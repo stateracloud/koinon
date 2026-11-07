@@ -18,7 +18,7 @@
 #      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
-#      SUITE=web: Playwright (web/e2e-real, issue koinon-private#50) drives the same install through the
+#      SUITE=web: Playwright (web/e2e-real, old issue 50) drives the same install through the
 #      browser: login, GitHub connection, agent, task, streamed reply, approval, terminal run.
 #      The two suites each need a fresh install (the bootstrap password is one-time), so run one
 #      per cluster.
@@ -120,7 +120,7 @@ diagnostics() {
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
-  # Sandbox namespaces (issue koinon-private#159): pod status with exit codes and termination messages. Koinon's
+  # Sandbox namespaces (old issue 159): pod status with exit codes and termination messages. Koinon's
   # admission policy denies pods/log there, so the containers' output is read on the kind node
   # with crictl, below the API.
   local ns

@@ -150,7 +150,7 @@ var _ = Describe("ProbeWaiter", func() {
 		Expect(time.Since(start)).To(BeNumerically(">=", 100*time.Millisecond), "time, not a count of polls, decides")
 	})
 
-	It("does not call a good file rejected while the gauge still reads 0 from the previous rejection (issue koinon-private#245)", func(ctx SpecContext) {
+	It("does not call a good file rejected while the gauge still reads 0 from the previous rejection (old issue 245)", func(ctx SpecContext) {
 		// The ConfigMap takes a minute to deliver the next file: the gauge reads 0 for that long, the
 		// probe gets 401, and then the file loads.
 		var polls atomic.Int32

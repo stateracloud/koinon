@@ -4,7 +4,7 @@
 # Chart assertions: registry mirrors and pull secrets.
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-# Registry mirrors and pull secrets (koinon-private#130): global.imageRegistry, global.registryMirrors and
+# Registry mirrors and pull secrets (old issue 130): global.imageRegistry, global.registryMirrors and
 # global.imagePullSecrets reach every image the chart runs or names. image_refs lists every image
 # reference (image:, imageName:, --probe-image, the supervisor pin) of a render, sorted and unique.
 image_refs() {
@@ -17,7 +17,7 @@ pg=ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d7
 want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.5 ghcr.io/stateracloud/koinon/flavors/opencode:0.0.0 \
 	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs) == "$want" ]] || fail "default image references changed: $(image_refs | tr '\n' ' ')"
-# The public repository's packages (#167): none of the old koinon-private names may come back.
+# The public repository's packages (#167): none of the old private-repository names may come back.
 image_refs | grep -Eq -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
 # (b) imageRegistry replaces every host and keeps path, tag and digest.
 want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.5 \

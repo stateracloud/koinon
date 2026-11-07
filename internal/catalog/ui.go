@@ -480,7 +480,7 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 }
 
 // clearDefaultIfGone clears the org's default model when the model it names no longer exists, in
-// the transaction that deleted the model, and audits it (koinon-private#256). It never picks another model: that
+// the transaction that deleted the model, and audits it (old issue 256). It never picks another model: that
 // silent change is what the stored default prevents. The agents without a model setting then fail
 // with agentmodel.NoDefaultMessage until an admin sets a default.
 func clearDefaultIfGone(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor) error {
@@ -496,7 +496,7 @@ func clearDefaultIfGone(ctx context.Context, q *store.Queries, org pgtype.UUID, 
 	})
 }
 
-// adoptDefaultModel makes the org's first model its default model (koinon-private#256). An org that has a default
+// adoptDefaultModel makes the org's first model its default model (old issue 256). An org that has a default
 // keeps it: a later provider or model never moves the agents that run on it. The change is audited.
 func adoptDefaultModel(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, model string) error {
 	n, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: model})

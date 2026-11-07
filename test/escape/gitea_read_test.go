@@ -31,10 +31,10 @@ import (
 // exercises the prefix), with a throwaway CA that it appends to the trust bundle of a supervisor
 // image the gateway is re-pointed at (OpenShell 0.1.5's supervisor verifies upstream TLS against
 // the bundle in its own image, not the sandbox's; interim until #80), so nothing leaves the
-// cluster (koinon-private#371). A request that reached the stand-in would get its 418, not the proxy's 403. The
+// cluster (old issue 371). A request that reached the stand-in would get its 418, not the proxy's 403. The
 // default, https://example.com/gitea, is for a cluster that can reach example.com:443 (IANA's
 // reserved example domain, which resolves inside the sandbox: a name that fails DNS, such as one
-// under .invalid, never reaches the proxy and the specs would see curl code 000, issue koinon-private#244).
+// under .invalid, never reaches the proxy and the specs would see curl code 000, old issue 244).
 // What a real Gitea does with the read token behind the policy (a push refused for the token's
 // missing write scope, 404 for a repository the bot is not a collaborator on) is covered by
 // the fake Gitea, which enforces both (internal/testing/fakegitea), and is confirmed on the home lab.

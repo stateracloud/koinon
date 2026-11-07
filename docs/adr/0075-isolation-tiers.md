@@ -10,7 +10,7 @@
 
 ADR 0045 makes Kata the default runtime class. The chart ships
 `openshell.runtimeClassName: kata`, and the sandbox VAP admits `[kata, kata-qemu, kata-qemu-runtime-rs]`
-(since the 2026-11-01 amendment, koinon-private#442; `charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
+(since the 2026-11-01 amendment, old issue 442; `charts/koinon/values.yaml:380`, `:512`). In practice Kata is the only supported path: the docs
 allow `runc` only on kind ("Do not use it for real work", `prerequisites.md:101`).
 
 procoduck's target users are platform teams on managed clusters. Most EKS organisations run Bottlerocket,
@@ -167,7 +167,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
      RuntimeClass reports the Landlock ABI (`landlock_create_ruleset` with
      `LANDLOCK_CREATE_RULESET_VERSION`) and whether a seccomp user-notification filter with
      `SECCOMP_ADDFD_FLAG_SEND` installs. ABI below 3, or no notification, fails. This catches
-     Bottlerocket on Kubernetes 1.32 and runner kernels without LSMs (issue koinon-private#159) at install time
+     Bottlerocket on Kubernetes 1.32 and runner kernels without LSMs (old issue 159) at install time
      instead of at the first sandbox.
    - **`vm`:**
      - the existing guest-seccomp probe (ADR 0048 decision 2) keeps its warning;
@@ -247,7 +247,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 13. **The `vm` and `hardened` tiers refuse wildcard egress hosts.**
     - OpenShell documents that a wildcard host rule (`*.example.com`, `**`, any glob) reopens a
       DNS-label channel: a sandbox can resolve `<secret>.attacker.example` and the lookup leaks the
-      data without a connection (`network-rules.mdx@v0.1.5:634-656`, issue koinon-private#266).
+      data without a connection (`network-rules.mdx@v0.1.5:634-656`, old issue 266).
     - **Where it is refused.** Every host that reaches a sandbox policy is an exact name today:
       connector hosts come from a base URL that must be a bare `https` host
       (`connectors.Locate`) and from `connector.schema.json`, whose `networkRule.host` now has the
@@ -343,7 +343,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 - https://kubernetes.io/docs/concepts/containers/runtime-class/#scheduling
 - https://github.com/bottlerocket-os/bottlerocket/issues/4070
 
-## Amendment (2026-11-01): kata-qemu-runtime-rs in the vm tier (koinon-private#442)
+## Amendment (2026-11-01): kata-qemu-runtime-rs in the vm tier (old issue 442)
 
 Kata 4.x's kata-deploy (4.3.1) creates `kata-qemu-runtime-rs` (the Rust runtime) by default and marks
 the Go-runtime `kata-qemu` deprecated. The `vm` tier's

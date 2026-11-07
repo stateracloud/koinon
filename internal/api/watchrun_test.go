@@ -113,7 +113,7 @@ var _ = Describe("WatchRun", func() {
 		Expect(ev.GetPayload().AsMap()).To(HaveKeyWithValue("n", BeEquivalentTo(5)))
 	})
 
-	It("streams the text the agent is typing, live and unstored (koinon-private#344)", func(ctx SpecContext) {
+	It("streams the text the agent is typing, live and unstored (old issue 344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
@@ -148,7 +148,7 @@ var _ = Describe("WatchRun", func() {
 		Expect(countRunEvents(ctx, e, run)).To(Equal(before), "chunks are never stored")
 	})
 
-	It("names the item on every live batch, and the event that replaces it names the same item (koinon-private#344)", func(ctx SpecContext) {
+	It("names the item on every live batch, and the event that replaces it names the same item (old issue 344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
@@ -179,7 +179,7 @@ var _ = Describe("WatchRun", func() {
 		Expect(eventItems).To(Equal([]string{"1-1"}))
 	})
 
-	It("lets a client drop every live tail of a stored item, whatever order they arrive in, even when the stream is busy (koinon-private#344)", func(ctx SpecContext) {
+	It("lets a client drop every live tail of a stored item, whatever order they arrive in, even when the stream is busy (old issue 344)", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
 		Expect((<-w.items).GetRun()).NotTo(BeNil())
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
@@ -218,7 +218,7 @@ var _ = Describe("WatchRun", func() {
 		}
 	})
 
-	It("sends the item a canceled run's worker stores after the cancel, then a second final snapshot (koinon-private#344)", func(ctx SpecContext) {
+	It("sends the item a canceled run's worker stores after the cancel, then a second final snapshot (old issue 344)", func(ctx SpecContext) {
 		quick := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchCancelGrace: 3 * time.Second})
 		w := watch(ctx, f.owner.on(quick), f.org, f.run.GetId(), 0)
 		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
@@ -250,7 +250,7 @@ var _ = Describe("WatchRun", func() {
 		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 	})
 
-	It("ends at once on a run canceled longer ago than the grace (koinon-private#660)", func(ctx SpecContext) {
+	It("ends at once on a run canceled longer ago than the grace (old issue 660)", func(ctx SpecContext) {
 		quick := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchCancelGrace: 30 * time.Second})
 		_, err := f.owner.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: f.org, RunId: f.run.GetId()})
 		Expect(err).NotTo(HaveOccurred())
@@ -273,7 +273,7 @@ var _ = Describe("WatchRun", func() {
 
 		ev := w.nextEvent(time.Second)
 		Expect(ev.GetKind()).To(Equal("run.canceled"))
-		// The final message is a terminal snapshot that follows the last event (koinon-private#140):
+		// The final message is a terminal snapshot that follows the last event (old issue 140):
 		// the server reads events, then the run; a snapshot sent before the event is not enough.
 		var last *runv1alpha1.WatchRunResponse
 		for msg := range w.items {

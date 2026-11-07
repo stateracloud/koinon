@@ -20,7 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-// Targets and recipients (issue koinon-private#182; ADR 0065 amendment 2026-10-28).
+// Targets and recipients (old issue 182; ADR 0065 amendment 2026-10-28).
 var _ = Describe("a question to a role", func() {
 	var (
 		w     world

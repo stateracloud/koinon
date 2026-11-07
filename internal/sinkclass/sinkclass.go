@@ -2,8 +2,8 @@
 
 // Package sinkclass is the vocabulary of ADR 0091: the sink class of a tool call (where its data
 // goes), the per-tool declaration that fixes the class or says how to derive it from the call's
-// address arguments, and the derivation itself. The leak guard (koinon-private#349) calls Classify for every tools/call;
-// the MCP server records (koinon-private#350) store the declarations.
+// address arguments, and the derivation itself. The leak guard (old issue 349) calls Classify for every tools/call;
+// the MCP server records (old issue 350) store the declarations.
 //
 // The cautious reading runs through the package: an unclassified tool, an address argument that does
 // not parse, a repository the org's scope does not list, a public one, one of unknown visibility and

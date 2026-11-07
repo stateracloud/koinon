@@ -163,7 +163,7 @@ var _ = Describe("ProviderService", func() {
 		Expect(or.GetProvider().GetFormats()[1].GetLabel()).To(Equal("Anthropic Messages"))
 		orID, oaID := or.GetProvider().GetId(), oa.GetProvider().GetId()
 
-		// The default follows the table: OpenRouter's Claude models speak Messages (koinon-private#242).
+		// The default follows the table: OpenRouter's Claude models speak Messages (old issue 242).
 		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "anthropic/claude-haiku-5.5"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(m.GetModel().GetFormat()).To(Equal("anthropic"))

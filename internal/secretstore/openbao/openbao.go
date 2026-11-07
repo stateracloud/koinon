@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package openbao is the secretstore.Wrapper over an OpenBao (or Vault) transit key (koinon-private#416, ADR 0085
+// Package openbao is the secretstore.Wrapper over an OpenBao (or Vault) transit key (old issue 416, ADR 0085
 // decision 12). The KEKs are encrypted by the transit engine; the key never leaves OpenBao.
 //
 // It speaks the HTTP API directly (four endpoints: Kubernetes login, encrypt, decrypt and nothing

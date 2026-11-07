@@ -37,7 +37,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    Each context must have succeeded on the tagged commit itself, except three that a push to main does
    not report as a result: `dco` (pull requests only), `claim` (`pull_request_target`; skipped on main) and
    `e2e result` (a composite that also passes when the e2e was skipped on main; on a pull request it
-   fails when the change needs the e2e and the head has none, koinon-private#562; its real subject, the kind
+   fails when the change needs the e2e and the head has none, old issue 562; its real subject, the kind
    e2e, the gate asks for through the `quickstart` rule below). `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age
    steps, which run on pull requests only) must succeed on the tagged commit and also on the merged
    pull request's head (`both` in the script). The three above are listed in the script
@@ -92,7 +92,7 @@ v0.3.0: `v0.3`). Until it merges, main can still contract the schema that the sh
 on (ADR 0085).
 
 Checklist step for every `vX.Y.0`, with the one above: record the persisted-state compatibility
-folder (koinon-private#652) from the tagged commit, so later changes are checked against what that release wrote:
+folder (old issue 652) from the tagged commit, so later changes are checked against what that release wrote:
 
 ```sh
 git switch --detach vX.Y.0

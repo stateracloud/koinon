@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Closes: [koinon-private#130](https://github.com/stateracloud/koinon-private/issues/130)
+- Closes: old issue 130
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md)
 
 ## Context

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command testverdict decides whether a run of Ginkgo suites really ran (koinon-private#507). Exit codes from
+// Command testverdict decides whether a run of Ginkgo suites really ran (old issue 507). Exit codes from
 // `ginkgo` and `go test` are not enough: a suite that skips as a whole exits 0, and under
 // `ginkgo -p` a suite whose processes exit before reporting prints "Test Suite Passed" and writes
 // no report at all.
@@ -117,7 +117,7 @@ func main() {
 		p := plain[d]
 		if len(p.failed) > 0 {
 			// Whatever the package's Ginkgo report says: a failed plain test fails the run, and the
-			// verdict must not read "0 failed" beside go test's own FAIL (koinon-private#512).
+			// verdict must not read "0 failed" beside go test's own FAIL (old issue 512).
 			results = append(results, result{dir: "./" + d, verdict: fail, passed: p.passed, why: "plain test failed: " + strings.Join(p.failed, ", ")})
 			continue
 		}

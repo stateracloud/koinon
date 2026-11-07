@@ -16,7 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
-// Drain on SIGTERM (ADR 0085 decision 2, koinon-private#403): a stopping pool claims nothing more, lets the turn
+// Drain on SIGTERM (ADR 0085 decision 2, old issue 403): a stopping pool claims nothing more, lets the turn
 // in progress finish up to the drain deadline, and hands a run still going at the deadline off.
 var _ = Describe("Draining on stop", func() {
 	// stopAsync stops the pool without blocking the spec: a draining pool returns only when its

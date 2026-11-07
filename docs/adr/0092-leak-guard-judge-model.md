@@ -4,12 +4,12 @@
 - Date: 2026-11-03
 - Amends: [0091](0091-leak-guard-by-destination.md) (decision 5: the both-legs `external-high` approval becomes rules, judge, person; decision 8: the guarantee wording)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0084](0084-leak-guard.md) (the 5 s backstop, failClosed), [0068](0068-prompt-caching-always-on.md) (prompt caching), [0023](0023-observability-and-audit.md) (metrics and audit), [0041](0041-koinon-spend-ledger-and-budget-stops.md) and [0081](0081-run-limits.md) (the run's USD ledger), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (providers and prices), [0072](0072-agent-model-run-now-echo-check.md) (calls Koinon makes itself)
-- Issue: koinon-private#630, part of #51; built by #116; measured by #70
+- Issue: old issue 630, part of #51; built by #116; measured by #70
 
 ## Context
 
 ADR 0091 decision 5 sends every `external-high` call of a session that holds both legs to a person,
-as an ADR 0042 approval. Shipped templates never get there (koinon-private#351). Admin-built agents can, and for
+as an ADR 0042 approval. Shipped templates never get there (old issue 351). Admin-built agents can, and for
 them each such call is a click. procoduck, 2026-11-03: asking a person on every risky call is nannying.
 
 Claude Code's auto mode solves the same problem in three tiers. Fixed rules let the obvious calls
@@ -63,7 +63,7 @@ match**, on a call of an auto-tier tool. Everything else stays rules:
 - An ask-tier tool already gets its one ADR 0042 card (ADR 0091 decision 5); the judge does not run
   for it.
 
-The judge can only turn that one approval into allow, block or a card. In PR koinon-private#628 the seam is in
+The judge can only turn that one approval into allow, block or a card. In PR old issue 628 the seam is in
 `Guard.check`, between `Decide` and `ApproveFunc`; `Decide` stays pure. With no judge configured the
 branch is an approval, as today.
 
@@ -297,6 +297,6 @@ failClosed, inside the gateway's processor timeout (ADR 0084, ADR 0091).
 
 ## Links
 
-- procoduck's decision, 2026-11-03: issue koinon-private#630
-- Issues #51, koinon-private#349, koinon-private#351, #70, koinon-private#630, #116; PR koinon-private#628
+- procoduck's decision, 2026-11-03: old issue 630
+- Issues #51, old issue 349, old issue 351, #70, old issue 630, #116; PR old issue 628
 - ADRs [0091](0091-leak-guard-by-destination.md), [0084](0084-leak-guard.md), [0042](0042-ask-tier-park-and-execute.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability-and-audit.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0081](0081-run-limits.md), [0072](0072-agent-model-run-now-echo-check.md)

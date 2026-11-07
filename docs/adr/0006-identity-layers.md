@@ -3,7 +3,7 @@
 - Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md)
 - Date: 2026-10-21
 - Decision: [design.md#6](../design.md)
-- Verification: Pending: OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
+- Verification: Pending: OpenShell spike (old issue 3)
 
 ## Context
 

@@ -19,8 +19,8 @@ import (
 
 // The ledger of the kind e2e's repo-helper scenario (test/scenarios), replayed without a cluster:
 // the quickstart's provider type is openai, which does not bill a refused request, so the title
-// request the fake model refuses is waived, not estimated (koinon-private#241, koinon-private#253), and the streamed requests
-// carry usage. The e2e once still asserted EstimatedRequests >= 1 after koinon-private#253 (koinon-private#258); a rule change
+// request the fake model refuses is waived, not estimated (old issue 241, old issue 253), and the streamed requests
+// carry usage. The e2e once still asserted EstimatedRequests >= 1 after old issue 253 (old issue 258); a rule change
 // now fails here first.
 var _ = Describe("the repo-helper scenario's ledger", func() {
 	BeforeEach(needDocker)
@@ -89,7 +89,7 @@ var _ = Describe("the repo-helper scenario's ledger", func() {
 		e, run := scenarioEnv(ctx)
 		t0 := time.Now().Add(-30 * time.Second)
 
-		By("the refused entry reaches the ledger first (the gateway exports in batches, koinon-private#291)")
+		By("the refused entry reaches the ledger first (the gateway exports in batches, old issue 291)")
 		_, err := ing.Ingest(ctx, []ledger.Entry{refusedTitle(e, t0.Add(time.Second))})
 		Expect(err).NotTo(HaveOccurred())
 		first := totals(ctx, e, run.ID)

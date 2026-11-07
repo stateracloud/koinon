@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Checks the cache ownership rule of the workflows (koinon-private#147, docs/dev/ci.md#cache-ownership):
+# Checks the cache ownership rule of the workflows (old issue 147, docs/dev/ci.md#cache-ownership):
 # main's `warm-caches` job saves the Go, envtest and Playwright caches, every other job in ci.yml only
 # restores them, there is one Go cache scheme (`go-ci`), `go-vet` is gone, and the e2e Go key has no run id.
 

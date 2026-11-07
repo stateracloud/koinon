@@ -224,7 +224,7 @@ func run(ctx context.Context, cfg config) error {
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) }
 		if cfg.pool.SavedWorkURL != "" {
-			// The live check of an agent's MCP tools (issue koinon-private#488) asks koinon-api, which holds the
+			// The live check of an agent's MCP tools (old issue 488) asks koinon-api, which holds the
 			// agent's gateway key; koinon-agentd never does.
 			cfg.pool.MCPTools = mcpcheck.Remote{HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL, Key: cfg.pool.SavedWorkKey}
 		}

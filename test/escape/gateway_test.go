@@ -30,7 +30,7 @@ func envOr(key, def string) string {
 
 // answered fails a spec whose request got no HTTP answer from the sandbox proxy: curl's code 000
 // means DNS or the connection failed before the proxy decided anything, so the spec observed no
-// policy decision (issue koinon-private#244). It is a test error, never an expected code. Specs that expect no
+// policy decision (old issue 244). It is a test error, never an expected code. Specs that expect no
 // answer (direct egress, which the sandbox refuses at connect) do not call it.
 func answered(code, body string) {
 	GinkgoHelper()

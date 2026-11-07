@@ -36,7 +36,7 @@ func (d *Driver) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.Is
 // One agent's invalid limit fails only that agent: its key is left out of the file and Apply
 // returns the revision with a *gateway.RejectedError naming it (a key that is not served is
 // refused, so the agent fails closed), as the Kubernetes driver does for an object the controller
-// refuses. The file agentgateway would have refused as a whole is never delivered (issue koinon-private#245).
+// refuses. The file agentgateway would have refused as a whole is never delivered (old issue 245).
 func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	s, rejected := s.WithoutInvalidLimits()
 	rev, err := d.apply(ctx, s)

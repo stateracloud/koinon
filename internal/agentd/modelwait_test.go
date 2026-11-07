@@ -14,7 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// A run waits until the gateway serves its model (issue koinon-private#174): a new provider is left out of the
+// A run waits until the gateway serves its model (old issue 174): a new provider is left out of the
 // gateway state until its key file has reached the gateway pod, and a harness started before that
 // gets a 403 on its first model call.
 var _ = Describe("Waiting for the gateway to serve the model", func() {

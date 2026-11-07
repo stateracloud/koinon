@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package awskms is the secretstore.Wrapper over an AWS KMS symmetric key (koinon-private#417, ADR 0085 decision
+// Package awskms is the secretstore.Wrapper over an AWS KMS symmetric key (old issue 417, ADR 0085 decision
 // 12). The KEKs are encrypted by KMS (Encrypt, Decrypt); the key never leaves KMS.
 //
 // It speaks the KMS JSON 1.1 API and the STS query API directly over net/http, with its own

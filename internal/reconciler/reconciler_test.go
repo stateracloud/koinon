@@ -1066,7 +1066,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a positive last limit would not bind: the key is revoked")
 	})
 
-	It("stops a spent agent's runs with the budget reason before the key is revoked (koinon-private#188)", func(ctx SpecContext) {
+	It("stops a spent agent's runs with the budget reason before the key is revoked (old issue 188)", func(ctx SpecContext) {
 		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"1.00"}}`)
 		mg.ledgerBudgets = true
 		r := newReconciler()
@@ -1204,7 +1204,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
-		It("names agentgateway's reason on the agents it holds back when the whole config is refused (issue koinon-private#245)", func(ctx SpecContext) {
+		It("names agentgateway's reason on the agents it holds back when the whole config is refused (old issue 245)", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)
@@ -1226,7 +1226,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
-		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (issue koinon-private#245)", func(ctx SpecContext) {
+		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (old issue 245)", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			r := newReconciler()
 			pass(ctx, r)

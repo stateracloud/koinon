@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-var _ = Describe("the declaration of a tool (ADR 0091, koinon-private#350)", func() {
+var _ = Describe("the declaration of a tool (ADR 0091, old issue 350)", func() {
 	var (
 		svc   *mcpservers.Service
 		org   pgtype.UUID
@@ -249,7 +249,7 @@ var _ = Describe("the declaration of a tool (ADR 0091, koinon-private#350)", fun
 		})
 	})
 
-	Describe("when the server's URL changes (the koinon-private#350 rule)", func() {
+	Describe("when the server's URL changes (the old issue 350 rule)", func() {
 		declare := func(ctx SpecContext, s mcpservers.Server) {
 			GinkgoHelper()
 			_, err := setDecl(ctx, org, actor, s.ID, "create_issue", codeHost)

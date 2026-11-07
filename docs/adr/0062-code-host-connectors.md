@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144) (decided there and in
+- Relates to: old issue 144 (decided there and in
   conversation on 2026-10-26)
 - Amends: [0007](0007-connector-model.md) (hosts per connection, provider data in the type),
   [0049](0049-v01-scope-decisions.md) (v0.1 is no longer GitHub-only; the workflow guard)
@@ -24,11 +24,11 @@ Koinon supports one code host, GitHub, and the support is GitHub-specific in man
   (`flavors/common/etc/koinon/git/config:7-11`), and saved work recognises only github.com origins
   (`internal/agentd/savework.sh:45-47`).
 - **The workflow guard.** `create_pull_request` refuses only `.github/workflows/`
-  (`internal/githubtools/validate.go:105`, `:135-137`). Issue koinon-private#144 cites this as
+  (`internal/githubtools/validate.go:105`, `:135-137`). Old issue 144 cites this as
   `internal/approvals/validate.go:105`; the file is in `internal/githubtools`.
 
 procoduck decided on 2026-10-26 that there are no GitHub-only special cases. Koinon gets a proper
-integration for GitHub and Gitea now, and GitLab and Azure DevOps later. The home-lab test (koinon-private#47)
+integration for GitHub and Gitea now, and GitLab and Azure DevOps later. The home-lab test (old issue 47)
 waits for this.
 
 Research (2026-10-26) on how the providers differ:
@@ -53,7 +53,7 @@ Research (2026-10-26) on how the providers differ:
 
 ## Decision
 
-1. **Two seams** (koinon-private#144). A **code host** covers the repository list, read and write credentials,
+1. **Two seams** (old issue 144). A **code host** covers the repository list, read and write credentials,
    git transport, commits and branches with exact file modes, pull requests and comments, the CI
    paths that approvals must refuse, and the hosts the sandbox may reach. A **work tracker** is a
    separate seam ([0064](0064-work-tracker-connectors.md)).
@@ -212,8 +212,8 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
 
 ## Links
 
-- Issue [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144); home-lab test
-  [koinon-private#47](https://github.com/stateracloud/koinon-private/issues/47)
+- Old issue 144; home-lab test
+  old issue 47
 - ADRs [0007](0007-connector-model.md), [0021](0021-connector-setup-guides.md),
   [0042](0042-ask-tier-park-and-execute.md), [0049](0049-v01-scope-decisions.md),
   [0063](0063-forge-credential-classes.md), [0064](0064-work-tracker-connectors.md),
@@ -279,7 +279,7 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   non-secret name that changes with the token, because a static token has no expiry to name it by; the
   reconciler uses it as the provider record's credential revision, so a replaced token is pushed into the
   same record and a token that did not change is never pushed again.
-- Amendment 2026-10-30 (koinon-private#268, branch namespace): Koinon, not the agent, owns the name of the branch
+- Amendment 2026-10-30 (old issue 268, branch namespace): Koinon, not the agent, owns the name of the branch
   `create_pull_request` creates. The agent suggests a short name; the tool server files it as
   `koinon/<agent>/<suggestion>`, where `<agent>` is the agent's display name slugified (at most 24
   characters, for reading) plus the last eight hex digits of its ID (for uniqueness: agent IDs are UUIDv7,

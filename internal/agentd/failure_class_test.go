@@ -206,7 +206,7 @@ var _ = Describe("Failure classes", func() {
 		})
 
 		It("fails the standalone gateway's budget refusal, a 429 with a Retry-After of hours, as throttled", func(ctx SpecContext) {
-			// The gateway cannot mark it x-should-retry: false in standalone mode (koinon-private#342).
+			// The gateway cannot mark it x-should-retry: false in standalone mode (old issue 342).
 			e := newEnv(ctx, store.AgentFlavorOpencode)
 			model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 11812})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))

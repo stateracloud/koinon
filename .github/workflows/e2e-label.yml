@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The `e2e` label added to a pull request starts e2e-kind once on its head, by dispatch (koinon-private#468).
+# The `e2e` label added to a pull request starts e2e-kind once on its head, by dispatch (old issue 468).
 # e2e-kind itself does not run on label events: `gh pr create --label e2e` fires `opened` and then
 # `labeled`, and two runs on one head cancelled each other. Its `opened` run reads the labels live;
 # this workflow covers the label added later. hack/e2e-label.sh decides: nothing when a run on the

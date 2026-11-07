@@ -94,7 +94,7 @@ export function AgentModel({ agent }: { agent: Agent }) {
  * (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version,
  * and it applies to the next run. A model that cannot think ignores it, and the section says so. A
  * model that always thinks offers no off choice; an off stored earlier is kept for a model that can
- * stop, and the section says it does not apply (koinon-private#316). Thinking is billed as output.
+ * stop, and the section says it does not apply (old issue 316). Thinking is billed as output.
  */
 function AgentThinking({ agent, model, archived }: { agent: Agent; model: GetAgentModelResponse; archived: boolean }) {
   const queryClient = useQueryClient()

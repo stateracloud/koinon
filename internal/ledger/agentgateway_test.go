@@ -532,7 +532,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 	// The quickstart's provider type is openai. Through the real gateway, the title request the fake
 	// model refuses (400, no usage) is waived and kept with the provider's status, and the streamed
 	// requests carry usage: the ledger shape of test/scenarios, in the order the e2e saw the refusal
-	// arrive first (koinon-private#291). The ingester-level rules are in scenario_test.go.
+	// arrive first (old issue 291). The ingester-level rules are in scenario_test.go.
 	Describe("the repo-helper scenario's ledger, as the gateway logs it", func() {
 		It("waives an openai 400 and records the answered requests with their usage", func(ctx SpecContext) {
 			sc := scenarios.PullRequest.Ledger

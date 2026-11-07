@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// The warning before the time limit (issue koinon-private#183; ADR 0066 amendment 2026-10-28).
+// The warning before the time limit (old issue 183; ADR 0066 amendment 2026-10-28).
 var _ = Describe("the time limit", func() {
 	// capped enqueues a run with a wall-clock cap of seconds.
 	capped := func(ctx SpecContext, e *env, t store.Task, seconds int32) store.Run {

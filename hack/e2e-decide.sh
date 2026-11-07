@@ -12,7 +12,7 @@
 #                      `e2e-lab`, so relevance alone must run the quickstart (issue #148); the
 #                      label and an external run are accelerators. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
-#                      then labels it (two events, koinon-private#468), and the run of `opened` should already see
+#                      then labels it (two events, old issue 468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
 #   merge_group        (the merge queue, #225, ADR 0094 decision 4) never needed: the
@@ -26,7 +26,7 @@
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
 #
-# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, koinon-private#562): the
+# `required=true` (pull requests only) is what `e2e result` enforces (hack/e2e-gate.sh, old issue 562): the
 # change needs an e2e (the full rule, the e2e's own files or the label), so the job fails unless the
 # head has a green quickstart or the `e2e-lab` status. On a pull request required implies
 # needed. Every other event: `required=false`.

@@ -55,7 +55,7 @@ sequenceDiagram
 - Positive: one deployable; typed client; live UI without polling.
 - Positive: replay from outbox IDs makes reconnects lossless.
 - Negative: NOTIFY payloads are limited to under 8000 bytes and are not replayed; the design must
-  never carry data in NOTIFY, only keys. _Amended 2026-11-04 (koinon-private#344): the one exception is the live
+  never carry data in NOTIFY, only keys. _Amended 2026-11-04 (old issue 344): the one exception is the live
   text an agent is typing, which is best effort and never stored; see [0074](0074-run-traces-trace-router.md) item 8 of its 2026-10-31 amendment._
 - Negative: two client patterns (connect-query for unary, plain client for streams) to keep
   consistent in the UI code _(inferred)_.

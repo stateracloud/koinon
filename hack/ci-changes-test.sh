@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests hack/ci-changes.sh (koinon-private#563): which CI jobs a change to a path turns on. Two parts:
+# Tests hack/ci-changes.sh (old issue 563): which CI jobs a change to a path turns on. Two parts:
 #   1. A table of path(s) -> the jobs that must run, a positive and a negative case for every
 #      group, and one row for each input the filters once missed (audit F3-F6).
 #   2. Derived cases: every input the gate scripts really read must turn its job on. The inputs are

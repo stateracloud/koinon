@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package scrub removes credentials and personal data from the content of run traces before the
-// trace router exports it (ADR 0074, decision 6, issue koinon-private#213).
+// trace router exports it (ADR 0074, decision 6, old issue 213).
 //
 // The router calls it on every span attribute value. It never calls a model or the network, and
 // it depends on nothing else in Koinon.

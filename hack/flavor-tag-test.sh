@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of hack/flavor-tag.sh: the tag must not depend on the caller's locale (koinon-private#335). A
+# Offline test of hack/flavor-tag.sh: the tag must not depend on the caller's locale (old issue 335). A
 # fixture repo has file names whose order differs between C and a UTF-8 collation; the script is run
 # under both and the tags must be equal. It also tests hack/flavor-base.sh (FLAVOR_BASE, #200).
 

@@ -101,7 +101,7 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 		)
 		// The ledger keeps 0 when the provider reported no thinking split (agentgateway logs none for
 		// Anthropic Messages, #78), so the attribute is left out rather than claim no thinking happened
-		// (koinon-private#316). A reported split is written, 0 included.
+		// (old issue 316). A reported split is written, 0 included.
 		if c.ReasoningKnown || c.Reasoning > 0 {
 			a = append(a, kvInt(semconv.GenAIUsageReasoningTokens, c.Reasoning))
 		}
@@ -148,7 +148,7 @@ func modelCallSpans(root *tracepb.Span, trace [16]byte, seq int32, calls []Model
 
 // putTotals sets the turn's totals on its root span (decision 3). They are written even when the turn
 // made no model call, so a backend shows zero rather than a missing figure; the reasoning tokens are
-// the exception, left out when no call reported a split (koinon-private#316, #78), since 0 would read as "no thinking".
+// the exception, left out when no call reported a split (old issue 316, #78), since 0 would read as "no thinking".
 func putTotals(root *tracepb.Span, u turnUsage) {
 	a := root.Attributes
 	a = setAttr(a, kvInt(semconv.GenAIUsageInputTokens, u.Input))

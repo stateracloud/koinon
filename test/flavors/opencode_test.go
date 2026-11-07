@@ -115,7 +115,7 @@ func lastBody(gw *gateway) string {
 	return b[len(b)-1]
 }
 
-// The tool set matches the egress (ADR 0080, issue koinon-private#247): without web egress the model is not
+// The tool set matches the egress (ADR 0080, old issue 247): without web egress the model is not
 // offered OpenCode's built-in webfetch, so it uses the org's MCP tools; with it (no switch) it is.
 var _ = Describe("koinon-opencode web tools", func() {
 	// offered reports which of the tools the model was offered in the first turn.
@@ -141,7 +141,7 @@ var _ = Describe("koinon-opencode web tools", func() {
 	}, SpecTimeout(3*time.Minute))
 })
 
-// Subagents are off for every agent (issue koinon-private#261): OpenCode 2.2.0's children outlive a cancelled
+// Subagents are off for every agent (old issue 261): OpenCode 2.2.0's children outlive a cancelled
 // turn and agentd records none of their events. The permission rule `subagent` `*` deny in the
 // config removes the tool from what the model is offered, and a call to it anyway starts no child.
 var _ = Describe("koinon-opencode subagents", func() {
@@ -248,7 +248,7 @@ const homeMarker = "KOINON-HOME-CONFIG-MARKER"
 
 // homeSeed is every place in the agent's own home (the volume, writable by the agent) where
 // OpenCode or a tool it imitates looks for configuration, instructions, skills or plugins. None
-// of it may reach the model or loosen the harness (issue koinon-private#84).
+// of it may reach the model or loosen the harness (old issue 84).
 func homeSeed() map[string]string {
 	allowAll := `{"permission": {"*": "allow", "external_directory": "allow"},
  "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
@@ -330,7 +330,7 @@ var _ = Describe("koinon-opencode and the agent's home", func() {
 		Entry("on", SpecTimeout(3*time.Minute), []string{"--plugin-installs"}, []string{"home-xdg"}),
 	)
 
-	// A plugin runs inside OpenCode (issue koinon-private#84), so a broken one can stop the harness from ever
+	// A plugin runs inside OpenCode (old issue 84), so a broken one can stop the harness from ever
 	// getting ready. koinon-agentd bounds bringing the session up and running the turn; whatever
 	// the plugin does, the attempt ends by that deadline.
 	DescribeTable("bounds a broken plugin by the prompt timeout",
@@ -429,7 +429,7 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 
 	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
 		// The Messages entry always turns OpenCode's own thinking block off (ADR 0069 amendment
-		// 2026-10-29); Koinon's form goes in the body overlay (koinon-private#316). The chat-completions entry has
+		// 2026-10-29); Koinon's form goes in the body overlay (old issue 316). The chat-completions entry has
 		// no compatibility overlay.
 		const off = `"models":{"m-1":{"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false}}}`
 		Expect(entryEnv(ctx, "--model-format", "anthropic", "--session-id", "01234567-run")).To(ContainSubstring(

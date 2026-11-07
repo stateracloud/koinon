@@ -487,7 +487,7 @@ it (the default provider URL check still applies).
 
 A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
 above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
-(OpenBao/Vault transit, koinon-private#416, or AWS KMS, koinon-private#417) wrap each KEK, so the Secret holds only ciphertext
+(OpenBao/Vault transit, old issue 416, or AWS KMS, old issue 417) wrap each KEK, so the Secret holds only ciphertext
 that is useless without the KMS. Both are set with `secrets.kek.kms` (below).
 
 What changes once you opt in (ADR 0085 decision 12):
@@ -622,7 +622,7 @@ kubectl -n koinon patch secret koinon-kek --type=merge \
 
 Back the Secret up (`keys export`) as soon as the pods are running again.
 
-### The install binding (koinon-private#615)
+### The install binding (old issue 615)
 
 Every KEK the key-admin Job wraps is bound to the install: the KMS call carries the install ID as
 part of its authenticated data, so the wrapped KEK opens only next to the database it was made for.
@@ -631,7 +631,7 @@ database restored into the wrong install, then fails to load with "cannot open e
 it was wrapped for install A and this is install B", the same error as a wrong key, never as a KMS
 outage.
 
-**Where the install ID comes from.** The first migration of a release with koinon-private#615 writes a random
+**Where the install ID comes from.** The first migration of a release with old issue 615 writes a random
 UUID into the table `install_identity` of the database. Triggers refuse UPDATE, DELETE and TRUNCATE
 of it; they guard against mistakes, not against the database owner: the table's owner can DROP the
 table or `ALTER TABLE … DISABLE TRIGGER`, and `pg_restore --disable-triggers` and
@@ -679,7 +679,7 @@ Rejected sources, and why: a chart value is lost on a reinstall that forgets it 
 the data; a generated Secret would be backed up and restored with the KEK Secret, which defeats the
 binding; the namespace or cluster UID changes on a move or a reinstall that keeps the data.
 
-**KEKs wrapped before koinon-private#615 keep working.** They are stored in the old form (`"fmt":1`) and open as
+**KEKs wrapped before old issue 615 keep working.** They are stored in the old form (`"fmt":1`) and open as
 before; `keys status` shows them as `…, unbound` in WRAPPED BY and lists them. koinon-api and the
 reconciler export `koinon_kek_unbound` (no labels), the number of KMS-wrapped KEKs in the loaded
 key set that are not bound, set on every load (at start and about once a minute); local KEKs are
@@ -733,16 +733,16 @@ Binding cannot help here: `rewrapUnbound` has to open a KEK to bind it. Instead:
 
 **Rotate as well if an old backup may have leaked.** The marker stops an old KEK Secret backup only
 where this database is: an install whose database lacks the marker (a clone taken before it was set, a
-rollback below koinon-private#615, another install on the same KMS key) still opens that backup's unbound KEKs. If
+rollback below old issue 615, another install on the same KMS key) still opens that backup's unbound KEKs. If
 a KEK Secret backup from before the rewrap may be in the wrong hands, rotate the KEKs as well (add,
 activate, rewrap, retire, as above): only rotation makes an old backup useless everywhere.
 
-**Rolling back below koinon-private#615.** A bound KEK is stored as `"fmt":2`, which a release before koinon-private#615
+**Rolling back below old issue 615.** A bound KEK is stored as `"fmt":2`, which a release before old issue 615
 refuses ("unsupported format 2"): its pods fail closed and never misread it. Every new KMS-wrapped
-KEK is bound, so before rolling back below koinon-private#615 use the steps in "Rolling back below the release that
+KEK is bound, so before rolling back below old issue 615 use the steps in "Rolling back below the release that
 added key wrapping" below (back to local KEKs), or roll back to a key set that held only unbound
 KEKs. Leave `rewrapUnbound` off until you will not roll back that far: once it binds the last KEK the
-marker is set, the Job says so, and a rollback below koinon-private#615 no longer works with this key set (those
+marker is set, the Job says so, and a rollback below old issue 615 no longer works with this key set (those
 releases cannot read bound KEKs, and the unbound backups no longer open on this database once you
 come forward again).
 

@@ -111,7 +111,7 @@ claim ref could be deleted by hand.
 Exit codes of `hack/claim.sh`: 0 success; 1 error; 2 refused (held by someone else, not takeable yet,
 a cap, lost the race): pick another issue; 3 lost claim: stop and tell your human.
 
-## Amendment: session lanes (issue koinon-private#379)
+## Amendment: session lanes (old issue 379)
 
 Decision 5 caps a session at one claim. A session that runs several agents in parallel, one issue
 each in its own worktree, could therefore work only one issue at a time. The cap is now counted per

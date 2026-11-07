@@ -104,16 +104,16 @@ type Config struct {
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
 	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
-	// the run's model (a new provider's key file is still reaching the gateway, issue koinon-private#174). A run
+	// the run's model (a new provider's key file is still reaching the gateway, old issue 174). A run
 	// whose model is not served in time fails with a reason that names the provider. Default
 	// DefaultModelServeTimeout.
 	ModelServeTimeout time.Duration
 	// MCPRetryDelay is how long a run waits, before it starts its harness, between finding an MCP
 	// server it may use not serving tools and looking again; a second miss fails the run (issue
-	// koinon-private#326). A miss is what Koinon's health record of the server says (probed every 60 s) or, with
+	// old issue 326). A miss is what Koinon's health record of the server says (probed every 60 s) or, with
 	// MCPTools, what the gateway lists to the agent right now. Default DefaultMCPRetryDelay.
 	MCPRetryDelay time.Duration
-	// MCPTools is the live check of the agent's MCP tools before the harness starts (issue koinon-private#488):
+	// MCPTools is the live check of the agent's MCP tools before the harness starts (old issue 488):
 	// it lists what the gateway offers the agent under the agent's own key, which koinon-agentd does
 	// not hold. Without it only the health record is checked.
 	MCPTools MCPTools
@@ -181,7 +181,7 @@ type Config struct {
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
-	// otherwise the org's stored default model is used (koinon-private#256).
+	// otherwise the org's stored default model is used (old issue 256).
 	DefaultModel string
 	// SessionCwd is the harness session's working directory in the sandbox. Default
 	// /sandbox/work.

@@ -58,7 +58,7 @@ must be recreated. No new migration is added. `hack/migrate-lint.sh` allows exac
 of 00002 (`allowed_edits`, pinned to the file's git blob, covered by `hack/migrate-lint-test.sh`);
 any further edit fails again. After v0.1 ships, no other exception is added.
 
-Issues koinon-private#36 (F2, Hermes flavor) and koinon-private#37 (F3, pi flavor) are closed as not planned.
+Old issues 36 (F2, Hermes flavor) and old issue 37 (F3, pi flavor) are closed as not planned.
 
 ## Alternatives considered
 
@@ -80,7 +80,7 @@ Issues koinon-private#36 (F2, Hermes flavor) and koinon-private#37 (F3, pi flavo
   must publish `flavor-opencode`, and nothing else.
 - Positive: no Hermes patch to redo on upgrades, no pi-acp to track.
 
-Follow-ups: [koinon-private#54](https://github.com/stateracloud/koinon-private/issues/54) (OpenCode re-pin); publish
+Follow-ups: old issue 54 (OpenCode re-pin); publish
 `flavor-opencode` in `release.yml`.
 
 ## Links

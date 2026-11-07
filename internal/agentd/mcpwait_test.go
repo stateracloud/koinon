@@ -19,7 +19,7 @@ import (
 )
 
 // An MCP server the agent may use that is not serving tools when the run is about to start its
-// harness is recorded, retried once and fails the run on a second miss (issue koinon-private#326).
+// harness is recorded, retried once and fails the run on a second miss (old issue 326).
 var _ = Describe("Checking the agent's MCP servers before the harness starts", func() {
 	const retry = 300 * time.Millisecond
 
@@ -159,7 +159,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		}
 	})
 
-	Describe("the live check with the agent's own key (issue koinon-private#488)", func() {
+	Describe("the live check with the agent's own key (old issue 488)", func() {
 		// It holds the tool names the gateway lists to the agent. It is koinon-api's answer; agentd
 		// never sees the agent's key, so nothing here carries one.
 		liveTools := &fakeMCPTools{}

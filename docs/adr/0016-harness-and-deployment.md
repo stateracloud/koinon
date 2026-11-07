@@ -4,7 +4,7 @@
 - Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md)
 - Date: 2026-10-21
 - Decision: [design.md#16](../design.md)
-- Verification: Pending: OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
+- Verification: Pending: OpenShell spike (old issue 3)
 
 > Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
 
@@ -89,13 +89,13 @@ flowchart LR
 - Negative: the OpenShell Helm chart README labels the Kubernetes path **Experimental**, while the
   support matrix lists it as Supported.
 - Follow-ups:
-  - the spike (issue koinon-private#3) verifies that the gateway API covers what the reconciler needs;
+  - the spike (old issue 3) verifies that the gateway API covers what the reconciler needs;
   - a contract test suite per flavor ([0025](0025-testing-strategy.md)).
 
 ## Open questions
 
 - Is `agentd` the sandbox's entrypoint process, started by the supervisor, or a sidecar? How does
-  it receive work (exec, a gateway channel, a socket)? This is the agentd deep-dive item (issue koinon-private#8).
+  it receive work (exec, a gateway channel, a socket)? This is the agentd deep-dive item (old issue 8).
 - Policy updates after creation: OpenShell lets only `network_policies` change on a running
   sandbox. Grant changes that touch other policy sections need a sandbox restart.
 - Use OpenShell's Go SDK (`github.com/NVIDIA/OpenShell/sdk/go`) or generate from the proto?

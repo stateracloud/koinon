@@ -3,8 +3,8 @@
 - Status: Accepted
 - Delivery: v0.3 (design accepted 2026-10-26)
 - Date: 2026-10-26
-- Relates to: [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144) (decided in conversation
-  and in the issue comment of 2026-10-26), [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146)
+- Relates to: old issue 144 (decided in conversation
+  and in the issue comment of 2026-10-26), old issue 146
   (releases)
 - Amends: [0007](0007-connector-model.md) (work trackers as connector types)
 - Builds on: [0062](0062-code-host-connectors.md) (the second seam),
@@ -12,7 +12,7 @@
 
 ## Context
 
-Issue koinon-private#144 names two seams: a code host ([0062](0062-code-host-connectors.md)) and a work tracker
+Old issue 144 names two seams: a code host ([0062](0062-code-host-connectors.md)) and a work tracker
 (issues and work items with their fields, states and columns; comments; links to PRs). It asked
 how Koinon's own work records relate to external boards: Koinon-only, link, import, mirror out,
 or two-way sync.
@@ -22,7 +22,7 @@ Today Koinon has no tracker integration. A ticket has no external reference
 of the ask-tier tool `comment_on_issue` (`connectors/github/connector.yaml:87-92`), and the sandbox
 can read issues of its repository through `repo.read` (`:43-47`).
 
-Scope (procoduck, koinon-private#144 comment, 2026-10-26): Jira (Cloud, and Data Center briefly) and Linear,
+Scope (procoduck, old issue 144 comment, 2026-10-26): Jira (Cloud, and Data Center briefly) and Linear,
 alongside the boards of GitHub, Gitea, GitLab and Azure DevOps.
 
 Research (2026-10-26, `forge-and-trackers.md` §2, §4) found:
@@ -58,11 +58,11 @@ Research (2026-10-26, `forge-and-trackers.md` §2, §4) found:
    - **Inbound triggers.** Tracker events start or wake agent work as a trigger type
      ([0066](0066-triggers-and-scheduling.md)): signed webhooks, with polling as the fallback where
      a tracker has no event or cannot reach Koinon.
-3. **A tracker is its own seam,** separate from the code-host interface (koinon-private#144), with its data in
+3. **A tracker is its own seam,** separate from the code-host interface (old issue 144), with its data in
    `connector.yaml` like other connector types ([0007](0007-connector-model.md)).
 4. **Providers:** Jira (Cloud, and Data Center briefly), Linear, Azure Boards, and the issues of GitHub,
    Gitea and GitLab, each with its triggers.
-5. **Timing:** designed now; built in v0.3 (koinon-private#146). Until then the only tracker action is the
+5. **Timing:** designed now; built in v0.3 (old issue 146). Until then the only tracker action is the
    existing `comment_on_issue` tool on GitHub.
 
 ```mermaid
@@ -75,7 +75,7 @@ flowchart LR
 
 ## Alternatives considered
 
-From the options koinon-private#144 listed and the research (`forge-and-trackers.md` §5b):
+From the options old issue 144 listed and the research (`forge-and-trackers.md` §5b):
 
 - **Link-only** (a task has external references with a cached title and state). Rejected: no links.
 - **Import** (create a Koinon record from an external item by a rule). Rejected as an import; the
@@ -116,7 +116,7 @@ From the options koinon-private#144 listed and the research (`forge-and-trackers
   the open task for that item ([0066](0066-triggers-and-scheduling.md)): whether storing an
   external item key on a task for correlation is allowed under "never sync, link or import".
 - Whether to use Linear's agent sessions (an agent must post a `thought` within 10 s).
-- How much of Jira Data Center is covered ("briefly" in koinon-private#144): PATs, webhooks and the dev panel
+- How much of Jira Data Center is covered ("briefly" in old issue 144): PATs, webhooks and the dev panel
   differ from Cloud.
 - Polling intervals per provider within their rate limits.
 
@@ -131,7 +131,7 @@ service-hook IDs.
 
 ## Links
 
-- Issues [koinon-private#144](https://github.com/stateracloud/koinon-private/issues/144), [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146)
+- Old issues 144, 146
 - ADRs [0007](0007-connector-model.md), [0008](0008-approvals-and-risk-tiers.md),
   [0042](0042-ask-tier-park-and-execute.md), [0062](0062-code-host-connectors.md),
   [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md),

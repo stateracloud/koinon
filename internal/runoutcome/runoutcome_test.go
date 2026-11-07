@@ -443,7 +443,7 @@ var _ = Describe("a worker that is shutting down", func() {
 	})
 })
 
-var _ = Describe("RecordUpdate: items, not chunks (koinon-private#344)", func() {
+var _ = Describe("RecordUpdate: items, not chunks (old issue 344)", func() {
 	chunk := func(kind, text string) []byte {
 		return []byte(`{"sessionUpdate":"` + kind + `","content":{"type":"text","text":"` + text + `"}}`)
 	}
@@ -571,7 +571,7 @@ var _ = Describe("RecordUpdate: items, not chunks (koinon-private#344)", func() 
 		Expect(kinds).NotTo(ContainElement("run.prompt"))
 	})
 
-	It("refuses an event that races the cancel: the fence is set after RecordRaw's check (koinon-private#660)", func(ctx SpecContext) {
+	It("refuses an event that races the cancel: the fence is set after RecordRaw's check (old issue 660)", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		Expect(w.own.RecordUpdate(ctx, "acp.agent_message_chunk", chunk("agent_message_chunk", "said so far"))).To(Succeed())
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "user canceled"})
