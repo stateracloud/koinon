@@ -83,6 +83,26 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
    kubectl -n koinon get pods
    ```
 
+## Upgrading to the install audit chain (ADR 0100)
+
+The release that adds the install audit chain (migration 00066) needs a `NOLOGIN` group role,
+`koinon_install_audit_writer`, and `koinon-api`'s login role must be a member of it. The migrate role
+has no `CREATEROLE`, so if the role is missing the migration fails and the migrate Job stops the
+upgrade.
+
+- **`postgres.mode: cnpg`.** Nothing to do: the chart lists the role as a CloudNativePG managed role,
+  so clusters created before this release get it, and `koinon_api` joins it, when the operator
+  reconciles. Let that finish before you upgrade if the operator was down.
+- **`postgres.mode: external`.** Before you upgrade, as an administrator:
+
+  ```sql
+  CREATE ROLE koinon_install_audit_writer NOLOGIN;
+  GRANT koinon_install_audit_writer TO <api login role>;
+  ```
+
+  Keep the `api`, `reconciler` and `agentd` logins separate. See "The install audit chain" in
+  `docs/ops/secret-keys.md` in the repository.
+
 ## Patch upgrade (rolling)
 
 A patch release shares the schema with the one before it. Upgrade in place:

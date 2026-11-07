@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -17,7 +16,7 @@ import (
 
 var _ = Describe("koinon-api audit verify", func() {
 	It("walks the install chain by default, alone with --install, and reports a break", func(ctx SpecContext) {
-		var pool *pgxpool.Pool = pgtest.Start(ctx)
+		pool := pgtest.Start(ctx)
 		q := store.New(pool)
 		for range 3 {
 			Expect(audit.RecordInstallErr(ctx, q, audit.InstallEvent{

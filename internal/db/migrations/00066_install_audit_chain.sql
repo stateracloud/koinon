@@ -126,8 +126,10 @@ CREATE TRIGGER install_audit_events_no_truncate BEFORE TRUNCATE ON install_audit
 CREATE TRIGGER install_audit_chain_head_no_truncate BEFORE TRUNCATE ON install_audit_chain_head
     FOR EACH STATEMENT EXECUTE FUNCTION install_audit_append_only();
 
--- Who may insert (ADR 0100 decision 1.1a). The chart creates the group role in postInitApplicationSQL;
--- a cluster initialised before this change, or an external database, may not have it yet. The
+-- Who may insert (ADR 0100 decision 1.1a). The chart creates the group role as a CNPG managed role
+-- (existing clusters too) and in postInitApplicationSQL; an external database needs an administrator
+-- to create it first. The migrate role has no CREATEROLE there, so a missing role is an error with
+-- the remedy, not a bare insufficient_privilege. The
 -- default privileges of the chart's bootstrap give koinon_app DML on every new table: take the
 -- writes away (it keeps SELECT), and give INSERT to the group role only. The nested handler makes
 -- the creation safe against a concurrent creator (roles are cluster-wide).
@@ -139,6 +141,9 @@ BEGIN
             CREATE ROLE koinon_install_audit_writer NOLOGIN;
         EXCEPTION WHEN duplicate_object OR unique_violation THEN
             NULL;
+        WHEN insufficient_privilege THEN
+            RAISE EXCEPTION 'role koinon_install_audit_writer is missing and the migrate role may not create it: create it as an administrator (CREATE ROLE koinon_install_audit_writer NOLOGIN; GRANT koinon_install_audit_writer TO <api login role>), see docs/ops/secret-keys.md, The install audit chain'
+                USING ERRCODE = 'insufficient_privilege';
         END;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'koinon_app') THEN

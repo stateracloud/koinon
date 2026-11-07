@@ -52,6 +52,11 @@ spec:
         - ALTER DEFAULT PRIVILEGES FOR ROLE {{ $migrate }} IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO koinon_app
   managed:
     roles:
+      {{- /* The group role is also managed so a cluster initialised before ADR 0100 gets it: the migrate
+             role (the initdb owner) has no CREATEROLE, so migration 00066 cannot create it there. */}}
+      - name: koinon_install_audit_writer
+        ensure: present
+        login: false
       {{- range $role := list "api" "reconciler" "agentd" }}
       - name: {{ include "koinon.pgRole" $role }}
         ensure: present

@@ -353,9 +353,12 @@ and make sure that role is not the table owner.
 Actions that belong to no org (platform prices first) go to a second chain, `install_audit_events`.
 Only `koinon-api` writes it. The migration grants INSERT to the group role
 `koinon_install_audit_writer` and takes every write privilege on both install tables away from
-`koinon_app`; it creates the group role itself when it is missing, which needs CREATEROLE, so create
-the role first as an administrator. The chart's CloudNativePG setup creates the role in
-`postInitApplicationSQL` and makes only the `koinon_api` managed role a member.
+`koinon_app`. It tries to create the group role when it is missing, which needs CREATEROLE; the
+migrate role usually has none, and then the migration fails with an error that says to create the role
+as an administrator. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new
+clusters) and as a managed role (clusters created before this release), and makes only the
+`koinon_api` managed role a member. Do not let the api, reconciler and agentd share one login: the
+reconciler would then be able to write this chain.
 
 With `postgres.mode: external` the roles are yours. Run this once as an administrator **before the
 first migration**, with `<api role>` the role `koinon-api` logs in as:

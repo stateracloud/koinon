@@ -107,7 +107,7 @@ func List(ctx context.Context, q *store.Queries, f Filter) ([]store.AuditEvent, 
 	}
 	var rows []store.AuditEvent
 	// One more than the page, to know whether another page follows.
-	limit := int32(size + 1)
+	limit := queryLimit(size)
 	if !f.AllOrgs {
 		rows, err = q.ListAuditEventsFiltered(ctx, store.ListAuditEventsFilteredParams{
 			OrgID: f.Org, BeforeID: before, Since: timeArg(f.Since), Until: timeArg(f.Until),
@@ -139,11 +139,17 @@ func ListInstall(ctx context.Context, q *store.Queries, f Filter) ([]store.Insta
 	}
 	rows, err := q.ListInstallAuditEventsFiltered(ctx, store.ListInstallAuditEventsFilteredParams{
 		BeforeID: before, Since: timeArg(f.Since), Until: timeArg(f.Until),
-		ActionPrefix: textArg(f.ActionPrefix), ActorKind: textArg(f.ActorKind), ActorID: textArg(f.ActorID), PageSize: int32(size + 1),
+		ActionPrefix: textArg(f.ActionPrefix), ActorKind: textArg(f.ActorKind), ActorID: textArg(f.ActorID), PageSize: queryLimit(size),
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("audit: list install: %w", err)
 	}
 	rows, next := nextToken(rows, size, func(e store.InstallAuditEvent) pgtype.UUID { return e.ID })
 	return rows, next, nil
+}
+
+// queryLimit is one more than the page size, to know whether another page follows. prepare caps the
+// size at MaxPageSize, so the conversion cannot overflow.
+func queryLimit(size int) int32 {
+	return int32(size + 1) //nolint:gosec // size <= MaxPageSize
 }

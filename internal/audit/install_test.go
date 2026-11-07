@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"sync"
 	"sync/atomic"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 var priceActor = audit.System("koinon-api:price-refresh")
@@ -361,8 +363,10 @@ var _ = Describe("the install audit chain", func() {
 
 			Expect(execAs(ctx, conn, api, insertSQL)).To(Succeed(), "koinon_api inserts")
 			Expect(execAs(ctx, conn, api, `SELECT count(*) FROM install_audit_events`)).To(Succeed())
-			for _, stmt := range []string{insertSQL, `UPDATE install_audit_events SET actor_id = 'x'`, `DELETE FROM install_audit_events`, `TRUNCATE install_audit_events`,
-				`UPDATE install_audit_chain_head SET seq = 0`, `TRUNCATE install_audit_chain_head`} {
+			for _, stmt := range []string{
+				insertSQL, `UPDATE install_audit_events SET actor_id = 'x'`, `DELETE FROM install_audit_events`, `TRUNCATE install_audit_events`,
+				`UPDATE install_audit_chain_head SET seq = 0`, `TRUNCATE install_audit_chain_head`,
+			} {
 				err := execAs(ctx, conn, reconciler, stmt)
 				if stmt == insertSQL {
 					Expect(err).To(MatchError(ContainSubstring("permission denied")), "the reconciler's role cannot insert")
@@ -376,6 +380,32 @@ var _ = Describe("the install audit chain", func() {
 				err := execAs(ctx, conn, api, stmt)
 				Expect(err).To(HaveOccurred(), "not even the writer: "+stmt)
 			}
+		})
+
+		// The migrate role of the chart (the CNPG initdb owner) and of most external databases has no
+		// CREATEROLE: when the group role is missing, the migration must say what to do.
+		It("fails with the remedy when the group role is missing and the migrate role cannot create it", func(ctx SpecContext) {
+			testenv.Require(testenv.Docker)
+			dsn, stop, err := pgtest.StartServer(ctx, pgtest.Durable())
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(stop)
+			conn, err := pgx.Connect(ctx, dsn)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = conn.Close(ctx) })
+			for _, stmt := range []string{
+				`CREATE ROLE migrate_probe LOGIN PASSWORD 'koinon_test_not-a-real-password' NOCREATEROLE`,
+				`CREATE DATABASE migrate_probe_db OWNER migrate_probe`,
+			} {
+				_, err := conn.Exec(ctx, stmt)
+				Expect(err).NotTo(HaveOccurred(), stmt)
+			}
+			u, err := url.Parse(dsn)
+			Expect(err).NotTo(HaveOccurred())
+			u.User = url.UserPassword("migrate_probe", "koinon_test_not-a-real-password")
+			u.Path = "/migrate_probe_db"
+			err = pgtest.MigrateErr(ctx, u.String())
+			Expect(err).To(MatchError(ContainSubstring("koinon_install_audit_writer is missing")))
+			Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
 		})
 	})
 })

@@ -113,9 +113,11 @@ would be skipped for good and `koinon-api` would fail its first install write. I
 - the migration `REVOKE`s `INSERT, UPDATE, DELETE, TRUNCATE` on both tables from `koinon_app`
   (which the default privileges would otherwise give it), `GRANT`s `SELECT` on both to
   `koinon_app`, and `GRANT INSERT ON install_audit_events TO koinon_install_audit_writer`. The
-  migration creates the group role itself when it is missing (`CREATE ROLE ... NOLOGIN` in a `DO`
-  block), so a cluster initialised before this change still gets it; the managed role's `inRoles`
-  then picks it up on the operator's next reconcile.
+  chart also lists the group role as a CNPG managed role (`ensure: present`, `login: false`), so a
+  cluster initialised before this change gets it from the operator; the migrate role has no
+  `CREATEROLE`, so the migration cannot be relied on to create it. The migration tries
+  `CREATE ROLE ... NOLOGIN` when the role is missing (it works for a superuser) and, on
+  `insufficient_privilege`, fails with a message that says to create the role as an administrator.
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:

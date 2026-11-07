@@ -453,6 +453,10 @@ func Migrate(ctx context.Context, dsn string) {
 	gomega.Expect(migrate(ctx, dsn)).To(gomega.Succeed())
 }
 
+// MigrateErr applies every migration to the database at dsn and returns the error, for specs that
+// migrate as a restricted role and expect a failure.
+func MigrateErr(ctx context.Context, dsn string) error { return migrate(ctx, dsn) }
+
 // Start returns a pool on a new migrated database (a copy of the template); call it from a
 // BeforeSuite. The pool is closed and the database dropped when the node ends.
 func Start(ctx context.Context, opts ...Option) *pgxpool.Pool {
