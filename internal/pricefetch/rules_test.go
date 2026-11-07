@@ -242,9 +242,9 @@ func TestEntryIDAndBuildEntry(t *testing.T) {
 	kept := entry("fake-model-a", "1", "2", "")
 	kept.Match = pricing.Match{Glob: "fake/model-a"}
 	kept.Provider = "openrouter"
-	kept.Spec.Prices.CacheWrite1h = "6"
-	if e, err = BuildEntry(o, &kept, SourceOpenRouter, now); err != nil || e.Spec.Prices.CacheWrite1h != "6" {
-		t.Errorf("cache_write_1h must be kept: %+v, %v", e.Spec.Prices, err)
+	kept.Prices.CacheWrite1h = "6"
+	if e, err = BuildEntry(o, &kept, SourceOpenRouter, now); err != nil || e.Prices.CacheWrite1h != "6" {
+		t.Errorf("cache_write_1h must be kept: %+v, %v", e.Prices, err)
 	}
 	// An offer with problems cannot become an entry.
 	if _, err := BuildEntry(Offer{Model: "fake/x", ProviderType: "openrouter", Problems: []string{"negative price"}}, nil, SourceOpenRouter, now); err == nil {
