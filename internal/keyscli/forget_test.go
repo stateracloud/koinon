@@ -366,6 +366,10 @@ var _ = Describe("koinon-api keys forget", func() {
 			tool.Yes = true
 			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("is not among the keys")))
 
+			By("the usage probe sees the envelopes under the removed ID, and none under a new one")
+			Expect(keyscli.UsedID(ctx, pool, lostKEK)).To(BeTrue())
+			Expect(keyscli.UsedID(ctx, pool, nextKEK)).To(BeFalse())
+
 			By("the key-admin Job adds a KEK and makes it active")
 			kms := &secretstoretest.FakeKMS{}
 			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
@@ -373,7 +377,8 @@ var _ = Describe("koinon-api keys forget", func() {
 			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
 			Expect((keyscli.KeyAdmin{
-				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out, Now: func() time.Time { return now },
+				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out,
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
 			}).Run(ctx)).To(Succeed())
 			set, err := ks.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())

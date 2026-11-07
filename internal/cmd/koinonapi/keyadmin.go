@@ -101,6 +101,7 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		RewrapUnbound:      o.rewrapUnbound,
 		Marker:             installid.Marker{DB: pool},
 		HasValues:          func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
+		UsedID:             func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
 		Out:                out,
 	}
 	_, _ = fmt.Fprintf(out, "Install ID %s: every KEK this Job wraps is bound to it.\n", install)
@@ -141,4 +142,15 @@ func anyEnvelopeYet(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 		return false, nil
 	}
 	return found, err
+}
+
+// kekIDUsedYet is keyscli.UsedID on a database that may not be migrated yet: a table that does not
+// exist holds no values.
+func kekIDUsedYet(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	used, err := keyscli.UsedID(ctx, pool, id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
+		return false, nil
+	}
+	return used, err
 }
