@@ -28,11 +28,11 @@ RUN set -eu; \
     sum=$(eval "echo \$NODE_SHA256_$arch"); \
     curl -fsSL --retry 3 -o /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
     echo "$sum  /tmp/node.tar.xz" | sha256sum -c -; \
-    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update; apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends xz-utils; \
+    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update; apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends xz-utils; \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --exclude='*/CHANGELOG.md' --exclude='*/README.md'; \
     rm -f /tmp/node.tar.xz; \
     npm install -g --no-fund --no-audit "pnpm@${PNPM_VERSION}"; \
-    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-koinon-retries; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80-koinon-retries; \
     npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium; \
     rm -rf /var/lib/apt/lists/* /root/.npm; \
     node --version; pnpm --version

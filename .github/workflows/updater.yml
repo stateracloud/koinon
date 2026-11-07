@@ -12,7 +12,7 @@
 #                           run (a new run of the same pull request follows)
 #   auto_merge_enabled      a pull request joined the queue
 #   schedule                a missed event or an UNKNOWN merge state self-heals
-# One at a time. The App ID and key are secrets of the `claims-bot` Environment (see claims.yml);
+# One at a time. The App ID and key are secrets of the `claims-bot` Environment (see docs/dev/work-claims-setup.md);
 # without them the job skips with a notice.
 name: updater
 

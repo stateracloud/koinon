@@ -331,9 +331,9 @@ jobs:
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # The short checks in one job (koinon-private#594). Every job is billed at least one whole minute and each of
-  # these did about 10 s of work, so five jobs (proto, migrations, adr-lint, claim-tests, dependency
-  # age) cost five minutes for under one minute of work. The steps run one after another and each
+  # The short checks in one job (koinon-private#594). Every job pays a fixed start-up cost (runner, checkout,
+  # toolchain) and each of these did about 10 s of work, so five jobs (proto, migrations, adr-lint,
+  # claim-tests, dependency age) paid it five times for under one minute of work. The steps run one after another and each
   # runs even when an earlier one failed (!cancelled()), so one run still shows every failure, as
   # five jobs did. Needs nothing, so it starts at once; always runs, also on drafts and on a push to
   # main with skip=true (a few seconds of work).

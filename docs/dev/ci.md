@@ -148,7 +148,11 @@ e2e (`test/e2e`, ~15-25 min) runs on a PR whenever `hack/needs-e2e.sh` says the 
 needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
 it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
-explains.
+explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
+after the driver: it runs the commands of `docs/site/src/content/docs/guides/backup-restore.md` (key export,
+`pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
+(ADR 0085 decision 18). `hack/docs-check.sh` keeps the script and the guide's `e1` blocks in step. Locally:
+`BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
@@ -185,7 +189,7 @@ Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides,
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
-koinon-private#594: every job bills a whole minute) and the other workflows (`dco`, `gitleaks`, `claim`,
+koinon-private#594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
@@ -301,9 +305,12 @@ builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fet
 this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
 
 Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
-Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149); a step that
-runs apt through another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with
-both settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
+Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149), and every
+`apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
+later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
+snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
+another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with all three
+settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
@@ -315,7 +322,8 @@ skipped by #595 still writes the entry). A pull request never writes it.
 ## Main's e2e regressions and release tags
 
 When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
-naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
+naming the merge (or the suspects); it dispatches every candidate with `backup_restore=true`, so a
+nightly that went red in the backup-restore step reproduces: fix forward within 2 hours, otherwise revert it. RC and
 release tags are cut only from a commit whose `quickstart` job concluded success
 (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
 

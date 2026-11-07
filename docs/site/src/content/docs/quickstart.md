@@ -6,6 +6,10 @@ description: From helm install to an approved pull request in about 15 minutes.
 You will install Koinon, sign in, add a model provider, connect a GitHub App, create the
 repo-helper agent, give it a task and approve the pull request it proposes.
 
+> **Before v0.3 there is no upgrade promise.** An upgrade between any two releases before v0.3.0
+> may need a reinstall or manual steps listed in the release notes. Backups of the database and the
+> encryption keys, and restoring from them, are supported. See [Upgrading Koinon](/guides/upgrading/).
+
 The clock starts at `helm install`. The prerequisites are not on it. Install them first
 ([Prerequisites](/prerequisites/)).
 
@@ -245,7 +249,8 @@ the database does not help.
 kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
 ```
 
-Keep the file where you keep your other secrets. Rotation and the compromise procedure are in the
+Keep the file where you keep your other secrets. The database needs a backup too, and the two must be
+taken together: [Back up and restore](/guides/backup-restore/) has both. Rotation and the compromise procedure are in the
 [runbook](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md).
 
 ## GitOps (Argo CD, Flux)

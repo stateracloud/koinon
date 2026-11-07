@@ -66,6 +66,7 @@ FORCED=(
   '^hack/versions-env\.sh$' # the filter that loads them into the workflow's environment
   '^hack/e2e-toolchain/'    # the web toolchain image run.sh uses (Chromium for the browser suite)
   '^docs/site/src/content/docs/quickstart\.md$'
+  '^docs/site/src/content/docs/guides/backup-restore\.md$' # test/e2e/backup-restore.sh runs its blocks (#90)
 )
 IGNORED=(
   '\.md$'

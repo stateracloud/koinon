@@ -253,6 +253,14 @@
           "additionalProperties": false,
           "properties": {
             "instances": {"type": "integer", "minimum": 1},
+            "nodeMaintenanceWindow": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "inProgress": {"type": "boolean"},
+                "reusePVC": {"type": "boolean"}
+              }
+            },
             "imageName": {"$ref": "#/definitions/nonEmpty"},
             "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
             "storage": {

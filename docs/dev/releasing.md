@@ -73,6 +73,19 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
+Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). It is
+tracked in #313 ("release: v0.1.0 tag-time gate checklist"), separate from the docs change that
+added it. Tick it on the tag commit, not before:
+
+- [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded
+      (#275).
+- [ ] The ADR 0085 implementation issues still in the v0.1.0 gate (decisions 2-4 and 13-16, ADR 0099
+      decision 2) are closed.
+- [ ] `hack/release-gate.sh` is green for the commit.
+- [ ] The `quickstart` job of the kind e2e succeeded on the tagged commit.
+- [ ] The release notes carry the pre-v0.3 notice (upgrade may need a reinstall or manual steps;
+      backups and the restore runbook are supported), from the template below.
+
 Checklist step for every `vX.Y.0` from v0.3.0 on (not for v0.1.0 or v0.2.0, ADR 0099): after the
 final tag is published, open a pull request that sets `hack/migrate-patch-line` to `vX.Y` (for
 v0.3.0: `v0.3`). Until it merges, main can still contract the schema that the shipped release runs
@@ -113,10 +126,20 @@ say what is specific to this release. Template:
 - **Other manual steps:** anything an operator must do before or after.
 ```
 
-For `v0.1.0` and `v0.2.0`, write that there is no schema or upgrade promise before v0.3 (ADR 0099)
-and that an upgrade, a patch upgrade included, may need a reinstall or the manual steps the notes
-list. For `v0.3.0`, write that it is the compatibility baseline, and how an earlier install reaches
-it (stop, migrate, start, or a reinstall) and that it cannot roll back to an earlier release.
+For a release before v0.3.0, open the section with this notice, then the list above:
+
+```markdown
+Until v0.3.0 there is no schema or upgrade promise (ADR 0099). An upgrade, a patch upgrade
+included, may need a reinstall or the manual steps below. Backups of the database and the encryption
+keys, and restoring from them, are supported: take both before you upgrade.
+```
+
+For `v0.1.0` and `v0.2.0` use the notice above. v0.1.0 is a first release, so its "Upgrading from"
+section says there is nothing to upgrade from and keeps the notice. Name the restore runbook only if
+it exists on `main` when you publish the notes; otherwise link
+[Upgrading Koinon](../site/src/content/docs/guides/upgrading.md#roll-back). For `v0.3.0`, write that
+it is the compatibility baseline, and how an earlier install reaches it (stop, migrate, start, or a
+reinstall) and that it cannot roll back to an earlier release.
 
 ## Signing and SBOM attestations
 

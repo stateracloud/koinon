@@ -11,7 +11,8 @@ Before v0.3 there is no schema or upgrade promise
 ([ADR 0099](https://github.com/stateracloud/koinon/blob/main/docs/adr/0099-no-schema-or-upgrade-promise-before-v0-3.md)).
 An upgrade between any two releases before v0.3.0, patch upgrades and release candidates included,
 may need a reinstall or the manual steps in the release notes. Read them and take the database
-backup first.
+backup first. Backups and restoring from them are supported in every release, and are the way back
+when an upgrade goes wrong.
 
 From v0.3.0 the following applies:
 
@@ -57,7 +58,8 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
    kubectl -n koinon get secret <name>-kek -o yaml > koinon-kek-backup.yaml
    ```
 
-4. For a minor upgrade, back up the database too, because it is the only way back. Keep the dump with
+4. For a minor upgrade, back up the database too (the details, and how to check the dump, are on
+   [Back up and restore](/guides/backup-restore/)), because it is the only way back. Keep the dump with
    the key backup from the step above, and note the chart version you ran (`helm -n koinon list`).
    Without both, a minor upgrade cannot be undone.
 
@@ -184,6 +186,54 @@ migration 00020). Take the database backup first. An install older than rc.3 is 
 any upgrade path: Koinon ships no compatibility views for the tables that migration 00020 renamed,
 so re-install instead of upgrading.
 
+## Draining a node that runs the database
+
+This applies to `postgres.mode: cnpg` (the default). Node upgrades (Talos, kubeadm, a cloud node
+pool) drain each node in turn. CloudNativePG protects the Cluster with a PodDisruptionBudget, and for
+a single-instance Cluster (`postgres.cnpg.instances: 1`, the chart default) that budget allows no
+eviction. The drain of the node that runs `<name>-pg-1` then waits forever, and the node upgrade
+stalls. `external` mode is not affected by the chart; check your own database's disruption policy.
+
+Pick one:
+
+- **Run two or more instances for production.** Set `postgres.cnpg.instances: 2` (or 3). The budget then
+  allows one eviction at a time and CloudNativePG fails over to a replica. This is the recommended
+  setup: no maintenance switch, and about a failover's worth of interruption per drain. It costs a
+  second copy of the storage and the compute.
+- **Use a maintenance window on a single instance.** Set it before the drain and remove it after.
+  Pin the chart version you have installed, so that the switch does not also upgrade Koinon (without
+  `--version`, helm pulls the newest chart, and a minor upgrade needs the procedure above). Read the
+  installed version with `helm -n koinon list` (the `CHART` column, for example `koinon-0.3.1`) or
+  `helm -n koinon get metadata <release>` (the `VERSION` field):
+
+  ```sh
+  helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <installed-version> \
+    --reuse-values \
+    --set postgres.cnpg.nodeMaintenanceWindow.inProgress=true \
+    --set postgres.cnpg.nodeMaintenanceWindow.reusePVC=true
+  ```
+
+  The Cluster drops its budget, so the drain evicts the pod, and CloudNativePG recreates it on another
+  node with the same PersistentVolumeClaim. Plan for about 1 to 2 minutes without a database per
+  drain, and longer if the volume has to detach and re-attach. Keep `reusePVC: true` on a single
+  instance: `false` deletes the only copy of the data. Only a storage class that can attach the volume
+  on another node (network or replicated storage) can reuse it; node-local storage cannot.
+  Afterwards, remove the window with the same pinned version so the budget returns:
+
+  ```sh
+  helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <installed-version> \
+    --reuse-values \
+    --set postgres.cnpg.nodeMaintenanceWindow=null
+  ```
+
+  If you manage the values in Git, commit the window and its removal like any other change.
+
+During the window the API, the reconciler and agentd cannot reach the database. Their readiness
+probes fail and requests return errors; agentd cannot renew run leases, so a run in progress can be
+taken over by another worker once the database returns. Nothing is lost that was committed, and the
+components reconnect on their own. Do the drain when no run you care about is mid-turn, or scale
+agentd down first as in the minor upgrade steps above.
+
 ## Check afterwards
 
 ```sh
@@ -237,7 +287,7 @@ Not Ready. The only way back is a restore:
      ```sh
      PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=<name>-pg,cnpg.io/instanceRole=primary -o name)
      kubectl -n koinon exec "$PRIMARY" -c postgres -- psql --dbname=koinon \
-       -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public'
+       -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public AUTHORIZATION pg_database_owner' -c 'GRANT USAGE ON SCHEMA public TO PUBLIC'
      kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon-pre-upgrade.dump
      ```
 
@@ -258,7 +308,8 @@ Everything written after the backup is lost: runs, tasks and ledger entries made
 checkpoints in the bucket are not restored with the database, so the restored list of checkpoints is
 older than the bucket. Once koinon-agentd is up, rebuild that list from the bucket with
 `koinon-api checkpoints resync --all` (see
-[After a database restore](/guides/home-checkpoints/#after-a-database-restore)). A full, tested restore
-procedure with a drill is not part of this page yet; it is tracked in ADR 0085, implementation item 19.
+[After a database restore](/guides/home-checkpoints/#after-a-database-restore)). The whole procedure, with the checks that
+prove it worked, is on [Back up and restore](/guides/backup-restore/); a nightly test restores an install with
+it.
 
 If the migration failed halfway on your database, restoring the backup is the safe way back too.

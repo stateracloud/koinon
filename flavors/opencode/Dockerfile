@@ -46,7 +46,7 @@ RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
 # no curl or CA bundle; like ca-bootstrap this stage takes both from the archive over HTTP, and it
 # never reaches the final image, so its apt state does not matter to the result.
 FROM ${BASE} AS dl
-RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=common --chmod=0755 koinon-fetch /usr/local/bin/koinon-fetch
@@ -120,7 +120,7 @@ RUN set -eux; \
 # archive over HTTP (apt checks it against the archive keyring) and the final image takes only
 # the bundle file, which the pinned ca-certificates below then regenerates.
 FROM ${BASE} AS ca-bootstrap
-RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
@@ -136,7 +136,8 @@ COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-ce
 RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
  && printf 'Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/%s/\nSuites: noble noble-updates noble-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$UBUNTU_SNAPSHOT" \
       > /etc/apt/sources.list.d/koinon-snapshot.sources \
- && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+ && { apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
+      || { echo "package index update from snapshot.ubuntu.com (snapshot ${UBUNTU_SNAPSHOT}) failed after retries: most likely the snapshot mirror is unreachable; otherwise check UBUNTU_SNAPSHOT and the archive keyring" >&2; exit 1; }; } \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
       ca-certificates=20260816ubuntu0.24.04.1 \
       git=1:2.43.0-1ubuntu7.4 \
