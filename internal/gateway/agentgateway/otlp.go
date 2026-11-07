@@ -103,10 +103,11 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				// agentgateway reports totals (input includes cache reads and writes, output includes
 				// reasoning); the usage record carries disjoint buckets (ADR 0097 decision 3), so the
 				// parts leave the totals here, in the driver. Counts that do not add up clamp at zero.
-				if inOK {
+				// A negative total is left alone so ledger.CheckRecord still rejects it.
+				if inOK && in >= 0 {
 					in = max(in-max(cacheRead, 0)-max(cacheWrite, 0), 0)
 				}
-				if outOK && reasoningOK {
+				if outOK && reasoningOK && out >= 0 {
 					out = max(out-max(reasoning, 0), 0)
 				}
 				status, statusOK := intValue(attrs[LogFieldStatus])

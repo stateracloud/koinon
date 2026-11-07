@@ -277,6 +277,16 @@ var _ = Describe("Decode", func() {
 		Expect(got["r-over"]).To(And(HaveField("InputTokens", int64(0)), HaveField("OutputTokens", int64(0))))
 	})
 
+	It("still rejects a negative total instead of clamping it to zero", func() {
+		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
+		entries, rejected, _ := agentgateway.Decode(export(
+			llmRecord(id("r-neg-in"), num(agentgateway.LogFieldInput, -5), num(agentgateway.LogFieldCacheRead, 3)),
+			llmRecord(id("r-neg-out"), num(agentgateway.LogFieldOutput, -5), num(agentgateway.LogFieldReasoning, 3)),
+		))
+		Expect(entries).To(BeEmpty())
+		Expect(rejected).To(Equal(int64(2)))
+	})
+
 	It("accepts numeric costs and tokens", func() {
 		rec := llmRecord(&commonpb.KeyValue{
 			Key:   "agw.ai.usage.cost.total",
