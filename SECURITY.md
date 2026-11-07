@@ -3,14 +3,16 @@
 Koinon runs AI agents that act on real systems, so we take isolation and credential handling
 seriously. A sandbox escape suite covers the isolation promises (ADR 0025). What runs where:
 
-- CI runs the admission half (`escape (admission)`): the admission policy that rejects unsafe
-  sandbox specs. It is a required check that reports on every pull request, but the suite itself
-  runs only when the change touches `charts/`, `test/escape/` or the packages the suite imports
-  (the reconciler, agent config, execution, leak guard, test helpers and store), and always on a
-  push to main (`hack/ci-changes.sh`).
-- The OpenShell cases (no direct egress, no cloud metadata, no service account token, no secrets on
-  disk) run on kind (`make test-escape-kind`) and on a maintainer's Kata cluster. No CI job runs
-  them on every pull request yet (the leak guard escape case joins the PR kind e2e in #348).
+- CI runs only the admission-labelled cases (`escape (admission)`, `-ginkgo.label-filter=admission`):
+  the chart's ValidatingAdmissionPolicy that rejects unsafe sandbox specs, against envtest. It is a
+  required check that reports on every pull request, but the job runs only when the change touches
+  `charts/`, `test/escape/` or `internal/testing/testenv/`, and always on a push to main
+  (`hack/ci-changes.sh`).
+- The reconciler, gateway and leak guard cases and the OpenShell cases (no direct egress, no cloud
+  metadata, no service account token, no secrets on disk) run only on kind (`make test-escape-kind`)
+  and on a maintainer's Kata cluster. No CI job runs them on pull requests yet: a follow-up to #66
+  tracks an escape-kind job on GitHub-hosted runners, and the leak guard escape case joins the PR
+  kind e2e in #348.
 - The Kata isolation tier is tested only on a maintainer's Kata cluster, because kind cannot run Kata.
 
 ## Reporting a vulnerability
