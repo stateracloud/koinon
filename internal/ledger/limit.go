@@ -81,7 +81,7 @@ func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budg
 		var s string
 		var err error
 		if l.Name == budget.SystemDaily {
-			continue // the system key holds nothing back: its entries are never provisional
+			continue // the system key holds nothing back: its provisional entries (awaiting OpenRouter's bill) hold no reserve
 		}
 		if l.Name == budget.RunSpend {
 			continue // the run level holds nothing back: see above
