@@ -48,6 +48,7 @@
 package declarative
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -71,6 +72,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -379,6 +381,12 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		})
 		if err != nil {
 			return err
+		}
+		// A new secret or site reaches other repositories than the old one read (#244).
+		if cur.SecretFingerprint != d.Fingerprint || !bytes.Equal(cur.Config, updated.Config) {
+			if err := orgsettings.ClearCodeHostScope(ctx, tq, org, cur.ID); err != nil {
+				return err
+			}
 		}
 		if err := audit.RecordErr(ctx, tq, audit.Event{
 			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),

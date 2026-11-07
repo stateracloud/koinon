@@ -70,7 +70,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	})
 
 	It("replaces a connection's repositories and lower-cases the names", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{
 			{Owner: "Northwind", Name: "Platform-Handbook", Visibility: "private"},
 			{Owner: "northwind", Name: "website", Visibility: "public"},
 			{Owner: "northwind", Name: "old", Visibility: "unknown"},
@@ -83,7 +83,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 		Expect(l.Scope().Internal(conn, "northwind", "old", now)).To(BeFalse(), "unknown visibility is not internal")
 
 		By("a second report is the whole list: a repository it leaves out leaves the scope, a changed one is updated")
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{
 			{Owner: "northwind", Name: "platform-handbook", Visibility: "public"},
 		}, now)).To(Succeed())
 		l, err = svc.LeakGuard(ctx, org)
@@ -92,23 +92,23 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeFalse(), "it turned public")
 
 		By("an empty report empties the connection's part of the scope")
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, nil, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", nil, now)).To(Succeed())
 		l, _ = svc.LeakGuard(ctx, org)
 		Expect(l.CodeHostRepos).To(BeEmpty())
 	})
 
 	It("keeps the connections apart", func(ctx SpecContext) {
 		second := newConn(ctx, org)
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "one", Visibility: "private"}}, now)).To(Succeed())
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, second, []orgsettings.CodeHostRepo{{Owner: "a", Name: "two", Visibility: "private"}}, now)).To(Succeed())
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, nil, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "one", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, second, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "two", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", nil, now)).To(Succeed())
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.CodeHostRepos).To(HaveLen(1))
 		Expect(l.CodeHostRepos[0].Name).To(Equal("two"))
 	})
 
 	It("treats a reading older than the window as unknown", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now.Add(-2*time.Hour))).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now.Add(-2*time.Hour))).To(Succeed())
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeFalse())
 		s := l.ScopeSummary(now)
@@ -116,14 +116,14 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 		Expect(s.Stale).To(Equal(1))
 		Expect(s.OldestCheckedAt).NotTo(BeNil())
 
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
 		l, _ = svc.LeakGuard(ctx, org)
 		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeTrue())
 		Expect(l.ScopeSummary(now).Stale).To(BeZero())
 	})
 
 	It("summarises by visibility", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{
 			{Owner: "a", Name: "p1", Visibility: "private"},
 			{Owner: "a", Name: "p2", Visibility: "private"},
 			{Owner: "a", Name: "i", Visibility: "internal"},
@@ -136,7 +136,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	})
 
 	It("audits a replacement with counts, not the list", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{
 			{Owner: "a", Name: "p", Visibility: "private"}, {Owner: "a", Name: "pub", Visibility: "public"},
 		}, now)).To(Succeed())
 		ev := events(ctx, org, "org.code_host_scope.replace")
@@ -153,33 +153,96 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	It("audits the system's refresh only on a change, and a person's sync always", func(ctx SpecContext) {
 		repos := []orgsettings.CodeHostRepo{{Owner: "a", Name: "p", Visibility: "private"}, {Owner: "a", Name: "pub", Visibility: "public"}}
 		sys := audit.System("koinon-test:spec")
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, repos, now.Add(-3*time.Minute))).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, "", repos, now.Add(-3*time.Minute))).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "the first reading is a change")
 
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, repos, now.Add(-2*time.Minute))).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, "", repos, now.Add(-2*time.Minute))).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "the same list, read again, is not audited")
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.ScopeSummary(now).OldestCheckedAt).To(HaveValue(BeTemporally("~", now.Add(-2*time.Minute), time.Millisecond)), "but its freshness is stored")
 
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, repos, now.Add(-time.Minute))).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", repos, now.Add(-time.Minute))).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(2), "a person's sync is always audited")
 
 		changed := []orgsettings.CodeHostRepo{{Owner: "a", Name: "p", Visibility: "public"}, {Owner: "a", Name: "pub", Visibility: "public"}}
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, changed, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, "", changed, now)).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(3), "a visibility that changed is")
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, changed[:1], now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, "", changed[:1], now)).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(4), "and so is a repository that left")
 	})
 
 	It("keeps the newer reading when an older one arrives after it", func(ctx SpecContext) {
 		newer := []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "public"}}
 		older := []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}, {Owner: "a", Name: "c", Visibility: "private"}}
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, newer, now)).To(Succeed())
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, older, now.Add(-time.Minute))).To(Succeed(), "dropped, not an error")
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", newer, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", older, now.Add(-time.Minute))).To(Succeed(), "dropped, not an error")
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.CodeHostRepos).To(HaveLen(1))
 		Expect(l.Scope().Internal(conn, "a", "b", now)).To(BeFalse(), "the older private reading must not win over the newer public one")
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "a dropped reading is not audited")
+	})
+
+	Describe("a reading is tied to the credential that took it (#244)", func() {
+		repos := []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}
+		// rotate is what SetConnectionSecret and a declared update do in one transaction.
+		rotate := func(ctx SpecContext, to string) {
+			GinkgoHelper()
+			_, err := pool.Exec(ctx, `UPDATE connections SET secret_fingerprint = $3 WHERE org_id = $1 AND id = $2`, org, conn, to)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		rows := func(ctx SpecContext) int {
+			GinkgoHelper()
+			l, err := svc.LeakGuard(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			return len(l.CodeHostRepos)
+		}
+
+		It("refuses a reading taken with the secret that was replaced, also an empty or failing successor", func(ctx SpecContext) {
+			rotate(ctx, "fp-old")
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "fp-old", repos, now)).To(Succeed())
+			Expect(rows(ctx)).To(Equal(1))
+
+			By("the secret changes and its scope goes")
+			rotate(ctx, "fp-new")
+			Expect(orgsettings.ClearCodeHostScope(ctx, q, org, uuidOf(conn))).To(Succeed())
+			Expect(rows(ctx)).To(BeZero())
+
+			By("a sync that began under the old secret finishes late")
+			err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "fp-old", repos, now.Add(time.Second))
+			Expect(err).To(MatchError(orgsettings.ErrCredentialChanged))
+			Expect(rows(ctx)).To(BeZero(), "nothing of the old credential's account is inside")
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "fp-old", nil, now.Add(time.Second))).To(MatchError(orgsettings.ErrCredentialChanged))
+
+			By("the new secret's reading is stored")
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "fp-new", repos, now.Add(2*time.Second))).To(Succeed())
+			Expect(rows(ctx)).To(Equal(1))
+		})
+
+		It("does not count repositories read with another secret, even if they were left behind", func(ctx SpecContext) {
+			rotate(ctx, "fp-old")
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "fp-old", repos, now)).To(Succeed())
+			rotate(ctx, "fp-new") // a path that forgot to clear the scope
+			Expect(rows(ctx)).To(BeZero())
+		})
+
+		It("keeps an empty newest reading, so an older non-empty one cannot land after it", func(ctx SpecContext) {
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", nil, now)).To(Succeed())
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", repos, now.Add(-time.Minute))).To(Succeed(), "dropped, not an error")
+			Expect(rows(ctx)).To(BeZero())
+			Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "a dropped reading is not audited")
+
+			By("a newer one still lands")
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", repos, now.Add(time.Minute))).To(Succeed())
+			Expect(rows(ctx)).To(Equal(1))
+		})
+
+		It("forgets the reading with the scope, so the connection reads again at once", func(ctx SpecContext) {
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", nil, now)).To(Succeed())
+			Expect(orgsettings.ClearCodeHostScope(ctx, q, org, uuidOf(conn))).To(Succeed())
+			at, err := q.CodeHostConnectionReadAt(ctx, store.CodeHostConnectionReadAtParams{OrgID: org, ConnectionID: uuidOf(conn)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(at.InfinityModifier).To(Equal(pgtype.NegativeInfinity))
+		})
 	})
 
 	It("ends with the newest reading whatever order concurrent replacements finish in", func(ctx SpecContext) {
@@ -193,7 +256,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 				for j := range i + 1 {
 					repos = append(repos, orgsettings.CodeHostRepo{Owner: "a", Name: fmt.Sprintf("r%02d", j), Visibility: "private"})
 				}
-				errs <- svc.ReplaceCodeHostRepos(ctx, org, actor, conn, repos, now.Add(time.Duration(i-n)*time.Second))
+				errs <- svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", repos, now.Add(time.Duration(i-n)*time.Second))
 			}()
 		}
 		for range n {
@@ -208,8 +271,8 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 
 	DescribeTable("refuses what it cannot store, and changes nothing",
 		func(ctx SpecContext, repos []orgsettings.CodeHostRepo) {
-			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "keep", Name: "me", Visibility: "private"}}, now)).To(Succeed())
-			err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, repos, now)
+			Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "keep", Name: "me", Visibility: "private"}}, now)).To(Succeed())
+			err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", repos, now)
 			var inv *orgsettings.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
 			l, _ := svc.LeakGuard(ctx, org)
@@ -244,17 +307,17 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	})
 
 	It("refuses a reading dated in the future, and keeps the old one", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
-		err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "a", Name: "c", Visibility: "private"}}, time.Now().Add(24*time.Hour))
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)).To(Succeed())
+		err := svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "c", Visibility: "private"}}, time.Now().Add(24*time.Hour))
 		var inv *orgsettings.InvalidError
 		Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, nil, time.Now().Add(sinkclass.MaxClockSkew/2))).To(Succeed(), "a small skew is tolerated")
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", nil, time.Now().Add(sinkclass.MaxClockSkew/2))).To(Succeed(), "a small skew is tolerated")
 	})
 
 	It("looks a repository up in the linked connection only", func(ctx SpecContext) {
 		second := newConn(ctx, org)
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "private"}}, now)).To(Succeed())
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, second, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "public"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, second, "", []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "platform-handbook", Visibility: "public"}}, now)).To(Succeed())
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.Scope().Internal(conn, "northwind", "platform-handbook", now)).To(BeTrue())
 		Expect(l.Scope().Internal(second, "northwind", "platform-handbook", now)).To(BeFalse())
@@ -264,10 +327,10 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	It("does not find another org's connection, or one that does not exist", func(ctx SpecContext) {
 		other, _, _ := pgtest.NewOrg(ctx, pool)
 		theirs := newConn(ctx, other)
-		err := svc.ReplaceCodeHostRepos(ctx, org, actor, theirs, []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)
+		err := svc.ReplaceCodeHostRepos(ctx, org, actor, theirs, "", []orgsettings.CodeHostRepo{{Owner: "a", Name: "b", Visibility: "private"}}, now)
 		Expect(err).To(MatchError(orgsettings.ErrNotFound))
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, uuid.NewString(), nil, now)).To(MatchError(orgsettings.ErrNotFound))
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, "not-a-uuid", nil, now)).To(MatchError(orgsettings.ErrNotFound))
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, uuid.NewString(), "", nil, now)).To(MatchError(orgsettings.ErrNotFound))
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, "not-a-uuid", "", nil, now)).To(MatchError(orgsettings.ErrNotFound))
 		l, _ := svc.LeakGuard(ctx, other)
 		Expect(l.CodeHostRepos).To(BeEmpty())
 	})
@@ -275,13 +338,13 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 	It("is read per org", func(ctx SpecContext) {
 		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
 		theirs := newConn(ctx, other)
-		Expect(svc.ReplaceCodeHostRepos(ctx, other, audit.User(otherUser), theirs, []orgsettings.CodeHostRepo{{Owner: "n", Name: "x", Visibility: "private"}}, now)).To(Succeed())
+		Expect(svc.ReplaceCodeHostRepos(ctx, other, audit.User(otherUser), theirs, "", []orgsettings.CodeHostRepo{{Owner: "n", Name: "x", Visibility: "private"}}, now)).To(Succeed())
 		l, _ := svc.LeakGuard(ctx, org)
 		Expect(l.CodeHostRepos).To(BeEmpty())
 	})
 
 	It("feeds the derivation: an org's internal write, a public one, and a trusted wildcard fetch host", func(ctx SpecContext) {
-		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, []orgsettings.CodeHostRepo{
+		Expect(svc.ReplaceCodeHostRepos(ctx, org, actor, conn, "", []orgsettings.CodeHostRepo{
 			{Owner: "northwind", Name: "platform-handbook", Visibility: "private"},
 			{Owner: "northwind", Name: "website", Visibility: "public"},
 		}, now)).To(Succeed())
@@ -312,3 +375,5 @@ var _ = Describe("the org's code-host scope (ADR 0091, old issue 350)", func() {
 		Expect(get("https://A.DOCS.Example.COM./")).To(Equal(sinkclass.Internal), "case and a trailing dot name the same host")
 	})
 })
+
+func uuidOf(s string) pgtype.UUID { return pgtype.UUID{Bytes: uuid.MustParse(s), Valid: true} }

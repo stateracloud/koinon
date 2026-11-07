@@ -134,7 +134,7 @@ type Querier interface {
 	// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
 	// LOCKED lets two results of one tool close two calls.
 	CloseLeakGuardCall(ctx context.Context, arg CloseLeakGuardCallParams) (int64, error)
-	// When one connection's repositories were last read: -infinity when nothing of it is stored.
+	// When one connection was last read with its current secret: -infinity when it was not.
 	CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
@@ -268,6 +268,7 @@ type Querier interface {
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
+	DeleteCodeHostConnectionReading(ctx context.Context, arg DeleteCodeHostConnectionReadingParams) error
 	DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteCodeHostConnectionReposParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
@@ -407,6 +408,8 @@ type Querier interface {
 	// The p90 of provider-reported input tokens per request byte over the newest 500 real
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
+	// One connection's last reading (also an empty one), to compare a new reading with.
+	GetCodeHostConnectionReading(ctx context.Context, arg GetCodeHostConnectionReadingParams) (GetCodeHostConnectionReadingRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	// The connection a server is being linked to, locked against a change of its host (a declared
 	// connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
@@ -635,7 +638,9 @@ type Querier interface {
 	// foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
 	// then the scope lock, then the repository rows), so a replacement never holds the scope lock while
 	// it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
-	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (pgtype.UUID, error)
+	// It returns the secret fingerprint as committed now: after a SetConnectionSecret or a declared
+	// update that held the row, the new one.
+	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (KeyShareConnectionRow, error)
 	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
 	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
 	// the restore of a recreation or archive of that sandbox.
@@ -704,7 +709,7 @@ type Querier interface {
 	// The read path (AuditService.List, GET /admin/v1/audit): newest first by id, optionally narrowed
 	// by time range, action prefix and actor. before_id is the cursor, the last id of the previous page.
 	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
-	// One connection's part of the scope, to compare a new reading with.
+	// One connection's part of the scope, to tell whether a new reading changes it.
 	ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error)
 	// Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 	// agent has seen is not restored (ADR 0032).
@@ -824,6 +829,7 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
 	// still be fresh, but the credential behind them is gone, so a repository is not internal through it.
+	// A repository counts only through a reading taken with the connection's current secret (#244).
 	ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error)
 	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
 	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)
@@ -1366,6 +1372,7 @@ type Querier interface {
 	// (#85): it carried every secret the backend needs (the trigger credential_lost_clear also clears the
 	// mark when credentials are stored).
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
+	UpsertCodeHostConnectionReading(ctx context.Context, arg UpsertCodeHostConnectionReadingParams) error
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error)

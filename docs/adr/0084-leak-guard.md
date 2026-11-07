@@ -250,6 +250,13 @@ The data model old issue 349 builds on, as shipped in migration `00050`:
   for 1 hour** (`DefaultVisibilityMaxAge`) and a stale one counts as unknown; a reading dated more
   than a minute in the future counts as stale on read and is refused by `ReplaceCodeHostRepos`, the
   writer a connector uses. The leak-guard view reports the counts by visibility and how many are stale.
+  Each reading is tied to the credential that took it (#244): `org_code_host_readings(org_id,
+  connection_id, secret_fingerprint, checked_at)` keeps the newest reading per connection, also an empty
+  one. `ReplaceCodeHostRepos` takes the secret fingerprint of the connection row the connector opened and,
+  under the scope lock, refuses (`ErrCredentialChanged`) a reading whose fingerprint is not the connection's
+  now, and drops one older than the stored reading. Every secret change (the UI path and a declared update
+  with another key or site) deletes the connection's repositories and reading in the same transaction,
+  and the scope read ignores repositories whose reading has another fingerprint.
 - **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256
   (the bounds of `internal/leakguard`, enforced by a CHECK). The API treats 0 or absent as "back to
   the default".

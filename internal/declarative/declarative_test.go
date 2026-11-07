@@ -461,7 +461,7 @@ var _ = Describe("Importer", func() {
 
 			osvc := orgsettings.NewService(pool)
 			now := time.Now()
-			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, now)).To(Succeed())
+			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, now)).To(Succeed())
 			code := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
 			classify := func() sinkclass.Class {
 				l, err := osvc.LeakGuard(ctx, org)
@@ -473,6 +473,47 @@ var _ = Describe("Importer", func() {
 			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "gh", metav1.DeleteOptions{})).To(Succeed())
 			Expect(imp.Sync(ctx)).To(Succeed())
 			Expect(classify()).To(Equal(sinkclass.ExternalHigh), "the reading is fresh but the connection is removed")
+		})
+
+		It("drops the code-host scope when the declared secret rotates, and keeps it when nothing changed (#244)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(HaveLen(1))
+			cid := rows[0].ID.String()
+			osvc := orgsettings.NewService(pool)
+			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint,
+				[]orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, time.Now())).To(Succeed())
+			stored := func() int {
+				l, err := osvc.LeakGuard(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return len(l.CodeHostRepos)
+			}
+			Expect(stored()).To(Equal(1))
+
+			By("the same Secret again keeps the reading")
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(stored()).To(Equal(1))
+
+			By("another private key is another credential: the old one's readings go")
+			other := githubtest.New()
+			DeferCleanup(other.Server.Close)
+			rotated := conn()
+			rotated["privateKey"] = string(other.PEM)
+			put(ctx, "gh", declarative.TypeConnection, slug, rotated)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(stored()).To(BeZero())
+			var readings int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_readings WHERE org_id = $1`, org).Scan(&readings)).To(Succeed())
+			Expect(readings).To(BeZero(), "the marker goes with the rows")
+
+			By("a reading taken with the old key is refused")
+			err = osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint,
+				[]orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, time.Now())
+			Expect(err).To(MatchError(orgsettings.ErrCredentialChanged))
+			Expect(stored()).To(BeZero())
 		})
 
 		It("can be read back with the keys", func(ctx SpecContext) {

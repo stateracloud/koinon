@@ -12,9 +12,10 @@ import (
 )
 
 const codeHostConnectionReadAt = `-- name: CodeHostConnectionReadAt :one
-SELECT coalesce(max(checked_at), '-infinity'::timestamptz)::timestamptz AS checked_at
-FROM org_code_host_repos
-WHERE org_id = $1 AND connection_id = $2
+SELECT coalesce(max(rd.checked_at), '-infinity'::timestamptz)::timestamptz AS checked_at
+FROM org_code_host_readings rd
+JOIN connections c ON c.org_id = rd.org_id AND c.id = rd.connection_id
+WHERE rd.org_id = $1 AND rd.connection_id = $2 AND rd.secret_fingerprint = c.secret_fingerprint
 `
 
 type CodeHostConnectionReadAtParams struct {
@@ -22,12 +23,27 @@ type CodeHostConnectionReadAtParams struct {
 	ConnectionID pgtype.UUID
 }
 
-// When one connection's repositories were last read: -infinity when nothing of it is stored.
+// When one connection was last read with its current secret: -infinity when it was not.
 func (q *Queries) CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, codeHostConnectionReadAt, arg.OrgID, arg.ConnectionID)
 	var checked_at pgtype.Timestamptz
 	err := row.Scan(&checked_at)
 	return checked_at, err
+}
+
+const deleteCodeHostConnectionReading = `-- name: DeleteCodeHostConnectionReading :exec
+DELETE FROM org_code_host_readings
+WHERE org_id = $1 AND connection_id = $2
+`
+
+type DeleteCodeHostConnectionReadingParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+func (q *Queries) DeleteCodeHostConnectionReading(ctx context.Context, arg DeleteCodeHostConnectionReadingParams) error {
+	_, err := q.db.Exec(ctx, deleteCodeHostConnectionReading, arg.OrgID, arg.ConnectionID)
+	return err
 }
 
 const deleteCodeHostConnectionRepos = `-- name: DeleteCodeHostConnectionRepos :execrows
@@ -48,8 +64,31 @@ func (q *Queries) DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteC
 	return result.RowsAffected(), nil
 }
 
+const getCodeHostConnectionReading = `-- name: GetCodeHostConnectionReading :one
+SELECT secret_fingerprint, checked_at FROM org_code_host_readings
+WHERE org_id = $1 AND connection_id = $2
+`
+
+type GetCodeHostConnectionReadingParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID pgtype.UUID
+}
+
+type GetCodeHostConnectionReadingRow struct {
+	SecretFingerprint string
+	CheckedAt         pgtype.Timestamptz
+}
+
+// One connection's last reading (also an empty one), to compare a new reading with.
+func (q *Queries) GetCodeHostConnectionReading(ctx context.Context, arg GetCodeHostConnectionReadingParams) (GetCodeHostConnectionReadingRow, error) {
+	row := q.db.QueryRow(ctx, getCodeHostConnectionReading, arg.OrgID, arg.ConnectionID)
+	var i GetCodeHostConnectionReadingRow
+	err := row.Scan(&i.SecretFingerprint, &i.CheckedAt)
+	return i, err
+}
+
 const keyShareConnection = `-- name: KeyShareConnection :one
-SELECT id FROM connections
+SELECT id, secret_fingerprint FROM connections
 WHERE org_id = $1 AND id = $2
 FOR KEY SHARE
 `
@@ -59,19 +98,26 @@ type KeyShareConnectionParams struct {
 	ID    pgtype.UUID
 }
 
+type KeyShareConnectionRow struct {
+	ID                pgtype.UUID
+	SecretFingerprint string
+}
+
 // The first lock of a scope replacement: the connection row, FOR KEY SHARE, which the inserts'
 // foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
 // then the scope lock, then the repository rows), so a replacement never holds the scope lock while
 // it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
-func (q *Queries) KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (pgtype.UUID, error) {
+// It returns the secret fingerprint as committed now: after a SetConnectionSecret or a declared
+// update that held the row, the new one.
+func (q *Queries) KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (KeyShareConnectionRow, error) {
 	row := q.db.QueryRow(ctx, keyShareConnection, arg.OrgID, arg.ID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i KeyShareConnectionRow
+	err := row.Scan(&i.ID, &i.SecretFingerprint)
+	return i, err
 }
 
 const listCodeHostConnectionRepos = `-- name: ListCodeHostConnectionRepos :many
-SELECT owner, repo, visibility, checked_at FROM org_code_host_repos
+SELECT owner, repo, visibility FROM org_code_host_repos
 WHERE org_id = $1 AND connection_id = $2
 ORDER BY owner, repo
 `
@@ -85,10 +131,9 @@ type ListCodeHostConnectionReposRow struct {
 	Owner      string
 	Repo       string
 	Visibility CodeHostRepoVisibility
-	CheckedAt  pgtype.Timestamptz
 }
 
-// One connection's part of the scope, to compare a new reading with.
+// One connection's part of the scope, to tell whether a new reading changes it.
 func (q *Queries) ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error) {
 	rows, err := q.db.Query(ctx, listCodeHostConnectionRepos, arg.OrgID, arg.ConnectionID)
 	if err != nil {
@@ -98,12 +143,7 @@ func (q *Queries) ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeH
 	var items []ListCodeHostConnectionReposRow
 	for rows.Next() {
 		var i ListCodeHostConnectionReposRow
-		if err := rows.Scan(
-			&i.Owner,
-			&i.Repo,
-			&i.Visibility,
-			&i.CheckedAt,
-		); err != nil {
+		if err := rows.Scan(&i.Owner, &i.Repo, &i.Visibility); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -118,7 +158,8 @@ const listOrgCodeHostRepos = `-- name: ListOrgCodeHostRepos :many
 
 SELECT r.org_id, r.connection_id, r.owner, r.repo, r.visibility, r.checked_at FROM org_code_host_repos r
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
-WHERE r.org_id = $1 AND c.removed_at IS NULL
+JOIN org_code_host_readings rd ON rd.org_id = r.org_id AND rd.connection_id = r.connection_id
+WHERE r.org_id = $1 AND c.removed_at IS NULL AND rd.secret_fingerprint = c.secret_fingerprint
 ORDER BY r.owner, r.repo, r.connection_id
 `
 
@@ -129,6 +170,7 @@ ORDER BY r.owner, r.repo, r.connection_id
 // (TestQueriesAreOrgScoped).
 // A connection marked removed (its declaring Secret is gone) contributes nothing: its readings may
 // still be fresh, but the credential behind them is gone, so a repository is not internal through it.
+// A repository counts only through a reading taken with the connection's current secret (#244).
 func (q *Queries) ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error) {
 	rows, err := q.db.Query(ctx, listOrgCodeHostRepos, orgID)
 	if err != nil {
@@ -169,6 +211,30 @@ type LockCodeHostConnectionScopeParams struct {
 // reading is compared with, and written after, the one stored before it.
 func (q *Queries) LockCodeHostConnectionScope(ctx context.Context, arg LockCodeHostConnectionScopeParams) error {
 	_, err := q.db.Exec(ctx, lockCodeHostConnectionScope, arg.OrgID, arg.ConnectionID)
+	return err
+}
+
+const upsertCodeHostConnectionReading = `-- name: UpsertCodeHostConnectionReading :exec
+INSERT INTO org_code_host_readings (org_id, connection_id, secret_fingerprint, checked_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (org_id, connection_id)
+DO UPDATE SET secret_fingerprint = EXCLUDED.secret_fingerprint, checked_at = EXCLUDED.checked_at
+`
+
+type UpsertCodeHostConnectionReadingParams struct {
+	OrgID             pgtype.UUID
+	ConnectionID      pgtype.UUID
+	SecretFingerprint string
+	CheckedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertCodeHostConnectionReading(ctx context.Context, arg UpsertCodeHostConnectionReadingParams) error {
+	_, err := q.db.Exec(ctx, upsertCodeHostConnectionReading,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.SecretFingerprint,
+		arg.CheckedAt,
+	)
 	return err
 }
 
