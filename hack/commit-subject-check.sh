@@ -32,6 +32,7 @@ fi
 
 fail=0
 while read -r c; do
+	[[ -z $c ]] && continue
 	name=$(git show -s --format='%an' "$c")
 	email=$(git show -s --format='%ae' "$c")
 	if [[ $name == "dependabot[bot]" && $email == *@users.noreply.github.com ]]; then

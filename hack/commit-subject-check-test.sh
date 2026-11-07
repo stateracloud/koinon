@@ -73,6 +73,11 @@ commit "fix: on main"
 git merge -q --no-ff -m "Merge branch 'side'" side
 expect "merge commit is exempt" 0
 
+# A range with no non-merge commits (base == head) has nothing to check and passes.
+out=$("$script" HEAD HEAD 2>&1)
+rc=$?
+if [[ $rc -eq 0 ]]; then echo "ok   empty range passes"; else echo "FAIL empty range: exit $rc, want 0"; echo "$out"; fail=1; fi
+
 # A failing git rev-list (unknown revision) must fail closed, not pass on an empty list.
 out=$("$script" "$base" does-not-exist 2>&1)
 rc=$?
