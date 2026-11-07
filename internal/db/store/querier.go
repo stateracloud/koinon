@@ -508,6 +508,8 @@ type Querier interface {
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetPriceProposal(ctx context.Context, id pgtype.UUID) (PriceProposal, error)
 	GetPriceRefreshSettings(ctx context.Context) (PriceRefreshSetting, error)
+	// The run of unchanged fetches of a source for a model (the stability rule).
+	GetPriceSourceObservation(ctx context.Context, arg GetPriceSourceObservationParams) (PriceSourceObservation, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
@@ -782,6 +784,8 @@ type Querier interface {
 	// this before it starts the harness; a server never probed (unknown) is not a miss.
 	ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
+	// The enabled models of enabled providers of one type, with their org, for the unpriced-model count.
+	ListModelsOfProviderType(ctx context.Context, providerType string) ([]ListModelsOfProviderTypeRow, error)
 	// Every model no admin set the format of, in every live org, with its provider's type (startup:
 	// catalog.RederiveFormats applies internal/modelformat to them).
 	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
@@ -1052,6 +1056,9 @@ type Querier interface {
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
 	// The ledger's cost of one provider's entries in [@since, @until), with how many there were.
 	ProviderLedgerForDay(ctx context.Context, arg ProviderLedgerForDayParams) (ProviderLedgerForDayRow, error)
+	// Whether any org has an enabled provider of this type (the refresh's auto mode). A yes or no only:
+	// no org, provider or secret.
+	ProviderTypeInUse(ctx context.Context, providerType string) (bool, error)
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error

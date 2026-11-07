@@ -51,9 +51,26 @@ platform price as `platform@<version>#<entry id>`. The design is
 [ADR 0098](../adr/0098-price-catalogue-updates-from-public-sources.md); this is slice 1 (OpenRouter
 only, command line only).
 
-**Nothing is fetched by default.** `prices.refresh.enabled` is `false` in the chart; while it is off
-`koinon-api` makes no request to any price source, and prices change only with an upgrade or when
-you accept a proposal yourself. Run the commands in a `koinon-api` pod:
+**Three modes.** `prices.refresh.enabled` in the chart picks one; the chart passes it to `koinon-api`
+as `--prices-refresh=auto|off|on` and knows nothing about providers:
+
+| `prices.refresh.enabled` | Mode | What `koinon-api` fetches |
+|---|---|---|
+| unset (the default) | `auto` | OpenRouter's public price list, only while some org has a provider of type `openrouter` (checked again on every tick, so adding or removing the provider takes effect within the hour) |
+| `false` | `off` | nothing: no request to any price source; prices change only with an upgrade or when you fetch and accept a proposal yourself |
+| `true` | `on` | every source Koinon has an adapter for, whatever providers exist |
+
+In `auto` and `on` the fetched proposals within the bounds apply by themselves (below). **The first
+day brings no OpenRouter estimate**: a fetched price counts only after two fetches 24 hours apart
+agree, so a new install with an OpenRouter provider has no price for its OpenRouter models until the
+second day, unless you set an org price or accept a proposal. A model Koinon has no price for at all
+is always a `needs_review` proposal: it never applies by itself.
+
+**Unpriced models.** At start and on every tick `koinon-api` counts the enabled models of enabled
+providers of a type Koinon fetches prices for (today `openrouter`) that no layer prices and logs a warning with the count per provider type (no model or org
+names); the gauge is `koinon_price_unpriced_models{provider_type}`.
+
+Run the commands in a `koinon-api` pod:
 
 ```sh
 kubectl -n koinon exec deploy/koinon-api -- koinon-api prices fetch
@@ -74,10 +91,14 @@ are never applied by themselves.
 
 | Class | Meaning | What you do |
 |---|---|---|
-| `auto` | at most 25% off the last price a person reviewed, no new or removed rate, none zero, the same values in two fetches 24 hours apart | nothing, if refresh is on; otherwise accept it |
+| `auto` | at most 25% off the last price a person reviewed, no new or removed rate, none zero, the same values in two fetches 24 hours apart | nothing, in `auto` or `on`; with `off`, accept it |
 | `needs_review` | anything else that is plausible (a first sighting, a bigger move, a new rate, a tier change, an import) | `accept` or `dismiss` |
 | `confirm` | more than 3 times up or down, a rate that fell to zero, a suspected unit mix-up (a ratio of 100 or more), or a rate above 1000 USD per million | `accept --confirm <model id>`, typed in full |
 | `refused` | the source's data cannot be made into a price (a negative or variable price, an unreadable rate) | nothing; it cannot be accepted |
+
+A source that reports no output limit for a model (OpenRouter's `max_completion_tokens` is null) makes
+a `needs_review` proposal: accept it with `accept <id> --max-output <tokens>`, which sets the entry's
+`max_output` (the `why:` line says so).
 
 Why a proposal is not `auto` is in `proposals list` (`why:`). A dismissed proposal does not come back
 for the same values from the same source. Accepting writes a new platform version valid from now on,
@@ -85,22 +106,28 @@ never in the past, so charged requests keep their price. `prices platform rollba
 a new version equal to an older one. Platform prices are always for one model name: an entry that
 covers other models too (a pattern) is not changed, the proposal makes an entry of its own.
 
-**Turning the refresh on** (`prices.refresh.enabled: true`, `prices.refresh.interval: 24h`) lets
-**small price changes apply by themselves**: `koinon-api` fetches on the interval and applies the
+**Small price changes apply by themselves** in `auto` and `on`: `koinon-api` fetches each active
+source on the interval (`prices.refresh.interval`, default `24h`, at least `1h`) and applies the
 `auto` proposals, at most 10 in 24 hours (more than that means a broken source, and all wait for a
-person). You can tighten the bounds (`--prices-refresh-max-change-percent`,
-`--prices-refresh-max-auto-per-day`), never loosen them. Every change is audited; roll back with the
-command above.
+person). Each candidate is classified again under the current bounds just before it is applied, and
+a source whose fetch failed applies nothing on that tick. You can tighten the bounds
+(`prices.refresh.maxChangePercent`, 1-25, and `prices.refresh.maxAutoPerDay`, 1-10), never loosen
+them; `koinon-api` stores them, and `prices fetch` on the command line classifies with the stored
+bounds too. Every change is audited; roll back with the command above.
 
 **When the default list catches up.** On start `koinon-api` retires a platform entry that equals the
 new default entry of the same id (`platform_price.retired`, the reason names the list version).
 
 **Audit.** In the personal org of every platform admin: `price.proposal.accepted`,
 `price.proposal.dismissed`, `platform_price.set`, `platform_price.rollback`,
-`platform_price.retired`, `price.import.uploaded` and `price.refresh.settings_changed`.
+`platform_price.retired`, `price.import.uploaded` and `price.refresh.settings_changed`. Before the
+first platform admin exists, `koinon-api`'s own bookkeeping (the stored refresh settings, an
+auto-apply, a retirement when the default list catches up) still happens: there is no org to audit
+it in, so it logs a warning and the append-only platform tables are the record. A person's command
+(`accept`, `dismiss`, `rollback`, `import`) is refused until a platform admin exists.
 
-**Metrics.** `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}`
-and `koinon_price_auto_applied_total{source}`.
+**Metrics.** `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}`,
+`koinon_price_auto_applied_total{source}` and `koinon_price_unpriced_models{provider_type}`.
 
 **Known limits of this slice.** OpenRouter's tier boundary (`min_prompt_tokens`) is read as "at least
 that many tokens" and not yet checked against a live response (issue #265). Time-of-day, batch, flex

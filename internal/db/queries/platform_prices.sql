@@ -116,10 +116,27 @@ ORDER BY m.name;
 SELECT * FROM price_refresh_settings WHERE singleton;
 
 -- name: UpsertPriceRefreshSettings :exec
-INSERT INTO price_refresh_settings (singleton, enabled, interval, max_change_percent, max_auto_per_day)
-VALUES (true, @enabled, @interval, @max_change_percent, @max_auto_per_day)
-ON CONFLICT (singleton) DO UPDATE SET enabled = EXCLUDED.enabled, interval = EXCLUDED.interval,
+INSERT INTO price_refresh_settings (singleton, mode, interval, max_change_percent, max_auto_per_day)
+VALUES (true, @mode, @interval, @max_change_percent, @max_auto_per_day)
+ON CONFLICT (singleton) DO UPDATE SET mode = EXCLUDED.mode, interval = EXCLUDED.interval,
     max_change_percent = EXCLUDED.max_change_percent, max_auto_per_day = EXCLUDED.max_auto_per_day, updated_at = now();
+
+-- name: GetPriceSourceObservation :one
+-- The run of unchanged fetches of a source for a model (the stability rule).
+SELECT * FROM price_source_observations WHERE source = @source AND model = @model;
+
+-- name: ProviderTypeInUse :one
+-- Whether any org has an enabled provider of this type (the refresh's auto mode). A yes or no only:
+-- no org, provider or secret.
+SELECT EXISTS (SELECT 1 FROM providers WHERE type = @provider_type AND disabled_reason IS NULL)::boolean AS in_use;
+
+-- name: ListModelsOfProviderType :many
+-- The enabled models of enabled providers of one type, with their org, for the unpriced-model count.
+SELECT m.org_id, m.id, m.name
+FROM models m
+JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+WHERE p.type = @provider_type AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL
+ORDER BY m.org_id, m.name;
 
 -- name: GetLastPriceSourceFetch :one
 SELECT * FROM price_source_fetches WHERE source = @source ORDER BY fetched_at DESC LIMIT 1;

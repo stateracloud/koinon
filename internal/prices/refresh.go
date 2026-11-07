@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -105,8 +106,8 @@ type RefreshConfig struct {
 }
 
 // Refresher fetches the public sources, makes proposals from them and applies the ones inside the
-// auto-apply bounds. Fetching happens only when a caller asks (the CLI) or Loop runs, which koinon-api
-// starts only when prices.refresh is enabled (ADR 0098 decision 2.2).
+// auto-apply bounds. Fetching happens only when a caller asks (the CLI) or Loop's Tick finds a
+// source its RefreshMode allows (ADR 0098 decision 2.2 and its 2026-11-07 amendment).
 type Refresher struct {
 	svc      *Service
 	adapters map[string]pricefetch.Adapter
@@ -219,12 +220,23 @@ type RunResult struct {
 // Run fetches every adapter, records the fetch, makes proposals and, when auto is true, applies
 // the proposals inside the bounds. A failing source does not stop the others.
 func (r *Refresher) Run(ctx context.Context, trigger string, auto bool) (RunResult, error) {
-	res := RunResult{Failed: map[string]string{}}
+	return r.run(ctx, trigger, r.adapterNames(), auto)
+}
+
+func (r *Refresher) adapterNames() []string {
 	names := make([]string, 0, len(r.adapters))
 	for n := range r.adapters {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	return names
+}
+
+// run fetches the named adapters. Auto-apply then considers only the proposals of the sources that
+// were fetched successfully in this run: a source that failed proposes nothing new, and its older
+// proposals wait for the next good fetch.
+func (r *Refresher) run(ctx context.Context, trigger string, names []string, auto bool) (RunResult, error) {
+	res := RunResult{Failed: map[string]string{}}
 	for _, name := range names {
 		n, err := r.fetchOne(ctx, r.adapters[name], trigger)
 		if err != nil {
@@ -235,8 +247,8 @@ func (r *Refresher) Run(ctx context.Context, trigger string, auto bool) (RunResu
 		res.Fetched = append(res.Fetched, name)
 		res.Proposals += n
 	}
-	if auto {
-		n, err := r.AutoApply(ctx)
+	if auto && len(res.Fetched) > 0 {
+		n, err := r.AutoApply(ctx, res.Fetched...)
 		res.Applied = n
 		if err != nil {
 			return res, err
@@ -399,7 +411,8 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 		params.CurrentRef = cur.Ref
 	}
 	entry, err := pricefetch.BuildEntry(o, curEntry, snap.Source, now)
-	if err != nil {
+	noMaxOutput := errors.Is(err, pricefetch.ErrNoMaxOutput)
+	if err != nil && !noMaxOutput {
 		params.Class, params.FailedRules = string(pricefetch.ClassRefused), truncate("refused: "+err.Error(), 3900)
 	} else {
 		if curEntry != nil && !pricefetch.Differs(curEntry.Spec, entry.Spec) {
@@ -412,6 +425,13 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 			Origin: origin, Source: snap.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: entry,
 			Agreeing: []string{snap.Source}, Stable: stable,
 		}, r.bounds)
+		if noMaxOutput {
+			// Never auto: a person supplies the output limit when accepting.
+			verdict.Failed = append([]string{pricefetch.ErrNoMaxOutput.Error()}, verdict.Failed...)
+			if verdict.Class == pricefetch.ClassAuto {
+				verdict.Class = pricefetch.ClassNeedsReview
+			}
+		}
 		params.Class, params.FailedRules = string(verdict.Class), truncate(strings.Join(verdict.Failed, "; "), 3900)
 		if params.ProposedEntry, err = json.Marshal(entry); err != nil {
 			return false, err
@@ -439,9 +459,13 @@ func baselineOf(e *effective) *pricing.Spec {
 }
 
 // AutoApply applies the open proposals of class auto in one platform version (actor auto), unless
-// the day's cap would be exceeded, in which case none applies and they wait for a person. It
+// the day's cap would be exceeded, in which case none applies and they wait for a person. With
+// sources, only those sources' proposals are considered. Each candidate is classified again here,
+// under this Refresher's bounds, against the price in use and the stored stability of its values:
+// a proposal classified earlier under looser bounds (a CLI fetch, another replica, an older
+// setting) applies only if it still is auto, and otherwise moves to the class it now has. It
 // returns how many it applied.
-func (r *Refresher) AutoApply(ctx context.Context) (int, error) {
+func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, error) {
 	applied := 0
 	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
@@ -459,12 +483,32 @@ func (r *Refresher) AutoApply(ctx context.Context) (int, error) {
 		}
 		var cands []Proposal
 		for _, row := range rows {
+			if len(sources) > 0 && !slices.Contains(sources, row.Source) {
+				continue
+			}
 			p, err := toProposal(row)
 			if err != nil {
 				return err
 			}
 			// Only a proposal still diffed against the price in use applies.
-			if cur := v.effective(p.ProviderType, p.Model, now); cur == nil || p.Current == nil || !sameSpec(cur.Entry.Spec, p.Current.Spec) || p.Proposed == nil {
+			cur := v.effective(p.ProviderType, p.Model, now)
+			if cur == nil || p.Current == nil || !sameSpec(cur.Entry.Spec, p.Current.Spec) || p.Proposed == nil {
+				continue
+			}
+			stable, err := storedStable(ctx, q, row.Source, row.Model, row.ValuesHash)
+			if err != nil {
+				return err
+			}
+			verdict := pricefetch.Classify(pricefetch.Facts{
+				Origin: p.Origin, Source: p.Source, Current: &cur.Entry, Baseline: baselineOf(cur), Proposed: *p.Proposed,
+				Agreeing: p.Agreeing, Stable: stable,
+			}, r.bounds)
+			if verdict.Class != pricefetch.ClassAuto {
+				if err := q.SetPriceProposalClass(ctx, store.SetPriceProposalClassParams{
+					ID: row.ID, Class: string(verdict.Class), FailedRules: truncate(strings.Join(verdict.Failed, "; "), 3900),
+				}); err != nil {
+					return err
+				}
 				continue
 			}
 			cands = append(cands, p)
@@ -492,7 +536,7 @@ func (r *Refresher) AutoApply(ctx context.Context) (int, error) {
 			return err
 		}
 		pv, err := writeVersion(ctx, q, versionWrite{
-			Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
+			Log: r.log, Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
 			RuleSet: pricefetch.RuleSetVersion, ProposalIDs: ids, Entries: entries, Changed: changed,
 		})
 		if err != nil {
@@ -511,6 +555,18 @@ func (r *Refresher) AutoApply(ctx context.Context) (int, error) {
 		r.log.Info("platform prices updated automatically", "entries", applied)
 	}
 	return applied, err
+}
+
+// storedStable applies the stability rule to the values a proposal carries: the source's latest run
+// of unchanged fetches for the model has these values and spans two fetches StabilityWindow apart.
+func storedStable(ctx context.Context, q *store.Queries, source, model, valuesHash string) (bool, error) {
+	obs, err := q.GetPriceSourceObservation(ctx, store.GetPriceSourceObservationParams{Source: source, Model: model})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return obs.ValuesHash == valuesHash && obs.Fetches >= 2 && obs.LastSeen.Time.Sub(obs.FirstSeen.Time) >= pricefetch.StabilityWindow, nil
 }
 
 func (m *Metrics) autoApplied(source string) {
@@ -602,7 +658,7 @@ func (r *Refresher) decide(ctx context.Context, q *store.Queries, p Proposal, st
 	if version > 0 {
 		after["platformVersion"] = version
 	}
-	return auditPlatform(ctx, q, actor, action, "price_proposal", p.ID, nil, after)
+	return auditPlatform(ctx, q, r.log, actor, action, "price_proposal", p.ID, nil, after)
 }
 
 // ListProposals lists proposals, newest first; empty state or class mean all.
@@ -628,13 +684,26 @@ type Accepted struct {
 	Warnings []string
 }
 
+// AcceptOptions are what a person adds when accepting a proposal.
+type AcceptOptions struct {
+	// Confirm is the model id typed out, for a proposal of class confirm.
+	Confirm string
+	// MaxOutput sets the entry's output limit in tokens; required when the source reports none
+	// (pricefetch.ErrNoMaxOutput), and otherwise it replaces the proposed one. Zero keeps it.
+	MaxOutput int
+}
+
 // Accept writes a proposal into a new platform version, from now on. A proposal of class confirm
-// needs confirmModel to equal the model id exactly; a refused one cannot be accepted. The
-// proposal must still be diffed against the price in use.
-func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id, confirmModel string) (Accepted, error) {
+// needs opts.Confirm to equal the model id exactly; a refused one cannot be accepted, and one
+// without an output limit needs opts.MaxOutput. The proposal must still be diffed against the price
+// in use.
+func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, opts AcceptOptions) (Accepted, error) {
 	uid, err := parseUUID(id)
 	if err != nil {
 		return Accepted{}, &InvalidError{Msg: "proposal id " + id + " is not a UUID"}
+	}
+	if opts.MaxOutput < 0 {
+		return Accepted{}, &InvalidError{Msg: fmt.Sprintf("--max-output %d is negative", opts.MaxOutput)}
 	}
 	var out Accepted
 	err = pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
@@ -657,8 +726,16 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id, confirmMo
 			return &InvalidError{Msg: "proposal " + id + " is " + p.State + ", not open"}
 		case p.Class == pricefetch.ClassRefused || p.Proposed == nil:
 			return &InvalidError{Msg: "proposal " + id + " is refused and cannot be accepted: " + p.FailedRules}
-		case p.Class == pricefetch.ClassConfirm && confirmModel != p.Model:
+		case p.Class == pricefetch.ClassConfirm && opts.Confirm != p.Model:
 			return &InvalidError{Msg: fmt.Sprintf("proposal %s needs a typed confirmation: pass the model id %q to accept it (%s)", id, p.Model, p.FailedRules)}
+		}
+		reason := "accepted proposal " + id + " for " + p.Model
+		if opts.MaxOutput > 0 {
+			p.Proposed.MaxOutput = opts.MaxOutput
+			reason += fmt.Sprintf(", max_output %d set by the approver", opts.MaxOutput)
+		}
+		if p.Proposed.MaxOutput == 0 {
+			return &InvalidError{Msg: fmt.Sprintf("proposal %s has no output limit: the source reports none for %s; pass --max-output <tokens>", id, p.Model)}
 		}
 		now := r.now()
 		v, err := r.svc.view(ctx, q, now)
@@ -675,7 +752,7 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id, confirmMo
 			return err
 		}
 		pv, err := writeVersion(ctx, q, versionWrite{
-			Actor: actor, Action: "platform_price.set", Reason: "accepted proposal " + id + " for " + p.Model,
+			Log: r.log, Actor: actor, Action: "platform_price.set", Reason: reason,
 			ProposalIDs: ids, Entries: entries, Changed: changed,
 		})
 		if err != nil {
@@ -757,78 +834,10 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 			total += n
 			uploaded = append(uploaded, map[string]any{"source": snap.Source, "fetchedAt": snap.FetchedAt.Format(time.RFC3339), "sha256": snap.SHA256, "models": snap.Count, "proposals": n})
 		}
-		return auditPlatform(ctx, q, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actorText(actor)})
+		return auditPlatform(ctx, q, r.log, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actorText(actor)})
 	})
 	if err == nil {
 		_ = r.metrics.refreshProposals(ctx, store.New(r.svc.pool))
 	}
 	return total, err
-}
-
-// SyncSettings records the refresh setting koinon-api started with and audits a change
-// (price.refresh.settings_changed). The first start with the defaults (off) records and audits
-// nothing. A bound looser than the default never gets here: NewRefresher refuses it.
-func (r *Refresher) SyncSettings(ctx context.Context, enabled bool, interval time.Duration) error {
-	return pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
-		want := store.UpsertPriceRefreshSettingsParams{
-			Enabled: enabled, Interval: interval.String(), MaxChangePercent: int32(r.bounds.MaxChangePercent), MaxAutoPerDay: int32(r.bounds.MaxAutoPerDay), // #nosec G115 -- validated bounds
-		}
-		old, err := q.GetPriceRefreshSettings(ctx)
-		first := errors.Is(err, pgx.ErrNoRows)
-		if err != nil && !first {
-			return err
-		}
-		if !first && old.Enabled == want.Enabled && old.Interval == want.Interval && old.MaxChangePercent == want.MaxChangePercent && old.MaxAutoPerDay == want.MaxAutoPerDay {
-			return nil
-		}
-		if err := q.UpsertPriceRefreshSettings(ctx, want); err != nil {
-			return err
-		}
-		if first && !enabled {
-			return nil
-		}
-		fmtSettings := func(en bool, iv string, pct, perDay int32) map[string]any {
-			return map[string]any{"enabled": en, "interval": iv, "maxChangePercent": pct, "maxAutoPerDay": perDay}
-		}
-		var before any
-		if !first {
-			before = fmtSettings(old.Enabled, old.Interval, old.MaxChangePercent, old.MaxAutoPerDay)
-		}
-		return auditPlatform(ctx, q, audit.System(), "price.refresh.settings_changed", "price_refresh", "", before,
-			fmtSettings(want.Enabled, want.Interval, want.MaxChangePercent, want.MaxAutoPerDay))
-	})
-}
-
-// Loop fetches on a schedule until ctx ends and applies the proposals inside the bounds. A source
-// fetched less than interval ago (another replica did, or this one before a restart) is not
-// fetched again. koinon-api calls Loop only when prices.refresh is enabled.
-func (r *Refresher) Loop(ctx context.Context, interval time.Duration) {
-	tick := time.NewTimer(time.Minute) // a restart does not fetch at once
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-		if r.due(ctx, interval) {
-			if _, err := r.Run(ctx, TriggerSchedule, true); err != nil && ctx.Err() == nil {
-				r.log.Warn("scheduled price refresh", "err", err)
-			}
-		}
-		tick.Reset(min(interval, time.Hour))
-	}
-}
-
-// due says whether some adapter was last fetched at least interval ago.
-func (r *Refresher) due(ctx context.Context, interval time.Duration) bool {
-	q := store.New(r.svc.pool)
-	for name := range r.adapters {
-		f, err := q.GetLastPriceSourceFetch(ctx, name)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && r.now().Sub(f.FetchedAt.Time) >= interval) {
-			return true
-		}
-	}
-	return false
 }

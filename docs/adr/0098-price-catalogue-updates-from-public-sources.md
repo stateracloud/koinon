@@ -106,6 +106,27 @@ off (ADR 0068), with no release.
    command), and on a schedule when a platform admin turns it on. Helm `prices.refresh.enabled:
    false` and `prices.refresh.interval: 24h` are the defaults. With the setting off, `koinon-api`
    makes no request to any source. The same setting turns on auto-apply (decision 3).
+
+   **Amendment, maintainer decision 2026-11-07.** The setting has three modes, and the default is
+   `auto`, not off. Helm `prices.refresh.enabled` unset (null) renders `auto`, `false` renders
+   `off`, `true` renders `on`; the chart passes one flag, `--prices-refresh=auto|off|on`, and knows
+   nothing about providers.
+   - `auto` fetches a source only while a provider that source prices is in use: OpenRouter while
+     some org has an enabled provider of type `openrouter`. `koinon-api` checks again on every tick,
+     so adding the first such provider starts the fetch and removing the last one stops it.
+   - `off` makes no request to any source, as the setting off did before.
+   - `on` fetches every source Koinon has an adapter for, whatever providers exist.
+
+   In `auto` and `on` the fetch auto-applies within the bounds of decision 3; the two-fetch,
+   24-hour stability rule of decision 2.4 is unchanged, so the first day brings no OpenRouter
+   estimate. Why: once the default list stops carrying OpenRouter's routed models, an install that
+   uses OpenRouter would otherwise have no price for them unless a person turned the refresh on, and
+   an unpriced model is the worse failure (its requests are refused unless a fallback price is
+   set, see Context). An install that uses
+   no OpenRouter provider still makes no request, and `off` keeps a zero-request install one value
+   away. `koinon-api` logs a count-only warning at start and on every tick while models of a priced
+   provider type have no price, and exports `koinon_price_unpriced_models{provider_type}`
+   (ADR 0023: no org or model label).
 3. **Fetch rules.**
    - Pinned hosts per adapter (`openrouter.ai`, `models.dev`, `api.github.com`,
      `raw.githubusercontent.com`), HTTPS only, no redirects, a body cap (16 MiB) and a strict
@@ -138,7 +159,8 @@ off (ADR 0068), with no release.
 The scheduled fetch may apply small changes by itself. Everything else waits for a person.
 
 **One switch, not two** (maintainer decision 2026-11-06). The scheduled fetch and auto-apply are one
-setting, off by default (decision 2.2). The chart values comment and the Platform *Prices* page say
+setting, off by default (decision 2.2; since the 2026-11-07 amendment its default is `auto`, which
+fetches and auto-applies only for sources whose provider type is in use). The chart values comment and the Platform *Prices* page say
 plainly that turning it on lets small price changes apply by themselves. Uploads (decision 6) are
 never auto-applied: a person is there to review them.
 
@@ -291,11 +313,13 @@ records the page URL and "manual" as its source.
 ### 11. What stays as it is
 
 - **ADR 0097's rule still holds.** The gateway never downloads prices in the request path. Fetching
-  runs in `koinon-api`'s scheduler, off by default. A fetched price reaches a request only as a
+  runs in `koinon-api`'s scheduler, in `auto` mode by default (decision 2.2 amendment). A fetched price reaches a request only as a
   stored, versioned, audited platform or org entry. ADR 0097 rejects a runtime download of a price
   list "as a supply-chain path into cost truth". Bounded auto-apply narrows that path to small moves
   of existing models, confirmed by two sources or the provider, pinned, audited and reversible. It
-  does not remove it, which is why it is off by default and its one setting says so plainly.
+  does not remove it, which is why it was off by default and its one setting says so plainly.
+  Since 2026-11-07 the default `auto` opens the path only for a source whose provider type an org
+  uses, a model new to Koinon still always waits for a person, and `off` closes it.
 - ADR 0070's metadata snapshot still never prices a request by itself.
 - The default list keeps changing only through a reviewed pull request (`docs/ops/prices.md`).
 
@@ -323,7 +347,8 @@ data: never OpenRouter's (#68).
 v0.2, issue #265. Migrations are expand-only (ADR 0085): new tables for platform price versions,
 proposals and source fetches, and a new `price_ref` form. The work shares the fetch code with ADR
 0070's delivery PR 4 (online refresh and offline import), whichever lands first. A chart assertion
-in `hack/chart-check.d` checks that the default values render the refresh off.
+in `hack/chart-check.d` checks that the default values render the refresh in `auto` mode, and
+`false` and `true` render `off` and `on` (decision 2.2 amendment).
 
 ## Alternatives considered
 
@@ -381,7 +406,8 @@ Decided at the maintainer's 2026-11-06 review and moved into the decisions: the 
 one switch for fetch and auto-apply (decisions 2.2 and 3), which proposals org admins see (decision
 1.6), and models.dev as a proposals-only source (decision 7). At the second 2026-11-06 review: org
 entries from proposals retire when a release ships the same price, hand-typed ones never (decision
-1.6).
+1.6). Decided on 2026-11-07: the three refresh modes with `auto` as the default (decision 2.2
+amendment).
 
 ## Upstream verification
 

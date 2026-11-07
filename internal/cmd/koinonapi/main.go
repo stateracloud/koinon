@@ -112,7 +112,7 @@ import (
 )
 
 type config struct {
-	pricesRefresh         bool
+	pricesRefresh         string
 	pricesRefreshInterval time.Duration
 	pricesMaxChange       int
 	pricesMaxAutoPerDay   int
@@ -191,9 +191,9 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
-	fs.BoolVar(&c.pricesRefresh, "prices-refresh-enabled", false,
-		"fetch the public price source (OpenRouter) on a schedule and apply small, stable price changes by themselves (ADR 0098); "+
-			"off by default, and while off koinon-api makes no request to any price source")
+	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
+		"the scheduled price refresh (ADR 0098): auto fetches OpenRouter's public price list only while some org has an openrouter provider, "+
+			"on always fetches it, off never makes a request to any price source; a fetched change applies by itself only within the bounds below")
 	fs.DurationVar(&c.pricesRefreshInterval, "prices-refresh-interval", 24*time.Hour, "how often the scheduled price refresh fetches")
 	fs.IntVar(&c.pricesMaxChange, "prices-refresh-max-change-percent", pricefetch.DefaultBounds.MaxChangePercent,
 		"largest change, in percent of the last reviewed rate, that applies without a person; it can only be lowered")
@@ -427,11 +427,10 @@ func serve(ctx context.Context, cfg config) error {
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
 	}
-	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.4).
-	if retired, err := priceSvc.RetireCaughtUp(ctx); err != nil {
+	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.5). It
+	// logs what it retired, and needs no platform admin (a fresh install has none yet).
+	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
 		return err
-	} else if len(retired) > 0 {
-		slog.Info("platform price entries retired: the default list caught up", "entries", retired)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
@@ -676,9 +675,14 @@ func serve(ctx context.Context, cfg config) error {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
 	}
-	// The price refresh (ADR 0098). Off, koinon-api makes no request to any price source.
+	// The price refresh (ADR 0098, amended 2026-11-07). Off, koinon-api makes no request to any price
+	// source; auto fetches a source only while a provider of a type it prices exists.
 	priceMetrics := prices.NewMetrics(reg)
-	if cfg.pricesRefresh && cfg.pricesRefreshInterval < minPricesRefreshInterval {
+	refreshMode, err := prices.ParseRefreshMode(cfg.pricesRefresh)
+	if err != nil {
+		return fmt.Errorf("--prices-refresh: %w", err)
+	}
+	if refreshMode != prices.RefreshOff && cfg.pricesRefreshInterval < minPricesRefreshInterval {
 		return fmt.Errorf("--prices-refresh-interval %s is below the minimum %s", cfg.pricesRefreshInterval, minPricesRefreshInterval)
 	}
 	refresher, err := prices.NewRefresher(priceSvc, prices.RefreshConfig{
@@ -689,13 +693,19 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return fmt.Errorf("price refresh: %w", err)
 	}
-	if err := refresher.SyncSettings(ctx, cfg.pricesRefresh, cfg.pricesRefreshInterval); err != nil {
+	// Startup bookkeeping never depends on a platform admin existing (a fresh install has none until
+	// the first login): without one, the change is recorded and logged, not audited in an org.
+	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); err != nil {
 		return err
 	}
-	if cfg.pricesRefresh {
-		slog.Info("price refresh on: small, stable price changes apply by themselves", "interval", cfg.pricesRefreshInterval)
-		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) { refresher.Loop(ctx, cfg.pricesRefreshInterval) })
+	if _, err := refresher.ReportUnpriced(ctx); err != nil {
+		slog.Warn("counting unpriced models", "err", err)
 	}
+	slog.Info("price refresh", "mode", refreshMode, "interval", cfg.pricesRefreshInterval,
+		"autoApply", refreshMode != prices.RefreshOff, "maxChangePercent", cfg.pricesMaxChange, "maxAutoPerDay", cfg.pricesMaxAutoPerDay)
+	safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
+		refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
+	})
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}

@@ -14,8 +14,9 @@
 --    many fetches in a row returned it; the "unchanged across two fetches 24 hours apart" rule.
 -- 4. price_proposals: a difference between a source and the effective price, with its class and
 --    state; dismissed ones are remembered per source, model and values.
--- 5. price_refresh_settings: the last scheduled-refresh setting koinon-api started with, so that a
---    change is audited (price.refresh.settings_changed).
+-- 5. price_refresh_settings: the last scheduled-refresh setting koinon-api started with (mode auto,
+--    off or on, the interval and the bounds), so that a change is audited
+--    (price.refresh.settings_changed) and the prices commands use the bounds the server runs with.
 --
 -- None of these tables belongs to an org. Expand only (ADR 0085): new tables, nothing existing
 -- changes. An older binary of the line does not read them and prices from the org and default
@@ -139,7 +140,8 @@ CREATE INDEX price_proposals_model ON price_proposals (provider_type, model, cre
 
 CREATE TABLE price_refresh_settings (
     singleton  boolean     PRIMARY KEY DEFAULT true CHECK (singleton),
-    enabled    boolean     NOT NULL,
+    -- auto: fetch a source while a provider of a type it prices exists; off: never fetch; on: always.
+    mode       text        NOT NULL CHECK (mode IN ('auto', 'off', 'on')),
     interval   text        NOT NULL,
     max_change_percent integer NOT NULL,
     max_auto_per_day   integer NOT NULL,

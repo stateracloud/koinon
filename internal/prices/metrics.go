@@ -29,6 +29,9 @@ type Metrics struct {
 	Fetches     *prometheus.CounterVec
 	Proposals   *prometheus.GaugeVec
 	AutoApplied *prometheus.CounterVec
+	// Unpriced counts the enabled catalog models no price covers, by provider type (the types a
+	// source prices: a fixed set).
+	Unpriced *prometheus.GaugeVec
 }
 
 // NewMetrics registers the metrics on reg (nil: none registered).
@@ -43,6 +46,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AutoApplied: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_price_auto_applied_total", Help: "Price proposals applied by the bounded auto-apply, by source.",
 		}, []string{"source"}),
+		Unpriced: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_price_unpriced_models", Help: "Enabled catalog models that no org, platform or default price covers, by provider type.",
+		}, []string{"provider_type"}),
+	}
+	for _, pt := range pricefetch.PricedProviderTypes() {
+		m.Unpriced.WithLabelValues(pt)
 	}
 	for _, s := range pricefetch.Sources {
 		for _, r := range []string{FetchOK, FetchFailed, FetchRefused} {
@@ -56,7 +65,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}
 	}
 	if reg != nil {
-		reg.MustRegister(m.Fetches, m.Proposals, m.AutoApplied)
+		reg.MustRegister(m.Fetches, m.Proposals, m.AutoApplied, m.Unpriced)
 	}
 	return m
 }
@@ -80,6 +89,12 @@ func (m *Metrics) refreshProposals(ctx context.Context, q *store.Queries) error 
 		m.Proposals.WithLabelValues(r.Class, r.State).Set(float64(r.N))
 	}
 	return nil
+}
+
+func (m *Metrics) unpriced(providerType string, n int) {
+	if m != nil {
+		m.Unpriced.WithLabelValues(providerType).Set(float64(n))
+	}
 }
 
 func (m *Metrics) fetched(source, result string) {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"time"
 
@@ -36,6 +37,28 @@ const (
 
 // Sources lists the adapters. Metric labels use only these.
 var Sources = []string{SourceOpenRouter}
+
+// sourceProviderTypes are the provider types each source prices. The refresh's auto mode fetches a
+// source only while some org has a provider of one of these types.
+var sourceProviderTypes = map[string][]string{SourceOpenRouter: {"openrouter"}}
+
+// ProviderTypesOf returns the provider types a source prices (nil for an unknown source).
+func ProviderTypesOf(source string) []string { return sourceProviderTypes[source] }
+
+// PricedProviderTypes lists, sorted and once each, the provider types some source prices: the fixed
+// values of the provider_type label of koinon_price_unpriced_models.
+func PricedProviderTypes() []string {
+	var out []string
+	for _, s := range Sources {
+		for _, pt := range sourceProviderTypes[s] {
+			if !slices.Contains(out, pt) {
+				out = append(out, pt)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 // Licences recorded in the provenance (ADR 0098 decision 4).
 const LicenceOpenRouter = "OpenRouter terms"

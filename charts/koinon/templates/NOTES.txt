@@ -24,11 +24,23 @@ The rewrite starts from image.registry, so Koinon's images may not end up where 
 already under the mirror is left alone). Leave image.registry at its default when you use a global mirror.
 {{- end }}
 
-{{- if not .Values.prices.refresh.enabled }}
+{{- $pricesMode := include "koinon.pricesRefreshMode" . }}
 
-Model prices: prices.refresh is off, so prices change only with an upgrade. Fetch and review newer ones with
-`kubectl -n {{ .Release.Namespace }} exec deploy/koinon-api -- koinon-api prices fetch`, or set prices.refresh.enabled=true
-to let small changes apply by themselves.
+{{- if eq $pricesMode "off" }}
+
+Model prices: prices.refresh is off (enabled=false), so koinon-api makes no request to any price source and
+prices change only with an upgrade. Fetch and review newer ones with
+`kubectl -n {{ .Release.Namespace }} exec deploy/koinon-api -- koinon-api prices fetch`, or unset
+prices.refresh.enabled (auto) to let small changes apply by themselves.
+{{- else }}
+
+Model prices: prices.refresh is {{ $pricesMode }}{{ if eq $pricesMode "auto" }} (koinon-api fetches OpenRouter's public
+price list only while an org has an openrouter provider){{ else }} (koinon-api fetches OpenRouter's public price list){{ end }},
+and small, stable price changes apply by themselves. The first day brings no OpenRouter estimate: a
+fetched price counts only after two fetches 24 hours apart. A model Koinon has no price for at all waits
+for a person as a proposal (`koinon-api prices proposals list`); koinon-api logs how many models are
+unpriced (metric koinon_price_unpriced_models).
+Set prices.refresh.enabled=false to make no request at all.
 {{- end }}
 
 {{- if .Values.openshell.insecure }}

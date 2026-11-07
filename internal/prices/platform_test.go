@@ -151,11 +151,16 @@ type fakeAdapter struct {
 	in    string
 	out   string
 	calls int
+	// err, when set, fails the fetch.
+	err error
 }
 
 func (f *fakeAdapter) Name() string { return pricefetch.SourceOpenRouter }
 func (f *fakeAdapter) Fetch(_ context.Context, now time.Time) (pricefetch.Snapshot, error) {
 	f.calls++
+	if f.err != nil {
+		return pricefetch.Snapshot{}, f.err
+	}
 	return pricefetch.Snapshot{
 		Source: pricefetch.SourceOpenRouter, URL: "https://example.com/fake", Licence: "fake", FetchedAt: now, SHA256: strings.Repeat("0", 64), Count: 1,
 		Offers: []pricefetch.Offer{{Model: f.model, ProviderType: "openrouter", Spec: pricing.Spec{Prices: pricing.Wire{Input: f.in, Output: f.out}}}},
@@ -229,12 +234,12 @@ var _ = Describe("the price refresh", func() {
 		Expect(r.AutoApply(ctx)).To(BeZero())
 
 		acc := auditCount(ctx, "price.proposal.accepted")
-		res, err := r.Accept(ctx, audit.CLI("test"), p.ID, "")
+		res, err := r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Version.Version).To(BeNumerically(">", 0))
 		Expect(auditCount(ctx, "price.proposal.accepted")).To(Equal(acc + 1))
 		Expect(resolve(ctx, r.Service(), src, m).Source).To(Equal(prices.SourcePlatform))
-		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, "")
+		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{})
 		Expect(err).To(HaveOccurred(), "a decided proposal cannot be accepted again")
 	})
 
@@ -249,9 +254,9 @@ var _ = Describe("the price refresh", func() {
 		p := proposalFor(ctx, r, m, "open")
 		Expect(p.Class).To(Equal(pricefetch.ClassConfirm))
 
-		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, "")
+		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{})
 		Expect(err).To(HaveOccurred())
-		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, "fake/other")
+		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{Confirm: "fake/other"})
 		Expect(err).To(HaveOccurred())
 
 		dis := auditCount(ctx, "price.proposal.dismissed")
@@ -274,7 +279,7 @@ var _ = Describe("the price refresh", func() {
 		_, err = r.Service().SetPlatformForTest(ctx, []pricing.Entry{platformEntry("p-"+strings.ReplaceAll(m, "/", "-"), m, "3", "6", "")})
 		Expect(err).NotTo(HaveOccurred())
 		now = time.Now() // the new version is valid from the instant it was written
-		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, "")
+		_, err = r.Accept(ctx, audit.CLI("test"), p.ID, prices.AcceptOptions{})
 		Expect(err).To(MatchError(ContainSubstring("changed since")))
 	})
 
@@ -282,15 +287,15 @@ var _ = Describe("the price refresh", func() {
 		a := &fakeAdapter{model: uniq(), in: "1", out: "2"}
 		now := time.Now()
 		r := newRefresher(defaultList("2000-01-01.1"), a, &now)
-		Expect(r.SyncSettings(ctx, false, 24*time.Hour)).To(Succeed())
+		Expect(r.SyncSettings(ctx, prices.RefreshOff, 24*time.Hour)).To(Succeed())
 		Expect(a.calls).To(BeZero())
 
 		n := auditCount(ctx, "price.refresh.settings_changed")
-		Expect(r.SyncSettings(ctx, true, 12*time.Hour)).To(Succeed())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed())
 		Expect(auditCount(ctx, "price.refresh.settings_changed")).To(Equal(n + 1))
-		Expect(r.SyncSettings(ctx, true, 12*time.Hour)).To(Succeed())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed())
 		Expect(auditCount(ctx, "price.refresh.settings_changed")).To(Equal(n+1), "no change, no event")
-		Expect(r.SyncSettings(ctx, false, 12*time.Hour)).To(Succeed())
+		Expect(r.SyncSettings(ctx, prices.RefreshOff, 12*time.Hour)).To(Succeed())
 		Expect(auditCount(ctx, "price.refresh.settings_changed")).To(Equal(n + 2))
 		Expect(a.calls).To(BeZero())
 	})

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"sync"
@@ -187,6 +188,9 @@ func (s *Service) PlatformVersions(ctx context.Context, limit int) ([]PlatformVe
 
 // versionWrite is one new platform version.
 type versionWrite struct {
+	// Log gets the warning when a system change finds no platform admin to audit in (auditPlatform);
+	// nil means slog.Default.
+	Log          *slog.Logger
 	Actor        audit.Actor
 	Action       string // platform_price.set, platform_price.rollback or platform_price.retired
 	Reason       string
@@ -267,7 +271,7 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 	if len(pv.ProposalIDs) > 0 {
 		after["proposals"] = pv.ProposalIDs
 	}
-	if err := auditPlatform(ctx, q, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after); err != nil {
+	if err := auditPlatform(ctx, q, w.Log, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after); err != nil {
 		return PlatformVersion{}, err
 	}
 	return pv, nil
@@ -275,14 +279,30 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 
 // auditPlatform records a platform-wide event. It belongs to no org, so, as the platform admin API
 // audits in the acting admin's personal org, it is written in the personal org of every platform
-// admin (the same rule as keys forget): the change acts for none of them. Without a platform admin
-// there is nowhere to audit and the change is refused.
-func auditPlatform(ctx context.Context, q *store.Queries, actor audit.Actor, action, kind, target string, before, after any) error {
+// admin (the same rule as keys forget): the change acts for none of them.
+//
+// Without a platform admin (a fresh install: admins are granted at their first login) there is no
+// org to audit in. A person's change (a CLI actor: accept, dismiss, rollback, import) is then
+// refused, so that no decision a person made goes unaudited. Koinon's own bookkeeping (a system
+// actor: the settings sync, retirement when a release caught up, the bounded auto-apply) must not
+// depend on an admin existing, or koinon-api could not start on a fresh install: it goes ahead,
+// and log gets a warning. Its record stays in the install-wide tables it writes, which are
+// append-only and carry the actor, the reason and the rule set (platform_price_versions,
+// price_proposals.decided_by, price_refresh_settings).
+func auditPlatform(ctx context.Context, q *store.Queries, log *slog.Logger, actor audit.Actor, action, kind, target string, before, after any) error {
 	orgs, err := q.ListPlatformAdminPersonalOrgs(ctx)
 	if err != nil {
 		return err
 	}
 	if len(orgs) == 0 {
+		if actor.Kind == audit.KindSystem {
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Warn("no platform admin exists yet, so this platform price change is in no org's audit log; the platform price tables record it",
+				"action", action, "actor", actorText(actor))
+			return nil
+		}
 		return errors.New("prices: no platform admin exists to audit the change in; grant one first")
 	}
 	for _, org := range orgs {
@@ -327,7 +347,7 @@ func (s *Service) Rollback(ctx context.Context, actor audit.Actor, version int64
 			return err
 		}
 		out, err = writeVersion(ctx, q, versionWrite{
-			Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
+			Log: s.log, Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
 			RestoredFrom: version, Entries: old.Entries, Changed: changedIDs(cur.Entries, old.Entries),
 		})
 		return err
@@ -399,7 +419,7 @@ func (s *Service) RetireCaughtUp(ctx context.Context) ([]string, error) {
 			return nil
 		}
 		_, err = writeVersion(ctx, q, versionWrite{
-			Actor: audit.System(), Action: "platform_price.retired", Reason: "default price list " + list.Version + " caught up",
+			Log: s.log, Actor: audit.System(), Action: "platform_price.retired", Reason: "default price list " + list.Version + " caught up",
 			Entries: keep, Changed: retired,
 		})
 		return err

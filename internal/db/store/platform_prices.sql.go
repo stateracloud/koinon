@@ -220,7 +220,7 @@ func (q *Queries) GetPriceProposal(ctx context.Context, id pgtype.UUID) (PricePr
 }
 
 const getPriceRefreshSettings = `-- name: GetPriceRefreshSettings :one
-SELECT singleton, enabled, interval, max_change_percent, max_auto_per_day, updated_at FROM price_refresh_settings WHERE singleton
+SELECT singleton, mode, interval, max_change_percent, max_auto_per_day, updated_at FROM price_refresh_settings WHERE singleton
 `
 
 func (q *Queries) GetPriceRefreshSettings(ctx context.Context) (PriceRefreshSetting, error) {
@@ -228,11 +228,35 @@ func (q *Queries) GetPriceRefreshSettings(ctx context.Context) (PriceRefreshSett
 	var i PriceRefreshSetting
 	err := row.Scan(
 		&i.Singleton,
-		&i.Enabled,
+		&i.Mode,
 		&i.Interval,
 		&i.MaxChangePercent,
 		&i.MaxAutoPerDay,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPriceSourceObservation = `-- name: GetPriceSourceObservation :one
+SELECT source, model, values_hash, first_seen, last_seen, fetches FROM price_source_observations WHERE source = $1 AND model = $2
+`
+
+type GetPriceSourceObservationParams struct {
+	Source string
+	Model  string
+}
+
+// The run of unchanged fetches of a source for a model (the stability rule).
+func (q *Queries) GetPriceSourceObservation(ctx context.Context, arg GetPriceSourceObservationParams) (PriceSourceObservation, error) {
+	row := q.db.QueryRow(ctx, getPriceSourceObservation, arg.Source, arg.Model)
+	var i PriceSourceObservation
+	err := row.Scan(
+		&i.Source,
+		&i.Model,
+		&i.ValuesHash,
+		&i.FirstSeen,
+		&i.LastSeen,
+		&i.Fetches,
 	)
 	return i, err
 }
@@ -363,6 +387,41 @@ func (q *Queries) LatestPlatformPriceVersion(ctx context.Context) (int64, error)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const listModelsOfProviderType = `-- name: ListModelsOfProviderType :many
+SELECT m.org_id, m.id, m.name
+FROM models m
+JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+WHERE p.type = $1 AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL
+ORDER BY m.org_id, m.name
+`
+
+type ListModelsOfProviderTypeRow struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+	Name  string
+}
+
+// The enabled models of enabled providers of one type, with their org, for the unpriced-model count.
+func (q *Queries) ListModelsOfProviderType(ctx context.Context, providerType string) ([]ListModelsOfProviderTypeRow, error) {
+	rows, err := q.db.Query(ctx, listModelsOfProviderType, providerType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListModelsOfProviderTypeRow
+	for rows.Next() {
+		var i ListModelsOfProviderTypeRow
+		if err := rows.Scan(&i.OrgID, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listOpenAutoPriceProposals = `-- name: ListOpenAutoPriceProposals :many
@@ -646,6 +705,19 @@ func (q *Queries) ObservePriceValue(ctx context.Context, arg ObservePriceValuePa
 	return i, err
 }
 
+const providerTypeInUse = `-- name: ProviderTypeInUse :one
+SELECT EXISTS (SELECT 1 FROM providers WHERE type = $1 AND disabled_reason IS NULL)::boolean AS in_use
+`
+
+// Whether any org has an enabled provider of this type (the refresh's auto mode). A yes or no only:
+// no org, provider or secret.
+func (q *Queries) ProviderTypeInUse(ctx context.Context, providerType string) (bool, error) {
+	row := q.db.QueryRow(ctx, providerTypeInUse, providerType)
+	var in_use bool
+	err := row.Scan(&in_use)
+	return in_use, err
+}
+
 const setPriceProposalClass = `-- name: SetPriceProposalClass :exec
 UPDATE price_proposals SET class = $1, failed_rules = $2, updated_at = now() WHERE id = $3 AND state = 'open'
 `
@@ -764,14 +836,14 @@ func (q *Queries) UpsertPriceProposal(ctx context.Context, arg UpsertPricePropos
 }
 
 const upsertPriceRefreshSettings = `-- name: UpsertPriceRefreshSettings :exec
-INSERT INTO price_refresh_settings (singleton, enabled, interval, max_change_percent, max_auto_per_day)
+INSERT INTO price_refresh_settings (singleton, mode, interval, max_change_percent, max_auto_per_day)
 VALUES (true, $1, $2, $3, $4)
-ON CONFLICT (singleton) DO UPDATE SET enabled = EXCLUDED.enabled, interval = EXCLUDED.interval,
+ON CONFLICT (singleton) DO UPDATE SET mode = EXCLUDED.mode, interval = EXCLUDED.interval,
     max_change_percent = EXCLUDED.max_change_percent, max_auto_per_day = EXCLUDED.max_auto_per_day, updated_at = now()
 `
 
 type UpsertPriceRefreshSettingsParams struct {
-	Enabled          bool
+	Mode             string
 	Interval         string
 	MaxChangePercent int32
 	MaxAutoPerDay    int32
@@ -779,7 +851,7 @@ type UpsertPriceRefreshSettingsParams struct {
 
 func (q *Queries) UpsertPriceRefreshSettings(ctx context.Context, arg UpsertPriceRefreshSettingsParams) error {
 	_, err := q.db.Exec(ctx, upsertPriceRefreshSettings,
-		arg.Enabled,
+		arg.Mode,
 		arg.Interval,
 		arg.MaxChangePercent,
 		arg.MaxAutoPerDay,

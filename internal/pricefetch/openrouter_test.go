@@ -4,6 +4,7 @@ package pricefetch
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -87,6 +88,26 @@ func TestParseOpenRouter(t *testing.T) {
 	}
 	if r := offer(t, s, "fake/router"); len(r.Problems) == 0 {
 		t.Error("a negative (variable) price is a problem")
+	}
+}
+
+// A null max_completion_tokens is no output limit, not a problem: the offer prices the model and
+// BuildEntry later asks a person for the limit (ErrNoMaxOutput) instead of refusing the model.
+func TestParseOpenRouterNullMaxCompletionTokens(t *testing.T) {
+	s := parse(t, `{"id":"fake/model-a","pricing":{"prompt":"0.000001","completion":"0.000002"},"top_provider":{"max_completion_tokens":null}},
+	 {"id":"fake/model-b","pricing":{"prompt":"0.000001","completion":"0.000002"},"top_provider":{}}`)
+	for _, m := range []string{"fake/model-a", "fake/model-b"} {
+		o := offer(t, s, m)
+		if o.MaxOutput != 0 || len(o.Problems) != 0 || o.Spec.Prices.Input != "1" {
+			t.Errorf("%s: want a priced offer with no output limit and no problems, got %+v", m, o)
+		}
+		e, err := BuildEntry(o, nil, SourceOpenRouter, time.Unix(0, 0))
+		if !errors.Is(err, ErrNoMaxOutput) {
+			t.Errorf("%s: BuildEntry error %v, want ErrNoMaxOutput", m, err)
+		}
+		if e.ID == "" || e.MaxOutput != 0 || e.Prices.Output != "2" {
+			t.Errorf("%s: the entry is still returned for review: %+v", m, e)
+		}
 	}
 }
 

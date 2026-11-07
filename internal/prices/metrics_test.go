@@ -22,6 +22,7 @@ func TestMetricsLabels(t *testing.T) {
 		"koinon_price_source_fetch_total": {"result", "source"},
 		"koinon_price_proposals":          {"class", "state"},
 		"koinon_price_auto_applied_total": {"source"},
+		"koinon_price_unpriced_models":    {"provider_type"},
 	}
 	for _, f := range fams {
 		labels, ok := want[f.GetName()]

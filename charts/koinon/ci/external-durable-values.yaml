@@ -24,8 +24,11 @@ preflight:
 api:
   durable:
     enabled: true
-# The price refresh on (ADR 0098): koinon-api must start with its flags.
+# The price refresh on, with both auto-apply bounds (ADR 0098): koinon-api must start with its flags.
+# The other values files leave prices.refresh.enabled unset, so they start it in auto mode.
 prices:
   refresh:
     enabled: true
     interval: 12h
+    maxChangePercent: 10
+    maxAutoPerDay: 3

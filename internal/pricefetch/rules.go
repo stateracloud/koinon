@@ -202,11 +202,26 @@ func BuildEntry(o Offer, cur *pricing.Entry, source string, now time.Time) (pric
 			e.MaxOutput = cur.MaxOutput
 		}
 	}
+	if e.MaxOutput == 0 {
+		// The source gives no output limit (OpenRouter's max_completion_tokens is null) and no
+		// current entry has one. The rest of the entry must still be valid; a person then supplies
+		// the limit when accepting (prices proposals accept --max-output).
+		probe := e
+		probe.MaxOutput = 1
+		if _, err := probe.Resolve(true); err != nil {
+			return pricing.Entry{}, err
+		}
+		return e, ErrNoMaxOutput
+	}
 	if _, err := e.Resolve(true); err != nil {
 		return pricing.Entry{}, err
 	}
 	return e, nil
 }
+
+// ErrNoMaxOutput is BuildEntry's error for an otherwise valid entry that has no max_output: the
+// source reports none and no current entry has one. The proposal waits for a person, who sets it.
+var ErrNoMaxOutput = errors.New("max_output must be set: the source reports no output limit for this model (accept with --max-output <tokens>)")
 
 // Facts are everything Classify needs.
 type Facts struct {

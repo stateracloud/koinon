@@ -38,7 +38,7 @@ func newPricesCommand() *cobra.Command {
 		if err != nil {
 			return nil, nil, fmt.Errorf("connect to postgres: %w", err)
 		}
-		r, err := newRefresher(pool, nil)
+		r, err := newRefresher(cmd.Context(), pool, nil)
 		if err != nil {
 			pool.Close()
 			return nil, nil, err
@@ -141,11 +141,13 @@ func newPricesCommand() *cobra.Command {
 	list.Flags().IntVar(&limit, "limit", 100, "how many to list")
 
 	var confirm string
+	var maxOutput int
 	accept := &cobra.Command{
 		Use:   "accept <proposal id>",
 		Short: "Apply a proposal to the platform list from now on",
 		Long: "A proposal of class confirm (a change of more than 3x either way, or a rate above the sanity limit) " +
-			"needs --confirm <model id>, typed out. A refused proposal cannot be accepted.",
+			"needs --confirm <model id>, typed out. A refused proposal cannot be accepted. A proposal whose source " +
+			"reports no output limit (a new model) needs --max-output <tokens>, from the provider's model page.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, closeFn, err := open(cmd)
@@ -153,7 +155,7 @@ func newPricesCommand() *cobra.Command {
 				return err
 			}
 			defer closeFn()
-			res, err := r.Accept(cmd.Context(), audit.CLI("prices proposals accept"), args[0], confirm)
+			res, err := r.Accept(cmd.Context(), audit.CLI("prices proposals accept"), args[0], prices.AcceptOptions{Confirm: confirm, MaxOutput: maxOutput})
 			if err != nil {
 				return err
 			}
@@ -165,6 +167,7 @@ func newPricesCommand() *cobra.Command {
 		},
 	}
 	accept.Flags().StringVar(&confirm, "confirm", "", "the model id, for a proposal of class confirm")
+	accept.Flags().IntVar(&maxOutput, "max-output", 0, "the entry's output limit in tokens; required when the source reports none")
 
 	dismiss := &cobra.Command{
 		Use:   "dismiss <proposal id>",
@@ -225,10 +228,17 @@ func newPricesCommand() *cobra.Command {
 	return root
 }
 
-// newRefresher builds the refresher over the OpenRouter adapter. metrics may be nil.
-func newRefresher(pool *pgxpool.Pool, metrics *prices.Metrics) (*prices.Refresher, error) {
-	return prices.NewRefresher(prices.New(pool, slog.Default(), pricing.Embedded()), prices.RefreshConfig{
+// newRefresher builds the refresher over the OpenRouter adapter, with the auto-apply bounds koinon-api
+// last started with (so a CLI fetch classifies as the server would). metrics may be nil.
+func newRefresher(ctx context.Context, pool *pgxpool.Pool, metrics *prices.Metrics) (*prices.Refresher, error) {
+	svc := prices.New(pool, slog.Default(), pricing.Embedded())
+	bounds, err := svc.StoredBounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return prices.NewRefresher(svc, prices.RefreshConfig{
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
+		Bounds:   bounds,
 		Metrics:  metrics,
 	})
 }

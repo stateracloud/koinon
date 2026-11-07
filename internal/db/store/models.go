@@ -2189,7 +2189,7 @@ type PriceProposal struct {
 
 type PriceRefreshSetting struct {
 	Singleton        bool
-	Enabled          bool
+	Mode             string
 	Interval         string
 	MaxChangePercent int32
 	MaxAutoPerDay    int32

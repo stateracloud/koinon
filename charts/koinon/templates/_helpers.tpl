@@ -951,3 +951,13 @@ spec:
     {{- . | nindent 4 }}
   {{- end }}
 {{- end }}
+
+{{/*
+koinon.pricesRefreshMode is koinon-api's --prices-refresh (ADR 0098, maintainer decision 2026-11-07):
+prices.refresh.enabled unset is auto (koinon-api fetches OpenRouter only while an openrouter provider
+exists; the chart knows nothing about providers), false is off, true is on.
+*/}}
+{{- define "koinon.pricesRefreshMode" -}}
+{{- $e := .Values.prices.refresh.enabled -}}
+{{- if not (kindIs "bool" $e) -}}auto{{- else if $e -}}on{{- else -}}off{{- end -}}
+{{- end }}
