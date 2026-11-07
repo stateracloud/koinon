@@ -16,7 +16,7 @@ network_policies:
   gitea_no_pr:
     name: gitea_no_pr
     endpoints:
-      - host: git.apps.lab.example.invalid
+      - host: git.example.invalid
         port: 443
         path: /api/v1/**
         protocol: rest
@@ -32,7 +32,7 @@ network_policies:
   echo_audit:
     name: echo_audit
     endpoints:
-      - host: whoami.apps.lab.example.invalid
+      - host: whoami.example.invalid
         port: 443
         protocol: rest
         enforcement: audit

@@ -12,7 +12,7 @@ set -euo pipefail
 VERSION=v1.0.7
 SHA256=136c10c9347cb5a6740b351444cae82f404e883c3f520272257ba785f2af0da8
 URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSION}/sandbox-with-extensions.yaml"
-KUBECTL=(kubectl --context homelab)
+KUBECTL=(kubectl --context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}")
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-sandbox.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT

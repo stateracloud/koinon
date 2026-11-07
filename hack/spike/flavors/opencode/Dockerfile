@@ -3,7 +3,7 @@
 # build from npm) is the process that makes network calls, so policy names it directly.
 FROM docker.io/library/node:24-bookworm-slim AS fetch
 RUN cd /tmp && npm pack opencode-linux-x64@1.19.3 >/dev/null && tar xzf opencode-linux-x64-1.19.3.tgz
-FROM zot.apps.lab.example.invalid/koinon/spike-probe:1
+FROM registry.example.invalid/koinon/spike-probe:1
 COPY --from=fetch /tmp/package/bin/opencode /usr/local/bin/opencode
 COPY opencode.json /etc/koinon/opencode/opencode.json
 COPY koinon-opencode /usr/local/bin/koinon-opencode

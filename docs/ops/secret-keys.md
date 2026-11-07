@@ -378,7 +378,7 @@ address, is not served; the render check fails closed). DNS rebinding between th
 because the gateway resolves the name itself; the egress NetworkPolicy below is the hard limit.
 
 A platform admin allows internal upstreams in the chart value `egress.allowedInternalHosts` (the old name `providers.allowedInternalHosts` still works for one more release and is joined with it; the list covers model providers and remote MCP servers): names
-(optionally with a port), IPs or CIDRs, for example `["ollama.lab.example.com:11434", "10.20.0.0/24"]`.
+(optionally with a port), IPs or CIDRs, for example `["ollama.lab.example.com:11434", "10.7.0.0/24"]`.
 
 **Gateway egress policy.** With `networkPolicy.enabled` the chart restricts agentgateway's egress with a
 standard `networking.k8s.io/v1` NetworkPolicy (no CNI-specific resources): DNS, `koinon-api`'s OTLP and
@@ -388,7 +388,7 @@ out. Allow an internal upstream there too, by address, with `networkPolicy.gatew
 ```yaml
 networkPolicy:
   gatewayEgressTo:
-    - to: [{ipBlock: {cidr: 10.20.0.0/24}}]
+    - to: [{ipBlock: {cidr: 10.7.0.0/24}}]
       ports: [{port: 11434}]
 ```
 

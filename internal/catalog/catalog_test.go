@@ -37,7 +37,7 @@ var _ = Describe("URLPolicy", func() {
 	}
 	p := catalog.URLPolicy{
 		Namespace:    "koinon",
-		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7", "[fd00::7]:11434"},
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.7.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7", "[fd00::7]:11434"},
 		Resolver: resolver(map[string][]string{
 			"api.openai.com":          {"104.18.6.192"},
 			"ollama.lab.example.com":  {"127.0.0.1"},
@@ -46,7 +46,7 @@ var _ = Describe("URLPolicy", func() {
 			"fakemodel.fakes.svc":     {"10.96.4.4"},
 			"other.fakes.svc":         {"10.96.4.5"},
 			"internal.example.com":    {"10.1.2.3"},
-			"allowed-net.example.com": {"10.20.0.9"},
+			"allowed-net.example.com": {"10.7.0.9"},
 			"cgnat.example.com":       {"100.64.3.3"},
 			"ula.example.com":         {"fd12::1"},
 			"v6.example.com":          {"fe80::1"},
@@ -66,7 +66,7 @@ var _ = Describe("URLPolicy", func() {
 		Entry("inner glob", "https://api.*.example.com"),
 	)
 	It("refuses a pattern in the platform allow list", func() {
-		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.20.0.0/24"})).To(Succeed())
+		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.7.0.0/24"})).To(Succeed())
 		Expect(catalog.ValidateAllowedHosts([]string{"[fd00::1]", "[fd00::1]:11434", "fd00::1", "fd00::/8"})).To(Succeed())
 		for _, bad := range []string{"*.lab.example.com", "[ab].lab.example.com", "[fd00::1]*", "[fd00::1]:[1-9]", "[*]:80"} {
 			Expect(catalog.ValidateAllowedHosts([]string{bad})).To(MatchError(ContainSubstring("is a pattern")), bad)
@@ -132,7 +132,7 @@ var _ = Describe("URLPolicy", func() {
 		Entry("an allow-listed Service with its port", "http://fakemodel.fakes.svc:8080/v1"),
 		Entry("an allow-listed host even though it resolves to loopback", "http://ollama.lab.example.com:11434/v1"),
 		Entry("an allow-listed host:port", "http://localhost:11434/v1"),
-		Entry("an IP inside an allow-listed CIDR", "http://10.20.0.5:11434/v1"),
+		Entry("an IP inside an allow-listed CIDR", "http://10.7.0.5:11434/v1"),
 		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
 		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
 		Entry("a public IPv6 literal (brackets are not a pattern)", "http://[2606:4700::1111]/v1"),

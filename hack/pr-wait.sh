@@ -22,7 +22,7 @@
 #              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
 #              `--require e2e` is the merge gate for a needs-e2e PR (koinon-private#547): it passes when the commit status
-#              `e2e-lab` (posted by hack/e2e-remote.sh --argo after a green lab run) is success on the head,
+#              `e2e-lab` (an external e2e run that passed on this commit) is success on the head,
 #              OR any `quickstart` check run on the head succeeded. Otherwise it behaves like
 #              `--require quickstart` and prints `REQUIRED e2e missing|skipped|failed` with how to produce one.
 #              Every required check is also read from the head commit's check runs (`gh api
@@ -452,7 +452,7 @@ while :; do
             name=${w%%$'\t'*} why=${w#*$'\t'}
             echo "REQUIRED $(shown "$name") $why"
             if [ "$alias_show" = 1 ] && [ "$name" = quickstart ]; then
-              echo "no green e2e on this head ($why quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref $branch"
+              echo "no green e2e on this head ($why quickstart, no e2e-lab success); run: gh workflow run e2e-kind.yml --ref $branch"
             elif [ "$why" = skipped ]; then
               echo "only skipped runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
             fi

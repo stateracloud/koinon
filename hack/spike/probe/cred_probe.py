@@ -77,7 +77,7 @@ def walk(root):
 def use_placeholder():
     """Send the placeholder to Gitea, so the response passes through this process."""
     import urllib.request
-    req = urllib.request.Request("https://git.apps.lab.example.invalid/api/v1/user",
+    req = urllib.request.Request("https://git.example.invalid/api/v1/user",
                                  headers={"Authorization": "Bearer " + os.environ.get("SPIKE_TOKEN", "")})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:

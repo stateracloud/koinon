@@ -15,12 +15,10 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit templ
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp/calls.log" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
-export GIT_TERMINAL_PROMPT=0 FAKE_NEEDS_RC="$tmp/needs.rc" FAKE_CLAIM_RC="$tmp/claim.rc" FAKE_LAB_RC="$tmp/lab.rc" FAKE_LAB_STATE="$tmp/lab.state"
+export GIT_TERMINAL_PROMPT=0 FAKE_NEEDS_RC="$tmp/needs.rc" FAKE_CLAIM_RC="$tmp/claim.rc"
 : >"$FAKE_LOG"
 echo 1 >"$FAKE_NEEDS_RC"
 echo 0 >"$FAKE_CLAIM_RC"
-echo 0 >"$FAKE_LAB_RC"
-echo success >"$FAKE_LAB_STATE"
 
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -80,18 +78,6 @@ cat >"$seed/hack/claim.sh" <<'SH'
 echo "claim $*" >>"$FAKE_LOG"
 exit "$(cat "$FAKE_CLAIM_RC")"
 SH
-# The lab client and the status reader (koinon-private#610): the gate's exit code and the visible status come from files.
-cat >"$seed/hack/e2e-remote.sh" <<'SH'
-#!/usr/bin/env bash
-echo "e2e-remote $*" >>"$FAKE_LOG"
-echo "lab gate output"
-exit "$(cat "$FAKE_LAB_RC")"
-SH
-cat >"$seed/hack/go-test-lab.sh" <<'SH'
-#!/usr/bin/env bash
-echo "go-test-lab $*" >>"$FAKE_LOG"
-cat "$FAKE_LAB_STATE"
-SH
 chmod +x "$seed/hack/"*.sh
 printf '# ADRs\n\n## Index\n' >"$seed/docs/adr/README.md"
 printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
@@ -121,7 +107,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; echo 0 >"$FAKE_LAB_RC"; echo success >"$FAKE_LAB_STATE"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -440,78 +426,6 @@ git checkout -q -b stray
 echo t >t.txt
 rc=$(run "$tmp/o19" --no-issue -m "chore: t")
 check "--no-issue still refuses a stray name" eq "$rc" 1
-# 20. (koinon-private#610) --lab-go-test: the lab gate runs after the push and before the pull request is marked ready
-reset_state
-w=$(newwork); cd "$w"
-echo l >l.txt
-rc=$(run "$tmp/o20" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --lab-go-test)
-check "--lab-go-test without --ready: usage error" eq "$rc" 2
-check "...nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
-rc=$(run "$tmp/o20b" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test --dry-run)
-check "--lab-go-test dry run: exit 0" eq "$rc" 0
-check "dry run names the lab gate" has 'would run the go-test gate on the lab' "$tmp/o20b"
-check "dry run runs no gate" hasnt 'e2e-remote' "$FAKE_LOG"
-reset_state
-rc=$(run "$tmp/o20c" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "lab go-test green: exit 0" eq "$rc" 0
-check "the gate is go-test on the lab queue" has 'e2e-remote --argo --gate go-test' "$FAKE_LOG"
-check "the status is read on the pushed head" has "go-test-lab state $(git rev-parse HEAD)" "$FAKE_LOG"
-check "a new PR is created as a draft when the lab runs first" has 'gh pr create .*--draft' "$FAKE_LOG"
-check "lab go-test ok line" has '^lab go-test ok' "$tmp/o20c"
-check "the lab ran before the pull request was marked ready" bash -c "awk '/e2e-remote/ { l = NR } /^gh pr ready/ { r = NR } END { exit !(l && r && l < r) }' $FAKE_LOG"
-check "ready happened" has '^ready$' "$tmp/o20c"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-for c in 75 76 78 2; do
-	reset_state
-	echo "$c" >"$FAKE_LAB_RC"
-	w=$(newwork); cd "$w"
-	echo "l$c" >"l$c.txt"
-	rc=$(run "$tmp/o21-$c" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-	check "lab exit $c: falls back to the hosted runner, exit 0" eq "$rc" 0
-	check "lab exit $c: the reason is printed" has "lab go-test:.*go-test runs on the hosted runner" "$tmp/o21-$c"
-	check "lab exit $c: skipped line" has "^lab go-test skipped (exit $c)" "$tmp/o21-$c"
-	check "lab exit $c: still marked ready" has '^ready$' "$tmp/o21-$c"
-	check "lab exit $c: no status read" hasnt 'go-test-lab state' "$FAKE_LOG"
-	git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-done
-# an already ready PR: the push started CI, the lab run would come too late
-reset_state
-export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=false
-w=$(newwork); cd "$w"
-echo lr >lr.txt
-rc=$(run "$tmp/o21r" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "already ready PR: exit 0" eq "$rc" 0
-check "already ready PR: the lab does not run" hasnt 'e2e-remote' "$FAKE_LOG"
-check "already ready PR: says why and how" has 'PR already ready.*gh pr ready --undo' "$tmp/o21r"
-check "already ready PR: skipped line" has '^lab go-test skipped (PR already ready)' "$tmp/o21r"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-echo 7 >"$FAKE_LAB_RC"
-w=$(newwork); cd "$w"
-echo l7 >l7.txt
-rc=$(run "$tmp/o21f" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "a gate's own failure status (rc 7) stops the ship" eq "$rc" 1
-check "...without marking ready" hasnt '^ready$' "$tmp/o21f"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-echo 1 >"$FAKE_LAB_RC"
-w=$(newwork); cd "$w"
-echo lf >lf.txt
-rc=$(run "$tmp/o22" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "lab go-test failed: exit 1" eq "$rc" 1
-check "...says so" has 'lab go-test failed' "$tmp/o22"
-check "...and the pull request is not marked ready" hasnt '^ready$' "$tmp/o22"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-echo none >"$FAKE_LAB_STATE"
-w=$(newwork); cd "$w"
-echo ln >ln.txt
-rc=$(run "$tmp/o23" -m "feat: l" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "lab passed but no status visible: warns and goes on, exit 0" eq "$rc" 0
-check "...the warning names the cost" has 'go-test-lab is not visible' "$tmp/o23"
-check "...skipped line" has '^lab go-test skipped (no status)' "$tmp/o23"
-check "...ready happened" has '^ready$' "$tmp/o23"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 24. (koinon-private#675) --ready on an existing draft PR marks it ready BEFORE the push, so one head never gets a
 # synchronize run and a ready_for_review run seconds apart
@@ -530,7 +444,7 @@ check "ready before push: gh pr ready ran before the push" bash -c "awk '/^gh pr
 check "ready before push: marked ready exactly once" eq "$(grep -c '^gh pr ready' "$FAKE_LOG")" 1
 check "ready before push: ready line" has '^ready$' "$tmp/o24"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-# an already ready PR is not marked again; with --lab-go-test the order stays push, lab, ready
+# an already ready PR is not marked again
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=false
 export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
@@ -545,18 +459,6 @@ check "already ready PR: exit 0" eq "$rc" 0
 # `gh pr ready` in step 7, after the push
 check "already ready PR: gh pr ready exactly once" eq "$(grep -c '^gh pr ready' "$FAKE_LOG")" 1
 check "already ready PR: gh pr ready only after the push" bash -c "awk '/^gh pr ready/ { r = NR } /^git-push/ { p = NR } END { exit !(r && p && p < r) }' $FAKE_LOG"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
-export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'
-w=$(newwork); cd "$w"
-# shellcheck disable=SC2016 # $FAKE_LOG expands when the hook runs
-printf '#!/bin/sh\necho "git-push" >>"$FAKE_LOG"\n' >.git/hooks/pre-push
-chmod +x .git/hooks/pre-push
-echo rd3 >rd3.txt
-rc=$(run "$tmp/o24c" -m "feat: r" --pr-title t --pr-body "$tmp/body.md" --ready --lab-go-test)
-check "lab: exit 0" eq "$rc" 0
-check "lab: ready only after the push and the lab" bash -c "awk '/^git-push/ { p = NR } /e2e-remote/ { l = NR } /^gh pr ready/ { r = NR } END { exit !(p && l && r && p < l && l < r) }' $FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 25. (koinon-private#675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
