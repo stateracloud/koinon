@@ -14,14 +14,14 @@
 #              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
 #              in progress (even at the same startedAt): it keeps waiting for the live run. A required check
 #              that is missing, skipped or cancelled while an e2e-kind run on the head is still queued or in
-#              progress (whose jobs may not exist yet, koinon-private#468) is waited for too: `waiting for e2e-kind run <id>`;
+#              progress (whose jobs may not exist yet, old issue 468) is waited for too: `waiting for e2e-kind run <id>`;
 #              so are failed or cancelled checks of an earlier e2e-kind run on the head (its `decide`
 #              cancelled, its `e2e result` red). Checks of e2e-kind count by their newest run, like
 #              required ones. All green is not final while an e2e-kind run on the head is queued or
 #              in progress either (the `e2e` label dispatches one, whose `e2e result` comes last).
 #              Otherwise, if the newest is skipped or cancelled, the next line suggests
 #              `gh workflow run e2e-kind.yml --ref <branch>`.
-#              `--require e2e` is the merge gate for a needs-e2e PR (koinon-private#547): it passes when the commit status
+#              `--require e2e` is the merge gate for a needs-e2e PR (old issue 547): it passes when the commit status
 #              `e2e-lab` (an external e2e run that passed on this commit) is success on the head,
 #              OR any `quickstart` check run on the head succeeded. Otherwise it behaves like
 #              `--require quickstart` and prints `REQUIRED e2e missing|skipped|failed` with how to produce one.
@@ -32,8 +32,8 @@
 #              With --checks, "all green" also needs every required status check context of the base
 #              branch's rules (gh api repos/{owner}/{repo}/rules/branches/<base>) to exist on the head:
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
-#              from the rollup (`waiting for required checks not on the head yet: ci,...`, koinon-private#562).
-#              A draft PR is never green (koinon-private#647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
+#              from the rollup (`waiting for required checks not on the head yet: ci,...`, old issue 562).
+#              A draft PR is never green (old issue 647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
 #              almost nothing, and `go`/`web` are red on purpose). A PR that is not a draft ignores the check
 #              runs of its draft-era `ci` runs (#218, #133), in every mode: a run whose display title is `ci (draft)`
 #              (the run-name of ci.yml when the event payload says draft), matched by run id. There is no time
@@ -41,7 +41,7 @@
 #              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
 #              exist. dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
 #              the runs, nothing is dropped.
-#              A stale PR head (koinon-private#661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
+#              A stale PR head (old issue 661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
 #              Not checked for a fork PR or when the remote cannot be read.
@@ -141,7 +141,7 @@ fi
 
 # One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
 # A required check is judged on its newest run only (by start time; rollup order breaks ties). A
-# cancelled or skipped run never outranks a queued or in-progress one (koinon-private#431): wait for the live run.
+# cancelled or skipped run never outranks a queued or in-progress one (old issue 431): wait for the live run.
 # The checks of the e2e-kind workflow count the same way: several runs on one head are normal there.
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm='def ok: .done and (.bad | not) and (.skipped | not);
@@ -292,7 +292,7 @@ while :; do
         echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
         exit 5
       fi
-      # A stale PR head: the push is on origin but GitHub's headRefOid still names the old commit (koinon-private#661).
+      # A stale PR head: the push is on origin but GitHub's headRefOid still names the old commit (old issue 661).
       sb=$(jq -r '.headRefName // ""' <<<"$json")
       sh=$(jq -r '.headRefOid // ""' <<<"$json")
       rem=""
@@ -393,7 +393,7 @@ while :; do
     reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
     # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
-    # an e2e-kind run on the head that is still queued or running brings newer ones (koinon-private#468), so wait
+    # an e2e-kind run on the head that is still queued or running brings newer ones (old issue 468), so wait
     # for it instead of failing.
     if [ -n "$failed" ] && [ -n "$head" ] &&
       jqn -e "$norm | [.[] | select(.bad)] | all((.cancelled and (.name | IN(\$req[]))) or .wf == \"e2e-kind\")" <<<"$json" >/dev/null; then
@@ -431,7 +431,7 @@ while :; do
       emit "waiting for e2e-kind run $live on ${head:0:7}"
     elif [ "$total" -gt 0 ] && [ -z "$pending" ]; then
       # Every check has finished, but an e2e-kind run on the head that has not created its jobs yet
-      # (queued; or dispatched by the `e2e` label, koinon-private#468) brings newer ones: wait for it.
+      # (queued; or dispatched by the `e2e` label, old issue 468) brings newer ones: wait for it.
       [ -z "$head" ] || live=$(live_e2e "$head")
       if [ -n "$live" ]; then
         emit "waiting for e2e-kind run $live on ${head:0:7}"

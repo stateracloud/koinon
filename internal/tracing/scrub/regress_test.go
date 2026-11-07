@@ -703,7 +703,7 @@ func TestNestedEscapedJSONIsBounded(t *testing.T) {
 	// parsedQuarter go through the JSON walk.
 	doc, parsed, parsedQuarter := build(4<<20), build(2<<20), build(1<<19)
 	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("notreal-dbpw")})
-	// The bound is on work, not on time (koinon-private#474): wall-clock ratios flake on shared CI runners, while
+	// The bound is on work, not on time (old issue 474): wall-clock ratios flake on shared CI runners, while
 	// the bytes the detectors read are the same on every machine. A parsed document is read
 	// linearly: the reads per input byte of a document four times larger stay within 1.1x those of
 	// the small one (a quadratic path grows by the size ratio), and no input byte is read more than
@@ -753,7 +753,7 @@ func TestLongDigestParameterThroughEscapes(t *testing.T) {
 	}
 }
 
-// Prose that has a credential word before a colon is not a key-value pair (koinon-private#325); real values
+// Prose that has a credential word before a colon is not a key-value pair (old issue 325); real values
 // next to the same words still are.
 func TestCredentialWordInProse(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})

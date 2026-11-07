@@ -13,7 +13,7 @@ import { LeakGuardService } from '@/gen/koinon/leakguard/v1alpha1/leakguard_pb'
 
 /**
  * LeakGuardSettings is where an org admin sets the leak guard's match threshold and the hosts a fetch
- * server may reach without the guard's say (ADR 0084, koinon-private#350). The list starts empty and a host is an
+ * server may reach without the guard's say (ADR 0084, old issue 350). The list starts empty and a host is an
  * exact DNS name, or *.example.com for any subdomain of it (never example.com itself). Every change is audited.
  */
 export function LeakGuardSettings({ orgId }: { orgId: string }) {

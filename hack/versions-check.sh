@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fails on drift between hack/versions.env (the one place tool versions live, koinon-private#544) and the copies
+# Fails on drift between hack/versions.env (the one place tool versions live, old issue 544) and the copies
 # that cannot read it:
 #   - hack/e2e-toolchain/Dockerfile: ARG <TOOL>_VERSION and <TOOL>_SHA256_<arch> for kind, ko, helm, kubectl
 #   - every `version:` input of azure/setup-helm (HELM_VERSION), golangci-lint-action

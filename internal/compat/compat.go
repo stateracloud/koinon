@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package compat is the persisted-state compatibility check (koinon-private#652): what a shipped release wrote
+// Package compat is the persisted-state compatibility check (old issue 652): what a shipped release wrote
 // to storage must still load at head. A recorded release is a folder testdata/compat/<release>/
 // made by hack/record-compat-fixtures.sh from the code of that release; Check* load it with the
 // code at head. The three formats are the stored agent configs (agent_versions.config), the

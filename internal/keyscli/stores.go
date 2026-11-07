@@ -176,7 +176,7 @@ func (k KubeStore) Ensure(ctx context.Context, now time.Time, hasValues func(con
 
 // EnsureWith is [KubeStore.Ensure] that calls beforeCreate, when it is not nil, once it has decided
 // to create the Secret and before it does: the key-admin Job and koinon-api set the install's
-// bound-only marker there (koinon-private#615), so the first KEK of an install never exists without it. When
+// bound-only marker there (old issue 615), so the first KEK of an install never exists without it. When
 // beforeCreate fails, nothing is created and the next run decides again.
 func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func(context.Context) (bool, error), beforeCreate func(context.Context) error) (bool, error) {
 	client, namespace, name := k.Client, k.Namespace, k.Name
@@ -226,7 +226,7 @@ func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func
 		// Someone else created it meanwhile: it is used as found. If that is an old Secret with KEKs
 		// stored unbound (GitOps or a backup restore on a new install), the marker set above makes the
 		// next load refuse them with secretstore.ErrBoundOnly, whose message says to delete the Secret
-		// and rerun the key-admin Job (koinon-private#615).
+		// and rerun the key-admin Job (old issue 615).
 		return false, nil
 	}
 	if err != nil {

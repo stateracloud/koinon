@@ -95,7 +95,7 @@ verifies it) and dated by `hack/dep-age-check.sh` (ADR 0079).
 
 ## Persisted-state compatibility
 
-`internal/compat` (koinon-private#652) checks that what a shipped release wrote still loads at head. Each folder
+`internal/compat` (old issue 652) checks that what a shipped release wrote still loads at head. Each folder
 `testdata/compat/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
 release's code and holds three formats:
 
@@ -135,12 +135,46 @@ from an assertion (at any shell level) makes it exit non-zero, which `hack/chart
 (a flag or env var it requires, a mount, a Secret key, an RBAC rule) is covered by
 `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers);
 extend it when you add a component or a startup input, since a unit test of the flag parser does
-not see what the chart really passes (koinon-private#284).
+not see what the chart really passes (old issue 284).
 
 The sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`) is tested by the
 escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`
 (`make test-admission`). Its OpenShell cases run on kind: `make dev-kind-up`, then
 `make test-escape-kind`.
+
+## Leak guard exfiltration cases
+
+Two cases try to send private text out through an MCP tool on the gateway path (ADR 0091, #293).
+Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canaries that look fake
+(`koinon-canary-<n>-not-a-secret`); no model is called.
+
+- **Kind e2e** (`test/e2e`, step 6b, `leakGuardExfilE2E` and the in-task case): through a full install
+  with the real agentgateway image and the leak guard, a `write_item` call carrying what `read_item`
+  returned is refused outside a task (the agent reads `mcpguard.NoRunApprovalText`) and parked inside
+  one; the approval's `McpCall.leak_guard` names both legs, `both_legs` and the `external-high` sink
+  class, and nothing reaches the fake server before the approval. It runs wherever the kind e2e runs
+  (`e2e-kind`, the lab quickstart).
+- **Escape suite** (`test/escape/exfil_test.go`, label `leakguard`, with the OpenShell cases): from a
+  real sandbox the agent reads the canary through `read_item`, then sends it out through `write_item`
+  as a note body and as a second write whose `title` is an attacker URL (the fake server has no
+  fetch-style tool or address argument; a real one goes with #348's CI wiring). Each call must fail with the guard's text and the
+  receiver must see no `write_item`. It needs a guarded gateway the suite does not start, named by
+  `KOINON_ESCAPE_MCP_HOST` (and `_PORT`, default 4000), `KOINON_ESCAPE_MCP_KEY` (an agent's gateway key
+  on it) and `KOINON_ESCAPE_MCP_RECEIVER_URL` (the fake server's base URL, as the test process
+  reaches it); the fixture sets the tools up as `test/e2e/mcp_test.go` does. Without them it skips,
+  or fails when `KOINON_REQUIRE` lists `escape-mcp-gateway` (one name; it checks all three variables, so a partial setup fails too). **Gap:** CI does not run the OpenShell cases
+  (see above), and `make test-escape-kind` does not set these variables, because `make dev-kind-up`
+  installs OpenShell only (no agentgateway, leak guard or fake server). So the escape case runs only
+  where someone points the variables at a guarded install (the e2e install or the lab) and runs
+  `go test ./test/escape/ -ginkgo.label-filter=leakguard`; set `KOINON_REQUIRE=escape-mcp-gateway` there
+  so a missing gateway fails instead of skipping. Exit condition: `kind.sh` installs the Koinon chart
+  with the fake MCP server (or the e2e job runs this suite against its install) and sets the variables;
+  tracked by #348. The kind e2e case above is the
+  one that runs in CI today.
+
+Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`)
+and the call reaches the server. The escape case sends the canary in `title`, the one argument the fake
+`write_item` accepts, so the bypassed call is recorded and the request-log assertion goes red.
 
 ## Testing layers
 
@@ -170,7 +204,7 @@ neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=sm
 
 The required check is `e2e result`: green when nothing needs the e2e, but for a PR that needs one
 (`hack/needs-e2e.sh`) it is red until the head has a green `quickstart` (this run or a dispatched
-one) or `e2e-lab` success (`hack/e2e-gate.sh`, koinon-private#562); a later `e2e-lab` or a passing dispatch
+one) or `e2e-lab` success (`hack/e2e-gate.sh`, old issue 562); a later `e2e-lab` or a passing dispatch
 re-runs the `e2e result` job itself (not when the PR run is still in progress: then "Re-run failed
 jobs"). `e2e-lab` is not a required context of its own: the PR's own quickstart is the path every
 contributor has.
@@ -178,9 +212,9 @@ contributor has.
 Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the
 gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is
 not pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against
-mistakes, not a malicious member (pinned integration_id: koinon-private#568).
+mistakes, not a malicious member (pinned integration_id: old issue 568).
 
-Why the e2e exists: koinon-private#281 (branch naming in githubtools) and koinon-private#284 (a startup flag the chart's
+Why the e2e exists: old issue 281 (branch naming in githubtools) and old issue 284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
 
 ## What `ci` runs when
@@ -190,28 +224,28 @@ Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides,
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
-koinon-private#594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
+old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
 
-### go-test satisfied by an external run (koinon-private#610)
+### go-test satisfied by an external run (old issue 610)
 
 `changes` reads the commit status `go-test-lab` (an external go-test run that passed on exactly this
 head) for the exact PR head SHA; when it is success the ready run skips `go-test`, which `go` accepts
 (the required name stays `go`; no change to the ruleset). Nothing in this repository posts it and
 nothing waits for a late one: without the status `go-test` runs on the hosted runner. Push to main
 (`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
-status or a change with no Go. Trust limit as `e2e-lab` (koinon-private#568).
+status or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
 
-### Draft pull request (koinon-private#593)
+### Draft pull request (old issue 593)
 
 Only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `web` are RED on
 purpose ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the
 newest run on the head while the ready run is still going. A draft cannot merge, so get WIP
 feedback from `hack/preflight.sh`, not CI. Marking it ready fires `ready_for_review`, which runs
 everything on the same head, and so does every push to a ready PR. The draft flag comes from the
-event payload (koinon-private#676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
+event payload (old issue 676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
 ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
@@ -224,7 +258,7 @@ instead. Mark the PR ready (`hack/ship.sh --ready`,
 `gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge
 evidence.
 
-### One run per head (koinon-private#675)
+### One run per head (old issue 675)
 
 `ci.yml` groups `pull_request` runs by the pull request's head SHA (`ci-pr-<N>-<sha>`) and a push to
 main by its own SHA (`ci-push-<sha>`), with `cancel-in-progress: false`. So runs on one head (the push's
@@ -249,7 +283,7 @@ another commit: that workflow's PR group still cancels in progress, and a re-run
 `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/e2e-rerun-result-test.sh`,
 `hack/ship-test.sh`.
 
-### Push to main (koinon-private#595)
+### Push to main (old issue 595)
 
 Everything runs, except when the push is a merge commit whose tree equals the tree of its second
 parent (the PR head) and every required check `ci.yml` produces is green (or skipped) on that
@@ -257,7 +291,7 @@ head, newest run per check, made by GitHub Actions. Then the heavy jobs are skip
 brought nothing the head was not tested with. The head must also contain the first parent, and
 `flavors` (advisory, but `flavor-publish` ships what it tested) must have passed on the head
 unless nothing it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell`
-report skipped (koinon-private#594). Any doubt (a merge of an out-of-date branch, an admin or direct push, a
+report skipped (old issue 594). Any doubt (a merge of an out-of-date branch, an admin or direct push, a
 squash, a missing or red check, an API error) runs everything. `flavor-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the
 nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
@@ -379,7 +413,7 @@ fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
-and fails a needs-e2e PR without a passing e2e on its head (koinon-private#562), so a plain auto-merge cannot
+and fails a needs-e2e PR without a passing e2e on its head (old issue 562), so a plain auto-merge cannot
 skip it; still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
@@ -388,7 +422,7 @@ head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; othe
 with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 
-`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (koinon-private#647): it refuses a
+`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
 reads every required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or

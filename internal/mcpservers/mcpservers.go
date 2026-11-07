@@ -935,7 +935,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					return err
 				}
 				// The query put the declaration back to the default; the audit says what it was.
-				if err := recordToolDeclarationReset(ctx, q, org, audit.System(), srv.Name, cur, out, ReasonContentChanged); err != nil {
+				if err := recordToolDeclarationReset(ctx, q, org, audit.System("koinon-reconciler:mcp-sync"), srv.Name, cur, out, ReasonContentChanged); err != nil {
 					return err
 				}
 				res.Changed = append(res.Changed, lt.Name)
@@ -966,7 +966,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 		slices.Sort(res.Demoted)
 		slices.Sort(res.Absent)
 		return audit.RecordErr(ctx, q, audit.Event{
-			Org: org, Actor: audit.System(), Action: "mcp_tool.sync", TargetKind: "mcp_server", TargetID: serverID.String(),
+			Org: org, Actor: audit.System("koinon-reconciler:mcp-sync"), Action: "mcp_tool.sync", TargetKind: "mcp_server", TargetID: serverID.String(),
 			After: map[string]any{"server": srv.Name, "new": res.New, "changed": res.Changed, "demoted": res.Demoted, "absent": res.Absent},
 		})
 	})
@@ -999,7 +999,7 @@ func (s *Service) RecordProbe(ctx context.Context, org, serverID pgtype.UUID, ok
 			return nil
 		}
 		return audit.RecordErr(ctx, q, audit.Event{
-			Org: org, Actor: audit.System(), Action: "mcp_server.health", TargetKind: "mcp_server", TargetID: serverID.String(),
+			Org: org, Actor: audit.System("koinon-reconciler:mcp-sync"), Action: "mcp_server.health", TargetKind: "mcp_server", TargetID: serverID.String(),
 			Before: map[string]any{"name": before.Name, "health": string(before.Health)},
 			After:  map[string]any{"name": row.Name, "health": string(row.Health), "reason": row.HealthReason.String},
 		})

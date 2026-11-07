@@ -8,7 +8,7 @@ package reconciler
 // deleted for a recreation (a changed spec, a stuck or failed sandbox) or an archive only after a
 // checkpoint taken since its home was last written is complete. The home is written by a harness,
 // so that clock is agent_sandboxes.home_dirtied_at (a run entering or leaving running in this
-// sandbox; issue koinon-private#329), not the idle clock: a wake or a start does not write the home. A sandbox no
+// sandbox; old issue 329), not the idle clock: a wake or a start does not write the home. A sandbox no
 // harness ever ran in (the clock is zero) holds what the newest checkpoint of its home generation
 // holds, so it is recreated or archived without a new backup: that checkpoint, if there is one,
 // becomes its restore. Otherwise the checkpoint becomes the sandbox's restore (SetSandboxRestore): the next sandbox keeps the home generation, and the first run
@@ -197,7 +197,7 @@ func (r *Reconciler) markBlocked(ctx context.Context, w *work, sb execution.Sand
 	r.m.AgentsUnhealthy.Inc()
 	r.log.Error("the sandbox is not recreated without a backup of its home", append(w.logAttrs(), "reason", reason)...)
 	return audit.RecordErr(ctx, r.q, audit.Event{
-		Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": w.names().Sandbox, "reason": reason, "checkpoint": checkpointID},
 	})
 }

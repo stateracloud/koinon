@@ -75,12 +75,12 @@ var _ = Describe("Org MCP servers", func() {
 	// server adds a server with tools in the given tiers.
 	server := func(ctx SpecContext, org pgtype.UUID, name, secret string, tiers map[string]string) mcpservers.Server {
 		GinkgoHelper()
-		actor := audit.System()
+		actor := audit.System("koinon-test:spec")
 		s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{
 			Name: name, URL: "https://mcp.example.com/" + name, CredentialHeader: "X-Api-Key", CredentialValue: secret,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, audit.System(), s.ID) })
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, audit.System("koinon-test:spec"), s.ID) })
 		var listed []mcpservers.ListedTool
 		for tool := range tiers {
 			listed = append(listed, mcpservers.ListedTool{Name: tool, Description: tool, InputSchema: json.RawMessage(`{"type":"object"}`)})
@@ -272,7 +272,7 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(after.ToolsSyncedAt).NotTo(BeNil())
 		})
 
-		It("probes a newly served server right after the pass that applied it, not at the next tick (koinon-private#226)", func(ctx SpecContext) {
+		It("probes a newly served server right after the pass that applied it, not at the next tick (old issue 226)", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
 			host, port, stop := fakeGateway(slug+"-wiki", "read")
 			DeferCleanup(stop)
@@ -373,9 +373,9 @@ var _ = Describe("Org MCP servers", func() {
 		DeferCleanup(func(ctx SpecContext) {
 			_, _ = pool.Exec(ctx, `DELETE FROM mcp_servers WHERE org_id IN ($1, $2)`, o1, o2)
 		})
-		_, err := svc.Create(ctx, o2, audit.System(), pgtype.UUID{}, mcpservers.Input{Name: "b", URL: "https://mcp.example.com/x"})
+		_, err := svc.Create(ctx, o2, audit.System("koinon-test:spec"), pgtype.UUID{}, mcpservers.Input{Name: "b", URL: "https://mcp.example.com/x"})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.Create(ctx, o1, audit.System(), pgtype.UUID{}, mcpservers.Input{Name: "ask2", URL: "https://mcp.example.com/y"})
+		_, err = svc.Create(ctx, o1, audit.System("koinon-test:spec"), pgtype.UUID{}, mcpservers.Input{Name: "ask2", URL: "https://mcp.example.com/y"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = pool.Exec(ctx, `UPDATE mcp_servers SET name = 'ask' WHERE org_id = $1`, o1)
 		Expect(err).NotTo(HaveOccurred())
@@ -404,7 +404,7 @@ var _ = Describe("Org MCP servers", func() {
 			org  pgtype.UUID
 			name string
 		}{{o1, "c"}, {o2, "b-c"}} {
-			_, err := svc.Create(ctx, c.org, audit.System(), pgtype.UUID{}, mcpservers.Input{Name: c.name, URL: "https://mcp.example.com/x"})
+			_, err := svc.Create(ctx, c.org, audit.System("koinon-test:spec"), pgtype.UUID{}, mcpservers.Input{Name: c.name, URL: "https://mcp.example.com/x"})
 			Expect(err).NotTo(HaveOccurred())
 		}
 		err := r.ReconcileAll(ctx)

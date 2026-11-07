@@ -30,7 +30,7 @@ type leakGuardJSON struct {
 	} `json:"codeHostScope"`
 }
 
-var _ = Describe("the leak guard in the admin API (koinon-private#350)", func() {
+var _ = Describe("the leak guard in the admin API (old issue 350)", func() {
 	var e *env
 	BeforeEach(func(ctx SpecContext) { e = newEnv(ctx) })
 

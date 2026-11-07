@@ -4,7 +4,7 @@
 - Date: 2026-11-01
 - Amends: [0072](0072-agent-model-run-now-echo-check.md) (the org default in the model precedence)
 - Relates to: [0056](0056-model-providers-pricing-and-budgets-per-org.md)
-- Issue: koinon-private#256
+- Issue: old issue 256
 
 ## Context
 
@@ -69,4 +69,4 @@ a naming rule to keep the order stable (an interim fix, with this issue as its e
 
 ## Links
 
-- Issue koinon-private#256; ADR 0072 (precedence), ADR 0056 (providers and models per org)
+- Old issue 256; ADR 0072 (precedence), ADR 0056 (providers and models per org)

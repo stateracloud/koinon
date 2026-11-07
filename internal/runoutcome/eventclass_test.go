@@ -195,6 +195,24 @@ var _ = Describe("Run event classes", func() {
 		Entry("anything else", errors.New("the database said no"), "other"),
 	)
 
+	DescribeTable("PermanentSQLState tells an error that cannot succeed on retry (koinon#123)",
+		func(err error, code string, permanent bool) {
+			got, ok := runoutcome.PermanentSQLState(err)
+			Expect(ok).To(Equal(permanent))
+			Expect(got).To(Equal(code))
+		},
+		Entry("a cardinality violation", &pgconn.PgError{Code: "21000"}, "21000", true),
+		Entry("a cardinality violation, wrapped", fmt.Errorf("upsert: %w", &pgconn.PgError{Code: "21000"}), "21000", true),
+		Entry("a unique violation", &pgconn.PgError{Code: "23505"}, "23505", true),
+		Entry("a data exception", &pgconn.PgError{Code: "22P02"}, "22P02", true),
+		Entry("a syntax error", &pgconn.PgError{Code: "42601"}, "42601", true),
+		Entry("a serialization failure", &pgconn.PgError{Code: "40001"}, "", false),
+		Entry("a connection failure", &pgconn.PgError{Code: "08006"}, "", false),
+		Entry("a statement timeout", &pgconn.PgError{Code: "57014"}, "", false),
+		Entry("a canceled context", context.Canceled, "", false),
+		Entry("an error that is not the database's", errors.New("boom"), "", false),
+	)
+
 	It("pins the class of every known kind; an unknown kind is business", func() {
 		B, D := runoutcome.ClassBusiness, runoutcome.ClassDiagnostic
 		Expect(runoutcome.KnownEventKinds()).To(Equal(map[string]runoutcome.EventClass{

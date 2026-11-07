@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146) (rounds 1 and 2, and the
+- Relates to: old issue 146 (rounds 1 and 2, and the
   releases)
 - Amends: [0010](0010-eventing.md) (tasks, not the board, are the queue),
   [0011](0011-agent-to-agent.md) (transport inside an install), [0030](0030-run-state-machine.md)
@@ -16,7 +16,7 @@
 
 ## Context
 
-procoduck's user stories (koinon-private#146, 2026-10-26), in the order the issue gives them: PR review on a new
+procoduck's user stories (old issue 146, 2026-10-26), in the order the issue gives them: PR review on a new
 PR; a FinOps agent asking a lead-engineer agent; daily stand-ups to Slack or Teams; a personal
 agent asking experts; @mentions in a channel; long-running research; a support-channel ops agent;
 weekly LCM upgrades; a personal agent with mail and reminders. "A person should never have to
@@ -88,7 +88,7 @@ with the same `taskId` answers an `input-required` task (§6.3).
 10. **No answer.** A reminder after 24 hours (inbox and chat), expiry after 7 days. On expiry the
     agent gets one short "no answer" run, so it can close the task as canceled or ask someone else.
     Both times are set per agent or template.
-10a. **Safe defaults and scoped approvals** (koinon-private#146 A4; amends [0042](0042-ask-tier-park-and-execute.md)):
+10a. **Safe defaults and scoped approvals** (old issue 146 A4; amends [0042](0042-ask-tier-park-and-execute.md)):
     - every question names a safe default, used when it is dismissed or expires; the agent is told;
     - approvals can be scoped: once, this task, or this agent and this kind of action until a date;
     - a scope wider than once needs an admin, shows in the agent's grants, and is audited.
@@ -103,12 +103,12 @@ with the same `taskId` answers an `input-required` task (§6.3).
     - sandboxes never talk to each other over the network.
 12. **An external A2A gateway comes later** (v1.0, `/.well-known/agent-card.json`) and maps onto the
     same tasks. procoduck: build `ask_agent` first, then judge whether it works in practice.
-12a. **`ask_agent` guards** (koinon-private#146 A3), all tunable per org:
+12a. **`ask_agent` guards** (old issue 146 A3), all tunable per org:
     - refused when the asked agent is already in the chain;
     - the chain is at most 3 deep;
     - an agent has at most 5 open questions to other agents;
     - the same question to the same agent in the same task returns the existing child.
-12b. **Interruption** (koinon-private#146 A2): only a person's chat message on the task can interrupt a running
+12b. **Interruption** (old issue 146 A2): only a person's chat message on the task can interrupt a running
     turn. Events, replies from other agents and answers wait until the turn ends, then arrive
     together ([0066](0066-triggers-and-scheduling.md)).
 
@@ -117,13 +117,13 @@ with the same `taskId` answers an `input-required` task (§6.3).
 13. **Home checkpoints ([0032](0032-agent-home-checkpoints.md)) are built now.** The home (session,
     notes, scratch work) is saved when a sandbox stops or before it is recreated, and restored
     afterwards, so long waits and long tasks survive drains and image bumps.
-13a. **Checkpoint lineage** (koinon-private#146 A6): a sandbox restored from a checkpoint keeps its home
+13a. **Checkpoint lineage** (old issue 146 A6): a sandbox restored from a checkpoint keeps its home
     generation and reloads the same session; only a sandbox created without a checkpoint gets a
     new generation ([0051](0051-session-home-generations.md) amendment).
-13b. **Archive tier** (koinon-private#146 A7, v0.1): after N days stopped (default 7), once a checkpoint is
+13b. **Archive tier** (old issue 146 A7, v0.1): after N days stopped (default 7), once a checkpoint is
     complete, Koinon deletes the sandbox and its volume and restores into a fresh one on the next
     run ([0032](0032-agent-home-checkpoints.md) amendment).
-13c. **Ephemeral agents** (koinon-private#146 A8): an agent or template can be marked ephemeral. Each task gets a
+13c. **Ephemeral agents** (old issue 146 A8): an agent or template can be marked ephemeral. Each task gets a
     fresh sandbox without a home volume, deleted when the task ends; memory lives in task notes and
     the [0033](0033-file-based-memory.md) stores. The default stays persistent.
     **Amendment (EP1, 2026-10-27):** the flag is `ephemeral` in a template's `spec` and in the agent
@@ -146,7 +146,7 @@ with the same `taskId` answers an `input-required` task (§6.3).
     version does not wait forever after a persistent version is activated. Deleting a task sandbox
     is audited as `sandbox.delete` (no phase, so ADR 0054's recreation loop guard does not count it);
     the event names the sandbox, whose name is a hash of org, agent and task, not the task ID.
-13d. **Failure classes** (koinon-private#146 A1): a failed run carries a `failure_class` (`transient`,
+13d. **Failure classes** (old issue 146 A1): a failed run carries a `failure_class` (`transient`,
     `throttled`, `context_overflow`, `budget`, `policy`, `fatal`) that drives retries and inbox
     messages; `context_overflow` shrinks the largest input once, then asks the user
     ([0030](0030-run-state-machine.md) amendment).
@@ -168,7 +168,7 @@ stateDiagram-v2
 
 The diagram is a reading aid. The mapping from today's columns and parks is recorded under Open questions (answered by TK1).
 
-### Releases (koinon-private#146)
+### Releases (old issue 146)
 
 - v0.1: tasks, the inbox, `ask_user` (with safe defaults and scoped approvals), home checkpoints with
   lineage and the archive tier, ephemeral agents, failure classes (procoduck placed scoped approvals and
@@ -187,7 +187,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   default ([0045](0045-openshell-hardening-defaults.md)), the callee is usually asleep, and the
   guards live in Koinon anyway (`messaging-and-workflows.md` §3.3).
 - **Wait for input with the sandbox kept running until the answer** (option A in
-  `triggers-lifecycle.md` Part 3). Rejected: one Kata VM per waiting agent for up to 7 days; koinon-private#99 was
+  `triggers-lifecycle.md` Part 3). Rejected: one Kata VM per waiting agent for up to 7 days; old issue 99 was
   filed for that cost. Chosen: a 15-minute warm window, then stop and resume.
 - **Memory snapshots instead of home checkpoints** (option D there). Not available on Kata, Agent
   Sandbox v1.0.7 or OpenShell 0.1.5.
@@ -234,7 +234,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   question sent to a group.
 - Whether a free-text answer in a thread is always an answer, or only when the task is
   input-required.
-- Which home paths a checkpoint includes. koinon-private#146 says "session, notes, scratch work"; ADR 0032
+- Which home paths a checkpoint includes. old issue 146 says "session, notes, scratch work"; ADR 0032
   excludes repository checkouts and caches. restic or kopia, and sidecar or Job, stay open there.
 - Whether the park, run-end and periodic checkpoint points of ADR 0032 also ship in v0.1.
 - Task retention and deletion.
@@ -251,9 +251,9 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 
 ## Links
 
-- Issue [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146); personal agent
+- Old issue 146; personal agent
   [#11](https://github.com/stateracloud/koinon/issues/11); idle-cost fix
-  [koinon-private#99](https://github.com/stateracloud/koinon-private/issues/99)
+  old issue 99
 - ADRs [0010](0010-eventing.md), [0011](0011-agent-to-agent.md), [0019](0019-personal-agents-and-teams.md),
   [0030](0030-run-state-machine.md), [0032](0032-agent-home-checkpoints.md),
   [0042](0042-ask-tier-park-and-execute.md), [0051](0051-session-home-generations.md),
@@ -494,7 +494,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 4. *13d failure classes.* Add `sandbox_unavailable`: the sandbox never became ready within the org's cap.
    It is never retried, and the agent is marked unhealthy.
 
-## Amendment (2026-10-31, koinon-private#324): a run's outcome ends its task
+## Amendment (2026-10-31, old issue 324): a run's outcome ends its task
 
 The TK1 interim ("runs do not end tasks") is over. A park already moved a task to `input-required` and
 its decision back to `working`, but nothing moved it on when the run ended, so a task whose run parked

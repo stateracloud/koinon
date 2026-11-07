@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package thinking is the one table that knows whether a model thinks, whether that can be turned
-// off, and what goes on the wire for each (ADR 0069 amendments 2026-10-29 and 2026-10-31, koinon-private#316).
+// off, and what goes on the wire for each (ADR 0069 amendments 2026-10-29 and 2026-10-31, old issue 316).
 //
 // Koinon decides whether a run's model thinks; no harness does, and no provider default does
 // either. A harness that guesses from a model ID (OpenCode turns adaptive thinking on for every ID
@@ -125,7 +125,7 @@ const OffOverriddenMsg = "this model always thinks; your off setting doesn't app
 
 // BindingBeta is the beta of thinking.block_binding, the body field OpenCode adds to adaptive
 // thinking when its own heuristic decides. Anthropic refuses the field without the beta. No row pins
-// it since the explicit on form (koinon-private#316) leaves block_binding out; it stays named because the strict
+// it since the explicit on form (old issue 316) leaves block_binding out; it stays named because the strict
 // fake and the gateway specs use it as the example of a beta-only field.
 const BindingBeta = "thinking-binding-controls-2026-08-01"
 
@@ -249,7 +249,7 @@ type row struct {
 	Capability
 }
 
-// The forms per kind of row. Sources, 2026-10-31 (deep dive G4 of koinon-private#316): Anthropic's adaptive
+// The forms per kind of row. Sources, 2026-10-31 (deep dive G4 of old issue 316): Anthropic's adaptive
 // thinking, effort and display pages (platform.claude.com/docs/en/build-with-claude/), OpenRouter's
 // reasoning-tokens guide and models API (reasoning.mandatory, supported efforts), models.dev
 // reasoning_options, OpenAI's reasoning guide; the rc.9 home-lab runs for what each route reported.
@@ -289,7 +289,7 @@ var rows = func() []row {
 	var out []row
 	for _, f := range claudeFamilies {
 		// No beta on either route: the on form has no beta-only field. OpenRouter's Messages route
-		// took adaptive thinking without one in the live check of 2026-10-29 (issue koinon-private#242).
+		// took adaptive thinking without one in the live check of 2026-10-29 (old issue 242).
 		out = append(out,
 			row{Provider: modelformat.ProviderAnthropic, Format: modelformat.Anthropic, Prefix: f.prefix, Capability: f.c},
 			row{Provider: modelformat.ProviderOpenRouter, Format: modelformat.Anthropic, Prefix: f.prefix, Capability: f.c},

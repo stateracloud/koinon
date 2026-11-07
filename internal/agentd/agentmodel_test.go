@@ -30,7 +30,7 @@ var _ = Describe("The agent's model setting", func() {
 			e.org, providerID, name, string(format)).Scan(&modelID)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO gateway_served_models (org_id, model_id, provider_id) VALUES ($1, $2, $3)`, e.org, modelID, providerID)
 		Expect(err).NotTo(HaveOccurred())
-		// The org's first model is its default, as catalog.CreateModel does (koinon-private#256).
+		// The org's first model is its default, as catalog.CreateModel does (old issue 256).
 		_, err = db.Exec(ctx, `UPDATE orgs SET default_model = $2 WHERE id = $1 AND default_model IS NULL`, e.org, name)
 		Expect(err).NotTo(HaveOccurred())
 		if !priced {
@@ -182,7 +182,7 @@ var _ = Describe("The agent's model setting", func() {
 	// Koinon decides whether the model thinks, and the harness renders that (rc.8, ADR 0069 amendment
 	// 2026-10-29): thinking is on unless the agent, or its version, turns it off, a model whose
 	// catalog capability says it cannot think runs with none, and on and off are sent explicitly
-	// (koinon-private#316).
+	// (old issue 316).
 	Describe("The agent's thinking setting", func() {
 		serveClaude := func(ctx context.Context, e *env, name string) {
 			GinkgoHelper()
@@ -233,7 +233,7 @@ var _ = Describe("The agent's model setting", func() {
 			Expect(thinkingArg(ctx, e)).To(Equal("disabled"), "off is sent explicitly")
 		})
 
-		It("runs a stored off with thinking on for a model that always thinks (koinon-private#316)", func(ctx SpecContext) {
+		It("runs a stored off with thinking on for a model that always thinks (old issue 316)", func(ctx SpecContext) {
 			e := newEnv(ctx, store.AgentFlavorOpencode)
 			serveClaude(ctx, e, "claude-opus-5-5")
 			setModel(ctx, e, "claude-opus-5-5")

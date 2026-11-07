@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-01
 - Relates to: [0030](0030-run-state-machine.md), [0065](0065-work-model-tasks-inbox.md), [0074](0074-run-traces-trace-router.md), [0087](0087-turn-policy-is-a-pure-state-machine.md)
-- Issue: koinon-private#453
+- Issue: old issue 453
 
 ## Context
 
@@ -59,7 +59,7 @@ success commit; the task left working after a park; and three more).
 - agentd's metrics and the pool's shutdown reason reach the module through two small hooks
   (`Metrics`, `Stop`), not an import of agentd.
 
-## Amendment 2026-11-02 (koinon-private#454): the control plane's cancels
+## Amendment 2026-11-02 (old issue 454): the control plane's cancels
 
 - **Every cancel by someone other than the run's owner is in the module too**, as package functions
   beside the `Owner`: `CancelUnowned` (a person, an expired approval, the ledger's budget stop of an
@@ -74,7 +74,7 @@ success commit; the task left working after a park; and three more).
   event. The `Owner` keeps its rule that it always holds an epoch: there is no unfenced `Owner`. The two
   are ordered by the run's row: whichever commits first is the run's outcome, and the other writes
   nothing (the owner's verb is fenced as `FenceCanceled`, ADR 0050, ADR 0030). One spec per order, for a single cancel and for the sweep, each against
-  the owner's success and its own cancel (koinon-private#522).
+  the owner's success and its own cancel (old issue 522).
 - **The time-limit note is built once, in the module.** `Owner.CancelAtTimeLimit` (agentd at the cap)
   and `CancelOverTimeLimit` (the sweep) both write `runreply.TimeLimitNote`; the reads the control
   plane makes inside its transaction run in a savepoint, so a failed read only leaves the summary out.

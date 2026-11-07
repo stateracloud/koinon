@@ -87,7 +87,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 		},
 		Entry("direct anthropic: Messages, the harness places the markers", "anthropic", "claude-haiku-5-5", modelformat.Anthropic, prices.CacheNative),
 		Entry("openrouter anthropic an admin kept on chat completions: cache_control markers", "openrouter", "anthropic/claude-haiku-5.5", modelformat.OpenAI, prices.CacheAnthropic),
-		Entry("openrouter anthropic in Messages format (the default since koinon-private#242)", "openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic, prices.CacheNative),
+		Entry("openrouter anthropic in Messages format (the default since old issue 242)", "openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic, prices.CacheNative),
 		Entry("openrouter qwen", "openrouter", "qwen/qwen4", modelformat.OpenAI, prices.CacheAlibaba),
 		Entry("openai", "openai", "gpt-6-luna", modelformat.OpenAI, prices.CacheAuto),
 		Entry("openrouter deepseek", "openrouter", "deepseek/deepseek-v4.1-flash", modelformat.OpenAI, prices.CacheAuto),

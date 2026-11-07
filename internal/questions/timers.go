@@ -289,7 +289,7 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 					return err
 				}
 				if err := audit.RecordErr(ctx, q, audit.Event{
-					Org: org, Actor: audit.System(), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
+					Org: org, Actor: audit.System("koinon-api:question-timers"), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
 					After: after,
 				}); err != nil {
 					return err

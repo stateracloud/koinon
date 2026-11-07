@@ -23,7 +23,7 @@ func TestDefault(t *testing.T) {
 		{"anthropic", "anything", modelformat.Anthropic}, // the only format offered
 		{"openrouter", "deepseek/deepseek-v4", modelformat.OpenAI},
 		{"openrouter", "openai/gpt-5", modelformat.OpenAI},
-		{"openrouter", "anthropic/claude-sonnet-4", modelformat.Anthropic}, // the live Messages check passed (koinon-private#242)
+		{"openrouter", "anthropic/claude-sonnet-4", modelformat.Anthropic}, // the live Messages check passed (old issue 242)
 		{"openrouter", "claude-sonnet-4", modelformat.Anthropic},
 		{"ollama", "claude-sonnet-4", modelformat.OpenAI},
 		{"custom-vendor", "Claude-Opus", modelformat.OpenAI},
@@ -40,7 +40,7 @@ func TestPreferredIgnoresWhatIsOffered(t *testing.T) {
 		t.Errorf("Preferred = %s, want anthropic", got)
 	}
 	if got := modelformat.Preferred("openrouter", "anthropic/claude-sonnet-4"); got != modelformat.Anthropic {
-		t.Errorf("Preferred = %s, want anthropic (the OpenRouter pin is gone, koinon-private#242)", got)
+		t.Errorf("Preferred = %s, want anthropic (the OpenRouter pin is gone, old issue 242)", got)
 	}
 	if got := modelformat.Preferred("x", "anthropic/claude-sonnet-4"); got != modelformat.Anthropic {
 		t.Errorf("Preferred = %s, want anthropic", got)

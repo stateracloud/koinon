@@ -58,7 +58,7 @@ type Decision struct {
 	Match  *Match
 	// Evicted reports that the taint store has forgotten some of the scope's private text to
 	// stay within its size limits, so a pass may miss it. It does not change Allow; what to do
-	// about it is the caller's choice (koinon-private#349).
+	// about it is the caller's choice (old issue 349).
 	Evicted bool
 }
 

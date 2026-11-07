@@ -12,7 +12,7 @@ function shallowEqual(a: object, b: object): boolean {
  *
  * A form calls done after its save and the refetch behind it finish, which can be well after the
  * person opened another form. Clearing the page's editing state unconditionally would close that
- * other form (koinon-private#520), so the callback clears it only while it still names mine.
+ * other form (old issue 520), so the callback clears it only while it still names mine.
  */
 export function closeOnly<T extends object>(setEditing: Dispatch<SetStateAction<T | undefined>>, mine: T): () => void {
   return () => setEditing((cur) => (cur !== undefined && shallowEqual(cur, mine) ? undefined : cur))

@@ -53,7 +53,7 @@ var _ = Describe("Declaration", func() {
 	})
 })
 
-var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", func() {
+var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() {
 	var (
 		svc   *mcpservers.Service
 		org   pgtype.UUID
@@ -303,7 +303,7 @@ var _ = Describe("the data class of a server (ADR 0084, koinon-private#350)", fu
 					Expect(got.Kind).To(Equal("fetch"), "the update wrote nothing")
 					Expect(events(ctx, "mcp_server.data_class.set")).To(BeEmpty())
 				},
-				Entry("GitHub's MCP server to a Gitea connection (koinon-private#621)", "gitea", "https://git.example.com", copilot, "does not act on the Gitea connection at https://git.example.com"),
+				Entry("GitHub's MCP server to a Gitea connection (old issue 621)", "gitea", "https://git.example.com", copilot, "does not act on the Gitea connection at https://git.example.com"),
 				Entry("GitHub's MCP server to a GitHub Enterprise Server connection", "github", "https://ghe.example.com", copilot, "accepts MCP servers at ghe.example.com"),
 				Entry("a Gitea MCP server to a github.com connection", "github", "", "https://git.example.com/mcp", "accepts MCP servers at github.com, api.github.com, api.githubcopilot.com"),
 				Entry("another host of the same domain", "gitea", "https://git.example.com", "https://mcp.git.example.com/mcp", "an MCP server at mcp.git.example.com"),

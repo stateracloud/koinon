@@ -128,7 +128,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
   run) and the same steps pass as a kind e2e test in CI without Kata, against the fake model server.
 - **Work order:** walking skeleton, then GitHub and approvals, then the remaining flavors, ledger
   and docs, then e2e, escape suite and release ([docs/plans/v0.1.md](../plans/v0.1.md)).
-- Issue [koinon-private#5](https://github.com/stateracloud/koinon-private/issues/5) closes as "build": Multica's licence
+- Old issue 5 closes as "build": Multica's licence
   restricts hosting, and LiteLLM was dropped in ADR [0040](0040-agentgateway-model-and-mcp-gateway.md).
 
 ### Small calls (mine; overrule freely)
@@ -237,7 +237,7 @@ access log into one file whose every change rolls the proxy pods).
 
 ## Amendment (2026-10-26): v0.1 Foundation replaces this scope
 
-procoduck replaced v0.1's scope with "v0.1 Foundation" ([koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146);
+procoduck replaced v0.1's scope with "v0.1 Foundation" (old issue 146;
 [0024](0024-roadmap.md) amendment; [docs/plans/v0.1.md](../plans/v0.1.md)). Changes to the decisions above:
 
 - **Code hosts.** GitHub, GitHub Enterprise Server and Gitea behind a code-host interface
@@ -253,7 +253,7 @@ procoduck replaced v0.1's scope with "v0.1 Foundation" ([koinon-private#146](htt
 - **Sandbox lifecycle.** A sandbox whose run waits on `a2a` or `input_required` stays warm for
   15 minutes; otherwise it stops after 10 idle minutes. A run waits in the queue instead of
   failing after 5 minutes. All of this is tunable per org ([0066](0066-triggers-and-scheduling.md)).
-- **Release test.** v0.1 is tested on the home lab with Gitea through three stories of koinon-private#146:
+- **Release test.** v0.1 is tested on the home lab with Gitea through three stories of old issue 146:
   the daily FinOps cost check (without the hand-off to the lead-engineer agent), a long-running research task, and the weekly LCM upgrade agent.
 
 ## Open questions
@@ -334,7 +334,7 @@ versions in `release/versions.yaml`. They install as separate Helm releases, eit
 
 ## Amendment (2026-11-01): a sandbox starts on demand, with an optional keep-warm
 
-Issue koinon-private#315 (decision by procoduck, 2026-10-31). Activating an agent no longer creates its sandbox: on
+Old issue 315 (decision by procoduck, 2026-10-31). Activating an agent no longer creates its sandbox: on
 the rc.9 home-lab run, activating 22 agents started 22 sandboxes and they stopped only after the
 idle timeout. The reconciler now creates (and starts) a sandbox only when something wants it: a run
 that is active, a claimable run (`has_demand`), a pre-wake signal (package wake), or a keep-warm
@@ -348,7 +348,7 @@ from templates costs nothing until work arrives.
 - **The operator caps keep-warm per org**: `reconciler.keepWarmPerOrg` in the chart (reconciler
   `--keep-warm-per-org`), default 2, negative for none. The flag is a request: each pass grants it to
   the org's oldest active agents (`created_at`, `id`) up to the cap, so the same agents win from pass
-  to pass; the others start on demand. Keep-warm sandboxes count toward resources (koinon-private#314).
+  to pass; the others start on demand. Keep-warm sandboxes count toward resources (old issue 314).
 - **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
   and the home volume at activation without starting the pod is not built: tracked in #101. A per-org rate limit on

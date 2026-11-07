@@ -141,7 +141,7 @@ var _ = Describe("Pool", func() {
 		// The agent's reply lands on the task: its last message, without the narration before its tool calls.
 		tevs := taskEvents(ctx, e, t)
 		Expect(tevs).To(HaveLen(3))
-		Expect(tevs[2].Kind).To(Equal("status.changed"), "the run's success completes the task (koinon-private#324)")
+		Expect(tevs[2].Kind).To(Equal("status.changed"), "the run's success completes the task (old issue 324)")
 		Expect(string(tevs[2].Payload)).To(ContainSubstring(`"completed"`))
 		Expect(tevs[1].Kind).To(Equal("message"))
 		Expect(tevs[1].ActorKind).To(Equal(store.TaskActorKindAgent))
@@ -358,7 +358,7 @@ var _ = Describe("Pool", func() {
 		Eventually(func() int { _, _, c, _ := e.harness.snapshot(); return c }).WithTimeout(5 * time.Second).Should(Equal(1))
 
 		// The message in progress ("working") is stored as a cut-off item, although the run is
-		// canceled: a stopped run keeps what the agent said (koinon-private#344).
+		// canceled: a stopped run keeps what the agent said (old issue 344).
 		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"working"}))
 		Consistently(func() []string { return kinds(events(ctx, r)) }, 500*time.Millisecond).
 			Should(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk"}))
@@ -422,7 +422,7 @@ var _ = Describe("Pool", func() {
 		Expect(claimed.OwnerID.String).To(HavePrefix("agentd-a/"))
 
 		// The worker stops; its lease runs out. The message it was writing ("one two ") is stored
-		// as it stops, cut off, as one item (koinon-private#344).
+		// as it stops, cut off, as one item (old issue 344).
 		killA()
 		e.pool("agentd-b")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -469,7 +469,7 @@ var _ = Describe("Pool", func() {
 		Expect(kinds(events(ctx, r))).To(Equal([]string{"run.failed"}))
 		tevs := taskEvents(ctx, e, t)
 		Expect(tevs[len(tevs)-2].Kind).To(Equal("run.failed"))
-		Expect(tevs[len(tevs)-1].Kind).To(Equal("status.changed"), "a fatal run fails its task (koinon-private#324)")
+		Expect(tevs[len(tevs)-1].Kind).To(Equal("status.changed"), "a fatal run fails its task (old issue 324)")
 	})
 
 	DescribeTable("runs each flavor's entry script with the agent's endpoints",

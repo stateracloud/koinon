@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: the schema-version readiness gate (ADR 0085, koinon-private#408).
+# Chart assertions: the schema-version readiness gate (ADR 0085, old issue 408).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 # Each binary answers /readyz from the schema gate and keeps /healthz for liveness, so a pod on a

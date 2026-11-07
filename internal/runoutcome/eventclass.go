@@ -63,7 +63,7 @@ var eventClasses = map[string]EventClass{
 	"acp.tool_call":           ClassBusiness,
 	"acp.tool_call_update":    ClassBusiness,
 
-	// The rest of the harness's session updates. A chunk kind's event is one stored item (koinon-private#344,
+	// The rest of the harness's session updates. A chunk kind's event is one stored item (old issue 344,
 	// runoutcome.RecordUpdate); the classes stay with the kinds.
 	"acp.agent_thought_chunk": ClassDiagnostic,
 	"acp.user_message_chunk":  ClassDiagnostic,
@@ -127,6 +127,24 @@ const (
 
 // WriteFailures is the reason label's whole set.
 var WriteFailures = []WriteFailure{FailureTimeout, FailureConn, FailureTransient, FailureCanceled, FailureOther}
+
+// PermanentSQLState reports whether a database error can never succeed on retry, and its SQLSTATE.
+// The statement or its data is what the database refuses (cardinality violation 21, data exception
+// 22, integrity constraint violation 23, syntax error or access rule violation 42, WITH CHECK
+// OPTION violation 44, feature not supported 0A), not a moment it is unreachable or busy. Anything
+// else, a connection, timeout, serialization or resource error and any error that is not the
+// database's, may pass and is not permanent.
+func PermanentSQLState(err error) (string, bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || len(pgErr.Code) < 2 {
+		return "", false
+	}
+	switch pgErr.Code[:2] {
+	case "21", "22", "23", "42", "44", "0A":
+		return pgErr.Code, true
+	}
+	return "", false
+}
 
 // failureOf classifies a write's error into the fixed set.
 func failureOf(err error) WriteFailure {

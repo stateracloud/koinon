@@ -15,7 +15,8 @@ service AuditService {
   // List returns audit events, newest first. An org admin or owner lists the events of their org
   // (org_id is required for them). A platform admin names any org, or leaves org_id empty to read
   // every org. A caller with a lower role in the org is refused, and an org the caller is not part
-  // of is NotFound.
+  // of is NotFound. With scope AUDIT_SCOPE_INSTALL it returns the install chain (ADR 0100): platform
+  // admins only, org_id must be empty, and everyone else gets PermissionDenied.
   rpc List(ListRequest) returns (ListResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -24,6 +25,7 @@ service AuditService {
 // AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} without secret values.
 message AuditEvent {
   string id = 1;
+  // org_id is empty for an install event.
   string org_id = 2;
   // actor_kind is user, token, agent, secret, system or cli; actor_id is that actor's ID, the
   // declaring Secret's name for secret, or the command for cli (keys forget).
@@ -36,14 +38,26 @@ message AuditEvent {
   google.protobuf.Struct summary = 8;
   string request_id = 9;
   google.protobuf.Timestamp created_at = 10;
-  // chain_seq, prev_hash and hash are the org's hash chain, the hashes in lower-case hex. See ADR 0023.
+  // chain_seq, prev_hash and hash are the org's hash chain (the install chain for an install event),
+  // the hashes in lower-case hex. See ADR 0023 and ADR 0100.
   int64 chain_seq = 11;
   string prev_hash = 12;
   string hash = 13;
 }
 
+// AuditScope selects which audit chain List reads.
+enum AuditScope {
+  // AUDIT_SCOPE_UNSPECIFIED reads the org scope, as before the install chain existed.
+  AUDIT_SCOPE_UNSPECIFIED = 0;
+  // AUDIT_SCOPE_ORG reads the events of an org (or, for a platform admin with no org_id, of every org).
+  AUDIT_SCOPE_ORG = 1;
+  // AUDIT_SCOPE_INSTALL reads the install chain: actions that belong to no org (ADR 0100).
+  AUDIT_SCOPE_INSTALL = 2;
+}
+
 message ListRequest {
-  // org_id names the org. Only a platform admin may leave it empty, to read every org.
+  // org_id names the org. Only a platform admin may leave it empty, to read every org. With scope
+  // AUDIT_SCOPE_INSTALL it must be empty.
   string org_id = 1;
   // since and until bound created_at: since <= created_at < until. Both are optional.
   google.protobuf.Timestamp since = 2;
@@ -59,6 +73,9 @@ message ListRequest {
   int32 page_size = 7;
   // page_token is the next_page_token of the previous page.
   string page_token = 8;
+  // scope defaults to the org scope (unspecified or AUDIT_SCOPE_ORG). AUDIT_SCOPE_INSTALL needs a
+  // platform admin.
+  AuditScope scope = 9;
 }
 
 message ListResponse {

@@ -1,11 +1,11 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
-The key-admin Job (ADR 0085 decision 12, koinon-private#416): only with a KMS (secrets.kek.kms.backend). It runs
+The key-admin Job (ADR 0085 decision 12, old issue 416): only with a KMS (secrets.kek.kms.backend). It runs
 "koinon-api key-admin" with its own service account, the only identity the KMS lets encrypt;
 koinon-api and the reconciler may only decrypt. It creates the KEK Secret with one active KEK
 wrapped by the KMS when the Secret does not exist (not with secrets.kek.existingSecret, which is the
 operator's), and adds the KEK secrets.kek.kms.keyAdmin.addKey names when the key set does not hold
-it. Every KEK it wraps is bound to the install ID in the database (koinon-private#615); with
+it. Every KEK it wraps is bound to the install ID in the database (old issue 615); with
 secrets.kek.kms.keyAdmin.rewrapUnbound it also binds the KEKs wrapped before that. It never
 activates, retires or rewraps values: koinon-api keys does. The one exception is
 secrets.kek.kms.keyAdmin.activateIfNoActive (with addKey), and only when the Secret has no usable

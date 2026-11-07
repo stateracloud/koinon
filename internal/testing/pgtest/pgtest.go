@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package pgtest gives Ginkgo suites migrated Postgres databases (koinon-private#224).
+// Package pgtest gives Ginkgo suites migrated Postgres databases (old issue 224).
 //
 // A test process starts at most one Postgres container per kind (the default fast one and the
 // Durable one), on first use, and every Run, Start, StartTemplate and Template.NewDB gets its own
@@ -389,6 +389,17 @@ func ensureTemplate(ctx context.Context, adminDSN, name string) error {
 	if err != nil {
 		return err
 	}
+	// The chart creates the install audit writer group role before the first migration; so do we.
+	// Roles are cluster-wide, hence the race-free helper.
+	rdb, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		return err
+	}
+	err = EnsureRole(ctx, rdb, migrations.InstallAuditWriterRole)
+	_ = rdb.Close()
+	if err != nil {
+		return err
+	}
 	if err := migrate(ctx, dsn); err != nil {
 		return fmt.Errorf("migrate template %s: %w", name, err)
 	}
@@ -411,7 +422,12 @@ func migrate(ctx context.Context, dsn string) error {
 	if err != nil {
 		return err
 	}
-	_, err = provider.Up(ctx)
+	if _, err = provider.Up(ctx); err != nil {
+		return err
+	}
+	// koinon-api migrate grants the install audit writer role after goose, once the chart (here: the
+	// test) has created it.
+	_, err = migrations.GrantInstallAuditWriter(ctx, db)
 	return err
 }
 
@@ -452,6 +468,10 @@ func Migrate(ctx context.Context, dsn string) {
 	ginkgo.GinkgoHelper()
 	gomega.Expect(migrate(ctx, dsn)).To(gomega.Succeed())
 }
+
+// MigrateErr applies every migration to the database at dsn and returns the error, for specs that
+// migrate as a restricted role and expect a failure.
+func MigrateErr(ctx context.Context, dsn string) error { return migrate(ctx, dsn) }
 
 // Start returns a pool on a new migrated database (a copy of the template); call it from a
 // BeforeSuite. The pool is closed and the database dropped when the node ends.

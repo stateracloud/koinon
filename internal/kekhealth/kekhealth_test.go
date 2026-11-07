@@ -89,7 +89,7 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(testutil.ToFloat64(m.Unbound)).To(Equal(0.0), "a local KEK is never counted as unbound")
 	})
 
-	It("counts the KMS KEKs wrapped before the install binding on every load, and warns while there are any (koinon-private#615)", func(ctx SpecContext) {
+	It("counts the KMS KEKs wrapped before the install binding on every load, and warns while there are any (old issue 615)", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, kms)
 		Expect(err).NotTo(HaveOccurred())
@@ -127,7 +127,7 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(logs.String()).To(ContainSubstring("unbound=1"))
 	})
 
-	It("does not advise a rewrap when the bound-only policy refused the unbound KEKs (koinon-private#615)", func(ctx SpecContext) {
+	It("does not advise a rewrap when the bound-only policy refused the unbound KEKs (old issue 615)", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		ws, err := secretstore.NewWrappers(secretstore.StaticBoundOnly(secretstoretest.BoundOnlySet), kms)
 		Expect(err).NotTo(HaveOccurred())

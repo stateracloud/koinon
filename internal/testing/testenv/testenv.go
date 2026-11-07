@@ -2,7 +2,7 @@
 
 // Package testenv declares what a Ginkgo suite or spec needs from the machine it runs on (Docker,
 // envtest assets, a variable that points at a live system) and decides what happens when it is
-// missing (koinon-private#507).
+// missing (old issue 507).
 //
 // Without the requirement a test skips, so `make test` keeps working on a laptop without Docker.
 // The skip message starts with Prefix and the requirement's name ("koinon:requires=docker: ..."),
@@ -70,6 +70,23 @@ func Var(name, variable string) Requirement {
 	return Requirement{Name: name, check: func() error {
 		if os.Getenv(variable) == "" {
 			return fmt.Errorf("%s is not set", variable)
+		}
+		return nil
+	}}
+}
+
+// Vars is Var for a system named by several variables: one requirement name, met only when every
+// variable is set, so KOINON_REQUIRE=<name> fails on a partial setup instead of skipping.
+func Vars(name string, variables ...string) Requirement {
+	return Requirement{Name: name, check: func() error {
+		var missing []string
+		for _, v := range variables {
+			if os.Getenv(v) == "" {
+				missing = append(missing, v)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("%s not set", strings.Join(missing, ", "))
 		}
 		return nil
 	}}

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # Byte-order collation everywhere: sort (and every other comparison in the hash path) must not
-# depend on the caller's locale, or a UTF-8 shell computes a different tag than CI (koinon-private#335).
+# depend on the caller's locale, or a UTF-8 shell computes a different tag than CI (old issue 335).
 export LC_ALL=C
 
 flavor=${1:?usage: flavor-tag.sh <flavor>}

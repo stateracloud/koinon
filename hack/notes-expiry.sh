@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# List working notes that are due for review (koinon-private#527). Two modes:
+# List working notes that are due for review (old issue 527). Two modes:
 #
 #   notes-expiry.sh DIR [--exclude NAME]... [--today YYYY-MM-DD]
 #       Markdown files in DIR (not recursive) whose frontmatter has `expires: YYYY-MM-DD` or

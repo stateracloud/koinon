@@ -10,7 +10,7 @@ import (
 
 // ForwardedHeaders are the client request headers an LLM route passes to the model's upstream
 // (lower-cased). Every other header the client sent is dropped, so the gateway key an agent holds
-// cannot reach a third party's logs through a header the agent invented (koinon-private#262). The headers the
+// cannot reach a third party's logs through a header the agent invented (old issue 262). The headers the
 // gateway needs upstream are not here: it sets them itself (Rendering.Headers, the provider's
 // credential, OrgHeader).
 //

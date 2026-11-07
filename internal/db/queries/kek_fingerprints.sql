@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process
+-- KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
 -- first loaded it. No key material.
 
 -- name: ListKEKFingerprints :many

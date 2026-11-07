@@ -348,6 +348,88 @@ REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM <app role>;
 
 and make sure that role is not the table owner.
 
+### The install audit chain (ADR 0100)
+
+Actions that belong to no org (platform prices first) go to a second chain, `install_audit_events`.
+Only `koinon-api` writes it. The migration takes every write privilege on both install tables away
+from `koinon_app`; `koinon-api migrate` then grants INSERT to the group role
+`koinon_install_audit_writer` after the migrations, on every run, if the role exists. It never creates
+the role (the migrate role has no CREATEROLE): when it is missing the Job logs a warning and grants
+nothing, or, with `--require-install-writer` (the chart's external mode, below), fails. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new clusters)
+and as a managed role (clusters created before this release), and makes only the `koinon_api`
+managed role a member. On an upgrade of an older cluster the operator creates that managed role
+after the `pre-upgrade` migrate Job, so the chart also runs `koinon-api migrate --grants-only` as a
+`post-upgrade` hook (`<release>-migrate-grants`; Argo CD: `PostSync`): it applies no migration,
+waits up to `migrations.wait` for the role and the tables, grants, and fails the upgrade if the role
+never appears. One `helm upgrade` is enough. Until the grant lands `koinon-api` serves anyway: it
+logs an error for each startup install event the database refuses
+(`koinon_audit_writes_total{chain="install",result="error"}` counts them) and retries it every
+30 seconds, and platform price changes fail with a permission error. The scheduled price refresh
+keeps the setting already recorded (mode, interval and auto-apply bounds) wherever it does less,
+until its change is recorded. Do not let the api, reconciler and
+agentd share one login: the reconciler would then be able to write this chain. `koinon-reconciler`
+and `koinon-agentd` log a warning at startup when their login can write it.
+
+`koinon-api` checks its own login against the role, at startup and every 30 seconds:
+`SELECT current_user, pg_has_role(current_user, 'koinon_install_audit_writer', 'USAGE')`. Only it
+knows the login it connects as, so the check runs there and not in the migrate Job or from a chart
+value (ADR 0100 decision 1.1a). When the role is missing, or the login is not a member or does not
+inherit it, it logs one error per change of state with the statement to run for that login, for
+example `GRANT koinon_install_audit_writer TO "koinon_api"`, and keeps serving. The gauge
+`koinon_install_audit_writer_ok` (no labels) is 1 while the login can write the chain and 0
+otherwise, so the gap shows before anything tries to write.
+
+A missing grant or membership that lasts longer than an upgrade, or a refused install write, needs
+an operator. An alert for both:
+
+```yaml
+- alert: KoinonInstallAuditWritesFailing
+  expr: >-
+    min(koinon_install_audit_writer_ok) == 0
+    or sum(increase(koinon_audit_writes_total{chain="install",result="error"}[15m])) > 0
+  for: 30m
+  annotations:
+    summary: koinon-api cannot write the install audit chain
+    description: >-
+      koinon-api's log names the GRANT to run for its login. Check that koinon_install_audit_writer
+      exists and that koinon-api's login role is a member, and run koinon-api migrate --grants-only
+      (docs/ops/secret-keys.md, The install audit chain).
+```
+
+With `postgres.mode: external` the roles are yours. Run this once as an administrator **before the
+first migration** (or before the upgrade that adds the chain; created later, run `koinon-api migrate`
+or `koinon-api migrate --grants-only` again), with `<api role>` the role `koinon-api` logs in as:
+
+```sql
+CREATE ROLE koinon_install_audit_writer NOLOGIN;
+GRANT koinon_install_audit_writer TO <api role>;
+```
+
+In this mode the chart runs the migrate Job with `--require-install-writer`: without the role the Job
+fails (`the role koinon_install_audit_writer does not exist`) and so does the install or upgrade, since
+no hook would create the role later. The check runs before any migration, so a failed Job leaves the
+schema as it was. Create the role as above and run the same `helm upgrade` again.
+
+The Job does not check the membership: it connects as the migration role and cannot know the login
+`koinon-api` uses (with a cloud group login or a pooler that forces the user it is not the name in the
+api URI, and under workload identity the Job is another identity). `koinon-api` checks its own (above).
+
+And, if the migration role is not the one that owns the tables or `koinon_app` does not exist, after
+it:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler role>, <agentd role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler role>, <agentd role>;
+```
+
+**Do not let `koinon-reconciler` or `koinon-agentd` share the `koinon-api` login role.** The
+privilege is the role's: a process that connects as the writer role can append install events
+under any actor name (the chain's hash stops edits, not a forged first write), and the only
+separation between the components is that their roles differ. The same holds for the table owner
+and any superuser, which can also rewrite the chain; signed checkpoints (ADR 0100) will close that
+gap later. `koinon-api audit verify` walks the install chain and every org chain and exits non-zero
+at the first broken link (`--install` for the install chain alone).
+
 ## Admin API tokens
 
 A token made from a session starts a chain: 30 days by default, at most 90. A token may create tokens
@@ -406,7 +488,7 @@ it (the default provider URL check still applies).
 
 A KMS is an option, not a mandate. The default keeps the KEKs in the Kubernetes Secret, as described
 above; it is fully supported and nothing here asks you to move. An install can opt in to have a KMS
-(OpenBao/Vault transit, koinon-private#416, or AWS KMS, koinon-private#417) wrap each KEK, so the Secret holds only ciphertext
+(OpenBao/Vault transit, old issue 416, or AWS KMS, old issue 417) wrap each KEK, so the Secret holds only ciphertext
 that is useless without the KMS. Both are set with `secrets.kek.kms` (below).
 
 What changes once you opt in (ADR 0085 decision 12):
@@ -541,7 +623,7 @@ kubectl -n koinon patch secret koinon-kek --type=merge \
 
 Back the Secret up (`keys export`) as soon as the pods are running again.
 
-### The install binding (koinon-private#615)
+### The install binding (old issue 615)
 
 Every KEK the key-admin Job wraps is bound to the install: the KMS call carries the install ID as
 part of its authenticated data, so the wrapped KEK opens only next to the database it was made for.
@@ -550,7 +632,7 @@ database restored into the wrong install, then fails to load with "cannot open e
 it was wrapped for install A and this is install B", the same error as a wrong key, never as a KMS
 outage.
 
-**Where the install ID comes from.** The first migration of a release with koinon-private#615 writes a random
+**Where the install ID comes from.** The first migration of a release with old issue 615 writes a random
 UUID into the table `install_identity` of the database. Triggers refuse UPDATE, DELETE and TRUNCATE
 of it; they guard against mistakes, not against the database owner: the table's owner can DROP the
 table or `ALTER TABLE … DISABLE TRIGGER`, and `pg_restore --disable-triggers` and
@@ -598,7 +680,7 @@ Rejected sources, and why: a chart value is lost on a reinstall that forgets it 
 the data; a generated Secret would be backed up and restored with the KEK Secret, which defeats the
 binding; the namespace or cluster UID changes on a move or a reinstall that keeps the data.
 
-**KEKs wrapped before koinon-private#615 keep working.** They are stored in the old form (`"fmt":1`) and open as
+**KEKs wrapped before old issue 615 keep working.** They are stored in the old form (`"fmt":1`) and open as
 before; `keys status` shows them as `…, unbound` in WRAPPED BY and lists them. koinon-api and the
 reconciler export `koinon_kek_unbound` (no labels), the number of KMS-wrapped KEKs in the loaded
 key set that are not bound, set on every load (at start and about once a minute); local KEKs are
@@ -652,16 +734,16 @@ Binding cannot help here: `rewrapUnbound` has to open a KEK to bind it. Instead:
 
 **Rotate as well if an old backup may have leaked.** The marker stops an old KEK Secret backup only
 where this database is: an install whose database lacks the marker (a clone taken before it was set, a
-rollback below koinon-private#615, another install on the same KMS key) still opens that backup's unbound KEKs. If
+rollback below old issue 615, another install on the same KMS key) still opens that backup's unbound KEKs. If
 a KEK Secret backup from before the rewrap may be in the wrong hands, rotate the KEKs as well (add,
 activate, rewrap, retire, as above): only rotation makes an old backup useless everywhere.
 
-**Rolling back below koinon-private#615.** A bound KEK is stored as `"fmt":2`, which a release before koinon-private#615
+**Rolling back below old issue 615.** A bound KEK is stored as `"fmt":2`, which a release before old issue 615
 refuses ("unsupported format 2"): its pods fail closed and never misread it. Every new KMS-wrapped
-KEK is bound, so before rolling back below koinon-private#615 use the steps in "Rolling back below the release that
+KEK is bound, so before rolling back below old issue 615 use the steps in "Rolling back below the release that
 added key wrapping" below (back to local KEKs), or roll back to a key set that held only unbound
 KEKs. Leave `rewrapUnbound` off until you will not roll back that far: once it binds the last KEK the
-marker is set, the Job says so, and a rollback below koinon-private#615 no longer works with this key set (those
+marker is set, the Job says so, and a rollback below old issue 615 no longer works with this key set (those
 releases cannot read bound KEKs, and the unbound backups no longer open on this database once you
 come forward again).
 

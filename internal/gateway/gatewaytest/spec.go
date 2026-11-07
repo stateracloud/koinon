@@ -65,7 +65,7 @@ type Env struct {
 	// Authorization.
 	HeaderAllowlist bool
 	// Unmarked lists the refusal kinds (the Refusal* constants) that agentgateway v1.7.0 cannot mark
-	// do-not-retry in this mode, because it answers them before any response policy runs (koinon-private#342). The
+	// do-not-retry in this mode, because it answers them before any response policy runs (old issue 342). The
 	// marker contract (gateway.DoNotRetry) holds for every other refusal; a consumer treats these as
 	// final by their status.
 	Unmarked []string
@@ -492,8 +492,8 @@ func llmSpec(env Env) {
 		})
 
 		// The gateway's own refusals carry the do-not-retry marker; a provider's answer, a 403 aside,
-		// does not (ADR 0056 amendment 2026-11-01, koinon-private#342).
-		Describe("do-not-retry marker on refusals (koinon-private#342)", func() {
+		// does not (ADR 0056 amendment 2026-11-01, old issue 342).
+		Describe("do-not-retry marker on refusals (old issue 342)", func() {
 			It("marks a missing and an unknown key (401)", func(ctx SpecContext) {
 				unmarked := slices.Contains(env.Unmarked, RefusalLLMKey)
 				for _, key := range []string{"kgw_not-a-real-key", ""} {
@@ -830,7 +830,7 @@ func mcpServersSpec(env Env) {
 			Expect(strings.Join(openLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
 		})
 
-		It("refuses an MCP request with the agent's key in any header but Authorization, and passes a server only the headers MCP needs (koinon-private#262)", func(ctx SpecContext) {
+		It("refuses an MCP request with the agent's key in any header but Authorization, and passes a server only the headers MCP needs (old issue 262)", func(ctx SpecContext) {
 			connect := func(name, value string) (*mcp.ClientSession, error) {
 				client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
 				return client.Connect(ctx, &mcp.StreamableClientTransport{

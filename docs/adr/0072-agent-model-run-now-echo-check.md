@@ -27,7 +27,7 @@ namespaces come back altered), with nothing in Koinon able to say so.
    for. `agentmodel.Check` is that test, used when the model is set and again when a run starts,
    because providers and prices change afterwards. A set model that fails it **fails the run at
    once** with "the agent's model X is not served in this org; pick another on the agent page" (or
-   the unpriced variant), like an unpriced model (koinon-private#174). It never falls back to another layer.
+   the unpriced variant), like an unpriced model (old issue 174). It never falls back to another layer.
 4. Composes with ADR 0069 (the harness's wire format follows the run's effective model) and the budget code without change: the wire format belongs to the model
    (`models.format`, looked up by name) and spend is charged to the agent by the gateway key, so a
    different model name changes neither.

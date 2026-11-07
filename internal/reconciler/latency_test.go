@@ -317,7 +317,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
 	})
 
-	// A sandbox starts on demand (koinon-private#315): activating agents creates nothing; the first run, a
+	// A sandbox starts on demand (old issue 315): activating agents creates nothing; the first run, a
 	// pre-wake signal or a keep-warm request does. The operator caps keep-warm sandboxes per org.
 	Describe("starting on demand", func() {
 		created := func() int { return osg.Calls("CreateSandbox") }

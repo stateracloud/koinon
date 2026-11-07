@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cancel the ci runs of OTHER heads of this pull request (koinon-private#675). ci.yml groups pull_request runs by
+# Cancel the ci runs of OTHER heads of this pull request (old issue 675). ci.yml groups pull_request runs by
 # head SHA with cancel-in-progress off, so two runs on one head (a push, then ready_for_review; a
 # re-run) never cancel each other; this script is what still stops the older heads' runs.
 #

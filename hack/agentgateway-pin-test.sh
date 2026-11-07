@@ -12,7 +12,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (koinon-private#466)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (old issue 466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 pin=$repo/hack/agentgateway-pin.sh
 d1=sha256:$(printf 'a%.0s' {1..64})

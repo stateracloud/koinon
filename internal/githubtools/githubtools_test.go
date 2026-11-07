@@ -296,7 +296,7 @@ var _ = Describe("Server", func() {
 
 	// The kind e2e's repo-helper scenario (test/scenarios): the call the fake model makes is
 	// filed under the agent's namespace, which is the branch the e2e expects on the fake GitHub
-	// (koinon-private#281 changed the naming and only the e2e noticed).
+	// (old issue 281 changed the naming and only the e2e noticed).
 	It("files the repo-helper scenario's pull request under the agent's namespace", func(ctx SpecContext) {
 		f := newFixture(ctx, standardGrant)
 		p := scenarios.PullRequest

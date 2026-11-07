@@ -11,7 +11,7 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ship=$repo/hack/ship.sh
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (koinon-private#466)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (old issue 466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp/calls.log" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
@@ -88,7 +88,7 @@ printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
 
 newwork() { # prints the path of a fresh clone on branch feat/1-x with an identity
 	local w
-	# Fail hard (koinon-private#485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
+	# Fail hard (old issue 485): a failed mktemp or clone must never leave $w empty, or the git -C calls below
 	# would run in the caller's own checkout and switch its branch.
 	w=$(mktemp -d "$tmp/w.XXXXXX") || exit 1
 	[[ -n $w && -d $w ]] || { echo "mktemp gave no directory" >&2; exit 1; }
@@ -101,7 +101,7 @@ newwork() { # prints the path of a fresh clone on branch feat/1-x with an identi
 }
 # shellcheck disable=SC2329 # called through check
 branch_on_origin() { git --git-dir="$tmp/origin.git" rev-parse --verify -q "refs/heads/$1" >/dev/null; }
-# koinon-private#485: when mktemp fails, newwork() must stop and leave the caller's checkout alone.
+# old issue 485: when mktemp fails, newwork() must stop and leave the caller's checkout alone.
 guard=$(mktemp -d "$tmp/guard.XXXXXX")
 git -C "$guard" init -q -b keep
 git -C "$guard" -c user.name=d -c user.email=d@example.invalid commit -q --allow-empty -m g
@@ -310,7 +310,7 @@ check "auto-merge on line" has '^auto-merge on$' "$tmp/o11b"
 check "gh pr merge --auto --merge" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 11c. (koinon-private#392) --e2e: the label goes on an open PR before the push, on a new PR at creation
+# 11c. (old issue 392) --e2e: the label goes on an open PR before the push, on a new PR at creation
 reset_state
 unset FAKE_PR_URL
 w=$(newwork); cd "$w"
@@ -367,7 +367,7 @@ echo u >u.txt
 rc=$(run "$tmp/o14b")
 check "changes without a message: exit 2" eq "$rc" 2
 
-# 15. (koinon-private#431) the branch's PR: merged or closed refuses before the push; auto-merge on warns; --hold
+# 15. (old issue 431) the branch's PR: merged or closed refuses before the push; auto-merge on warns; --hold
 reset_state
 w=$(newwork); cd "$w"
 echo m >m.txt
@@ -414,7 +414,7 @@ unset FAKE_PR_JSON
 check "mktemp failure: newwork() fails" test "$mktemp_fail_rc" -ne 0
 check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep
 
-# koinon-private#485: ship.sh refuses a branch that is not <type>/<N>-<slug>
+# old issue 485: ship.sh refuses a branch that is not <type>/<N>-<slug>
 reset_state
 w=$(newwork); cd "$w"
 git checkout -q -b stray
@@ -424,7 +424,7 @@ check "stray branch name: refused" eq "$rc" 1
 check "stray branch name: message" has 'is not <type>/<N>-<slug>' "$tmp/o16"
 check "stray branch name: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/stray"
 
-# koinon-private#485: unnumbered branches (exempt work) need --no-issue
+# old issue 485: unnumbered branches (exempt work) need --no-issue
 reset_state
 w=$(newwork); cd "$w"
 git checkout -q -b chore/light-lane-cpu
@@ -441,7 +441,7 @@ echo t >t.txt
 rc=$(run "$tmp/o19" --no-issue -m "chore: t")
 check "--no-issue still refuses a stray name" eq "$rc" 1
 
-# 24. (koinon-private#675) --ready on an existing draft PR marks it ready BEFORE the push, so one head never gets a
+# 24. (old issue 675) --ready on an existing draft PR marks it ready BEFORE the push, so one head never gets a
 # synchronize run and a ready_for_review run seconds apart
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
@@ -475,7 +475,7 @@ check "already ready PR: gh pr ready exactly once" eq "$(grep -c '^gh pr ready' 
 check "already ready PR: gh pr ready only after the push" bash -c "awk '/^gh pr ready/ { r = NR } /^git-push/ { p = NR } END { exit !(r && p && p < r) }' $FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 25. (koinon-private#675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
+# 25. (old issue 675) the push fails after the PR was marked ready: the PR is put back to draft, and the error says so
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PR_DRAFT=true
 export FAKE_PR_JSON='[{"number":123,"state":"OPEN","autoMergeRequest":null}]'

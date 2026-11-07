@@ -94,8 +94,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		// non-loopback address (OpenShell always blocks loopback and link-local) with a server on
 		// port 4000 that answers every request 418 with X-Koinon-Standin: 1 (koinon-fakemodel
 		// -standin; test/fixtures/rt1/manifests/escape-gateway-standin.yaml). A name that fails
-		// DNS never reaches the proxy (issue koinon-private#244), and a refused connection reaches the client
-		// as a TCP failure, not a 502 (issue koinon-private#270). The gateway spec skips without it; the
+		// DNS never reaches the proxy (old issue 244), and a refused connection reaches the client
+		// as a TCP failure, not a 502 (old issue 270). The gateway spec skips without it; the
 		// provider record below only needs some host to bind the key to.
 		gwHost = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
 	)
@@ -142,7 +142,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 
 		// OpenShell binds every network rule to its binaries and checks the caller at connect():
 		// the flavor's harness plus /usr/bin/curl, which sends the gateway requests below. Without
-		// curl the connect is refused with EACCES before anything leaves the pod (koinon-private#322).
+		// curl the connect is refused with EACCES before anything leaves the pod (old issue 322).
 		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
 		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
 			reconciler.Flavor{Binaries: gwBinaries},
@@ -386,7 +386,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			Command: []string{"python3", "-m", "http.server", "8099", "--bind", "0.0.0.0"},
 		})
 		// The command starts with the sandbox, so its listener can come up after the sandbox reports
-		// ready: wait for it, or the isolation check below would be skipped by a lost race (koinon-private#323).
+		// ready: wait for it, or the isolation check below would be skipped by a lost race (old issue 323).
 		Eventually(func() any {
 			return probeIn(ctx, other, check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099})["local"]
 		}).WithContext(ctx).WithTimeout(90*time.Second).WithPolling(2*time.Second).

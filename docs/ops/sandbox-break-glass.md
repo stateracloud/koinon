@@ -30,7 +30,7 @@ Only when both are true:
 3. The agent run's events and the audit trail in Koinon (the run page, or the OCSF log the
    supervisor emits).
 4. Recreate the sandbox. Koinon does this automatically when a sandbox is lost (since
-   [koinon-private#102](https://github.com/stateracloud/koinon-private/issues/102)); the home volume persists.
+   old issue 102); the home volume persists.
 5. Saved work. A stuck sandbox's uncommitted work is saved by `koinon-agentd` before it is
    recreated ([ADR 0054](../adr/0054-unkillable-sandbox-process.md)).
 

@@ -74,7 +74,7 @@ cooldown (golang/go#76485 is on hold).
   npm registry, Helm repository indexes. No secrets are used. The `govulncheck` job (pinned version)
   reports reachable vulnerabilities in Go dependencies; that report is what starts the Go fast path.
   It runs nightly on main (`govulncheck.yml`), because a new advisory needs no code change to
-  apply (the per-pull-request run was removed in koinon-private#561, 2026-11-02).
+  apply (the per-pull-request run was removed in old issue 561, 2026-11-02).
 - **Docs**: CONTRIBUTING.md has a short "Dependency updates" section that links this ADR.
 
 ### Security fast path
@@ -178,7 +178,7 @@ new dependencies, and the sandbox's egress limits.
   `release/versions.yaml` with `# dep-age: github=<owner/repo>` when that file lands, so the
   check reads them; apply the same pnpm settings to `docs/site` and add its Dependabot entry; add the
   fast-path checklist to the PR template when one exists; CONTRIBUTING.md grows other sections under
-  issue koinon-private#234.
+  old issue 234.
 
 ## Open questions
 

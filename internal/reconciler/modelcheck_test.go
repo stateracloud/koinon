@@ -55,7 +55,9 @@ var _ = Describe("The provider echo check end to end", func() {
 		Expect(err).NotTo(HaveOccurred())
 		org, user := newOrg(ctx)
 		p := addProvider(ctx, org, user, "openrouter", "", "fake/echo")
-		DeferCleanup(func(ctx SpecContext) { _ = catalog.New(pool, ring, nil).DeleteProvider(ctx, org, audit.System(), p.ID) })
+		DeferCleanup(func(ctx SpecContext) {
+			_ = catalog.New(pool, ring, nil).DeleteProvider(ctx, org, audit.System("koinon-test:spec"), p.ID)
+		})
 		var slug string
 		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, org).Scan(&slug)).To(Succeed())
 		check := gateway.AgentRef{Org: slug, Name: gateway.ModelCheckAgentName}
@@ -79,7 +81,7 @@ var _ = Describe("The provider echo check end to end", func() {
 		svc := modelcheck.New(pool, modelcheck.GatewayChat{
 			URL: srv.URL, Keys: mcpservers.KubeExecKeys{Client: kube, Namespace: namespace, SecretName: mcpservers.ModelCheckSecretName},
 		}, prices.NewResolver(pricing.Embedded()))
-		res, err := svc.Check(ctx, org, providerID(p.ID), "fake/echo", audit.System(), user)
+		res, err := svc.Check(ctx, org, providerID(p.ID), "fake/echo", audit.System("koinon-test:spec"), user)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Unchanged).To(BeTrue())
 		Expect(auth).To(Equal("Bearer " + material))
@@ -124,7 +126,7 @@ var _ = Describe("The provider echo check end to end", func() {
 
 		By("it counts against the org's monthly cap")
 		cap5 := money.FromCents(50)
-		Expect(budget.New(pool).SetOrgCap(ctx, org, audit.System(), &cap5)).To(Succeed())
+		Expect(budget.New(pool).SetOrgCap(ctx, org, audit.System("koinon-test:spec"), &cap5)).To(Succeed())
 		st, err := budget.ComputeSystem(ctx, q, org, time.Now())
 		Expect(err).NotTo(HaveOccurred())
 		var orgSpent money.USD

@@ -71,7 +71,7 @@ func Stop(ctx context.Context, db scheduler.DB, org, agent pgtype.UUID, l budget
 }
 
 // StopSpent stops the runs of an agent whose budget has nothing left at now, before the caller
-// takes its key out of the gateway (issue koinon-private#188): the reconciler calls it for every key
+// takes its key out of the gateway (old issue 188): the reconciler calls it for every key
 // it is about to push a limit of zero for, so a run in flight records the budget stop and not the
 // gateway's 401 or 429. The ledger cancels at the entry that reaches a limit already; this covers
 // every other way a key runs out: an admin lowering a limit below the spend, an entry recorded

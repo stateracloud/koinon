@@ -229,7 +229,7 @@ var _ = Describe("ask_user", func() {
 		Expect(loads).To(Equal([]string{"ses_1"}))
 		Expect(a.question(ctx, qid).DeliveredAt.Valid).To(BeTrue())
 		got, _ := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
-		Expect(got.State).To(Equal(store.TaskStateCompleted), "the run that parked and resumed ends its task (koinon-private#324)")
+		Expect(got.State).To(Equal(store.TaskStateCompleted), "the run that parked and resumed ends its task (old issue 324)")
 		Expect(kindsOf(taskEvents(ctx, a.env, t))).To(ContainElement(questions.KindAnswered))
 	})
 

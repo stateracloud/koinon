@@ -12,13 +12,13 @@
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
 # --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (koinon-private#468).
+# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (old issue 468).
 #
-# --ready on a draft PR that exists marks it ready BEFORE the push (koinon-private#675): ready
+# --ready on a draft PR that exists marks it ready BEFORE the push (old issue 675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
 #
 # Run it inside a checkout or worktree on a feature branch named <type>/<N>-<slug> (the claim and the
-# PR hang off N); any other name is refused before anything is pushed (koinon-private#485). Work that needs no issue
+# PR hang off N); any other name is refused before anything is pushed (old issue 485). Work that needs no issue
 # (the claim check only fails on someone else's live claim, so a PR without Closes #N passes, ADR 0094
 # decision 2) passes --no-issue, which accepts <type>/<slug> instead. The git identity must be on
 # hack/git-identities.allowed (hack/git-identity-check.sh commit, before anything is committed). Environment:
@@ -71,7 +71,7 @@ branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a f
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
 # work without an issue. A stray name, such as the one a broken test helper once checked out in
-# a real worktree (koinon-private#485), is refused before anything is pushed.
+# a real worktree (old issue 485), is refused before anything is pushed.
 if [[ $no_issue == 1 ]]; then
 	[[ $branch =~ ^[a-z]+/[a-z0-9][a-z0-9._-]{2,}$ ]] || fail "branch '$branch' is not <type>/<slug>; rename it (git branch -m) before shipping"
 else
@@ -153,7 +153,7 @@ else
 		fi
 	fi
 
-	# 4b. the branch's PR: a merged or closed one cannot take this push (koinon-private#431)
+	# 4b. the branch's PR: a merged or closed one cannot take this push (old issue 431)
 	prinfo=$(gh pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
 		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv' 2>/dev/null || true)
 	pr_state="" pr_num="" pr_auto=false
@@ -197,7 +197,7 @@ else
 			say "label e2e"
 		fi
 	fi
-	# Ready BEFORE the push (koinon-private#675): a draft PR marked ready after the push runs the ci workflow twice on
+	# Ready BEFORE the push (old issue 675): a draft PR marked ready after the push runs the ci workflow twice on
 	# one head (the synchronize run, then the ready_for_review run), seconds apart. Marked ready first,
 	# the ready_for_review run starts on the old head and the push's run supersedes it (an older head is
 	# cancelled, ci.yml).

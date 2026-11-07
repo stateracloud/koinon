@@ -9,10 +9,10 @@
 The rc.7 home-lab re-run found two gaps with one theme: what a test or an agent believes about
 the network must be what the sandbox's proxy actually does.
 
-1. Issue koinon-private#247. A research agent used OpenCode's built-in `webfetch` and `curl`. The sandbox policy
+1. Old issue 247. A research agent used OpenCode's built-in `webfetch` and `curl`. The sandbox policy
    blocked both, as designed, and the agent gave up instead of using the org's web-search MCP
    tools. A tool the network policy can only make fail should not be offered.
-2. Issue koinon-private#244. Two escape cases used `.invalid` hosts. DNS failed inside the sandbox before the
+2. Old issue 244. Two escape cases used `.invalid` hosts. DNS failed inside the sandbox before the
    request reached OpenShell's proxy, so curl reported code `000` and neither case observed an
    allow or deny decision.
 
@@ -37,7 +37,7 @@ the network must be what the sandbox's proxy actually does.
 4. **Escape cases must see a proxy decision.** curl code `000` is a test error (`answered` in
    `test/escape`), never an expected code, in every case that expects a policy answer. The
    direct-egress cases still expect `000`, because there the sandbox refuses the connection
-   itself. The two cases from koinon-private#244 use hosts that resolve inside the sandbox:
+   itself. The two cases from old issue 244 use hosts that resolve inside the sandbox:
    `KOINON_ESCAPE_GATEWAY_HOST` (no default: a non-loopback name the proxy resolves, with a server on
    4000; see the 2026-10-30 amendment: an allowed request gets the stand-in's 418 and a denied one
    gets 403; the case skips without it) and
@@ -46,16 +46,16 @@ the network must be what the sandbox's proxy actually does.
    is set (the home lab) and skip everywhere else, kind and CI included, so nothing about the kind
    runs changes.
 
-## Amendment 2026-10-30: subagents are off (issue koinon-private#261)
+## Amendment 2026-10-30: subagents are off (old issue 261)
 
 The same rule governs OpenCode's `subagent` tool, for a different reason: a child session outlives a
-cancelled turn and agentd records none of its events, so the wall clock (koinon-private#243) and the wrap-up
-notice (koinon-private#183) could not stop it and traces (ADR 0074) would not show it. The config overlay denies
+cancelled turn and agentd records none of its events, so the wall clock (old issue 243) and the wrap-up
+notice (old issue 183) could not stop it and traces (ADR 0074) would not show it. The config overlay denies
 the `subagent` action for every agent, `explore` included, so the model is not offered the tool. The
 contract suite checks the tool list. Allowing `explore` again needs agentd to advertise and record
 child updates and cancel to cascade to children.
 
-## Amendment 2026-10-30: the gateway stand-in is a real listener (issue koinon-private#270)
+## Amendment 2026-10-30: the gateway stand-in is a real listener (old issue 270)
 
 The rc.8 home-lab run showed that decision 4's stand-in does not work on OpenShell 0.1.5. With a
 Service without endpoints, an allowed request whose upstream refuses the connection does not reach

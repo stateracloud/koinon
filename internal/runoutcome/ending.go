@@ -460,7 +460,7 @@ func (o *Owner) SandboxUnavailable(ctx context.Context, turn Turn, u Unavailable
 			return err
 		}
 		if err := audit.RecordErr(ctx, q, audit.Event{
-			Org: o.run.OrgID, Actor: audit.System(), Action: "agent.mark_unhealthy",
+			Org: o.run.OrgID, Actor: audit.System("koinon-agentd:run-outcome"), Action: "agent.mark_unhealthy",
 			TargetKind: "agent", TargetID: o.run.AgentID.String(),
 			After: map[string]any{
 				"reason": reason, "cause": "sandbox_unavailable", "sandboxCause": string(u.Cause),

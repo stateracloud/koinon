@@ -1,7 +1,7 @@
 # 0024. Release roadmap from v0.1 to v1.0
 
 - Status: Accepted
-- Amended: 2026-10-26 (releases from [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146))
+- Amended: 2026-10-26 (releases from old issue 146)
 - Date: 2026-10-21
 - Decision: [design.md#24](../design.md)
 
@@ -47,7 +47,7 @@ land in v0.2 (ADR [0044](0044-in-sandbox-credential-exception.md)).
 - Negative: the v0.1 scope grew (GitHub connector, approval flow, agentgateway) compared with the
   original roadmap line _(inferred)_.
 - Follow-ups: v0.1 milestone with issues per component (bootstrap deliverable 4,
-  [koinon-private#4](https://github.com/stateracloud/koinon-private/issues/4)).
+  old issue 4).
 
 ## Open questions
 
@@ -58,9 +58,9 @@ land in v0.2 (ADR [0044](0044-in-sandbox-credential-exception.md)).
 
 None needed. Checked 2026-10-21.
 
-## Amendment (2026-10-26): v0.1 to v0.3 replaced by the releases of koinon-private#146
+## Amendment (2026-10-26): v0.1 to v0.3 replaced by the releases of old issue 146
 
-procoduck set three releases on 2026-10-26 ([koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146)).
+procoduck set three releases on 2026-10-26 (old issue 146).
 They replace the v0.1, v0.2 and v0.3 rows above; v0.4 onwards is unchanged.
 
 | Release | Theme | Includes |
@@ -72,7 +72,7 @@ They replace the v0.1, v0.2 and v0.3 rows above; v0.4 onwards is unchanged.
 The work moved to v0.2 on 2026-10-23 stays in v0.2: chat
 ([0055](0055-chat-as-its-own-object.md)), container MCP servers ([0057](0057-mcp-servers.md)), and
 the shared gateway driver with REL2 run B ([0058](0058-gateway-modes.md)). Items of the old rows
-that koinon-private#146 does not place, whose release is open: the in-sandbox credential exception
+that old issue 146 does not place, whose release is open: the in-sandbox credential exception
 ([0044](0044-in-sandbox-credential-exception.md)) and the agent builder
 ([0020](0020-agent-builder-and-templates.md)). The external A2A gateway is v1.0
 ([0065](0065-work-model-tasks-inbox.md)).

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The e2e-label workflow: the `e2e` label was added to a pull request. Label events do not start
-# e2e-kind (koinon-private#468), so this starts it once on the PR's head, by dispatch, unless that is not needed:
+# e2e-kind (old issue 468), so this starts it once on the PR's head, by dispatch, unless that is not needed:
 #
 #   - a run of e2e-kind on the head runs quickstart now, or one passed it: nothing to do.
 #   - a run on the head has not decided yet (queued, or decide still running): wait for it. The
@@ -12,7 +12,7 @@
 #     branch. Removing and adding the label again is a way to retry a red e2e.
 #
 # A dispatch run's checks, `e2e result` among them, land on the head commit (run 41265167595 on
-# koinon-private#462's head, 2026-11-01). Its `e2e result` appears only once quickstart ends; until then the head
+# old issue 462's head, 2026-11-01). Its `e2e result` appears only once quickstart ends; until then the head
 # keeps its earlier result (green when that run skipped the e2e). hack/pr-wait.sh waits while an
 # e2e-kind run on the head is live, so after the dispatch this waits until the new run is listed
 # (it takes a few seconds) and fails loudly if it never is.

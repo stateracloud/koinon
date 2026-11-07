@@ -132,7 +132,7 @@ procoduck decided these points on 2026-10-24. They answer the open questions abo
    with "outcome unknown" and it is never run again. The auto tier is offered on the server's own target,
    directly through the gateway.
 8. **Health.** The reconciler probes each served server every 60 s through the gateway with a probe key,
-   and also right after the pass that first serves a server or serves it with another URL or credential (koinon-private#226)
+   and also right after the pass that first serves a server or serves it with another URL or credential (old issue 226)
    (initialize and `tools/list`, as an agent would), which also syncs the tool list. With `failOpen` an
    unreachable target is skipped without an error, so "no tools came back" is the failure the prober sees,
    and the Servers page shows that: the credential never leaves the gateway, so the prober cannot ask the
@@ -215,7 +215,7 @@ the same `mcpsanitize` policy to what it hands the model, and pins each tool to 
 then an admin sees the sanitised text and the flags at approval, and the ask tier is the safe choice for a
 server that is not trusted.
 
-## Amendment 2026-10-31: the leak guard on every org route (koinon-private#347)
+## Amendment 2026-10-31: the leak guard on every org route (old issue 347)
 
 [0084](0084-leak-guard.md) puts a leak guard in front of every MCP tool call:
 
@@ -231,14 +231,14 @@ server that is not trusted.
   empty by default.
 - **Servers declare a data class and kind.** Each server record says which of untrusted input,
   private data and outbound tool it carries, and its kind (for example fetch or search), so the
-  guard and the templates test read a declaration rather than a name (koinon-private#350). The identifiers and
+  guard and the templates test read a declaration rather than a name (old issue 350). The identifiers and
   the class existing servers migrate to are open in 0084.
 
-## Amendment 2026-11-01: a live check with the agent's own key (koinon-private#488)
+## Amendment 2026-11-01: a live check with the agent's own key (old issue 488)
 
 The health record of decision 8 is up to one probe interval (60 s) old, and agentgateway runs `failOpen`,
 so a server that drops between two probes is left out of the agent's tool list without a word (the rc.9
-incident). Before the harness starts, agentd (koinon-private#326, `mcpwait.go`) therefore also asks the gateway what it
+incident). Before the harness starts, agentd (old issue 326, `mcpwait.go`) therefore also asks the gateway what it
 lists to the agent right now.
 
 - **The credential is the agent's own gateway key.** `tools/list` under that key shows exactly what the
@@ -264,7 +264,7 @@ lists to the agent right now.
   already covers those) and has present tools in the auto or ask tier within the agent's allowlist, the
   gateway must list at least one of them under `<org>-<server>_<tool>` (auto) or
   `<org>-<server>-ask_<tool>` (ask). A server with none to offer is not expected to list anything.
-- **Miss handling is koinon-private#326's, not a second path.** The live misses join the health-record misses in the
+- **Miss handling is old issue 326's, not a second path.** The live misses join the health-record misses in the
   one `waitMCPServers`: the `run.mcp_server_missing` event, the `koinon.mcp.missing_servers` trace
   attribute, one retry after `MCPRetryDelay`, a failed run on the second miss. The reason says the
   gateway does not list the server's tools and, as the gateway does not say why, names the causes.

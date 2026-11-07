@@ -256,7 +256,7 @@ func describeAgentd(f flavor) bool {
 				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 			}
 			// A refusal costs the agent a tool call, not the run: a harness that ends the turn on a
-			// rejection is prompted again with agentd's note (issue koinon-private#186).
+			// rejection is prompted again with agentd's note (old issue 186).
 			if f.agentdVerdict == "reject" {
 				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 				var refusals int

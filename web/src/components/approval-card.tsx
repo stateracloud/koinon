@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { FileStatus, ScopeKind, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { FileStatus, ScopeKind, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type LeakGuard, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { approvalStatusLabel, approveLabel, defaultScopeEnd, endOfLocalDay, localDate, targetRepo, toolChanged, toolVersion, type ScopeChoice } from '@/lib/approvals'
 import { ciPathsHit } from '@/lib/ci-paths'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
@@ -340,11 +340,36 @@ function McpToolInfo({ call, stale }: { call: McpCall; stale: boolean }) {
           {call.reviewReason}
         </p>
       )}
+      {call.leakGuard && <LeakGuardNote guard={call.leakGuard} />}
       {call.toolDescription && (
         <details className="rounded-md border" data-testid="mcp-tool-description">
           <summary className="cursor-pointer px-2 py-1 font-medium">What the tool says it does</summary>
           <p className="bg-muted/40 max-h-48 overflow-auto border-t p-2 whitespace-pre-wrap">{call.toolDescription}</p>
         </details>
+      )}
+    </section>
+  )
+}
+
+/** LeakGuardNote says why the leak guard (ADR 0091) put this call on a card: which legs the session holds and where the call goes. */
+function LeakGuardNote({ guard }: { guard: LeakGuard }) {
+  const legs = [guard.untrustedInput && 'untrusted input', guard.privateData && 'private data'].filter(Boolean)
+  const destination = Object.entries(guard.destination)
+  return (
+    <section aria-label="Leak guard" data-testid="leak-guard" className="rounded-md border border-amber-500/60 bg-amber-500/5 p-2">
+      <h4 className="mb-1 font-semibold">Held by the leak guard</h4>
+      <p>
+        This session holds <span data-testid="leak-guard-legs">{legs.length ? legs.join(' and ') : 'no leg'}</span>
+        {guard.sinkClass ? <> and the tool is a {guard.sinkClass} sink.</> : '.'}
+      </p>
+      {destination.length > 0 && (
+        <ul aria-label="Destination" className="font-mono text-xs">
+          {destination.map(([k, v]) => (
+            <li key={k}>
+              {k}: {v}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   )

@@ -144,7 +144,7 @@ kubelet's ConfigMap resync, and the proxy is the controller's Deployment (no PVC
 the controller picks its image). The chart's NetworkPolicy for the proxy selects it by the controller's
 `gateway.networking.k8s.io/gateway-name` label.
 
-## Amendment (2026-10-26, issue koinon-private#98): the reconciler creates the standalone config ConfigMap
+## Amendment (2026-10-26, old issue 98): the reconciler creates the standalone config ConfigMap
 
 The chart no longer renders the standalone gateway ConfigMap. Its bootstrap config was rendered
 whenever `lookup` could not read the live object (`helm template`, Argo CD, Flux), so every sync
@@ -184,7 +184,7 @@ name from colliding with an org's `<org>-<server>` name, since slugs and server 
 one. Remove it when upstream allows a condition on a lone target. No upstream issue will be filed
 (procoduck's decision).
 
-## Amendment (2026-10-30, koinon-private#262): the gateway forwards an allowlist of client headers
+## Amendment (2026-10-30, old issue 262): the gateway forwards an allowlist of client headers
 
 An agent holds its gateway key (`kgw_...`) and is untrusted. Until now the gateway removed named
 headers (`anthropic-beta`, a target's credential header) and passed every other client header to the

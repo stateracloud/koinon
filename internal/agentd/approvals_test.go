@@ -214,7 +214,7 @@ var _ = Describe("Parking on approvals", func() {
 		final, err := q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: g.org, ID: row.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(final.DeliveredAt.Valid).To(BeTrue())
-		By("the task follows the run's outcome after the park, like a run that never parked (koinon-private#324)")
+		By("the task follows the run's outcome after the park, like a run that never parked (old issue 324)")
 		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
 		Expect(getRun(ctx, r).ParkedSeconds).To(BeNumerically(">=", 0))
 		Expect(g.gh.Snapshot("widgets").Pulls).To(HaveLen(1))

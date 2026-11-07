@@ -21,7 +21,7 @@ func TestWrapping(t *testing.T) {
 	RunSpecs(t, "wrapping Suite")
 }
 
-// unset is the bound-only marker of an install that has not set it (koinon-private#615).
+// unset is the bound-only marker of an install that has not set it (old issue 615).
 var unset = secretstore.StaticBoundOnly(secretstore.BoundOnly{})
 
 func parse(args ...string) wrapping.Config {
@@ -66,7 +66,7 @@ var _ = Describe("New", func() {
 		Expect(got).To(Equal(kek))
 	})
 
-	It("refuses to build wrappers without a source for the bound-only marker (koinon-private#615), in every role and backend", func(ctx SpecContext) {
+	It("refuses to build wrappers without a source for the bound-only marker (old issue 615), in every role and backend", func(ctx SpecContext) {
 		for _, role := range []wrapping.Role{wrapping.Service, wrapping.KeyAdmin} {
 			for _, cfg := range []wrapping.Config{parse(), parse("--kek-backend=openbao", "--openbao-address=https://bao.example:8200",
 				"--openbao-key=koinon-kek", "--openbao-role=koinon-api")} {

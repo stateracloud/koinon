@@ -173,7 +173,7 @@ func (p *Pool) resyncAgent(ctx context.Context, r store.HomeCheckpointResync) {
 				return errResyncClaimLost
 			}
 			return audit.RecordErr(ctx, q, audit.Event{
-				Org: r.OrgID, Actor: audit.System(), Action: ResyncFailedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
+				Org: r.OrgID, Actor: audit.System("koinon-agentd:resync"), Action: ResyncFailedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 				After: map[string]any{"attempts": r.Attempts, "error": msg},
 			})
 		}); err != nil {
@@ -348,7 +348,7 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 		}
 		n.raised = raised == 1
 		return audit.RecordErr(ctx, q, audit.Event{
-			Org: r.OrgID, Actor: audit.System(), Action: ResyncedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
+			Org: r.OrgID, Actor: audit.System("koinon-agentd:resync"), Action: ResyncedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 			After: map[string]any{
 				"repositoryEpochs": slices.Clone(n.epochs), "snapshots": n.snapshots, "added": n.added,
 				"missing": n.missing, "skipped": n.skipped, "takenPrefixes": n.taken, "ownershipEpochRaisedTo": raisedTo(n),
