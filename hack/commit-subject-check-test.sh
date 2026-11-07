@@ -73,5 +73,10 @@ commit "fix: on main"
 git merge -q --no-ff -m "Merge branch 'side'" side
 expect "merge commit is exempt" 0
 
+# A failing git rev-list (unknown revision) must fail closed, not pass on an empty list.
+out=$("$script" "$base" does-not-exist 2>&1)
+rc=$?
+if [[ $rc -ne 0 && $out == *"rev-list"* ]]; then echo "ok   failing rev-list fails closed"; else echo "FAIL failing rev-list: exit $rc, want non-zero with a rev-list message"; echo "$out"; fail=1; fi
+
 [[ $fail -eq 0 ]] && echo "commit-subject-check tests passed"
 exit $fail
