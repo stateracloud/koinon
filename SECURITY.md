@@ -12,10 +12,13 @@ seriously. A sandbox escape suite covers the isolation promises (ADR 0025). What
   disk, and the gitea and github read and live admission cases) run only on kind
   (`make test-escape-kind`) and on a maintainer's Kata cluster. No CI job runs them on pull requests
   yet: the escape-kind job on GitHub-hosted runners that #66 listed is tracked in #109.
-- The leak guard escape case (`exfil_test.go`) runs only when someone points the
-  `KOINON_ESCAPE_MCP_*` variables at a guarded install (the e2e install or a maintainer's lab).
-  `make test-escape-kind` skips it, because that install has no gateway or leak guard. Adding it to
-  the PR kind e2e is tracked in #348.
+- The leak guard escape case (`exfil_test.go`, label `leakguard`) runs from a real sandbox in the
+  kind e2e (`e2e-kind`): on every pull request that needs the kind e2e (`hack/needs-e2e.sh`, which
+  includes changes under `test/escape/`) and on every push to main. `e2e-kind.yml` sets `ESCAPE_MCP=1`
+  for the go suite, and `test/e2e/escape-mcp.sh` runs `test/escape/kind.sh` against the install's
+  gateway. Outside that e2e it runs only when someone points the `KOINON_ESCAPE_MCP_*` variables at a
+  guarded install, and `make test-escape-kind` alone skips it, because that install has no gateway or
+  leak guard.
 - The Kata isolation tier is tested only on a maintainer's Kata cluster, because kind cannot run Kata.
 
 ## Reporting a vulnerability

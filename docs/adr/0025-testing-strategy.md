@@ -144,7 +144,7 @@ that a waiting Blacksmith job is billed, or that Actions minutes are scarce) des
 the workflows now run on GitHub-hosted runners, which cost nothing on a public repository. The
 decisions stand; only the cost reasoning changed. What runs where: CI runs the admission half of the
 escape suite (`escape (admission)`, only the admission-labelled cases, path-gated by `hack/ci-changes.sh`); the OpenShell cases run on kind (`make test-escape-kind`) and
-on the maintainers' lab, where the Kata tier can be tested.
+on the maintainers' lab, where the Kata tier can be tested. The leak guard exfiltration case (label `leakguard`) runs from a sandbox inside the kind e2e (`e2e-kind`, #348).
 
 ## Links
 
