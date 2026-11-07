@@ -755,6 +755,9 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- if and .Values.secrets.kek.kms.keyAdmin.addKey (not (include "koinon.kms" .)) }}
 {{- fail "secrets.kek.kms.keyAdmin.addKey needs a KMS (secrets.kek.kms.backend): a local install adds KEKs with koinon-api keys add" }}
 {{- end }}
+{{- if and .Values.secrets.kek.kms.keyAdmin.activateIfNoActive (not .Values.secrets.kek.kms.keyAdmin.addKey) }}
+{{- fail "secrets.kek.kms.keyAdmin.activateIfNoActive needs secrets.kek.kms.keyAdmin.addKey: the new ID it makes active" }}
+{{- end }}
 {{- if .Values.sandboxObserver.enabled }}
 {{- if not .Values.sandboxPolicy.enabled }}
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.enabled: the policy's RoleBinding rule is what limits the reconciler's right to bind the observer role to sandbox namespaces. Enable sandboxPolicy, or set sandboxObserver.enabled=false (a sandbox that cannot pull its image then stays an unknown wait cause)" }}
@@ -917,6 +920,9 @@ spec:
         {{- end }}
         {{- with .ka.addKey }}
         - {{ printf "--add-key=%s" . | quote }}
+        {{- end }}
+        {{- if .ka.activateIfNoActive }}
+        - --activate-if-no-active
         {{- end }}
         {{- if .ka.rewrapUnbound }}
         - --rewrap-unbound

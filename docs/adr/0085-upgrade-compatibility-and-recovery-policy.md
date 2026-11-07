@@ -339,6 +339,13 @@ Implementation-level unknowns, to settle in the sub-issues:
     the KEK Secret when missing (never with `existingSecret`, and never while the database holds
     values) and adds the KEK `addKey` names; it never activates, rewraps or retires. With a KMS,
     koinon-api runs with `--kek-create=false` and restarts until the Job has made the Secret.
+  - Lost KMS key that wrapped the active KEK (#255): the one exception to "it never activates". With
+    `--activate-if-no-active` (chart `keyAdmin.activateIfNoActive`, with `addKey`) the Job adds the
+    KEK and makes it active in the same write, only when the Secret's `active` entry is missing or
+    names a KEK the Secret no longer holds. It never replaces a working active KEK. The key set must
+    not load without an active KEK (every process still refuses it), and the new KEK has to be
+    wrapped by the identity that may encrypt, so the Job does it. The operator removes the dead
+    KEKs' entries first; `keys forget` then runs as for any lost KEK.
   - Fingerprint: decision 12 said the wrapping keys' fingerprints; the code fingerprints the KEKs
     (`secretstore.Fingerprint`, HMAC-SHA256 keyed by the KEK, 16 bytes). A KEK's fingerprint is the
     same however it is wrapped: a KEK's fingerprint does not depend on its wrapping, so an export
