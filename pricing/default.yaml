@@ -69,7 +69,7 @@ entries:
     max_output: 128000
     hidden_thinking: true
     source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-11-07}
-    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07: base prices unchanged; the 272K long-context tier could not be re-verified from the OpenAI page (rendered client-side) and is kept."
+    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07: base prices unchanged; the 272K long-context tier could not be re-verified from the OpenAI page (rendered client-side) and is kept. OpenAI's reasoning guide says Chat Completions does not support function calling with GPT-6 Astra (use the Responses API); Koinon serves provider type openai on /v1/chat/completions only, so tool calls on this model through a direct openai provider are likely to fail (follow-up issue linked from the PR for #65)."
   - id: openrouter-openai-gpt-6-astra
     provider: openrouter
     match: {glob: "openai/gpt-6-astra"}
