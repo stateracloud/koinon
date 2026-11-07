@@ -1,13 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154,SC2046,SC2206,SC2015
-# Chart assertions: the failure gate, then the preflight hook.
+# Chart assertions: the preflight hook. (The failure gate is in hack/chart-check.sh, after every file.)
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
-
-if [ "$failures" -gt 0 ]; then
-	echo "$failures assertion(s) failed" >&2
-	exit 1
-fi
 
 # The preflight hook (plan item H2) renders unless preflight.enabled=false, as a pre-install and
 # pre-upgrade hook whose output Helm prints; the probe RBAC only with the seccomp probe on.
