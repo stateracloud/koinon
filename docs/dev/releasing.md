@@ -73,8 +73,9 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
-Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). Tick it on
-the tag commit, not before:
+Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). It is
+tracked in its own gate issue, separate from the docs change that added it. Tick it on the tag
+commit, not before:
 
 - [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded.
 - [ ] `hack/release-gate.sh` is green for the commit.
