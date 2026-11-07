@@ -25,6 +25,10 @@ spec:
   {{- with include "koinon.imagePullSecrets" . }}
   {{- . | nindent 2 }}
   {{- end }}
+  {{- with .Values.postgres.cnpg.nodeMaintenanceWindow }}
+  nodeMaintenanceWindow:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   enableSuperuserAccess: false
   postgresql:
     pg_hba:

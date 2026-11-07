@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
@@ -338,22 +339,22 @@ func (b *builder) gatewayObjects() {
 	}, nil, nil)
 
 	attrs := []any{
-		attr(gateway.LogFieldKey, `default(apiKey.name, "")`),
-		attr(gateway.LogFieldAgent, `default(apiKey.agent, "")`),
-		attr(gateway.LogFieldRequest, `uuid()`),
-		attr(gateway.LogFieldInput, `llm.inputTokens`),
-		attr(gateway.LogFieldOutput, `llm.outputTokens`),
-		attr(gateway.LogFieldCacheRead, `llm.cachedInputTokens`),
-		attr(gateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
-		attr(gateway.LogFieldReasoning, `llm.reasoningTokens`),
-		attr(gateway.LogFieldFormat, gateway.FormatLogExpr()),
-		attr(gateway.LogFieldStream, `llm.streaming`),
-		attr(gateway.LogFieldError, `proxy.error.reason`),
-		attr(gateway.LogFieldStatus, `response.code`),
-		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
-		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
-		attr(gateway.LogFieldResponseID, gateway.ResponseIDCEL),
-		attr(gateway.LogFieldUpstream, gateway.UpstreamCEL),
+		attr(agentgateway.LogFieldKey, `default(apiKey.name, "")`),
+		attr(agentgateway.LogFieldAgent, `default(apiKey.agent, "")`),
+		attr(agentgateway.LogFieldRequest, `uuid()`),
+		attr(agentgateway.LogFieldInput, `llm.inputTokens`),
+		attr(agentgateway.LogFieldOutput, `llm.outputTokens`),
+		attr(agentgateway.LogFieldCacheRead, `llm.cachedInputTokens`),
+		attr(agentgateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
+		attr(agentgateway.LogFieldReasoning, `llm.reasoningTokens`),
+		attr(agentgateway.LogFieldFormat, agentgateway.FormatLogExpr()),
+		attr(agentgateway.LogFieldStream, `llm.streaming`),
+		attr(agentgateway.LogFieldError, `proxy.error.reason`),
+		attr(agentgateway.LogFieldStatus, `response.code`),
+		attr(agentgateway.LogFieldMaxTokens, `llm.params.max_tokens`),
+		attr(agentgateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
+		attr(agentgateway.LogFieldResponseID, agentgateway.ResponseIDCEL),
+		attr(agentgateway.LogFieldUpstream, agentgateway.UpstreamCEL),
 	}
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {

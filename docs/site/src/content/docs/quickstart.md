@@ -6,6 +6,10 @@ description: From helm install to an approved pull request in about 15 minutes.
 You will install Koinon, sign in, add a model provider, connect a GitHub App, create the
 repo-helper agent, give it a task and approve the pull request it proposes.
 
+> **Before v0.3 there is no upgrade promise.** An upgrade between any two releases before v0.3.0
+> may need a reinstall or manual steps listed in the release notes. Backups of the database and the
+> encryption keys, and restoring from them, are supported. See [Upgrading Koinon](/guides/upgrading/).
+
 The clock starts at `helm install`. The prerequisites are not on it. Install them first
 ([Prerequisites](/prerequisites/)).
 
