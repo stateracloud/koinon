@@ -11,7 +11,8 @@ Before v0.3 there is no schema or upgrade promise
 ([ADR 0099](https://github.com/stateracloud/koinon/blob/main/docs/adr/0099-no-schema-or-upgrade-promise-before-v0-3.md)).
 An upgrade between any two releases before v0.3.0, patch upgrades and release candidates included,
 may need a reinstall or the manual steps in the release notes. Read them and take the database
-backup first.
+backup first. Backups and restoring from them are supported in every release, and are the way back
+when an upgrade goes wrong.
 
 From v0.3.0 the following applies:
 
