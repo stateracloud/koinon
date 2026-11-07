@@ -270,7 +270,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		n, rerr := revokeBootstrapSessions(ctx, pool, now)
 		res = BootstrapResult{RevokedSessions: n}
 		if rerr != nil {
-			return res, fmt.Errorf("%w; revoke bootstrap sessions: %v", err, rerr)
+			return res, fmt.Errorf("%w; revoke bootstrap sessions: %w", err, rerr)
 		}
 	}
 	return res, err
