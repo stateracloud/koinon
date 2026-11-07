@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -48,14 +49,14 @@ type priced struct {
 
 // rejectedByUpstream: the provider answered with a 4xx and reported no usage, so it refused the
 // request (invalid, flagged, not authorised, rate limited).
-func (e Entry) rejectedByUpstream() bool {
+func rejectedByUpstream(e Entry) bool {
 	return !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500
 }
 
 // failedByUpstream: the provider answered with a 5xx and reported no usage. It generated nothing, so
 // the request is charged its input estimate only, with no output and no max_tokens reserve, and still
 // counts as a model request (ADR 0056, amendment 2026-10-31, koinon-private#340).
-func (e Entry) failedByUpstream() bool {
+func failedByUpstream(e Entry) bool {
 	return !e.InputKnown && !e.OutputKnown && e.Status >= 500 && e.Status < 600
 }
 
@@ -148,7 +149,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 		// Unknown output is the cut signal of a completions stream; a logged proxy error covers a
 		// Messages stream, whose message_start already logged output.
-		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: e.rejectedByUpstream(), Failed: e.failedByUpstream()}
+		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: rejectedByUpstream(e), Failed: failedByUpstream(e)}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
@@ -261,3 +262,9 @@ func gatewayCost(s string) (money.USD, error) {
 	}
 	return money.FromRat(r)
 }
+
+// ValidGatewayCost reports whether s is a plain non-negative decimal a gateway may report as a cost
+// (up to 10 integer and 18 fractional digits).
+func ValidGatewayCost(s string) bool { return decimalRE.MatchString(s) }
+
+var decimalRE = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,18})?$`)

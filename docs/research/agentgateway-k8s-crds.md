@@ -371,7 +371,7 @@ v1.6.0 and Gateway API v1.4.0 standard CRDs. Everything below is exercised by
   literal for `provider`; both reach the upstream body.
 - **V: access log and OTLP.** `frontend.accessLog.attributes.add` with Koinon's CEL expressions and
   `otlp{url, protocol: HTTP}` deliver `koinon.key`, `koinon.agent`, the token and status fields and
-  `agw.ai.usage.cost.total` to the OTLP receiver; the ledger's own `ledger.Decode` reads them. The model
+  `agw.ai.usage.cost.total` to the OTLP receiver; `agentgateway.Decode` (internal/gateway/agentgateway) reads them. The model
   catalog ConfigMap prices the request (`0.0010` for 10 + 10 tokens at $50 per million).
 - **V: MCP.** An `AgentgatewayBackend` with static targets (`failureMode: FailOpen`, `prefixMode:
   Always`), `policies.mcp.authorization` (the same CEL rules as standalone mode) and per-target

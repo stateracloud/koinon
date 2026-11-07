@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -146,7 +147,7 @@ var _ = Describe("Render", func() {
 	It("logs who answered (ADR 0056 amendment 2026-10-29)", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(dump(r))).To(ContainSubstring("name: " + gateway.LogFieldUpstream))
+		Expect(string(dump(r))).To(ContainSubstring("name: " + agentgateway.LogFieldUpstream))
 	})
 
 	// agentgateway v1.7.0 records the body of EVERY response on a listener (up to 32 MiB per LLM

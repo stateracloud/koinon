@@ -19,6 +19,7 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
@@ -505,12 +506,12 @@ func anthropicSpec(env Env) {
 			// The gateway answered 200 before the cut, so the status says nothing; what tells the ledger is
 			// the error reason, set only when the proxy failed the response, with the usage of
 			// message_start alone (the final output count of 10 never arrived).
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldFormat, "anthropic"))
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldStream, true))
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldStatus, float64(200)))
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldError, "Upstream"))
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldOutput, float64(1)))
-			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldInput, float64(100)))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldFormat, "anthropic"))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldStream, true))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldStatus, float64(200)))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldError, "Upstream"))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldOutput, float64(1)))
+			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldInput, float64(100)))
 		})
 
 		It("logs the cache tokens, with the input including both", func(ctx SpecContext) {
@@ -523,19 +524,19 @@ func anthropicSpec(env Env) {
 			// The upstream reports input_tokens 50 beside 30 cache reads and 20 writes; the log carries
 			// agentgateway's consistent semantics, where the input includes both.
 			want := map[string]any{
-				gateway.LogFieldInput: float64(100), gateway.LogFieldCacheRead: float64(30),
-				gateway.LogFieldCacheWrite: float64(20), gateway.LogFieldOutput: float64(10),
+				agentgateway.LogFieldInput: float64(100), agentgateway.LogFieldCacheRead: float64(30),
+				agentgateway.LogFieldCacheWrite: float64(20), agentgateway.LogFieldOutput: float64(10),
 			}
 			Eventually(func() []map[string]any { return accessLog(logs(ctx), keyC.ID) }, 30*time.Second, time.Second).
-				Should(ContainElement(HaveKeyWithValue(gateway.LogFieldOutput, want[gateway.LogFieldOutput])))
+				Should(ContainElement(HaveKeyWithValue(agentgateway.LogFieldOutput, want[agentgateway.LogFieldOutput])))
 			finished := 0
 			for _, rec := range accessLog(logs(ctx), keyC.ID) {
-				if rec[gateway.LogFieldInput] != want[gateway.LogFieldInput] || rec[gateway.LogFieldOutput] != want[gateway.LogFieldOutput] || rec[gateway.LogFieldFormat] != "anthropic" {
+				if rec[agentgateway.LogFieldInput] != want[agentgateway.LogFieldInput] || rec[agentgateway.LogFieldOutput] != want[agentgateway.LogFieldOutput] || rec[agentgateway.LogFieldFormat] != "anthropic" {
 					continue // not the usage of a finished response (the cut stream has output 1; a chat-completions record has format openai)
 				}
 				finished++
-				Expect(rec).NotTo(HaveKey(gateway.LogFieldError), "a normal end carries no error")
-				Expect(rec).To(HaveKeyWithValue(gateway.LogFieldFormat, "anthropic"))
+				Expect(rec).NotTo(HaveKey(agentgateway.LogFieldError), "a normal end carries no error")
+				Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldFormat, "anthropic"))
 				for k, v := range want {
 					Expect(rec).To(HaveKeyWithValue(k, v), k)
 				}
@@ -576,7 +577,7 @@ func accessLog(log, keyID string) []map[string]any {
 				}
 			}
 		}
-		if rec[gateway.LogFieldKey] == keyID {
+		if rec[agentgateway.LogFieldKey] == keyID {
 			out = append(out, rec)
 		}
 	}

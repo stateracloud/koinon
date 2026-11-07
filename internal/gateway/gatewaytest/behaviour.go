@@ -10,7 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported, as in every spec file
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
-	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 )
 
 // The behaviour suite (ADR 0097 decision 4, step 1) states what Koinon needs from a gateway, through
@@ -37,7 +37,7 @@ type Observed struct {
 	Reasoning *int64
 }
 
-// ObservedFromAgentgatewayLog reads agentgateway's access log (the koinon.* fields, gateway.LogField*)
+// ObservedFromAgentgatewayLog reads agentgateway's access log (the koinon.* fields, agentgateway.LogField*)
 // as [Observed] records of one key. It is the default of [Gateway.Observe].
 func ObservedFromAgentgatewayLog(log, keyID string) []Observed {
 	var out []Observed
@@ -47,17 +47,17 @@ func ObservedFromAgentgatewayLog(log, keyID string) []Observed {
 			return int64(f)
 		}
 		o := Observed{
-			Status: int(num(gateway.LogFieldStatus)),
-			Input:  num(gateway.LogFieldInput), Output: num(gateway.LogFieldOutput),
-			CacheRead: num(gateway.LogFieldCacheRead), CacheWrite: num(gateway.LogFieldCacheWrite),
+			Status: int(num(agentgateway.LogFieldStatus)),
+			Input:  num(agentgateway.LogFieldInput), Output: num(agentgateway.LogFieldOutput),
+			CacheRead: num(agentgateway.LogFieldCacheRead), CacheWrite: num(agentgateway.LogFieldCacheWrite),
 		}
-		o.Format, _ = rec[gateway.LogFieldFormat].(string)
-		o.Stream, _ = rec[gateway.LogFieldStream].(bool)
-		if e, _ := rec[gateway.LogFieldError].(string); e != "" {
+		o.Format, _ = rec[agentgateway.LogFieldFormat].(string)
+		o.Stream, _ = rec[agentgateway.LogFieldStream].(bool)
+		if e, _ := rec[agentgateway.LogFieldError].(string); e != "" {
 			o.Failed = true
 		}
-		if _, ok := rec[gateway.LogFieldReasoning].(float64); ok {
-			r := num(gateway.LogFieldReasoning)
+		if _, ok := rec[agentgateway.LogFieldReasoning].(float64); ok {
+			r := num(agentgateway.LogFieldReasoning)
 			o.Reasoning = &r
 		}
 		out = append(out, o)
