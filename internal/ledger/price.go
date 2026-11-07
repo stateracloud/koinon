@@ -26,7 +26,10 @@ var FlagThreshold = big.NewRat(1, 100)
 
 // priced is what the ledger records for one request.
 type priced struct {
-	inTokens, outTokens        int64
+	// The token buckets are disjoint, as in the usage record (ADR 0097 decision 3): input excludes
+	// the cache parts, output excludes reasoning. The spend entry stores the provider's totals
+	// (migration 00013), [priced.totalIn] and [priced.totalOut].
+	input, output              int64
 	cacheRead, cacheWrite      int64
 	reasoning                  int64
 	reasoningKnown             bool
@@ -45,6 +48,18 @@ type priced struct {
 	model prices.Model
 	// waived: the provider refused the request and does not bill that; nothing is charged.
 	waived bool
+}
+
+// totalIn is the input including cache reads and writes, as spend_entries.input_tokens stores it.
+func (p priced) totalIn() int64 { return p.input + p.cacheRead + p.cacheWrite }
+
+// totalOut is the output including reasoning, as spend_entries.output_tokens stores it.
+func (p priced) totalOut() int64 { return p.output + p.reasoning }
+
+// usage is the priced buckets with the output replaced by out (the reserve bound prices a larger
+// output than the one charged).
+func (p priced) usage(output int64) pricing.Usage {
+	return pricing.Usage{Input: p.input, CacheRead: p.cacheRead, CacheWrite: p.cacheWrite, Output: output, Reasoning: p.reasoning}
 }
 
 // rejectedByUpstream: the provider answered with a 4xx and reported no usage, so it refused the
@@ -72,7 +87,7 @@ func waivesRejected(m prices.Model) bool {
 // at its time, and compares it with the gateway's.
 func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry) (priced, error) {
 	p := priced{
-		inTokens: e.InputTokens, outTokens: e.OutputTokens,
+		input: e.InputTokens, output: e.OutputTokens,
 		cacheRead: e.CacheReadTokens, cacheWrite: e.CacheWriteTokens, reasoning: e.ReasoningTokens,
 		reasoningKnown: e.ReasoningKnown,
 	}
@@ -157,10 +172,12 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			x.ResponseBytes = e.ResponseBytes
 		}
 		if e.InputKnown {
-			x.ReportedInput = &e.InputTokens
+			inTotal := p.totalIn()
+			x.ReportedInput = &inTotal
 		}
 		if e.OutputKnown {
-			x.ReportedOutput = &e.OutputTokens
+			outTotal := p.totalOut()
+			x.ReportedOutput = &outTotal
 		}
 		r := estimate.Estimate(params, x)
 		switch {
@@ -183,7 +200,11 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			}
 			p.flagged = true
 		}
-		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, !p.waived
+		// The estimator works in totals (a byte heuristic over the whole prompt and response, and the
+		// provider's reported totals above); the cache and reasoning parts leave them here. This is
+		// the only subtraction in the ledger, and it applies to estimates only.
+		p.input, p.output = max(r.InputTokens-p.cacheRead-p.cacheWrite, 0), max(r.OutputTokens-p.reasoning, 0)
+		p.estimated = !p.waived
 		p.aborted = x.Aborted && !x.Rejected && !x.Failed
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
@@ -191,9 +212,9 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
 			"reserve_output_tokens": r.ReserveOutputTokens,
 		}
-		if p.aborted && r.ReserveOutputTokens > p.outTokens {
+		if p.aborted && r.ReserveOutputTokens > p.totalOut() {
 			// The bound the gateway key holds back while the provider's figure is pending; never charged.
-			_, bound, err := res.Price.Cost(pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, r.ReserveOutputTokens, p.reasoning))
+			_, bound, err := res.Price.Cost(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
 			if err != nil {
 				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
 			}
@@ -208,15 +229,15 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		p.aborted, p.flagged = true, true
 		meta["usage_partial"] = true
 		meta["estimate"] = map[string]any{"method": "partial", "reserve_output_tokens": bound, "max_output_fallback": fallback, "max_output_capped": capped}
-		if bound > p.outTokens {
-			_, b, err := res.Price.Cost(pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, bound, p.reasoning))
+		if bound > p.totalOut() {
+			_, b, err := res.Price.Cost(p.usage(max(bound-p.reasoning, 0)))
 			if err != nil {
 				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
 			}
 			p.reserve = b
 		}
 	}
-	u := pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, p.outTokens, p.reasoning)
+	u := p.usage(p.output)
 	_, cost, err := res.Price.Cost(u)
 	if err != nil {
 		return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}

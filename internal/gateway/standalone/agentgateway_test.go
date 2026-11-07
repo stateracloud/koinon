@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
+	"github.com/stateracloud/koinon/internal/testing/cfgdeliver"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -41,8 +42,7 @@ var options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mod
 type running struct {
 	gatewaytest.Gateway
 	driver   *standalone.Driver
-	file     standalone.FileDeliverer
-	cfgDir   string
+	file     standalone.Deliverer
 	statsURL string
 }
 
@@ -50,46 +50,36 @@ type running struct {
 // mounted at /secrets/upstream. guardURL is the MCP leak guard the driver renders ("" for none).
 func startStandalone(ctx context.Context, hostPorts []int, files map[string]string, guardURL string) (*running, error) {
 	testenv.Require(testenv.Docker)
-	cfgDir, err := os.MkdirTemp("", "koinon-agw-cfg-")
-	if err != nil {
-		return nil, err
-	}
 	secretsDir, err := os.MkdirTemp("", "koinon-agw-secrets-")
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range []string{cfgDir, secretsDir} {
-		if err := os.Chmod(d, 0o755); err != nil {
-			return nil, err
-		}
+	if err := os.Chmod(secretsDir, 0o755); err != nil {
+		return nil, err
 	}
 	for name, v := range files {
 		if err := os.WriteFile(filepath.Join(secretsDir, name), []byte(v), 0o644); err != nil {
 			return nil, err
 		}
 	}
-	file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
 	opts := options
 	opts.GuardURL = guardURL
 	first, _, err := standalone.Render(gateway.State{}, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := file.Deliver(ctx, first, ""); err != nil {
-		return nil, err
-	}
-	ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(),
-		testcontainers.WithCmd("-f", "/cfg/config.yaml"),
+	// The config goes in through the Docker API, not a bind mount: OrbStack delivers no inotify events
+	// for host-side writes into a bind mount, so agentgateway would miss every reload (#301).
+	ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(), append(cfgdeliver.ContainerOptions(first),
 		testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 		testcontainers.WithHostPortAccess(hostPorts...),
 		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-			hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", secretsDir+":/secrets/upstream:ro")
+			hc.Binds = append(hc.Binds, secretsDir+":/secrets/upstream:ro")
 		}),
 		testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
-	)
-	r := &running{file: file, cfgDir: cfgDir}
+	)...)
+	r := &running{}
 	r.Stop = func(ctx context.Context) error {
-		_ = os.RemoveAll(cfgDir)
 		_ = os.RemoveAll(secretsDir)
 		return testcontainers.TerminateContainer(ctr)
 	}
@@ -111,9 +101,10 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 	if r.statsURL, err = containerhost.Endpoint(ctx, ctr, "15020/tcp", "http"); err != nil {
 		return nil, err
 	}
+	r.file = cfgdeliver.Deliverer{Container: ctr}
 	r.driver = &standalone.Driver{
 		Options:   opts,
-		Deliverer: file,
+		Deliverer: r.file,
 		Waiter:    standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond},
 	}
 	r.Driver = r.driver
@@ -248,7 +239,7 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
 		failures := func() int { return strings.Count(r.Logs(ctx), "Failed to reload config") }
 		Eventually(failures).WithTimeout(30 * time.Second).Should(BeNumerically(">", 0))
-		// The file watcher can report one rename twice; let the second reload finish.
+		// The file watcher can report one delivery twice; let the second reload finish.
 		time.Sleep(time.Second)
 
 		extra, err := gateway.NewKey(agent)

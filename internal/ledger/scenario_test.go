@@ -50,9 +50,10 @@ var _ = Describe("the repo-helper scenario's ledger", func() {
 			UpstreamKnown: true, Upstream: true, MaxTokens: 4000, RequestBytes: 3_000, ResponseBytes: -1, Time: at,
 		}
 	}
-	// streamed is a request the provider answered with usage, as the script's turns report it.
+	// streamed is a request the provider answered with usage, as the script's turns report it: in is
+	// the provider's total input and includes cached; the usage record carries disjoint buckets.
 	streamed := func(e *env, at time.Time, in, cached, out int64, cost string) ledger.Entry {
-		x := e.usage(at, flash, in, out, cached, cost)
+		x := e.usage(at, flash, in-cached, out, cached, cost)
 		x.Status = 200
 		return x
 	}

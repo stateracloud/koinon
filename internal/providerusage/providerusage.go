@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Usage is a provider's record of one response, in agentgateway's consistent semantics: input
@@ -44,6 +45,20 @@ type Usage struct {
 	// Cancelled is the provider's own mark that the response was canceled before it ended
 	// (OpenRouter's cancelled). It is recorded with the settlement; the figures stand either way.
 	Cancelled bool
+}
+
+// Buckets is the usage in the disjoint buckets the price applies to (input without the cache
+// parts, output without reasoning). A provider record reports totals, so the subtraction is this
+// source's mapping, as the gateway driver's is for the usage record. Counts that do not add up
+// clamp at zero.
+func (u Usage) Buckets() pricing.Usage {
+	cacheRead, cacheWrite, reasoning := max(u.CacheReadTokens, 0), max(u.CacheWriteTokens, 0), max(u.ReasoningTokens, 0)
+	return pricing.Usage{
+		Input:     max(u.InputTokens-cacheRead-cacheWrite, 0),
+		CacheRead: cacheRead, CacheWrite: cacheWrite,
+		Output:    max(u.OutputTokens-reasoning, 0),
+		Reasoning: reasoning,
+	}
 }
 
 // Billed is what the response cost the org: the provider's cost plus, with the org's own upstream

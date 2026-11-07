@@ -437,7 +437,8 @@ tokens are billed as output).
    `2026-10-29.1`), so a cut stream's output is flagged `thinking_unmeasured`, and a test keeps the
    price list and the catalog in step. The budget reserve of a cut stream is the request's `max_tokens`
    capped at the entry's `max_output`; Anthropic counts thinking inside `max_tokens`, so the reserve
-   already covers it.
+   already covers it. 2026-11-07: since #302 (ADR 0097 decision 3) the driver splits reasoning out of
+   the output when it maps its log; the ledger prices the disjoint buckets and pricing.Split is gone.
 7. **koinon-private#242: the OpenRouter pin rows are deleted** after the live check (decision 7) passed on 2026-10-29,
    as decision 4 said. `anthropic/*` models on OpenRouter default to `anthropic` through the family
    preference; the startup re-derivation moves every model whose format no admin set and writes

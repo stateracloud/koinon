@@ -26,7 +26,8 @@ var _ = Describe("run limits", func() {
 	// cacheHeavy is a request of a long agent loop: a big prompt read from the provider's cache, a
 	// short answer, a fraction of a cent.
 	cacheHeavy := func(e *env, cost string) ledger.Entry {
-		x := e.entry(time.Now(), cost, 180_000, 400)
+		// 500 plain input beside the cache parts (the record's buckets are disjoint): 180k in all.
+		x := e.entry(time.Now(), cost, 500, 400)
 		x.CacheReadTokens, x.CacheWriteTokens = 178_000, 1_500
 		return x
 	}
@@ -62,7 +63,7 @@ var _ = Describe("run limits", func() {
 		_, err := db.Exec(ctx, `UPDATE runs SET max_tokens = 1000 WHERE org_id = $1 AND id = $2`, e.org, r.ID)
 		Expect(err).NotTo(HaveOccurred())
 		x := cacheHeavy(e, "0.01")
-		x.ReasoningTokens = 120
+		x.OutputTokens, x.ReasoningTokens = 280, 120 // 400 output in all
 		_, err = ing.Ingest(ctx, []ledger.Entry{x})
 		Expect(err).NotTo(HaveOccurred())
 
