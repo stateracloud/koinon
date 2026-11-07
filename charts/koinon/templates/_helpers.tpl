@@ -483,7 +483,7 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end }}
 
 {{/*
-The Secret with the bearer token of koinon-api's internal OTLP listener (ADR 0074, issue koinon-private#52): key
+The Secret with the bearer token of koinon-api's internal OTLP listener (ADR 0074, old issue 52): key
 "token", plus "previous" during a rotation. koinon-api and koinon-agentd mount it; the standalone
 gateway mounts it too, and in kubernetes mode the agentgateway controller reads it by name. Never
 mounted into a sandbox.
@@ -932,7 +932,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        # Always: every KEK it wraps is bound to the install ID in the database (koinon-private#615).
+        # Always: every KEK it wraps is bound to the install ID in the database (old issue 615).
         {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
         {{- include "koinon.kmsEnv" (dict "root" $ "role" "keyAdmin") | trim | nindent 8 }}
       securityContext:

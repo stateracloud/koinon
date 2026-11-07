@@ -27,7 +27,7 @@ const (
 )
 
 // hangBound tells a hang from a slow machine. The client's own timeout is not what these specs test,
-// and the 2 s it had was missed on a loaded external gate (koinon-private#612).
+// and the 2 s it had was missed on a loaded external gate (old issue 612).
 const hangBound = time.Minute
 
 var _ = Describe("Client", func() {

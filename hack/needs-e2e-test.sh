@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# First, and on its own line so set -e stops the script when mktemp fails (koinon-private#476).
+# First, and on its own line so set -e stops the script when mktemp fails (old issue 476).
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/needs-e2e-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
@@ -107,7 +107,7 @@ while IFS= read -r p; do
   expect 0 "$p"
 done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
-# koinon-private#565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
+# old issue 565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
 # or bisect, which are about whether to run) read, and every file under hack/e2e-toolchain/, is an
 # input: a kind, ko or helm bump must run the e2e.
 while IFS= read -r p; do

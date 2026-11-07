@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Live chunks (koinon-private#344, ADR 0074). The text an agent is typing is not stored chunk by chunk (the
+// Live chunks (old issue 344, ADR 0074). The text an agent is typing is not stored chunk by chunk (the
 // run's events are completed items); it is streamed. agentd batches the chunks of a run about every
 // ChunkInterval and sends each batch as a NOTIFY on Channel whose payload is
 //

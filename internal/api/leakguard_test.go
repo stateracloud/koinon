@@ -17,7 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
-// The leak guard's data from the UI (ADR 0084, koinon-private#350): McpServerService.SetServerClass and
+// The leak guard's data from the UI (ADR 0084, old issue 350): McpServerService.SetServerClass and
 // LeakGuardService call the same services as the admin API.
 var _ = Describe("the leak guard settings in the UI API", func() {
 	var (

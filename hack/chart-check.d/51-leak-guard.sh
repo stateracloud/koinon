@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154,SC2046,SC2206,SC2015
-# Chart assertions: the MCP leak guard (ADR 0084, ADR 0091, issue koinon-private#349).
+# Chart assertions: the MCP leak guard (ADR 0084, ADR 0091, old issue 349).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 # koinon-api serves the guard on its own port and Service; the reconciler renders that Service's

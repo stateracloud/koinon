@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The required check `go` aggregates the parallel go-* jobs of ci.yml (koinon-private#217). Fails when a go-*
+# The required check `go` aggregates the parallel go-* jobs of ci.yml (old issue 217). Fails when a go-*
 # job is missing from the gate's needs, or the gate names a job that does not exist.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -20,10 +20,10 @@ if [[ $jobs != "$needs" ]]; then
 fi
 # shellcheck disable=SC2016 # literal GitHub expression, not a shell expansion
 grep -qF '    if: ${{ !cancelled() && !(github.event_name == '"'push'"' && needs.changes.outputs.skip == '"'true'"') }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
-# A draft is not tested: the gate must fail on it (koinon-private#593), or a vacuous green would be the newest run.
+# A draft is not tested: the gate must fail on it (old issue 593), or a vacuous green would be the newest run.
 # shellcheck disable=SC2016 # literal text of the workflow
 sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | grep -qF 'SKIP == true && $EVENT == pull_request' || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
-# go-test satisfied by an external run (koinon-private#610): the job is skipped when `changes` found a green go-test-lab on
+# go-test satisfied by an external run (old issue 610): the job is skipped when `changes` found a green go-test-lab on
 # the head, and only then may the gate count that skip. Run the gate's own script with each outcome.
 # shellcheck disable=SC2016 # literal text of the workflow
 grep -qF "if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'" <(sed -n '/^  go-test:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-test must be skipped when go_test_lab is true (and only then)"; exit 1; }

@@ -55,7 +55,7 @@ printf 'no header\n' >"$work/0008-x.md"
 if "$index" "$work" >/dev/null 2>&1; then echo "FAIL: header required"; fail=1; else echo "ok: header required"; fi
 rm "$work/0008-x.md"
 
-# Status values and links (koinon-private#525).
+# Status values and links (old issue 525).
 expect_out() { # expect_out <exit code> <description> <text in the output>
   local got=0 out
   out=$("$lint" "$work" 2>&1) || got=$?

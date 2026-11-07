@@ -90,7 +90,7 @@ Consequences: every turn costs one more short model call; a ticket whose agent w
 (a session from before this) hands off from its messages alone; a handoff is a summary, not the
 session, so the agent can miss detail the old session had.
 
-## Amendment (2026-10-26, koinon-private#146 A6): the generation follows the checkpoint lineage
+## Amendment (2026-10-26, old issue 146 A6): the generation follows the checkpoint lineage
 
 [0065](0065-work-model-tasks-inbox.md) builds home checkpoints in v0.1
 ([0032](0032-agent-home-checkpoints.md)). The home generation now follows the home's checkpoint

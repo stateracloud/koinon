@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146) (rounds 1 and 3, and the
+- Relates to: old issue 146 (rounds 1 and 3, and the
   releases)
 - Amends: [0010](0010-eventing.md) (ingress, subscriptions), [0030](0030-run-state-machine.md)
   (timers, the sandbox-timeout failure), [0049](0049-v01-scope-decisions.md) (sandbox idle stop)
@@ -26,7 +26,7 @@ webhook ingest with dedupe and retries, and per-org concurrency and rate limits.
 **Latency.** The spike measured 22 s from start to Ready for a stopped Kata sandbox and 4–10 s for
 OpenCode's ACP `initialize` (`hack/spike/results/1-install.md:16`, `7-harnesses.md:28`). A resume
 from a stopped sandbox is about 30–45 s, and a two-agent exchange 60–90 s _(estimates,
-`triggers-lifecycle.md` §1.3, koinon-private#146)_. Today:
+`triggers-lifecycle.md` §1.3, old issue 146)_. Today:
 
 - a sandbox stops after 10 idle minutes, parked runs included (`internal/reconciler/reconciler.go:76`);
 - a run whose sandbox is not Ready within 5 minutes fails (`internal/agentd/agentd.go:150`,
@@ -98,20 +98,20 @@ than a Postgres row does (`messaging-and-workflows.md` §3.4).
 
 ### Interruption, watches and warm pools
 
-12. **Interruption** (koinon-private#146 A2): only a person's chat message on the task can interrupt a running
+12. **Interruption** (old issue 146 A2): only a person's chat message on the task can interrupt a running
     turn. Events, replies from other agents and answers that match a task mid-turn wait until the
     turn ends, then arrive together. A parked run is resumed by any matching input.
-13. **Task-scoped watch** (koinon-private#146 A5): an MCP tool `watch(kind, key, until)` waits for one event tied
+13. **Task-scoped watch** (old issue 146 A5): an MCP tool `watch(kind, key, until)` waits for one event tied
     to the agent's own task. It is allowed only for event kinds that the agent's triggers or
     connections already cover. It expires, is removed when the task ends, and the run parks
     meanwhile. **This is not agent-created triggers:** triggers stay on the versioned agent
     (decision 4); a watch adds no new ingress and no new permission.
-14. **Warm pools** (koinon-private#146 A9, v0.3): only for sandboxes without a home volume (ephemeral agents,
+14. **Warm pools** (old issue 146 A9, v0.3): only for sandboxes without a home volume (ephemeral agents,
     [0065](0065-work-model-tasks-inbox.md)), and only once Agent Sandbox and OpenShell support them
     upstream. Agent Sandbox v1.0.7 ships a `SandboxWarmPool` extension, but OpenShell 0.1.5 drives
     `Sandbox` directly and has no warm or claim path (`triggers-lifecycle.md` Part 2).
 
-### Releases (koinon-private#146)
+### Releases (old issue 146)
 
 - v0.1: DBOS; schedule and direct-message triggers.
 - v0.2: code-host and Slack/Teams events (webhooks, Socket Mode, polling, correlation); the
@@ -134,7 +134,7 @@ flowchart LR
 
 ## Alternatives considered
 
-From koinon-private#146 and `messaging-and-workflows.md` Part 2 (licences read from each repository's licence
+From old issue 146 and `messaging-and-workflows.md` Part 2 (licences read from each repository's licence
 file on 2026-10-26):
 
 - **Restate** (v1.8.1): BSL 1.1, Apache-2.0 four years after each release. Not OSI open source, and
@@ -225,11 +225,11 @@ file on 2026-10-26):
   the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
   re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
   ID (for example the pod name) or the durable runtime must stay at one replica.~~
-  Answered by ADR 0085 (koinon-private#413): the executor ID is the pod name (downward API), and a leader recovers
+  Answered by ADR 0085 (old issue 413): the executor ID is the pod name (downward API), and a leader recovers
   the workflows of executors whose heartbeat went stale.
 - ~~`ApplicationVersion` is the release version, so workflows left pending by the previous release
   (a long durable timer) are not recovered after an upgrade; decide how they are carried over.~~
-  Answered by ADR 0085, decision 11 (koinon-private#412): a fixed `durable.WorkflowVersion`, bumped only when a
+  Answered by ADR 0085, decision 11 (old issue 412): a fixed `durable.WorkflowVersion`, bumped only when a
   workflow's steps change, and `durable.CarryOver` forks older pending workflows from step 0.
 - ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
   the 2026-10-27 (DB2) amendment: `run_claimable`.
@@ -238,9 +238,9 @@ file on 2026-10-26):
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
 - Gitea's webhook signature scheme, and the polling interval per provider.
-- ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since koinon-private#146
+- ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since old issue 146
   lists correlation under v0.2.~~ Answered by the 2026-10-27 (TR3) amendment: it ships in v0.1 for the
-  inbox chat (koinon-private#146, procoduck, 2026-10-26); Slack and Teams stay in v0.2.
+  inbox chat (old issue 146, procoduck, 2026-10-26); Slack and Teams stay in v0.2.
 - The DBOS management plane (Conductor) is an enterprise module (`go.dbos.dev/dbos-enterprise-go`);
   how operators inspect DBOS state without it.
 
@@ -298,8 +298,8 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 
 ## Links
 
-- Issue [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146); Restate licence
-  [koinon-private#11](https://github.com/stateracloud/koinon-private/issues/11)
+- Old issue 146; Restate licence
+  old issue 11
 - ADRs [0010](0010-eventing.md), [0030](0030-run-state-machine.md), [0049](0049-v01-scope-decisions.md),
   [0060](0060-migrations-as-a-job.md), [0062](0062-code-host-connectors.md),
   [0064](0064-work-tracker-connectors.md), [0065](0065-work-model-tasks-inbox.md)
@@ -310,7 +310,7 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 ## Amendment (2026-10-27, plan item TR1): triggers on the agent version
 
 - **Shape.** `templates.Trigger` is `{id, type, filter, instruction}` in the template (`spec.triggers`, schema `$defs.trigger`) and in `agentconfig.Config.Triggers`; the agent proto carries `Trigger` (`cron` and `timezone` for the schedule filter). `id` is a lowercase slug, unique within the agent and stable across versions, so TR2 can key a schedule on `(agent, id)`. At most 16 triggers, instruction at most 4096 characters.
-- **Filters are typed per type, no expression language (koinon-private#146).** `schedule`: a five-field cron expression (`robfig/cron/v3` standard parser; descriptors such as `@daily` and `TZ=`/`CRON_TZ=` prefixes are refused) and an IANA timezone, validated with `time.LoadLocation` (`Local` refused; `time/tzdata` is embedded so validation does not depend on the image). `direct_message`: no filter, at most one per agent. `code_host_event` and `channel_event` exist as enum values and are rejected until v0.2.
+- **Filters are typed per type, no expression language (old issue 146).** `schedule`: a five-field cron expression (`robfig/cron/v3` standard parser; descriptors such as `@daily` and `TZ=`/`CRON_TZ=` prefixes are refused) and an IANA timezone, validated with `time.LoadLocation` (`Local` refused; `time/tzdata` is embedded so validation does not depend on the image). `direct_message`: no filter, at most one per agent. `code_host_event` and `channel_event` exist as enum values and are rejected until v0.2.
 - **Versioned, activated, audited.** The new RPC `AgentService.SetAgentTriggers(agent_id, base_version, triggers)` (admins and owners, because a trigger starts autonomous work) adds a version copying the latest config with the new triggers and audits `agent.triggers.propose` (before and after, with instructions). `base_version` must equal `latest_version`. Activation is the existing `ActivateAgent`; its audit event now also records the activated version's triggers and, in `before`, the previous version's.
 - **An active agent stays active while a trigger change is proposed.** `ReturnAgentToDraft` (grant changes) would stop the agent's runs for a change that adds no grant, so `SetAgentTriggers` does not use it. Instead `ActivateAgent` also accepts an active agent whose latest version is newer than its active one (the query allows `status IN ('draft','active')`; activating the version it already runs is still refused). Judgement call: the active version keeps running and its triggers stay in effect until the new version is activated.
 - **Read side.** `internal/triggers`: `ForOrg`, `All` (every live org; query `ListActiveAgentVersionsAllOrgs`, on the cross-org allowlist) and `ForAgent`, each optionally filtered by type. A trigger is in effect when it is in the active version of an `active` agent; draft, archived and proposed versions contribute none. They do not check `unhealthy_at`; TR2 and TR3 decide what to do for an unhealthy agent. `templates.Trigger.Next(t)` computes the next schedule firing in the trigger's zone. Nothing is scheduled or fired by TR1; trigger state such as last-fired belongs to TR2 (no migration).
@@ -319,7 +319,7 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 
 ## Amendment (2026-10-27, plan item DB2): per-org concurrency and rate limits as built
 
-Settles the open question on where per-org concurrency is enforced (koinon-private#146, procoduck, 2026-10-26).
+Settles the open question on where per-org concurrency is enforced (old issue 146, procoduck, 2026-10-26).
 
 - **Run concurrency lives in Postgres.** `run_claimable` (migration 00023) refuses a claim while the
   org already has `max_concurrent_runs` runs in `starting` or `running`; parked runs do not count.
@@ -392,7 +392,7 @@ Settles the open question on where per-org concurrency is enforced (koinon-priva
 
 ## Amendment (2026-10-27, plan item TR3): the direct-message trigger as built
 
-Settles the open question on thread correlation in v0.1 (koinon-private#146, procoduck, 2026-10-26, decision 2): inbox-chat
+Settles the open question on thread correlation in v0.1 (old issue 146, procoduck, 2026-10-26, decision 2): inbox-chat
 thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0.2.
 
 - **The thread is the task.** No table and no migration. `TaskService.SendDirectMessage(agent_id,
@@ -453,7 +453,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
 
 ## Amendment (2026-10-28, rc.6): the sandbox wait cap, notify targets and a warning before the time limit
 
-1. *The sandbox wait is capped (koinon-private#160).*
+1. *The sandbox wait is capped (old issue 160).*
    - The LT1 requeue is bounded by `org_settings.sandbox_wait_cap_seconds` (default 1 h, agentd
      `--sandbox-wait-cap`). It counts from the first not-ready poll of the current wait
      (`runs.sandbox_wait_started_at`, set by agentd and kept across requeues, so queue time between claims
@@ -470,8 +470,8 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
      this means the admins and owners, who are the ones who can resume an agent. Every task with a
      waiting run of the agent gets a note.
    - Supersedes in part the follow-up "the 5-minute `SandboxTimeout` failure becomes a requeue" and the LT1 amendment (latency defaults as built): the requeue is no longer unbounded.
-   - Alternative rejected: failing at the first queue wait, which brings back koinon-private#160's fail-on-burst.
-2. *Notify targets on triggers (koinon-private#182).*
+   - Alternative rejected: failing at the first queue wait, which brings back old issue 160's fail-on-burst.
+2. *Notify targets on triggers (old issue 182).*
    - `Trigger.notify` is `{kind: user|role|channel, user, role, channel}`. It is accepted on every
      trigger type except `direct_message`, which asks the chat's person. A template names a role only:
      a person and a channel both belong to one org.
@@ -482,7 +482,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
      change does not move a task's questions.
    - A person target is checked when the triggers are set (member or higher) and again when the question
      is asked. If it is no longer valid, the question falls back to the default and the tool result says so.
-3. *A warning before the time limit (koinon-private#183).*
+3. *A warning before the time limit (old issue 183).*
    - `WrapUpNotice` before `started_at + max_wall_clock + parked`, agentd cancels the current turn
      (`session/cancel`) and sends a wrap-up prompt on the same session. If a turn starts inside the window,
      the notice is prepended instead.

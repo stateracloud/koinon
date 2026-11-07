@@ -110,7 +110,7 @@ Checked 2026-10-21:
 - **Restate:** BSL 1.1, with a four-year change date to Apache-2.0; bans only a public Restate
   Platform Service. https://github.com/restatedev/restate/blob/main/LICENSE. SDK licenses
   unverified. Design open item "Verify Restate's server license" is answered here
-  ([koinon-private#11](https://github.com/stateracloud/koinon-private/issues/11)).
+  (old issue 11).
 - **celld:** Apache-2.0, v0.6.2, a V8 daemon that runs Workers apps with Durable Objects, SQLite
   per cell and LTX replication to S3/GCS/Azure, with no consensus service.
   https://github.com/denoland/celld
@@ -152,7 +152,7 @@ introduced first.
 - **Sandbox wait.** A run whose sandbox is not ready after 5 minutes waits in the queue instead of
   failing, and interactive work is claimed before scheduled work ([0066](0066-triggers-and-scheduling.md)).
 
-## Amendment (2026-10-26, koinon-private#146 A1): failure classes
+## Amendment (2026-10-26, old issue 146 A1): failure classes
 
 Each failed run gets a `failure_class`, set where the error is first understood (the gateway or
 ledger response, the ACP stop reason, the harness exit code). Retries and inbox messages follow
@@ -170,7 +170,7 @@ from the class:
 Status (FC1): `runs.failure_class` (migration 00021) and `Run.failure_class` on the API carry the
 class. agentd classifies an answered `session/prompt` error from the HTTP status, `Retry-After` and
 error text the harness reports (`internal/agentd/classify.go`). Exactly one layer retries a failed
-model request (ADR 0056 amendment 2026-10-31, point 3; koinon-private#341). For a flavor whose harness retries model
+model request (ADR 0056 amendment 2026-10-31, point 3; old issue 341). For a flavor whose harness retries model
 requests itself (`RetriesModelRequests` in `internal/flavor`, OpenCode today) that layer is the
 harness, on Koinon's policy, which agentd passes as launch switches; agentd then repeats no turn, and
 a `transient` or `throttled` failure that reaches it ends the run. For every other flavor agentd
@@ -193,14 +193,14 @@ Before FC1 a failure was free text (`internal/agentd/run.go:42`, `:603-611`, `:6
 
 ## Amendment (2026-10-28, rc.6): `sandbox_unavailable` and two run columns
 
-The failure class `sandbox_unavailable` joins the list of koinon-private#146 A1: the run's sandbox never became ready
+The failure class `sandbox_unavailable` joins the list of old issue 146 A1: the run's sandbox never became ready
 within the org's cap (ADR 0066 amendment 2026-10-28). It is never retried. Two columns record the
 timers the amendment adds: `runs.sandbox_wait_started_at` (when the current wait for the sandbox
 began; kept across requeues, cleared when any run of the agent finds the sandbox ready or the agent is
 resumed) and `runs.wrap_up_notice_at` (set when the wrap-up notice is no longer armed: it was sent, or it was suppressed because the harness ignored the cancel; the `run.wrap_up_notice` event is the record that the agent was told). There are no new
 states or transitions.
 
-## Amendment (2026-10-29, issue koinon-private#246): who refused the model request
+## Amendment (2026-10-29, old issue 246): who refused the model request
 
 OpenCode 2.2.0 reports a provider's 401 and 403 alike as `-32000 "Authentication required: provider
 authentication required"`, with no status. The text heuristic (`classify.go`) read it as the gateway

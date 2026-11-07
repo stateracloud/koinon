@@ -114,8 +114,8 @@ has "could not read e2e-lab: invalid JSON"
 echo '[{"context":"e2e-lab","state":"success"}]' >"$tmp/lab.json"
 
 wf=.github/workflows/e2e-kind.yml
-# The result job can read commit statuses (without it e2e-lab is a 403, koinon-private#588).
-awk '/^  result:/{f=1;next} f&&/^  [a-z-]+:/{f=0} f' "$wf" | grep -qxF '      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (koinon-private#588)' || { echo "FAIL: the result job lacks statuses: read" >&2; fail=1; }
+# The result job can read commit statuses (without it e2e-lab is a 403, old issue 588).
+awk '/^  result:/{f=1;next} f&&/^  [a-z-]+:/{f=0} f' "$wf" | grep -qxF '      statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (old issue 588)' || { echo "FAIL: the result job lacks statuses: read" >&2; fail=1; }
 echo ok: result job statuses pinned
 
 # The YAML and the gate agree on the marker step: its exact name, and the `if` that makes the default

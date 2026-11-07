@@ -17,7 +17,7 @@ SELECT slug FROM orgs
 WHERE id = @org_id AND deleted_at IS NULL;
 
 -- name: GetOrgDefaultModel :one
--- The model agents without a model setting run on (koinon-private#256); '' when the org has none.
+-- The model agents without a model setting run on (old issue 256); '' when the org has none.
 SELECT coalesce(default_model, '')::text AS default_model FROM orgs
 WHERE id = @org_id AND deleted_at IS NULL;
 

@@ -85,7 +85,7 @@ type pathResolver func(workspace string, paths []string) ([]string, error)
 // decide answers req for a session working in workspace. Allowing picks a one-time allow
 // option, so the harness asks again next time; agentd never picks an "always" option, since
 // agentd answers each request on its own and nothing the harness remembers may widen access
-// (koinon-private#260). A request without a once option is answered with a cancel. Rejecting picks a
+// (old issue 260). A request without a once option is answered with a cancel. Rejecting picks a
 // reject-once option, or cancels the request if none is offered.
 //
 // The paths are checked lexically first. When resolve is not nil, the paths that pass are

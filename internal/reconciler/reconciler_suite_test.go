@@ -126,7 +126,7 @@ func coolDown(ctx context.Context, org pgtype.UUID, agents ...pgtype.UUID) {
 }
 
 // newOnDemandAgent creates and activates an OpenCode agent that is not keep-warm: its sandbox
-// starts with the first run, not with the activation (koinon-private#315).
+// starts with the first run, not with the activation (old issue 315).
 func newOnDemandAgent(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
 		OrgID: org, DisplayName: "Repo helper with a long display name that is no sandbox name",
@@ -165,7 +165,7 @@ func claimRun(ctx context.Context, org pgtype.UUID) store.Run {
 }
 
 // dirtyHome plays a harness that ran in the agent's sandbox and ended: a run goes starting ->
-// running -> succeeded, which stamps agent_sandboxes.home_dirtied_at (issue koinon-private#329).
+// running -> succeeded, which stamps agent_sandboxes.home_dirtied_at (old issue 329).
 func dirtyHome(ctx context.Context, org, user, agent pgtype.UUID) store.Run {
 	GinkgoHelper()
 	queueRun(ctx, org, user, agent)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# hack/go-test.sh runs its PARALLEL_SUITES with Ginkgo -p (koinon-private#222). Fails when a listed suite is not
+# hack/go-test.sh runs its PARALLEL_SUITES with Ginkgo -p (old issue 222). Fails when a listed suite is not
 # a Ginkgo suite, when one starts Postgres outside a BeforeSuite (the container would then be shared
 # or missing in the other processes), or when one binds a fixed local port.
 
@@ -35,7 +35,7 @@ pgs=$(grep -n 'pgserver" -dsn-file' hack/go-test.sh | head -1 | cut -d: -f1)
 ! grep -q 'TESTCONTAINERS_RYUK_DISABLED' hack/go-test.sh .github/workflows/ci.yml || { echo "FAIL: Ryuk must stay on (#171)"; exit 1; }
 echo "ok: one testcontainers session per run, exported before pgserver"
 
-# Per-spec reports (koinon-private#221): the script writes them and CI uploads them even when tests fail.
+# Per-spec reports (old issue 221): the script writes them and CI uploads them even when tests fail.
 grep -q -- '--junit-report' hack/go-test.sh || { echo "FAIL: go-test.sh writes no Ginkgo JUnit report"; exit 1; }
 grep -q -- 'gotestsum --junitfile' hack/go-test.sh || { echo "FAIL: go-test.sh writes no gotestsum JUnit file"; exit 1; }
 wf=.github/workflows/ci.yml
@@ -63,7 +63,7 @@ if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
 	echo "ok: serial Ginkgo suite report has per-spec testcases"
 fi
 
-# koinon-private#507: a Ginkgo suite where no spec ran is not a pass. ./internal/runoutcome has Postgres specs
+# old issue 507: a Ginkgo suite where no spec ran is not a pass. ./internal/runoutcome has Postgres specs
 # only, so without Docker every one of them skips through testenv.Require. A dead DOCKER_HOST does
 # not simulate that (testcontainers falls back to the default socket), KOINON_TESTENV_UNAVAILABLE does.
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
@@ -99,7 +99,7 @@ out=$(env -u KUBEBUILDER_ASSETS HELM=koinon-no-such-helm REPORT_DIR="$d" hack/go
 grep -q 'INCOMPLETE (missing helm)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict does not name helm"; exit 1; }
 echo "ok: a plain test skipped for an expected requirement makes the run incomplete"
 
-# make test-go-suite SUITE=<name> (koinon-private#512): one of --list, nothing free-form. The refusals do not start
+# make test-go-suite SUITE=<name> (old issue 512): one of --list, nothing free-form. The refusals do not start
 # any test, so they run anywhere.
 for bad in "" ./internal/nope "./internal/agentd ./internal/api" "../etc"; do
 	rc=0
@@ -113,7 +113,7 @@ KOINON_RC_FILE=$rc_file REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXX
 [[ $(cat "$rc_file") == 1 ]] || { echo "FAIL: KOINON_RC_FILE must hold go-test.sh's exit status (1 for a bad package)"; exit 1; }
 echo "ok: KOINON_RC_FILE carries the exit status past make"
 
-# koinon-private#512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
+# old issue 512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
 # the same run says "ok ... 0 failed" (the first external gate run: a flaky plain test, exit 1, no hint).
 fx=$(mktemp -d "$root/internal/zzfailfixture.XXXXXX")
 trap 'rm -rf "$fx"' EXIT

@@ -95,7 +95,7 @@ func fixtures() []fixture {
 			Models: []gateway.Model{
 				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
 				// A model whose thinking row pins a beta: the gateway sets it. No catalog row pins one
-				// since the explicit forms of koinon-private#316, so the capability is spelled out here.
+				// since the explicit forms of old issue 316, so the capability is spelled out here.
 				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Capability{
 					Thinks: thinking.Always, On: thinking.AdaptiveSummarized, Betas: []string{thinking.BindingBeta},
 				}, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
@@ -109,7 +109,7 @@ func fixtures() []fixture {
 	}}
 	formats.AddKey(fixedKey("k-eeeeeeeeeeee", agentA, "test-e"))
 
-	// Issue koinon-private#245: the limits the ledger pushed in the rc.7 home-lab run, net of spends with ten and
+	// Old issue 245: the limits the ledger pushed in the rc.7 home-lab run, net of spends with ten and
 	// twelve fraction digits, and one that float64 prints with an exponent.
 	budgets := gateway.State{}
 	budgets.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))

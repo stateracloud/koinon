@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Merge a pull request only after its head has been read, not assumed (koinon-private#647). It replaces the
+# Merge a pull request only after its head has been read, not assumed (old issue 647). It replaces the
 # hand-written wait-then-merge loops: a draft's green rollup, a ready run that has not started yet and a
 # required context that never reported have each been merged over by hand before.
 #

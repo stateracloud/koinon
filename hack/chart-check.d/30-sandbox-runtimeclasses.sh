@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154,SC2046,SC2206,SC2015
-# Chart assertions: the RuntimeClasses the sandbox policy admits (ADR 0075, koinon-private#442).
+# Chart assertions: the RuntimeClasses the sandbox policy admits (ADR 0075, old issue 442).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 pol=templates/sandbox-policy.yaml

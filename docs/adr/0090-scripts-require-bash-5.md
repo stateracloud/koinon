@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-02
 - Relates to: [0079](0079-dependency-cooldown.md), [0082](0082-work-claims-and-ready-queue.md)
-- Issue: koinon-private#553
+- Issue: old issue 553
 
 ## Context
 
@@ -65,7 +65,7 @@ it. That closes the gap at the source for the price of one prerequisite.
 ## What this replaces
 
 - The bash 3.2 compatibility rule in `docs/agents/subagent-brief.md` and in script comments.
-- The planned bash 3.2 CI job of koinon-private#544. It is not built.
+- The planned bash 3.2 CI job of old issue 544. It is not built.
 - The Nix point of `docs/research/2026-11-dev-toolchain.md`: the gap it would have closed is closed by
   Homebrew bash (addendum there). BSD-versus-GNU tool differences (sed, grep, date, mktemp) remain and
   are not covered here.

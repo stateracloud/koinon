@@ -326,7 +326,7 @@ var _ = Describe("Provider delivery", func() {
 		Expect(slices.ContainsFunc(st.Providers, func(p gateway.Provider) bool { return p.Org == orgSlug(ctx, orgB) })).To(BeTrue())
 	})
 
-	Describe("the models the gateway serves (issue koinon-private#174)", func() {
+	Describe("the models the gateway serves (old issue 174)", func() {
 		It("records them once applied and removes them when the provider is disabled or deleted", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			keyed := addProvider(ctx, org, user, "openrouter", "sk-served", "keyed-model")

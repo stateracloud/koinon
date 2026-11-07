@@ -111,7 +111,7 @@ var _ = Describe("Destination queues", func() {
 		depth := func() float64 { return testutil.ToFloat64(m.QueueDepth.WithLabelValues("org", "generic")) }
 		dropped := func() float64 { return testutil.ToFloat64(m.Dropped.WithLabelValues("org", "generic", "queue_full")) }
 		// A post returns once its spans are in the intake, and the intake workers attribute spans
-		// concurrently, so two posts in a row can reach the queue in either order (koinon-private#567). Each span is
+		// concurrently, so two posts in a row can reach the queue in either order (old issue 567). Each span is
 		// queued (or has pushed the oldest out) before the next is posted, so arrival order is s1..s5.
 		for i := 1; i <= 5; i++ {
 			e.post(named(tr.tool(false), "s"+strconv.Itoa(i)))
@@ -147,7 +147,7 @@ var _ = Describe("Destination queues", func() {
 	It("retries with backoff, pauses a failing destination with a growing breaker, and recovers", func() {
 		// The waits the queue asks for after the first attempt, recorded rather than timed: on a loaded
 		// machine a 2 ms wait can take longer than the breaker's pause, so only the pauses' lower
-		// bounds are measured on the clock (a wait never ends early) (koinon-private#612).
+		// bounds are measured on the clock (a wait never ends early) (old issue 612).
 		var ep string
 		var mu sync.Mutex
 		var afterFirst []time.Duration
@@ -248,7 +248,7 @@ var _ = Describe("Destination queues", func() {
 		}
 		e.post(named(tb.tool(false), "b0"))
 		// A's export is still held: B's span arriving, and every post above answering, is the proof that
-		// neither B's queue nor the sender waited for A. No wall-clock bound (koinon-private#612).
+		// neither B's queue nor the sender waited for A. No wall-clock bound (old issue 612).
 		Eventually(func() int { return len(beB.spans()) }).Should(Equal(1), "org B's destination is unaffected")
 		Expect(be.spans()).To(BeEmpty())
 		close(hold)
@@ -257,7 +257,7 @@ var _ = Describe("Destination queues", func() {
 
 	It("writes a destination's health at most every interval", func() {
 		// The router's clock is frozen and moved by whole intervals, so the number of intervals the
-		// traffic spans is fixed however slowly the machine runs (koinon-private#612).
+		// traffic spans is fixed however slowly the machine runs (old issue 612).
 		setup(func(c *router.Config) { c.HealthInterval = 300 * time.Millisecond })
 		e.clock.Freeze()
 		const rounds = 3

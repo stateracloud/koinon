@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Stand-in for a Gitea server in the escape suite (issue koinon-private#371): koinon-fakemodel -standin over TLS.
+# Stand-in for a Gitea server in the escape suite (old issue 371): koinon-fakemodel -standin over TLS.
 # OpenShell 0.1.5 admits the connect to an allowed host at L4 and dials (and TLS-handshakes) it
 # before its L7 relay judges the request, so the Gitea read-grant specs need a real TLS listener
 # behind the host the grant is rendered for, inside the cluster instead of on the internet. It

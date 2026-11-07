@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
-// The cap on the total wait for a sandbox (issue koinon-private#160; ADR 0066 amendment 2026-10-28).
+// The cap on the total wait for a sandbox (old issue 160; ADR 0066 amendment 2026-10-28).
 var _ = Describe("the sandbox wait cap", func() {
 	addAdmin := func(ctx context.Context, e *env) pgtype.UUID {
 		GinkgoHelper()

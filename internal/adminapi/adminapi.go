@@ -68,7 +68,7 @@ type Server struct {
 	// agentModels sets and describes agents' models; triggers fires a schedule trigger now;
 	// modelCheck runs the provider echo check.
 	agentModels *agentmodel.Service
-	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (koinon-private#350).
+	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (old issue 350).
 	leakGuard  *orgsettings.Service
 	triggers   TriggerRunner
 	modelCheck *modelcheck.Service

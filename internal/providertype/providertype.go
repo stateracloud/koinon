@@ -31,12 +31,12 @@ var conservative = Traits{BillsRejectedRequests: true}
 // describes the provider's errors and the issue that recorded the billing claim; re-read the page
 // when changing a row.
 var traits = map[string]Traits{
-	// https://docs.anthropic.com/en/api/errors; billing claim: issue koinon-private#241.
+	// https://docs.anthropic.com/en/api/errors; billing claim: old issue 241.
 	Anthropic: {BillsRejectedRequests: false},
 	// https://openrouter.ai/docs/api-reference/errors (a moderation or guardrail 403 is returned
-	// before a provider is reached); billing claim: issue koinon-private#241.
+	// before a provider is reached); billing claim: old issue 241.
 	OpenRouter: {BillsRejectedRequests: false},
-	// https://platform.openai.com/docs/guides/error-codes; billing claim: issue koinon-private#241.
+	// https://platform.openai.com/docs/guides/error-codes; billing claim: old issue 241.
 	OpenAI: {BillsRejectedRequests: false},
 }
 

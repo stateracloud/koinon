@@ -379,7 +379,7 @@ var _ = Describe("runs", func() {
 			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(second.ID))
 		})
 
-		// koinon-private#27's per-task rule with koinon-private#28's takeover columns: a run whose lease was released or
+		// old issue 27's per-task rule with old issue 28's takeover columns: a run whose lease was released or
 		// expired is still owned, so the task's next run waits through every takeover, and
 		// the next run sees how far the taken-over run prompted.
 		It("keeps a task's next run waiting while another of its runs is taken over", func(ctx SpecContext) {

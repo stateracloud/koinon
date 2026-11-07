@@ -19,7 +19,7 @@ import (
 )
 
 // A spent budget revokes the agent's key while the harness is mid-turn: the harness sees the
-// gateway's 401 (or 429) before the ledger's cancel reaches agentd (issue koinon-private#188).
+// gateway's 401 (or 429) before the ledger's cancel reaches agentd (old issue 188).
 var _ = Describe("A gateway refusal on a spent budget", func() {
 	// spend records spent USD for the agent now, which a daily limit of limit USD counts.
 	spend := func(ctx context.Context, e *env, limit, spent string) {

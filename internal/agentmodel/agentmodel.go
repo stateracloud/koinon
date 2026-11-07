@@ -163,7 +163,7 @@ func ListServed(ctx context.Context, rv prices.Resolver, q *store.Queries, org p
 	return out, nil
 }
 
-// OrgDefault is the org's stored default model (orgs.default_model, koinon-private#256): the model agents with
+// OrgDefault is the org's stored default model (orgs.default_model, old issue 256): the model agents with
 // no model setting run on. It is set by the org's first model or by an admin (Service.SetDefault)
 // and nothing else changes it. "" when the org has none.
 func OrgDefault(ctx context.Context, q *store.Queries, org pgtype.UUID) (string, error) {

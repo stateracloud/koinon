@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Guards against the koinon-private#476 class: a hack/ test script whose temp directory failed to be created must
+# Guards against the old issue 476 class: a hack/ test script whose temp directory failed to be created must
 # stop, not run `rm -rf` on the caller's directory (`cd "$(mktemp -d)"` with a failing mktemp cd's
 # nowhere, and the EXIT trap then deletes the caller's worktree).
 #   1. static: no `cd "$(mktemp` (or pushd) under hack/.

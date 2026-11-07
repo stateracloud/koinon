@@ -150,7 +150,7 @@ var _ = Describe("Render", func() {
 			Expect(render().LLM.Policies.Transformations.Request.Set).To(HaveKeyWithValue(gateway.OrgHeader, `default(apiKey.org, "")`))
 		})
 
-		It("keeps only the allowlisted client headers on LLM and MCP routes (koinon-private#262)", func() {
+		It("keeps only the allowlisted client headers on LLM and MCP routes (old issue 262)", func() {
 			d := render()
 			Expect(d.LLM.Policies.Transformations.Request.Replace).To(Equal(
 				`request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])`))
@@ -443,7 +443,7 @@ var _ = Describe("Render", func() {
 		Expect(strings.Count(string(b), "rolling:")).To(Equal(1), "only the reload probe keeps a window")
 	})
 
-	It("renders every USD limit fixed-point with at most nine fraction digits, rounded down, never an exponent (issue koinon-private#245)", func() {
+	It("renders every USD limit fixed-point with at most nine fraction digits, rounded down, never an exponent (old issue 245)", func() {
 		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
 		for _, c := range []struct{ spent, want string }{
 			{"0.0172757592", "4.98272424"},    // a DeepSeek charge: ten digits

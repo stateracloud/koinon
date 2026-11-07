@@ -20,7 +20,7 @@ import (
 const secretstorePath = "github.com/stateracloud/koinon/internal/secretstore"
 
 // Every secretstore.Binding the code builds names a column that holds envelopes; the key tool
-// must know all of them, or rotation could retire a KEK they still need (issue koinon-private#96). A plain test,
+// must know all of them, or rotation could retire a KEK they still need (old issue 96). A plain test,
 // not a spec of the suite, so it runs without Docker.
 func TestColumnsListEveryBinding(t *testing.T) {
 	g := NewWithT(t)

@@ -96,7 +96,7 @@ var _ = Describe("the key-admin Job", func() {
 		ks := load(ctx)
 		Expect(ks.Keys).To(HaveLen(1))
 		Expect(ks.Stored[ks.Active].Backend).To(Equal(secretstoretest.FakeKMSBackend))
-		Expect(ks.Stored[ks.Active].InstallID).To(Equal(secretstoretest.InstallA), "bound to the install (koinon-private#615)")
+		Expect(ks.Stored[ks.Active].InstallID).To(Equal(secretstoretest.InstallA), "bound to the install (old issue 615)")
 		Expect(marker.b.Set).To(BeTrue(), "a fresh install is bound-only from its first KEK")
 		Expect(marker.b.How).To(Equal(secretstore.BoundOnlyFirstInstall))
 		Expect(out.String()).To(ContainSubstring("The bound-only marker of this install is set at 2026-11-03T13:00:00Z, when the first KEK of this install was created"))
@@ -368,13 +368,13 @@ var _ = Describe("the key-admin Job", func() {
 		Expect(list.Items).To(BeEmpty())
 	})
 
-	Describe("binding the KEKs wrapped before koinon-private#615 (rewrapUnbound)", func() {
+	Describe("binding the KEKs wrapped before old issue 615 (rewrapUnbound)", func() {
 		var (
 			old      *secretstoretest.FakeKMS
 			local    []byte
 			legacies map[string][]byte
 		)
-		// legacy is a KEK as a release before koinon-private#615 wrapped it: format 1, bound to its ID only.
+		// legacy is a KEK as a release before old issue 615 wrapped it: format 1, bound to its ID only.
 		legacy := func(ctx SpecContext, w secretstore.Wrapper, id string, kek []byte) []byte {
 			GinkgoHelper()
 			b, err := w.Wrap(ctx, kek, secretstoretest.LegacyKEKAAD(id))
@@ -415,7 +415,7 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(out.String()).To(And(
 				ContainSubstring("Bound kek-20261001-prim to the install ID"),
 				ContainSubstring("KEK kek-20261001-olde is wrapped by fakekms:koinon-test-old, not by fakekms:koinon-test, and stays unbound"),
-				ContainSubstring("a rollback below koinon-private#615 no longer works"),
+				ContainSubstring("a rollback below old issue 615 no longer works"),
 				ContainSubstring("kek-20261001-olde stay unbound, so the bound-only marker is not set"),
 			))
 			Expect(marker.b.Set).To(BeFalse(), "an unbound KEK remains")
@@ -465,7 +465,7 @@ var _ = Describe("the key-admin Job", func() {
 			Expect(marker.b.Set).To(BeTrue())
 			Expect(marker.b.How).To(Equal(secretstore.BoundOnlyRewrap))
 			Expect(out.String()).To(And(ContainSubstring("Every KEK is bound. The bound-only marker of this install is set"),
-				ContainSubstring("a rollback below koinon-private#615 no longer works"), ContainSubstring("rotate the KEKs as well")))
+				ContainSubstring("a rollback below old issue 615 no longer works"), ContainSubstring("rotate the KEKs as well")))
 			Expect(load(ctx).Keys["kek-20261001-prim"]).To(Equal(legacies["kek-20261001-prim"]))
 
 			By("a rerun keeps it and wraps nothing")

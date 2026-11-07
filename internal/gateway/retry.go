@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// The do-not-retry marker (ADR 0056, 2026-11-01 amendment, points 4 and 6; koinon-private#342).
+// The do-not-retry marker (ADR 0056, 2026-11-01 amendment, points 4 and 6; old issue 342).
 //
 // Contract, for every consumer of a model or MCP response from the gateway:
 //

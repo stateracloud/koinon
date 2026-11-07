@@ -6,7 +6,7 @@
 - Amends: [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository) (the OpenCode version and the
   OpenCode details of decision 4; decision 4's flavor contract stands)
 - Verification: spike on 2026-10-22 (below); re-pin tracked in
-  [koinon-private#54](https://github.com/stateracloud/koinon-private/issues/54)
+  old issue 54
 
 ## Context
 
@@ -85,7 +85,7 @@ A spike on 2026-10-22 rebuilt the flavor on `@opencode/cli` 2.0.24 (tag `v2.0.24
 
 ### Workarounds tied to 2.0.24
 
-These go away or change when the flavor is re-pinned ([koinon-private#54](https://github.com/stateracloud/koinon-private/issues/54)):
+These go away or change when the flavor is re-pinned (old issue 54):
 
 - the `AGENTS.md` link instead of the `instructions` key (2.0.30 reads the key; using both would
   load the file twice);
@@ -100,7 +100,7 @@ These go away or change when the flavor is re-pinned ([koinon-private#54](https:
 - **Stay on 1.19.3:** works today, but v0.1 would ship on a line that has to be replaced.
 - **Pin 2.0.30 or later now** _(reconstructed)_: would remove the `AGENTS.md` link, but the spike
   verified 2.0.24 end to end and later releases change semantics again (see risks); re-pinning is
-  koinon-private#54.
+  old issue 54.
 - **A fixed delay instead of the readiness prompt:** simpler, but a guess; the prompt shows that
   the server is actually connected, so it is the primary mechanism. A fixed delay stays the
   fallback if the prompt does not get through (decision 4); the short settle after the ready
@@ -121,13 +121,13 @@ These go away or change when the flavor is re-pinned ([koinon-private#54](https:
     they cannot be reached either, because the sandbox policy denies `opencode.ai`, and agentd
     selects the koinon model explicitly.
   - With `pluginInstalls` on, plugins run in-process with OpenCode's full power
-    ([koinon-private#53](https://github.com/stateracloud/koinon-private/issues/53)); a broken plugin can keep OpenCode from
+    (old issue 53); a broken plugin can keep OpenCode from
     getting ready, which the readiness timeout bounds.
   - OpenCode's `execute` tool can call `fetch`; the policy-enforced egress contains it like any
     other process in the sandbox.
   - v2 changes semantics quickly (2.0.28 and 2.0.30 already change config and instructions);
     every re-pin reruns the contract suite and rereads the source.
-- Follow-ups: koinon-private#54 (re-pin), koinon-private#53 (home configuration and plugins).
+- Follow-ups: old issue 54 (re-pin), old issue 53 (home configuration and plugins).
 
 ## Open questions
 
@@ -144,12 +144,12 @@ home-lab run described in Context. Source references are in `flavors/opencode/RE
 ## Links
 
 - [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository),
-  [0049](0049-v01-scope-decisions.md) (on PR koinon-private#16)
+  [0049](0049-v01-scope-decisions.md) (on PR old issue 16)
 - [flavors/opencode/README.md](../../flavors/opencode/README.md)
 - https://github.com/anomalyco/opencode/tree/v2.0.24 (original pin), https://github.com/anomalyco/opencode/tree/v2.2.0 (amendment 2026-10-28)
 - https://www.npmjs.com/package/@opencode/cli
 
-## Amendment 2026-10-28: re-pin to 2.2.0 (issue koinon-private#54)
+## Amendment 2026-10-28: re-pin to 2.2.0 (old issue 54)
 
 procoduck decided on 2026-10-28 to move the OpenCode flavor from `@opencode/cli` 2.0.24 to **2.2.0**
 (published 2026-10-27), **waiving the project's two-week minimum age for this update only**. (Amended 2026-10-29: [0079](0079-dependency-cooldown.md) replaces the unwritten two-week rule with a 3-day minimum and a security fast path; this waiver was made under the old rule and stands as recorded.) The
@@ -166,7 +166,7 @@ Pin: `@opencode/cli-linux-x64` and `-arm64` 2.2.0 from `registry.npmjs.org`, sha
 `flavors/opencode/Dockerfile`); OpenCode tag `v2.2.0`, commit
 `1097e2668b1e08ad63bdf0b1c4860b9bc01e420c`. Decision 1's "2.0.24 only" now reads 2.2.0.
 
-What changed for koinon-private#54:
+What changed for old issue 54:
 
 - **Instructions.** The config's `instructions` key names `/sandbox/.koinon/AGENTS.md`; the
   `AGENTS.md` link in the global config directory is gone. The descriptor's `InstructionLink` for

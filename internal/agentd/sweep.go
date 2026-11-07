@@ -35,7 +35,7 @@ const sweepTimeout = 30 * time.Second
 // earlier one: not a harness's daemon (one that idles after a run and serves the next
 // session), not a background job the agent started. Such a process could change the
 // agent's home between the entry script's checks and the harness reading it, which would let
-// the agent change its own tools or instructions for a later run (koinon-private#84).
+// the agent change its own tools or instructions for a later run (old issue 84).
 //
 // It returns the main process it kept and the IDs of the processes it ended, or a failure
 // when some are still running.

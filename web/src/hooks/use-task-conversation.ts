@@ -38,7 +38,7 @@ export function useTaskConversation(orgId: string, taskId: string) {
   // Run state changes also write task events (queued, canceled, state changes), so a new snapshot re-reads the task.
   const runIds = useMemo(() => (task.data?.runs ?? []).map((r) => r.id), [task.data])
   const watches = useRunWatches(orgId, runIds, () => void refresh())
-  // The text the agent is typing follows the stored events as one more event with no seq of its own (koinon-private#344).
+  // The text the agent is typing follows the stored events as one more event with no seq of its own (old issue 344).
   const runEvents = useMemo(() => Object.fromEntries(Object.entries(watches).map(([id, w]) => [id, [...w.events, ...liveEvents(id, w)]])), [watches])
   // Only when a run's content was purged, and only an admin can read the retention; others see "content expired".
   const anyPurged = useMemo(() => Object.values(runEvents).some((evs) => evs.some((e) => e.contentPurged)), [runEvents])

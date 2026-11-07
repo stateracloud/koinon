@@ -22,7 +22,7 @@ import (
 
 // commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
 // that has moved to the shared CLI stack adds itself here; until then its containers are not
-// checked. koinon-api, koinon-agentd and koinon-reconciler are all on the stack (koinon-private#497, koinon-private#458, koinon-private#457).
+// checked. koinon-api, koinon-agentd and koinon-reconciler are all on the stack (old issue 497, old issue 458, old issue 457).
 var commandTrees = map[string]func() *cobra.Command{
 	"koinon-api":        koinonapi.NewRootCommand,
 	"koinon-agentd":     koinonagentd.NewRootCommand,
@@ -35,7 +35,7 @@ var commandTrees = map[string]func() *cobra.Command{
 // the environment the chart gives it: the command must exist, every flag must be known and parse,
 // every required flag must be present (by flag or environment), the rules between flags must hold,
 // and no KOINON_* variable may be set that the command does not read. Only the command's work is
-// skipped. koinon-private#284 (the migrate Job lacking a token a serve-only check wanted) and 3151301a
+// skipped. old issue 284 (the migrate Job lacking a token a serve-only check wanted) and 3151301a
 // (KOINON_KEK_DIR missing from a Deployment) are failures of this kind; the container-level smoke
 // test (smoke_test.go, make test-chart-smoke) still boots the same containers against Postgres.
 //

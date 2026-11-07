@@ -36,7 +36,7 @@ func parkedRun(ctx context.Context, f fixture) store.Run {
 }
 
 // has_demand keeps a sandbox up and starts a stopped one, so it must be true exactly when
-// ClaimNextRun would claim a run (koinon-private#99).
+// ClaimNextRun would claim a run (old issue 99).
 var _ = Describe("run demand", func() {
 	It("ignores a queued run behind a parked run of its task, until the parked run finishes", func(ctx SpecContext) {
 		f := newFixture(ctx)

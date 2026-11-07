@@ -18,7 +18,7 @@
 # Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp bash5 versions e2e gitleaks.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
-# expected requirement was missing, so some suites or specs skipped; koinon-private#507). Full logs are under
+# expected requirement was missing, so some suites or specs skipped; old issue 507). Full logs are under
 # ${TMPDIR:-/tmp}/koinon-preflight/<hash of the repo root>/, one directory per worktree, so
 # parallel lanes never mix logs. The e2e gate only reports the verdict
 # of hack/needs-e2e.sh and never fails. Gates never touch a cluster (KUBECONFIG=/dev/null).
@@ -194,7 +194,7 @@ g_go() {
 		go vet $pkgs || return 1
 	fi
 	# hack/go-test.sh, not bare go test: its verdict reports a suite that skipped for a missing
-	# requirement (no Docker in a sandbox) as SKIPPED and one that did not run as a failure (koinon-private#507).
+	# requirement (no Docker in a sandbox) as SKIPPED and one that did not run as a failure (old issue 507).
 	local reports rc=0
 	reports=$(mktemp -d "${TMPDIR:-/tmp}/preflight-go.XXXXXX") || return 1
 	# shellcheck disable=SC2086
@@ -250,15 +250,15 @@ g_shell() {
 	shellcheck $files
 }
 g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint can depend on its siblings
-g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (koinon-private#535)
+g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
 }
-g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, koinon-private#553)
+g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, old issue 553)
 	hack/bash5-lint-test.sh
 	hack/bash5-lint.sh
 }
-g_versions() { # hack/versions.env against its literal copies (koinon-private#544)
+g_versions() { # hack/versions.env against its literal copies (old issue 544)
 	hack/versions-check-test.sh
 	hack/versions-check.sh
 }

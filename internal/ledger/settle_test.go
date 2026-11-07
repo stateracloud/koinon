@@ -351,7 +351,7 @@ var _ = Describe("Settling responses cut short", func() {
 		})
 	})
 
-	It("pushes a limit with at most nine fraction digits, rounded down (issue koinon-private#245)", func(ctx SpecContext) {
+	It("pushes a limit with at most nine fraction digits, rounded down (old issue 245)", func(ctx SpecContext) {
 		// A provider's own cost can carry ten digits; the remainder of a $1.00 limit then has ten
 		// too, and agentgateway rejects its whole config for a budget with more than nine.
 		_, err := db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)

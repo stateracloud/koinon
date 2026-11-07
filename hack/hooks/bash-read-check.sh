@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Claude Code PreToolUse hook on the Bash tool (issue koinon-private#534; docs/research/2026-11-token-tiers.md).
+# Claude Code PreToolUse hook on the Bash tool (old issue 534; docs/research/2026-11-token-tiers.md).
 # Reading several files in one Bash call was 20% of all subagent output. This hook refuses a command
 # that prints files the expensive way:
 #   - `cat`, `head` or `tail` of two or more files;

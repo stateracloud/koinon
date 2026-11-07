@@ -264,7 +264,7 @@ var _ = func() bool {
 		KnownGaps: gatewaytest.AgentgatewayV170Gaps,
 		Host:      func() string { return os.Getenv(envHost) }(),
 		KeyFile:   func(name string) string { return "/provider-keys/" + name },
-		// The key stage answers before any response policy runs (koinon-private#342).
+		// The key stage answers before any response policy runs (old issue 342).
 		Unmarked: []string{gatewaytest.RefusalLLMKey, gatewaytest.RefusalMCPKey},
 		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
 			g, err := startKube(ctx, ports, files, gwk8s.Options{GuardURL: guardURL})

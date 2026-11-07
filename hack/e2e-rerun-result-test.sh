@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of hack/e2e-rerun-result.sh (koinon-private#675): a re-run must not cancel a live run of a newer head.
+# Offline test of hack/e2e-rerun-result.sh (old issue 675): a re-run must not cancel a live run of a newer head.
 # gh is a stub; nothing talks to GitHub.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.

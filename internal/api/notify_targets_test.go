@@ -21,7 +21,7 @@ import (
 )
 
 // Notify targets: a question to a role has several recipients, the first answer wins, and a trigger
-// carries its target to the tasks it creates (issue koinon-private#182, ADR 0065 and 0066 amendments 2026-10-28).
+// carries its target to the tasks it creates (old issue 182, ADR 0065 and 0066 amendments 2026-10-28).
 var _ = Describe("notify targets", func() {
 	var (
 		e     *env

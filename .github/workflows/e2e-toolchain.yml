@@ -5,7 +5,7 @@
 #       go<GO_VERSION>-<first 12 hex of the Dockerfile's sha256> (hack/e2e-remote.sh builds the
 #       same Dockerfile locally under the same tag, so a tag names exactly one Dockerfile)
 #   ghcr.io/<owner>/<repo>/e2e-toolchain-web  hack/e2e-toolchain/web.Dockerfile on top of that
-#       image (koinon-private#358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
+#       image (old issue 358), tag <toolchain tag>-web-<first 12 hex of web.Dockerfile's sha256>
 # The names derive from github.repository (ghcr.io/stateracloud/koinon/...), so the repository that
 # builds them owns the packages (#167). The spike probe image is no longer built: no test pulls it
 # (test/escape/kind.sh builds or takes KOINON_OPENSHELL_IMAGE).

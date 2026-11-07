@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Stand-in for agentgateway in the escape suite (ADR 0080, issue koinon-private#270): an HTTP server on :4000
+# Stand-in for agentgateway in the escape suite (ADR 0080, old issue 270): an HTTP server on :4000
 # that answers every request with an empty 418 and the header X-Koinon-Standin: 1. It is
 # koinon-fakemodel in -standin mode, so it serves no model and holds no data. The escape suite's
 # KOINON_ESCAPE_GATEWAY_HOST is escape-gateway-standin.koinon-fixtures.svc.cluster.local. A request

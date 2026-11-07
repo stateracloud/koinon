@@ -3,7 +3,7 @@
 #
 # The e2e-kind workflow's `e2e result` job (the required check): did the e2e pass, and when this
 # pull request needs one (hack/e2e-decide.sh says `required=true`), is there evidence on its head?
-# Without this, a needs-e2e change merged on a green `e2e result` because the e2e was skipped (koinon-private#562).
+# Without this, a needs-e2e change merged on a green `e2e result` because the e2e was skipped (old issue 562).
 #
 # Evidence, any one of (all on the PR's head commit):
 #   1. this run's `quickstart` job succeeded;
@@ -22,7 +22,7 @@
 # drop this gate. The guard is the ruleset's required review on `.github/**` (not CODEOWNERS:
 # require_code_owner_review is false). `e2e result` is not pinned to an app and `e2e-lab` can be
 # posted by anyone with write access: a guardrail against mistakes, not against a malicious member.
-# The follow-up is a pinned integration_id (koinon-private#568).
+# The follow-up is a pinned integration_id (old issue 568).
 #
 # Environment: DECIDE and QUICKSTART (the `needs.<job>.result` values), REQUIRED (true|false), SHA
 # (the pull request head), BRANCH (its head branch, for the hint), GH (the gh command), GH_REPO,
@@ -74,7 +74,7 @@ if [[ -n $SHA && -n $GH_REPO ]]; then
     fi
   done
   # The e2e-lab status (the newest e2e-lab status is first). An API error (a 403 when the job lacks
-  # `statuses: read`, koinon-private#588) or a body that is not JSON is reported as such, not as "no e2e-lab";
+  # `statuses: read`, old issue 588) or a body that is not JSON is reported as such, not as "no e2e-lab";
   # the gate still fails closed.
   lab="" laberr=""
   errf=$(mktemp "${TMPDIR:-/tmp}/e2e-gate.XXXXXX")

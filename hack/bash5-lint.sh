@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# bash 5 guard lint (ADR 0090, koinon-private#553): every `#!/usr/bin/env bash` script carries the guard line
+# bash 5 guard lint (ADR 0090, old issue 553): every `#!/usr/bin/env bash` script carries the guard line
 #
 #   [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 ..." >&2; exit 2; }
 #

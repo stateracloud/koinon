@@ -1,7 +1,7 @@
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); koinon-private#169 (restore through the upload channel); AR1 (archive tier built)
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built)
 - Date: 2026-10-21
 - Decision: [design.md#32](../design.md)
 
@@ -111,7 +111,7 @@ Still open: restic or kopia; sidecar or Job; whether the park, run-end and perio
 also ship in v0.1; and which paths "scratch work" covers, given the exclusion of repository
 checkouts above.
 
-## Amendment (2026-10-26, koinon-private#146 A7): archive tier in v0.1
+## Amendment (2026-10-26, old issue 146 A7): archive tier in v0.1
 
 After N days stopped (default 7), once a home checkpoint is complete, Koinon deletes the sandbox
 and its volume and restores the home into a fresh one on the next run. The generation follows the
@@ -123,9 +123,9 @@ Prior art (ideas only, no code; its servers are AGPL-3.0): Daytona v0.190.0 arch
 after 7 days stopped and only once its latest backup is complete, and restores newest backup first
 (`sandbox.manager.ts:173-230`; research notes `daytona.md` §3).
 
-## Amendment (2026-10-27, koinon-private#146 HC1 decisions): kopia, the exec-stream runner, hourly points
+## Amendment (2026-10-27, old issue 146 HC1 decisions): kopia, the exec-stream runner, hourly points
 
-procoduck's HC1 decisions on koinon-private#146 (2026-10-26) answer the open questions above; plan item HC1 builds
+procoduck's HC1 decisions on old issue 146 (2026-10-26) answer the open questions above; plan item HC1 builds
 them. Research with sources and spike numbers: kopia full backup 6.2 s, incremental 0.7 s and
 restore 7.2 s on a 186 MB home.
 
@@ -146,7 +146,7 @@ restore 7.2 s on a 186 MB home.
     `os.Root` (no path, symbolic link included, leaves the scratch directory), with absolute
     names, links to other files, devices and anything over 4 GiB or 2 million entries refused.
     Restore streams a tar back in before the harness starts (over exec here; amended 2026-10-27,
-    koinon-private#169: through OpenShell's upload channel, see the last amendment).
+    old issue 169: through OpenShell's upload channel, see the last amendment).
   - *Fallback (not built in this item):* after stop, for a stuck or crashed sandbox where exec is
     impossible, the reconciler would mount the stopped volume in a pinned pod that streams the tar
     to agentd's writer without S3 credentials, under a narrow admission exemption for exactly that
@@ -221,9 +221,9 @@ into a task sandbox, and serves a later persistent version. Moving the row to a 
 clears any pending restore and the sandbox lineage, so nothing carries over between tasks (ADR 0065
 13c).
 
-## Amendment (2026-10-27, koinon-private#169): the restore goes through OpenShell's upload channel
+## Amendment (2026-10-27, old issue 169): the restore goes through OpenShell's upload channel
 
-**Decision (procoduck, 2026-10-27, issue koinon-private#169).** The restore no longer pipes tar into `tar -x` over
+**Decision (procoduck, 2026-10-27, old issue 169).** The restore no longer pipes tar into `tar -x` over
 exec. koinon-agentd uploads it through OpenShell's flow-controlled `openshell-upload-v1` SSH
 subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar over exec.
 
@@ -281,7 +281,7 @@ subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar ove
 ### 2026-10-27: measured on a maintainer's cluster
 
 Measured on main e520d87 on a maintainer's cluster (Kata sandboxes, an S3-compatible store), with
-200 MiB of random data in an agent's home (210 MB with the rest of the home), koinon-private#169:
+200 MiB of random data in an agent's home (210 MB with the rest of the home), old issue 169:
 
 | | Time |
 | --- | --- |
@@ -293,7 +293,7 @@ The restored files' SHA-256 sums matched the originals. Before the fix, every re
 exit 74; a prototype that sent 3 MiB pieces over exec took 19.9 s and needed twice the disk space.
 A home at the 4 GiB stage limit would take about 5 minutes at these rates.
 
-## Amendment (2026-10-27, koinon-private#146 A7, plan item AR1): the archive tier
+## Amendment (2026-10-27, old issue 146 A7, plan item AR1): the archive tier
 
 The archive tier above is built in the reconciler (`internal/reconciler/archive.go`).
 
@@ -322,7 +322,7 @@ The archive tier above is built in the reconciler (`internal/reconciler/archive.
   session. Any observed starting, ready, stopping, stopped or error sandbox clears `archived_at`.
 - **Shown** on the agent page ("archived, restores on next run", `Agent.sandbox_archived_at`).
 
-## Amendment (2026-10-31, koinon-private#329): the gates count from when the home was last written
+## Amendment (2026-10-31, old issue 329): the gates count from when the home was last written
 
 Every gate (recreate, repair of a stuck or failed sandbox, idle stop, archive) compared its
 checkpoint with `activitySince`: the latest of the sandbox's start, the last run activity and the

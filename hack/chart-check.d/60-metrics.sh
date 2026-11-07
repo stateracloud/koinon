@@ -4,7 +4,7 @@
 # Chart assertions: metrics Services, ServiceMonitors and NetworkPolicies.
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-# Metrics (issue koinon-private#106, ADR 0023): every component has a "metrics" container port and a Service of its
+# Metrics (old issue 106, ADR 0023): every component has a "metrics" container port and a Service of its
 # own; the ServiceMonitors are off by default and need the CRD; the NetworkPolicies admit the port only
 # from metrics.allowFrom.
 n=$(render --show-only templates/deployments.yaml | grep -c -- '- name: metrics$' || true)

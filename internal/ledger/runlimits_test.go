@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
-// Run limits (issue koinon-private#243, ADR 0081): a run ends at the first of its model-request limit, its spend
+// Run limits (old issue 243, ADR 0081): a run ends at the first of its model-request limit, its spend
 // limit and its time limit. Tokens are reported, not enforced.
 var _ = Describe("run limits", func() {
 	BeforeEach(needDocker)
@@ -41,7 +41,7 @@ var _ = Describe("run limits", func() {
 		return p
 	}
 
-	It("does not cancel a cache-heavy run of many requests below its request and spend limits (issue koinon-private#243)", func(ctx SpecContext) {
+	It("does not cancel a cache-heavy run of many requests below its request and spend limits (old issue 243)", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00")
 		r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "2.00"}, time.Now().Add(-time.Minute))
 		var batch []ledger.Entry
@@ -105,7 +105,7 @@ var _ = Describe("run limits", func() {
 		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled))
 	})
 
-	// ADR 0056, amendment 2026-10-31 (koinon-private#340): a failed call costs its input estimate only, never
+	// ADR 0056, amendment 2026-10-31 (old issue 340): a failed call costs its input estimate only, never
 	// max_tokens, holds no reserve even from a provider that could settle it, and still counts.
 	It("charges three failed 5xx calls their input estimates only, and counts all three requests", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00")

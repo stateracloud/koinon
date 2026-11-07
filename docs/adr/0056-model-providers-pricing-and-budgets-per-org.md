@@ -309,7 +309,7 @@ removes the layer that PV1 left on the model.
    toward limits and tend to run high. The 100% stop shows on the ticket timeline as "stopped at a spend
    limit", from the `run.canceled` event the ledger already writes.
 
-## Amendment (2026-10-28, issue koinon-private#174): a run waits until the gateway serves its model
+## Amendment (2026-10-28, old issue 174): a run waits until the gateway serves its model
 
 A new provider is left out of the gateway state until its key file has reached the gateway pod
 (`ProviderKeySettle`, decision 3), which took about 90 s in the kind e2e. agentd checked only the
@@ -500,7 +500,7 @@ not borrow an agent's key.
    at most $0.10 a day (less when the org's caps are lower), and it opens no MCP tool. Its spend is recorded with the `system` principal
    (ADR 0041 amendment) and counts against the org budget.
 
-## Amendment (2026-10-29, issues koinon-private#241 and koinon-private#246): requests the provider refused
+## Amendment (2026-10-29, old issues 241 and 246): requests the provider refused
 
 The rc.7 re-run charged four Anthropic `400 invalid_request` responses $0.0030058 each: the input
 estimated from the request bytes, at the model's price. Anthropic, OpenRouter and OpenAI do not bill a
@@ -525,12 +525,12 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
      refusal. A rolling update therefore changes nothing until the new config is served.
 3. **What a refusal costs.** The provider type decides, by an explicit flag and not by the status:
    `providertype.Traits.BillsRejectedRequests` is false for `anthropic`, `openrouter` and `openai`
-   (each row cites the provider's error page; issue koinon-private#241). For those types a refused 4xx is charged
+   (each row cites the provider's error page; old issue 241). For those types a refused 4xx is charged
    nothing, whatever its number (400, 401, 403, 404, 429, ...). A type without a row (`ollama`, a
    custom or unknown type, or a model Koinon cannot tell the provider of) takes the conservative
    default, true: any provider 4xx is charged the input estimate only, 401 and 403 included. The
    gateway's own refusals never reach this rule (point 2). An earlier revision of this amendment
-   waived the statuses 401/402/403/404/405/413/415/429 for every provider type; issue koinon-private#241 asked for
+   waived the statuses 401/402/403/404/405/413/415/429 for every provider type; old issue 241 asked for
    the flag alone, because a custom provider may bill what it refused and the ledger must not
    under-count.
    A waived entry keeps its row, with tokens 0 and cost 0 (it must not count toward the run's token
@@ -578,29 +578,29 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
 9. **History is not rewritten.** Entries recorded before this change (the rc.7 phantom charges) stay
    as they were; a ledger is append-only (ADR 0041).
 
-## Amendment (2026-10-31, koinon-private#339): failed model calls cost input only, one retry layer, do-not-retry refusals
+## Amendment (2026-10-31, old issue 339): failed model calls cost input only, one retry layer, do-not-retry refusals
 
 Decision of procoduck, 2026-10-31 ([#49](https://github.com/stateracloud/koinon/issues/49), all three
 parts). The finding behind it (harness research round 3): OpenCode 2.2.0 retries a failed model call
 up to 10 times and agentd then repeats the turn up to 3 more times, so one failed step can reach about
 44 gateway requests, and decision 6.3 of the 2026-10-24 amendment charged every retried 5xx at
-`max_tokens`, the same pattern [koinon-private#241](https://github.com/stateracloud/koinon-private/issues/241) fixed for
+`max_tokens`, the same pattern old issue 241 fixed for
 refused 4xx (af162cb2). This amendment changes decision 6.3 for 5xx and for a stream cut with nothing
-streamed. The code lands in koinon-private#340 (ledger), koinon-private#341 (agentd) and koinon-private#342 (gateway), which point here.
+streamed. The code lands in old issue 340 (ledger), old issue 341 (agentd) and old issue 342 (gateway), which point here.
 
 1. **A failed call with nothing streamed costs its input estimate only.** An upstream 5xx without
    usage, and a stream cut before any output was streamed, are charged the input estimated from the
    request bytes (decision 6.2 of the 2026-10-24 amendment) and nothing for output. They are no longer
    charged at `max_tokens`. Providers do not bill output they never generated, and a retried 5xx must
    not burn the run's budget on one bad minute. The entry keeps `estimated` and `usage_missing`.
-   Built in koinon-private#340: a 5xx without usage is recorded `failed_by_upstream`, final at once (no settlement),
+   Built in old issue 340: a 5xx without usage is recorded `failed_by_upstream`, final at once (no settlement),
    with no `max_tokens` reserve held back from the key, even from a provider that could settle it. A
    stream cut with a 2xx keeps the reserve and the settlement: nothing in the gateway's log says whether
    the provider generated output before the cut, and the provider's own figure decides.
 2. **A cut-short response is never charged at `max_tokens`** (procoduck, 2026-11-01). A response cut
    short (an aborted stream, a closed connection) is charged its input plus the output actually
    streamed, estimated when the provider did not report usage. This replaces the sentence of issue
-   koinon-private#339 that an aborted response which did stream stays at `max_tokens`, and agrees with the
+   old issue 339 that an aborted response which did stream stays at `max_tokens`, and agrees with the
    2026-10-28 amendment (RT1 on rc.5).
 3. **One layer retries model calls.** Exactly one layer retries a failed model request. Koinon
    configures it (defaults below, procoduck, 2026-11-01). agentd
@@ -621,12 +621,12 @@ streamed. The code lands in koinon-private#340 (ledger), koinon-private#341 (age
    the route and backend `responseHeaderModifier` run in `ResponsePolicies::apply` on that path
    (`tests/tests/direct_response.rs` pairs a direct response with a response header modifier). The
    limit: a policy applies only once the request has reached the stage that selects it, so a failure
-   before route selection (route not found) cannot carry it; koinon-private#342 asserts the marking for each refusal
+   before route selection (route not found) cannot carry it; old issue 342 asserts the marking for each refusal
    Koinon lists. OpenCode 2.2.0 honours it: `isRetryable` in `packages/ai/src/provider-error.ts` returns
    false for `x-should-retry: false` and true for `true`, before any status rule
    ([agentgateway v1.7.0](https://github.com/agentgateway/agentgateway/tree/v1.7.0),
    [opencode v2.2.0](https://github.com/anomalyco/opencode/tree/v2.2.0)).
-   Built in koinon-private#342 (`gateway.DoNotRetryHeader`, `gateway.DoNotRetryCEL`; a response transformation in
+   Built in old issue 342 (`gateway.DoNotRetryHeader`, `gateway.DoNotRetryCEL`; a response transformation in
    both drivers) and tested against the real gateway in both modes. Finding: the key stage answers
    before any response policy runs, so a 401 for a missing, unknown or revoked key cannot carry the
    marker, nor, in standalone mode, the budget `429`, the LLM route's authorization `403` and the
@@ -648,8 +648,8 @@ streamed. The code lands in koinon-private#340 (ledger), koinon-private#341 (age
   `packages/core/src/config.ts` sets it. The only levers are the `x-should-retry` response header and a
   plugin `session.retry` hook (`packages/core/src/session/runner/retry.ts` lets a hook change the
   decision and delay), which nothing here has exercised. Until a lever is chosen, the single-layer rule
-  is met by the gateway marking refusals and agentd skipping its own retry; koinon-private#341 decides whether the
-  flavor uses a plugin hook. Decided in koinon-private#341: it does. Koinon's plugin `koinon.retry`, listed in the
+  is met by the gateway marking refusals and agentd skipping its own retry; old issue 341 decides whether the
+  flavor uses a plugin hook. Decided in old issue 341: it does. Koinon's plugin `koinon.retry`, listed in the
   flavor's read-only config, replaces each `session.retry` decision with the policy above, which
   agentd passes as launch switches (`flavors/opencode/README.md`, "Model retries"); the flavor
   contract suite asserts the tries and waits.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Keeps the required status checks and the jobs of ci.yml in step (koinon-private#561). hack/ci-required.txt is the
+# Keeps the required status checks and the jobs of ci.yml in step (old issue 561). hack/ci-required.txt is the
 # source of truth for the `main` ruleset's required checks. A job of ci.yml, by its display name (the
 # `name:` field, else the job key), must be
 #   - listed as required,

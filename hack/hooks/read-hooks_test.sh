@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests of hack/hooks/read-result-check.sh and hack/hooks/bash-read-check.sh (issue koinon-private#534).
+# Offline tests of hack/hooks/read-result-check.sh and hack/hooks/bash-read-check.sh (old issue 534).
 # Needs only bash, awk and jq.
 # shellcheck disable=SC2016 # the commands under test are literal strings; nothing should expand
 

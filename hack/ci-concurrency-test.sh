@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Checks the concurrency rule of ci.yml (koinon-private#675): runs on one head never cancel each other, a push to
+# Checks the concurrency rule of ci.yml (old issue 675): runs on one head never cancel each other, a push to
 # main is in its own group, and the older heads are cancelled explicitly. Plus actionlint when it is
 # installed (CI installs it for the workflow lint job; a machine without it skips that one line).
 

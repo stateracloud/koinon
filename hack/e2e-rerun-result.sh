@@ -30,7 +30,7 @@ if [[ -z $id ]]; then
   echo "e2e-rerun-result: no failed pull request e2e-kind run on ${sha:0:12} to re-run (one still in progress: use \"Re-run failed jobs\" when it ends)"
   exit 0
 fi
-# A re-run joins the pull request's concurrency group, and that group cancels the run in progress (koinon-private#675):
+# A re-run joins the pull request's concurrency group, and that group cancels the run in progress (old issue 675):
 # when the branch has a live e2e-kind run on another commit (a newer head), re-running here would kill it.
 # Without a branch the live-run check cannot be made (`--branch ""` would list every branch): skip the re-run.
 if [[ -z $branch ]]; then

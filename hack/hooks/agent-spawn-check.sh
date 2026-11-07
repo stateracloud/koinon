@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Claude Code PreToolUse hook on the Agent tool (2026-10-31 retro, point 6; issue koinon-private#397).
+# Claude Code PreToolUse hook on the Agent tool (2026-10-31 retro, point 6; old issue 397).
 # Registered in .claude/settings.json. Reads the hook JSON on stdin and enforces the spawn rule:
 #   - subagent_type "fork" is always allowed (it inherits the parent's context and model);
 #   - every other spawn must set tool_input.model;

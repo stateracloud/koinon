@@ -19,7 +19,7 @@ ORDER BY kek_id
 
 // SPDX-License-Identifier: Apache-2.0
 //
-// KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process
+// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
 // first loaded it. No key material.
 func (q *Queries) ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error) {
 	rows, err := q.db.Query(ctx, listKEKFingerprints)

@@ -714,7 +714,7 @@ active_counts() { # CLAIMS_JSON NOW HUMAN KEY -> "human_count key_count"; KEY is
 }
 
 # held_by_key CLAIMS_JSON NOW KEY -> the active claims of that session and lane, one per line:
-# "#12 (PR koinon-private#34)" or "#12" when no pull request is known.
+# "#12 (PR old issue 34)" or "#12" when no pull request is known.
 held_by_key() {
   jq -r --argjson now "$2" --arg s "$3" '
     .[] | select(.state == "held" and (.lease_until | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))
@@ -1680,7 +1680,7 @@ def green: if .__typename == "StatusContext" then .state == "SUCCESS"
 # update_target REQUIRED_JSON: stdin is open_prs output; prints the number of the pull request to
 # bring up to date, or nothing. The oldest auto-merge pull request that is behind main, not a draft,
 # and green on its own head: every required check has reported and its newest run succeeded.
-# Updating any other one only starts CI runs that are thrown away (koinon-private#596): a draft is not asking to
+# Updating any other one only starts CI runs that are thrown away (old issue 596): a draft is not asking to
 # merge, a red or running head changes anyway, and a conflicting one (DIRTY) is labelled needs-update.
 update_target() {
   jq -r --argjson req "${1:?required contexts}" "$JQ_LATEST"'
