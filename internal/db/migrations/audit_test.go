@@ -18,7 +18,7 @@ var _ = Describe("00012_providers_audit_tokens", func() {
 	It("makes audit_events append-only, even for the table owner", func(ctx SpecContext) {
 		var id string
 		Expect(db.QueryRowContext(ctx,
-			`INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', '', 'test.insert', 'test') RETURNING id`,
+			`INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', 'koinon-test:spec', 'test.insert', 'test') RETURNING id`,
 			org).Scan(&id)).To(Succeed())
 		_, err := db.ExecContext(ctx, `UPDATE audit_events SET action = 'test.changed' WHERE id = $1`, id)
 		Expect(err).To(MatchError(ContainSubstring("append-only")))

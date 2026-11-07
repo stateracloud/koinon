@@ -141,7 +141,7 @@ changes its defaults. Choosing the default again, or an empty `format` in the AP
 back on the default. The model list shows a model's format, and "(set)" when someone chose it.
 
 **Defaults follow the table.** At every start `koinon-api` applies the table to each model whose
-format nobody set, and records each change in the audit log with the actor `koinon-api`. Existing
+format nobody set, and records each change in the audit log with the actor `system koinon-api:model-formats`. Existing
 models of an Anthropic provider moved to `anthropic` when Koinon was upgraded.
 
 **What a run does with it.** A run uses the harness entry for its effective model's format (the

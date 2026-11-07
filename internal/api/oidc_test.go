@@ -244,8 +244,11 @@ var _ = Describe("OIDC platform admin groups", func() {
 	isAdmin := func(ctx context.Context, subject string) bool {
 		return count(ctx, e, `SELECT count(*) FROM platform_admins pa JOIN users u ON u.id = pa.user_id WHERE u.oidc_subject = $1`, subject) == 1
 	}
-	events := func(ctx context.Context, action string) int {
-		return count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = $1 AND actor_kind = 'system' AND actor_id = 'oidc'`, action)
+	// events counts the install chain's events for a subject's user, by the sync's named actor
+	// (ADR 0100): a platform admin grant belongs to no org, so nothing lands in a personal org.
+	events := func(ctx context.Context, subject, action string) int {
+		return count(ctx, e, `SELECT count(*) FROM install_audit_events i JOIN users u ON u.id::text = i.target_id
+			WHERE i.action = $1 AND i.actor_kind = 'system' AND i.actor_id = 'koinon-api:oidc-sync' AND u.oidc_subject = $2`, action, subject)
 	}
 
 	It("grants on login, revokes when the group is gone, and audits both", func(ctx SpecContext) {
@@ -257,11 +260,11 @@ var _ = Describe("OIDC platform admin groups", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(who.GetPlatformAdmin()).To(BeTrue())
 		Expect(isAdmin(ctx, "pia")).To(BeTrue())
-		Expect(events(ctx, "platform_admin.grant")).To(Equal(1))
+		Expect(events(ctx, "pia", "platform_admin.grant")).To(Equal(1))
 
 		By("keeping the grant, without a second event, while the group stays")
 		e.browser().oidcLogin(ctx, "")
-		Expect(events(ctx, "platform_admin.grant")).To(Equal(1))
+		Expect(events(ctx, "pia", "platform_admin.grant")).To(Equal(1))
 
 		By("revoking when the user loses every listed group")
 		e.issuer.SetUser(oidcUser("pia", "staff"))
@@ -271,13 +274,17 @@ var _ = Describe("OIDC platform admin groups", func() {
 		who, err = again.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(who.GetPlatformAdmin()).To(BeFalse())
-		Expect(events(ctx, "platform_admin.revoke")).To(Equal(1))
+		Expect(events(ctx, "pia", "platform_admin.revoke")).To(Equal(1))
 
 		By("granting again when the group returns")
 		e.issuer.SetUser(oidcUser("pia", "other"))
 		e.browser().oidcLogin(ctx, "")
 		Expect(isAdmin(ctx, "pia")).To(BeTrue())
-		Expect(events(ctx, "platform_admin.grant")).To(Equal(2))
+		Expect(events(ctx, "pia", "platform_admin.grant")).To(Equal(2))
+
+		By("writing none of it into the user's personal org")
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events a JOIN users u ON u.personal_org_id = a.org_id
+			WHERE u.oidc_subject = 'pia' AND a.action LIKE 'platform_admin.%'`)).To(BeZero())
 	})
 
 	It("leaves the bootstrap admin and other platform admins alone", func(ctx SpecContext) {
@@ -290,7 +297,7 @@ var _ = Describe("OIDC platform admin groups", func() {
 		e.browser().oidcLogin(ctx, "")
 		Expect(isAdmin(ctx, "sam")).To(BeTrue(), "a grant from another source is not revoked by the login")
 		Expect(count(ctx, e, `SELECT count(*) FROM platform_admins pa JOIN users u ON u.id = pa.user_id WHERE u.oidc_issuer = $1`, auth.LocalIssuer)).To(Equal(1))
-		Expect(events(ctx, "platform_admin.revoke")).To(Equal(0))
+		Expect(events(ctx, "sam", "platform_admin.revoke")).To(Equal(0))
 
 		By("not turning another source's grant into a group grant")
 		e.issuer.SetUser(oidcUser("sam", "koinon-platform"))
@@ -298,7 +305,7 @@ var _ = Describe("OIDC platform admin groups", func() {
 		e.issuer.SetUser(oidcUser("sam"))
 		e.browser().oidcLogin(ctx, "")
 		Expect(isAdmin(ctx, "sam")).To(BeTrue())
-		Expect(events(ctx, "platform_admin.grant")).To(Equal(0))
+		Expect(events(ctx, "sam", "platform_admin.grant")).To(Equal(0))
 	})
 
 	It("changes nothing when the setting is empty", func(ctx SpecContext) {
@@ -311,6 +318,6 @@ var _ = Describe("OIDC platform admin groups", func() {
 		e.issuer.SetUser(oidcUser("tom"))
 		e.browser().oidcLogin(ctx, "")
 		Expect(isAdmin(ctx, "tom")).To(BeTrue(), "an empty setting does not revoke")
-		Expect(events(ctx, "platform_admin.revoke")).To(Equal(0))
+		Expect(events(ctx, "tom", "platform_admin.revoke")).To(Equal(0))
 	})
 })

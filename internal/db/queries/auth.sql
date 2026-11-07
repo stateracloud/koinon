@@ -13,7 +13,7 @@ INSERT INTO orgs (slug, display_name, kind, identity_mode)
 VALUES (@slug, @display_name, @kind, @identity_mode)
 RETURNING *;
 
--- name: SetOrgIdentityMode :exec
+-- name: SetOrgIdentityMode :execrows
 UPDATE orgs SET identity_mode = @identity_mode
 WHERE id = @id AND identity_mode <> @identity_mode;
 
@@ -45,7 +45,7 @@ INSERT INTO org_memberships (org_id, user_id, source, role)
 VALUES (@org_id, @user_id, 'manual', @role)
 ON CONFLICT (org_id, user_id, group_mapping_id) DO NOTHING;
 
--- name: GrantPlatformAdmin :exec
+-- name: GrantPlatformAdmin :execrows
 INSERT INTO platform_admins (user_id, granted_by, source)
 VALUES (@user_id, sqlc.narg(granted_by), 'bootstrap')
 ON CONFLICT (user_id) DO NOTHING;
@@ -64,22 +64,17 @@ DELETE FROM platform_admins
 WHERE user_id = @user_id AND source = 'oidc_group'
 RETURNING user_id;
 
--- name: ListPlatformAdminPersonalOrgs :many
--- The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
--- command) is audited, as the platform API audits in the acting admin's personal org.
-SELECT u.personal_org_id FROM platform_admins pa JOIN users u ON u.id = pa.user_id ORDER BY u.personal_org_id;
-
 -- name: IsPlatformAdmin :one
 SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = @user_id);
 
--- name: UpsertGroupMapping :exec
+-- name: UpsertGroupMapping :execrows
 INSERT INTO org_group_mappings (org_id, oidc_issuer, group_name, role)
 VALUES (@org_id, @oidc_issuer, @group_name, @role)
 ON CONFLICT (org_id, oidc_issuer, group_name) DO UPDATE
 SET role = EXCLUDED.role
 WHERE org_group_mappings.role <> EXCLUDED.role;
 
--- name: DeleteGroupMappingsExcept :exec
+-- name: DeleteGroupMappingsExcept :execrows
 -- Removing a mapping cascades to the memberships it granted.
 DELETE FROM org_group_mappings
 WHERE org_id = @org_id AND oidc_issuer = @oidc_issuer

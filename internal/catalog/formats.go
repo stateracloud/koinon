@@ -13,10 +13,10 @@ import (
 )
 
 // FormatActor is the audit actor of the startup re-derivation of model formats.
-var FormatActor = audit.Actor{Kind: audit.KindSystem, ID: "koinon-api"}
+var FormatActor = audit.System("koinon-api:model-formats")
 
 // RederiveFormats applies internal/modelformat to every model whose format no admin set, in every
-// org, and audits each change with the actor "system koinon-api" (ADR 0069, decision 2). This is
+// org, and audits each change with the actor "system koinon-api:model-formats" (ADR 0069, decision 2). This is
 // how a change to the table, such as the OpenRouter flip, reaches existing models; it is the
 // counterpart of prices.CompleteMigrated's startup fill. It is idempotent and safe from every
 // replica, and returns how many models it changed. A model an admin overrides is never touched.

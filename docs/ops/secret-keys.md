@@ -130,10 +130,9 @@ restored meanwhile. Then:
   cannot be restored. The old repository is deleted after the org's home backup retention
   ([retention guide](../site/src/content/docs/guides/retention.md)).
 - Each org it changed gets one `keys.forget` audit event (actor `cli`, `keys forget`) listing what was
-  lost and the new repositories. The platform's own trace destination belongs to no org: like the
-  platform admin API, the command audits it in a platform admin's personal org (each platform
-  admin's, since it acts for none of them), and a platform admin enters it again. With no platform
-  admin it leaves that destination as it is and says so; grant one and run it again.
+  lost and the new repositories. The platform's own trace destination belongs to no org: it is one
+  event in the install audit chain (actor `cli`, `keys forget`), written in the same transaction, and
+  a platform admin enters the destination again. It needs no platform admin to exist.
 
 Running it again finds nothing left to forget. Then check that `keys status` no longer shows the KEK.
 

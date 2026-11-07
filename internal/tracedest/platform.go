@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -45,8 +44,8 @@ func (s *Service) GetPlatform(ctx context.Context) (Platform, error) {
 
 // SetPlatformDestination saves the platform destination, testing it first when the change touches its
 // connection (see Update). Stored secrets are kept only while backend and endpoint origin stay the
-// same. Audited in auditOrg, the platform admin's personal org: the log has no org-less events (ADR 0023).
-func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor, expectedVersion *int64, in Input) (Destination, error) {
+// same. Audited in the install audit chain (ADR 0100 decision 3), in the transaction of the change.
+func (s *Service) SetPlatformDestination(ctx context.Context, actor audit.Actor, expectedVersion *int64, in Input) (Destination, error) {
 	q := store.New(s.pool)
 	cur, err := q.GetPlatformTraceDestination(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -124,20 +123,20 @@ func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UU
 			return err
 		}
 		out = toPlatform(row)
-		ev := audit.Event{
-			Org: auditOrg, Actor: actor, Action: "trace.platform_destination.set", TargetKind: "trace_platform_destination",
+		ev := audit.InstallEvent{
+			Actor: actor, Action: "trace.platform_destination.set", TargetKind: "trace_platform_destination",
 			TargetID: "platform", After: auditView(out),
 		}
 		if before != nil {
 			ev.Before = auditView(*before)
 		}
-		return audit.RecordErr(ctx, q, ev)
+		return audit.RecordInstallErr(ctx, q, ev)
 	})
 	return out, err
 }
 
 // DeletePlatformDestination removes the platform destination.
-func (s *Service) DeletePlatformDestination(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor) error {
+func (s *Service) DeletePlatformDestination(ctx context.Context, actor audit.Actor) error {
 	return s.tx(ctx, func(q *store.Queries) error {
 		cur, err := q.GetPlatformTraceDestination(ctx)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -149,8 +148,8 @@ func (s *Service) DeletePlatformDestination(ctx context.Context, auditOrg pgtype
 		if _, err := q.DeletePlatformTraceDestination(ctx); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
-			Org: auditOrg, Actor: actor, Action: "trace.platform_destination.delete", TargetKind: "trace_platform_destination",
+		return audit.RecordInstallErr(ctx, q, audit.InstallEvent{
+			Actor: actor, Action: "trace.platform_destination.delete", TargetKind: "trace_platform_destination",
 			TargetID: "platform", Before: auditView(toPlatform(cur)),
 		})
 	})
@@ -159,7 +158,7 @@ func (s *Service) DeletePlatformDestination(ctx context.Context, auditOrg pgtype
 // TestPlatform sends the platform destination a synthetic trace again and keeps the result, only if
 // the configuration is still the one that was tested: a destination deleted meanwhile is ErrNotFound
 // and one changed meanwhile is ErrChanged; neither is written back.
-func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor) (Destination, export.Outcome, error) {
+func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destination, export.Outcome, error) {
 	cur, err := store.New(s.pool).GetPlatformTraceDestination(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Destination{}, export.Outcome{}, ErrNotFound
@@ -199,8 +198,8 @@ func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor 
 			return ErrChanged
 		}
 		out = toPlatform(row)
-		return audit.RecordErr(ctx, q, audit.Event{
-			Org: auditOrg, Actor: actor, Action: "trace.platform_destination.test", TargetKind: "trace_platform_destination",
+		return audit.RecordInstallErr(ctx, q, audit.InstallEvent{
+			Actor: actor, Action: "trace.platform_destination.test", TargetKind: "trace_platform_destination",
 			TargetID: "platform", After: map[string]any{"ok": outcome.OK, "status": outcome.Status, "rejectedSpans": outcome.Rejected},
 		})
 	})
@@ -208,10 +207,11 @@ func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor 
 }
 
 // SetPlatformCeiling sets the highest content level an org may pick. Lowering it lowers every org
-// above it in the same transaction, and each of those orgs gets an audit event of its own, so its
-// admins see why the level changed. The change itself is audited in auditOrg. It returns how many
-// orgs were lowered.
-func (s *Service) SetPlatformCeiling(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor, ceiling string) (int, error) {
+// above it in the same transaction. The change is one install event, written first (ADR 0100
+// decision 1.7: domain locks, then the install event, then org events in org ID order); each lowered
+// org then gets a trace.settings.lowered event of its own, pointing back with install_event_id, so its
+// admins see why the level changed. It returns how many orgs were lowered.
+func (s *Service) SetPlatformCeiling(ctx context.Context, actor audit.Actor, ceiling string) (int, error) {
 	if !ValidLevel(ceiling) {
 		return 0, invalid("ceiling must be none, redacted or full")
 	}
@@ -231,20 +231,25 @@ func (s *Service) SetPlatformCeiling(ctx context.Context, auditOrg pgtype.UUID, 
 			return err
 		}
 		lowered = len(rows)
-		for _, r := range rows {
+		install, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+			Actor: actor, Action: "trace.platform_ceiling.set", TargetKind: "trace_platform_ceiling", TargetID: "platform",
+			Before: map[string]any{"ceiling": string(before.ContentCeiling)},
+			After:  map[string]any{"ceiling": ceiling, "orgsLowered": lowered},
+		})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows { // LowerOrgTraceLevels returns them in org ID order
 			if err := audit.RecordErr(ctx, q, audit.Event{
 				Org: r.OrgID, Actor: actor, Action: "trace.settings.lowered", TargetKind: "trace_settings", TargetID: r.OrgID.String(),
-				Before: map[string]any{"contentLevel": string(r.OldLevel), "platformCopyLevel": string(r.OldCopyLevel)},
-				After:  map[string]any{"contentLevel": ceiling, "platformCopyLevel": MinLevel(string(r.OldCopyLevel), ceiling), "ceiling": ceiling},
+				Before:         map[string]any{"contentLevel": string(r.OldLevel), "platformCopyLevel": string(r.OldCopyLevel)},
+				After:          map[string]any{"contentLevel": ceiling, "platformCopyLevel": MinLevel(string(r.OldCopyLevel), ceiling), "ceiling": ceiling},
+				InstallEventID: install.ID.String(),
 			}); err != nil {
 				return err
 			}
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
-			Org: auditOrg, Actor: actor, Action: "trace.platform_ceiling.set", TargetKind: "trace_platform_ceiling", TargetID: "platform",
-			Before: map[string]any{"ceiling": string(before.ContentCeiling)},
-			After:  map[string]any{"ceiling": ceiling, "orgsLowered": lowered},
-		})
+		return nil
 	})
 	return lowered, err
 }

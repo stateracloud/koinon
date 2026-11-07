@@ -275,7 +275,7 @@ type Querier interface {
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
-	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) (int64, error)
 	DeleteLeakGuardSession(ctx context.Context, arg DeleteLeakGuardSessionParams) error
 	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
@@ -559,7 +559,7 @@ type Querier interface {
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
-	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) (int64, error)
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
 	GrantPlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
@@ -868,9 +868,6 @@ type Querier interface {
 	// the matching default entry, in every org (startup: prices.CompleteMigrated).
 	ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error)
 	ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, error)
-	// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
-	// command) is audited, as the platform API audits in the acting admin's personal org.
-	ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	ListPlatformPriceEntries(ctx context.Context, version int64) ([]PlatformPriceEntry, error)
 	ListPlatformPriceVersions(ctx context.Context, maxRows int32) ([]PlatformPriceVersion, error)
 	// The names of the enabled models of providers of one type, in every org (the fetch diffs a
@@ -993,7 +990,9 @@ type Querier interface {
 	// The fingerprints of @fps the session holds.
 	LookupLeakGuardFingerprints(ctx context.Context, arg LookupLeakGuardFingerprintsParams) ([]int64, error)
 	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
-	// caller's transaction. Returns the orgs it changed with their levels before, for the audit log.
+	// caller's transaction. Returns the orgs it changed with their levels before, for the audit log, in org ID
+	// order: the row locks are taken in that order, and the caller writes one audit event per org in that
+	// order (ADR 0100 decision 1.7).
 	LowerOrgTraceLevels(ctx context.Context, arg LowerOrgTraceLevelsParams) ([]LowerOrgTraceLevelsRow, error)
 	MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthyParams) (Agent, error)
 	// Records that the outcomes were sent to the agent.
@@ -1244,7 +1243,7 @@ type Querier interface {
 	// How long an old home backup repository is kept after a key change (#219); NULL is the platform
 	// default. It touches only this column.
 	SetOrgHomeBackupRetention(ctx context.Context, arg SetOrgHomeBackupRetentionParams) error
-	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) (int64, error)
 	// The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
 	// default. It touches only this column, so the latency and limit overrides stay.
 	SetOrgLeakMatchThreshold(ctx context.Context, arg SetOrgLeakMatchThresholdParams) error
@@ -1369,7 +1368,7 @@ type Querier interface {
 	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
-	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
+	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error)
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error

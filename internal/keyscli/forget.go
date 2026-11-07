@@ -88,8 +88,8 @@ type ForgetResult struct {
 // old repositories are deleted after the org's home backup retention.
 //
 // Each org changes in one transaction, audited there as [ForgetAction] with the cli actor; the
-// platform's trace destination, which belongs to no org, is audited in each platform admin's
-// personal org. A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
+// platform's trace destination, which belongs to no org, is one event in the install audit log
+// (actor `cli keys forget`, ADR 0100 decision 3). A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
 // also when it is restored while the confirmation is open. Without a terminal it needs --yes.
 // Running Forget again finds nothing left to do.
 func (t *Tool) Forget(ctx context.Context, id string) error {
@@ -192,9 +192,9 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 }
 
 // forgetPlatform marks the platform's trace destination lost when id sealed it. It belongs to no
-// org, so, as the platform admin API does (tracedest.SetPlatformDestination), the change is
-// audited in a platform admin's personal org: here in every platform admin's, since the command
-// acts for none of them. In one transaction: without a platform admin nothing changes.
+// org, so it is one event in the install audit chain (ADR 0100 decision 3), written in the
+// transaction of the change; it needs no platform admin, because the install chain has none to name
+// (decision 1.4). Each org's part is audited in that org's own chain by forgetOrg.
 func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
 	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
 	changed := false
@@ -207,23 +207,10 @@ func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult)
 		if changed = tag.RowsAffected() > 0; !changed {
 			return nil
 		}
-		q := store.New(tx)
-		orgs, err := q.ListPlatformAdminPersonalOrgs(ctx)
-		if err != nil {
-			return err
-		}
-		if len(orgs) == 0 {
-			return errors.New("no platform admin exists to audit the change in; grant one, then run keys forget again")
-		}
-		for _, org := range orgs {
-			if err := audit.RecordErr(ctx, q, audit.Event{
-				Org: org, Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id,
-				After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
+		return audit.RecordInstallErr(ctx, store.New(tx), audit.InstallEvent{
+			Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id,
+			After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
+		})
 	})
 	if err != nil {
 		return err
@@ -377,7 +364,7 @@ func (t *Tool) reportForget(id string, res ForgetResult) {
 		_, _ = fmt.Fprintln(t.Out, "Org admins see \"credential lost\" on each provider, connection, MCP server and trace destination concerned; enter those credentials again.")
 	}
 	if res.Platform {
-		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (Audited in each platform admin's personal org.)")
+		_, _ = fmt.Fprintln(t.Out, "The platform's trace destination lost its credentials: a platform admin enters them again. (Recorded in the install audit log.)")
 	}
 }
 

@@ -671,7 +671,7 @@ var _ = Describe("Service", func() {
 			ev := events(ctx, "model.format_rederived")
 			Expect(ev).To(HaveLen(1))
 			Expect(ev[0].ActorKind).To(Equal("system"))
-			Expect(ev[0].ActorID).To(Equal("koinon-api"))
+			Expect(ev[0].ActorID).To(Equal("koinon-api:model-formats"))
 			Expect(ev[0].TargetID).To(Equal(follows.ID))
 
 			n, err = svc.RederiveFormats(ctx)

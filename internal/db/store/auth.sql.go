@@ -235,7 +235,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, before pgtype.Times
 	return result.RowsAffected(), nil
 }
 
-const deleteGroupMappingsExcept = `-- name: DeleteGroupMappingsExcept :exec
+const deleteGroupMappingsExcept = `-- name: DeleteGroupMappingsExcept :execrows
 DELETE FROM org_group_mappings
 WHERE org_id = $1 AND oidc_issuer = $2
   AND NOT (group_name = ANY ($3::text[]))
@@ -248,9 +248,12 @@ type DeleteGroupMappingsExceptParams struct {
 }
 
 // Removing a mapping cascades to the memberships it granted.
-func (q *Queries) DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error {
-	_, err := q.db.Exec(ctx, deleteGroupMappingsExcept, arg.OrgID, arg.OidcIssuer, arg.KeepGroups)
-	return err
+func (q *Queries) DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupMappingsExcept, arg.OrgID, arg.OidcIssuer, arg.KeepGroups)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteStaleGroupMemberships = `-- name: DeleteStaleGroupMemberships :exec
@@ -368,7 +371,7 @@ func (q *Queries) GetUserByIdentity(ctx context.Context, arg GetUserByIdentityPa
 	return i, err
 }
 
-const grantPlatformAdmin = `-- name: GrantPlatformAdmin :exec
+const grantPlatformAdmin = `-- name: GrantPlatformAdmin :execrows
 INSERT INTO platform_admins (user_id, granted_by, source)
 VALUES ($1, $2, 'bootstrap')
 ON CONFLICT (user_id) DO NOTHING
@@ -379,9 +382,12 @@ type GrantPlatformAdminParams struct {
 	GrantedBy pgtype.UUID
 }
 
-func (q *Queries) GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error {
-	_, err := q.db.Exec(ctx, grantPlatformAdmin, arg.UserID, arg.GrantedBy)
-	return err
+func (q *Queries) GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) (int64, error) {
+	result, err := q.db.Exec(ctx, grantPlatformAdmin, arg.UserID, arg.GrantedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const grantPlatformAdminFromGroup = `-- name: GrantPlatformAdminFromGroup :one
@@ -453,32 +459,6 @@ func (q *Queries) ListEffectiveMemberships(ctx context.Context, userID pgtype.UU
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPlatformAdminPersonalOrgs = `-- name: ListPlatformAdminPersonalOrgs :many
-SELECT u.personal_org_id FROM platform_admins pa JOIN users u ON u.id = pa.user_id ORDER BY u.personal_org_id
-`
-
-// The personal orgs of the platform admins: where a platform change made by no user (a koinon-api
-// command) is audited, as the platform API audits in the acting admin's personal org.
-func (q *Queries) ListPlatformAdminPersonalOrgs(ctx context.Context) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listPlatformAdminPersonalOrgs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []pgtype.UUID
-	for rows.Next() {
-		var personal_org_id pgtype.UUID
-		if err := rows.Scan(&personal_org_id); err != nil {
-			return nil, err
-		}
-		items = append(items, personal_org_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -685,7 +665,7 @@ func (q *Queries) SetLocalUsername(ctx context.Context, arg SetLocalUsernamePara
 	return err
 }
 
-const setOrgIdentityMode = `-- name: SetOrgIdentityMode :exec
+const setOrgIdentityMode = `-- name: SetOrgIdentityMode :execrows
 UPDATE orgs SET identity_mode = $1
 WHERE id = $2 AND identity_mode <> $1
 `
@@ -695,9 +675,12 @@ type SetOrgIdentityModeParams struct {
 	ID           pgtype.UUID
 }
 
-func (q *Queries) SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error {
-	_, err := q.db.Exec(ctx, setOrgIdentityMode, arg.IdentityMode, arg.ID)
-	return err
+func (q *Queries) SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOrgIdentityMode, arg.IdentityMode, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchSession = `-- name: TouchSession :one
@@ -736,7 +719,7 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (Ses
 	return i, err
 }
 
-const upsertGroupMapping = `-- name: UpsertGroupMapping :exec
+const upsertGroupMapping = `-- name: UpsertGroupMapping :execrows
 INSERT INTO org_group_mappings (org_id, oidc_issuer, group_name, role)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (org_id, oidc_issuer, group_name) DO UPDATE
@@ -751,14 +734,17 @@ type UpsertGroupMappingParams struct {
 	Role       OrgRole
 }
 
-func (q *Queries) UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error {
-	_, err := q.db.Exec(ctx, upsertGroupMapping,
+func (q *Queries) UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertGroupMapping,
 		arg.OrgID,
 		arg.OidcIssuer,
 		arg.GroupName,
 		arg.Role,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertGroupMemberships = `-- name: UpsertGroupMemberships :exec

@@ -330,9 +330,14 @@ func (s *Service) upsertOIDCUser(ctx context.Context, q *store.Queries, id ident
 	return user.ID, nil
 }
 
+// OIDCSyncActor is the actor of a platform admin grant or revoke from IdP groups at login (ADR 0100
+// decision 2).
+var OIDCSyncActor = audit.System("koinon-api:oidc-sync")
+
 // syncPlatformAdmin grants or revokes platform admin from the user's groups (oidc.platformAdminGroups).
-// It never touches a grant from another source, such as the bootstrap admin's. The audit events sit
-// in the user's personal org, the one org every user has; audit_events has no org-less rows.
+// It never touches a grant from another source, such as the bootstrap admin's. A grant or revoke is an
+// install-wide action, so its event goes in the install audit chain (ADR 0100 decision 3), in the
+// transaction of the change, not in the user's personal org.
 func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user store.User, groups []string) error {
 	if s.oidc == nil || len(s.oidc.cfg.PlatformAdminGroups) == 0 {
 		return nil
@@ -343,9 +348,8 @@ func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user 
 			matched = append(matched, g)
 		}
 	}
-	ev := audit.Event{
-		Org: user.PersonalOrgID, Actor: audit.Actor{Kind: audit.KindSystem, ID: "oidc"},
-		TargetKind: "user", TargetID: user.ID.String(),
+	ev := audit.InstallEvent{
+		Actor: OIDCSyncActor, TargetKind: "user", TargetID: user.ID.String(),
 	}
 	if len(matched) > 0 {
 		_, err := q.GrantPlatformAdminFromGroup(ctx, user.ID)
@@ -356,7 +360,7 @@ func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user 
 			return fmt.Errorf("grant platform admin: %w", err)
 		}
 		ev.Action, ev.After = "platform_admin.grant", map[string]any{"source": "oidc_group", "groups": matched}
-		return audit.RecordErr(ctx, q, ev)
+		return audit.RecordInstallErr(ctx, q, ev)
 	}
 	_, err := q.RevokePlatformAdminFromGroup(ctx, user.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -366,7 +370,7 @@ func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user 
 		return fmt.Errorf("revoke platform admin: %w", err)
 	}
 	ev.Action, ev.Before = "platform_admin.revoke", map[string]any{"source": "oidc_group"}
-	return audit.RecordErr(ctx, q, ev)
+	return audit.RecordInstallErr(ctx, q, ev)
 }
 
 // safeReturnTo keeps post-login redirects on this site: only absolute paths,

@@ -51,7 +51,7 @@ const MinAge = DefaultInterval / 2
 const roundLock = "koinon.code-host-scope.round"
 
 // Actor is the audit actor of a refresh.
-var Actor = audit.Actor{Kind: audit.KindSystem, ID: "code-host-scope"}
+var Actor = audit.System("koinon-api:code-host-scope")
 
 // Syncer reads connections' repositories into the code-host scope.
 type Syncer struct {

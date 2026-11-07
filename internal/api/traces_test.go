@@ -242,13 +242,17 @@ var _ = Describe("TraceDestinationService", func() {
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 
-		By("the lowering is in the org's audit log, and the platform changes are in the admin's personal org")
+		By("the lowering is in the org's audit log, pointing at the platform change, which is in the install chain")
 		var n int
-		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'trace.settings.lowered'`, org).Scan(&n)).To(Succeed())
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events a JOIN install_audit_events i ON i.id::text = a.summary->>'install_event_id'
+			WHERE a.org_id = $1 AND a.action = 'trace.settings.lowered' AND i.action = 'trace.platform_ceiling.set'`, org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))
-		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events a JOIN users u ON u.personal_org_id = a.org_id
-			WHERE u.id = $1 AND a.action IN ('trace.platform_destination.set', 'trace.platform_ceiling.set')`, pa.userID).Scan(&n)).To(Succeed())
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events i JOIN users u ON u.id::text = i.actor_id
+			WHERE u.id = $1 AND i.action IN ('trace.platform_destination.set', 'trace.platform_ceiling.set')`, pa.userID).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(4), "three destination saves and the ceiling")
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events a JOIN users u ON u.personal_org_id = a.org_id
+			WHERE u.id = $1 AND a.action LIKE 'trace.platform_%'`, pa.userID).Scan(&n)).To(Succeed())
+		Expect(n).To(BeZero(), "nothing in the admin's personal org")
 	})
 
 	It("does not let a platform admin choose what an org sends: they may lower its settings but not raise them", func(ctx SpecContext) {

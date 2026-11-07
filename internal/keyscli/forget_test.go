@@ -115,10 +115,6 @@ var _ = Describe("koinon-api keys forget", func() {
 	It("marks every value the lost KEK sealed lost, starts new home repositories, and audits each org", func(ctx SpecContext) {
 		org, user, _ := pgtest.NewOrg(ctx, pool)
 		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
-		// A platform admin of their own, whose personal org holds no sealed value.
-		personal, admin, _ := pgtest.NewOrg(ctx, pool)
-		_, err := pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, admin)
-		Expect(err).NotTo(HaveOccurred())
 		settings := orgsettings.NewService(pool)
 		three := 3
 		Expect(settings.SetHomeBackupRetention(ctx, org, audit.User(user), &three)).To(Succeed())
@@ -269,7 +265,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			kind, id, actor string
 			summary         []byte
 		}
-		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_id, summary FROM audit_events WHERE action = $1 AND org_id <> $2 ORDER BY org_id`, keyscli.ForgetAction, personal)
+		rows, err := pool.Query(ctx, `SELECT org_id, actor_kind, actor_id, target_id, summary FROM audit_events WHERE action = $1 AND org_id IN ($2, $3) ORDER BY org_id`, keyscli.ForgetAction, org, other)
 		Expect(err).NotTo(HaveOccurred())
 		var events []event
 		for rows.Next() {
@@ -290,11 +286,13 @@ var _ = Describe("koinon-api keys forget", func() {
 			}
 		}
 
-		By("the platform's trace destination is audited in the platform admin's personal org")
+		By("the platform's trace destination is one install event, and in no org")
 		var platformSummary []byte
-		var kind string
-		Expect(pool.QueryRow(ctx, `SELECT actor_kind, summary FROM audit_events WHERE action = $1 AND org_id = $2`, keyscli.ForgetAction, personal).Scan(&kind, &platformSummary)).To(Succeed())
+		var kind, actorID string
+		Expect(pool.QueryRow(ctx, `SELECT actor_kind, actor_id, summary FROM install_audit_events WHERE action = $1 AND target_id = $2 ORDER BY chain_seq DESC LIMIT 1`,
+			keyscli.ForgetAction, lostKEK).Scan(&kind, &actorID, &platformSummary)).To(Succeed())
 		Expect(kind).To(Equal(audit.KindCLI))
+		Expect(actorID).To(Equal("keys forget"))
 		Expect(string(platformSummary)).To(ContainSubstring("platformTraceDestination"))
 
 		By("running it again finds nothing left")
@@ -323,7 +321,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(usage(ctx)).To(BeEmpty())
 		})
 
-		It("changes nothing of the platform without a platform admin to audit it in, and finishes once there is one", func(ctx SpecContext) {
+		It("records the platform part as an install event even with no platform admin", func(ctx SpecContext) {
 			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
 				ON CONFLICT (singleton) DO NOTHING`)
 			Expect(err).NotTo(HaveOccurred())
@@ -332,16 +330,16 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, err = pool.Exec(ctx, `DELETE FROM platform_admins`)
 			Expect(err).NotTo(HaveOccurred())
+			count := func() (n int) {
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = $1 AND target_id = $2 AND actor_kind = 'cli'`,
+					keyscli.ForgetAction, lostKEK).Scan(&n)).To(Succeed())
+				return n
+			}
+			before := count()
 			tool.Yes = true
-			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("no platform admin exists")))
-			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "the org's values are done; the platform's is left as it was")
-
-			var user pgtype.UUID
-			Expect(pool.QueryRow(ctx, `SELECT id FROM users ORDER BY id LIMIT 1`).Scan(&user)).To(Succeed())
-			_, err = pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, user)
-			Expect(err).NotTo(HaveOccurred())
 			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 			Expect(usage(ctx)).To(BeEmpty())
+			Expect(count()).To(Equal(before+1), "one install event for the platform part")
 		})
 	})
 
