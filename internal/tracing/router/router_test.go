@@ -474,7 +474,7 @@ var _ = Describe("Router", func() {
 			Expect(os.WriteFile(filepath.Join(dir, "token"), []byte(token), 0o600)).To(Succeed())
 			tokens, err := otlpauth.NewTokens(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			Expect(err).NotTo(HaveOccurred())
-			// The order ledger.Serve applies in koinon-api: the token check outermost.
+			// The order agentgateway.Serve applies in koinon-api: the token check outermost.
 			h := otlpauth.Middleware(tokens, otlpauth.NewMetrics(nil))(e.r.Mount()(http.NotFoundHandler()))
 			srv := httptest.NewServer(h)
 			DeferCleanup(srv.Close)

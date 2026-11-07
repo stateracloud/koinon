@@ -25,6 +25,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 )
 
 // Options are the static settings of a standalone agentgateway. Most of them
@@ -594,27 +595,27 @@ func build(s gateway.State, o Options) document {
 			// is flattened into apiKey (schema/cel.md). uuid() is a CEL
 			// extension function (schema/cel-functions.md); each log record
 			// evaluates it once, so an exported record keeps its id on retry.
-			gateway.LogFieldKey:     `default(apiKey.name, "")`,
-			gateway.LogFieldAgent:   `default(apiKey.agent, "")`,
-			gateway.LogFieldRequest: `uuid()`,
+			agentgateway.LogFieldKey:     `default(apiKey.name, "")`,
+			agentgateway.LogFieldAgent:   `default(apiKey.agent, "")`,
+			agentgateway.LogFieldRequest: `uuid()`,
 			// Usage in agentgateway's consistent semantics, for the ledger's own pricing
 			// (plan item PV2). A field whose expression fails is left out of the record.
-			gateway.LogFieldInput:        `llm.inputTokens`,
-			gateway.LogFieldOutput:       `llm.outputTokens`,
-			gateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
-			gateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
-			gateway.LogFieldReasoning:    `llm.reasoningTokens`,
-			gateway.LogFieldFormat:       gateway.FormatLogExpr(),
-			gateway.LogFieldStream:       `llm.streaming`,
-			gateway.LogFieldError:        `proxy.error.reason`,
-			gateway.LogFieldStatus:       `response.code`,
-			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
-			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
+			agentgateway.LogFieldInput:        `llm.inputTokens`,
+			agentgateway.LogFieldOutput:       `llm.outputTokens`,
+			agentgateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
+			agentgateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
+			agentgateway.LogFieldReasoning:    `llm.reasoningTokens`,
+			agentgateway.LogFieldFormat:       agentgateway.FormatLogExpr(),
+			agentgateway.LogFieldStream:       `llm.streaming`,
+			agentgateway.LogFieldError:        `proxy.error.reason`,
+			agentgateway.LogFieldStatus:       `response.code`,
+			agentgateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
+			agentgateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
 			// The provider's response ID, to settle a stream cut short (ADR 0056, amendment 2026-10-28).
-			gateway.LogFieldResponseID: gateway.ResponseIDCEL,
+			agentgateway.LogFieldResponseID: agentgateway.ResponseIDCEL,
 			// Who answered (ADR 0056, amendment 2026-10-29). No field reads a response body.
-			gateway.LogFieldUpstream: gateway.UpstreamCEL,
-			MarkerField:              `""`,
+			agentgateway.LogFieldUpstream: agentgateway.UpstreamCEL,
+			MarkerField:                   `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}

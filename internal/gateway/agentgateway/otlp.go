@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package ledger
+package agentgateway
 
 import (
 	"compress/gzip"
@@ -12,7 +12,6 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/safego"
 )
@@ -52,19 +52,17 @@ const LogsPath = "/v1/logs"
 // most 512 records per export, a few KiB each.
 const maxBody = 16 << 20
 
-var decimalRE = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,18})?$`)
-
-// Decode extracts the charged LLM requests from an OTLP logs export. Records
+// Decode maps the charged LLM requests of an OTLP logs export to usage records. Records
 // that are not charged requests (MCP calls, rejected requests, requests
 // without usage) are skipped. Records that look charged but cannot be
 // attributed are counted in rejected, with the first reason in reason.
-func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected int64, reason string) {
+func Decode(req *collogspb.ExportLogsServiceRequest) (entries []gateway.UsageRecord, rejected int64, reason string) {
 	return decode(req, nil)
 }
 
-// decode is Decode that also reports each rejection's kind (one of the reject* constants) to
+// decode is Decode that also reports each rejection's kind (one of the ledger.Reject* constants) to
 // onReject, for the metrics.
-func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string)) (entries []Entry, rejected int64, reason string) {
+func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string)) (entries []gateway.UsageRecord, rejected int64, reason string) {
 	reject := func(kind, msg string) {
 		rejected++
 		if reason == "" {
@@ -81,38 +79,38 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				for _, kv := range lr.GetAttributes() {
 					attrs[kv.GetKey()] = kv.GetValue()
 				}
-				if stringValue(attrs[gateway.LogFieldKey]) == gateway.ReloadProbeKeyName {
+				if stringValue(attrs[LogFieldKey]) == gateway.ReloadProbeKeyName {
 					continue // the gateway driver's reload probe, never charged or run-attributed
 				}
 				model := stringValue(attrs[attrRequestModel])
 				// Usage in agentgateway's consistent semantics when the driver logged it
 				// (koinon.*), else the gen_ai attributes (older configs and fixtures).
-				in, inOK := intValue(attrs[gateway.LogFieldInput])
+				in, inOK := intValue(attrs[LogFieldInput])
 				if !inOK {
 					in, inOK = intValue(attrs[attrInputTokens])
 				}
-				out, outOK := intValue(attrs[gateway.LogFieldOutput])
+				out, outOK := intValue(attrs[LogFieldOutput])
 				if !outOK {
 					out, outOK = intValue(attrs[attrOutputTokens])
 				}
-				cacheRead, _ := intValue(attrs[gateway.LogFieldCacheRead])
-				cacheWrite, _ := intValue(attrs[gateway.LogFieldCacheWrite])
+				cacheRead, _ := intValue(attrs[LogFieldCacheRead])
+				cacheWrite, _ := intValue(attrs[LogFieldCacheWrite])
 				// The split is absent, not 0, when the gateway had none to log (agentgateway v1.7.0
 				// on Anthropic Messages, #78): the entry then records it as unknown. Interim until
 				// agentgateway sets llm.reasoningTokens from Messages usage; #78 links the upstream
 				// issue, and the exit condition is that field logged on a Messages call.
-				reasoning, reasoningOK := intValue(attrs[gateway.LogFieldReasoning])
-				status, statusOK := intValue(attrs[gateway.LogFieldStatus])
+				reasoning, reasoningOK := intValue(attrs[LogFieldReasoning])
+				status, statusOK := intValue(attrs[LogFieldStatus])
 				cost := decimalValue(attrs[attrCostTotal])
 				// Usage or a non-zero cost is charged whatever the status. agentgateway logs a zero
 				// cost for requests it did not price, so a zero cost is not usage.
 				usage := inOK || outOK || (cost != "" && !isZeroDecimal(cost))
-				reqBytes, hasReqBytes := intValue(attrs[gateway.LogFieldRequestBytes])
+				reqBytes, hasReqBytes := intValue(attrs[LogFieldRequestBytes])
 				if model == "" {
 					continue // not an LLM request (MCP, or refused before the model)
 				}
-				upstreamKnown := attrs[gateway.LogFieldUpstream] != nil
-				upstream := boolValue(attrs[gateway.LogFieldUpstream])
+				upstreamKnown := attrs[LogFieldUpstream] != nil
+				upstream := boolValue(attrs[LogFieldUpstream])
 				if !usage {
 					switch {
 					case statusOK && upstreamKnown && !upstream:
@@ -130,13 +128,13 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 						continue // an older config's record without usage: not a charged request
 					}
 				}
-				agent := stringValue(attrs[gateway.LogFieldAgent])
+				agent := stringValue(attrs[LogFieldAgent])
 				if agent == "" {
 					continue // unauthenticated: agentgateway rejected it before the model
 				}
-				e := Entry{
-					RequestID:    stringValue(attrs[gateway.LogFieldRequest]),
-					KeyID:        stringValue(attrs[gateway.LogFieldKey]),
+				e := gateway.UsageRecord{
+					RequestID:    stringValue(attrs[LogFieldRequest]),
+					KeyID:        stringValue(attrs[LogFieldKey]),
 					Model:        model,
 					InputTokens:  in,
 					OutputTokens: out,
@@ -148,36 +146,31 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					RequestBytes: -1, ResponseBytes: -1,
 					Time: recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
 				}
-				e.MaxTokens, _ = intValue(attrs[gateway.LogFieldMaxTokens])
+				e.MaxTokens, _ = intValue(attrs[LogFieldMaxTokens])
 				if hasReqBytes && reqBytes >= 0 {
 					e.RequestBytes = reqBytes
 				}
-				if id := stringValue(attrs[gateway.LogFieldResponseID]); len(id) <= 256 {
+				if id := stringValue(attrs[LogFieldResponseID]); len(id) <= 256 {
 					e.ResponseID = id
 				}
 				e.Format = modelformat.OpenAI
-				if f := stringValue(attrs[gateway.LogFieldFormat]); f != "" {
+				if f := stringValue(attrs[LogFieldFormat]); f != "" {
 					e.Format = modelformat.Format(f)
 				}
-				e.Stream = boolValue(attrs[gateway.LogFieldStream])
-				e.Error = stringValue(attrs[gateway.LogFieldError])
+				e.Stream = boolValue(attrs[LogFieldStream])
+				e.Error = stringValue(attrs[LogFieldError])
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
-				switch {
-				case !ok || e.Agent.Validate() != nil:
-					reject(rejectInvalidAgent, fmt.Sprintf("invalid %s %q", gateway.LogFieldAgent, agent))
+				if !ok || e.Agent.Validate() != nil {
+					reject(ledger.RejectInvalidAgent, fmt.Sprintf("invalid %s %q", LogFieldAgent, agent))
 					continue
-				case e.RequestID == "" || len(e.RequestID) > 128:
-					reject(rejectInvalidReq, "missing or invalid "+gateway.LogFieldRequest)
+				}
+				if kind, msg := ledger.CheckRecord(e); kind != "" {
+					reject(kind, msg)
 					continue
-				case e.KeyID == "":
-					reject(rejectMissingKey, "missing "+gateway.LogFieldKey)
-					continue
-				case in < 0 || out < 0 || cacheRead < 0 || cacheWrite < 0 || reasoning < 0:
-					reject(rejectNegativeToken, "negative token counts")
-					continue
-				case attrs[attrCostTotal] != nil && cost == "":
-					reject(rejectInvalidCost, fmt.Sprintf("invalid %s", attrCostTotal))
+				}
+				if attrs[attrCostTotal] != nil && cost == "" {
+					reject(ledger.RejectInvalidCost, fmt.Sprintf("invalid %s", attrCostTotal))
 					continue
 				}
 				entries = append(entries, e)
@@ -244,7 +237,7 @@ func decimalValue(v *commonpb.AnyValue) string {
 	case *commonpb.AnyValue_IntValue:
 		s = strconv.FormatInt(x.IntValue, 10)
 	}
-	if !decimalRE.MatchString(s) {
+	if !ledger.ValidGatewayCost(s) {
 		return ""
 	}
 	return s
@@ -258,7 +251,7 @@ func decimalValue(v *commonpb.AnyValue) string {
 // that could not be attributed (retrying would not help), 400 for an
 // undecodable body, and 503 when the database is unavailable, which the
 // exporter may retry; replays are recorded once.
-func Handler(in *Ingester, log *slog.Logger) http.Handler {
+func Handler(in *ledger.Ingester, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -279,11 +272,7 @@ func Handler(in *Ingester, log *slog.Logger) http.Handler {
 			http.Error(w, "invalid ExportLogsServiceRequest", http.StatusBadRequest)
 			return
 		}
-		var onReject func(string)
-		if in.Metrics != nil {
-			onReject = func(kind string) { in.Metrics.Rejected.WithLabelValues(kind).Inc() }
-		}
-		entries, rejected, reason := decode(&req, onReject)
+		entries, rejected, reason := decode(&req, in.Metrics.Reject)
 		res, err := in.Ingest(r.Context(), entries)
 		if err != nil {
 			log.Error("spend ledger: ingest failed", "entries", len(entries), "err", err)
@@ -340,7 +329,7 @@ func readBody(r *http.Request) ([]byte, error) {
 // Serve runs the OTLP receiver on addr until ctx ends. Each wrap wraps the whole handler, the
 // first one outermost; koinon-api passes the bearer-token check (internal/otlpauth), which must
 // cover every path of the listener.
-func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger, wrap ...func(http.Handler) http.Handler) error {
+func Serve(ctx context.Context, addr string, in *ledger.Ingester, log *slog.Logger, wrap ...func(http.Handler) http.Handler) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}

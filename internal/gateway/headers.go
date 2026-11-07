@@ -14,7 +14,7 @@ import (
 // gateway needs upstream are not here: it sets them itself (Rendering.Headers, the provider's
 // credential, OrgHeader).
 //
-// content-length stays so the access log's request size (LogFieldRequestBytes) still reads it.
+// content-length stays so the access log's request size (agentgateway.LogFieldRequestBytes) still reads it.
 // Sticky routing needs no header: the session ID travels as a body field (flavors/opencode).
 var ForwardedHeaders = []string{"accept", "content-length", "content-type", "user-agent"}
 

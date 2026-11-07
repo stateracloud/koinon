@@ -797,100 +797,73 @@ func (s State) Validate() error {
 	return nil
 }
 
-// Access-log attributes every driver adds to agentgateway's access log. The
-// spend ledger (package ledger) attributes requests by them.
 const (
-	// LogFieldKey is the gateway key's ID (Key.ID).
-	LogFieldKey = "koinon.key"
-	// LogFieldAgent is the key's agent (AgentRef.String: "<org slug>/<agent>").
-	LogFieldAgent = "koinon.agent"
-	// LogFieldRequest is a per-request UUID. agentgateway logs its own request
-	// id only at debug level, so drivers add one; the ledger is idempotent on it.
-	LogFieldRequest = "koinon.request"
-
-	// LogFieldInput and the fields after it carry the usage in agentgateway's consistent
-	// semantics (llm.inputTokens includes cache reads and writes, llm.outputTokens includes
-	// reasoning), so the ledger prices disjoint buckets whatever the provider's convention.
-	LogFieldInput      = "koinon.in"
-	LogFieldOutput     = "koinon.out"
-	LogFieldCacheRead  = "koinon.cache_read"
-	LogFieldCacheWrite = "koinon.cache_write"
-	LogFieldReasoning  = "koinon.reasoning"
-	// LogFieldStatus is the HTTP status the gateway answered; a 2xx LLM record without usage
-	// is a request whose usage must be estimated (an aborted stream, a provider that
-	// reports none).
-	LogFieldStatus = "koinon.status"
-	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
-	// hidden thinking.
-	LogFieldMaxTokens = "koinon.max_tokens" //nolint:gosec // attribute name, not a credential
-	// LogFieldFormat is the wire format of the request (a modelformat.Format value, "" for a path that
-	// is not a model route), read from the request path alone, so the log needs no body. The spend
-	// ledger tells a cut Messages stream by it (ADR 0069 amendment).
-	LogFieldFormat = "koinon.format"
-	// LogFieldStream is llm.streaming: whether the request streamed its response.
-	LogFieldStream = "koinon.stream"
-	// LogFieldError is proxy.error.reason: why the proxy failed the request, absent when it did not.
-	// A response that was cut mid-stream is logged with its 200 status and the reason here.
-	LogFieldError = "koinon.error"
-	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
-	// calibration use.
-	LogFieldRequestBytes = "koinon.req_bytes"
-	// LogFieldResponseID is the provider's response ID from a response header (an OpenRouter
-	// generation ID, x-generation-id), so the ledger can ask the provider later what it billed for a
-	// response cut short (ADR 0056, amendment 2026-10-28). See ResponseIDCEL.
-	LogFieldResponseID = "koinon.response_id"
-	// LogFieldUpstream is whether the gateway called the provider for this request (a boolean,
-	// UpstreamCEL). It tells a status the provider answered from one the gateway made itself (a bad
-	// or revoked key, a model the key may not use, its own budget): the ledger charges and attributes
-	// the first and ignores the second (ADR 0056, amendment 2026-10-29). A record without the field
-	// comes from a config that predates it.
-	LogFieldUpstream = "koinon.upstream"
-)
-
-// UpstreamCEL is the CEL of LogFieldUpstream. proxy.upstreamDuration is the time spent waiting for
-// the outbound call, so it exists exactly when the gateway made one (verified against v1.7.0: a
-// provider's 403 has it, a gateway 401 or model_not_allowed 403 does not).
-const UpstreamCEL = `default(proxy.upstreamDuration, "") != ""`
-
-// ResponseIDHeaders are the response headers that carry a provider's response ID, in the order
-// tried. OpenRouter returns x-generation-id on every endpoint; the ID is what its generation
-// endpoint takes (package providerusage).
-var ResponseIDHeaders = []string{"x-generation-id"}
-
-// ResponseIDCEL is the CEL of LogFieldResponseID: the first of ResponseIDHeaders the response
-// carries. It reads a header only, so the gateway records no body for it (a body variable in a
-// log expression would make agentgateway record the whole response as it streams). A response
-// without such a header leaves the field out (a failed expression is left out of the record).
-var ResponseIDCEL = func() string {
-	parts := make([]string, len(ResponseIDHeaders))
-	for i, h := range ResponseIDHeaders {
-		parts[i] = fmt.Sprintf("response.headers[%q]", h)
-	}
-	return "coalesce(" + strings.Join(parts, ", ") + ")"
-}()
-
-const (
-	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
+	// ReloadProbeKeyName is the ID of the key a driver puts in each
 	// config to detect its reload (standalone.ReloadProbeKey). Its requests
 	// never reach a model; the spend ledger drops them.
 	ReloadProbeKeyName = "koinon-reload-probe"
 )
 
-// UsageRecord is one charged request, as the spend ledger (L1) needs it.
+// UsageRecord is the Koinon usage record (ADR 0097 decision 3): one per gateway request, whichever
+// gateway served it. The spend ledger reads only this and never a gateway's own fields; each driver
+// maps what its gateway logs into it (for agentgateway, package agentgateway).
 type UsageRecord struct {
-	RequestID    string
-	KeyID        string
-	Agent        AgentRef
-	Model        string
-	InputTokens  int64
-	OutputTokens int64
-	CostUSD      float64
-	Time         time.Time
+	// RequestID is unique per request and is the ledger's idempotency key.
+	RequestID string
+	// KeyID is the gateway key that made the request.
+	KeyID string
+	// Agent is the key's agent: the org slug and the agent ID. A run is found from it and Time
+	// (the per-run key of ADR 0073 will name the run directly).
+	Agent AgentRef
+	// Time is when the gateway logged the request.
+	Time  time.Time
+	Model string
+	// Format is the API format the model was served in (ADR 0069); Stream says the response
+	// streamed.
+	Format modelformat.Format
+	Stream bool
+	// Status is the HTTP status the gateway answered (0 when not recorded). UpstreamKnown says the
+	// record tells whether the provider answered; Upstream is that answer, so Status is the
+	// provider's. Without it the origin of a status is not known.
+	Status                  int64
+	UpstreamKnown, Upstream bool
+	// Error is why the gateway failed the request, empty when it did not ("Upstream" for a stream
+	// the upstream cut).
+	Error string
+
+	// InputTokens is the total input as the gateway reports it and includes CacheReadTokens and
+	// CacheWriteTokens; OutputTokens includes ReasoningTokens. The record is therefore NOT disjoint:
+	// the ledger derives the disjoint buckets it prices (input without cache, output with reasoning)
+	// itself, in pricing.Split. ADR 0097 decision 3 intends disjoint buckets in the record; that
+	// change is a follow-up and alters this field's meaning. InputKnown and OutputKnown say the
+	// gateway reported the side.
+	InputTokens, OutputTokens         int64
+	InputKnown, OutputKnown           bool
+	CacheReadTokens, CacheWriteTokens int64
+	// ReasoningTokens is the part of OutputTokens the provider reported as reasoning. ReasoningKnown
+	// says the split was reported; without it the 0 means "not reported", not "no thinking".
+	ReasoningTokens int64
+	ReasoningKnown  bool
+
+	// MaxTokens is the request's max_tokens (0 when not recorded). RequestBytes and ResponseBytes
+	// are -1 when not recorded. They feed the estimate and the reserve (ADR 0056).
+	MaxTokens                   int64
+	RequestBytes, ResponseBytes int64
+	// ResponseID is the provider's response ID (an OpenRouter generation ID), empty when none.
+	ResponseID string
+
+	// CostUSD is the gateway's own cost as a decimal string, empty when the driver has none or
+	// could not price the request. It is compared with Koinon's own computation, never charged.
+	CostUSD string
+
+	// Cut is set by the ledger, never by a driver: a response with output usage that was cut
+	// anyway, so its usage is partial, not final.
+	Cut bool
 }
 
 // UsageReader yields usage records, for drivers whose gateway can be polled.
 // The spend ledger does not poll: agentgateway pushes its access log over OTLP
-// to koinon-api (package ledger), so drivers return NoUsage.
+// to koinon-api (package agentgateway maps it to usage records), so drivers return NoUsage.
 type UsageReader interface {
 	ReadUsage(ctx context.Context, since time.Time) ([]UsageRecord, error)
 }

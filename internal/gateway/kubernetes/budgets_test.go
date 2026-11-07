@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -55,7 +56,7 @@ func newSink(host string) *otlpSink {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		entries, _, _ := ledger.Decode(&req)
+		entries, _, _ := agentgateway.Decode(&req)
 		now := time.Now()
 		for _, e := range entries {
 			se := sunk{Entry: e, At: now}

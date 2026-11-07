@@ -12,9 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -371,11 +374,29 @@ var _ = Describe("An Ingester without prices", func() {
 	It("is refused at startup instead of recording every request unpriced", func(ctx SpecContext) {
 		in := &ledger.Ingester{}
 		Expect(in.Validate()).To(MatchError(ContainSubstring("Prices is required")))
-		Expect(ledger.Serve(ctx, "127.0.0.1:0", in, nil)).To(MatchError(ContainSubstring("Prices is required")))
+		Expect(agentgateway.Serve(ctx, "127.0.0.1:0", in, nil)).To(MatchError(ContainSubstring("Prices is required")))
 		Expect((&ledger.Ingester{Prices: prices.NewResolver(priceList)}).Validate()).To(Succeed())
 		Expect((&ledger.Settler{}).Validate()).To(MatchError(ContainSubstring("Settler.Prices is required")))
 		_, err := (&ledger.Settler{}).SettleDue(context.Background())
 		Expect(err).To(MatchError(ContainSubstring("Settler.Prices is required")), "a pass refuses to run unwired")
 		Expect((&ledger.Settler{Prices: prices.NewResolver(priceList)}).Validate()).To(Succeed())
+	})
+})
+
+var _ = Describe("Ingest's record check", func() {
+	It("rejects an invalid record itself, whatever driver sent it, and counts it", func(ctx SpecContext) {
+		// No database: a rejected record never reaches it.
+		m := ledger.NewMetrics(prometheus.NewRegistry())
+		in := &ledger.Ingester{Prices: prices.NewResolver(priceList), Metrics: m}
+		res, err := in.Ingest(ctx, []ledger.Entry{
+			{RequestID: "", KeyID: "k"},
+			{RequestID: "r", KeyID: ""},
+			{RequestID: "r", KeyID: "k", InputTokens: -1},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ledger.Result{Rejected: 3}))
+		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues(ledger.RejectInvalidReq))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues(ledger.RejectMissingKey))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues(ledger.RejectNegativeToken))).To(Equal(1.0))
 	})
 })

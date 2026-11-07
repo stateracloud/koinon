@@ -3,13 +3,12 @@
 // Package ledger is Koinon's minimal spend ledger (plan item L1; ADRs 0041,
 // 0049).
 //
-//   - Ingestion: agentgateway exports its access log over OTLP/HTTP (protobuf)
-//     to koinon-api, which serves [Handler]. Each LLM request record carries
-//     the gateway key and agent (koinon.key, koinon.agent), a per-request id
-//     (koinon.request), the requested model, token counts and the USD cost
-//     from the model catalog. [Ingester] maps it to the agent's run at the
-//     record's time and writes one spend_entries row, idempotent on the
-//     request id.
+//   - Ingestion: a gateway driver yields Koinon usage records ([Entry], ADR 0097 decision 3):
+//     the gateway key and agent, a per-request id, the model, token counts in disjoint buckets
+//     and, optionally, the gateway's own cost. For agentgateway, package agentgateway receives
+//     the access log over OTLP/HTTP and maps it; the ledger knows no gateway's field names.
+//     [Ingester] maps a record to the agent's run at the record's time and writes one
+//     spend_entries row, idempotent on the request id.
 //   - Run limits (ADR 0081): a recorded request adds its tokens to the run's reported total
 //     (tokens are reported, not enforced), and every recorded or settled entry of a run is
 //     followed by scheduler.CheckRunLimits, which cancels the run at its model-request or spend
@@ -36,7 +35,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/gateway"
-	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // Window is the agent spend-limit window: the UTC day (agentgateway aligns 24h budget windows
@@ -51,54 +49,21 @@ const RunGrace = time.Minute
 // WindowStart returns the start of the window containing t.
 func WindowStart(t time.Time) time.Time { return budget.DayStart(t) }
 
-// Entry is one request from agentgateway's access log.
-type Entry struct {
-	// RequestID is unique per request (koinon.request).
-	RequestID string
-	// KeyID is the gateway key (koinon.key).
-	KeyID string
-	// Agent is the key's agent (koinon.agent): the org slug and the agent ID.
-	Agent gateway.AgentRef
-	Model string
-	// InputTokens includes cache reads and writes; OutputTokens includes reasoning
-	// (agentgateway's consistent semantics). Known say whether the gateway logged the side.
-	InputTokens, OutputTokens         int64
-	InputKnown, OutputKnown           bool
-	CacheReadTokens, CacheWriteTokens int64
-	// ReasoningTokens is the part of OutputTokens the provider reported as reasoning (thinking).
-	// ReasoningKnown says the gateway logged the split (koinon.reasoning); without it the 0 means
-	// "not reported", not "no thinking". agentgateway v1.7.0 logs none for Anthropic Messages,
-	// whose thinking is inside OutputTokens all the same (#78).
-	ReasoningTokens int64
-	ReasoningKnown  bool
-	// CostUSD is the decimal cost as the gateway logged it; empty when the gateway could not
-	// price the request. It is compared with Koinon's own computation, never charged.
-	CostUSD string
-	// Status is the HTTP status the gateway answered (0 when not logged).
-	Status int64
-	// UpstreamKnown says the record carries koinon.upstream; Upstream is its value: the gateway
-	// called the provider, so Status is the provider's. Without the field (a config that predates
-	// it) the origin of a status is not known.
-	UpstreamKnown, Upstream bool
-	// MaxTokens is the request's max_tokens (0 when not logged).
-	MaxTokens int64
-	// RequestBytes and ResponseBytes are -1 when not logged.
-	RequestBytes, ResponseBytes int64
-	// ResponseID is the provider's response ID from a response header (koinon.response_id: an
-	// OpenRouter generation ID); empty when the provider sent none.
-	ResponseID string
-	// Format is the wire format the model was served in (koinon.format: modelformat.OpenAI or
-	// modelformat.Anthropic); a record without the field is OpenAI, the only format served before
-	// it existed. Stream is koinon.stream: the response was streamed.
-	Format modelformat.Format
-	Stream bool
-	// Error is koinon.error, why the proxy failed the request ("Upstream" for a stream the upstream
-	// cut); empty when the field is absent or the request did not fail.
-	Error string
-	// Cut is set by the ingester: a response with logged output usage that was cut anyway, because
-	// the proxy logged an error for it, or it is a streamed Anthropic-format response whose run was
-	// canceled at or before the record's time. Its logged usage is partial, not final.
-	Cut bool
-	// Time is when the gateway logged the request.
-	Time time.Time
+// Entry is one request as the ledger records it: the Koinon usage record a gateway driver yields
+// (ADR 0097 decision 3). The ledger never reads a gateway's own fields.
+type Entry = gateway.UsageRecord
+
+// CheckRecord reports why a usage record cannot be recorded: the reject kind (a Reject* constant, the
+// metric label) and a message for the exporter. It returns "" for a valid record. A driver calls it
+// after mapping, so every driver is held to the same rules.
+func CheckRecord(r Entry) (kind, reason string) {
+	switch {
+	case r.RequestID == "" || len(r.RequestID) > 128:
+		return RejectInvalidReq, "missing or invalid request ID"
+	case r.KeyID == "":
+		return RejectMissingKey, "missing key ID"
+	case r.InputTokens < 0 || r.OutputTokens < 0 || r.CacheReadTokens < 0 || r.CacheWriteTokens < 0 || r.ReasoningTokens < 0:
+		return RejectNegativeToken, "negative token counts"
+	}
+	return "", ""
 }

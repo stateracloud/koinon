@@ -42,6 +42,32 @@ func (k KubeStore) Load(ctx context.Context) (KeySet, error) {
 		return KeySet{}, fmt.Errorf("read the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
 	}
 	ks, err := openKeySet(ctx, k.Wrappers, s.Data)
+	return k.finishLoad(s, ks, err)
+}
+
+// LoadWithoutActive is Load for recovering from a lost active KEK (issue #255): the Secret's
+// active entry may be missing or name a KEK the Secret no longer holds, which Load refuses. Every
+// KEK the Secret does hold must still unwrap. The result's Active is the entry as stored and may
+// not be in Keys; only the key-admin Job uses it, to put a new active KEK there.
+func (k KubeStore) LoadWithoutActive(ctx context.Context) (KeySet, error) {
+	s, err := k.Client.CoreV1().Secrets(k.Namespace).Get(ctx, k.Name, metav1.GetOptions{})
+	if err != nil {
+		return KeySet{}, fmt.Errorf("read the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
+	}
+	stored, active, err := secretstore.ParseStoredKeys(s.Data)
+	if err != nil {
+		return KeySet{}, fmt.Errorf("KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
+	}
+	keys, err := k.Wrappers.UnwrapAll(ctx, stored)
+	ks := KeySet{Stored: stored, Active: active}
+	if err == nil {
+		ks.Keys = keys
+	}
+	return k.finishLoad(s, ks, err)
+}
+
+// finishLoad adds the activation time of s to ks and names the Secret in err.
+func (k KubeStore) finishLoad(s *corev1.Secret, ks KeySet, err error) (KeySet, error) {
 	if v := s.Annotations[ActivatedAnnotation]; v != "" {
 		ks.ActivatedAt, _ = time.Parse(time.RFC3339, v)
 	}

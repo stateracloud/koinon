@@ -404,6 +404,12 @@ secrets:
         # rewrap, keys retire the old ones. The Job runs again whenever this or the KMS settings
         # change; with nothing to do it changes nothing.
         addKey: ""
+        # Recovery from a lost KMS key that wrapped the active KEK (docs/ops/secret-keys.md, issue
+        # #255): with addKey set to a new ID, when the KEK Secret has no usable active KEK (you removed
+        # the entries of the lost KEKs and `active` names one of them), the Job makes the added KEK
+        # active in the same write. With a working active KEK it changes nothing about activation.
+        # Turn it off again afterwards.
+        activateIfNoActive: false
         # Every KEK the Job wraps is bound to the install ID in the database (koinon-private#615): a KEK Secret
         # copied to another install, or a database restored into the wrong one, does not open. true
         # also binds the KEKs of the primary wrapping key wrapped before that (the KEKs themselves

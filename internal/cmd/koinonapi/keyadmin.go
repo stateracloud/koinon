@@ -24,7 +24,7 @@ import (
 
 type keyAdminOptions struct {
 	dbURL, kekSecret, namespace, kubeconfig, addID string
-	create, rewrapUnbound                          bool
+	create, rewrapUnbound, activateIfNoActive      bool
 	wait                                           time.Duration
 	wrapping                                       wrapping.Config
 }
@@ -41,7 +41,7 @@ func newKeyAdminCommand() *cobra.Command {
 			"exist (--kek-create), and adds the KEK --add-key names when the key set does not hold it. Every KEK " +
 			"it wraps is bound to the install ID in the database (koinon-private#615); with --rewrap-unbound it also wraps " +
 			"again, bound, each KEK of the primary wrapping key that was wrapped before that. It is idempotent " +
-			"and never activates, retires or rewraps values: koinon-api keys does. Needs --kek-backend other " +
+			"and never activates (except with --activate-if-no-active, when there is no active KEK to replace), retires or rewraps values: koinon-api keys does. Needs --kek-backend other " +
 			"than local and --database-url.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -55,6 +55,7 @@ func newKeyAdminCommand() *cobra.Command {
 	f.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	f.BoolVar(&o.create, "kek-create", false, "create the KEK Secret with one active KMS-wrapped KEK when it does not exist")
 	f.StringVar(&o.addID, "add-key", "", "ID of a KEK to add, wrapped by the KMS, unless the key set holds it already")
+	f.BoolVar(&o.activateIfNoActive, "activate-if-no-active", false, "with --add-key, when the KEK Secret has no usable active KEK (its active entry is missing or names a KEK the Secret no longer holds, after a lost KMS key), make the added KEK active; otherwise change nothing about which KEK is active")
 	f.BoolVar(&o.rewrapUnbound, "rewrap-unbound", false, "wrap again, bound to the install ID, every KEK of the primary wrapping key that is not bound yet (wrapped before koinon-private#615); a binary older than koinon-private#615 cannot read the result")
 	f.DurationVar(&o.wait, "wait", 5*time.Minute, "how long to wait for the database to come up and be migrated")
 	o.wrapping.Flags(f)
@@ -92,13 +93,15 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		return err
 	}
 	job := keyscli.KeyAdmin{
-		Store:         keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers},
-		Create:        o.create,
-		AddID:         o.addID,
-		RewrapUnbound: o.rewrapUnbound,
-		Marker:        installid.Marker{DB: pool},
-		HasValues:     func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
-		Out:           out,
+		Store:  keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers},
+		Create: o.create,
+		AddID:  o.addID,
+
+		ActivateIfNoActive: o.activateIfNoActive,
+		RewrapUnbound:      o.rewrapUnbound,
+		Marker:             installid.Marker{DB: pool},
+		HasValues:          func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
+		Out:                out,
 	}
 	_, _ = fmt.Fprintf(out, "Install ID %s: every KEK this Job wraps is bound to it.\n", install)
 	return job.Run(ctx)
