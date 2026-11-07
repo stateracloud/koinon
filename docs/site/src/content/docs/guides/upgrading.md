@@ -87,12 +87,18 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
 
 The release that adds the install audit chain (migration 00066) needs a `NOLOGIN` group role,
 `koinon_install_audit_writer`, and `koinon-api`'s login role must be a member of it. The migrate role
-has no `CREATEROLE`, so if the role is missing the migration fails and the migrate Job stops the
-upgrade.
+has no `CREATEROLE`, so it cannot create the role itself. The migration does not need the role: the
+`INSERT` grant to it is made by `koinon-api migrate` after the migrations, on every run, and only when
+the role exists. A missing role makes the Job log a warning, not fail.
 
-- **`postgres.mode: cnpg`.** Nothing to do: the chart lists the role as a CloudNativePG managed role,
-  so clusters created before this release get it, and `koinon_api` joins it, when the operator
-  reconciles. Let that finish before you upgrade if the operator was down.
+- **`postgres.mode: cnpg`.** The chart lists the role as a CloudNativePG managed role, and `koinon_api`
+  joins it. With Helm or Flux the migrate Job is a `pre-upgrade` hook, so it runs before the updated
+  Cluster reaches the API server: on the first upgrade the role does not exist yet, the Job warns and
+  grants nothing, and `koinon-api` cannot write install audit events (platform price changes fail with
+  a permission error) until the operator has created the role **and** the migrate Job has run again.
+  So run `helm upgrade` a second time once `kubectl get cluster` shows the managed role reconciled
+  (the second run changes nothing else). Under Argo CD the Job runs in every sync, after the Cluster:
+  sync again if the first sync raced the operator.
 - **`postgres.mode: external`.** Before you upgrade, as an administrator:
 
   ```sql

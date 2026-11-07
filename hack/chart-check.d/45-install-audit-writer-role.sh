@@ -38,8 +38,9 @@ member_line=$(grep -nE 'inRoles: \[koinon_app, koinon_install_audit_writer\]' <<
 has "the group role is a managed role without login" '^      - name: koinon_install_audit_writer$' "${cluster[@]}"
 role_line=$(grep -nE '^      - name: koinon_install_audit_writer$' <<<"$sql" | head -1 | cut -d: -f1)
 block=$(sed -n "$((role_line + 1)),$((role_line + 3))p" <<<"$sql")
-grep -qE '^        ensure: present$' <<<"$block" && grep -qE '^        login: false$' <<<"$block" ||
+if ! grep -qE '^        ensure: present$' <<<"$block" || ! grep -qE '^        login: false$' <<<"$block"; then
 	fail "the managed group role is ensure: present, login: false"
+fi
 
 # No non-CNPG render creates a role (the roles are the operator's, ADR 0100 docs/ops/secret-keys.md).
 lacks "an external database render has no CNPG group role" 'koinon_install_audit_writer' --set postgres.mode=external --set postgres.external.secretName=db

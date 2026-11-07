@@ -905,6 +905,16 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// The install audit writer role is the chart's (CloudNativePG managed role, or the operator's on an
+	// external database). On a Helm upgrade it may appear only after this hook, so a missing role is a
+	// warning, not a failure: the next migrate grants it (ADR 0100 decision 1.1a).
+	granted, err := migrations.GrantInstallAuditWriter(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the install audit writer: %w", err)
+	}
+	if !granted {
+		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet: no install audit event can be written until it exists and koinon-api migrate has run again (helm upgrade, or an Argo CD sync); see docs/ops/secret-keys.md, The install audit chain")
+	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).

@@ -8,8 +8,8 @@
 --
 -- Only koinon-api writes this chain. The grant cannot name its login role (CloudNativePG creates
 -- that role asynchronously, maybe after this migration), so it goes to the NOLOGIN group role
--- koinon_install_audit_writer, which the chart creates before any migration runs and only the
--- koinon_api managed role is a member of (ADR 0100 decision 1.1a).
+-- koinon_install_audit_writer, which only the koinon_api managed role is a member of (ADR 0100
+-- decision 1.1a). The grant itself is made by "koinon-api migrate" after goose, see below.
 
 -- +goose Up
 
@@ -126,32 +126,20 @@ CREATE TRIGGER install_audit_events_no_truncate BEFORE TRUNCATE ON install_audit
 CREATE TRIGGER install_audit_chain_head_no_truncate BEFORE TRUNCATE ON install_audit_chain_head
     FOR EACH STATEMENT EXECUTE FUNCTION install_audit_append_only();
 
--- Who may insert (ADR 0100 decision 1.1a). The chart creates the group role as a CNPG managed role
--- (existing clusters too) and in postInitApplicationSQL; an external database needs an administrator
--- to create it first. The migrate role has no CREATEROLE there, so a missing role is an error with
--- the remedy, not a bare insufficient_privilege. The
--- default privileges of the chart's bootstrap give koinon_app DML on every new table: take the
--- writes away (it keeps SELECT), and give INSERT to the group role only. The nested handler makes
--- the creation safe against a concurrent creator (roles are cluster-wide).
+-- Who may insert (ADR 0100 decision 1.1a). The default privileges of the chart's bootstrap give
+-- koinon_app DML on every new table: take the writes away (it keeps SELECT). INSERT goes to the group
+-- role koinon_install_audit_writer, but not here: the chart creates that role, the migrate role has
+-- no CREATEROLE, and on a Helm upgrade of an existing CloudNativePG cluster this migration runs
+-- before the updated Cluster adds the role. So "koinon-api migrate" grants it after goose, on
+-- every run, once the role exists (migrations.GrantInstallAuditWriter). Until then nobody but the
+-- owner can insert.
 -- +goose StatementBegin
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'koinon_install_audit_writer') THEN
-        BEGIN
-            CREATE ROLE koinon_install_audit_writer NOLOGIN;
-        EXCEPTION WHEN duplicate_object OR unique_violation THEN
-            NULL;
-        WHEN insufficient_privilege THEN
-            RAISE EXCEPTION 'role koinon_install_audit_writer is missing and the migrate role may not create it: create it as an administrator (CREATE ROLE koinon_install_audit_writer NOLOGIN; GRANT koinon_install_audit_writer TO <api login role>), see docs/ops/secret-keys.md, The install audit chain'
-                USING ERRCODE = 'insufficient_privilege';
-        END;
-    END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'koinon_app') THEN
         REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM koinon_app;
         GRANT SELECT ON install_audit_events, install_audit_chain_head TO koinon_app;
     END IF;
-    GRANT INSERT ON install_audit_events TO koinon_install_audit_writer;
-    GRANT SELECT ON install_audit_events, install_audit_chain_head TO koinon_install_audit_writer;
 END;
 $$;
 -- +goose StatementEnd

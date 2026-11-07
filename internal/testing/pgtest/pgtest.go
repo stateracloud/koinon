@@ -389,6 +389,17 @@ func ensureTemplate(ctx context.Context, adminDSN, name string) error {
 	if err != nil {
 		return err
 	}
+	// The chart creates the install audit writer group role before the first migration; so do we.
+	// Roles are cluster-wide, hence the race-free helper.
+	rdb, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		return err
+	}
+	err = EnsureRole(ctx, rdb, migrations.InstallAuditWriterRole)
+	_ = rdb.Close()
+	if err != nil {
+		return err
+	}
 	if err := migrate(ctx, dsn); err != nil {
 		return fmt.Errorf("migrate template %s: %w", name, err)
 	}
@@ -411,7 +422,12 @@ func migrate(ctx context.Context, dsn string) error {
 	if err != nil {
 		return err
 	}
-	_, err = provider.Up(ctx)
+	if _, err = provider.Up(ctx); err != nil {
+		return err
+	}
+	// koinon-api migrate grants the install audit writer role after goose, once the chart (here: the
+	// test) has created it.
+	_, err = migrations.GrantInstallAuditWriter(ctx, db)
 	return err
 }
 

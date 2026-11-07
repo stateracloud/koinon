@@ -103,27 +103,31 @@ allows), so the chain trigger can move the head and nothing else can. A statemen
 **1.1a Who may insert.** Only the `koinon-api` binary writes this chain (decision 1.2);
 `koinon-reconciler` and `koinon-agentd` cannot. The grant cannot name the login role `koinon_api`
 directly: with the chart's CloudNativePG setup that role is a managed role the operator creates
-asynchronously, and the migrate Job may already have run by then, so a "grant when the role exists"
-would be skipped for good and `koinon-api` would fail its first install write. Instead:
+asynchronously, and the migrate Job may already have run by then. Instead:
 
 - the chart's `postInitApplicationSQL` creates a `NOLOGIN` group role
   `koinon_install_audit_writer` next to `koinon_app`, so it exists before any migration runs;
 - the `koinon_api` managed role lists it in `inRoles` (`[koinon_app, koinon_install_audit_writer]`);
   the reconciler and agentd roles do not;
 - the migration `REVOKE`s `INSERT, UPDATE, DELETE, TRUNCATE` on both tables from `koinon_app`
-  (which the default privileges would otherwise give it), `GRANT`s `SELECT` on both to
-  `koinon_app`, and `GRANT INSERT ON install_audit_events TO koinon_install_audit_writer`. The
-  chart also lists the group role as a CNPG managed role (`ensure: present`, `login: false`), so a
-  cluster initialised before this change gets it from the operator; the migrate role has no
-  `CREATEROLE`, so the migration cannot be relied on to create it. The migration tries
-  `CREATE ROLE ... NOLOGIN` when the role is missing (it works for a superuser) and, on
-  `insufficient_privilege`, fails with a message that says to create the role as an administrator.
+  (which the default privileges would otherwise give it) and `GRANT`s `SELECT` on both to
+  `koinon_app`. It does not touch the group role. The chart also lists the group role as a CNPG
+  managed role (`ensure: present`, `login: false`), so a cluster initialised before this change gets
+  it from the operator;
+- the grants to the group role (`INSERT` on `install_audit_events`, `SELECT` on both) are an
+  idempotent step of `koinon-api migrate` after goose (`migrations.GrantInstallAuditWriter`), not part
+  of the migration. A Helm `pre-upgrade` hook runs before the updated Cluster reaches the API server,
+  and the migrate role has no `CREATEROLE`, so a migration that needs the role would fail on an
+  existing cnpg install and abort the upgrade before the role could appear, on every retry. When the
+  role is missing the step logs a warning and grants nothing; `koinon-api` then fails its install
+  writes with a permission error until the next migrate (the next `helm upgrade`, or Argo CD sync)
+  finds the role. New installs have the role from `postInitApplicationSQL` and never see this.
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:
 
 ```sql
-CREATE ROLE koinon_install_audit_writer NOLOGIN;  -- when the migration could not
+CREATE ROLE koinon_install_audit_writer NOLOGIN;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <app role>;
 GRANT SELECT ON install_audit_events, install_audit_chain_head TO <app role>;
 GRANT koinon_install_audit_writer TO <koinon-api login role>;

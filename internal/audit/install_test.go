@@ -356,7 +356,10 @@ var _ = Describe("the install audit chain", func() {
 				_, err := conn.Exec(ctx, stmt)
 				Expect(err).NotTo(HaveOccurred(), stmt)
 			}
-			By("the group role does not exist yet: the migration creates it when it is missing")
+			By("the chart creates the group role in postInitApplicationSQL, before the first migration")
+			// (The test server may have it from building its template; the role is cluster-wide.)
+			_, err = conn.Exec(ctx, `DO $$ BEGIN CREATE ROLE koinon_install_audit_writer NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`)
+			Expect(err).NotTo(HaveOccurred())
 			pgtest.Migrate(ctx, admin)
 			_, err = conn.Exec(ctx, fmt.Sprintf(`CREATE ROLE %s NOLOGIN IN ROLE koinon_app, koinon_install_audit_writer`, api))
 			Expect(err).NotTo(HaveOccurred())
@@ -382,9 +385,10 @@ var _ = Describe("the install audit chain", func() {
 			}
 		})
 
-		// The migrate role of the chart (the CNPG initdb owner) and of most external databases has no
-		// CREATEROLE: when the group role is missing, the migration must say what to do.
-		It("fails with the remedy when the group role is missing and the migrate role cannot create it", func(ctx SpecContext) {
+		// A Helm upgrade of a cluster initialised before ADR 0100: the migrate hook runs before the updated
+		// Cluster adds the group role, and the migrate role (the initdb owner) has no CREATEROLE. The
+		// migration must not abort the upgrade; the next migrate, once the role exists, grants it.
+		It("migrates without the group role as a non-CREATEROLE owner, and grants it on the next run", func(ctx SpecContext) {
 			testenv.Require(testenv.Docker)
 			dsn, stop, err := pgtest.StartServer(ctx, pgtest.Durable())
 			Expect(err).NotTo(HaveOccurred())
@@ -403,9 +407,25 @@ var _ = Describe("the install audit chain", func() {
 			Expect(err).NotTo(HaveOccurred())
 			u.User = url.UserPassword("migrate_probe", "koinon_test_not-a-real-password")
 			u.Path = "/migrate_probe_db"
-			err = pgtest.MigrateErr(ctx, u.String())
-			Expect(err).To(MatchError(ContainSubstring("koinon_install_audit_writer is missing")))
-			Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
+			Expect(pgtest.MigrateErr(ctx, u.String())).To(Succeed(), "the group role is missing: the upgrade goes on")
+
+			By("the Cluster change arrives: the role exists, a member of it still cannot insert before the next migrate")
+			_, err = conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+			Expect(err).NotTo(HaveOccurred())
+			member := fmt.Sprintf("upgrade_member_%d", roleSeq.Add(1))
+			_, err = conn.Exec(ctx, fmt.Sprintf(`CREATE ROLE %s NOLOGIN IN ROLE koinon_install_audit_writer`, member))
+			Expect(err).NotTo(HaveOccurred())
+			su, err := url.Parse(dsn)
+			Expect(err).NotTo(HaveOccurred())
+			su.Path = "/migrate_probe_db"
+			mconn, err := pgx.Connect(ctx, su.String())
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = mconn.Close(ctx) })
+			Expect(execAs(ctx, mconn, member, insertSQL)).To(MatchError(ContainSubstring("permission denied")))
+
+			By("the next migrate (the next upgrade or sync) grants it")
+			Expect(pgtest.MigrateErr(ctx, u.String())).To(Succeed())
+			Expect(execAs(ctx, mconn, member, insertSQL)).To(Succeed())
 		})
 	})
 })
