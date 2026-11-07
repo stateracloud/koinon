@@ -47,6 +47,7 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 
 ## Check and ship
+- `hack/lane-gates.sh` is the blocking form: preflight's gates plus the heavy CI jobs, one `verdict=` line each, `notrun` (not `fail`) when the machine cannot run one. Do not poll logs.
 - `hack/preflight.sh` runs the gates your change touches (lint with gofumpt, vet, tests, tidy,
   generate, migrations, ADRs, docs, chart, web, shellcheck, gitleaks) and prints one line per gate.
   It must pass before you hand back.
