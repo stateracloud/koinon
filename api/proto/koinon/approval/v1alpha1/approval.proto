@@ -267,6 +267,23 @@ message McpCall {
   string review_reason = 5;
   // tool_description is the tool's current description, so the approver reads what the agent read.
   string tool_description = 6;
+  // leak_guard is set when the leak guard (ADR 0091) put this call on a card: why, and which legs
+  // the session held.
+  LeakGuard leak_guard = 7;
+}
+
+// LeakGuard is what the MCP leak guard recorded on a card (ADR 0091): the reasons it stopped the
+// call, the tool's sink class, the call's address arguments, and the two legs of the session.
+message LeakGuard {
+  // reasons are the guard's reason codes, e.g. "both_legs" and "taint".
+  repeated string reasons = 1;
+  string sink_class = 2;
+  // destination holds the call's address arguments by name.
+  map<string, string> destination = 3;
+  // untrusted_input: the session read input an attacker could have written.
+  bool untrusted_input = 4;
+  // private_data: the session read data the org keeps private.
+  bool private_data = 5;
 }
 
 // SavedWorkCall describes uncommitted work saved from a stuck sandbox, as a diffstat. The files

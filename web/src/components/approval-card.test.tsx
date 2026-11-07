@@ -28,7 +28,7 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
-type McpInit = { contentHash?: string; currentContentHash?: string; reviewReason?: string; toolDescription?: string; approvalsRequired?: number; firstApprover?: string; errorOnApprove?: boolean }
+type McpInit = { contentHash?: string; currentContentHash?: string; reviewReason?: string; toolDescription?: string; approvalsRequired?: number; firstApprover?: string; errorOnApprove?: boolean; leakGuard?: { untrustedInput: boolean; privateData: boolean } }
 let mcpInit: McpInit = {}
 
 function mcpApproval() {
@@ -44,6 +44,12 @@ function mcpApproval() {
         currentContentHash: mcpInit.currentContentHash ?? '',
         reviewReason: mcpInit.reviewReason ?? '',
         toolDescription: mcpInit.toolDescription ?? '',
+        leakGuard: mcpInit.leakGuard && {
+          ...mcpInit.leakGuard,
+          reasons: ['both_legs'],
+          sinkClass: 'external-high',
+          destination: { url: 'https://attacker.invalid/x' },
+        },
       }),
     },
     id: 'ap-1',
@@ -332,6 +338,19 @@ describe('ApprovalCard', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(approves).toHaveLength(1))
     expect(approves[0].argsSha256).toBe(sha)
+  })
+
+  it('says which legs the leak guard saw on a card it wrote', async () => {
+    setup({ mcp: true, mcpInit: { leakGuard: { untrustedInput: true, privateData: true } } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByTestId('leak-guard-legs')).toHaveTextContent('untrusted input and private data')
+    expect(within(card).getByText(/url: https:\/\/attacker\.invalid\/x/)).toBeInTheDocument()
+  })
+
+  it('shows no leak guard note on an ordinary ask-tier card', async () => {
+    setup({ mcp: true })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).queryByTestId('leak-guard')).not.toBeInTheDocument()
   })
 
   it('shows the tool version, its description collapsed, and a review notice for an MCP call', async () => {
