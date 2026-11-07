@@ -24,12 +24,18 @@ type keyAudit struct {
 	keySet keyscli.Store
 	// generated reads the generated Secrets' metadata; nil without Kubernetes access.
 	generated func(ctx context.Context) ([]keyscli.GeneratedSecret, error)
+	// kekSecret is the name of the KEK Secret; the KEK part of a keys.generated event for any other
+	// Secret comes from the last recorded state, not from the live key set.
+	kekSecret string
+
+	kube      kubernetes.Interface
+	namespace string
 }
 
-func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace string, secretNames ...string) *keyAudit {
-	k := &keyAudit{pool: pool}
+func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace, kekSecret string, secretNames ...string) *keyAudit {
+	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret}
 	if kube != nil {
-		k.generated = keyscli.GeneratedReader{Client: kube, Namespace: namespace, ListLabelled: true, Names: secretNames}.Read
+		k.generated = keyscli.GeneratedReader{Client: kube, Namespace: namespace, ListLabelled: true, Names: append([]string{kekSecret}, secretNames...)}.Read
 	}
 	return k
 }
@@ -51,9 +57,12 @@ func clearKeys(ks keyscli.KeySet) {
 	}
 }
 
-// generatedEvent records a key koinon-api has just created (keys.generated, actor koinon-api:keys):
-// the whole key-set state afterwards. The creation is not atomic with the event; if the write fails
-// the start-up check records the key set as keys.observed, so a failure is logged, not fatal.
+// generatedEvent records a key koinon-api has just created (keys.generated, actor koinon-api:keys).
+// Its "after" changes only the Secret created, on top of the last recorded state (the KEK part is the
+// live key set only when the created Secret is the KEK Secret). Any other difference, such as the
+// ensure-secrets Secrets or a key event that was lost, is left for the start-up check to write as
+// keys.observed. The creation is not atomic with the event; if the write fails the start-up check
+// records the key set as keys.observed, so a failure is logged, not fatal.
 func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 	err := func() error {
 		ks, err := k.load(ctx)
@@ -61,10 +70,20 @@ func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 			return err
 		}
 		defer clearKeys(ks)
-		a := k.auditor(keyscli.ActorKeys)
+		a := &keyscli.Auditor{Pool: k.pool, Actor: keyscli.ActorKeys}
+		if k.kube != nil {
+			a.Generated = keyscli.GeneratedReader{Client: k.kube, Namespace: k.namespace, Names: []string{id}}.Read
+		}
+		prev, err := a.LastState(ctx)
+		if err != nil {
+			return err
+		}
 		after, err := a.Snapshot(ctx, ks)
 		if err != nil {
 			return err
+		}
+		if prev != nil && id != k.kekSecret {
+			after.KEKs, after.Active, after.Retired = prev.KEKs, prev.Active, prev.Retired
 		}
 		return a.Record(ctx, keyscli.Event{Action: keyscli.ActionGenerated, TargetKind: kind, TargetID: id, After: after})
 	}()

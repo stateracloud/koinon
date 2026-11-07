@@ -48,7 +48,7 @@ var _ = Describe("koinon-api's key events", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		kube = fake.NewClientset()
-		keyAud = newKeyAudit(pgtest.Start(ctx), kube, ns, "koinon-saved-work")
+		keyAud = newKeyAudit(pgtest.Start(ctx), kube, ns, "koinon-kek", "koinon-saved-work")
 		raw := make([]byte, secretstore.KeySize)
 		copy(raw, "koinon_test_not-a-real-kek")
 		_, err := kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
@@ -80,6 +80,22 @@ var _ = Describe("koinon-api's key events", func() {
 		keyAud.startObserving(ctx, func() {})
 		Expect(count(ctx, "keys.observed", m)).To(BeZero())
 		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+	})
+
+	It("records only the created KEK Secret as keys.generated, and the labelled ensure-secrets Secret as keys.observed", func(ctx SpecContext) {
+		_, err := kube.CoreV1().Secrets(ns).Create(ctx, secretOf("koinon-session", "uid-1", true), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		m := mark(ctx)
+		keyAud.generatedEvent(ctx, "secret", "koinon-kek")
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+		var gen string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.generated'`, m).Scan(&gen)).To(Succeed())
+		Expect(gen).NotTo(ContainSubstring("koinon-session"))
+		keyAud.startObserving(ctx, func() {})
+		Expect(count(ctx, "keys.observed", m)).To(Equal(1))
+		var raw string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.observed'`, m).Scan(&raw)).To(Succeed())
+		Expect(raw).To(ContainSubstring("koinon-session"))
 	})
 
 	It("observes once, again when a generated Secret is re-created, and never records a value", func(ctx SpecContext) {
