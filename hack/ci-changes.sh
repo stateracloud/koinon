@@ -75,7 +75,10 @@ pattern() {
 	# runs the tests of internal/declarative. Its repository-link check reads any file of the repo,
 	# so its inputs cannot be listed: this pattern is partial, and a push to main runs docs anyway.
 	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)' ;;
-	escape) echo '^(charts/|test/escape/)' ;;
+	# The suite renders sandbox specs with the reconciler and agent config and runs the leak guard
+	# (test/escape imports these packages). Hand-written and partial, like chartsmoke: a push to
+	# main runs the job anyway.
+	escape) echo '^(charts/|test/escape/|internal/(reconciler|agentconfig|execution|mcpguard|testing|db/store)/)' ;;
 	# The suite's Go imports are added by flavors_graph below.
 	flavors) echo '^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)' ;;
 	esac

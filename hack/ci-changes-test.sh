@@ -92,14 +92,16 @@ expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart chartsmoke docs escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
+expect "go chartsmoke escape" internal/reconciler/sandbox.go # the suite renders specs with it (#66)
+expect "go chartsmoke escape flavors" internal/agentconfig/config.go
 
 # F5, flavors: test/flavors imports these (go list -deps -test ./test/flavors/...).
-expect "go chartsmoke flavors" internal/execution/run.go
+expect "go chartsmoke escape flavors" internal/execution/run.go
 expect "go chartsmoke flavors" internal/modelformat/format.go
 expect "go chartsmoke flavors" internal/prices/prices.go
-expect "go chartsmoke flavors" internal/testing/fakemodel/server.go
+expect "go chartsmoke escape flavors" internal/testing/fakemodel/server.go
 expect "go chartsmoke flavors" internal/thinking/thinking.go
-expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
+expect "go chartsmoke escape flavors generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
