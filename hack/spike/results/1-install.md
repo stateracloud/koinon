@@ -1,6 +1,6 @@
 # Step 1: install and lifecycle
 
-Run 2026-10-21 on context `homelab` (Talos 1.14.4, Kubernetes 1.37.1, node kernel 6.18.57-talos).
+Run 2026-10-21 on the spike cluster (Talos 1.14.4, Kubernetes 1.37.1, node kernel 6.18.57-talos).
 Installed: Agent Sandbox v1.0.7 (`hack/spike/agent-sandbox.sh`, manifest SHA-256 verified) and
 OpenShell 0.1.5 (`hack/spike/openshell.sh`, chart digest pinned, values in
 `hack/spike/openshell-values.yaml`). CLI 0.1.5 (aarch64-apple-darwin, checksum verified) talks to
@@ -64,7 +64,7 @@ the gateway over mTLS through `hack/spike/port-forward.sh`.
    > `workspace-x` still bound. Reproduced twice with commands that exit within a second; a
    > command that runs a few seconds is cleaned up. Expected: the driver deletes the `Sandbox`
    > (and its storage) before the gateway drops its record, or reconciles orphans later.
-9. **A node losing its network stops the sandbox.** When `homelab-workers-cjgkns` was NotReady for
+9. **A node losing its network stops the sandbox.** When `spike-workers-cjgkns` was NotReady for
    about a minute at 14:35Z (`cni plugin not initialized`), OpenShell moved `p2` to `Stopped`
    and did not restart it; `sandbox start` brought it back with its workspace. Koinon's reconciler
    decides whether and when to restart an agent's sandbox after infrastructure failures.

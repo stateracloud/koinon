@@ -29,7 +29,7 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 - A criterion that fails and passes on re-run after a platform fix is recorded as **pass after
   platform fix**, keeps its fail history, and the fix becomes a Koinon install requirement.
 - Claude asks procoduck before any cluster-level change not listed here, including temporary ones.
-- The spike starts once procoduck reports that **Zot** (`docs/dev/maintainer-homelab.md`) and **OpenBao** are
+- The spike starts once procoduck reports that **Zot** (the spike registry) and **OpenBao** are
   installed (both running since 2026-10-21) and gives the go-ahead. Nothing cluster-wide changes
   beyond the CRDs and namespaces listed below.
 - No paid model calls. Models come from the home-lab Ollama.
@@ -39,7 +39,7 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 
 | Item | Value |
 | --- | --- |
-| Cluster | Talos 1.14, Kubernetes 1.37, 2 workers (Proxmox VMs), context `homelab` |
+| Cluster | Talos 1.14, Kubernetes 1.37, 2 workers (Proxmox VMs), the spike cluster context |
 | Runtime classes | `kata` (Cloud Hypervisor, default), `kata-qemu` (fallback if nested virtualization misbehaves) |
 | CNI | Cilium (Koinon must not depend on it; only standard NetworkPolicy is used) |
 | Storage | `proxmox-zfs` (default) |

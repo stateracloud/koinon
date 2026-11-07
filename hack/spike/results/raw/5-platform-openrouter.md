@@ -1,6 +1,6 @@
 # Platform agentgateway: Koinon's config and the OpenRouter model
 
-Run 2026-10-21T18:09:38Z. Namespace `agentgateway` (procoduck/homelab e4e93b6): Koinon owns ConfigMap `agentgateway-config`; the OpenRouter key is mounted from ExternalSecret `openrouter-api-key`.
+Run 2026-10-21T18:09:38Z. Namespace `agentgateway` (the platform repository e4e93b6): Koinon owns ConfigMap `agentgateway-config`; the OpenRouter key is mounted from ExternalSecret `openrouter-api-key`.
 
 ```
 $ kubectl -n agentgateway create configmap agentgateway-config --from-file=config.yaml=hack/spike/agentgateway/platform-config.yaml --dry-run=client -o yaml | kubectl apply -f -   # 18:09:38Z

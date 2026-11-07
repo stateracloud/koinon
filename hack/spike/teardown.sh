@@ -14,7 +14,7 @@ set -euo pipefail
 
 run=0
 [[ ${1:-} == --yes ]] && run=1
-K=(kubectl --context homelab)
+K=(kubectl --context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}")
 
 step() {
   echo "+ $*"
@@ -29,14 +29,14 @@ done
 step "${K[@]}" delete validatingadmissionpolicybinding koinon-spike-sandbox-pods --ignore-not-found
 step "${K[@]}" delete validatingadmissionpolicy koinon-spike-sandbox-pods --ignore-not-found
 
-step helm --kube-context homelab uninstall openshell -n openshell --ignore-not-found
+step helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" uninstall openshell -n openshell --ignore-not-found
 # agentgateway Kubernetes mode (5.6): its Gateway first, then the controller and its CRDs.
 step "${K[@]}" delete -f "$(dirname "$0")/agentgateway-k8s/manifests.yaml" --ignore-not-found
-if helm --kube-context homelab status agw-k8s -n agentgateway-system >/dev/null 2>&1; then
-  step helm --kube-context homelab uninstall agw-k8s -n agentgateway-system
+if helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" status agw-k8s -n agentgateway-system >/dev/null 2>&1; then
+  step helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" uninstall agw-k8s -n agentgateway-system
 fi
-if helm --kube-context homelab status agw-k8s-crds -n agentgateway-system >/dev/null 2>&1; then
-  step helm --kube-context homelab uninstall agw-k8s-crds -n agentgateway-system
+if helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" status agw-k8s-crds -n agentgateway-system >/dev/null 2>&1; then
+  step helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" uninstall agw-k8s-crds -n agentgateway-system
 fi
 
 for ns in $("${K[@]}" get ns -l openshell.ai/managed-by=openshell -o name) \
