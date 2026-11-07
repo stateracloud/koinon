@@ -32,6 +32,9 @@ case ${!v:-ok} in
 ok) echo "$g ok 1s" ;;
 fail) echo "$g FAIL 1s"; echo "boom"; exit 1 ;;
 incomplete) echo "$g INCOMPLETE 1s (skipped: docker)"; echo "INCOMPLETE (missing docker)"; exit 3 ;;
+realfail) # full log: failed spec early, EPERM text in the tail, like Koinon's own sandbox tests
+	printf -- '--- FAIL: TestSandbox (0.1s)\nline\nline\nline\nline\nline\nopen /x: operation not permitted\ngo-test verdict: FAILED: x\n' >"$STUB_DIR/$g.inner"
+	echo "$g FAIL 1s log=$STUB_DIR/$g.inner"; tail -n 5 "$STUB_DIR/$g.inner" | sed 's/^/  | /'; exit 1 ;;
 skip) echo "$g skip (pnpm not installed)" ;;
 esac
 EOF
@@ -86,6 +89,10 @@ expect "fail" 1 '^gate=go rc=1 seconds=[0-9]+ verdict=fail log=' '^gate=tidy .*v
 # exit 3 from a gate (missing requirement): notrun with the reason, never fail.
 run STUB_GATES="go" STUB_go=incomplete
 expect "incomplete" 3 '^gate=go rc=3 .*verdict=notrun reason="missing docker"' '^lane-gates INCOMPLETE'
+
+# A real failure whose tail mentions EPERM: classified from the inner log, which is the logged path.
+run STUB_DIR="$tmp" STUB_GATES="go" STUB_go=realfail
+expect "inner log decides" 1 "^gate=go rc=1 .*verdict=fail log=$tmp/go.inner"
 
 # A tool that is not installed: notrun, exit 3.
 run STUB_GATES="web" STUB_web=skip

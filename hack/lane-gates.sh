@@ -52,7 +52,7 @@ env_problem() { # <log>: prints the reason when the log shows one
 		echo "docker unavailable"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
-	elif grep -qiE 'operation not permitted' "$log" && ! grep -qE -- '--- FAIL|\[FAIL\]|^FAIL[[:space:]]|Summarizing [0-9]+ Failure' "$log"; then
+	elif grep -qiE 'operation not permitted' "$log" && ! grep -qE -- '--- FAIL|\[FAIL\]|^FAIL[[:space:]]|Summarizing [0-9]+ Failure|verdict: FAILED' "$log"; then
 		# A bare EPERM with no failed test in the log is the machine; a failing spec that
 		# mentions EPERM (or the word "sandbox") is a real failure. Never match the bare word.
 		echo "sandbox denial"
@@ -109,6 +109,10 @@ for g in $gates; do
 	rc=$?
 	secs=$((SECONDS - start))
 	reason=$(sed -n 's/^'"$g"' skip (\(.*\))$/\1/p' "$log" | head -1)
+	# The wrapper log holds preflight's stdout: a `<g> FAIL|INCOMPLETE Ns log=<inner>` line and a
+	# 5-line tail. Classify from the full inner log it names, and report that path.
+	inner=$(awk -v g="$g" '$1 == g && ($2 == "FAIL" || $2 == "INCOMPLETE") { for (i = 3; i <= NF; i++) if ($i ~ /^log=/) { print substr($i, 5); exit } }' "$log")
+	[[ -n $inner && -r $inner ]] && log=$inner
 	case $rc in
 	0) if [[ -n $reason ]]; then report "$g" 0 "$secs" notrun "$reason" "$log"; else report "$g" 0 "$secs" pass "" "$log"; fi ;;
 	3) report "$g" 3 "$secs" notrun "$(env_problem "$log")" "$log" ;;
