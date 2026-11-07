@@ -301,9 +301,12 @@ builds work. The token is never an ARG, ENV, log line or layer (`hack/koinon-fet
 this; a new `ADD` of a release asset fails it, also with the URL on a continuation line).
 
 Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
-Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149); a step that
-runs apt through another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with
-both settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
+Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149), and every
+`apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
+later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
+snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
+another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with all three
+settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
