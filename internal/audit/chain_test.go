@@ -21,7 +21,7 @@ import (
 func record(ctx context.Context, org pgtype.UUID, action string) store.AuditEvent {
 	GinkgoHelper()
 	row, err := audit.Record(ctx, store.New(pool), audit.Event{
-		Org: org, Actor: audit.System(), Action: action, TargetKind: "test", TargetID: "t",
+		Org: org, Actor: audit.System("koinon-test:spec"), Action: action, TargetKind: "test", TargetID: "t",
 		After: map[string]any{"n": action},
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -105,7 +105,7 @@ var _ = Describe("the audit hash chain", func() {
 			wg.Go(func() {
 				errs <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 					return audit.RecordErr(ctx, store.New(tx), audit.Event{
-						Org: org, Actor: audit.System(), Action: fmt.Sprintf("test.c%d", i), TargetKind: "test",
+						Org: org, Actor: audit.System("koinon-test:spec"), Action: fmt.Sprintf("test.c%d", i), TargetKind: "test",
 					})
 				})
 			})

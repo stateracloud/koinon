@@ -12,6 +12,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -28,7 +29,10 @@ import (
 // (decimal microseconds since the Unix epoch). prev_hash is appended as its 32 raw bytes; the first
 // row of a chain has 32 zero bytes. A row's chain_seq counts from 1 without gaps.
 
-const hashTag = "koinon.audit.v1"
+const (
+	hashTag        = "koinon.audit.v1"
+	installHashTag = "koinon.install_audit.v1"
+)
 
 // ZeroHash is the prev_hash of the first row of a chain.
 var ZeroHash = make([]byte, sha256.Size)
@@ -38,18 +42,47 @@ func appendField(b []byte, s string) []byte {
 	return append(b, s...)
 }
 
-// RowHash computes the hash a chain row must have.
-func RowHash(r store.ListAuditChainRowsRow) []byte {
-	b := appendField(nil, hashTag)
-	for _, f := range []string{
-		r.OrgText, r.IDText, strconv.FormatInt(r.ChainSeq, 10), r.ActorKind, r.ActorID, r.Action,
-		r.TargetKind, r.TargetID, r.SummaryText, r.RequestID, strconv.FormatInt(r.CreatedMicros, 10),
+// chainFields are the values both kinds of chain hash: the scope ID (the org's ID, or the install's
+// in its place, ADR 0100 decision 1.3) and the fields the two tables share.
+type chainFields struct {
+	Scope, ID                                        string
+	Seq                                              int64
+	ActorKind, ActorID, Action, TargetKind, TargetID string
+	Summary, RequestID                               string
+	CreatedMicros                                    int64
+	PrevHash                                         []byte
+}
+
+// hashRow is the one encoder of both chains; only the tag and the scope ID differ.
+func hashRow(tag string, f chainFields) []byte {
+	b := appendField(nil, tag)
+	for _, v := range []string{
+		f.Scope, f.ID, strconv.FormatInt(f.Seq, 10), f.ActorKind, f.ActorID, f.Action,
+		f.TargetKind, f.TargetID, f.Summary, f.RequestID, strconv.FormatInt(f.CreatedMicros, 10),
 	} {
-		b = appendField(b, f)
+		b = appendField(b, v)
 	}
-	b = append(b, r.PrevHash...)
+	b = append(b, f.PrevHash...)
 	sum := sha256.Sum256(b)
 	return sum[:]
+}
+
+// RowHash computes the hash an org chain row must have.
+func RowHash(r store.ListAuditChainRowsRow) []byte {
+	return hashRow(hashTag, chainFields{
+		Scope: r.OrgText, ID: r.IDText, Seq: r.ChainSeq, ActorKind: r.ActorKind, ActorID: r.ActorID, Action: r.Action,
+		TargetKind: r.TargetKind, TargetID: r.TargetID, Summary: r.SummaryText, RequestID: r.RequestID,
+		CreatedMicros: r.CreatedMicros, PrevHash: r.PrevHash,
+	})
+}
+
+// InstallRowHash computes the hash an install chain row must have.
+func InstallRowHash(r store.ListInstallAuditChainRowsRow) []byte {
+	return hashRow(installHashTag, chainFields{
+		Scope: r.ScopeText, ID: r.IDText, Seq: r.ChainSeq, ActorKind: r.ActorKind, ActorID: r.ActorID, Action: r.Action,
+		TargetKind: r.TargetKind, TargetID: r.TargetID, Summary: r.SummaryText, RequestID: r.RequestID,
+		CreatedMicros: r.CreatedMicros, PrevHash: r.PrevHash,
+	})
 }
 
 // Break is the first place an org's chain does not hold.
@@ -73,48 +106,125 @@ func (r OrgResult) OK() bool { return r.Break == nil }
 
 const verifyPage = 1000
 
+// link is one row of a chain as the walker needs it: the stored values and the hash recomputed from
+// the row's content.
+type link struct {
+	seq        int64
+	id         string
+	prev, hash []byte
+	want       []byte
+}
+
+// walk reads a chain page by page in order and returns the rows seen, the break (nil when the chain
+// holds), and the last chain_seq and hash. It checks that chain_seq counts from 1 without gaps, that
+// each prev_hash is the previous row's hash and that each hash matches the row.
+func walk(fetch func(afterSeq int64) ([]link, error)) (rows, last int64, prev []byte, brk *Break, err error) {
+	prev = ZeroHash
+	for {
+		page, err := fetch(last)
+		if err != nil {
+			return rows, last, prev, nil, err
+		}
+		for _, r := range page {
+			switch {
+			case r.seq != last+1:
+				brk = &Break{Seq: r.seq, Reason: fmt.Sprintf("chain_seq %d follows %d: a row is missing or was inserted", r.seq, last)}
+			case !bytes.Equal(r.prev, prev):
+				brk = &Break{Seq: r.seq, Reason: "prev_hash is not the hash of the previous row"}
+			case !bytes.Equal(r.hash, r.want):
+				brk = &Break{Seq: r.seq, Reason: fmt.Sprintf("hash does not match the content of row %s", r.id)}
+			}
+			if brk != nil {
+				return rows, last, prev, brk, nil
+			}
+			last, prev = r.seq, r.hash
+			rows++
+		}
+		if len(page) < verifyPage {
+			return rows, last, prev, nil, nil
+		}
+	}
+}
+
+// headBreak compares a chain head with the last row: it finds removed tail rows and a changed head.
+// found is false when there is no head row at all; seeded says the chain always has one (the
+// install chain's, which migration 00066 creates), so a missing head is a break even with no rows.
+// An org's head appears with its first event, so an org with neither has an empty, intact chain.
+func headBreak(seeded, found bool, headSeq int64, headHash []byte, last int64, prev []byte) *Break {
+	switch {
+	case !found && last == 0 && !seeded:
+		return nil // no rows and no head
+	case !found:
+		return &Break{Seq: last + 1, Reason: "the chain head is missing"}
+	case headSeq != last || !bytes.Equal(headHash, prev):
+		return &Break{Seq: last + 1, Reason: fmt.Sprintf("the chain head says %d rows, the log has %d: rows were removed from the end or the head was changed", headSeq, last)}
+	}
+	return nil
+}
+
 // VerifyOrg walks one org's chain in order and reports the first broken link. It checks that
 // chain_seq counts from 1 without gaps, that each prev_hash is the previous row's hash, that each
 // hash matches the row, and that the chain head names the last row (so removed tail rows show).
 func VerifyOrg(ctx context.Context, q *store.Queries, org pgtype.UUID) (OrgResult, error) {
 	res := OrgResult{Org: org}
-	var (
-		last int64
-		prev = ZeroHash
-	)
-	for {
-		rows, err := q.ListAuditChainRows(ctx, store.ListAuditChainRowsParams{OrgID: org, AfterSeq: last, PageSize: verifyPage})
+	rows, last, prev, brk, err := walk(func(after int64) ([]link, error) {
+		page, err := q.ListAuditChainRows(ctx, store.ListAuditChainRowsParams{OrgID: org, AfterSeq: after, PageSize: verifyPage})
 		if err != nil {
-			return res, fmt.Errorf("audit verify: read org %s: %w", org.String(), err)
+			return nil, fmt.Errorf("audit verify: read org %s: %w", org.String(), err)
 		}
-		for _, r := range rows {
-			switch {
-			case r.ChainSeq != last+1:
-				res.Break = &Break{Seq: r.ChainSeq, Reason: fmt.Sprintf("chain_seq %d follows %d: a row is missing or was inserted", r.ChainSeq, last)}
-			case !bytes.Equal(r.PrevHash, prev):
-				res.Break = &Break{Seq: r.ChainSeq, Reason: "prev_hash is not the hash of the previous row"}
-			case !bytes.Equal(r.Hash, RowHash(r)):
-				res.Break = &Break{Seq: r.ChainSeq, Reason: fmt.Sprintf("hash does not match the content of row %s", r.IDText)}
-			}
-			if res.Break != nil {
-				return res, nil
-			}
-			last, prev = r.ChainSeq, r.Hash
-			res.Rows++
+		out := make([]link, len(page))
+		for i, r := range page {
+			out[i] = link{seq: r.ChainSeq, id: r.IDText, prev: r.PrevHash, hash: r.Hash, want: RowHash(r)}
 		}
-		if len(rows) < verifyPage {
-			break
-		}
+		return out, nil
+	})
+	res.Rows, res.Break = rows, brk
+	if err != nil || brk != nil {
+		return res, err
 	}
 	head, err := q.GetAuditChainHead(ctx, org)
-	switch {
-	case err != nil && last == 0:
-		return res, nil // no rows and no head
-	case err != nil:
-		res.Break = &Break{Seq: last + 1, Reason: "the chain head is missing"}
-	case head.Seq != last || !bytes.Equal(head.Hash, prev):
-		res.Break = &Break{Seq: last + 1, Reason: fmt.Sprintf("the chain head says %d rows, the log has %d: rows were removed from the end or the head was changed", head.Seq, last)}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return res, fmt.Errorf("audit verify: read head of org %s: %w", org.String(), err)
 	}
+	res.Break = headBreak(false, err == nil, head.Seq, head.Hash, last, prev)
+	return res, nil
+}
+
+// InstallResult is the verdict on the install chain.
+type InstallResult struct {
+	Rows int64
+	// Break is nil when the chain holds.
+	Break *Break
+}
+
+// OK reports whether the chain holds.
+func (r InstallResult) OK() bool { return r.Break == nil }
+
+// VerifyInstall walks the install chain as VerifyOrg walks an org's, with the hash of tag
+// koinon.install_audit.v1. The install head is seeded by the migration, so a missing head is a
+// break even before the first event.
+func VerifyInstall(ctx context.Context, q *store.Queries) (InstallResult, error) {
+	var res InstallResult
+	rows, last, prev, brk, err := walk(func(after int64) ([]link, error) {
+		page, err := q.ListInstallAuditChainRows(ctx, store.ListInstallAuditChainRowsParams{AfterSeq: after, PageSize: verifyPage})
+		if err != nil {
+			return nil, fmt.Errorf("audit verify: read the install chain: %w", err)
+		}
+		out := make([]link, len(page))
+		for i, r := range page {
+			out[i] = link{seq: r.ChainSeq, id: r.IDText, prev: r.PrevHash, hash: r.Hash, want: InstallRowHash(r)}
+		}
+		return out, nil
+	})
+	res.Rows, res.Break = rows, brk
+	if err != nil || brk != nil {
+		return res, err
+	}
+	head, err := q.GetInstallAuditChainHead(ctx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return res, fmt.Errorf("audit verify: read the install chain head: %w", err)
+	}
+	res.Break = headBreak(true, err == nil, head.Seq, head.Hash, last, prev)
 	return res, nil
 }
 
@@ -156,4 +266,14 @@ func WriteReport(w io.Writer, results []OrgResult) bool {
 		_, _ = fmt.Fprintln(w, "no audit events")
 	}
 	return ok
+}
+
+// WriteInstallReport prints the verdict on the install chain and reports whether it holds.
+func WriteInstallReport(w io.Writer, r InstallResult) bool {
+	if r.OK() {
+		_, _ = fmt.Fprintf(w, "ok      install chain: %d events\n", r.Rows)
+		return true
+	}
+	_, _ = fmt.Fprintf(w, "BROKEN  install chain: first broken link at chain_seq %d: %s\n", r.Break.Seq, r.Break.Reason)
+	return false
 }

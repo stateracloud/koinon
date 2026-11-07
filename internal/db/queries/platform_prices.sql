@@ -102,7 +102,7 @@ WHERE id = @id AND state = 'open'
 RETURNING *;
 
 -- name: CountAutoAppliedPriceProposalsSince :one
-SELECT count(*)::bigint FROM price_proposals WHERE decided_by = 'auto' AND state = 'accepted' AND decided_at >= @since;
+SELECT count(*)::bigint FROM price_proposals WHERE decided_by = @decided_by AND state = 'accepted' AND decided_at >= @since;
 
 -- name: CountPriceProposalsByClassState :many
 SELECT class, state, count(*)::bigint AS n FROM price_proposals GROUP BY class, state;

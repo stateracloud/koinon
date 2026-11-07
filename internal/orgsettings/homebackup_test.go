@@ -33,17 +33,17 @@ var _ = Describe("Home backup retention", func() {
 		Expect(days).To(Equal(7))
 
 		forty := 40
-		Expect(svc.SetRunContentRetention(ctx, org, audit.System(), &forty)).To(Succeed())
+		Expect(svc.SetRunContentRetention(ctx, org, audit.System("koinon-test:spec"), &forty)).To(Succeed())
 		thirty := 30
-		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System(), &thirty)).To(Succeed())
-		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System(), &thirty)).To(Succeed(), "unchanged: no audit entry")
+		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &thirty)).To(Succeed())
+		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &thirty)).To(Succeed(), "unchanged: no audit entry")
 		d, err := svc.HomeBackupRetention(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d).To(Equal(30 * 24 * time.Hour))
 		run, _ := svc.RunContentRetentionDays(ctx, org)
 		Expect(run).To(Equal(40), "the run content retention stays")
 
-		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System(), nil)).To(Succeed())
+		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), nil)).To(Succeed())
 		days, _ = svc.HomeBackupRetentionDays(ctx, org)
 		Expect(days).To(Equal(7))
 		run, _ = svc.RunContentRetentionDays(ctx, org)
@@ -65,12 +65,12 @@ var _ = Describe("Home backup retention", func() {
 	It("rejects a retention outside 1 to 90 days, here and in the table", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		for _, d := range []int{0, -1, 91} {
-			err := svc.SetHomeBackupRetention(ctx, org, audit.System(), &d)
+			err := svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &d)
 			var inv *orgsettings.InvalidError
 			Expect(err).To(BeAssignableToTypeOf(inv), "%d days", d)
 		}
 		for _, d := range []int{1, 90} {
-			Expect(svc.SetHomeBackupRetention(ctx, org, audit.System(), &d)).To(Succeed(), "%d days", d)
+			Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &d)).To(Succeed(), "%d days", d)
 		}
 		_, err := pool.Exec(ctx, `UPDATE org_settings SET home_backup_retention_days = 91 WHERE org_id = $1`, org)
 		Expect(err).To(MatchError(ContainSubstring("home_backup_retention_days")))
@@ -81,7 +81,7 @@ var _ = Describe("Home backup retention", func() {
 		var agent pgtype.UUID
 		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'homes', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		three := 3
-		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System(), &three)).To(Succeed())
+		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &three)).To(Succeed())
 
 		pw := checkpoint.Passwords{Q: store.New(pool), Keys: secretstoretest.Keyring(), Begin: pool.Begin}
 		_, err := pw.Current(ctx, org, agent)

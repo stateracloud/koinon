@@ -12,11 +12,16 @@ import (
 )
 
 const countAutoAppliedPriceProposalsSince = `-- name: CountAutoAppliedPriceProposalsSince :one
-SELECT count(*)::bigint FROM price_proposals WHERE decided_by = 'auto' AND state = 'accepted' AND decided_at >= $1
+SELECT count(*)::bigint FROM price_proposals WHERE decided_by = $1 AND state = 'accepted' AND decided_at >= $2
 `
 
-func (q *Queries) CountAutoAppliedPriceProposalsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error) {
-	row := q.db.QueryRow(ctx, countAutoAppliedPriceProposalsSince, since)
+type CountAutoAppliedPriceProposalsSinceParams struct {
+	DecidedBy string
+	Since     pgtype.Timestamptz
+}
+
+func (q *Queries) CountAutoAppliedPriceProposalsSince(ctx context.Context, arg CountAutoAppliedPriceProposalsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutoAppliedPriceProposalsSince, arg.DecidedBy, arg.Since)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err

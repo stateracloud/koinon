@@ -246,7 +246,7 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 		}
 		incidentID = inc.ID
 		ev := audit.Event{
-			Org: r.run.OrgID, Actor: audit.System(), TargetKind: "agent", TargetID: r.run.AgentID.String(),
+			Org: r.run.OrgID, Actor: audit.System("koinon-agentd:stuck-run"), TargetKind: "agent", TargetID: r.run.AgentID.String(),
 			After: map[string]any{
 				"sandbox": sandbox, "reason": reason, "processes": procs, "work": work, "incident": inc.ID.String(),
 				"recreations_in_24h": n,

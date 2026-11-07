@@ -25,11 +25,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AuditScope selects which audit chain List reads.
+type AuditScope int32
+
+const (
+	// AUDIT_SCOPE_UNSPECIFIED reads the org scope, as before the install chain existed.
+	AuditScope_AUDIT_SCOPE_UNSPECIFIED AuditScope = 0
+	// AUDIT_SCOPE_ORG reads the events of an org (or, for a platform admin with no org_id, of every org).
+	AuditScope_AUDIT_SCOPE_ORG AuditScope = 1
+	// AUDIT_SCOPE_INSTALL reads the install chain: actions that belong to no org (ADR 0100).
+	AuditScope_AUDIT_SCOPE_INSTALL AuditScope = 2
+)
+
+// Enum value maps for AuditScope.
+var (
+	AuditScope_name = map[int32]string{
+		0: "AUDIT_SCOPE_UNSPECIFIED",
+		1: "AUDIT_SCOPE_ORG",
+		2: "AUDIT_SCOPE_INSTALL",
+	}
+	AuditScope_value = map[string]int32{
+		"AUDIT_SCOPE_UNSPECIFIED": 0,
+		"AUDIT_SCOPE_ORG":         1,
+		"AUDIT_SCOPE_INSTALL":     2,
+	}
+)
+
+func (x AuditScope) Enum() *AuditScope {
+	p := new(AuditScope)
+	*p = x
+	return p
+}
+
+func (x AuditScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AuditScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_audit_v1alpha1_audit_proto_enumTypes[0].Descriptor()
+}
+
+func (AuditScope) Type() protoreflect.EnumType {
+	return &file_koinon_audit_v1alpha1_audit_proto_enumTypes[0]
+}
+
+func (x AuditScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AuditScope.Descriptor instead.
+func (AuditScope) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_audit_v1alpha1_audit_proto_rawDescGZIP(), []int{0}
+}
+
 // AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} without secret values.
 type AuditEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	OrgId string                 `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// org_id is empty for an install event.
+	OrgId string `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	// actor_kind is user, token, agent, secret, system or cli; actor_id is that actor's ID, the
 	// declaring Secret's name for secret, or the command for cli (keys forget).
 	ActorKind string `protobuf:"bytes,3,opt,name=actor_kind,json=actorKind,proto3" json:"actor_kind,omitempty"`
@@ -41,7 +95,8 @@ type AuditEvent struct {
 	Summary    *structpb.Struct       `protobuf:"bytes,8,opt,name=summary,proto3" json:"summary,omitempty"`
 	RequestId  string                 `protobuf:"bytes,9,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	// chain_seq, prev_hash and hash are the org's hash chain, the hashes in lower-case hex. See ADR 0023.
+	// chain_seq, prev_hash and hash are the org's hash chain (the install chain for an install event),
+	// the hashes in lower-case hex. See ADR 0023 and ADR 0100.
 	ChainSeq      int64  `protobuf:"varint,11,opt,name=chain_seq,json=chainSeq,proto3" json:"chain_seq,omitempty"`
 	PrevHash      string `protobuf:"bytes,12,opt,name=prev_hash,json=prevHash,proto3" json:"prev_hash,omitempty"`
 	Hash          string `protobuf:"bytes,13,opt,name=hash,proto3" json:"hash,omitempty"`
@@ -172,7 +227,8 @@ func (x *AuditEvent) GetHash() string {
 
 type ListRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// org_id names the org. Only a platform admin may leave it empty, to read every org.
+	// org_id names the org. Only a platform admin may leave it empty, to read every org. With scope
+	// AUDIT_SCOPE_INSTALL it must be empty.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	// since and until bound created_at: since <= created_at < until. Both are optional.
 	Since *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=since,proto3" json:"since,omitempty"`
@@ -187,7 +243,10 @@ type ListRequest struct {
 	// page_size is 50 by default and at most 200.
 	PageSize int32 `protobuf:"varint,7,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// page_token is the next_page_token of the previous page.
-	PageToken     string `protobuf:"bytes,8,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken string `protobuf:"bytes,8,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// scope defaults to the org scope (unspecified or AUDIT_SCOPE_ORG). AUDIT_SCOPE_INSTALL needs a
+	// platform admin.
+	Scope         AuditScope `protobuf:"varint,9,opt,name=scope,proto3,enum=koinon.audit.v1alpha1.AuditScope" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -278,6 +337,13 @@ func (x *ListRequest) GetPageToken() string {
 	return ""
 }
 
+func (x *ListRequest) GetScope() AuditScope {
+	if x != nil {
+		return x.Scope
+	}
+	return AuditScope_AUDIT_SCOPE_UNSPECIFIED
+}
+
 type ListResponse struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Events []*AuditEvent          `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
@@ -355,7 +421,7 @@ const file_koinon_audit_v1alpha1_audit_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1b\n" +
 	"\tchain_seq\x18\v \x01(\x03R\bchainSeq\x12\x1b\n" +
 	"\tprev_hash\x18\f \x01(\tR\bprevHash\x12\x12\n" +
-	"\x04hash\x18\r \x01(\tR\x04hash\"\xa3\x02\n" +
+	"\x04hash\x18\r \x01(\tR\x04hash\"\xdc\x02\n" +
 	"\vListRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x120\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x120\n" +
@@ -366,10 +432,16 @@ const file_koinon_audit_v1alpha1_audit_proto_rawDesc = "" +
 	"\bactor_id\x18\x06 \x01(\tR\aactorId\x12\x1b\n" +
 	"\tpage_size\x18\a \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\b \x01(\tR\tpageToken\"q\n" +
+	"page_token\x18\b \x01(\tR\tpageToken\x127\n" +
+	"\x05scope\x18\t \x01(\x0e2!.koinon.audit.v1alpha1.AuditScopeR\x05scope\"q\n" +
 	"\fListResponse\x129\n" +
 	"\x06events\x18\x01 \x03(\v2!.koinon.audit.v1alpha1.AuditEventR\x06events\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2d\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*W\n" +
+	"\n" +
+	"AuditScope\x12\x1b\n" +
+	"\x17AUDIT_SCOPE_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fAUDIT_SCOPE_ORG\x10\x01\x12\x17\n" +
+	"\x13AUDIT_SCOPE_INSTALL\x10\x022d\n" +
 	"\fAuditService\x12T\n" +
 	"\x04List\x12\".koinon.audit.v1alpha1.ListRequest\x1a#.koinon.audit.v1alpha1.ListResponse\"\x03\x90\x02\x01BQZOgithub.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1;auditv1alpha1b\x06proto3"
 
@@ -385,27 +457,30 @@ func file_koinon_audit_v1alpha1_audit_proto_rawDescGZIP() []byte {
 	return file_koinon_audit_v1alpha1_audit_proto_rawDescData
 }
 
+var file_koinon_audit_v1alpha1_audit_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_koinon_audit_v1alpha1_audit_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_koinon_audit_v1alpha1_audit_proto_goTypes = []any{
-	(*AuditEvent)(nil),            // 0: koinon.audit.v1alpha1.AuditEvent
-	(*ListRequest)(nil),           // 1: koinon.audit.v1alpha1.ListRequest
-	(*ListResponse)(nil),          // 2: koinon.audit.v1alpha1.ListResponse
-	(*structpb.Struct)(nil),       // 3: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
+	(AuditScope)(0),               // 0: koinon.audit.v1alpha1.AuditScope
+	(*AuditEvent)(nil),            // 1: koinon.audit.v1alpha1.AuditEvent
+	(*ListRequest)(nil),           // 2: koinon.audit.v1alpha1.ListRequest
+	(*ListResponse)(nil),          // 3: koinon.audit.v1alpha1.ListResponse
+	(*structpb.Struct)(nil),       // 4: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
 }
 var file_koinon_audit_v1alpha1_audit_proto_depIdxs = []int32{
-	3, // 0: koinon.audit.v1alpha1.AuditEvent.summary:type_name -> google.protobuf.Struct
-	4, // 1: koinon.audit.v1alpha1.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
-	4, // 2: koinon.audit.v1alpha1.ListRequest.since:type_name -> google.protobuf.Timestamp
-	4, // 3: koinon.audit.v1alpha1.ListRequest.until:type_name -> google.protobuf.Timestamp
-	0, // 4: koinon.audit.v1alpha1.ListResponse.events:type_name -> koinon.audit.v1alpha1.AuditEvent
-	1, // 5: koinon.audit.v1alpha1.AuditService.List:input_type -> koinon.audit.v1alpha1.ListRequest
-	2, // 6: koinon.audit.v1alpha1.AuditService.List:output_type -> koinon.audit.v1alpha1.ListResponse
-	6, // [6:7] is the sub-list for method output_type
-	5, // [5:6] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	4, // 0: koinon.audit.v1alpha1.AuditEvent.summary:type_name -> google.protobuf.Struct
+	5, // 1: koinon.audit.v1alpha1.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
+	5, // 2: koinon.audit.v1alpha1.ListRequest.since:type_name -> google.protobuf.Timestamp
+	5, // 3: koinon.audit.v1alpha1.ListRequest.until:type_name -> google.protobuf.Timestamp
+	0, // 4: koinon.audit.v1alpha1.ListRequest.scope:type_name -> koinon.audit.v1alpha1.AuditScope
+	1, // 5: koinon.audit.v1alpha1.ListResponse.events:type_name -> koinon.audit.v1alpha1.AuditEvent
+	2, // 6: koinon.audit.v1alpha1.AuditService.List:input_type -> koinon.audit.v1alpha1.ListRequest
+	3, // 7: koinon.audit.v1alpha1.AuditService.List:output_type -> koinon.audit.v1alpha1.ListResponse
+	7, // [7:8] is the sub-list for method output_type
+	6, // [6:7] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_koinon_audit_v1alpha1_audit_proto_init() }
@@ -418,13 +493,14 @@ func file_koinon_audit_v1alpha1_audit_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_audit_v1alpha1_audit_proto_rawDesc), len(file_koinon_audit_v1alpha1_audit_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_koinon_audit_v1alpha1_audit_proto_goTypes,
 		DependencyIndexes: file_koinon_audit_v1alpha1_audit_proto_depIdxs,
+		EnumInfos:         file_koinon_audit_v1alpha1_audit_proto_enumTypes,
 		MessageInfos:      file_koinon_audit_v1alpha1_audit_proto_msgTypes,
 	}.Build()
 	File_koinon_audit_v1alpha1_audit_proto = out.File

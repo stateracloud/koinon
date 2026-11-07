@@ -757,10 +757,10 @@ var _ = Describe("Service", func() {
 			By("the lowered org sees why, and the platform admin's org has the change")
 			ev := events(ctx, org, "trace.settings.lowered")
 			Expect(ev).To(HaveLen(1))
-			var summary map[string]map[string]any
+			var summary map[string]any
 			Expect(json.Unmarshal(ev[0].Summary, &summary)).To(Succeed())
-			Expect(summary["before"]["contentLevel"]).To(Equal("full"))
-			Expect(summary["after"]["contentLevel"]).To(Equal("redacted"))
+			Expect(summary["before"]).To(HaveKeyWithValue("contentLevel", "full"))
+			Expect(summary["after"]).To(HaveKeyWithValue("contentLevel", "redacted"))
 			Expect(events(ctx, other, "trace.settings.lowered")).To(BeEmpty())
 			Expect(events(ctx, auditor, "trace.platform_ceiling.set")).To(HaveLen(2), "the reset in BeforeEach and this change")
 

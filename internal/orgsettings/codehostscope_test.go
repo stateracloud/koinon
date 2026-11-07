@@ -152,7 +152,7 @@ var _ = Describe("the org's code-host scope (ADR 0091, koinon-private#350)", fun
 
 	It("audits the system's refresh only on a change, and a person's sync always", func(ctx SpecContext) {
 		repos := []orgsettings.CodeHostRepo{{Owner: "a", Name: "p", Visibility: "private"}, {Owner: "a", Name: "pub", Visibility: "public"}}
-		sys := audit.System()
+		sys := audit.System("koinon-test:spec")
 		Expect(svc.ReplaceCodeHostRepos(ctx, org, sys, conn, repos, now.Add(-3*time.Minute))).To(Succeed())
 		Expect(events(ctx, org, "org.code_host_scope.replace")).To(HaveLen(1), "the first reading is a change")
 

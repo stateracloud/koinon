@@ -20,8 +20,8 @@
 // second Deployment would add an image, a database role and RBAC without
 // separating any secret.
 //
-// "koinon-api audit verify [--org ID]" walks the audit hash chain (ADR 0023) and exits non-zero at
-// the first broken link.
+// "koinon-api audit verify [--org ID | --install]" walks the install audit chain (ADR 0100) and the
+// org chains (ADR 0023) and exits non-zero at the first broken link.
 //
 // "koinon-api preflight [flags]" checks the cluster for Koinon's install
 // prerequisites and exits non-zero when one is missing (plan item H2); the chart
@@ -61,6 +61,7 @@ import (
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/askuser"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -334,7 +335,7 @@ func serve(ctx context.Context, cfg config) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if cfg.migrate {
-		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait, migrateOptions{durable: cfg.durable}); err != nil {
 			return err
 		}
 	}
@@ -428,11 +429,14 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.5). It
-	// logs what it retired, and needs no platform admin (a fresh install has none yet). It is
+	// writes an install audit event for what it retired (ADR 0100), so a fresh install with no admin is covered. It is
 	// bookkeeping: a failure (a stored entry this binary refuses, a database hiccup) is a warning,
 	// never a reason not to serve; the next start tries again.
-	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
-		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", err)
+	// A retirement the install audit chain refused (the writer role is not granted yet, ADR 0100
+	// decision 1.1a) is retried in the background once the background context exists, below.
+	_, retireErr := priceSvc.RetireCaughtUp(ctx)
+	if retireErr != nil {
+		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", retireErr)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
@@ -451,6 +455,14 @@ func serve(ctx context.Context, cfg config) error {
 
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg() // before pool.Close
+	if errors.Is(retireErr, audit.ErrInstallWriteDenied) {
+		safego.GoOrStop(bgCtx, slog.Default(), "price-retire-caught-up", stop, func(ctx context.Context) {
+			retryInstallWrite(ctx, "platform price retirement", installWriteRetry, func(ctx context.Context) error {
+				_, err := priceSvc.RetireCaughtUp(ctx)
+				return err
+			})
+		})
+	}
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
 	safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
@@ -671,6 +683,17 @@ func serve(ctx context.Context, cfg config) error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
+	audit.RegisterMetrics(reg)
+	// koinon-api checks its own login against the install audit writer role, at startup and every
+	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
+	// identity). A missing grant is logged with the GRANT to run and shows as
+	// koinon_install_audit_writer_ok 0; it never fails the start (ADR 0100 decision 1.1a).
+	audit.RegisterInstallWriterMetric(reg)
+	writerCheck := &audit.InstallWriterCheck{DB: pool, Log: slog.Default()}
+	writerCheck.Check(ctx)
+	safego.GoOrStop(bgCtx, slog.Default(), "install-audit-writer-check", stop, func(ctx context.Context) {
+		writerCheck.Run(ctx, installWriteRetry)
+	})
 	reg.MustRegister(kekMetrics.Collectors()...)
 	reg.MustRegister(guardMetrics.Collectors()...)
 	if durableRT != nil {
@@ -696,8 +719,19 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("price refresh: %w", err)
 	}
 	// Startup bookkeeping never depends on a platform admin existing (a fresh install has none until
-	// the first login): without one, the change is recorded and logged, not audited in an org.
-	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); err != nil {
+	// the first login): without one, the change is recorded and logged, not audited in an org. Nor
+	// does it wait for the install audit writer's grant (ADR 0100 decision 1.1a): on an upgrade of a
+	// CloudNativePG cluster that grant is the chart's post-upgrade hook, which Helm runs only once these
+	// pods are ready, so a refused audit write is retried in the background instead of failing the start.
+	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); errors.Is(err, audit.ErrInstallWriteDenied) {
+		slog.Error("the price refresh setting is not recorded yet: the database refuses koinon-api's install audit event; "+
+			"retrying until the install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "err", err)
+		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh-settings", stop, func(ctx context.Context) {
+			retryInstallWrite(ctx, "price refresh setting", installWriteRetry, func(ctx context.Context) error {
+				return refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval)
+			})
+		})
+	} else if err != nil {
 		return err
 	}
 	if _, err := refresher.ReportUnpriced(ctx); err != nil {
@@ -705,6 +739,9 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	slog.Info("price refresh", "mode", refreshMode, "interval", cfg.pricesRefreshInterval,
 		"autoApply", refreshMode != prices.RefreshOff, "maxChangePercent", cfg.pricesMaxChange, "maxAutoPerDay", cfg.pricesMaxAutoPerDay)
+	// The loop gets the configured setting but runs each tick in the recorded one where that fetches
+	// less (Refresher.Effective): while the retry above has not recorded the setting and its install
+	// event, mode on does not fetch on the strength of an unrecorded change.
 	safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
 		refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
 	})
@@ -868,9 +905,22 @@ func serve(ctx context.Context, cfg config) error {
 	}
 }
 
-// migrate applies pending migrations, first waiting up to wait for the
-// database: on a fresh install it may still be starting.
-func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bool) error {
+// migrateOptions are the flags of "koinon-api migrate".
+type migrateOptions struct {
+	// durable also creates the DBOS runtime's tables.
+	durable bool
+	// grantsOnly applies no migration: it waits, within the same wait, for the install audit writer
+	// role and grants it (grantInstallAuditWriter).
+	grantsOnly bool
+	// requireWriter fails the migration when the install audit writer role does not exist, instead
+	// of warning. The chart passes it on an external database, where no hook will create the role
+	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
+	requireWriter bool
+}
+
+// migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
+// it may still be starting.
+func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptions) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
@@ -879,19 +929,29 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	for {
-		err = db.PingContext(waitCtx)
-		if err == nil {
-			break
-		}
-		slog.Info("waiting for the database", "err", err)
-		select {
-		case <-waitCtx.Done():
-			return fmt.Errorf("database not reachable: %w", err)
-		case <-time.After(2 * time.Second):
-		}
+	if err := waitForDatabase(waitCtx, db); err != nil {
+		return err
+	}
+	if o.grantsOnly {
+		// The wait ends once the role and the tables exist and the grant is made. It does not wait for
+		// koinon_api's membership in the role: CNPG adds the managed role's inRoles on its own schedule,
+		// possibly after this hook succeeds. That is harmless: koinon-api retries every install write
+		// the database refuses (retryInstallWrite) until the membership lands (ADR 0100 decision 1.1a).
+		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
+			return migrations.GrantInstallAuditWriter(ctx, db)
+		})
 	}
 
+	// On an external database nothing creates the install audit writer role later, so the chart
+	// passes --require-install-writer. The check needs no table and runs before any migration: a
+	// failed Job leaves the schema as it was.
+	if o.requireWriter {
+		if err := migrations.CheckInstallAuditWriter(ctx, db); err != nil {
+			return fmt.Errorf("%w: create the role and add koinon-api's login role to it "+
+				"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; no migration was applied; "+
+				"without it koinon-api records no install audit event", err)
+		}
+	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
 	if err != nil {
 		return err
@@ -903,13 +963,72 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// The install audit writer role is the chart's (CloudNativePG managed role, or the operator's on an
+	// external database). On a Helm upgrade of a CloudNativePG cluster it may appear only after this
+	// pre-upgrade hook, so a missing role is a warning, not a failure: the chart's post-upgrade hook
+	// (Argo CD: PostSync) runs "migrate --grants-only", which waits for it (ADR 0100 decision 1.1a).
+	granted, err := migrations.GrantInstallAuditWriter(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the install audit writer: %w", err)
+	}
+	if !granted && o.requireWriter {
+		// The role was there before the migrations (checked above): it was dropped meanwhile.
+		return fmt.Errorf("the role %s or the install audit tables disappeared during the migration: "+
+			"create the role (docs/ops/secret-keys.md, The install audit chain), then run the migration again", migrations.InstallAuditWriterRole)
+	}
+	if !granted {
+		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet, so it was granted nothing: " +
+			"with the chart's CloudNativePG cluster its post-upgrade grant hook grants it once the Cluster has created it; " +
+			"on an external database create it (docs/ops/secret-keys.md, The install audit chain) and run koinon-api migrate again. " +
+			"Until then koinon-api writes no install audit event")
+	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).
-	if !withDurable {
+	if !o.durable {
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())
+}
+
+// grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as
+// ctx lasts (the migrate Job's --wait). On an upgrade of a CloudNativePG cluster the Cluster creates
+// the writer role (a managed role) only after the pre-upgrade migration, on the operator's own
+// schedule; the post-upgrade hook waits for it here. Running out of time fails the hook, so the
+// release reports what the pods would otherwise only log.
+func grantInstallAuditWriter(ctx context.Context, wait, poll time.Duration, grant func(context.Context) (bool, error)) error {
+	for {
+		granted, err := grant(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("grant the install audit writer: %w", err)
+		case granted:
+			slog.Info("granted the install audit writer its privileges", "role", migrations.InstallAuditWriterRole)
+			return nil
+		}
+		slog.Info("waiting for the install audit writer role and tables", "role", migrations.InstallAuditWriterRole)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the role %s or the install audit tables did not appear within %s: the CloudNativePG Cluster has not reconciled its managed roles, or the migration did not run", migrations.InstallAuditWriterRole, wait)
+		case <-time.After(poll):
+		}
+	}
+}
+
+// waitForDatabase pings db until it answers or ctx ends.
+func waitForDatabase(ctx context.Context, db *sql.DB) error {
+	for {
+		err := db.PingContext(ctx)
+		if err == nil {
+			return nil
+		}
+		slog.Info("waiting for the database", "err", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("database not reachable: %w", err)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes
