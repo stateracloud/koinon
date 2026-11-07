@@ -19,6 +19,12 @@ var _ = Describe("koinon-api's startup", func() {
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--wait", "2m", "--durable")).To(Succeed())
 	})
 
+	It("runs the grant-only migrate of the chart's post-upgrade hook, without --durable", func() {
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--wait", "5m")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--durable")).
+			To(MatchError(ContainSubstring("--grants-only and --durable are exclusive")))
+	})
+
 	It("takes the database URL from the flag, KOINON_DATABASE_URL or DATABASE_URL", func() {
 		Expect(start(nil, "migrate", "--database-url="+db)).To(Succeed())
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate")).To(Succeed())

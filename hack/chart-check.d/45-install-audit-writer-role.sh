@@ -44,3 +44,35 @@ fi
 
 # No non-CNPG render creates a role (the roles are the operator's, ADR 0100 docs/ops/secret-keys.md).
 lacks "an external database render has no CNPG group role" 'koinon_install_audit_writer' --set postgres.mode=external --set postgres.external.secretName=db
+
+# The grant hook (install-audit-grants.yaml): on an upgrade of a cluster initialised before ADR 0100,
+# CNPG creates the group role only after the pre-upgrade migrate Job, so a post-upgrade hook (Argo CD:
+# PostSync) runs `koinon-api migrate --grants-only` as the migration role and waits for the role.
+grants=(--show-only templates/install-audit-grants.yaml)
+g=$(render "${grants[@]}")
+for want in \
+	'^    helm\.sh/hook: post-upgrade$' \
+	'^    helm\.sh/hook-delete-policy: before-hook-creation,hook-succeeded$' \
+	'^    argocd\.argoproj\.io/hook: PostSync$' \
+	'^    argocd\.argoproj\.io/hook-delete-policy: BeforeHookCreation$' \
+	'^          args: \["migrate", "--grants-only", "--wait", "5m"\]$' \
+	'^ +name: koinon-db-migrate$' \
+	'^      serviceAccountName: koinon-migrate-grants$' \
+	'^      automountServiceAccountToken: false$' \
+	'^          image: ghcr\.io/.*/api:'; do
+	grep -Eq -- "$want" <<<"$g" || fail "the install audit grant hook renders $want"
+done
+# Not a post-install hook: a new cluster has the role before its first migration, and a post-install
+# hook would make `helm install` without --wait wait for the new database.
+grep -Eq 'helm\.sh/hook: .*post-install' <<<"$g" && fail "the install audit grant hook is not a post-install hook"
+# Both the ServiceAccount and the Job are hooks of the same phases, the ServiceAccount first.
+n=$(grep -cE '^    helm\.sh/hook: post-upgrade$' <<<"$g" || true)
+[[ $n == 2 ]] || fail "the grant hook's ServiceAccount and Job are both post-upgrade hooks (found $n)"
+n=$(grep -cE '^    argocd\.argoproj\.io/hook: PostSync$' <<<"$g" || true)
+[[ $n == 2 ]] || fail "the grant hook's ServiceAccount and Job are both Argo CD PostSync hooks (found $n)"
+grep -Eq '^    argocd\.argoproj\.io/sync-wave: "-10"$' <<<"$g" || fail "the grant hook's ServiceAccount comes before its Job in Argo CD"
+# The pull secrets and the image registry follow the chart's helpers (ADR 0061).
+has "the grant hook takes global.imagePullSecrets" '^        - name: regcred$' --set 'global.imagePullSecrets={regcred}' "${grants[@]}"
+has "the grant hook takes global.imageRegistry" '^          image: mirror\.example/' --set global.imageRegistry=mirror.example "${grants[@]}"
+# External mode: the operator creates the role before the upgrade; the pre-upgrade migrate grants it.
+lacks "an external database render has no grant hook" 'migrate-grants' --set postgres.mode=external --set postgres.external.secretName=db

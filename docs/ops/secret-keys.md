@@ -354,14 +354,22 @@ Actions that belong to no org (platform prices first) go to a second chain, `ins
 Only `koinon-api` writes it. The migration takes every write privilege on both install tables away
 from `koinon_app`; `koinon-api migrate` then grants INSERT to the group role
 `koinon_install_audit_writer` after the migrations, on every run, if the role exists. It never creates
-the role (the migrate role has no CREATEROLE): when it is missing the Job logs a warning and
-`koinon-api` cannot write install events until the role exists and migrate has run again. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new
-clusters) and as a managed role (clusters created before this release), and makes only the
-`koinon_api` managed role a member. Do not let the api, reconciler and agentd share one login: the
+the role (the migrate role has no CREATEROLE): when it is missing the Job logs a warning and grants
+nothing. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new clusters)
+and as a managed role (clusters created before this release), and makes only the `koinon_api`
+managed role a member. On an upgrade of an older cluster the operator creates that managed role
+after the `pre-upgrade` migrate Job, so the chart also runs `koinon-api migrate --grants-only` as a
+`post-upgrade` hook (`<release>-migrate-grants`; Argo CD: `PostSync`): it applies no migration,
+waits up to `migrations.wait` for the role and the tables, grants, and fails the upgrade if the role
+never appears. One `helm upgrade` is enough. Until the grant lands `koinon-api` serves anyway: it
+logs an error for each startup install event the database refuses
+(`koinon_audit_writes_total{chain="install",result="error"}` counts them) and retries it every
+30 seconds, and platform price changes fail with a permission error. Do not let the api, reconciler and agentd share one login: the
 reconciler would then be able to write this chain.
 
 With `postgres.mode: external` the roles are yours. Run this once as an administrator **before the
-first migration** (or before the next one, then run `koinon-api migrate` again), with `<api role>` the role `koinon-api` logs in as:
+first migration** (or before the upgrade that adds the chain; created later, run `koinon-api migrate`
+or `koinon-api migrate --grants-only` again), with `<api role>` the role `koinon-api` logs in as:
 
 ```sql
 CREATE ROLE koinon_install_audit_writer NOLOGIN;

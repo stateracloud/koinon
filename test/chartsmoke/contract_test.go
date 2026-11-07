@@ -47,6 +47,8 @@ func TestChartContract(t *testing.T) {
 	for _, values := range valuesFiles() {
 		t.Run(filepath.Base(values), func(t *testing.T) {
 			r := helmRender(t.Context(), values)
+			// The cnpg-only post-upgrade grant hook (ADR 0100), which the external render lacks.
+			r.Jobs = append(r.Jobs, helmRenderWith(t.Context(), values, cnpgUpgrade...).Jobs...)
 			checked := 0
 			for _, c := range containersOf(r) {
 				newRoot, ok := commandTrees[imageName(c.Image)]

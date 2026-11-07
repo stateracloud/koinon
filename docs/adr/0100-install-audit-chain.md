@@ -119,9 +119,21 @@ asynchronously, and the migrate Job may already have run by then. Instead:
   of the migration. A Helm `pre-upgrade` hook runs before the updated Cluster reaches the API server,
   and the migrate role has no `CREATEROLE`, so a migration that needs the role would fail on an
   existing cnpg install and abort the upgrade before the role could appear, on every retry. When the
-  role is missing the step logs a warning and grants nothing; `koinon-api` then fails its install
-  writes with a permission error until the next migrate (the next `helm upgrade`, or Argo CD sync)
-  finds the role. New installs have the role from `postInitApplicationSQL` and never see this.
+  role is missing the step logs a warning and grants nothing. New installs have the role from
+  `postInitApplicationSQL` and never see this;
+- in cnpg mode the chart adds a `post-upgrade` hook Job (`templates/install-audit-grants.yaml`; Argo
+  CD: `PostSync`) that runs `koinon-api migrate --grants-only` as the migrate role: no migration, only
+  the grant step, polled until the role and the tables exist, within `migrations.wait`. Helm runs it
+  after the release's objects, so after the updated Cluster, and with `--wait` once the pods are
+  ready. Running out of time fails the hook, so the upgrade reports a role CNPG never created. One
+  `helm upgrade` (or sync) is enough (maintainer decision 2026-11-07, after review: an earlier
+  version of this decision asked for a second `helm upgrade`);
+- `koinon-api` never needs the grant to start, or the post-upgrade hook could never run under
+  `--wait`: an install event the database refuses for lack of privilege (SQLSTATE 42501, wrapped as
+  `audit.ErrInstallWriteDenied`) at startup (the price refresh setting, the retirement of caught-up
+  platform prices) is logged as an error and retried in the background every 30 seconds until the
+  grant lands. Requests that write install events (platform price changes) fail with the permission
+  error in that window, which is the hook's runtime.
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:

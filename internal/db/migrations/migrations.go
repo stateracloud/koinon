@@ -26,15 +26,18 @@ type Execer interface {
 }
 
 // GrantInstallAuditWriter gives InstallAuditWriterRole its privileges on the install audit tables
-// and reports whether the role exists. It runs after the goose migrations, on every migrate, as the
-// table owner, and is idempotent. It is not part of migration 00066 because on a Helm upgrade of a
-// CloudNativePG cluster the migrate hook runs before the updated Cluster (which adds the role as a
-// managed role) reaches the API server: a migration that needs the role would abort the upgrade
-// before the role can appear. When the role is missing nothing is granted and the caller warns; the
-// next migrate (the next upgrade or Argo CD sync) grants once the role exists.
+// and reports whether it did: false when the role or the tables (migration 00066) do not exist yet.
+// It runs as the table owner after the goose migrations on every migrate, and alone in "koinon-api
+// migrate --grants-only", and is idempotent. It is not part of migration 00066 because on a Helm
+// upgrade of a CloudNativePG cluster the migrate hook runs before the updated Cluster (which adds the
+// role as a managed role) reaches the API server: a migration that needs the role would abort the
+// upgrade before the role can appear. So the chart's post-upgrade hook (and Argo CD PostSync hook)
+// runs --grants-only, which waits for the role and then grants (ADR 0100 decision 1.1a).
 func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 	var exists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, InstallAuditWriterRole).Scan(&exists); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)
+		AND to_regclass('install_audit_events') IS NOT NULL
+		AND to_regclass('install_audit_chain_head') IS NOT NULL`, InstallAuditWriterRole).Scan(&exists); err != nil {
 		return false, err
 	}
 	if !exists {

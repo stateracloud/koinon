@@ -42,8 +42,8 @@ spec:
         name: {{ include "koinon.pgSecret" (list . "migrate") }}
       postInitApplicationSQL:
         - CREATE ROLE koinon_app NOLOGIN
-        # The only role that may insert install audit events (ADR 0100 decision 1.1a). Migration 00066
-        # grants it INSERT; only koinon-api's login role is a member, below.
+        # The only role that may insert install audit events (ADR 0100 decision 1.1a). `koinon-api migrate`
+        # grants it its privileges after the goose migrations; only koinon-api's login role is a member, below.
         - CREATE ROLE koinon_install_audit_writer NOLOGIN
         - GRANT CONNECT ON DATABASE {{ $db }} TO koinon_app
         - GRANT USAGE ON SCHEMA public TO koinon_app
@@ -53,7 +53,9 @@ spec:
   managed:
     roles:
       {{- /* The group role is also managed so a cluster initialised before ADR 0100 gets it: the migrate
-             role (the initdb owner) has no CREATEROLE, so migration 00066 cannot create it there. */}}
+             role (the initdb owner) has no CREATEROLE, so no migration can create it there. CNPG creates
+             it after the pre-upgrade migrate Job has run, so the post-upgrade hook
+             (install-audit-grants.yaml, `koinon-api migrate --grants-only`) waits for it and grants it. */}}
       - name: koinon_install_audit_writer
         ensure: present
         login: false
@@ -62,8 +64,10 @@ spec:
         ensure: present
         login: true
         inherit: true
-        {{- /* Both group roles exist before CNPG reconciles managed roles (postInitApplicationSQL), so
-               membership never waits on a migration; the migration grants the groups their table privileges. */}}
+        {{- /* Membership never waits on a migration: on a new cluster both group roles come from
+               postInitApplicationSQL, on an older one CNPG creates the writer role in the same managed-role
+               reconcile. `koinon-api migrate` grants the writer role its table privileges after the goose
+               migrations (and the post-upgrade hook, once CNPG has created the writer role). */}}
         inRoles: [koinon_app{{ if eq $role "api" }}, koinon_install_audit_writer{{ end }}]
         passwordSecret:
           name: {{ include "koinon.pgSecret" (list $ $role) }}

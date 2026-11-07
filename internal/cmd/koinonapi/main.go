@@ -335,7 +335,7 @@ func serve(ctx context.Context, cfg config) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if cfg.migrate {
-		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable, false); err != nil {
 			return err
 		}
 	}
@@ -432,8 +432,11 @@ func serve(ctx context.Context, cfg config) error {
 	// writes an install audit event for what it retired (ADR 0100), so a fresh install with no admin is covered. It is
 	// bookkeeping: a failure (a stored entry this binary refuses, a database hiccup) is a warning,
 	// never a reason not to serve; the next start tries again.
-	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
-		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", err)
+	// A retirement the install audit chain refused (the writer role is not granted yet, ADR 0100
+	// decision 1.1a) is retried in the background once the background context exists, below.
+	_, retireErr := priceSvc.RetireCaughtUp(ctx)
+	if retireErr != nil {
+		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", retireErr)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
@@ -452,6 +455,14 @@ func serve(ctx context.Context, cfg config) error {
 
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg() // before pool.Close
+	if errors.Is(retireErr, audit.ErrInstallWriteDenied) {
+		safego.GoOrStop(bgCtx, slog.Default(), "price-retire-caught-up", stop, func(ctx context.Context) {
+			retryInstallWrite(ctx, "platform price retirement", installWriteRetry, func(ctx context.Context) error {
+				_, err := priceSvc.RetireCaughtUp(ctx)
+				return err
+			})
+		})
+	}
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
 	safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
@@ -698,8 +709,19 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("price refresh: %w", err)
 	}
 	// Startup bookkeeping never depends on a platform admin existing (a fresh install has none until
-	// the first login): without one, the change is recorded and logged, not audited in an org.
-	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); err != nil {
+	// the first login): without one, the change is recorded and logged, not audited in an org. Nor
+	// does it wait for the install audit writer's grant (ADR 0100 decision 1.1a): on an upgrade of a
+	// CloudNativePG cluster that grant is the chart's post-upgrade hook, which Helm runs only once these
+	// pods are ready, so a refused audit write is retried in the background instead of failing the start.
+	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); errors.Is(err, audit.ErrInstallWriteDenied) {
+		slog.Error("the price refresh setting is not recorded yet: the database refuses koinon-api's install audit event; "+
+			"retrying until the install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "err", err)
+		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh-settings", stop, func(ctx context.Context) {
+			retryInstallWrite(ctx, "price refresh setting", installWriteRetry, func(ctx context.Context) error {
+				return refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval)
+			})
+		})
+	} else if err != nil {
 		return err
 	}
 	if _, err := refresher.ReportUnpriced(ctx); err != nil {
@@ -871,8 +893,9 @@ func serve(ctx context.Context, cfg config) error {
 }
 
 // migrate applies pending migrations, first waiting up to wait for the
-// database: on a fresh install it may still be starting.
-func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bool) error {
+// database: on a fresh install it may still be starting. With grantsOnly it applies no migration:
+// it waits, within the same wait, for the install audit writer role and grants it (grantInstallAuditWriter).
+func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable, grantsOnly bool) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
@@ -881,17 +904,13 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	for {
-		err = db.PingContext(waitCtx)
-		if err == nil {
-			break
-		}
-		slog.Info("waiting for the database", "err", err)
-		select {
-		case <-waitCtx.Done():
-			return fmt.Errorf("database not reachable: %w", err)
-		case <-time.After(2 * time.Second):
-		}
+	if err := waitForDatabase(waitCtx, db); err != nil {
+		return err
+	}
+	if grantsOnly {
+		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
+			return migrations.GrantInstallAuditWriter(ctx, db)
+		})
 	}
 
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
@@ -906,14 +925,18 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 		return fmt.Errorf("migrate: %w", err)
 	}
 	// The install audit writer role is the chart's (CloudNativePG managed role, or the operator's on an
-	// external database). On a Helm upgrade it may appear only after this hook, so a missing role is a
-	// warning, not a failure: the next migrate grants it (ADR 0100 decision 1.1a).
+	// external database). On a Helm upgrade of a CloudNativePG cluster it may appear only after this
+	// pre-upgrade hook, so a missing role is a warning, not a failure: the chart's post-upgrade hook
+	// (Argo CD: PostSync) runs "migrate --grants-only", which waits for it (ADR 0100 decision 1.1a).
 	granted, err := migrations.GrantInstallAuditWriter(ctx, db)
 	if err != nil {
 		return fmt.Errorf("grant the install audit writer: %w", err)
 	}
 	if !granted {
-		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet: no install audit event can be written until it exists and koinon-api migrate has run again (helm upgrade, or an Argo CD sync); see docs/ops/secret-keys.md, The install audit chain")
+		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet, so it was granted nothing: " +
+			"with the chart's CloudNativePG cluster its post-upgrade grant hook grants it once the Cluster has created it; " +
+			"on an external database create it (docs/ops/secret-keys.md, The install audit chain) and run koinon-api migrate again. " +
+			"Until then koinon-api writes no install audit event")
 	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
@@ -922,6 +945,46 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bo
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())
+}
+
+// grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as
+// ctx lasts (the migrate Job's --wait). On an upgrade of a CloudNativePG cluster the Cluster creates
+// the writer role (a managed role) only after the pre-upgrade migration, on the operator's own
+// schedule; the post-upgrade hook waits for it here. Running out of time fails the hook, so the
+// release reports what the pods would otherwise only log.
+func grantInstallAuditWriter(ctx context.Context, wait, poll time.Duration, grant func(context.Context) (bool, error)) error {
+	for {
+		granted, err := grant(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("grant the install audit writer: %w", err)
+		case granted:
+			slog.Info("granted the install audit writer its privileges", "role", migrations.InstallAuditWriterRole)
+			return nil
+		}
+		slog.Info("waiting for the install audit writer role and tables", "role", migrations.InstallAuditWriterRole)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the role %s or the install audit tables did not appear within %s: the CloudNativePG Cluster has not reconciled its managed roles, or the migration did not run", migrations.InstallAuditWriterRole, wait)
+		case <-time.After(poll):
+		}
+	}
+}
+
+// waitForDatabase pings db until it answers or ctx ends.
+func waitForDatabase(ctx context.Context, db *sql.DB) error {
+	for {
+		err := db.PingContext(ctx)
+		if err == nil {
+			return nil
+		}
+		slog.Info("waiting for the database", "err", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("database not reachable: %w", err)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes

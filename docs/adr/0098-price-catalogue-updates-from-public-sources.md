@@ -268,7 +268,9 @@ Every platform entry and every org entry made from a proposal records:
 - the licence (`MIT`, or `OpenRouter terms` for OpenRouter);
 - the agreeing sources;
 - the proposal ID;
-- the approver's user ID, or `auto` with the rule set version, and the time.
+- who approved it, as the audit actor names it (`Actor.String()`): a user, a `cli` command, or
+  `system koinon-api:price-refresh` with the rule set version (it was `auto` until the install audit
+  chain, ADR 0100; maintainer decision 2026-11-07), and the time.
 
 The Prices page and the ledger's `price_ref` lead to it. A price a person typed from a provider page
 records the page URL and "manual" as its source.
@@ -276,8 +278,8 @@ records the page URL and "manual" as its source.
 ### 5. Audit, rollback and metrics
 
 - **Audit**, with `audit.RecordErr` in the same transaction as the change (as `SetOverride` does):
-  `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user or
-  `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
+  `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user, a `cli`
+  command or `system koinon-api:price-refresh`, formerly `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
   `price.import.uploaded` and
   `price.refresh.settings_changed`. A refused change is not audited (ADR 0056 decision 10).
 - **Rollback** is a new version that restores an earlier version's entries from now on. History is

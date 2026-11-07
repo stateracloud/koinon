@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -255,10 +256,20 @@ func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store
 	})
 	countWrite(ChainInstall, err)
 	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "42501" { // insufficient_privilege
+			return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w: %w", e.Action, ErrInstallWriteDenied, err)
+		}
 		return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
 	}
 	return row, nil
 }
+
+// ErrInstallWriteDenied is in the error RecordInstall returns when the database refuses the insert
+// for lack of privilege: the connecting role is not (yet) a member of the install audit writer role,
+// or "koinon-api migrate --grants-only" has not yet granted that role its privileges (ADR 0100
+// decision 1.1a). On an upgrade of a CloudNativePG cluster this is the state between the new pods
+// and the chart's post-upgrade grant hook, so startup writes retry instead of failing the start.
+var ErrInstallWriteDenied = errors.New("the install audit writer role may not insert yet")
 
 // RecordInstallErr is RecordInstall for callers that only need the error.
 func RecordInstallErr(ctx context.Context, q *store.Queries, e InstallEvent) error {

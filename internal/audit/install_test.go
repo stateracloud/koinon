@@ -5,6 +5,7 @@ package audit_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"sync"
@@ -13,11 +14,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -387,8 +390,9 @@ var _ = Describe("the install audit chain", func() {
 
 		// A Helm upgrade of a cluster initialised before ADR 0100: the migrate hook runs before the updated
 		// Cluster adds the group role, and the migrate role (the initdb owner) has no CREATEROLE. The
-		// migration must not abort the upgrade; the next migrate, once the role exists, grants it.
-		It("migrates without the group role as a non-CREATEROLE owner, and grants it on the next run", func(ctx SpecContext) {
+		// migration must not abort the upgrade; koinon-api's refused write says why (ErrInstallWriteDenied,
+		// which its startup retries on), and the post-upgrade hook (migrate --grants-only) grants the role.
+		It("migrates without the group role as a non-CREATEROLE owner, and the grant-only run grants it", func(ctx SpecContext) {
 			testenv.Require(testenv.Docker)
 			dsn, stop, err := pgtest.StartServer(ctx, pgtest.Durable())
 			Expect(err).NotTo(HaveOccurred())
@@ -409,7 +413,7 @@ var _ = Describe("the install audit chain", func() {
 			u.Path = "/migrate_probe_db"
 			Expect(pgtest.MigrateErr(ctx, u.String())).To(Succeed(), "the group role is missing: the upgrade goes on")
 
-			By("the Cluster change arrives: the role exists, a member of it still cannot insert before the next migrate")
+			By("the Cluster change arrives: the role exists, a member of it still cannot insert before the grant")
 			_, err = conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
 			Expect(err).NotTo(HaveOccurred())
 			member := fmt.Sprintf("upgrade_member_%d", roleSeq.Add(1))
@@ -422,9 +426,18 @@ var _ = Describe("the install audit chain", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func(ctx SpecContext) { _ = mconn.Close(ctx) })
 			Expect(execAs(ctx, mconn, member, insertSQL)).To(MatchError(ContainSubstring("permission denied")))
+			_, err = mconn.Exec(ctx, `SET ROLE `+member)
+			Expect(err).NotTo(HaveOccurred())
+			err = audit.RecordInstallErr(ctx, store.New(mconn), audit.InstallEvent{Actor: priceActor, Action: "test.denied", TargetKind: "test"})
+			Expect(err).To(MatchError(audit.ErrInstallWriteDenied), "koinon-api can tell a missing grant from other failures")
+			_, err = mconn.Exec(ctx, `RESET ROLE`)
+			Expect(err).NotTo(HaveOccurred())
 
-			By("the next migrate (the next upgrade or sync) grants it")
-			Expect(pgtest.MigrateErr(ctx, u.String())).To(Succeed())
+			By("the post-upgrade hook (migrate --grants-only, as the migrate role) grants it")
+			mdb, err := sql.Open("pgx", u.String())
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(mdb.Close)
+			Expect(migrations.GrantInstallAuditWriter(ctx, mdb)).To(BeTrue())
 			Expect(execAs(ctx, mconn, member, insertSQL)).To(Succeed())
 		})
 	})

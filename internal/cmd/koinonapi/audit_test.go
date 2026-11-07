@@ -4,6 +4,9 @@ package koinonapi
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -51,4 +54,46 @@ var _ = Describe("koinon-api audit verify", func() {
 		Expect(verifyAudit(ctx, pool, "", true, &out)).To(MatchError(audit.ErrBroken))
 		Expect(out.String()).To(ContainSubstring("chain_seq 2"))
 	}, SpecTimeout(3*time.Minute))
+})
+
+var _ = Describe("startup install audit writes before the writer role is granted", func() {
+	denied := fmt.Errorf("audit: record install event x: %w: permission denied for table install_audit_events", audit.ErrInstallWriteDenied)
+
+	It("retries a refused write until it is recorded, and stops with the server", func(ctx SpecContext) {
+		calls := 0
+		retryInstallWrite(ctx, "probe", time.Millisecond, func(context.Context) error {
+			calls++
+			if calls < 3 {
+				return denied
+			}
+			return nil
+		})
+		Expect(calls).To(Equal(3))
+
+		stopped, cancel := context.WithCancel(ctx)
+		cancel()
+		retryInstallWrite(stopped, "probe", time.Hour, func(context.Context) error {
+			Fail("no write after the server stopped")
+			return nil
+		})
+	})
+
+	It("waits in the grant-only migrate for the role, and gives up with the wait", func(ctx SpecContext) {
+		calls := 0
+		Expect(grantInstallAuditWriter(ctx, time.Minute, time.Millisecond, func(context.Context) (bool, error) {
+			calls++
+			return calls == 3, nil
+		})).To(Succeed())
+		Expect(calls).To(Equal(3))
+
+		short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		defer cancel()
+		Expect(grantInstallAuditWriter(short, 20*time.Millisecond, time.Millisecond, func(context.Context) (bool, error) {
+			return false, nil
+		})).To(MatchError(ContainSubstring("did not appear within 20ms")))
+
+		Expect(grantInstallAuditWriter(ctx, time.Minute, time.Millisecond, func(context.Context) (bool, error) {
+			return false, errors.New("permission denied for table install_audit_events")
+		})).To(MatchError(ContainSubstring("grant the install audit writer")), "a grant that fails is not waited out")
+	})
 })

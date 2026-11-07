@@ -67,6 +67,15 @@ CREATE ROLE koinon_install_audit_writer NOLOGIN;
 GRANT koinon_install_audit_writer TO <api login role>;
 ```
 
+If the migrate role is not the one that owns the tables, or the role `koinon_app` does not exist, also
+run this after the first migration, so that the reconciler and agentd can read the install audit
+chain and not write it:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler login role>, <agentd login role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
+```
+
 Give `api`, `reconciler` and `agentd` separate logins: if they share one, the reconciler can write
 the install audit chain too and the separation the chain relies on is gone. See "The install audit
 chain" in `docs/ops/secret-keys.md` in the repository.

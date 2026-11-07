@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -85,4 +87,37 @@ func verifyAudit(ctx context.Context, pool *pgxpool.Pool, orgID string, installO
 		return audit.ErrBroken
 	}
 	return nil
+}
+
+// installWriteRetry is how often koinon-api retries a startup write that the install audit chain
+// refused (retryInstallWrite).
+const installWriteRetry = 30 * time.Second
+
+// retryInstallWrite calls write every interval until it succeeds or ctx ends. It is for startup
+// bookkeeping that writes an install audit event (ADR 0100) and failed with
+// audit.ErrInstallWriteDenied: on an upgrade of a CloudNativePG cluster the writer role is granted by
+// the chart's post-upgrade hook, which Helm runs only once koinon-api is ready, so the start must not
+// wait for it. Each failed attempt is logged as an error, so the state is never silent.
+func retryInstallWrite(ctx context.Context, what string, interval time.Duration, write func(context.Context) error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+		err := write(ctx)
+		if err == nil {
+			slog.Info("recorded after a retry", "what", what)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, audit.ErrInstallWriteDenied) {
+			slog.Error("still not recorded: the database refuses koinon-api's install audit event; "+
+				"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", what, "err", err)
+			continue
+		}
+		slog.Error("still not recorded; retrying", "what", what, "err", err)
+	}
 }

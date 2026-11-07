@@ -314,22 +314,87 @@ func describeMode(name, valuesFile string) {
 				Expect(n).To(Equal(1), "koinon-api wrote an install event on its first start, as koinon_api")
 			}
 
-			insert := `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
-				VALUES ('system', 'koinon-test:chartsmoke', 'chartsmoke.probe', 'probe', 'x', '{}')`
-			as := func(role string) error {
-				c, err := pgx.Connect(ctx, strings.Replace(dbURL, "//koinon:", "//"+role+":", 1))
-				Expect(err).NotTo(HaveOccurred())
-				defer func() { _ = c.Close(ctx) }()
-				_, err = c.Exec(ctx, insert)
-				return err
-			}
-			Expect(as("koinon_api")).To(Succeed(), "koinon_api is in the writer group")
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(Succeed(), "koinon_api is in the writer group")
 			for _, role := range []string{"koinon_reconciler", "koinon_agentd"} {
-				err := as(role)
+				err := insertInstallEventAs(ctx, dbURL, role)
 				Expect(err).To(HaveOccurred(), "%s may not append to the install audit chain", role)
 				Expect(err.Error()).To(ContainSubstring("permission denied"), role)
 			}
 		}, SpecTimeout(time.Minute))
+
+		// An upgrade, in cnpg mode, of a cluster initialised before ADR 0100 (#328): the pre-upgrade
+		// migrate Job runs before the updated Cluster creates the managed group role, so it finds no role
+		// and grants nothing; CNPG then creates the role (and adds koinon_api to it) on its own schedule,
+		// and the post-upgrade hook, which waits for the role, grants it. The hook is rendered in cnpg
+		// mode with --is-upgrade; it connects as the migrate Job does here (the cnpg URI verifies the
+		// CNPG cluster's CA, see externalDatabase), the rest of its pod spec is the chart's.
+		It("grants the writer role once an upgraded cluster creates it, in the post-upgrade hook", func(ctx SpecContext) {
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			execAll := func(stmts ...string) {
+				GinkgoHelper()
+				for _, stmt := range stmts {
+					_, err := conn.Exec(ctx, stmt)
+					Expect(err).NotTo(HaveOccurred(), stmt)
+				}
+			}
+
+			By("a cluster from before ADR 0100: no writer role, koinon_api in koinon_app only")
+			execAll(
+				`REVOKE ALL ON install_audit_events, install_audit_chain_head FROM koinon_install_audit_writer`,
+				`REVOKE koinon_install_audit_writer FROM koinon_api`,
+				`DROP ROLE koinon_install_audit_writer`,
+			)
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
+
+			By("the pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
+			var migrate *batchv1.Job
+			for _, j := range r.Jobs {
+				if j.Name == "koinon-migrate" {
+					migrate = j
+				}
+			}
+			Expect(migrate).NotTo(BeNil())
+			runJob(ctx, rn, migrate)
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
+
+			By("the post-upgrade hook waits while CNPG reconciles its managed roles, then grants")
+			up := helmRenderWith(ctx, valuesFile, cnpgUpgrade...)
+			Expect(up.Jobs).To(HaveLen(1))
+			grants := up.Jobs[0].DeepCopy()
+			Expect(grants.Annotations).To(HaveKeyWithValue("helm.sh/hook", "post-upgrade"))
+			Expect(grants.Annotations).To(HaveKeyWithValue("argocd.argoproj.io/hook", "PostSync"))
+			Expect(grants.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--grants-only"))
+			ps, mps := &grants.Spec.Template.Spec, migrate.Spec.Template.Spec
+			ps.Volumes = append(slices.DeleteFunc(slices.Clone(ps.Volumes), func(v corev1.Volume) bool { return v.Name == "db-ca" || v.Name == "tmp" }), mps.Volumes...)
+			ps.Containers[0].Env = mps.Containers[0].Env
+			ps.Containers[0].VolumeMounts = mps.Containers[0].VolumeMounts
+			for _, o := range up.Objects {
+				Expect(applyObject(ctx, cl, o)).To(Succeed(), "the hook's ServiceAccount, a hook of a lower weight")
+			}
+			created := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				select {
+				case <-ctx.Done():
+					created <- ctx.Err()
+					return
+				case <-time.After(3 * time.Second):
+				}
+				_, err := conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+				if err == nil {
+					_, err = conn.Exec(ctx, `GRANT koinon_install_audit_writer TO koinon_api`)
+				}
+				created <- err
+			}()
+			runJob(ctx, rn, grants)
+			Expect(<-created).To(Succeed(), "CNPG's role reconcile, simulated")
+
+			By("koinon_api can now append to the install audit chain, without another upgrade")
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(Succeed())
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_reconciler")).To(MatchError(ContainSubstring("permission denied")))
+		}, SpecTimeout(3*time.Minute))
 
 		// The MCP leak guard (ADR 0091): agentgateway fails every org MCP call closed when it cannot
 		// reach the guard, so the guard koinon-api serves must be where the chart's reconciler config
@@ -518,6 +583,17 @@ func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 	default:
 		return fmt.Errorf("applyObject: %T is not modelled", o)
 	}
+	return err
+}
+
+// insertInstallEventAs appends a probe event to the install audit chain as the login role.
+func insertInstallEventAs(ctx context.Context, dbURL, role string) error {
+	GinkgoHelper()
+	c, err := pgx.Connect(ctx, strings.Replace(dbURL, "//koinon:", "//"+role+":", 1))
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = c.Close(ctx) }()
+	_, err = c.Exec(ctx, `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
+		VALUES ('system', 'koinon-test:chartsmoke', 'chartsmoke.probe', 'probe', 'x', '{}')`)
 	return err
 }
 
