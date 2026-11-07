@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Refuses a merge commit (git merge origin/main) under an identity outside hack/git-identities.allowed
+# (koinon#320). A fast-forward writes no commit and never runs this.
+exec "$(dirname "${BASH_SOURCE[0]}")/../git-identity-check.sh" commit

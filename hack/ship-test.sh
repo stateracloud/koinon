@@ -78,6 +78,9 @@ cat >"$seed/hack/claim.sh" <<'SH'
 echo "claim $*" >>"$FAKE_LOG"
 exit "$(cat "$FAKE_CLAIM_RC")"
 SH
+# The identity gate (koinon#320): ship runs the repository's own check against its own allowlist.
+cp "$repo/hack/git-identity-check.sh" "$seed/hack/"
+printf 'Test Dev <dev@example.invalid>\nadv <adv@example.invalid>\n' >"$seed/hack/git-identities.allowed"
 chmod +x "$seed/hack/"*.sh
 printf '# ADRs\n\n## Index\n' >"$seed/docs/adr/README.md"
 printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
@@ -107,7 +110,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_SHIP_ALLOWED_EMAILS KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -129,14 +132,15 @@ run() { # <outfile> <args...>: runs ship in the current directory; echoes the ex
 	echo "$rc"
 }
 
-# 1. identity refusal
+# 1. identity refusal (hack/git-identity-check.sh commit, before any commit)
 reset_state
 w=$(newwork); cd "$w"
+git config user.email t@example.invalid
 echo one >f.txt
-export KOINON_SHIP_ALLOWED_EMAILS="a@example.invalid, b@example.invalid"
 rc=$(run "$tmp/o1" -m "feat: x")
 check "identity not allowed: exit 1" eq "$rc" 1
-check "identity refusal is named" has "KOINON_SHIP_ALLOWED_EMAILS" "$tmp/o1"
+check "identity refusal is named" has "identity" "$tmp/o1"
+check "identity refusal names the address" has "t@example.invalid" "$tmp/o1"
 check "identity refusal commits nothing" eq "$(git rev-list --count origin/main..HEAD)" 0
 check "identity refusal pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
 
@@ -148,7 +152,7 @@ export KOINON_COMMIT_FOOTER=$'Co-Authored-By: Bot <bot@example.invalid>\nClaude-
 rc=$(run "$tmp/o2" -m "feat: add f")
 check "plain ship exits 0" eq "$rc" 0
 check "commit line printed" has '^commit ok [0-9a-f]\{7,\}' "$tmp/o2"
-check "unset allow list is printed" has 'any address allowed' "$tmp/o2"
+check "identity line printed" has '^identity dev@example.invalid$' "$tmp/o2"
 git log -1 --format=%B >"$tmp/m2"
 check "sign-off present" has '^Signed-off-by: Test Dev <dev@example.invalid>$' "$tmp/m2"
 check "footer appended" has '^Claude-Session: https://example.invalid/s$' "$tmp/m2"
@@ -157,15 +161,6 @@ check "gitleaks line counts commits" has '^gitleaks ok (1 commits)$' "$tmp/o2"
 check "pushed line" has '^pushed feat/1-x$' "$tmp/o2"
 check "branch reached origin" branch_on_origin feat/1-x
 check "no PR without --pr-title" hasnt 'gh pr \(create\|edit\|merge\)' "$FAKE_LOG"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-
-# 3. allowed identity passes
-reset_state
-w=$(newwork); cd "$w"
-echo one >f.txt
-export KOINON_SHIP_ALLOWED_EMAILS="x@example.invalid,dev@example.invalid"
-rc=$(run "$tmp/o3" -m "feat: y")
-check "allowed identity: exit 0" eq "$rc" 0
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 4. blob refusal
@@ -236,6 +231,25 @@ check "ADR README regenerated" has 'regenerated docs/adr/README.md' "$tmp/o8"
 check "regenerated README has both ADRs" bash -c "grep -q 0002-second.md docs/adr/README.md && grep -q 0003-third.md docs/adr/README.md && ! grep -q '<<<<' docs/adr/README.md"
 check "ADR README: pushed" branch_on_origin feat/1-x
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+rm -rf "$adv"
+
+# 8b. a hook that refuses the merge commit is reported as such, not as a conflict
+reset_state
+w=$(newwork); cd "$w"
+git clone -q "$tmp/origin.git" "$adv"
+git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
+echo more2 >"$adv/c.txt" && git -C "$adv" add -A && git -C "$adv" commit -q -m "main moves again" && git -C "$adv" push -q origin main
+mkdir -p "$tmp/hooks"
+printf '#!/bin/sh\necho "identity refused by hook" >&2\nexit 1\n' >"$tmp/hooks/pre-merge-commit"
+chmod +x "$tmp/hooks/pre-merge-commit"
+git config core.hooksPath "$tmp/hooks"
+echo mine2 >mine2.txt
+rc=$(run "$tmp/o8b" -m "feat: mine2")
+check "hook-refused merge: exit 1" eq "$rc" 1
+check "hook-refused merge shows the hook output" has 'identity refused by hook' "$tmp/o8b"
+check "hook-refused merge is not called a conflict" hasnt 'merge conflict in' "$tmp/o8b"
+check "hook-refused merge leaves no merge in progress" bash -c "! git rev-parse -q --verify MERGE_HEAD"
+check "hook-refused merge pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
 rm -rf "$adv"
 
 # 9. gitleaks failure stops before the push

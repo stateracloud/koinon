@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Refuses a commit under an identity outside hack/git-identities.allowed (koinon#320).
+exec "$(dirname "${BASH_SOURCE[0]}")/../git-identity-check.sh" commit
