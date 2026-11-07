@@ -152,7 +152,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
-	CountAutoAppliedPriceProposalsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
+	CountAutoAppliedPriceProposalsSince(ctx context.Context, arg CountAutoAppliedPriceProposalsSinceParams) (int64, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
@@ -436,6 +436,7 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The install ID (koinon-private#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
@@ -583,6 +584,8 @@ type Querier interface {
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
+	InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error)
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -764,6 +767,12 @@ type Querier interface {
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
+	// One page of the install chain in chain order, with the fields the hash covers as text. The
+	// install ID is read from install_identity, which never changes.
+	ListInstallAuditChainRows(ctx context.Context, arg ListInstallAuditChainRowsParams) ([]ListInstallAuditChainRowsRow, error)
+	// The install-scope read path (AuditService.List with AUDIT_SCOPE_INSTALL): the filters of
+	// ListAuditEventsAllOrgs over the install chain.
+	ListInstallAuditEventsFiltered(ctx context.Context, arg ListInstallAuditEventsFilteredParams) ([]InstallAuditEvent, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process

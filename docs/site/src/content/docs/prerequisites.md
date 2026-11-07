@@ -56,7 +56,30 @@ Postgres image (18.6) by digest in `values.yaml`.
 
 With an external Postgres, create one libpq URI per role in a Secret and name it in
 `postgres.external.secretName`. The roles are `migrate`, `api`, `reconciler` and `agentd`. The
-migrate role owns the schema. The other roles need only DML. The roles may share one login.
+migrate role owns the schema. The other roles need only DML, except that the `api` login role must
+also be a member of a `koinon_install_audit_writer` group role, which is the only role that may write
+the install audit chain (ADR 0100). An administrator creates it once, before the first migration (the
+migrate role usually has no `CREATEROLE`; without the role the migrate Job fails before it migrates
+anything). `koinon-api` checks its own membership when it starts: when it is missing it logs the
+`GRANT` to run for the login it connects as, and serves anyway:
+
+```sql
+CREATE ROLE koinon_install_audit_writer NOLOGIN;
+GRANT koinon_install_audit_writer TO <api login role>;
+```
+
+If the migrate role is not the one that owns the tables, or the role `koinon_app` does not exist, also
+run this after the first migration, so that the reconciler and agentd can read the install audit
+chain and not write it:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler login role>, <agentd login role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
+```
+
+Give `api`, `reconciler` and `agentd` separate logins: if they share one, the reconciler can write
+the install audit chain too and the separation the chain relies on is gone. See "The install audit
+chain" in `docs/ops/secret-keys.md` in the repository.
 
 If you set `api.durable.enabled` (the DBOS runtime for schedules and durable timers), the migration
 Job also creates a `dbos` schema, so the migrate role needs `CREATE` on the database. The other

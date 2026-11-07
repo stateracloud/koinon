@@ -1021,7 +1021,16 @@ paths:
         The org is the token's org: a token never reads another org's events. Filters combine with
         AND. Page with `pageToken` from the previous page's `nextPageToken`; the last page has none.
         Each event carries its place in the org's hash chain (ADR 0023).
+
+        `scope=install` reads the install-level chain instead (platform prices and other actions that
+        belong to no org, ADR 0100). It needs a token whose root user is a platform admin, checked on
+        every request; any other token gets 403.
       parameters:
+        - name: scope
+          in: query
+          required: false
+          description: "`org` (the default) or `install`."
+          schema: {type: string, enum: [org, install]}
         - name: since
           in: query
           required: false
@@ -1943,7 +1952,7 @@ components:
         summary: {type: object, description: "{before, after} without secret values.", additionalProperties: true}
         requestId: {type: string}
         createdAt: {type: string, format: date-time}
-        chainSeq: {type: integer, format: int64, description: "Position in the org's hash chain, from 1."}
+        chainSeq: {type: integer, format: int64, description: "Position in the org's hash chain (the install chain for scope=install), from 1."}
         prevHash: {type: string, description: "Hash of the previous event, lower-case hex."}
         hash: {type: string, description: "sha256 of the canonical event and prevHash, lower-case hex."}
     AuditEventList:

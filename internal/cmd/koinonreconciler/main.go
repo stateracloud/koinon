@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
@@ -84,6 +85,7 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
 	defer pool.Close()
+	audit.WarnSharedWriterLogin(ctx, pool, "koinon-reconciler", slog.Default())
 
 	kube, err := kubeClient(cfg.kubeconfig)
 	if err != nil {
@@ -163,6 +165,7 @@ func serve(ctx context.Context, cfg config) error {
 	}
 
 	reg := metrics.NewRegistry()
+	audit.RegisterMetrics(reg)
 	reg.MustRegister(kekMetrics.Collectors()...)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err

@@ -188,7 +188,7 @@ var _ = Describe("schedule triggers", func() {
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
 
 		svc := services.New(pool, services.Options{Prices: pricing.Embedded()})
-		manual, err := svc.RunScheduleTrigger(ctx, triggers.RunNow{Org: org, Agent: agent.ID, Trigger: "hourly", Actor: audit.System()})
+		manual, err := svc.RunScheduleTrigger(ctx, triggers.RunNow{Org: org, Agent: agent.ID, Trigger: "hourly", Actor: audit.System("koinon-test:spec")})
 		Expect(err).NotTo(HaveOccurred())
 
 		shape := func(task pgtype.UUID) map[string]string {

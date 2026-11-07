@@ -133,17 +133,17 @@ Auto-apply and retirement then wait (they would drop the entry without a person 
 back to a good version or accept a proposal, which writes a version without the bad entries and
 says in its audit event how many it dropped (`droppedBadEntries`).
 
-**Audit.** In the personal org of every platform admin: `price.proposal.accepted`,
-`price.proposal.dismissed`, `platform_price.set`, `platform_price.rollback`,
-`platform_price.retired`, `price.import.uploaded` and `price.refresh.settings_changed`. Before the
-first platform admin exists, `koinon-api`'s start-up bookkeeping (the stored refresh settings, a
-retirement when the default list catches up) still happens: there is no org to audit it in, so it
-logs a warning; the append-only platform version table is the record of a retirement, and the
-stored refresh settings are one row updated in place (the current setting only, not a history).
-**No price is applied automatically until a platform admin exists**: the `auto` proposals stay
-open, a warning gives their count, and the next scheduled refresh after an admin is granted applies them
-(until the install-level audit log of #324 replaces this). A person's command (`accept`,
-`dismiss`, `rollback`, `import`) is refused until a platform admin exists.
+**Audit.** Every price change is an event in the install audit chain (ADR 0100), which belongs to no
+org and needs no platform admin: `price.proposal.accepted`, `price.proposal.dismissed`,
+`platform_price.set`, `platform_price.rollback`, `platform_price.retired`, `price.import.uploaded`
+and `price.refresh.settings_changed`. The actor is the person (`user <id>`), the command line
+(`cli`) or, for the scheduled fetch's auto-apply and `koinon-api`'s start-up bookkeeping (the stored
+refresh settings, a retirement when the default list catches up), `system koinon-api:price-refresh`.
+A fresh install with no platform admin is audited like any other, and the bounded auto-apply does
+not wait for an admin. A platform admin reads the chain with `AuditService.List` (scope install), the
+admin API (`GET /admin/v1/audit?scope=install`, for a token whose root user is a platform admin)
+and verifies it with `koinon-api audit verify` (`--install` for the install chain alone). Events written before
+this change are in the personal orgs of the platform admins of that time; no backfill is made.
 
 **Metrics.** `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}`,
 `koinon_price_auto_applied_total{source}`, `koinon_price_unpriced_models{provider_type}` and

@@ -465,6 +465,24 @@ func (e ThinkingStateVersionSetting) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsScope.
+const (
+	Install ListAuditEventsParamsScope = "install"
+	Org     ListAuditEventsParamsScope = "org"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsScope enum.
+func (e ListAuditEventsParamsScope) Valid() bool {
+	switch e {
+	case Install:
+		return true
+	case Org:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListAuditEventsParamsActorKind.
 const (
 	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
@@ -570,7 +588,7 @@ type AuditEvent struct {
 	ActorId   string              `json:"actorId"`
 	ActorKind AuditEventActorKind `json:"actorKind"`
 
-	// ChainSeq Position in the org's hash chain, from 1.
+	// ChainSeq Position in the org's hash chain (the install chain for scope=install), from 1.
 	ChainSeq  int64     `json:"chainSeq"`
 	CreatedAt time.Time `json:"createdAt"`
 
@@ -1468,6 +1486,9 @@ type ToolName = string
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
+	// Scope `org` (the default) or `install`.
+	Scope *ListAuditEventsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+
 	// Since RFC 3339 time; keeps events created at or after it.
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 
@@ -1485,6 +1506,9 @@ type ListAuditEventsParams struct {
 	PageSize  *int    `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 	PageToken *string `form:"pageToken,omitempty" json:"pageToken,omitempty"`
 }
+
+// ListAuditEventsParamsScope defines parameters for ListAuditEvents.
+type ListAuditEventsParamsScope string
 
 // ListAuditEventsParamsActorKind defines parameters for ListAuditEvents.
 type ListAuditEventsParamsActorKind string
@@ -1978,6 +2002,19 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", r.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "scope"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		}
+		return
+	}
 
 	// ------------- Optional query parameter "since" -------------
 

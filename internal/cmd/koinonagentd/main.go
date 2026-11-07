@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
@@ -212,6 +213,7 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("database: %w", err)
 	}
 	defer db.Close()
+	audit.WarnSharedWriterLogin(ctx, db, "koinon-agentd", slog.Default())
 
 	backend, err := cli.OpenShell{Address: cfg.openshellAddr, TLSDir: cfg.openshellTLSDir, ServerName: cfg.openshellName}.Dial()
 	if err != nil {
@@ -235,6 +237,7 @@ func run(ctx context.Context, cfg config) error {
 		cfg.pool.Checkpoints = cp
 	}
 	reg := metrics.NewRegistry()
+	audit.RegisterMetrics(reg)
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
 	// The MCP leak guard's feed (ADR 0091 decision 4): agentd fingerprints the sandbox's own tool
 	// results in this process and stores the fingerprints only.

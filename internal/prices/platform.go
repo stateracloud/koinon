@@ -24,15 +24,10 @@ import (
 // PlatformRef names a platform entry in a ledger row: "platform@<version>#<id>" (ADR 0098 decision 1.3).
 func PlatformRef(version int64, id string) string { return fmt.Sprintf("platform@%d#%s", version, id) }
 
-// AutoActor is the actor of the bounded auto-apply. Its text in a version's actor column is "auto".
-var AutoActor = audit.Actor{Kind: audit.KindSystem, ID: "auto"}
-
-func actorText(a audit.Actor) string {
-	if a == AutoActor {
-		return "auto"
-	}
-	return a.String()
-}
+// AutoActor is the actor of the price refresh and its bounded auto-apply: system
+// koinon-api:price-refresh (ADR 0100 decision 2). The platform price tables' actor columns store the
+// same text the install audit log shows, Actor.String().
+var AutoActor = audit.System("koinon-api:price-refresh")
 
 // Provenance is where a platform price came from (ADR 0098 decision 4).
 type Provenance struct {
@@ -46,7 +41,7 @@ type Provenance struct {
 	Licence         string    `json:"licence,omitempty"`
 	AgreeingSources []string  `json:"agreeingSources,omitempty"`
 	ProposalID      string    `json:"proposalId,omitempty"`
-	// Approver is "auto" or the actor who accepted the proposal ("user <id>", "cli <command>").
+	// Approver is the actor who accepted the proposal (Actor.String(): "system koinon-api:price-refresh", "user <id>", "cli <command>").
 	Approver       string    `json:"approver"`
 	RuleSetVersion string    `json:"ruleSetVersion,omitempty"`
 	ApprovedAt     time.Time `json:"approvedAt,omitzero"`
@@ -209,9 +204,6 @@ func (s *Service) PlatformVersions(ctx context.Context, limit int) ([]PlatformVe
 
 // versionWrite is one new platform version.
 type versionWrite struct {
-	// Log gets the warning when a system change finds no platform admin to audit in (auditPlatform);
-	// nil means slog.Default.
-	Log          *slog.Logger
 	Actor        audit.Actor
 	Action       string // platform_price.set, platform_price.rollback or platform_price.retired
 	Reason       string
@@ -246,7 +238,7 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 		}
 	}
 	vw := store.InsertPlatformPriceVersionParams{
-		Actor: actorText(w.Actor), Reason: w.Reason, RuleSetVersion: w.RuleSet, ProposalIds: w.ProposalIDs,
+		Actor: w.Actor.String(), Reason: w.Reason, RuleSetVersion: w.RuleSet, ProposalIds: w.ProposalIDs,
 	}
 	if vw.ProposalIds == nil {
 		vw.ProposalIds = []pgtype.UUID{}
@@ -298,48 +290,19 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 	if len(pv.ProposalIDs) > 0 {
 		after["proposals"] = pv.ProposalIDs
 	}
-	if err := auditPlatform(ctx, q, w.Log, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after); err != nil {
+	if err := auditPlatform(ctx, q, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after); err != nil {
 		return PlatformVersion{}, err
 	}
 	return pv, nil
 }
 
-// auditPlatform records a platform-wide event. It belongs to no org, so, as the platform admin API
-// audits in the acting admin's personal org, it is written in the personal org of every platform
-// admin (the same rule as keys forget): the change acts for none of them.
-//
-// Without a platform admin (a fresh install: admins are granted at their first login) there is no
-// org to audit in. A person's change (a CLI actor: accept, dismiss, rollback, import) is then
-// refused, so that no decision a person made goes unaudited. Koinon's own bookkeeping at start (a
-// system actor: the settings sync, retirement when a release caught up) must not depend on an
-// admin existing, or koinon-api could not start on a fresh install: it goes ahead, and log gets a
-// warning. Its record stays in the install-wide tables it writes (platform_price_versions, which is
-// append-only and carries the actor and the reason; price_refresh_settings, which holds only the
-// latest setting). The bounded auto-apply is not bookkeeping: it fails closed before it gets here
-// (Refresher.AutoApply leaves the proposals open), until the install-level audit chain of #324
-// lands and replaces this rule.
-func auditPlatform(ctx context.Context, q *store.Queries, log *slog.Logger, actor audit.Actor, action, kind, target string, before, after any) error {
-	orgs, err := q.ListPlatformAdminPersonalOrgs(ctx)
-	if err != nil {
-		return err
-	}
-	if len(orgs) == 0 {
-		if actor.Kind == audit.KindSystem {
-			if log == nil {
-				log = slog.Default()
-			}
-			log.Warn("no platform admin exists yet, so this platform price change is in no org's audit log; the platform price tables record it",
-				"action", action, "actor", actorText(actor))
-			return nil
-		}
-		return errors.New("prices: no platform admin exists to audit the change in; grant one first")
-	}
-	for _, org := range orgs {
-		if err := audit.RecordErr(ctx, q, audit.Event{Org: org, Actor: actor, Action: action, TargetKind: kind, TargetID: target, Before: before, After: after}); err != nil {
-			return err
-		}
-	}
-	return nil
+// auditPlatform records a platform-wide event in the install audit chain (ADR 0100). It belongs to
+// no org and needs no platform admin: a change before the first admin exists is one install event
+// with a named actor, a user, a cli command or system koinon-api:price-refresh. It is written in the
+// transaction of the change, and a failed write fails the change. Callers hold the platform price
+// lock first (ADR 0100 decision 1.7: domain locks, then the install event).
+func auditPlatform(ctx context.Context, q *store.Queries, actor audit.Actor, action, kind, target string, before, after any) error {
+	return audit.RecordInstallErr(ctx, q, audit.InstallEvent{Actor: actor, Action: action, TargetKind: kind, TargetID: target, Before: before, After: after})
 }
 
 // currentPlatform returns the version valid now (zero value, no entries, when none).
@@ -376,7 +339,7 @@ func (s *Service) Rollback(ctx context.Context, actor audit.Actor, version int64
 			return err
 		}
 		out, err = writeVersion(ctx, q, versionWrite{
-			Log: s.log, Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
+			Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
 			RestoredFrom: version, Entries: old.Entries, Changed: changedIDs(cur.Entries, old.Entries), Dropped: old.BadEntries,
 		})
 		return err
@@ -455,7 +418,7 @@ func (s *Service) RetireCaughtUp(ctx context.Context) ([]string, error) {
 			return nil
 		}
 		_, err = writeVersion(ctx, q, versionWrite{
-			Log: s.log, Actor: audit.System(), Action: "platform_price.retired", Reason: "default price list " + list.Version + " caught up",
+			Actor: AutoActor, Action: "platform_price.retired", Reason: "default price list " + list.Version + " caught up",
 			Entries: keep, Changed: retired,
 		})
 		return err

@@ -19,6 +19,20 @@ var _ = Describe("koinon-api's startup", func() {
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--wait", "2m", "--durable")).To(Succeed())
 	})
 
+	It("runs the grant-only migrate of the chart's post-upgrade hook, without --durable", func() {
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--wait", "5m")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--durable")).
+			To(MatchError(ContainSubstring("--grants-only and --durable are exclusive")))
+	})
+
+	It("runs the external-database migrate that requires the install audit writer role", func() {
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--wait", "4m")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--require-install-writer")).
+			To(MatchError(ContainSubstring("--grants-only and --require-install-writer are exclusive")))
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--install-writer-member", "koinon_api")).
+			To(MatchError(ContainSubstring("unknown flag: --install-writer-member")), "koinon-api checks its own membership")
+	})
+
 	It("takes the database URL from the flag, KOINON_DATABASE_URL or DATABASE_URL", func() {
 		Expect(start(nil, "migrate", "--database-url="+db)).To(Succeed())
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate")).To(Succeed())

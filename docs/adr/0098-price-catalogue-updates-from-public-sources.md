@@ -76,7 +76,10 @@ off (ADR 0068), with no release.
 3. **Ledger citation.** A request priced from it stores `price_ref` `platform@<version>#<id>`, beside
    today's `default@<list version>#<id>`, `org#<id>` and `model#<id>@<time>`. `Resolution.Source`
    gains a platform value.
-4. **Who writes it.** Only a platform admin, or the bounded auto-apply of decision 3 (actor `auto`).
+4. **Who writes it.** Only a platform admin, a `cli` actor (the `koinon-api prices` commands), or the
+   bounded auto-apply of decision 3 (actor `system koinon-api:price-refresh`; it was `auto` until the
+   install audit chain, ADR 0100; maintainer decision 2026-11-07). Every write is an install audit
+   event naming its actor.
 5. **Entries retire when a release catches up.** When `koinon-api` starts with a new default list, a
    platform entry whose rates, tiers and limits equal the new default entry of the same `id` is
    removed in a new platform version. The removal is audited with the release's list version as the
@@ -202,7 +205,7 @@ These are warnings with numbers, not silent refusals. The real DeepSeek drift wa
   of decision 2.4 holds (two fetches at least 24 hours apart returned the same values), within the
   same bounds as any other automatic change: the fetch floors, the refused class for structural
   problems, the daily cap (it counts towards it), no zero rate, the confirmation for a rate above
-  1,000 USD per million, the same audit and rollback, actor `auto`. It has no baseline, so the 25%
+  1,000 USD per million, the same audit and rollback, actor `system koinon-api:price-refresh`. It has no baseline, so the 25%
   bound does not apply and the unit mix-up check is made inside the entry: a base rate 100 or more
   times (or 1/100 or less of) the input rate, or a tier rate that far from the base rate of its
   bucket, needs the typed confirmation. A zero rate waits for a person (a free model is checked by
@@ -218,14 +221,15 @@ These are warnings with numbers, not silent refusals. The real DeepSeek drift wa
 - **OpenRouter tier boundaries** (open question 1, resolved): `context_over` is
   `min_prompt_tokens` itself, and several overrides combine as OpenRouter documents them (decision
   8).
-- **No auto-apply without an audit log.** Install-wide actions get an install-level audit chain of
-  their own, designed in an ADR through #324 and built later. Until the install-level audit chain
-  of #324 lands (it replaces this rule), platform-wide events are audited in every platform
-  admin's personal org, and with no platform admin (a fresh install) the auto-apply fails closed:
-  it applies nothing, leaves the proposals open in class `auto` and logs a warning with their
-  count; a later auto-apply run applies them once an admin exists. Start-up bookkeeping (the refresh
-  settings sync, retirement of entries a release caught up with) still goes ahead with a warning,
-  or koinon-api could not start on a fresh install; a person's decision is refused.
+- **Every write is audited in the install chain.** Install-wide actions are audited in the install
+  audit chain of ADR 0100, not in the personal orgs of the platform admins (maintainer decision
+  2026-11-07; this replaces the interim rule that audited in every admin's personal org and made the
+  auto-apply fail closed when no platform admin existed). The chain needs no admin: on a fresh
+  install the auto-apply, the refresh settings sync and the retirement of entries a release caught up
+  with all write their install event as `system koinon-api:price-refresh`, and nothing waits for an
+  admin or logs only a warning. A person's decision is never refused for want of an audit target. A
+  write whose audit event cannot be recorded does not happen: the event and the change commit in one
+  transaction.
 - **Import and fetch stay apart.** A live proposal is keyed by source, origin, model and values,
   so an import never rewrites a fetch proposal's provenance and never holds the key a fetch needs.
   An import's fetch row keeps the file's time as provenance, but the due time of the scheduled
@@ -247,7 +251,7 @@ that do not ascend, or a non-zero price without `max_output` (today's rules).
 
 **After an auto-apply.**
 
-- It writes a new platform version with actor `auto`, the rule set version and the proposal IDs.
+- It writes a new platform version with actor `system koinon-api:price-refresh`, the rule set version and the proposal IDs.
 - It is audited in the same transaction.
 - Platform admins get an in-app notification with the diff and a *Roll back* link (the ADR 0056
   notification store).
@@ -264,7 +268,9 @@ Every platform entry and every org entry made from a proposal records:
 - the licence (`MIT`, or `OpenRouter terms` for OpenRouter);
 - the agreeing sources;
 - the proposal ID;
-- the approver's user ID, or `auto` with the rule set version, and the time.
+- who approved it, as the audit actor names it (`Actor.String()`): a user, a `cli` command, or
+  `system koinon-api:price-refresh` with the rule set version (it was `auto` until the install audit
+  chain, ADR 0100; maintainer decision 2026-11-07), and the time.
 
 The Prices page and the ledger's `price_ref` lead to it. A price a person typed from a provider page
 records the page URL and "manual" as its source.
@@ -272,8 +278,8 @@ records the page URL and "manual" as its source.
 ### 5. Audit, rollback and metrics
 
 - **Audit**, with `audit.RecordErr` in the same transaction as the change (as `SetOverride` does):
-  `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user or
-  `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
+  `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user, a `cli`
+  command or `system koinon-api:price-refresh`, formerly `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
   `price.import.uploaded` and
   `price.refresh.settings_changed`. A refused change is not audited (ADR 0056 decision 10).
 - **Rollback** is a new version that restores an earlier version's entries from now on. History is

@@ -197,7 +197,7 @@ func (r *Reconciler) markBlocked(ctx context.Context, w *work, sb execution.Sand
 	r.m.AgentsUnhealthy.Inc()
 	r.log.Error("the sandbox is not recreated without a backup of its home", append(w.logAttrs(), "reason", reason)...)
 	return audit.RecordErr(ctx, r.q, audit.Event{
-		Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": w.names().Sandbox, "reason": reason, "checkpoint": checkpointID},
 	})
 }

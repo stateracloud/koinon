@@ -37,6 +37,24 @@ Filters are `since`, `until`, `actionPrefix`, `actorKind` and `actorId`; they co
 with `nextPageToken` has more; pass it as `pageToken`. A token reads only its own org. A platform admin
 may name any org with `AuditService.List`, or none to read every org. The web UI has no audit page yet.
 
+### The install log
+
+Changes that belong to no org, such as a platform price, go to the install log: a second hash chain
+with the same fields and the same guarantees, and no org. A platform admin reads it with
+`AuditService.List` and `scope: AUDIT_SCOPE_INSTALL`, or with the admin API and a token whose root
+user is a platform admin (the check runs on every request, so removing the admin removes the access):
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://koinon.example.com/admin/v1/audit?scope=install&actionPrefix=platform_price."
+```
+
+Everyone else gets `PermissionDenied` (403). The automatic price changes are written as the actor
+`system koinon-api:price-refresh`. Koinon records writes to both logs in
+`koinon_audit_writes_total{chain="org|install",result="ok|error"}`. `koinon_install_audit_writer_ok`
+is 1 while `koinon-api`'s database login may write the install log and 0 otherwise; when it is 0,
+`koinon-api`'s log names the `GRANT` to run.
+
 ## Check that it was not changed
 
 Each org's events form a hash chain: every event stores the hash of the one before it, and its own hash
@@ -44,11 +62,12 @@ covers its content and that link. The database computes both in a trigger, and r
 `DELETE` and `TRUNCATE` for every role. To walk the chains and see the first event that does not fit:
 
 ```sh
-kubectl -n koinon exec deploy/koinon-api -- koinon-api audit verify            # every org
+kubectl -n koinon exec deploy/koinon-api -- koinon-api audit verify            # the install log and every org
 kubectl -n koinon exec deploy/koinon-api -- koinon-api audit verify --org <org-id>
+kubectl -n koinon exec deploy/koinon-api -- koinon-api audit verify --install  # the install log alone
 ```
 
-The command prints one line per org and exits non-zero when a chain is broken. A broken chain means
+The command prints one line per chain and exits non-zero when a chain is broken. A broken chain means
 that someone with owner-level database access changed or removed events. The chain does not stop a
 database superuser who rewrites a whole chain from the start; keep database access tight and copy the
 log's last hash somewhere else if you need to prove more.

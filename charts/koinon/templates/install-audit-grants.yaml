@@ -1,0 +1,93 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The install audit writer grant (ADR 0100 decision 1.1a), cnpg mode only: "koinon-api migrate
+--grants-only" as the migration role, after the release's objects are applied. It waits (within
+migrations.wait) for the CloudNativePG Cluster to have created the managed group role
+koinon_install_audit_writer and for the install audit tables, then grants the role INSERT on
+install_audit_events and SELECT on the chain tables. It applies no migration.
+
+Why a second Job: on an upgrade of a cluster initialised before ADR 0100 the migrate Job is a
+pre-upgrade hook (migrate-job.yaml), so it runs before the updated Cluster, which adds the group
+role, reaches the API server, and finds no role to grant. Waiting there would deadlock the upgrade.
+So the grant is a post-upgrade hook: Helm (and Flux's helm-controller) run it once the release's
+resources are applied, and with --wait once koinon-api is ready, which never depends on the grant
+(koinon-api retries an install audit write the database refuses). It is not a post-install hook: on
+a new install the group role comes from postInitApplicationSQL before the first migration, which
+grants it, and a post-install hook would make `helm install` without --wait wait for the new
+database.
+
+Argo CD renders with `helm template` and ignores Helm hooks when its own annotations are present:
+`argocd.argoproj.io/hook: PostSync` runs it after every sync's resources are healthy, and with
+`BeforeHookCreation` each sync creates a fresh Job, as for the migrate Job (ADR 0060). The grant is
+idempotent, so rerunning it on every upgrade or sync is harmless.
+
+External mode has no such Job: the operator creates the role before the upgrade
+(docs/ops/secret-keys.md) and the pre-upgrade migrate Job grants it.
+*/ -}}
+{{- if eq .Values.postgres.mode "cnpg" }}
+{{- $name := include "koinon.componentName" (list . "migrate-grants") }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-10"
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-output-log-policy: hook-failed,hook-succeeded
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate-grants
+          image: {{ include "koinon.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate", "--grants-only", "--wait", {{ .Values.migrations.wait | quote }}]
+          env:
+            {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "koinon.dbVolumeMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "koinon.dbVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+{{- end }}
