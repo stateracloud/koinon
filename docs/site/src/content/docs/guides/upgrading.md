@@ -198,10 +198,15 @@ Pick one:
   allows one eviction at a time and CloudNativePG fails over to a replica. This is the recommended
   setup: no maintenance switch, and about a failover's worth of interruption per drain. It costs a
   second copy of the storage and the compute.
-- **Use a maintenance window on a single instance.** Set it before the drain and remove it after:
+- **Use a maintenance window on a single instance.** Set it before the drain and remove it after.
+  Pin the chart version you have installed, so that the switch does not also upgrade Koinon (without
+  `--version`, helm pulls the newest chart, and a minor upgrade needs the procedure above). Read the
+  installed version with `helm -n koinon list` (the `CHART` column, for example `koinon-0.3.1`) or
+  `helm -n koinon get metadata <release>` (the `VERSION` field):
 
   ```sh
-  helm upgrade <name> <chart> --reuse-values \
+  helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <installed-version> \
+    --reuse-values \
     --set postgres.cnpg.nodeMaintenanceWindow.inProgress=true \
     --set postgres.cnpg.nodeMaintenanceWindow.reusePVC=true
   ```
@@ -211,9 +216,15 @@ Pick one:
   drain, and longer if the volume has to detach and re-attach. Keep `reusePVC: true` on a single
   instance: `false` deletes the only copy of the data. Only a storage class that can attach the volume
   on another node (network or replicated storage) can reuse it; node-local storage cannot.
-  Afterwards, set the value back to `{}`
-  (`--set postgres.cnpg.nodeMaintenanceWindow=null`) so the budget returns. If you manage the values
-  in Git, commit the window and its removal like any other change.
+  Afterwards, remove the window with the same pinned version so the budget returns:
+
+  ```sh
+  helm upgrade <release> oci://ghcr.io/stateracloud/koinon/charts/koinon --version <installed-version> \
+    --reuse-values \
+    --set postgres.cnpg.nodeMaintenanceWindow=null
+  ```
+
+  If you manage the values in Git, commit the window and its removal like any other change.
 
 During the window the API, the reconciler and agentd cannot reach the database. Their readiness
 probes fail and requests return errors; agentd cannot renew run leases, so a run in progress can be
