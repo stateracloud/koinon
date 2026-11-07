@@ -175,7 +175,7 @@ The decisions on #51 leave these open; each is settled in the implementation iss
 ## Amendment (2026-11-03, koinon-private#348): the work budget decides, the clock is a 5 s backstop
 
 procoduck, 2026-11-03: "A work limit decides; 5 s backstop". The first core (koinon-private#348) bounded one taint
-check by a work counter (`MaxWorkBytes`, 32 MiB) and a wall clock of 1 s. On a loaded lab node (3 CPUs,
+check by a work counter (`MaxWorkBytes`, 32 MiB) and a wall clock of 1 s. On a loaded 3-CPU node (
 other test packages in parallel) benign calls took 1.0 to 1.1 s and the one-core smoke test 2.8 s, so
 the clock refused calls that were fine: how long a check takes depends on the machine, not on the
 call. Now:

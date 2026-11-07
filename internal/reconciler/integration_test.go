@@ -36,7 +36,7 @@ import (
 // It creates a workspace (kw-…), a provider record and a sandbox, waits for the sandbox to be
 // ready, stops it as idle, then archives the agent and waits for the sandbox to be deleted. The
 // workspace is left behind (OpenShell 0.1.5 has no workspace delete in Koinon's backend), which
-// is why the home lab runs it with KOINON_E2E_ORG_ID.
+// is why an external cluster run sets KOINON_E2E_ORG_ID.
 var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 	It("activates, stops and archives an agent", func(ctx SpecContext) {
 		testenv.Require(testenv.Var("openshell", "KOINON_OPENSHELL_ENDPOINT"))

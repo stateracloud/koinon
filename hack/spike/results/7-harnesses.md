@@ -64,7 +64,7 @@ All three harnesses pass 7.1–7.5.
 Same harnesses and driver. Images `spike-opencode:4`, `spike-hermes:4`, `spike-pi:5` (default model
 `deepseek/deepseek-v4.1-flash`, the 4B model still listed), sandboxes `d-*`, through the
 **platform** agentgateway (`agentgateway.agentgateway.svc:8080`, Koinon-owned config with LLM and
-MCP on one listener; procoduck/homelab e4e93b6, 318f822). OpenRouter account: ZDR for every model
+MCP on one listener; the platform team's repository). OpenRouter account: ZDR for every model
 group, training off, prompt logging off; agentgateway additionally forces `provider: {zdr: true,
 data_collection: deny, only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex],
 allow_fallbacks: false}` on every request (`raw/5-platform-openrouter.md`). The 7.5 prompt was

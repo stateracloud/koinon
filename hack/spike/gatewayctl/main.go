@@ -25,8 +25,8 @@ import (
 
 const (
 	workspace = "spike-a"
-	gitea     = "git.apps.lab.example.invalid"
-	probe     = "zot.apps.lab.example.invalid/koinon/spike-probe:1"
+	gitea     = "git.example.invalid"
+	probe     = "registry.example.invalid/koinon/spike-probe:1"
 	// orgLabel mirrors internal/project.Domain; this spike module cannot import the root module.
 	orgLabel = "koinon.dev/org"
 )
@@ -103,7 +103,7 @@ func lifecycle(ctx context.Context, c *v1.Client) {
 	must(err, "4.1 wait ready")
 	fmt.Printf("4.1 ready after %s\n", time.Since(t0).Round(time.Second))
 
-	run(ctx, c, name, "4.4 v1 GET whoami (expect 000)", "curl -s -o /dev/null -w %{http_code} --max-time 5 https://whoami.apps.lab.example.invalid/")
+	run(ctx, c, name, "4.4 v1 GET whoami (expect 000)", "curl -s -o /dev/null -w %{http_code} --max-time 5 https://whoami.example.invalid/")
 	run(ctx, c, name, "4.4 v1 POST pulls (expect 403)", "curl -s -o /dev/null -w %{http_code} -X POST -H \"Authorization: Bearer $SPIKE_TOKEN\" https://"+gitea+"/api/v1/repos/koinon-spike/hello/pulls")
 
 	res, err := c.Config().Update(ctx, workspace, &v1.ConfigUpdate{Name: name, Policy: step3Policy(true)})
@@ -111,7 +111,7 @@ func lifecycle(ctx context.Context, c *v1.Client) {
 	fmt.Printf("4.4 policy update: %+v\n", *res)
 	t1 := time.Now()
 	for i := 0; i < 30; i++ {
-		if out := run(ctx, c, name, "", "curl -s -o /dev/null -w %{http_code} --max-time 5 https://whoami.apps.lab.example.invalid/"); out == "200" {
+		if out := run(ctx, c, name, "", "curl -s -o /dev/null -w %{http_code} --max-time 5 https://whoami.example.invalid/"); out == "200" {
 			fmt.Printf("4.4 v2 GET whoami 200 after %s\n", time.Since(t1).Round(time.Second))
 			break
 		}
@@ -176,7 +176,7 @@ func step3Policy(withEcho bool) *v1.SandboxPolicy {
 		p.NetworkPolicies["echo"] = v1.NetworkPolicyRule{
 			Name: "echo",
 			Endpoints: []v1.PolicyNetworkEndpoint{{
-				Host: "whoami.apps.lab.example.invalid", Port: 443, Protocol: "rest",
+				Host: "whoami.example.invalid", Port: 443, Protocol: "rest",
 				Enforcement: v1.NetworkEnforcementModeEnforce,
 				Access:      v1.NetworkAccessPresetReadOnly,
 			}},

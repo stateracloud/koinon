@@ -61,7 +61,7 @@ run crane copy "$searxng_mcp" "$repo/rt1-searxng-mcp:$searxng_mcp_tag"
 
 if [ "${DRY_RUN:-}" != 1 ]; then
   echo
-  echo "# Pin these in an images: block (test/fixtures/rt1/overlays/homelab/kustomization.yaml is the example):"
+  echo "# Pin these in an images: block (test/fixtures/rt1/overlays/remote/kustomization.yaml is the example):"
   echo "images:"
   for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-fakemodel:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
     echo "  - name: $repo/${ref%%:*}"

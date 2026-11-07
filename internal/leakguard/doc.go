@@ -74,8 +74,8 @@
 //     MaxWorkBytes. Each benign shape has a cap of 1.1 times its measured work, rounded up to
 //     100 KB (0.5 to 17 MB): the caps keep the cost of a shape from growing unnoticed, and they
 //     are chosen by shape because the time a byte of work takes differs (19 to 35 ms a MB here,
-//     and 2.1 times that on the lab node, taking the slowest shape to 0.85 s on the lab node unloaded).
-//     One spec, serial and on one core, runs the slowest shape that failed on the lab node
+//     and 2.1 times that on a slow CI-class node, taking the slowest shape to 0.85 s on a slow CI-class node unloaded).
+//     One spec, serial and on one core, runs the slowest shape that failed on a slow CI-class node
 //     against the 5 s backstop. A
 //     projection keeps stretches of 16 or more decoded bytes that are 60% letters, digits or
 //     spaces (ASCII punctuation and NULs do not count against them), so chance ASCII in
@@ -182,7 +182,7 @@
 // the specs assert both that and a cap per shape. MaxDuration (5 s) is a safety net for a stuck
 // or starved machine, not a policy: a benign call must never depend on it (the specs run the
 // whole suite with the clock set to an hour and nothing changes), and 5 s is far above the
-// worst time measured for the worst shape (2.8 s, one core under parallel load on the lab node).
+// worst time measured for the worst shape (2.8 s, one core under parallel load on a slow CI-class node).
 // A cancelled context still ends a check at once, with ReasonBudgetTime.
 //
 // # Store limits

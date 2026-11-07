@@ -239,7 +239,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
     - **On a failure:** an SELinux denial is recorded with its AVC message and raised with
       Bottlerocket or OpenShell. It is never fixed by relaxing the policy.
 
-    The Rivet request is drafted after the rc.6 re-run (procoduck, 2026-10-28). The status stays
+    The platform-team request is drafted after the rc.6 re-run (procoduck, 2026-10-28). The status stays
     "pending qualification" until the run passes.
 
 ### Amendment 2026-10-30: no wildcard egress hosts
@@ -284,7 +284,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
   - the reconciler's per-org RuntimeClass for `orgPools`;
   - the UI badge;
   - the audit field;
-  - the qualification run and the Rivet request.
+  - the qualification run and the platform-team request.
 
 ## Alternatives
 
@@ -355,3 +355,5 @@ the listed names, and the chart default plus the escape suite (`runc` and `gviso
 `kata-qemu-runtime-rs` admitted) cover that. Enforcement stays `enforce`
 (ADR 0045). The reconciler still requests `openshell.runtimeClassName` (default `kata`), which must
 be one of the admitted classes (the chart fails the render otherwise); its default is unchanged.
+
+Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

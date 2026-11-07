@@ -6,8 +6,8 @@ seriously. A sandbox escape suite covers the isolation promises (ADR 0025). What
 - CI runs the admission half on every pull request (`escape (admission)`): the admission policy
   that rejects unsafe sandbox specs.
 - The OpenShell cases (no direct egress, no cloud metadata, no service account token, no secrets on
-  disk) run on kind (`make test-escape-kind`) and on the maintainers' lab, not in CI.
-- The Kata isolation tier is tested only on the maintainers' lab, because kind cannot run Kata.
+  disk) run on kind (`make test-escape-kind`) and on a maintainer's Kata cluster, not in CI.
+- The Kata isolation tier is tested only on a maintainer's Kata cluster, because kind cannot run Kata.
 
 ## Reporting a vulnerability
 

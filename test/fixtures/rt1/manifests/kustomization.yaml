@@ -5,7 +5,6 @@
 # says where they come from, so apply one of the overlays, not this directory:
 #   overlays/kind     images built locally and loaded into kind, fake secrets  (hack/rt1-fixtures-kind.sh)
 #   overlays/remote   images in your registry (hack/rt1-fixtures-build.sh REGISTRY)
-#   overlays/homelab  the maintainer's Zot, pinned by digest
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: koinon-fixtures

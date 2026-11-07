@@ -89,10 +89,10 @@ term.
 4. **Testing in three stages.**
    - A: a fake AS and a fake OAuth MCP server in the kind e2e. This is the merge gate, and it replaces
      the quickstart's refusal step.
-   - B: the lab's Pocket ID as AS, a pre-registered public client with PKCE and a real passkey sign-in;
+   - B: a self-hosted OIDC AS (e.g. Pocket ID), a pre-registered public client with PKCE and a real passkey sign-in;
      then CIMD (off by default, since Pocket ID v2.13).
    - C: Cloudflare's MCP server, read-only scopes, the maintainer authorizing in the browser.
-   - B and C are home-lab changes and go to the lab owner as change requests, each in its own issue.
+   - B and C are tested on a maintainer cluster.
 5. **Delivery only through Koinon's own MCP path** (maintainer decision 2026-11-06). Sign-in tokens
    reach MCP servers only through Koinon's MCP path (ADR 0097 step 2), which ships in the same release,
    v0.2. The agentgateway delivery spike is dropped: a token handoff built on agentgateway would be
@@ -230,7 +230,7 @@ These are checked in the build stages named in the table; a failed check leads t
 |---|---|
 | How the gateway's refresh row lock behaves under load (lock wait, a replica that dies mid-refresh) | ADR 0097 step 2 tests: concurrent calls on one sign-in refresh once; a killed refresher leaves the old refresh token usable |
 | Cloudflare's access-token lifetime, and whether a refresh token comes without `offline_access` | Stage C: record `expires_in` and the refresh behaviour over a day |
-| Cloudflare accepts a redirect URI on a private hostname | Stage C: CIMD with the lab callback; fall back to a public callback if refused |
+| Cloudflare accepts a redirect URI on a private hostname | Stage C: CIMD with a private callback; fall back to a public callback if refused |
 | Pocket ID supports RFC 8707 `resource` (and DCR) | Stage B: a live check of the authorize and token requests with `resource` |
 
 ## Alternatives considered
@@ -271,7 +271,7 @@ These are checked in the build stages named in the table; a failed check leads t
   (refresh), and the gateway needs Postgres and egress to each AS for these servers.
 - Negative: an org sign-in acts as one person's upstream account _(inferred)_.
 - Follow-ups: the checks for Koinon's MCP path, in ADR 0097's step 2 work; amend ADR 0057 items 2 and 5 when the build lands; the stage A fixtures and
-  the quickstart step that replaces 6b; issues for stages B and C to the lab owner; the "revoke all
+  the quickstart step that replaces 6b; stages B and C tested on a maintainer cluster; the "revoke all
   sign-ins" step in the compromise runbook; the keys tool list.
 
 ## Upstream verification

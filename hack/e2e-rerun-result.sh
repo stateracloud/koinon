@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Re-run the `e2e result` job of the pull request's e2e-kind run on a commit, so it
-# looks again for the e2e evidence that arrived later (the lab's e2e-lab status, a dispatched run that
+# looks again for the e2e evidence that arrived later (the e2e-lab status, a dispatched run that
 # passed). hack/e2e-gate.sh explains why a status event cannot do this by itself.
 #
 #   hack/e2e-rerun-result.sh <sha>
