@@ -347,6 +347,14 @@ the first start the creation is the one event: `platform_admin.bootstrap` stands
 comes with it, and `platform_admin.grant` is written only when the grant insert adds a row for an
 admin that already exists (maintainer decision 2026-11-07: one event, `platform_admin.bootstrap`, which covers the grant made with it).
 
+When the install audit writer role is not granted yet (decision 1.1a), the bootstrap transaction rolls
+back whole and a background retry runs it again after the grant. The revocation of bootstrap sessions does
+not wait for that: with bootstrap login off, the revocation and its `org.bootstrap_sessions.revoked` event
+run in a transaction of their own, right after the refused one. It takes the bootstrap lock and the default
+org's head and no install lock, so the lock order of decision 1.7 holds. The retry then finds no session to
+revoke and writes no second event. This event has no `install_event_id`: the install event of that start
+did not exist when it was written, and the revocation does not depend on it.
+
 **Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
 in three ways, and the ADR says so rather than pretending otherwise:
 

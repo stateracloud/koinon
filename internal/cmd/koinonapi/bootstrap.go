@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/stateracloud/koinon/internal/auth"
 )
 
 // SQLSTATEs that mean the schema is not there yet: the migration Job has not run.
@@ -63,5 +65,30 @@ func retryBootstrap[T any](ctx context.Context, wait, interval time.Duration, bo
 		case <-ctx.Done():
 		case <-time.After(interval):
 		}
+	}
+}
+
+// reportBootstrap logs what a finished bootstrap did. The direct start and the background retry
+// after a deferred install write both call it, so the same lines appear either way.
+func reportBootstrap(res auth.BootstrapResult, loginEnabled bool) {
+	slog.Info("bootstrap done", "created_admin", res.CreatedAdmin, "created_org", res.CreatedOrg,
+		"created_credential", res.CreatedCredential, "revoked_bootstrap_sessions", res.RevokedSessions,
+		"bootstrap_login", loginEnabled)
+	if res.MissingPasswordFile {
+		slog.Warn("bootstrap login is enabled but no password is set; set --bootstrap-password-file")
+	}
+}
+
+// bootstrapRetryWrite is the write the background retry runs after the install audit writer role
+// refused bootstrap. It runs bootstrap with the retry goroutine's own ctx (not the serve ctx, which
+// outlives the goroutine's stop) and reports the result like the direct path.
+func bootstrapRetryWrite(run func(context.Context) (auth.BootstrapResult, error), loginEnabled bool) func(context.Context) error {
+	return func(ctx context.Context) error {
+		res, err := run(ctx)
+		if err != nil {
+			return err
+		}
+		reportBootstrap(res, loginEnabled)
+		return nil
 	}
 }

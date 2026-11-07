@@ -3,11 +3,13 @@
 package koinonapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"path/filepath"
 	"syscall"
@@ -21,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pressly/goose/v3"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -128,5 +131,43 @@ var _ = Describe("retryBootstrap", func() {
 			Expect(err).To(MatchError(ContainSubstring("read bootstrap password file")))
 			Expect(calls).To(Equal(1))
 		})
+	})
+})
+
+var _ = Describe("bootstrapRetryWrite", func() {
+	type ctxKey struct{}
+
+	It("runs bootstrap with the retry goroutine's ctx, not an outer one", func() {
+		serve := context.WithValue(context.Background(), ctxKey{}, "serve")
+		retry := context.WithValue(context.Background(), ctxKey{}, "retry")
+		var got any
+		write := bootstrapRetryWrite(func(ctx context.Context) (auth.BootstrapResult, error) {
+			got = ctx.Value(ctxKey{})
+			return auth.BootstrapResult{}, nil
+		}, true)
+		Expect(write(retry)).To(Succeed())
+		Expect(got).To(Equal("retry"))
+		Expect(got).NotTo(Equal(serve.Value(ctxKey{})))
+	})
+
+	It("passes the error on, so the retry goes on, and logs nothing for it", func() {
+		denied := fmt.Errorf("record: %w", audit.ErrInstallWriteDenied)
+		write := bootstrapRetryWrite(func(context.Context) (auth.BootstrapResult, error) {
+			return auth.BootstrapResult{MissingPasswordFile: true}, denied
+		}, true)
+		Expect(write(context.Background())).To(MatchError(audit.ErrInstallWriteDenied))
+	})
+
+	It("warns about a missing password file after a retry succeeds, as the direct path does", func() {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		DeferCleanup(func() { slog.SetDefault(prev) })
+		write := bootstrapRetryWrite(func(context.Context) (auth.BootstrapResult, error) {
+			return auth.BootstrapResult{MissingPasswordFile: true}, nil
+		}, true)
+		Expect(write(context.Background())).To(Succeed())
+		Expect(buf.String()).To(ContainSubstring("bootstrap done"))
+		Expect(buf.String()).To(ContainSubstring("no password is set"))
 	})
 })

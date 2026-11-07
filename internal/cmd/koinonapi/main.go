@@ -361,7 +361,7 @@ func serve(ctx context.Context, cfg config) error {
 	// On a fresh install the database and its schema come up after koinon-api starts (the chart's
 	// migration Job waits for CNPG), so bootstrap is retried for up to --wait while the database
 	// is unreachable or not migrated. Any other error fails at once.
-	runBootstrap := func() (auth.BootstrapResult, error) {
+	runBootstrap := func(ctx context.Context) (auth.BootstrapResult, error) {
 		return auth.Bootstrap(ctx, pool, auth.BootstrapConfig{
 			Username:               cfg.bootstrapUsername,
 			PasswordFile:           cfg.bootstrapPasswordFile,
@@ -371,7 +371,7 @@ func serve(ctx context.Context, cfg config) error {
 			GroupMappings:          mappings,
 		}, time.Now())
 	}
-	res, err := retryBootstrap(ctx, cfg.wait, 2*time.Second, runBootstrap)
+	res, err := retryBootstrap(ctx, cfg.wait, 2*time.Second, func() (auth.BootstrapResult, error) { return runBootstrap(ctx) })
 	// Bootstrap writes install audit events in the transaction of its change (ADR 0100 decision 3).
 	// A database that does not yet let this login write the chain (the CloudNativePG upgrade window,
 	// decision 1.1a) must not stop the start: the transaction rolled back, so bootstrap is idempotently
@@ -380,20 +380,15 @@ func serve(ctx context.Context, cfg config) error {
 	if bootstrapDenied {
 		slog.Error("bootstrap is not recorded yet: the database refuses koinon-api's install audit event; "+
 			"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook); "+
-			"the whole bootstrap transaction, including the bootstrap session revocation, is deferred until that grant arrives and the background retry succeeds", "err", err)
+			"the bootstrap transaction is deferred until that grant arrives and the background retry succeeds; "+
+			"bootstrap sessions are revoked meanwhile when bootstrap login is off", "revoked_bootstrap_sessions", res.RevokedSessions, "err", err)
 		err = nil
 	}
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
 	if !bootstrapDenied {
-		slog.Info("bootstrap done", "created_admin", res.CreatedAdmin, "created_org", res.CreatedOrg,
-			"created_credential", res.CreatedCredential, "revoked_bootstrap_sessions", res.RevokedSessions,
-			"bootstrap_login", cfg.bootstrapLogin)
-	}
-
-	if !bootstrapDenied && res.MissingPasswordFile {
-		slog.Warn("bootstrap login is enabled but no password is set; set --bootstrap-password-file")
+		reportBootstrap(res, cfg.bootstrapLogin)
 	}
 
 	authCfg := auth.Config{
@@ -471,10 +466,7 @@ func serve(ctx context.Context, cfg config) error {
 	defer cancelBg() // before pool.Close
 	if bootstrapDenied {
 		safego.GoOrStop(bgCtx, slog.Default(), "bootstrap-retry", stop, func(ctx context.Context) {
-			retryInstallWrite(ctx, "bootstrap", installWriteRetry, func(context.Context) error {
-				_, err := runBootstrap()
-				return err
-			})
+			retryInstallWrite(ctx, "bootstrap", installWriteRetry, bootstrapRetryWrite(runBootstrap, cfg.bootstrapLogin))
 		})
 	}
 	if errors.Is(retireErr, audit.ErrInstallWriteDenied) {

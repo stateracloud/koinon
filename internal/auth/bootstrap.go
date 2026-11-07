@@ -260,7 +260,51 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		}
 		return flush()
 	})
+	if errors.Is(err, audit.ErrInstallWriteDenied) && !cfg.LoginEnabled {
+		// The install writer role is not granted yet (ADR 0100 decision 1.1a), so the transaction above
+		// rolled back whole, including the revocation. Ending the bootstrap sessions must not wait for a
+		// grant that may be late: it is its own transaction, which takes no install lock (domain lock,
+		// then the default org's head only, decision 1.7). The retry that follows the grant finds no
+		// session left to revoke, so the org event is written once. Unlike the same-start case, this
+		// event carries no install_event_id: the install event it would link to does not exist yet.
+		n, rerr := revokeBootstrapSessions(ctx, pool, now)
+		res = BootstrapResult{RevokedSessions: n}
+		if rerr != nil {
+			return res, fmt.Errorf("%w; revoke bootstrap sessions: %v", err, rerr)
+		}
+	}
 	return res, err
+}
+
+// revokeBootstrapSessions ends the password sessions when bootstrap login is off, apart from the
+// install event of Bootstrap, and records org.bootstrap_sessions.revoked in the default org's chain
+// when it ended any. A database with no default org yet has no session to end.
+func revokeBootstrapSessions(ctx context.Context, pool *pgxpool.Pool, now time.Time) (int64, error) {
+	var n int64
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		if err := q.LockBootstrap(ctx); err != nil {
+			return err
+		}
+		org, err := q.GetOrgBySlug(ctx, DefaultOrgSlug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("load default org: %w", err)
+		}
+		n, err = q.RevokeSessionsByMethod(ctx, store.RevokeSessionsByMethodParams{
+			Now: ts(now), AuthMethod: store.AuthMethodPassword,
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		return audit.RecordErr(ctx, q, bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // bootstrapOrgEvent is a change bootstrap made to the default org, in that org's chain.
