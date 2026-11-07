@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command koinon-fakemcp is a fake remote MCP server for tests and e2e (plan item MC1). It serves two
-// tools over Streamable HTTP at /mcp, refuses requests without the expected credential header, and
+// Command koinon-fakemcp is a fake remote MCP server for tests and e2e (plan item MC1). It serves three
+// tools (read_item, write_item and the fetch-style fetch_url, which names a destination) over Streamable HTTP at /mcp, refuses requests without the expected credential header, and
 // records what it receives at /_fake/requests, so a test can check that the gateway injected the
 // credential and what identity it forwarded.
 package main
@@ -82,6 +82,18 @@ func run(addr, header, value string) error {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tool + " ok: " + in.Title}}}, nil, nil
 		})
 	}
+	// fetch_url is the fetch-style tool: an argument that names a destination. Like the others it only
+	// records the call, so a request the leak guard let through shows in /_fake/requests (#348).
+	type fetchArgs struct {
+		URL string `json:"url"`
+	}
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "fetch_url", Description: "Fake tool fetch_url: fetches a URL",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(_ context.Context, req *mcp.CallToolRequest, in fetchArgs) (*mcp.CallToolResult, any, error) {
+		recs.add(record{Time: time.Now(), Method: "TOOL", Tool: "fetch_url", Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fetch_url ok: " + in.URL}}}, nil, nil
+	})
 	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
 		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
 	mux := http.NewServeMux()

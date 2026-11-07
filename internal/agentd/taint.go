@@ -128,7 +128,7 @@ func (c *feedCounts) write(ctx context.Context) {
 			wctx, cancel := context.WithTimeout(ctx, feedTimeout)
 			err = c.feed.Counts(wctx, c.r.run.OrgID, c.r.run.ID, c.r.run.Epoch, read, done)
 			cancel()
-			if err == nil || errors.Is(err, mcpguard.ErrFeedFenced) || ctx.Err() != nil || try == taintTries {
+			if err == nil || errors.Is(err, mcpguard.ErrFeedFenced) || ctx.Err() != nil || try == taintTries || permanentFeedErr(err) {
 				break
 			}
 			t := time.NewTimer(wait)
@@ -147,6 +147,8 @@ func (c *feedCounts) write(ctx context.Context) {
 		case errors.Is(err, mcpguard.ErrFeedFenced):
 			c.r.log.Warn("the leak guard's feed belongs to a newer worker of the run; this worker stops counting")
 			c.r.own.Fence(runoutcome.FenceLost)
+			return
+		case c.r.feedGiveUp(err):
 			return
 		default:
 			c.r.log.Error("the leak guard's feed could not count tool results; giving the run up", "err", err)
@@ -358,8 +360,8 @@ func (r *runner) feedTaint(ctx context.Context, update []byte) error {
 			r.p.cfg.Metrics.taintReport(legs, true)
 			return nil
 		}
-		if try == taintTries {
-			break
+		if try == taintTries || permanentFeedErr(err) {
+			break // a refusal that cannot change is not retried
 		}
 		t := time.NewTimer(wait)
 		select {
@@ -371,7 +373,38 @@ func (r *runner) feedTaint(ctx context.Context, update []byte) error {
 		wait *= 2
 	}
 	r.p.cfg.Metrics.taintReport(legs, false)
+	if r.feedGiveUp(err) {
+		return err
+	}
 	r.log.Error("the leak guard's feed could not record a tool result; giving the run up", "err", err)
 	r.own.Fence(runoutcome.FenceAbandon)
 	return err
+}
+
+// permanentFeedErr reports whether a feed error cannot succeed on retry (a constraint or
+// cardinality violation, bad input). Failing closed stays: such a run is failed, not run unwatched.
+func permanentFeedErr(err error) bool {
+	_, ok := runoutcome.PermanentSQLState(err)
+	return ok
+}
+
+// feedGiveUp fails the run once, with a named reason, when err is permanent: a takeover would feed
+// the same data to the same statement and meet the same refusal (koinon#123, ADR 0091 decision 4).
+// It reports whether it did; a transient error is left to the caller, which abandons the run for
+// another worker to resume.
+func (r *runner) feedGiveUp(err error) bool {
+	code, ok := runoutcome.PermanentSQLState(err)
+	if !ok {
+		return false
+	}
+	r.log.Error("the leak guard's feed refused a tool result for good; failing the run", "sqlstate", code, "err", err)
+	r.feedFailure.CompareAndSwap(nil, &failure{reason: feedFailReason(code), class: classFatal})
+	r.own.Fence(runoutcome.FenceFailed)
+	return true
+}
+
+// feedFailReason is the run's failure reason for a permanent feed error: the SQLSTATE only, never the
+// error's text, which may quote what the session read.
+func feedFailReason(code string) string {
+	return "the leak guard could not record a tool result and retrying cannot help (database error " + code + "); the run is failed instead of retried"
 }

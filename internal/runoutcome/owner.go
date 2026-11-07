@@ -52,6 +52,10 @@ const (
 	FenceCanceled
 	// FenceAbandon: the worker cannot reach the database and gives up.
 	FenceAbandon
+	// FenceFailed: the worker must end the run as failed, with a reason it holds, because the cause
+	// is permanent and a takeover would meet it again (the leak guard's feed, koinon#123). The
+	// ending verbs still write; the turn row ends with the run.
+	FenceFailed
 )
 
 // DB begins the transactions of the verbs; *pgxpool.Pool is one.

@@ -57,6 +57,7 @@ NEEDED=(
 )
 FORCED=(
   '^test/e2e/'              # the driver, run.sh, kind/ (up.sh, fakes, values)
+  '^test/escape/'           # run.sh calls test/escape/kind.sh through test/e2e/escape-mcp.sh when ESCAPE_MCP=1
   '^\.github/workflows/e2e-kind\.yml$'
   '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it

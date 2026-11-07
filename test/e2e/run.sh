@@ -33,6 +33,9 @@
 #   docs/site/src/content/docs/guides/backup-restore.md backs up the keys and the database, the install is
 #   changed, then the guide restores both and the script checks the install is the one that was backed up
 #   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
+#   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
+#   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
+#   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -281,6 +284,8 @@ go)
   KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
   KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
   KOINON_E2E_PASSWORD="$password" \
+  KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 ]] && echo "$here/escape-mcp.sh" || true)" \
+  CLUSTER="$CLUSTER" \
   KOINON_E2E_T0="$T0" \
   KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
     bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v ${3:+-ginkgo.label-filter="$3"}' _ "$root" "$OUT/bin/e2e.test" "${SUITE_LABEL:-}" 2>&1 | tee "$OUT/driver.log"

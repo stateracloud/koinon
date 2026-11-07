@@ -18,9 +18,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/execution"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
@@ -945,8 +947,13 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 
 		By("the reconciler bound the observer role in the workspace namespace, to itself only")
-		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell", "-o", "jsonpath={.items[0].metadata.name}")
-		Expect(ns).To(HavePrefix("openshell-openshell-kw-"))
+		orgID, err := uuid.Parse(org)
+		Expect(err).NotTo(HaveOccurred())
+		// This org's own workspace, not any OpenShell namespace: other suites (the escape hook of step 6b)
+		// make workspaces of their own in the same cluster.
+		ws := execution.WorkspaceName(orgID)
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(Equal("openshell-openshell-" + ws))
 		Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
 			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
 			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
