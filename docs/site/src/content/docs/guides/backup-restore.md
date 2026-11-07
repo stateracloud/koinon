@@ -41,7 +41,7 @@ the export makes a backup that cannot open what was sealed since:
 ```sh e1=check-keys
 fp=$(kubectl -n koinon exec deploy/koinon-api -- koinon-api keys status | awk '$2 == "active" { print $NF }')
 test -n "$fp"
-grep -q "fingerprint $fp" koinon-kek-backup.yaml || { echo "the backup does not hold the active key $fp" >&2; exit 1; }
+grep -q "fingerprint $fp" koinon-kek-backup.yaml || { echo "the backup does not hold the active key $fp" >&2; false; }
 ```
 
 If you use a KMS, back up the KMS key as your KMS documents; the Secret then holds only wrapped

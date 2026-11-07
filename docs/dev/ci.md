@@ -319,7 +319,8 @@ skipped by #595 still writes the entry). A pull request never writes it.
 ## Main's e2e regressions and release tags
 
 When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e-regression` issue
-naming the merge (or the suspects): fix forward within 2 hours, otherwise revert it. RC and
+naming the merge (or the suspects); it dispatches every candidate with `backup_restore=true`, so a
+nightly that went red in the backup-restore step reproduces: fix forward within 2 hours, otherwise revert it. RC and
 release tags are cut only from a commit whose `quickstart` job concluded success
 (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
 

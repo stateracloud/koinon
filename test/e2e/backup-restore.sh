@@ -56,6 +56,11 @@ state() {
 }
 
 step "state before the backup"
+# A run that is still going can add rows between this read and pg_dump (and a recovered workflow can
+# add some after the restart), so the counts below would not be what the dump holds. Require every
+# run to be terminal first; a failure here means the driver left work in flight, not a restore bug.
+inflight=$(sql "SELECT count(*) FROM runs WHERE state NOT IN ('succeeded', 'failed', 'canceled')")
+[[ $inflight == 0 ]] || fail "$inflight run(s) are not in a terminal state: the counts would change between the read and the dump"
 state | tee "$work/state.before"
 [[ $(grep -c '^tasks=' "$work/state.before") == 1 ]] || fail "could not read the install's state"
 tasks=$(sed -n 's/^tasks=//p' "$work/state.before")
