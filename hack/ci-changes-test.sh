@@ -92,6 +92,7 @@ expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart chartsmoke docs escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
+expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the admission specs import it
 
 # F5, flavors: test/flavors imports these (go list -deps -test ./test/flavors/...).
 expect "go chartsmoke flavors" internal/execution/run.go
