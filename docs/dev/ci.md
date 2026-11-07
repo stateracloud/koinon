@@ -221,13 +221,33 @@ mistakes, not a malicious member (pinned integration_id: old issue 568).
 Why the e2e exists: old issue 281 (branch naming in githubtools) and old issue 284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
 
+## The local gate command
+
+`hack/lane-gates.sh [<base>]` (base defaults to `origin/main`) runs the gates your change touches and
+blocks until it has a verdict: the gates of `hack/preflight.sh` that the diff selects, plus the heavy
+CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`; the e2e is not part
+of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
+else: no lab, no external-run status. It prints one line per gate,
+
+```
+gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason="..."] log=<path>
+```
+
+and exits 1 when a gate failed, 3 when none failed but a gate could not run on this machine, 0 when
+all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
+requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
+requirement exists. It never says `ok` unless every selected gate passed and at least one ran: a
+crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
+local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
+its offline self-test (stubbed gates, run by the `scripts` job).
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
-`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check and the dependency age steps in one job,
+`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports

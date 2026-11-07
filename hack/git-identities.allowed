@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Identities allowed on commits (author and committer), checked by hack/git-identity-check.sh in the
+# lane worktrees' hooks and in CI. One `Name <email>` shell glob per line. A contributor adds their own
+# line in the pull request that brings their first commit.
+
+# The project identity (agents and lanes).
+procoduck <coder@procodus.dev>
+
+# GitHub-attributed identities: web UI commits and merges, the merge queue, bots, and contributors
+# who use their GitHub noreply address.
+GitHub <noreply@github.com>
+* <*@users.noreply.github.com>
