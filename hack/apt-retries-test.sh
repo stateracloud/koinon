@@ -32,7 +32,7 @@ check() {
           cmd = substr(rest, RSTART + RLENGTH)
           rest = cmd
           sub(/[;&|].*/, "", cmd)
-          if (cmd ~ /^(-o [^ ]+ +)*update([ \t]|$)/ && cmd !~ /-o APT::Update::Error-Mode=any/)
+          if (cmd ~ /(^|[ \t])update([ \t]|$)/ && cmd !~ /APT::Update::Error-Mode=any|--error-on=any/)
             printf "%s:%d: %s update without -o APT::Update::Error-Mode=any (a fetch error would only warn): %s %s\n", FILENAME, start, tool, tool, cmd
           if (cmd !~ /-o Acquire::Retries=5/ || cmd !~ /-o Acquire::http::Timeout=30/)
             printf "%s:%d: %s without -o Acquire::Retries=5 -o Acquire::http::Timeout=30: %s %s\n", FILENAME, start, tool, tool, cmd
@@ -82,6 +82,10 @@ self_test() {
   [ "$(check "$tmp/nomsg" | wc -l)" -eq 1 ] || { echo "self-test: snapshot step without outage message not flagged" >&2; exit 1; }
   [ -z "$(check "$tmp/msg")" ] || { echo "self-test: snapshot step with message flagged" >&2; exit 1; }
   [ "$(check "$tmp/second" | wc -l)" -eq 1 ] || { echo "self-test: second apt-get on a line not flagged" >&2; exit 1; }
+  printf 'FROM x\nRUN apt-get -qq -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update\n' >"$tmp/quiet"
+  printf 'FROM x\nRUN apt-get -qq -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update\n' >"$tmp/quietmode"
+  [ "$(check "$tmp/quiet" | wc -l)" -eq 1 ] || { echo "self-test: update with -qq and no Error-Mode not flagged" >&2; exit 1; }
+  [ -z "$(check "$tmp/quietmode")" ] || { echo "self-test: update with -qq and Error-Mode flagged" >&2; exit 1; }
   echo "apt-retries-test self-test: ok"
 }
 
