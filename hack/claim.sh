@@ -138,6 +138,12 @@ EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 
 die() { echo "claim: $*" >&2; exit "${CLAIM_EXIT:-1}"; }
 warn() { echo "claim: warning: $*" >&2; }
+# write_failed MSG: an issue write (unassign, label, comment) failed. In Actions the job has
+# issues: write, so that is a real fault and fails the job; locally it only warns (koinon#315).
+write_failed() {
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then die "$*"; fi
+  warn "$*"
+}
 
 # An epoch -> RFC 3339 UTC, and back. GNU and BSD date both work.
 if date -u -d @0 +%s >/dev/null 2>&1; then
@@ -661,8 +667,11 @@ set_status() {
 }
 
 assign() { gh api -X POST "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || warn "cannot assign $2 to #$1"; }
-unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || warn "cannot unassign $2 from #$1"; }
-add_label() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || warn "cannot label #$1 $2"; }
+unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || write_failed "cannot unassign $2 from #$1"; }
+add_label() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || write_failed "cannot label #$1 $2"; }
+# The updater runs on a GitHub App token without issues: write; its label only informs the author, so a
+# failed label write warns and never stops the update-branch step (koinon#315).
+add_label_soft() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || warn "cannot label #$1 $2"; }
 drop_label() { gh api -X DELETE "repos/$REPO/issues/$1/labels/$2" >/dev/null 2>&1 || true; }
 
 # upsert_comment N BODY: the one marked comment on the issue, edited in place.
@@ -670,9 +679,9 @@ upsert_comment() {
   local id
   id=$(gh api --paginate "repos/$REPO/issues/$1/comments" --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null | head -1 || true)
   if [[ -n $id ]]; then
-    gh api -X PATCH "repos/$REPO/issues/comments/$id" -f "body=$2" >/dev/null 2>&1 || warn "cannot edit the claim comment on #$1"
+    gh api -X PATCH "repos/$REPO/issues/comments/$id" -f "body=$2" >/dev/null 2>&1 || write_failed "cannot edit the claim comment on #$1"
   else
-    gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$2" >/dev/null 2>&1 || warn "cannot comment on #$1"
+    gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$2" >/dev/null 2>&1 || write_failed "cannot comment on #$1"
   fi
 }
 
@@ -1315,7 +1324,7 @@ remind_once() {
     { warn "#$1: cannot read the comments; no reminder"; return 0; }
   [[ -z $seen ]] || return 0
   echo "#$1: outsider claim runs out within $((OUTSIDER_WARN / 86400)) days; reminding"
-  gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$tag"$'\n'"$3" >/dev/null 2>&1 || warn "cannot comment on #$1"
+  gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$tag"$'\n'"$3" >/dev/null 2>&1 || write_failed "cannot comment on #$1"
   return 0
 }
 
@@ -1333,7 +1342,7 @@ cmd_sweep() {
 # release-pr P: release the held claims of the issues pull request P closes, but only claims that
 # point at P (or that point at nothing while no other open pull request closes the issue).
 cmd_release_pr() {
-  local p=${1:-} body merged n rc others
+  local p=${1:-} body merged n rc others failed=0
   [[ $p =~ ^[0-9]+$ ]] || die "usage: release-pr <PR>"
   body=$(gh pr view "$p" -R "$REPO" --json body --jq '.body // ""')
   merged=0
@@ -1350,8 +1359,10 @@ cmd_release_pr() {
     else
       echo "#$n: claimed for pull request #$(jq -r .pr <<<"$C"), not #$p; keeping the claim"; continue
     fi
-    do_release_claim "$C" "pull request #$p closed" "$merged" pr-close || true
+    # A subshell: a failed write (write_failed dies under Actions) must not skip the other issues' claims.
+    ( do_release_claim "$C" "pull request #$p closed" "$merged" pr-close ) || failed=$((failed + 1))
   done
+  ((failed == 0)) || { echo "claim: $failed claim(s) failed to release" >&2; return 1; }
 }
 
 # pr_meta P -> {author, body} of pull request P (REST: the check runs on GITHUB_TOKEN).
@@ -1721,7 +1732,7 @@ cmd_update_oldest() {
   for n in $(jq -r '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "DIRTY" and ((.isInMergeQueue // false) | not)) | .number' <<<"$prs"); do
     if ! jq -e --argjson n "$n" '.[] | select(.number == $n) | .labels[]? | select(.name == "needs-update")' <<<"$prs" >/dev/null; then
       echo "#$n conflicts with main; labelling needs-update"
-      add_label "$n" needs-update
+      add_label_soft "$n" needs-update
     fi
   done
   for n in $(jq -r '.[] | select(.mergeStateStatus != "DIRTY" and ([.labels[]? | select(.name == "needs-update")] | length > 0)) | .number' <<<"$prs"); do
@@ -1732,7 +1743,7 @@ cmd_update_oldest() {
   head=$(jq -r --argjson n "$target" '.[] | select(.number == $n) | .headRefOid' <<<"$prs")
   gh_try -X PUT "repos/$REPO/pulls/$target/update-branch" -f "expected_head_sha=$head"
   if ((TRY_RC == 0)); then echo "updated #$target with main"
-  elif [[ $TRY_OUT == *"onflict"* ]]; then echo "#$target conflicts with main; labelling needs-update"; add_label "$target" needs-update
+  elif [[ $TRY_OUT == *"onflict"* ]]; then echo "#$target conflicts with main; labelling needs-update"; add_label_soft "$target" needs-update
   else die "update-branch failed for #$target: $TRY_OUT"; fi
 }
 
