@@ -95,6 +95,8 @@ if keys_status | grep -qiE 'warning|missing'; then
   keys_status >&2
   fail "keys status warns after the restore"
 fi
+# The migration role must still own its schema: this is what the next helm upgrade Job runs as.
+sql "SET ROLE koinon_migrate; CREATE TABLE public.e2e_migrate_probe (); DROP TABLE public.e2e_migrate_probe" >/dev/null
 # koinon-api is Ready only with the restored keys and a schema it can read (the start block waited).
 "${K[@]}" -n "$NS" get deploy koinon-api koinon-reconciler koinon-agentd
 

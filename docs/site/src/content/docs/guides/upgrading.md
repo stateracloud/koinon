@@ -238,7 +238,7 @@ Not Ready. The only way back is a restore:
      ```sh
      PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=<name>-pg,cnpg.io/instanceRole=primary -o name)
      kubectl -n koinon exec "$PRIMARY" -c postgres -- psql --dbname=koinon \
-       -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public'
+       -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public AUTHORIZATION pg_database_owner' -c 'GRANT USAGE ON SCHEMA public TO PUBLIC'
      kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon-pre-upgrade.dump
      ```
 
