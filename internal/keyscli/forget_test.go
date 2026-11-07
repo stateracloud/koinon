@@ -389,7 +389,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: otherRemoved, ActivateIfNoActive: true, Out: out,
 				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
-			}).Run(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+			}).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
 			after, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(after.Data).To(Equal(before.Data), "the Secret is unchanged")

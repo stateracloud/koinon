@@ -259,7 +259,7 @@ var _ = Describe("the key-admin Job", func() {
 			const removed = "kek-20251201-eeee"
 			seed(ctx, lost, survivor)
 			sealed[removed] = true
-			Expect(recover(removed).Run(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+			Expect(recover(removed).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
 			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, secret, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sec.Data).To(HaveLen(2))
