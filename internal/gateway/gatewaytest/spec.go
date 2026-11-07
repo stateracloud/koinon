@@ -84,6 +84,9 @@ type Gateway struct {
 	// Observe returns what the gateway recorded about the requests of one key (Key.ID), oldest
 	// first. Optional: when nil the specs read it from Logs as agentgateway's access log
 	// ([ObservedFromAgentgatewayLog]); a gateway of Koinon's own sets it to read its usage record.
+	// These are the gateway's own totals (input including cache, output including reasoning), not
+	// the disjoint UsageRecord: a driver that reads its usage record adds the parts back. The
+	// ledger prices the disjoint record that the driver maps from this log.
 	Observe func(ctx context.Context, keyID string) ([]Observed, error)
 	// Stop tears the gateway down. Optional.
 	Stop func(ctx context.Context) error

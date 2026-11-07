@@ -38,8 +38,10 @@ type usageCase struct {
 // record, so a gateway bump that changes a count changes a bill (#47, #78).
 func usageSpec(env Env) {
 	// The provider answers; the gateway's own log must follow the consistent semantics: Input
-	// includes the cache buckets and Output includes reasoning. The usage record the driver maps
-	// from it is disjoint (ADR 0097 decision 3; the driver's decode specs assert that).
+	// includes the cache buckets and Output includes reasoning. Observed carries those totals, not
+	// the disjoint UsageRecord; a driver that reads its usage record adds the parts back. The ledger
+	// prices the disjoint record the driver maps from this log (ADR 0097 decision 3; the driver's
+	// decode specs assert that).
 	chat := fakemodel.Usage{InputTokens: 100, CachedInputTokens: 30, OutputTokens: 40, ReasoningTokens: 25}
 	messages := fakemodel.Usage{InputTokens: 100, CachedInputTokens: 30, CacheWriteTokens: 20, OutputTokens: 40, ReasoningTokens: 25}
 	plain := fakemodel.Usage{InputTokens: 100, OutputTokens: 10}

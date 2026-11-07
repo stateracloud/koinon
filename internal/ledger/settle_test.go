@@ -510,6 +510,7 @@ var _ = Describe("Settling responses cut short", func() {
 			return n, known
 		}
 		logged := complete("gen-t1") // chat completions: the gateway logged the split
+		logged.OutputTokens = 170    // disjoint: 170 plain output plus 80 reasoning, 250 in all
 		logged.ReasoningTokens, logged.ReasoningKnown = 80, true
 		_, err := in.Ingest(ctx, []ledger.Entry{logged, complete("gen-t2"), complete("gen-t3")})
 		Expect(err).NotTo(HaveOccurred())
@@ -766,10 +767,14 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(err).NotTo(HaveOccurred())
 			cancelRun(ctx, clock.Add(-time.Second))
 			x := partial("gen-cw")
-			x.CacheWriteTokens = 600 // message_start: 600 of the 1000 input tokens written to the cache
+			x.InputTokens = 400 // disjoint buckets: 400 plain input plus 600 cache writes, 1000 in all
+			x.CacheWriteTokens = 600
 			_, err = in.Ingest(ctx, []ledger.Entry{x})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(e.provisional(ctx)).To(Equal(1))
+			var provInput int64
+			Expect(db.QueryRow(ctx, `SELECT input_tokens FROM spend_entries WHERE org_id = $1`, e.org).Scan(&provInput)).To(Succeed())
+			Expect(provInput).To(Equal(int64(1000)), "the stored input is the total: 400 plain plus 600 cache writes")
 			// OpenRouter's generation: prompt and completion, no cache writes.
 			src.answer("gen-cw", providerusage.Usage{InputTokens: 1000, OutputTokens: 100, Cost: money.MustParse("0.003")})
 			clock = clock.Add(time.Minute)
