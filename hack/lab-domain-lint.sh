@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Fails when a tracked file names a maintainer lab host (koinon-private#693, umbrella #135). The lab's domain lives only
-# in the untracked lab config (hack/lab/lab.env.example, KOINON_LAB_DOMAIN); docs, fixtures and spikes use
+# in the untracked lab config (outside git; KOINON_LAB_DOMAIN, see docs/dev/maintainer-homelab.md); docs, fixtures and spikes use
 # lab.example.invalid. The check carries no real domain: it matches the shape of a lab host, a name under
 # `.lab.<domain>` (zot.apps.lab.<domain>, ollama.lab.<domain>) or a bare `lab.<domain>/...` label key, that is
 # not one of the example domains. When KOINON_LAB_DOMAIN is set (env or lab config) a tracked file naming
@@ -17,9 +17,20 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/.."
-# shellcheck source=hack/lab/config.sh disable=SC1091
-. "$here/lab/config.sh"
-lab_config_load 2>/dev/null || true
+# The lab's real domain is the one value this check needs from the untracked lab config (the lab
+# client lives outside the repository, issue #300). The environment wins over the file; the file is
+# plain shell and runs in a subshell, and only its KOINON_LAB_DOMAIN counts.
+if [[ -z ${KOINON_LAB_DOMAIN:-} ]]; then
+	lab_cfg=${KOINON_LAB_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env}
+	if [[ -r $lab_cfg ]]; then
+		KOINON_LAB_DOMAIN=$( (
+			set +eu
+			# shellcheck disable=SC1090
+			. "$lab_cfg" >/dev/null 2>&1
+			printf '%s' "${KOINON_LAB_DOMAIN:-}"
+		) || true)
+	fi
+fi
 
 rev=${1:-}
 allowed='lab\.example\.(invalid|com|org|net)'

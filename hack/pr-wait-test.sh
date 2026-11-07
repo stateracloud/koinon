@@ -322,11 +322,11 @@ TIMEOUT"
 seq_set "$(prh "$lint_ok,$q_skip_new")"
 run 7 --checks --require e2e --interval 0
 expect "--require e2e: only a skipped quickstart says how to get a green e2e" 1 "REQUIRED e2e skipped
-no green e2e on this head (skipped quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref <branch>"
+no green e2e on this head (skipped quickstart, no e2e-lab success); run: gh workflow run e2e-kind.yml --ref <branch>"
 seq_set "$(prh "$lint_ok")"
 run 7 --checks --require e2e --interval 0
 expect "--require e2e: nothing at all is missing" 1 "REQUIRED e2e missing
-no green e2e on this head (missing quickstart, no e2e-lab success); run: hack/e2e-remote.sh --argo (posts e2e-lab), or gh workflow run e2e-kind.yml --ref <branch>"
+no green e2e on this head (missing quickstart, no e2e-lab success); run: gh workflow run e2e-kind.yml --ref <branch>"
 seq_set "$(prh "$lint_ok,$(st e2e-lab SUCCESS),$go_ok")"
 printf '\n' >"$FAKE_DIR/runs"
 run 7 --checks --require e2e --require go --interval 0

@@ -48,7 +48,7 @@
 #                 check, a shallow clone, an unknown event) is skip=false.
 # lab (koinon-private#610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
 #   (HEAD_SHA: github.event.pull_request.head.sha, not the merge ref github.sha) has the commit status
-#   `go-test-lab` = success (hack/go-test-lab.sh; posted by hack/e2e-remote.sh --argo --gate go-test
+#   `go-test-lab` = success (hack/go-test-lab.sh; posted by the maintainer lab client, `--gate go-test`
 #   after a green lab run). ci.yml then skips the go-test job and the `go` gate accepts that skip.
 #   Anything else, an API error included, is false: go-test runs on the hosted runner as before. There is no
 #   waiting for a status that arrives later; hack/ship.sh posts it before marking the pull request ready.

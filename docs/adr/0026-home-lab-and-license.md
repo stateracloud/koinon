@@ -65,6 +65,12 @@ own checkout (`hack/e2e-remote.sh --argo`) and posts the result as the commit st
 `e2e-lab` is not a check of the repository ruleset: contributors without a lab use GitHub's `e2e-kind`.
 The merge rule and the exit codes are in ADR [0025](0025-testing-strategy.md) (amendment).
 
+## Note (2026-11-07, issue #300)
+
+The lab client named above (`hack/e2e-remote.sh --argo`) is no longer in the repository; it lives with the lab,
+outside git. The rule is unchanged: a maintainer's own agent submits a run of the maintainer's own checkout and
+posts `e2e-lab`. See the note in ADR [0025](0025-testing-strategy.md).
+
 ## Links
 
 - [design.md](../design.md), decision 26

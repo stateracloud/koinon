@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Post the commit status `e2e-lab` on a commit: the record that a lab run of the kind e2e passed (or
-# failed) on exactly that commit (koinon-private#547). hack/e2e-remote.sh --argo calls it after the run; run it by
+# failed) on exactly that commit (koinon-private#547). the maintainer lab client (outside git) calls it after the run; run it by
 # hand to post a result again, for example when the commit was not pushed yet at the time.
 #
 #   hack/e2e-status.sh <sha> <success|failure> <description> [target url]

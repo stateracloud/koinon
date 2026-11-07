@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Helpers for the commit status `go-test-lab` (koinon-private#610): the record that a lab gate run of go-test
-# (hack/e2e-remote.sh --argo --gate go-test, which posts it through hack/e2e-status.sh) passed on exactly
+# (the maintainer lab client, `--gate go-test`, which posts it through hack/e2e-status.sh) passed on exactly
 # one commit. The ci.yml job go-test is satisfied without running when the pull request head has a
 # green one, so the hosted runner does not redo what the lab already proved.
 #

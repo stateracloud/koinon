@@ -79,3 +79,8 @@ it. That closes the gap at the source for the price of one prerequisite.
 - The version in the message is whatever the old shell reports in `$BASH_VERSION`.
 - Raising the minimum later (6) is one edit of the guard line in every script plus the lint, done with
   the same mechanical change.
+
+## Note (2026-11-07, issue #300)
+
+`hack/lab/config.sh`, named above as a sourced library without a guard, is no longer tracked (the maintainer
+lab's scripts live outside the repository). The scope rule is unchanged.

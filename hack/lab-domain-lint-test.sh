@@ -22,9 +22,8 @@ not() { ! "$@"; }
 
 dom="lab.""fixture-corp.""com"
 r=$tmp/repo
-mkdir -p "$r/hack/lab" "$r/docs"
+mkdir -p "$r/hack" "$r/docs"
 cp "$root/hack/lab-domain-lint.sh" "$r/hack/"
-cp "$root/hack/lab/config.sh" "$r/hack/lab/"
 git -C "$r" init -q
 git -C "$r" config user.email t@example.invalid
 git -C "$r" config user.name t
@@ -55,6 +54,11 @@ dom2="fixture-corp-internal"
 echo "something under $dom2 here" >"$r/docs/bad.md"
 check "the exact configured domain fails when set" not env KOINON_LAB_DOMAIN="$dom2" bash -c "cd '$r' && hack/lab-domain-lint.sh"
 check "... but passes when it is not configured" lint
+
+# The domain also comes from the untracked lab config file; the environment wins over it.
+echo "KOINON_LAB_DOMAIN=$dom2" >"$tmp/lab.env"
+check "the exact domain from the lab config file fails too" not env KOINON_LAB_CONFIG="$tmp/lab.env" bash -c "cd '$r' && hack/lab-domain-lint.sh"
+check "... unless the environment names another domain" env KOINON_LAB_CONFIG="$tmp/lab.env" KOINON_LAB_DOMAIN=other-domain.example bash -c "cd '$r' && hack/lab-domain-lint.sh"
 
 # The real tree must be clean.
 check "this repository names no lab host" "$root/hack/lab-domain-lint.sh"

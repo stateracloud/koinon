@@ -15,7 +15,7 @@
 # second call; e2e-kind's `opened` run reads the labels live and runs the e2e (koinon-private#468).
 #
 # --lab-go-test (with --ready, koinon-private#610) runs the go-test gate on the lab after the push and BEFORE the pull
-# request is marked ready: `hack/e2e-remote.sh --argo --gate go-test` posts the commit status go-test-lab
+# request is marked ready: the lab client (outside git: $KOINON_LAB_CLIENT, default ~/.config/koinon/lab/lab-e2e.sh; docs/dev/maintainer-homelab.md) runs `--gate go-test` and posts the commit status go-test-lab
 # on the pushed head, and the ready run of ci.yml then skips its hosted go-test (a draft skips the
 # heavy jobs, so nothing is lost by running the lab first). Exit 75 (lab cannot run it now, no free slot),
 # 76 (NOT RUN), 78 (no lab configured) or 2 (the lab rejected the call) print the reason and go on: go-test runs on
@@ -243,7 +243,7 @@ pr_url=""
 if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
-		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (hack/e2e-remote.sh --argo --gate go-test) before marking ready"
+		[[ $lab == 1 ]] && say "dry-run: would run the go-test gate on the lab (the lab client, --gate go-test) before marking ready"
 		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
 		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
 	else
@@ -272,7 +272,10 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		elif [[ $lab == 1 ]]; then
 			# The status must exist on the pushed head before the ready run reads it (koinon-private#610).
 			lab_rc=0
-			hack/e2e-remote.sh --argo --gate go-test || lab_rc=$?
+			# The lab client lives outside the repository (issue #300): KOINON_LAB_CLIENT, else the
+			# maintainer's install. Without one there is no lab (78, as an unconfigured lab).
+			lab_client=${KOINON_LAB_CLIENT:-${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab/lab-e2e.sh}
+			if [[ -x $lab_client ]]; then "$lab_client" --repo "$PWD" --gate go-test || lab_rc=$?; else lab_rc=78; fi
 			case $lab_rc in
 			0)
 				if [[ $(hack/go-test-lab.sh state "$(git rev-parse HEAD)" 2>/dev/null || true) == success ]]; then

@@ -39,7 +39,7 @@ Instructions for coding agents working on Koinon.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
   `e2e-lab` status or `quickstart` run on its head (`e2e result` is red without one). The PR's own
-  run runs the quickstart by itself; `hack/e2e-remote.sh --argo` (lab) is an optional faster path, and
+  run runs the quickstart by itself; a maintainer lab run (its client lives outside git) is an optional faster path, and
   you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. Exit 75/78/79 and `--local` (not merge evidence): [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
@@ -108,14 +108,15 @@ with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.
 the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
 eight claims per human. Pick the model from the brief's "Which model" section. The parent beats,
 ships (`hack/ship.sh`) and releases; agents never call `claim.sh`. Each lane tests its own
-worktree: `hack/e2e-remote.sh --repo` is an `--argo` option, so on the local Docker run the script
-from the lane's worktree.
+worktree: `hack/e2e-remote.sh` tests the checkout it is run from, so run it from the lane's worktree.
 
 ## Maintainer lab (optional)
 
-Only the maintainers have a home lab; nothing in the repository needs it. Settings, exit codes, the
-`e2e-lab` status and lane rules: `docs/dev/maintainer-homelab.md`. A lane runs
-`hack/e2e-remote.sh --argo --repo <its worktree>` with `KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.
+Only the maintainers have a home lab; nothing in the repository needs it, and its scripts, settings
+and client are not in git (issue #300). What stays here is the contract: the `e2e-lab` and `go-test-lab`
+commit statuses (`hack/e2e-status.sh`) and `docs/dev/maintainer-homelab.md` (a pointer plus the lane
+rules). A maintainer's lane runs the lab client with `--repo <its worktree>` and
+`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.
 
 ## Working alongside another human
 

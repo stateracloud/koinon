@@ -98,7 +98,7 @@ pull_request)
       # here" could never go green for it (issue #148). The label and the lab stay accelerators: the
       # label only matters for the nothing-relevant case above, a green `e2e-lab` also satisfies
       # `e2e result` (hack/e2e-gate.sh) and may land first.
-      summary "Runs: this pull request is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"The lab's \`e2e-lab\` status (\`hack/e2e-remote.sh --argo\`) also satisfies \`e2e result\`."
+      summary "Runs: this pull request is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"$'\n\n'"The lab's \`e2e-lab\` status (posted by the maintainer lab client) also satisfies \`e2e result\`."
       emit true true
     else
       summary "Does not run: nothing in this pull request needs the kind e2e."

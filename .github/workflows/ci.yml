@@ -121,7 +121,7 @@ jobs:
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
       # go-test on the lab gate first (koinon-private#610): a ready pull request whose head has the commit status
-      # go-test-lab = success (posted by `hack/e2e-remote.sh --argo --gate go-test` through hack/ship.sh
+      # go-test-lab = success (posted by the maintainer lab client, `--gate go-test`, through hack/ship.sh
       # --lab-go-test, before the pull request is marked ready) does not run go-test on the runner; the
       # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
       # Trust limit as for e2e-lab (koinon-private#568): anyone with write access can post the status, and this job

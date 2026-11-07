@@ -8,7 +8,7 @@
 #   - pull requests: when the full rule (hack/needs-e2e.sh) says the change is e2e-relevant, the PR
 #     changes the e2e's own files or it carries the `e2e` label (read live, so `gh pr create --label e2e`
 #     counts on `opened`). Relevance alone runs it, so a fork PR (which cannot label, dispatch or post
-#     `e2e-lab`) can go green (issue #148). The label and the lab (hack/e2e-remote.sh --argo) are
+#     `e2e-lab`) can go green (issue #148). The label and the maintainer lab (its client lives outside git) are
 #     accelerators: the label forces a run for a change the rule thinks irrelevant, a green `e2e-lab`
 #     satisfies `e2e result` once this run's quickstart has finished; if that quickstart
 #     fails or is cancelled, hack/e2e-gate.sh still passes on the lab status or another run's quickstart.

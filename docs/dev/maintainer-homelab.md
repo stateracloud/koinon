@@ -40,26 +40,29 @@ Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows `kind-koinon-*` an
 
 ## Maintainer config outside the repository
 
-Nothing of the lab is tracked (issue koinon-private#508): the repository works without it. The maintainers keep
-these in `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
+Nothing of the lab is tracked (issues koinon-private#508 and #300): the repository works without it, and the
+lab's scripts, the remote-run client included, are not in git. The maintainers keep these in
+`${XDG_CONFIG_HOME:-$HOME/.config}/koinon/`:
 
 | File | What |
 | --- | --- |
-| `lab.env` | `KOINON_E2E_ARGO_SERVER`, `_BUNDLE_URL`, `_RESULTS_URL`, `_S3_REGION`, `_ARGO_CREDS`, `_LIGHT_MANIFEST` for `hack/e2e-remote.sh --argo` (template `hack/lab/lab.env.example`; the environment overrides it) |
-| `lab/creds.sh` | the credentials functions of `hack/e2e-argo.sh` (contract `hack/lab/creds.example.sh`) |
-| `lab/light.workflow.json` | the Argo Workflow of `--lane light` (superseded by the lab's `koinon-gate` WorkflowTemplate, `--gate <set>`; no file needed) |
+| `lab.env` | `KOINON_E2E_ARGO_SERVER`, `_BUNDLE_URL`, `_RESULTS_URL`, `_S3_REGION`, `_ARGO_CREDS`, `KOINON_LAB_DOMAIN` for the lab client (template `lab/lab.env.example`; the environment overrides it) |
+| `lab/lab-e2e.sh` (+ `lab/config.sh`, `lab/lab-e2e-test.sh`) | the lab client: it replaces the old `hack/e2e-remote.sh --argo` and `hack/e2e-argo.sh`; `ship.sh --lab-go-test` finds it through `KOINON_LAB_CLIENT` (default `lab/lab-e2e.sh`) |
+| `lab/creds.sh` | the credentials functions of the client (contract `lab/creds.example.sh`) |
 | `lab/local.homelab.example.yaml`, `values-homelab.yaml`, `model-provider-homelab.yaml` | the Tilt remote profile of the lab |
 
-Without `lab.env`, `hack/e2e-remote.sh --argo` exits 78 (no lab configured) and names what is missing.
+Without `lab.env`, the lab client exits 78 (no lab configured) and names what is missing. The lab runs its
+gate sets from its own mounted copy of the gate script, not from the tested commit; the light lane is
+retired.
 
-`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job) fails when a tracked file names a lab host (koinon-private#693).
+`lab.env` also holds `KOINON_LAB_DOMAIN`, the lab's DNS domain: lab hosts are `<name>.apps.<domain>` and `ollama.<domain>`, and the lane label of gate runs is `<domain>/lane`. The real value is never tracked: docs, fixtures and spikes use `lab.example.invalid`, and `hack/lab-domain-lint.sh` (CI `scripts` job; it reads `KOINON_LAB_DOMAIN` from the environment or `lab.env`) fails when a tracked file names a lab host (koinon-private#693).
 
 ## Where a pull request's kind e2e runs (koinon-private#547)
 
 A needs-e2e pull request (`hack/needs-e2e.sh`) is tested lab first. A green lab run is enough to merge,
 recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendment) has the decision.
 
-1. Push the branch, then `hack/e2e-remote.sh --argo` (about 15-25 min; `--no-wait` and `--follow <run>`
+1. Push the branch, then `lab/lab-e2e.sh --repo <worktree>` (about 15-25 min; `--no-wait` and `--follow <run>`
    to come back later). A followed run posts the commit status `e2e-lab` on the commit it tested: `success`
    on exit 0, `failure` when the e2e failed, nothing on a fallback. The description names the run and the
    target URL is the run's page on the Argo Server from `lab.env`. A branch that is not pushed cannot take
@@ -70,7 +73,7 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
    pull_request run). Then auto-merge as usual.
 3. Otherwise wait for the PR's own quickstart on GitHub (dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run), when:
 
-| Exit of `--argo` | Meaning | What to do |
+| Exit of the lab client | Meaning | What to do |
 | --- | --- | --- |
 | 0 | the e2e passed, `e2e-lab` is success | merge gate 2 |
 | 1 | the e2e failed, `e2e-lab` is failure | fix it |
@@ -85,7 +88,10 @@ recorded as a commit status. ADR [0025](../adr/0025-testing-strategy.md) (amendm
 
    The `koinon-gate` lane (`--gate <set>`, not the e2e) has the same 75 / 76 contract: 75 is "run the gate
    locally", including the 120 s Pending fallback (reasons `quota`, `unschedulable`, `namespace-limit`,
-   `slot`; the run is deleted, never stopped).
+   `slot`; the run is deleted, never stopped). Simultaneous submits no longer pile onto `gate-1`: a few
+   seconds after the submit the client re-reads the run, and one that waits for the slot's mutex is deleted and
+   resubmitted on the next free slot (the last candidate is kept; the 120 s fallback stays the last resort).
+   A gate set the lab does not know is denied by the lab at the submit (exit 2); the client does not pre-check.
 4. Any e2e-relevant pull request (`hack/needs-e2e.sh`, including the e2e's own files) runs the quickstart in
    its own run on GitHub, so the lab run is optional there; the `e2e` label dispatches it too.
 5. Main stays batched on GitHub (each push that changed something e2e-relevant, one running and the newest
@@ -96,7 +102,7 @@ the required check stays `e2e result`, and it enforces the rule on GitHub (koino
 (or the e2e's own files, or the `e2e` label) says the PR needs the e2e, the PR's own run runs the quickstart
 (issue #148) and `e2e result` fails unless the head
 has a successful `quickstart` job (this run, or an e2e-kind run dispatched on the head) or the commit
-status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names `hack/e2e-remote.sh --argo` and
+status `e2e-lab` = success (`hack/e2e-gate.sh`; the failure message names the lab status and
 `gh workflow run e2e-kind.yml --ref <branch>`). A status event starts no workflow, so
 `hack/e2e-status.sh` re-runs the PR run's `e2e result` job (only that job, not a failed quickstart) after posting `success`
 (`hack/e2e-rerun-result.sh`), as does a passing dispatched run; if that did not happen, use "Re-run failed
@@ -117,7 +123,7 @@ there (`test/e2e/run.sh`), and the lab reaches `nvcr.io` only through Zot's mirr
 a build input, `FLAVOR_BASE` (`make flavor-opencode FLAVOR_BASE=...`, `test/e2e/run.sh`), checked by
 `hack/flavor-base.sh`: it must end with the digest the Dockerfile's `ARG BASE=` pins, which is the same
 through the mirror, so the base never changes without a change to the Dockerfile. Unset, the Dockerfile's
-public default builds. The lab's `koinon-make` WorkflowTemplate (the kind lane; the light lane and the
+public default builds. The lab's `koinon-make` WorkflowTemplate (the kind lane; the
 gates build no flavor image) sets `FLAVOR_BASE=<registry host from lab.env>/nvcr.io/<the Dockerfile's ref
 and digest>` from the lab's own config, and `make test-e2e-kind` hands it to `test/e2e/run.sh`; the mirror
 address is never tracked. A lab runner without `FLAVOR_BASE` fails the image build
@@ -128,7 +134,7 @@ address is never tracked. A lab runner without `FLAVOR_BASE` fails the image bui
 CI's `go-test` job is the longest CI job. With a lab, run it there first and let CI skip it:
 
 1. Pull request as a draft (a draft skips the heavy jobs, koinon-private#593). Then
-   `hack/ship.sh --ready --lab-go-test ...`: after the push it runs `hack/e2e-remote.sh --argo --gate go-test`
+   `hack/ship.sh --ready --lab-go-test ...`: after the push it runs the lab client with `--gate go-test`
    on a free gate slot (`gate-1`..`gate-4` with no unfinished `lane=gate` run, never always `gate-1`),
    which posts the commit status `go-test-lab` on the pushed head (`success`, or `failure` when the gate
    failed; nothing on 75 / 76 / 78 or with `--no-status`), and only then marks the pull request ready.
@@ -154,8 +160,8 @@ against mistakes, not against a malicious member. `changes` and the release `gat
 
 ### Lanes and notifications
 
-Each lane of a parallel session runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
-`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting. The lab's notifications
+Each lane of a parallel session runs the lab client with `--repo <its worktree>` and
+`KOINON_E2E_AGENT=<session>-<lane>`, and keeps at most one kind run waiting. The lab's notifications
 (ntfy) carry the agent label as a tag (`?tags=<agent>`).
 
 ## Dev database
@@ -266,8 +272,7 @@ Everyone else uses `overlays/kind` or `overlays/remote` ([real-model-tests.md](r
 ## Agents and lanes
 
 Only the maintainers have a home lab; nothing in the repository needs it and none of its endpoints
-are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
-(template `hack/lab/lab.env.example`; `hack/e2e-argo.sh` header). With them,
-`hack/e2e-remote.sh --argo` queues the e2e (and `--gate <set>` the Docker-only gates) on the lab's
-Argo. Each lane runs `hack/e2e-remote.sh --argo --repo <its worktree>` with
-`KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.
+or scripts are tracked. Their settings live in the untracked `${XDG_CONFIG_HOME:-$HOME/.config}/koinon/lab.env`
+(template `lab/lab.env.example`, installed with the client). With them, the lab client (`lab/lab-e2e.sh`)
+queues the e2e (and `--gate <set>` the Docker-only gates) on the lab's Argo. Each lane runs it with
+`--repo <its worktree>` and `KOINON_E2E_AGENT=<session>-<lane>` and keeps at most one kind run waiting.

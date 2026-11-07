@@ -152,7 +152,7 @@ explains.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
-with a lab you can get there sooner: `hack/e2e-remote.sh --argo`, a green run posts the commit status
+with a lab you can get there sooner: the maintainer lab client (outside git, see maintainer-homelab.md), a green run posts the commit status
 `e2e-lab` on your pushed head and that is enough to merge once the PR's own quickstart has finished (a flaky red one does not hide a green lab run). When it exits 75 (the lab cannot run it
 now) or 78 (no lab configured), wait
 for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
@@ -192,7 +192,7 @@ success, so every required check still reports.
 
 ### go-test on the lab gate first (koinon-private#610)
 
-`hack/ship.sh --ready --lab-go-test` runs `hack/e2e-remote.sh --argo --gate go-test` on the pushed
+`hack/ship.sh --ready --lab-go-test` runs the lab client with `--gate go-test` (`$KOINON_LAB_CLIENT`, outside git) on the pushed
 draft head (a free gate slot) and the lab posts the commit status `go-test-lab`; `changes` reads
 it for the exact PR head SHA and the ready run skips `go-test`, which `go` accepts (the required
 name stays `go`; no change to the ruleset). Exit 75/78/76/2 or no status: `go-test` runs on
@@ -380,12 +380,12 @@ skip it; still, a pull request that changes startup flags, chart Jobs or hooks, 
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` status on the head (from
-`hack/e2e-remote.sh --argo`, which needs the branch pushed) or a green `quickstart` run on the
+the maintainer lab client, which needs the branch pushed) or a green `quickstart` run on the
 head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it
 with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 
-The maintainer lab (`hack/e2e-remote.sh --argo`, `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
+The maintainer lab (its client lives outside git; `e2e-lab`, lanes): `docs/dev/maintainer-homelab.md`.
 
 `hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (koinon-private#647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole

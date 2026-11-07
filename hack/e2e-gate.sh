@@ -10,7 +10,7 @@
 #   2. another e2e-kind run on the head (a `gh workflow run e2e-kind.yml --ref <branch>` dispatch,
 #      the `e2e` label's dispatch) has a go-suite `quickstart` job that succeeded (not a bisect
 #      dispatch of another commit, not the web suite);
-#   3. the commit status `e2e-lab` is success (posted by hack/e2e-remote.sh --argo after a green lab
+#   3. the commit status `e2e-lab` is success (posted by the maintainer lab client, which lives outside git, after a green lab
 #      run, hack/e2e-status.sh). Its newest status counts.
 #
 # A status event does not start a workflow, so a later `e2e-lab` (or a dispatched run) does not
@@ -94,7 +94,7 @@ else
 fi
 
 msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this${QUICKSTART:+ ($QUICKSTART)} or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
-how="Produce one: run \`hack/e2e-remote.sh --argo\` (the lab posts the status e2e-lab), or run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
+how="Produce one: a maintainer's lab run posts the status e2e-lab; otherwise run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
 echo "::error::$msg"
 echo "$how"
 [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || printf '## e2e result\n\n%s\n\n%s\n' "$msg" "$how" >>"$GITHUB_STEP_SUMMARY"
