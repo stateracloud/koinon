@@ -91,7 +91,7 @@ spec:
   ports:
     - {name: http, port: 8080, targetPort: http}
 ---
-# A remote MCP server (plan item MC1): two tools over Streamable HTTP at /mcp, refusing requests
+# A remote MCP server (plan item MC1): three tools over Streamable HTTP at /mcp, refusing requests
 # without the X-Api-Key credential, and a record of what it received at /_fake/requests.
 apiVersion: apps/v1
 kind: Deployment

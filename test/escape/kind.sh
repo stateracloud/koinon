@@ -23,10 +23,11 @@
 #
 # The leak guard exfiltration case (exfil_test.go, #293) needs a guarded gateway this script does not
 # start: it runs when KOINON_ESCAPE_MCP_HOST, KOINON_ESCAPE_MCP_KEY and KOINON_ESCAPE_MCP_RECEIVER_URL are
-# set in the environment (docs/dev/ci.md#leak-guard-exfiltration-cases) and skips otherwise. This script does
-# not set them: `make dev-kind-up` installs OpenShell only, with no agentgateway, leak guard or fakemcp, so the
-# case does not run from here yet. KOINON_REQUIRE=escape-mcp-gateway makes the skip a failure for whoever
-# supplies a guarded gateway. Gap and exit condition: #348, docs/dev/ci.md#leak-guard-exfiltration-cases.
+# set in the environment (docs/dev/ci.md#leak-guard-exfiltration-cases) and skips otherwise. `make dev-kind-up`
+# installs OpenShell only, so from there it skips. The kind e2e (test/e2e/run.sh with ESCAPE_MCP=1) calls this
+# script from its step 6b through test/e2e/escape-mcp.sh, against the quickstart install, with
+# KOINON_ESCAPE_LABEL=leakguard, KOINON_ESCAPE_STANDIN=0 and KOINON_REQUIRE=escape-mcp-gateway (#348).
+# KOINON_ESCAPE_LABEL is the Ginkgo label filter (default openshell).
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -187,4 +188,4 @@ cd "$root"
 KOINON_OPENSHELL_ENDPOINT="127.0.0.1:$PORT" \
 KOINON_OPENSHELL_MTLS_DIR="$tmp" \
 KOINON_OPENSHELL_IMAGE="$IMAGE" \
-  go test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
+  go test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter="${KOINON_ESCAPE_LABEL:-openshell}"
