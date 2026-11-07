@@ -21,7 +21,6 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
-	"github.com/stateracloud/koinon/pricing"
 )
 
 // SettleWindow bounds how long a provisional entry waits for its provider's own figure. After it,
@@ -422,7 +421,7 @@ func (s *Settler) charge(ctx context.Context, q *store.Queries, org pgtype.UUID,
 		res, err = s.Prices.Resolve(ctx, q, org, model, row.OccurredAt.Time)
 	}
 	if err == nil {
-		_, listed, err = res.Price.Cost(pricing.Split(u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens, u.ReasoningTokens))
+		_, listed, err = res.Price.Cost(u.Buckets())
 		if err != nil {
 			err = &prices.BadPriceError{Err: err}
 		}

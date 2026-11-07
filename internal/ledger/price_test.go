@@ -80,8 +80,8 @@ var _ = Describe("Cost truth", func() {
 	It("recomputes the cost from raw usage and the dated default price, in disjoint buckets", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
-		// 1M input of which 500k were cache reads, 1k output. The gateway agrees.
-		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 1000, 500_000, "0.127")})
+		// 500k input and 500k cache reads (the record's buckets are disjoint), 1k output. The gateway agrees.
+		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 500_000, 1000, 500_000, "0.127")})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		// 500k * 0.20 + 500k * 0.05 + 1k * 2, per million.
@@ -92,6 +92,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(list.Version).To(Equal("2000-01-01.1"), "the specs run against the fixture list")
 		Expect(s.PriceRef).To(Equal(pricing.Ref(list.Version, "acme-flash")))
 		Expect(s.CacheReadTokens).To(Equal(int64(500_000)))
+		Expect(s.InputTokens).To(Equal(int64(1_000_000)), "the entry stores the provider's total: input plus cache")
 	})
 
 	// Thinking is on by default (ADR 0069 amendment 2026-10-29), and a provider bills thinking tokens as
@@ -105,15 +106,15 @@ var _ = Describe("Cost truth", func() {
 			return n
 		}
 
-		By("1M output tokens of which 400k were reasoning: all billed at the output rate, none twice")
-		u := e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")
+		By("600k output tokens and 400k reasoning (disjoint buckets): all billed at the output rate, none twice")
+		u := e.usage(time.Now(), flash, 1_000_000, 600_000, 0, "")
 		u.ReasoningTokens = 400_000
 		_, err := ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		// 1M input at 0.20 plus 1M output at 2; the 400k reasoning tokens are in the output.
 		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.20"))
-		Expect(s.OutputTokens).To(Equal(int64(1_000_000)), "output includes reasoning")
+		Expect(s.OutputTokens).To(Equal(int64(1_000_000)), "the entry stores the provider's total: output plus reasoning")
 		Expect(reasoning()).To(Equal(int64(400_000)))
 		Expect(s.CostFlagged).To(BeFalse())
 
@@ -141,7 +142,7 @@ var _ = Describe("Cost truth", func() {
 			ValidFrom: time.Now().Add(-time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		u = e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")
+		u = e.usage(time.Now(), flash, 1_000_000, 600_000, 0, "")
 		u.ReasoningTokens = 400_000
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
@@ -255,7 +256,7 @@ var _ = Describe("Cost truth", func() {
 			ValidFrom: time.Now().Add(-time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		u := e.usage(time.Now(), frontier, 1_000_000, 0, 0, "")
+		u := e.usage(time.Now(), frontier, 0, 0, 0, "") // 1M tokens, all cache write
 		u.CacheWriteTokens = 1_000_000
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())

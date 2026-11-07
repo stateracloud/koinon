@@ -37,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
+	"github.com/stateracloud/koinon/internal/testing/cfgdeliver"
 	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
@@ -186,22 +187,18 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			DatabaseURL:   "sqlite:///tmp/agentgateway.db?mode=rwc",
 			AccessLogOTLP: &standalone.OTLPExport{HostPort: fmt.Sprintf("%s:%d", testcontainers.HostInternal, hostPort(receiver)), TokenFile: "/secrets/otlp/token"},
 		}
-		cfgDir := GinkgoT().TempDir()
-		Expect(os.Chmod(cfgDir, 0o755)).To(Succeed())
-		file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
 		first, _, err := standalone.Render(state, options)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(file.Deliver(ctx, first, "")).To(Succeed())
 
-		ctr, err = testcontainers.Run(ctx, agentgatewayimage.Ref(),
-			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
+		// The config goes in through the Docker API: OrbStack bind mounts deliver no inotify events (#301).
+		ctr, err = testcontainers.Run(ctx, agentgatewayimage.Ref(), append(cfgdeliver.ContainerOptions(first),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort, refusePort),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", tokenDir+":/secrets/otlp:ro")
+				hc.Binds = append(hc.Binds, tokenDir+":/secrets/otlp:ro")
 			}),
 			testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
-		)
+		)...)
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
 
@@ -210,7 +207,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		statsURL, err := containerhost.Endpoint(ctx, ctr, "15020/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 		driver = &standalone.Driver{
-			Options: options, Deliverer: file,
+			Options: options, Deliverer: cfgdeliver.Deliverer{Container: ctr},
 			Waiter: standalone.ProbeWaiter{GatewayURL: llmURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
 		}
 		_, err = driver.Apply(ctx, state)

@@ -44,6 +44,12 @@ type KeyAdmin struct {
 	// HasValues tells whether the database holds encrypted values: a missing Secret is then
 	// restored from backup, never created (KubeStore.Ensure).
 	HasValues func(context.Context) (bool, error)
+	// UsedID tells whether any stored value in the database carries an envelope under the KEK ID
+	// (the usage query of keys status and keys forget). The recovery from a lost active KEK refuses
+	// an ID it reports as used: the envelopes under it were sealed by another key, so a new KEK
+	// under that ID would be tried against them and keys forget would then refuse the ID.
+	// Required with ActivateIfNoActive.
+	UsedID func(ctx context.Context, id string) (bool, error)
 	// Marker is the install's bound-only marker (koinon-private#615). Creating the first KEK sets it (before the
 	// Secret exists), and so does RewrapUnbound once no unbound KEK remains. Required with Create
 	// or RewrapUnbound.
@@ -85,6 +91,10 @@ func (a KeyAdmin) Run(ctx context.Context) error {
 	if a.ActivateIfNoActive && a.AddID == "" {
 		// Checked before anything is written, so a misconfigured Job changes nothing.
 		return errors.New("keyscli: recovering from a lost active KEK needs the ID of the KEK to add")
+	}
+	if a.ActivateIfNoActive && a.UsedID == nil {
+		// Fail closed: without the probe a retired or dead KEK's ID could be reused.
+		return errors.New("keyscli: recovering from a lost active KEK needs the database to check that the new KEK ID is unused")
 	}
 	if a.Create {
 		// The first KEK of an install is bound, so the install is bound-only from the start: the
@@ -157,6 +167,14 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 	if a.AddID == ks.Active {
 		// The lost KEK's entry is gone but envelopes sealed by it still carry its ID.
 		return false, fmt.Errorf("KEK %s is the lost active KEK; IDs are never reused: pick a new ID", a.AddID)
+	}
+	// Any other retired or dead KEK the operator removed from the Secret may still seal values.
+	used, err := a.UsedID(ctx, a.AddID)
+	if err != nil {
+		return false, fmt.Errorf("check that KEK ID %s is unused: %w", a.AddID, err)
+	}
+	if used {
+		return false, fmt.Errorf("KEK %s seals values in the database although the Secret does not hold it; IDs are never reused: pick a new ID", a.AddID)
 	}
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {

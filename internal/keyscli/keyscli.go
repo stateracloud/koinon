@@ -195,6 +195,16 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	return out, nil
 }
 
+// UsedID reports whether any stored value carries an envelope under the KEK ID: the usage query
+// that keys status and keys forget use, asked about one ID.
+func UsedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	usage, err := (&Tool{Pool: pool}).Usage(ctx)
+	if err != nil {
+		return false, err
+	}
+	return usage[id] > 0, nil
+}
+
 // AnyEnvelope reports whether any stored value is encrypted (so some KEK is needed to read it).
 func AnyEnvelope(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	for _, c := range Columns {
