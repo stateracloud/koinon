@@ -24,8 +24,8 @@ entries:
     prices: {input: "0", output: "0"}
     tokenizer: bytes
     ratio: "3.0"
-    source: {url: "https://ollama.com/", accessed: 2026-10-24}
-    note: "Runs on the org's own hardware; no provider bills tokens, so the price is zero."
+    source: {url: "https://ollama.com/", accessed: 2026-11-07}
+    note: "Runs on the org's own hardware; no provider bills tokens, so the price is zero. Re-checked 2026-11-07, unchanged: local models stay free (ollama.com bills per token for cloud models only)."
   - id: openrouter-deepseek-v4-1-flash
     provider: openrouter
     match: {glob: "deepseek/deepseek-v4.1-flash"}
@@ -68,8 +68,8 @@ entries:
     ratio: "3.0"
     max_output: 128000
     hidden_thinking: true
-    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-10-24}
-    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-11-07}
+    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07: base prices unchanged; the 272K long-context tier could not be re-verified from the OpenAI page (rendered client-side) and is kept."
   - id: openrouter-openai-gpt-6-astra
     provider: openrouter
     match: {glob: "openai/gpt-6-astra"}
@@ -82,8 +82,8 @@ entries:
     ratio: "3.0"
     max_output: 128000
     hidden_thinking: true
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
   - id: openai-gpt-6-luna
     provider: openai
     match: {glob: "gpt-6-luna"}
@@ -96,8 +96,8 @@ entries:
     ratio: "3.0"
     max_output: 128000
     hidden_thinking: true
-    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-10-24}
-    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-11-07}
+    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07: base prices unchanged; the 272K long-context tier could not be re-verified from the OpenAI page (rendered client-side) and is kept."
   - id: openrouter-openai-gpt-6-luna
     provider: openrouter
     match: {glob: "openai/gpt-6-luna"}
@@ -110,8 +110,8 @@ entries:
     ratio: "3.0"
     max_output: 128000
     hidden_thinking: true
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
   - id: anthropic-claude-fable-5-1
     provider: anthropic
     match: {glob: "claude-fable-5-1"}
@@ -121,8 +121,8 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
-    note: "Anthropic pricing page 2026-10-24, Claude Fable 5.1: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-11-07}
+    note: "Anthropic pricing page 2026-10-24, Claude Fable 5.1: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07 against the Anthropic pricing page, unchanged."
   - id: openrouter-anthropic-claude-fable-5-1
     provider: openrouter
     match: {glob: "anthropic/claude-fable-5.1"}
@@ -132,8 +132,8 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
   - id: anthropic-claude-opus-5-5
     provider: anthropic
     match: {glob: "claude-opus-5-5"}
@@ -144,8 +144,8 @@ entries:
     tool_overhead_tokens: 286
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
-    note: "Anthropic pricing page 2026-10-24, Claude Opus 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Tool-use system prompt of 286 tokens: docs/research/claude-token-estimation.md [S30]. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-11-07}
+    note: "Anthropic pricing page 2026-10-24, Claude Opus 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Tool-use system prompt of 286 tokens: docs/research/claude-token-estimation.md [S30]. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07 against the Anthropic pricing page, unchanged."
   - id: openrouter-anthropic-claude-opus-5-5
     provider: openrouter
     match: {glob: "anthropic/claude-opus-5.5"}
@@ -156,8 +156,8 @@ entries:
     tool_overhead_tokens: 286
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
   - id: anthropic-claude-sonnet-5-5
     provider: anthropic
     match: {glob: "claude-sonnet-5-5"}
@@ -167,8 +167,8 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
-    note: "Anthropic pricing page 2026-10-24, Claude Sonnet 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-11-07}
+    note: "Anthropic pricing page 2026-10-24, Claude Sonnet 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07 against the Anthropic pricing page, unchanged."
   - id: openrouter-anthropic-claude-sonnet-5-5
     provider: openrouter
     match: {glob: "anthropic/claude-sonnet-5.5"}
@@ -178,8 +178,8 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
   - id: anthropic-claude-haiku-5-5
     provider: anthropic
     match: {glob: "claude-haiku-5-5"}
@@ -192,8 +192,8 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
-    note: "Anthropic pricing page 2026-10-24, Claude Haiku 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Prompts over 100,000 tokens (cache tokens included) bill at the tier. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-11-07}
+    note: "Anthropic pricing page 2026-10-24, Claude Haiku 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Prompts over 100,000 tokens (cache tokens included) bill at the tier. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page. Re-checked 2026-11-07 against the Anthropic pricing page, unchanged."
   - id: openrouter-anthropic-claude-haiku-5-5
     provider: openrouter
     match: {glob: "anthropic/claude-haiku-5.5"}
@@ -206,5 +206,5 @@ entries:
     ratio: "2.3"
     hidden_thinking: true
     max_output: 128000
-    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
-    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page including the min_prompt_tokens 100000 override. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-11-07}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page including the min_prompt_tokens 100000 override. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24). Re-checked 2026-11-07 against the OpenRouter models API, unchanged."
