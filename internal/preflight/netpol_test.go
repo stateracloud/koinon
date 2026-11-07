@@ -50,33 +50,44 @@ var _ = Describe("NetPolClient", func() {
 		Expect(l.Close()).To(Succeed())
 		return port
 	}
-	// serve runs the probe server on the given ports until the spec ends.
-	serve := func(ports ...int) {
+	// serve opens n probe ports and answers on them until the spec ends. The ports are open when
+	// serve returns, so a client never races the server's start, and a port is never picked and
+	// then lost to another process.
+	serve := func(n int) []int {
+		listeners := make([]net.Listener, n)
+		ports := make([]int, n)
+		for i := range listeners {
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			listeners[i], ports[i] = l, l.Addr().(*net.TCPAddr).Port
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		go func() { done <- preflight.ServeNetPolProbe(ctx, "127.0.0.1", ports...) }()
+		go func() { done <- preflight.ServeNetPolProbeOn(ctx, listeners...) }()
 		DeferCleanup(func() {
 			cancel()
 			Eventually(done).Should(Receive(BeNil()))
 		})
+		return ports
 	}
+	// client's Attempt is generous: an answering port replies at once, a blocked one is refused
+	// at once, so the bound only matters on a stalled host, where a short one would read a slow
+	// answer as a blocked port.
 	client := func(control, denied int) preflight.NetPolClient {
 		return preflight.NetPolClient{
 			Host: "127.0.0.1", ControlPort: control, DeniedPort: denied,
 			ControlWait: 300 * time.Millisecond, Window: 200 * time.Millisecond,
-			Attempt: 200 * time.Millisecond, Pause: 20 * time.Millisecond,
+			Attempt: 5 * time.Second, Pause: 20 * time.Millisecond,
 		}
 	}
 
 	It("reports the denied port open when it answers for the whole window", func(ctx SpecContext) {
-		control, denied := freePort(), freePort()
-		serve(control, denied)
-		Expect(client(control, denied).Run(ctx)).To(Equal(preflight.NetPolResult{ControlReached: true, DeniedReached: true}))
+		ports := serve(2)
+		Expect(client(ports[0], ports[1]).Run(ctx)).To(Equal(preflight.NetPolResult{ControlReached: true, DeniedReached: true}))
 	})
 
 	It("reports the denied port blocked when a connection to it fails", func(ctx SpecContext) {
-		control, denied := freePort(), freePort()
-		serve(control)
+		control, denied := serve(1)[0], freePort()
 		Expect(client(control, denied).Run(ctx)).To(Equal(preflight.NetPolResult{ControlReached: true}))
 	})
 
