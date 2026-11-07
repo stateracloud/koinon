@@ -83,6 +83,7 @@ name=$(git config user.name || true)
 email=$(git config user.email || true)
 [[ -n $name && -n $email ]] || fail "git user.name/user.email not set"
 # The same check the commit hooks and CI run (koinon#320): author and committer must be on the allowlist.
+[[ -x hack/git-identity-check.sh ]] || fail "hack/git-identity-check.sh is missing: this branch was cut before koinon#320; run 'git merge origin/main' (never rebase), then ship again"
 id_out=$(hack/git-identity-check.sh commit 2>&1) || { echo "$id_out" >&2; fail "identity: $name <$email> is not allowed (hack/git-identities.allowed)"; }
 say "identity $email"
 

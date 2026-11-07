@@ -111,6 +111,34 @@ base=$(git rev-parse HEAD)
 git commit -q --allow-empty -m "Bump x" --author="dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: dependabot passes" 0 $? "$out"
 
+# the list is read from the BASE commit: a head that widens it does not help its own commits
+base=$(git rev-parse HEAD)
+printf 'Some Person <some.person@example.invalid>\n' >>hack/git-identities.allowed
+git add hack/git-identities.allowed
+git commit -q -m "chore: widen the list" --no-verify
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: relies on the widened list"
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a head that widens the list is still refused" 1 $? "$out"
+out=$(KOINON_ALLOWED_IDENTITIES='Some Person <some.person@example.invalid>' hack/git-identity-check.sh range "$base" HEAD 2>&1)
+check "range: KOINON_ALLOWED_IDENTITIES is not honoured" 1 $? "$out"
+# once the widened list is on the base, the next pull request may use it
+base2=$(git rev-parse HEAD)
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: uses the merged list"
+out=$(hack/git-identity-check.sh range "$base2" HEAD 2>&1); check "range: a line already on the base is allowed" 0 $? "$out"
+
+# first add: the base has no list, so the head's (newly added) list is used
+git checkout -q --orphan firstadd
+cp hack/git-identity-check.sh "$tmp/chk.sh"
+git rm -rq --cached . && rm -rf hack
+git commit -q --allow-empty -m "chore: no list yet" --no-verify
+nobase=$(git rev-parse HEAD)
+mkdir hack && cp "$repo/hack/git-identities.allowed" hack/
+git add hack && git commit -q -m "chore: add the list" --no-verify
+out=$("$tmp/chk.sh" range "$nobase" HEAD 2>&1); check "range: first add falls back to the head's list" 0 $? "$out"
+[[ $out == *"newly added"* ]] || { echo "FAIL fallback not announced"; echo "$out"; fail=1; }
+git rm -q hack/git-identities.allowed && git commit -q -m "chore: no list" --no-verify
+out=$("$tmp/chk.sh" range "$nobase" HEAD 2>&1); check "range: no list at base or head fails closed" 2 $? "$out"
+git checkout -q -f main
+
 out=$(hack/git-identity-check.sh range "$base" nope 2>&1); check "range: an unknown revision fails closed" 2 $? "$out"
 out=$(hack/git-identity-check.sh range 2>&1); check "range: misuse exits 2" 2 $? "$out"
 out=$(hack/git-identity-check.sh bogus 2>&1); check "unknown mode exits 2" 2 $? "$out"

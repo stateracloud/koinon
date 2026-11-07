@@ -83,7 +83,7 @@ check "a commit as t@example.invalid in the worktree is refused" refuses git -C 
 git -C "$tmp/kw/foo" reset -q
 rm -f "$tmp/kw/foo/h.txt"
 # the rest of this test commits as t@example.invalid in worktrees on purpose
-export KOINON_SKIP_IDENTITY_CHECK=1
+export KOINON_ALLOWED_IDENTITIES='t <t@example.invalid>'
 check "new refuses a bad name" refuses wt new ../x
 
 # new --branch, --from

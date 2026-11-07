@@ -13,8 +13,10 @@
 #   hack/git-identity-check.sh install          make this worktree run hack/githooks (hack/wt.sh new does it)
 #
 # The allowed list is hack/git-identities.allowed: one `Name <email>` glob per line (`#` comments).
-# KOINON_ALLOWED_IDENTITIES (newline separated, same syntax) replaces the file; a contributor adds their
-# own line to the file in the same pull request, or sets it in their environment. Exit 0 when every
+# KOINON_ALLOWED_IDENTITIES (newline separated, same syntax) replaces the file in commit mode (not in
+# range mode). In range mode the list is read from the base commit, so a pull request cannot widen its
+# own list; a new contributor adds their line in a pull request and it counts from the next one on (or
+# sets KOINON_ALLOWED_IDENTITIES locally for the hook). Exit 0 when every
 # identity is allowed, 1 when one is not, 2 on misuse or when the commits cannot be listed (fails closed).
 # KOINON_SKIP_IDENTITY_CHECK=1 turns the hook off for one command (CI ignores it).
 
@@ -33,7 +35,9 @@ usage() {
 # patterns: prints the allowed `Name <email>` globs, comments and blank lines removed.
 patterns() {
 	local src line
-	if [[ -n ${KOINON_ALLOWED_IDENTITIES:-} ]]; then
+	if [[ $mode == range ]]; then
+		src=$range_list
+	elif [[ -n ${KOINON_ALLOWED_IDENTITIES:-} ]]; then
 		src=$KOINON_ALLOWED_IDENTITIES
 	else
 		[[ -r $here/git-identities.allowed ]] || {
@@ -81,6 +85,28 @@ if [[ $mode == install ]]; then
 	exit 0
 fi
 
+if [[ $mode == range ]]; then
+	# CI: the list comes from the pull request's BASE commit, so a pull request cannot widen the list it
+	# is checked against (a new contributor's line counts from the next pull request on). The one
+	# exception: when the base has no list at all and the head adds the file, the head's list is used
+	# (the pull request that introduces the list). KOINON_ALLOWED_IDENTITIES is not honoured here.
+	[[ $# -eq 3 ]] || usage
+	base=$2 head=$3
+	if ! commits=$(git rev-list "$base..$head"); then
+		echo "::error::git rev-list $base..$head failed (see its error above), cannot check commit identities"
+		exit 2
+	fi
+	if range_list=$(git show "$base:hack/git-identities.allowed" 2>/dev/null); then
+		:
+	elif ! git cat-file -e "$base:hack/git-identities.allowed" 2>/dev/null &&
+		range_list=$(git show "$head:hack/git-identities.allowed" 2>/dev/null); then
+		echo "git-identity-check: the base has no hack/git-identities.allowed; using the head's (newly added) list"
+	else
+		echo "::error::hack/git-identities.allowed is missing at both $base and $head, cannot check commit identities"
+		exit 2
+	fi
+fi
+
 pats=$(patterns) || exit 2
 [[ -n $pats ]] || { echo "git-identity-check: the allowed identity list is empty" >&2; exit 2; }
 
@@ -110,12 +136,6 @@ if [[ $mode == commit ]]; then
 fi
 
 # range
-[[ $# -eq 3 ]] || usage
-base=$2 head=$3
-if ! commits=$(git rev-list "$base..$head"); then
-	echo "::error::git rev-list $base..$head failed (see its error above), cannot check commit identities"
-	exit 2
-fi
 fail=0
 while read -r c; do
 	[[ -z $c ]] && continue
