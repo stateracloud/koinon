@@ -34,12 +34,13 @@ const gpt = create(PriceEntrySchema, {
 const bad = create(PriceEntrySchema, { id: 'bad-link', provider: '*', match: { glob: 'x' }, validFrom: '2026-10-01', rates: { input: '1', output: '1' }, sourceUrl: 'javascript:alert(1)' })
 
 function setup(role = OrgRole.OWNER, warnings: string[] = []) {
-  const calls = { sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[] }
+  const calls = { sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[], gate: undefined as Promise<void> | undefined }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role }) })
     service(PriceService, {
-      listPrices: () => {
+      listPrices: async () => {
         calls.listed++
+        await calls.gate
         return { prices: [mine, migrated] }
       },
       getDefaultPrices: () => ({ version: '2026-10-24.1', entries: [gpt, bad] }),
@@ -152,6 +153,24 @@ describe('Prices page', () => {
     expect(calls.retires).toHaveLength(0)
     await userEvent.click(screen.getByRole('button', { name: /^Retire price$/ }))
     await waitFor(() => expect(calls.retires).toEqual([expect.objectContaining({ name: 'sonnet-mine' })]))
+  })
+
+  it('keeps the form of another price open while a save is still refreshing (old issue 111)', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit price sonnet-mine' }))
+    const form = screen.getByRole('form', { name: 'New version of sonnet-mine' })
+    let release = () => {}
+    calls.gate = new Promise<void>((r) => (release = r))
+    await userEvent.click(within(form).getByRole('button', { name: 'Save new version' }))
+    await waitFor(() => expect(calls.sets).toHaveLength(1))
+
+    // The save has returned but its refresh is pending, so the first form is still open.
+    await userEvent.click(screen.getByRole('button', { name: 'Edit price model-custom-abc' }))
+    expect(screen.getByRole('form', { name: 'New version of model-custom-abc' })).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'New version of sonnet-mine' })).not.toBeInTheDocument())
+    expect(screen.getByRole('form', { name: 'New version of model-custom-abc' })).toBeInTheDocument()
   })
 
   it('shows members a notice and sends no request', async () => {
