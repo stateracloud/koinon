@@ -789,7 +789,7 @@ var _ = Describe("Service", func() {
 			Expect(json.Unmarshal(highEv[0].Summary, &highSummary)).To(Succeed())
 			Expect(highSummary).To(HaveKeyWithValue("install_event_id", install[0].ID.String()))
 			// created_at is the transaction's time, so the insert order is the heap order of an append-only table.
-			rows, err := pool.Query(ctx, `SELECT org_id FROM audit_events WHERE action = 'trace.settings.lowered' AND org_id = ANY($1) ORDER BY ctid`,
+			rows, err := pool.Query(ctx, `SELECT org_id FROM audit_events WHERE action = 'trace.settings.lowered' AND org_id = ANY($1) ORDER BY id`,
 				[]pgtype.UUID{org, high})
 			Expect(err).NotTo(HaveOccurred())
 			inserted, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])

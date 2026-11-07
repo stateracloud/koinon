@@ -91,7 +91,12 @@ var _ = Describe("the install audit chain", func() {
 		db = pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
 	})
 
-	It("takes the install head before the org heads, so concurrent transactions with one install and two org events do not deadlock (ADR 0100 decision 1.7)", func(ctx SpecContext) {
+	// This spec does not test the org order: audit.Record takes one org per call and the trigger locks that
+	// org's head row, so the order of the org writes is the caller's duty (ADR 0100 decision 1.7), and two
+	// transactions that write orgs A,B and B,A without an install event can deadlock. What it shows is that
+	// the install head, taken first, serialises every transaction that writes an install event, whatever the
+	// org writes after it.
+	It("serialises transactions that write an install event on the install head, so they do not deadlock on the org heads they write after it (ADR 0100 decision 1.7)", func(ctx SpecContext) {
 		a, _, _ := pgtest.NewOrg(ctx, db)
 		b, _, _ := pgtest.NewOrg(ctx, db)
 		orgs := []pgtype.UUID{a, b}
@@ -105,7 +110,7 @@ var _ = Describe("the install audit chain", func() {
 				if err != nil {
 					return err
 				}
-				for _, org := range orgs { // org ID order
+				for _, org := range orgs { // the callers' order rule; the install head already serialises these
 					if err := audit.RecordErr(ctx, q, audit.Event{
 						Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "test", TargetID: fmt.Sprint(n), InstallEventID: install.ID.String(),
 					}); err != nil {
