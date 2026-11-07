@@ -64,7 +64,11 @@ In `auto` and `on` the fetched proposals within the bounds apply by themselves (
 day brings no OpenRouter estimate**: a fetched price counts only after two fetches 24 hours apart
 agree, so a new install with an OpenRouter provider has no price for its OpenRouter models until the
 second day, unless you set an org price or accept a proposal. A model Koinon has no price for at all
-is always a `needs_review` proposal: it never applies by itself.
+applies by itself the same way, once two fetches 24 hours apart returned the same values: it has
+no earlier price, so the 25% bound does not apply to it, but every other rule does (no zero rate,
+no suspected unit mix-up between its own rates, nothing above 1000 USD per million, an output
+limit from the source, and the daily cap, which it counts towards). Its first applied price is
+the one later automatic changes are measured against until you accept one yourself.
 
 **Unpriced models.** At start and on every tick `koinon-api` counts the enabled models of enabled
 providers of a type Koinon fetches prices for (today `openrouter`) that no layer prices and logs a warning with the count per provider type (no model or org
@@ -91,9 +95,9 @@ are never applied by themselves.
 
 | Class | Meaning | What you do |
 |---|---|---|
-| `auto` | at most 25% off the last price a person reviewed, no new or removed rate, none zero, the same values in two fetches 24 hours apart | nothing, in `auto` or `on`; with `off`, accept it |
-| `needs_review` | anything else that is plausible (a first sighting, a bigger move, a new rate, a tier change, an import) | `accept` or `dismiss` |
-| `confirm` | more than 3 times up or down, a rate that fell to zero, a suspected unit mix-up (a ratio of 100 or more), or a rate above 1000 USD per million | `accept --confirm <model id>`, typed in full |
+| `auto` | at most 25% off the last price a person reviewed (or a model with no price yet), no new or removed rate, none zero, the same values in two fetches 24 hours apart | nothing, in `auto` or `on`; with `off`, accept it |
+| `needs_review` | anything else that is plausible (a first sighting, a bigger move, a new rate, a tier change, a new model with a zero rate or no output limit, an import) | `accept` or `dismiss` |
+| `confirm` | more than 3 times up or down, a rate that fell to zero, a suspected unit mix-up (a ratio of 100 or more to the current rate, or for a new model between its own rates), or a rate above 1000 USD per million | `accept --confirm <model id>`, typed in full |
 | `refused` | the source's data cannot be made into a price (a negative or variable price, an unreadable rate) | nothing; it cannot be accepted |
 
 A source that reports no output limit for a model (OpenRouter's `max_completion_tokens` is null) makes
@@ -129,8 +133,12 @@ it in, so it logs a warning and the append-only platform tables are the record. 
 **Metrics.** `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}`,
 `koinon_price_auto_applied_total{source}` and `koinon_price_unpriced_models{provider_type}`.
 
-**Known limits of this slice.** OpenRouter's tier boundary (`min_prompt_tokens`) is read as "at least
-that many tokens" and not yet checked against a live response (issue #265). Time-of-day, batch, flex
+**Tiers.** OpenRouter's `min_prompt_tokens` override applies to a prompt strictly greater than
+that many tokens, as OpenRouter's SDK documents (ADR 0098), so it becomes `context_over` unchanged.
+Several overrides combine as OpenRouter applies them: later ones win per rate, a rate an override
+does not set keeps the base price, and an override with a time condition is never a tier.
+
+**Known limits of this slice.** Time-of-day, batch, flex
 and priority prices, per-upstream prices and 1-hour cache writes are not imported. Not built yet (later
 slices of #265, tracked as separate issues): the models.dev, LiteLLM and genai-prices adapters, the
 admin API and the Platform Prices page, org-admin acceptance into org entries (with their retirement
