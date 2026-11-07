@@ -138,6 +138,12 @@ EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 
 die() { echo "claim: $*" >&2; exit "${CLAIM_EXIT:-1}"; }
 warn() { echo "claim: warning: $*" >&2; }
+# write_failed MSG: an issue write (unassign, label, comment) failed. In Actions the job has
+# issues: write, so that is a real fault and fails the job; locally it only warns (koinon#315).
+write_failed() {
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then die "$*"; fi
+  warn "$*"
+}
 
 # An epoch -> RFC 3339 UTC, and back. GNU and BSD date both work.
 if date -u -d @0 +%s >/dev/null 2>&1; then
@@ -661,8 +667,8 @@ set_status() {
 }
 
 assign() { gh api -X POST "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || warn "cannot assign $2 to #$1"; }
-unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || warn "cannot unassign $2 from #$1"; }
-add_label() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || warn "cannot label #$1 $2"; }
+unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || write_failed "cannot unassign $2 from #$1"; }
+add_label() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || write_failed "cannot label #$1 $2"; }
 drop_label() { gh api -X DELETE "repos/$REPO/issues/$1/labels/$2" >/dev/null 2>&1 || true; }
 
 # upsert_comment N BODY: the one marked comment on the issue, edited in place.
@@ -670,9 +676,9 @@ upsert_comment() {
   local id
   id=$(gh api --paginate "repos/$REPO/issues/$1/comments" --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null | head -1 || true)
   if [[ -n $id ]]; then
-    gh api -X PATCH "repos/$REPO/issues/comments/$id" -f "body=$2" >/dev/null 2>&1 || warn "cannot edit the claim comment on #$1"
+    gh api -X PATCH "repos/$REPO/issues/comments/$id" -f "body=$2" >/dev/null 2>&1 || write_failed "cannot edit the claim comment on #$1"
   else
-    gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$2" >/dev/null 2>&1 || warn "cannot comment on #$1"
+    gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$2" >/dev/null 2>&1 || write_failed "cannot comment on #$1"
   fi
 }
 
@@ -1315,7 +1321,7 @@ remind_once() {
     { warn "#$1: cannot read the comments; no reminder"; return 0; }
   [[ -z $seen ]] || return 0
   echo "#$1: outsider claim runs out within $((OUTSIDER_WARN / 86400)) days; reminding"
-  gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$tag"$'\n'"$3" >/dev/null 2>&1 || warn "cannot comment on #$1"
+  gh api -X POST "repos/$REPO/issues/$1/comments" -f "body=$tag"$'\n'"$3" >/dev/null 2>&1 || write_failed "cannot comment on #$1"
   return 0
 }
 

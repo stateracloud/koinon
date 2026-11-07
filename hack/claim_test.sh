@@ -857,6 +857,32 @@ eq "PROJECT=none makes no graphql call" "$(grep -c graphql "$LOG")" 0
 eq "PROJECT=none logs nothing about the board" "$(grep -c 'board' <<<"$r")" 0
 rm -f "$LOG"
 
+# ---- issue writes fail the job in Actions, only warn locally (koinon#315) ----
+# gh always fails here (a missing issues: write); each write runs in a subshell so a die is observable.
+write_try() { # ACTIONS(true|"") WRITE-COMMAND...: prints output and rc
+  local act=$1 out rc=0; shift
+  out=$( { if [[ -n $act ]]; then GITHUB_ACTIONS=$act; else unset GITHUB_ACTIONS; fi
+    REPO=acme/koinon; MARKER='<!-- koinon-claim -->'
+    gh() { return 1; }
+    "$@"; echo "continued"; } 2>&1) || rc=$?
+  echo "$out"; echo "rc=$rc"
+}
+for w in "unassign 7 alice" "add_label 7 claim:stale" "upsert_comment 7 body"; do
+  read -ra wa <<<"$w"; r=$(write_try true "${wa[@]}")
+  if [[ $(rc_of "$r") != 0 ]] && ! grep -q continued <<<"$r"; then ok "Actions: a failing '${w%% *}' fails the job"; else bad "Actions: a failing '${w%% *}' fails the job ($r)"; fi
+  r=$(write_try "" "${wa[@]}")
+  eq "local: a failing '${w%% *}' warns and continues (rc 0)" "$(rc_of "$r")" 0
+  eq "local: a failing '${w%% *}' says continued" "$(grep -c continued <<<"$r")" 1
+  eq "local: a failing '${w%% *}' warns" "$(grep -c 'warning' <<<"$r")" 1
+done
+# remind_once: reading the comments may fail softly; the post must not.
+r=$({ GITHUB_ACTIONS=true; REPO=acme/koinon; REMINDER_MARKER='<!-- r'
+  gh() { [[ $* == *"-X POST"* ]] && return 1; return 0; }
+  ( remind_once 7 sha body ); echo "rc=$?"; } 2>&1)
+eq "Actions: a failing reminder post fails the job" "$([[ $(rc_of "$r") != 0 ]] && echo yes)" yes
+r=$(write_try true unassign 7 alice)
+eq "Actions: the failure names the write" "$(grep -c 'cannot unassign alice from #7' <<<"$r")" 1
+
 # A sweep whose write_claim dies (missing contents:write, ruleset refusal) must end red, after trying every claim.
 LOG=$(mktemp "${TMPDIR:-/tmp}/claim_sweep.XXXXXX")
 sweep_rc=0
