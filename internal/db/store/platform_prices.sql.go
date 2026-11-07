@@ -101,9 +101,11 @@ func (q *Queries) DecidePriceProposal(ctx context.Context, arg DecidePricePropos
 }
 
 const getLastGoodPriceSourceFetch = `-- name: GetLastGoodPriceSourceFetch :one
-SELECT id, source, url, fetched_at, result, error, sha256, etag, commit_sha, model_count, trigger FROM price_source_fetches WHERE source = $1 AND result = 'ok' ORDER BY fetched_at DESC LIMIT 1
+SELECT id, source, url, fetched_at, result, error, sha256, etag, commit_sha, model_count, trigger FROM price_source_fetches WHERE source = $1 AND result = 'ok' AND trigger <> 'import' ORDER BY fetched_at DESC LIMIT 1
 `
 
+// The last good fetch the install made itself (the half-of-last-good floor). An import is left out:
+// its time and model count are the uploader's word, so a file cannot move the floor.
 func (q *Queries) GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error) {
 	row := q.db.QueryRow(ctx, getLastGoodPriceSourceFetch, source)
 	var i PriceSourceFetch
@@ -124,9 +126,11 @@ func (q *Queries) GetLastGoodPriceSourceFetch(ctx context.Context, source string
 }
 
 const getLastPriceSourceFetch = `-- name: GetLastPriceSourceFetch :one
-SELECT id, source, url, fetched_at, result, error, sha256, etag, commit_sha, model_count, trigger FROM price_source_fetches WHERE source = $1 ORDER BY fetched_at DESC LIMIT 1
+SELECT id, source, url, fetched_at, result, error, sha256, etag, commit_sha, model_count, trigger FROM price_source_fetches WHERE source = $1 AND trigger <> 'import' ORDER BY fetched_at DESC LIMIT 1
 `
 
+// The last fetch the install made itself (whether the scheduled refresh is due). An import is left
+// out: its fetched_at is the file's time, which must not delay or block a fetch.
 func (q *Queries) GetLastPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error) {
 	row := q.db.QueryRow(ctx, getLastPriceSourceFetch, source)
 	var i PriceSourceFetch
@@ -766,7 +770,7 @@ INSERT INTO price_proposals (source, origin, provider_type, model, current_ref, 
                              changes, provenance, agreeing_sources, class, failed_rules, values_hash)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13)
-ON CONFLICT (source, model, values_hash) WHERE state IN ('open', 'dismissed') DO UPDATE SET
+ON CONFLICT (source, origin, model, values_hash) WHERE state IN ('open', 'dismissed') DO UPDATE SET
     current_ref = EXCLUDED.current_ref, current_entry = EXCLUDED.current_entry, proposed_entry = EXCLUDED.proposed_entry,
     changes = EXCLUDED.changes, provenance = EXCLUDED.provenance, agreeing_sources = EXCLUDED.agreeing_sources,
     class = EXCLUDED.class, failed_rules = EXCLUDED.failed_rules, updated_at = now()
@@ -790,9 +794,11 @@ type UpsertPriceProposalParams struct {
 	ValuesHash      string
 }
 
-// A fetch's proposal. A live open one with the same source, model and values is refreshed (its
-// class and the numbers can change as the stability and agreement facts do); a dismissed one is
-// remembered and returns no row.
+// A fetch's or an import's proposal. A live open one with the same source, origin, model and values
+// is refreshed (its class and the numbers can change as the stability and agreement facts do); a
+// dismissed one is remembered and returns no row. The origin is part of the key: an import never
+// rewrites a fetch proposal's provenance (which auto-apply would then trust), and an import that
+// came first never holds the key a fetch needs.
 func (q *Queries) UpsertPriceProposal(ctx context.Context, arg UpsertPriceProposalParams) (PriceProposal, error) {
 	row := q.db.QueryRow(ctx, upsertPriceProposal,
 		arg.Source,

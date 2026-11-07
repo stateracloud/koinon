@@ -4,6 +4,7 @@ package koinonapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -86,7 +87,7 @@ func newPricesCommand() *cobra.Command {
 				return err
 			}
 			defer func() { _ = f.Close() }()
-			file, err := pricefetch.DecodeFile(f)
+			file, err := pricefetch.DecodeFile(f, time.Now())
 			if err != nil {
 				return err
 			}
@@ -221,7 +222,7 @@ func newPricesCommand() *cobra.Command {
 			return err
 		}
 		if dbURL == "" && (cmd.Name() != "fetch" || out == "") {
-			return fmt.Errorf("--database-url is required (or KOINON_DATABASE_URL)")
+			return errors.New("--database-url is required (or KOINON_DATABASE_URL, or its alias DATABASE_URL)")
 		}
 		return nil
 	}

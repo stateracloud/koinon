@@ -5,6 +5,7 @@ package pricefetch
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -273,9 +274,9 @@ func TestOpenRouterFetch(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	host := mustHost(t, srv.URL)
+	host, port := mustHost(t, srv.URL), mustPort(t, srv.URL)
 	adapter := func(path string) *OpenRouter {
-		return &OpenRouter{client: srv.Client(), endpoint: srv.URL + path, host: host, minModel: 1}
+		return &OpenRouter{client: srv.Client(), endpoint: srv.URL + path, host: host, port: port, minModel: 1}
 	}
 
 	snap, err := adapter("/models").Fetch(context.Background(), time.Unix(100, 0))
@@ -297,12 +298,14 @@ func TestOpenRouterFetch(t *testing.T) {
 	// The endpoint is held to https and the pinned host before any request.
 	before := hits.Load()
 	for name, o := range map[string]*OpenRouter{
-		"plain http":  {client: srv.Client(), endpoint: strings.Replace(srv.URL, "https", "http", 1), host: host},
-		"other host":  {client: srv.Client(), endpoint: srv.URL, host: "openrouter.ai"},
-		"user info":   {client: srv.Client(), endpoint: strings.Replace(srv.URL, "https://", "https://u:p@", 1), host: host},
-		"not a URL":   {client: srv.Client(), endpoint: "::", host: host},
-		"empty":       {client: srv.Client(), endpoint: "", host: host},
-		"file scheme": {client: srv.Client(), endpoint: "file:///etc/passwd", host: host},
+		"plain http":  {client: srv.Client(), endpoint: strings.Replace(srv.URL, "https", "http", 1), host: host, port: port},
+		"other host":  {client: srv.Client(), endpoint: srv.URL, host: "openrouter.ai", port: port},
+		"user info":   {client: srv.Client(), endpoint: strings.Replace(srv.URL, "https://", "https://u:p@", 1), host: host, port: port},
+		"not a URL":   {client: srv.Client(), endpoint: "::", host: host, port: port},
+		"empty":       {client: srv.Client(), endpoint: "", host: host, port: port},
+		"file scheme": {client: srv.Client(), endpoint: "file:///etc/passwd", host: host, port: port},
+		// The server's own port is not the pinned 443 of production.
+		"other port": {client: srv.Client(), endpoint: srv.URL, host: host},
 	} {
 		if _, err := o.Fetch(context.Background(), time.Now()); err == nil {
 			t.Errorf("%s: want an error", name)
@@ -311,9 +314,33 @@ func TestOpenRouterFetch(t *testing.T) {
 	if hits.Load() != before {
 		t.Error("a refused endpoint must not reach the server")
 	}
-	if got := NewOpenRouter(nil); got.endpoint != OpenRouterURL || got.host != "openrouter.ai" || got.MinModels() != OpenRouterMinModels {
+	if got := NewOpenRouter(nil); got.endpoint != OpenRouterURL || got.host != "openrouter.ai" || got.port != "" || got.MinModels() != OpenRouterMinModels {
 		t.Errorf("the production adapter is pinned: %+v", got)
 	}
+}
+
+// TestCheckEndpointPort: production pins port 443, written or not; any other port is refused.
+func TestCheckEndpointPort(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://openrouter.ai/api/v1/models":      true,
+		"https://openrouter.ai:443/api/v1/models":  true,
+		"https://openrouter.ai:8443/api/v1/models": false,
+		"https://openrouter.ai:80/api/v1/models":   false,
+		"https://openrouter.ai:/api/v1/models":     true, // an empty port is the default
+	} {
+		if err := checkEndpoint(raw, "openrouter.ai", ""); (err == nil) != ok {
+			t.Errorf("%s: err %v, want ok %v", raw, err, ok)
+		}
+	}
+}
+
+func mustPort(t *testing.T, raw string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Port()
 }
 
 func mustHost(t *testing.T, raw string) string {
@@ -345,7 +372,8 @@ func TestFileRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := DecodeFile(strings.NewReader(string(b)))
+	now := time.Unix(1000, 0)
+	f, err := DecodeFile(strings.NewReader(string(b)), now)
 	if err != nil || len(f.Snapshots) != 1 || f.Snapshots[0].Offers[0].Model != "fake/model-a" {
 		t.Fatalf("round trip: %+v, %v", f, err)
 	}
@@ -354,8 +382,38 @@ func TestFileRoundTrip(t *testing.T) {
 		"unknown source": strings.Replace(string(b), SourceOpenRouter, "evil", 1),
 		"not json":       "nope",
 	} {
-		if _, err := DecodeFile(strings.NewReader(bad)); err == nil {
+		if _, err := DecodeFile(strings.NewReader(bad), now); err == nil {
 			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+// The fetch time and the model count are the uploader's word: DecodeFile refuses what the install
+// can see is wrong.
+func TestDecodeFileChecksTimeAndCount(t *testing.T) {
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	offer := Offer{Model: "fake/model-a", ProviderType: "openrouter"}
+	for _, c := range []struct {
+		name  string
+		at    time.Time
+		count int
+		ok    bool
+	}{
+		{"in the past", now.Add(-time.Hour), 1, true},
+		{"within the clock skew", now.Add(MaxFileClockSkew), 1, true},
+		{"more listed than offered", now, 3, true},
+		{"no fetchedAt", time.Time{}, 1, false},
+		{"in the future", now.Add(MaxFileClockSkew + time.Second), 1, false},
+		{"fewer listed than offered", now, 0, false},
+		{"over int32", now, math.MaxInt32 + 1, false},
+	} {
+		b, err := EncodeFile([]Snapshot{{Source: SourceOpenRouter, FetchedAt: c.at, Count: c.count, Offers: []Offer{offer}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = DecodeFile(strings.NewReader(string(b)), now)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: DecodeFile = %v, want ok %v", c.name, err, c.ok)
 		}
 	}
 }

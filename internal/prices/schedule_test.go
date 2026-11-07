@@ -185,7 +185,7 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 var _ = Describe("startup bookkeeping with no platform admin (a fresh install)", func() {
 	BeforeEach(func() { needDocker() })
 
-	It("syncs the settings, retires caught-up entries and auto-applies, recording and not refusing", func(ctx SpecContext) {
+	It("syncs the settings and retires caught-up entries, recording and not refusing, but auto-applies nothing", func(ctx SpecContext) {
 		pool := freshDB(ctx)
 		m := uniq()
 		id := "fake-0-" + strings.ReplaceAll(m, "/", "-")
@@ -214,9 +214,20 @@ var _ = Describe("startup bookkeeping with no platform admin (a fresh install)",
 		now = now.Add(25 * time.Hour)
 		res, err := r.Tick(ctx, prices.RefreshOn, 12*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Applied).To(Equal(1), "the scheduled auto-apply needs no admin")
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = 'auto'`)).To(Equal(1))
+		Expect(res.Applied).To(BeZero(), "no audit log to write an applied price in: fail closed (until #324)")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = 'auto'`)).To(BeZero())
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events`)).To(Equal(audited), "no org to audit in")
+		p := openProposal(ctx, r, other)
+		Expect(p.Class).To(BeEquivalentTo(pricefetch.ClassAuto), "the proposal stays open and auto, waiting for an admin")
+
+		// Once an admin exists the waiting proposal applies, audited.
+		set := countRows(ctx, pool, `SELECT count(*) FROM audit_events WHERE action = 'platform_price.set'`)
+		grantAdmin(ctx, pool)
+		n, err := r.AutoApply(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions WHERE actor = 'auto'`)).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events WHERE action = 'platform_price.set'`)).To(Equal(set + 1))
 	})
 
 	It("still refuses a person's decision with no admin to audit it", func(ctx SpecContext) {
@@ -270,6 +281,7 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 
 	It("skips auto-apply for a source whose fetch failed this run", func(ctx SpecContext) {
 		pool := freshDB(ctx)
+		grantAdmin(ctx, pool) // the auto-apply needs an audit log to write in
 		m := uniq()
 		src := defaultList("2000-01-01.1", m)
 		a := &fakeAdapter{model: m, in: "1.1", out: "2.2"}

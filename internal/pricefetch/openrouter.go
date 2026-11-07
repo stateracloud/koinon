@@ -52,6 +52,8 @@ type OpenRouter struct {
 	client   *http.Client
 	endpoint string
 	host     string
+	// port is the pinned port; empty is 443, the only one in production (tests pin their server's).
+	port     string
 	minModel int
 }
 
@@ -67,8 +69,9 @@ func (*OpenRouter) Name() string { return SourceOpenRouter }
 // MinModels is the model-count floor of this adapter.
 func (o *OpenRouter) MinModels() int { return o.minModel }
 
-// checkEndpoint holds a request to HTTPS and the pinned host, with no user info and no other port.
-func checkEndpoint(raw, host string) error {
+// checkEndpoint holds a request to HTTPS and the pinned host and port (empty: 443), with no user
+// info.
+func checkEndpoint(raw, host, port string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return err
@@ -79,12 +82,22 @@ func checkEndpoint(raw, host string) error {
 	if !strings.EqualFold(u.Hostname(), host) || u.User != nil {
 		return fmt.Errorf("pricefetch: %s is not on the pinned host %s", raw, host)
 	}
+	if port == "" {
+		port = "443"
+	}
+	got := u.Port()
+	if got == "" {
+		got = "443" // the https default
+	}
+	if got != port {
+		return fmt.Errorf("pricefetch: %s is not on the pinned port %s", raw, port)
+	}
 	return nil
 }
 
 // Fetch implements Adapter.
 func (o *OpenRouter) Fetch(ctx context.Context, now time.Time) (Snapshot, error) {
-	if err := checkEndpoint(o.endpoint, o.host); err != nil {
+	if err := checkEndpoint(o.endpoint, o.host, o.port); err != nil {
 		return Snapshot{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.endpoint, nil)

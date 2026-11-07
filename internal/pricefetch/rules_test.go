@@ -4,6 +4,8 @@ package pricefetch
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,6 +56,60 @@ func TestClassify(t *testing.T) {
 		if v.Class != c.want {
 			t.Errorf("%s: class %s, want %s (rules: %v)", c.name, v.Class, c.want, v.Failed)
 		}
+	}
+}
+
+// TestDiffReasoningAsBilled: a reasoning rate equal to the output rate and no reasoning rate bill
+// the same, so neither side's spelling makes a change (the source drops a reasoning rate equal to
+// output, separateReasoning); a reasoning rate that bills differently still does.
+func TestDiffReasoningAsBilled(t *testing.T) {
+	w := func(out, reasoning string) pricing.Wire {
+		return pricing.Wire{Input: "1", Output: out, Reasoning: reasoning}
+	}
+	spec := func(base pricing.Wire, tiers ...pricing.WireTier) pricing.Spec {
+		return pricing.Spec{Prices: base, Tiers: tiers}
+	}
+	tier := func(out, reasoning string) pricing.WireTier {
+		return pricing.WireTier{ContextOver: 1000, Prices: pricing.Wire{Output: out, Reasoning: reasoning}}
+	}
+	for _, c := range []struct {
+		name      string
+		cur, prop pricing.Spec
+		changes   []string // bucket@contextOver
+	}{
+		{"current spells reasoning = output, source drops it", spec(w("2", "2")), spec(w("2", "")), nil},
+		{"current has none, source spells it out", spec(w("2", "")), spec(w("2", "2.0")), nil},
+		{"both unset", spec(w("2", "")), spec(w("2", "")), nil},
+		{"a separate reasoning rate appears", spec(w("2", "")), spec(w("2", "3")), []string{"reasoning@0"}},
+		{"output moves, reasoning billed at output follows", spec(w("2", "2")), spec(w("2.2", "")), []string{"output@0", "reasoning@0"}},
+		{"output moves, a separate reasoning rate stays", spec(w("2", "3")), spec(w("2.2", "3")), []string{"output@0"}},
+		{"tier: reasoning = tier output, dropped", spec(w("2", ""), tier("4", "4")), spec(w("2", ""), tier("4", "")), nil},
+		{"tier inherits the base's separate rate", spec(w("2", "3"), tier("4", "")), spec(w("2", "3"), tier("4", "")), nil},
+		{"tier: base rate = output dropped, the tier bills at its own output", spec(w("2", "2"), tier("4", "")), spec(w("2", ""), tier("4", "")), []string{"reasoning@1000"}},
+	} {
+		changes, boundaries := Diff(c.cur, c.prop)
+		var got []string
+		for _, ch := range changes {
+			got = append(got, fmt.Sprintf("%s@%d", ch.Bucket, ch.ContextOver))
+		}
+		if boundaries || !slices.Equal(got, c.changes) {
+			t.Errorf("%s: changes %v (boundaries %v), want %v", c.name, got, boundaries, c.changes)
+		}
+		if Differs(c.cur, c.prop) != (len(c.changes) > 0) {
+			t.Errorf("%s: Differs disagrees with Diff", c.name)
+		}
+	}
+	// A current entry that spells reasoning = output is not "no longer priced" by a source that
+	// drops it: a small stable change still applies by itself.
+	cur := entry("openrouter-fake-model-a", "1", "2", "")
+	cur.Prices.Reasoning = "2"
+	facts := Facts{
+		Origin: "fetch", Source: SourceOpenRouter, Current: &cur, Proposed: entry(cur.ID, "1.1", "2.2", ""),
+		Agreeing: []string{SourceOpenRouter}, Stable: true,
+	}
+	v := Classify(facts, DefaultBounds)
+	if v.Class != ClassAuto {
+		t.Errorf("reasoning = output dropped: class %s, want auto (rules: %v)", v.Class, v.Failed)
 	}
 }
 

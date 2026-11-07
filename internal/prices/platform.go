@@ -76,6 +76,9 @@ type PlatformVersion struct {
 	ProposalIDs    []string        `json:"proposalIds,omitempty"`
 	RestoredFrom   int64           `json:"restoredFrom,omitempty"`
 	Entries        []PlatformEntry `json:"entries"`
+	// BadEntries counts the stored entries that no longer decode or validate. They are left out of
+	// Entries (and of a version written from this one) and the resolver skips them.
+	BadEntries int `json:"badEntries,omitempty"`
 }
 
 type platformKey struct {
@@ -105,23 +108,41 @@ func platformEntries(ctx context.Context, q *store.Queries, t time.Time) (int64,
 	if err != nil {
 		return 0, nil, err
 	}
+	rs, badN := resolvePlatformRows(v, rows)
+	// Parsed once per version and process, so the warning and the gauge follow the version in use.
+	platformBadEntries.Set(float64(badN))
+	if badN > 0 {
+		slog.Default().Warn("platform price entries that no longer decode or validate are skipped; their models fall through to the default price list",
+			"version", v.Version, "entries", badN)
+	}
+	platformParsed.Store(key, rs)
+	return v.Version, rs, nil
+}
+
+// resolvePlatformRows resolves a version's stored entries. An entry that no longer decodes or
+// validates (a later binary's stricter rules, a hand-edited row) is skipped and counted, not an
+// error: one bad entry must not fail every request priced without an org entry. Its models fall
+// through to the default list.
+func resolvePlatformRows(v store.PlatformPriceVersion, rows []store.PlatformPriceEntry) ([]pricing.Resolved, int) {
 	rs := make([]pricing.Resolved, 0, len(rows))
+	badN := 0
 	for _, row := range rows {
 		var e pricing.Entry
 		if err := json.Unmarshal(row.Entry, &e); err != nil {
-			return 0, nil, bad(fmt.Errorf("platform price %d#%s: %w", v.Version, row.EntryID, err))
+			badN++
+			continue
 		}
 		e.ID = row.EntryID
 		r, err := e.Resolve(true)
 		if err != nil {
-			return 0, nil, bad(err)
+			badN++
+			continue
 		}
 		// The version, not the entry's date, says when the price starts.
 		r.ValidFrom = v.ValidFrom.Time
 		rs = append(rs, r)
 	}
-	platformParsed.Store(key, rs)
-	return v.Version, rs, nil
+	return rs, badN
 }
 
 func toPlatformVersion(v store.PlatformPriceVersion, rows []store.PlatformPriceEntry) (PlatformVersion, error) {
@@ -134,15 +155,15 @@ func toPlatformVersion(v store.PlatformPriceVersion, rows []store.PlatformPriceE
 	}
 	for _, r := range rows {
 		pe := PlatformEntry{}
-		if err := json.Unmarshal(r.Entry, &pe.Entry); err != nil {
-			return PlatformVersion{}, err
+		if json.Unmarshal(r.Entry, &pe.Entry) != nil || json.Unmarshal(r.Reviewed, &pe.Reviewed) != nil ||
+			json.Unmarshal(r.Provenance, &pe.Provenance) != nil {
+			out.BadEntries++
+			continue
 		}
 		pe.Entry.ID = r.EntryID
-		if err := json.Unmarshal(r.Reviewed, &pe.Reviewed); err != nil {
-			return PlatformVersion{}, err
-		}
-		if err := json.Unmarshal(r.Provenance, &pe.Provenance); err != nil {
-			return PlatformVersion{}, err
+		if _, err := pe.Entry.Resolve(true); err != nil {
+			out.BadEntries++
+			continue
 		}
 		out.Entries = append(out.Entries, pe)
 	}
@@ -203,6 +224,9 @@ type versionWrite struct {
 	Entries   []PlatformEntry
 	// Changed lists the entry ids the version adds, changes or removes, for the audit event.
 	Changed []string
+	// Dropped counts the entries of the version written from that no longer decode or validate and
+	// are not carried over; the audit event says how many.
+	Dropped int
 }
 
 // writeVersion validates entries, writes the next version and audits it in the same
@@ -268,6 +292,9 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 	if w.RestoredFrom > 0 {
 		after["restoredFrom"] = w.RestoredFrom
 	}
+	if w.Dropped > 0 {
+		after["droppedBadEntries"] = w.Dropped
+	}
 	if len(pv.ProposalIDs) > 0 {
 		after["proposals"] = pv.ProposalIDs
 	}
@@ -283,12 +310,14 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 //
 // Without a platform admin (a fresh install: admins are granted at their first login) there is no
 // org to audit in. A person's change (a CLI actor: accept, dismiss, rollback, import) is then
-// refused, so that no decision a person made goes unaudited. Koinon's own bookkeeping (a system
-// actor: the settings sync, retirement when a release caught up, the bounded auto-apply) must not
-// depend on an admin existing, or koinon-api could not start on a fresh install: it goes ahead,
-// and log gets a warning. Its record stays in the install-wide tables it writes, which are
-// append-only and carry the actor, the reason and the rule set (platform_price_versions,
-// price_proposals.decided_by, price_refresh_settings).
+// refused, so that no decision a person made goes unaudited. Koinon's own bookkeeping at start (a
+// system actor: the settings sync, retirement when a release caught up) must not depend on an
+// admin existing, or koinon-api could not start on a fresh install: it goes ahead, and log gets a
+// warning. Its record stays in the install-wide tables it writes (platform_price_versions, which is
+// append-only and carries the actor and the reason; price_refresh_settings, which holds only the
+// latest setting). The bounded auto-apply is not bookkeeping: it fails closed before it gets here
+// (Refresher.AutoApply leaves the proposals open), until the install-level audit chain of #324
+// lands and replaces this rule.
 func auditPlatform(ctx context.Context, q *store.Queries, log *slog.Logger, actor audit.Actor, action, kind, target string, before, after any) error {
 	orgs, err := q.ListPlatformAdminPersonalOrgs(ctx)
 	if err != nil {
@@ -348,7 +377,7 @@ func (s *Service) Rollback(ctx context.Context, actor audit.Actor, version int64
 		}
 		out, err = writeVersion(ctx, q, versionWrite{
 			Log: s.log, Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
-			RestoredFrom: version, Entries: old.Entries, Changed: changedIDs(cur.Entries, old.Entries),
+			RestoredFrom: version, Entries: old.Entries, Changed: changedIDs(cur.Entries, old.Entries), Dropped: old.BadEntries,
 		})
 		return err
 	})
@@ -406,6 +435,13 @@ func (s *Service) RetireCaughtUp(ctx context.Context) ([]string, error) {
 		cur, err := currentPlatform(ctx, q)
 		if err != nil {
 			return err
+		}
+		if cur.BadEntries > 0 {
+			// Retiring would write a version without the bad entries, a change no person made and the
+			// audit event would not show. Leave the version as it is; a person rolls back or replaces it.
+			s.log.Warn("platform price retirement skipped: the current platform version has entries that no longer decode or validate",
+				"version", cur.Version, "entries", cur.BadEntries)
+			return nil
 		}
 		var keep []PlatformEntry
 		for _, pe := range cur.Entries {

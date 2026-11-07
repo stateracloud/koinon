@@ -536,13 +536,32 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 			}
 			return nil
 		}
-		entries, ids, changed, err := r.applyEntries(ctx, q, v, cands, AutoActor, now)
+		// An applied price changes what every org is charged, so it is never unaudited. Without a
+		// platform admin there is no audit log to write it in (auditPlatform): fail closed and leave
+		// the proposals open, until the install-level audit chain of #324 lands and replaces this.
+		admins, err := q.ListPlatformAdminPersonalOrgs(ctx)
 		if err != nil {
 			return err
 		}
+		if len(admins) == 0 {
+			r.log.Warn("automatic price updates wait: no platform admin exists yet to audit them in; they apply once one does",
+				"proposals", len(cands))
+			return nil
+		}
+		a, err := r.applyEntries(ctx, q, v, cands, AutoActor, now)
+		if err != nil {
+			return err
+		}
+		if a.Dropped > 0 {
+			// The new version would leave out the bad entries, a change no rule allows the auto-apply
+			// to make. The proposals stay open until a person rolls back or replaces the version.
+			r.log.Warn("automatic price updates wait: the current platform version has entries that no longer decode or validate",
+				"proposals", len(cands), "entries", a.Dropped)
+			return nil
+		}
 		pv, err := writeVersion(ctx, q, versionWrite{
 			Log: r.log, Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
-			RuleSet: pricefetch.RuleSetVersion, ProposalIDs: ids, Entries: entries, Changed: changed,
+			RuleSet: pricefetch.RuleSetVersion, ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed,
 		})
 		if err != nil {
 			return err
@@ -597,10 +616,10 @@ func parseUUID(s string) (pgtype.UUID, error) {
 // sets the reviewed price to the proposed one; an automatic one keeps the last reviewed price. A
 // new model applied automatically has no reviewed price yet, so its first applied price becomes the
 // baseline later automatic changes are bounded against, until a person reviews one.
-func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceView, ps []Proposal, actor audit.Actor, now time.Time) ([]PlatformEntry, []pgtype.UUID, []string, error) {
+func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceView, ps []Proposal, actor audit.Actor, now time.Time) (applied, error) {
 	cur, err := currentPlatform(ctx, q)
 	if err != nil {
-		return nil, nil, nil, err
+		return applied{}, err
 	}
 	byID := map[string]PlatformEntry{}
 	for _, e := range cur.Entries {
@@ -610,7 +629,7 @@ func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceV
 	var changed []string
 	for _, p := range ps {
 		if p.Proposed == nil {
-			return nil, nil, nil, &InvalidError{Msg: "proposal " + p.ID + " has no entry"}
+			return applied{}, &InvalidError{Msg: "proposal " + p.ID + " has no entry"}
 		}
 		e := *p.Proposed
 		reviewed := e.Spec
@@ -630,7 +649,7 @@ func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceV
 		changed = append(changed, e.ID)
 		id, err := parseUUID(p.ID)
 		if err != nil {
-			return nil, nil, nil, err
+			return applied{}, err
 		}
 		ids = append(ids, id)
 	}
@@ -638,7 +657,17 @@ func (r *Refresher) applyEntries(ctx context.Context, q *store.Queries, v priceV
 	for _, e := range byID {
 		out = append(out, e)
 	}
-	return out, ids, changed, nil
+	return applied{Entries: out, IDs: ids, Changed: changed, Dropped: cur.BadEntries}, nil
+}
+
+// applied is a new platform version's content made by applyEntries.
+type applied struct {
+	Entries []PlatformEntry
+	IDs     []pgtype.UUID
+	Changed []string
+	// Dropped counts the current version's entries that no longer decode or validate and so are not
+	// carried into the new version.
+	Dropped int
 }
 
 // decide marks a proposal accepted or dismissed and audits it. A proposal already decided is an
@@ -754,13 +783,13 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, op
 		case (cur == nil) != (p.Current == nil), cur != nil && !sameSpec(cur.Entry.Spec, p.Current.Spec):
 			return &InvalidError{Msg: "the price of " + p.Model + " changed since the proposal was made; fetch again and review the new proposal"}
 		}
-		entries, ids, changed, err := r.applyEntries(ctx, q, v, []Proposal{p}, actor, now)
+		a, err := r.applyEntries(ctx, q, v, []Proposal{p}, actor, now)
 		if err != nil {
 			return err
 		}
 		pv, err := writeVersion(ctx, q, versionWrite{
 			Log: r.log, Actor: actor, Action: "platform_price.set", Reason: reason,
-			ProposalIDs: ids, Entries: entries, Changed: changed,
+			ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed, Dropped: a.Dropped,
 		})
 		if err != nil {
 			return err
@@ -812,6 +841,9 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		now := r.now()
+		if err := pricefetch.CheckFile(f, now); err != nil {
+			return &InvalidError{Msg: err.Error()}
+		}
 		var uploaded []map[string]any
 		for _, snap := range f.Snapshots {
 			for _, o := range snap.Offers {
@@ -828,9 +860,11 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 			if err := pricefetch.CheckFloor(snap, floor, 0); err != nil {
 				return &InvalidError{Msg: err.Error()}
 			}
+			// fetched_at keeps the file's time as provenance; the due time and the last-good floor
+			// read only the install's own fetches, so neither the time nor the count moves them.
 			if _, err := q.InsertPriceSourceFetch(ctx, store.InsertPriceSourceFetchParams{
-				Source: snap.Source, Url: snap.URL, FetchedAt: pgtype.Timestamptz{Time: snap.FetchedAt, Valid: !snap.FetchedAt.IsZero()},
-				Result: FetchOK, Sha256: snap.SHA256, Etag: truncate(snap.ETag, 290), CommitSha: truncate(snap.CommitSHA, 60), ModelCount: int32(snap.Count), Trigger: TriggerImport, // #nosec G115 -- bounded by the file cap
+				Source: snap.Source, Url: snap.URL, FetchedAt: pgtype.Timestamptz{Time: snap.FetchedAt, Valid: true},
+				Result: FetchOK, Sha256: snap.SHA256, Etag: truncate(snap.ETag, 290), CommitSha: truncate(snap.CommitSHA, 60), ModelCount: int32(snap.Count), Trigger: TriggerImport, // #nosec G115 -- CheckFile bounds it to int32
 			}); err != nil {
 				return err
 			}

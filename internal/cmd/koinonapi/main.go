@@ -428,9 +428,11 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.5). It
-	// logs what it retired, and needs no platform admin (a fresh install has none yet).
+	// logs what it retired, and needs no platform admin (a fresh install has none yet). It is
+	// bookkeeping: a failure (a stored entry this binary refuses, a database hiccup) is a warning,
+	// never a reason not to serve; the next start tries again.
 	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
-		return err
+		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", err)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {

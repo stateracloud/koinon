@@ -83,7 +83,8 @@ CREATE TABLE price_source_fetches (
     etag        text        NOT NULL DEFAULT '' CHECK (length(etag) <= 300),
     commit_sha  text        NOT NULL DEFAULT '' CHECK (length(commit_sha) <= 64),
     model_count integer     NOT NULL DEFAULT 0 CHECK (model_count >= 0),
-    -- schedule, cli or import.
+    -- schedule, cli or import. For an import, fetched_at is the file's fetch time (provenance) and
+    -- the row never counts as the install's last fetch (due time, last-good floor).
     trigger     text        NOT NULL CHECK (trigger IN ('schedule', 'cli', 'import'))
 );
 
@@ -130,10 +131,12 @@ CREATE TABLE price_proposals (
     applied_version  bigint      REFERENCES platform_price_versions (version)
 );
 
--- One live proposal per source, model and values: an open one is refreshed by the next fetch, a
--- dismissed one is remembered so the same proposal does not come back. Accepted and superseded
--- rows are history; a value that returns after a later change is a new proposal.
-CREATE UNIQUE INDEX price_proposals_live ON price_proposals (source, model, values_hash)
+-- One live proposal per source, origin, model and values: an open one is refreshed by the next
+-- fetch (or import), a dismissed one is remembered so the same proposal does not come back.
+-- Accepted and superseded rows are history; a value that returns after a later change is a new
+-- proposal. The origin is in the key so that a fetch proposal and an import proposal with the same
+-- values never share a row: an import must not rewrite the provenance auto-apply trusts.
+CREATE UNIQUE INDEX price_proposals_live ON price_proposals (source, origin, model, values_hash)
     WHERE state IN ('open', 'dismissed');
 CREATE INDEX price_proposals_state ON price_proposals (state, class);
 CREATE INDEX price_proposals_model ON price_proposals (provider_type, model, created_at DESC);

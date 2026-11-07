@@ -115,8 +115,31 @@ func SameRate(a, b string) bool {
 	return ra == rb
 }
 
-// Diff lists the rate changes from cur to prop, and whether the tier boundaries differ.
+// billedReasoning spells out the reasoning rate a spec bills where it leaves it unset. Reasoning
+// tokens without a rate of their own bill at the output rate (pricing.Price), and a source that
+// charges reasoning at the output rate drops the bucket (separateReasoning), so "reasoning equals
+// output" and "no reasoning rate" are one price and must compare equal. The base rate is the
+// output rate; a tier that sets no reasoning rate inherits the base one when the base sets it, and
+// otherwise bills at its own output rate when it sets one (and at the base's when not, which the
+// filled-in base rate already says).
+func billedReasoning(s pricing.Spec) pricing.Spec {
+	out := s
+	if out.Prices.Reasoning == "" {
+		out.Prices.Reasoning = out.Prices.Output
+	}
+	out.Tiers = slices.Clone(s.Tiers)
+	for i, t := range out.Tiers {
+		if t.Prices.Reasoning == "" && s.Prices.Reasoning == "" && t.Prices.Output != "" {
+			out.Tiers[i].Prices.Reasoning = t.Prices.Output
+		}
+	}
+	return out
+}
+
+// Diff lists the rate changes from cur to prop, and whether the tier boundaries differ. Reasoning
+// compares as billed (billedReasoning): an unset rate equals the output rate.
 func Diff(cur, prop pricing.Spec) (changes []Change, boundariesDiffer bool) {
+	cur, prop = billedReasoning(cur), billedReasoning(prop)
 	cmp := func(over int64, a, b pricing.Wire) {
 		for _, bk := range Buckets {
 			from, to := wireBucket(a, bk), wireBucket(b, bk)
@@ -432,6 +455,7 @@ func newModelChecks(s pricing.Spec) (confirm, review []string) {
 
 // overBound lists the base and tier rates of prop that moved more than pct percent from base.
 func overBound(base, prop pricing.Spec, pct int) []string {
+	base, prop = billedReasoning(base), billedReasoning(prop)
 	var out []string
 	check := func(where string, a, b pricing.Wire) {
 		for _, bk := range Buckets {

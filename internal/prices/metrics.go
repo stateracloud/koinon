@@ -32,7 +32,17 @@ type Metrics struct {
 	// Unpriced counts the enabled catalog models no price covers, by provider type (the types a
 	// source prices: a fixed set).
 	Unpriced *prometheus.GaugeVec
+	// PlatformBadEntries counts the entries of the platform version last loaded that no longer decode
+	// or validate and are skipped. No labels: a count, never an entry or model.
+	PlatformBadEntries prometheus.Gauge
 }
+
+// platformBadEntries is set where platform versions are parsed (platformEntries), which every
+// Resolver in the process shares; NewMetrics exports it.
+var platformBadEntries = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "koinon_price_platform_bad_entries",
+	Help: "Entries of the platform price version last loaded that no longer decode or validate; they are skipped and their models priced from the default list.",
+})
 
 // NewMetrics registers the metrics on reg (nil: none registered).
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -49,6 +59,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Unpriced: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "koinon_price_unpriced_models", Help: "Enabled catalog models that no org, platform or default price covers, by provider type.",
 		}, []string{"provider_type"}),
+		PlatformBadEntries: platformBadEntries,
 	}
 	for _, pt := range pricefetch.PricedProviderTypes() {
 		m.Unpriced.WithLabelValues(pt)
@@ -65,7 +76,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}
 	}
 	if reg != nil {
-		reg.MustRegister(m.Fetches, m.Proposals, m.AutoApplied, m.Unpriced)
+		reg.MustRegister(m.Fetches, m.Proposals, m.AutoApplied, m.Unpriced, m.PlatformBadEntries)
 	}
 	return m
 }

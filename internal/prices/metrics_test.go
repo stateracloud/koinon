@@ -19,10 +19,11 @@ func TestMetricsLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"koinon_price_source_fetch_total": {"result", "source"},
-		"koinon_price_proposals":          {"class", "state"},
-		"koinon_price_auto_applied_total": {"source"},
-		"koinon_price_unpriced_models":    {"provider_type"},
+		"koinon_price_source_fetch_total":   {"result", "source"},
+		"koinon_price_proposals":            {"class", "state"},
+		"koinon_price_auto_applied_total":   {"source"},
+		"koinon_price_unpriced_models":      {"provider_type"},
+		"koinon_price_platform_bad_entries": nil,
 	}
 	for _, f := range fams {
 		labels, ok := want[f.GetName()]

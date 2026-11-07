@@ -443,7 +443,11 @@ type Querier interface {
 	GetInstallID(ctx context.Context) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetKEKBoundOnly(ctx context.Context) (GetKEKBoundOnlyRow, error)
+	// The last good fetch the install made itself (the half-of-last-good floor). An import is left out:
+	// its time and model count are the uploader's word, so a file cannot move the floor.
 	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
+	// The last fetch the install made itself (whether the scheduled refresh is due). An import is left
+	// out: its fetched_at is the file's time, which must not delay or block a fetch.
 	GetLastPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
 	// The last request of a run that its provider answered with an error status at or after @since: the
 	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
@@ -1366,9 +1370,11 @@ type Querier interface {
 	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
 	// @set_test as for UpdateTraceDestination.
 	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
-	// A fetch's proposal. A live open one with the same source, model and values is refreshed (its
-	// class and the numbers can change as the stability and agreement facts do); a dismissed one is
-	// remembered and returns no row.
+	// A fetch's or an import's proposal. A live open one with the same source, origin, model and values
+	// is refreshed (its class and the numbers can change as the stability and agreement facts do); a
+	// dismissed one is remembered and returns no row. The origin is part of the key: an import never
+	// rewrites a fetch proposal's provenance (which auto-apply would then trust), and an import that
+	// came first never holds the key a fetch needs.
 	UpsertPriceProposal(ctx context.Context, arg UpsertPriceProposalParams) (PriceProposal, error)
 	UpsertPriceRefreshSettings(ctx context.Context, arg UpsertPriceRefreshSettingsParams) error
 	// Records (or, on a later pass, replaces) the reconciliation of one provider's day.

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"sort"
 	"time"
@@ -155,10 +156,43 @@ func EncodeFile(snaps []Snapshot) ([]byte, error) {
 	return json.MarshalIndent(File{Format: FileFormat, Snapshots: snaps}, "", "  ")
 }
 
+// MaxFileClockSkew is how far a snapshot's fetch time may lie after the importing install's clock:
+// the file comes from another machine whose clock can run a little ahead.
+const MaxFileClockSkew = 5 * time.Minute
+
+// CheckFile checks what a file says that the install cannot verify, against the importing
+// install's clock now: each snapshot's source, a fetch time that is set and not in the future
+// (beyond MaxFileClockSkew), a model count that is at least the number of offers and fits the
+// database column, and that every offer is for a provider type and a model name. The price rules
+// run again when proposals are made.
+func CheckFile(f File, now time.Time) error {
+	for i, s := range f.Snapshots {
+		if !knownSource(s.Source) {
+			return fmt.Errorf("pricefetch: snapshot %d: unknown source %q", i, s.Source)
+		}
+		if s.FetchedAt.IsZero() {
+			return fmt.Errorf("pricefetch: snapshot %d: no fetchedAt", i)
+		}
+		if s.FetchedAt.After(now.Add(MaxFileClockSkew)) {
+			return fmt.Errorf("pricefetch: snapshot %d: fetchedAt %s is in the future", i, s.FetchedAt.UTC().Format(time.RFC3339))
+		}
+		// The body may list models Koinon cannot name (no offer), so the count can exceed the offers,
+		// never fall short of them.
+		if s.Count < len(s.Offers) || s.Count > math.MaxInt32 {
+			return fmt.Errorf("pricefetch: snapshot %d: count %d does not fit its %d offers", i, s.Count, len(s.Offers))
+		}
+		for _, o := range s.Offers {
+			if o.Model == "" || o.ProviderType == "" {
+				return fmt.Errorf("pricefetch: snapshot %d: an offer without a model or provider type", i)
+			}
+		}
+	}
+	return nil
+}
+
 // DecodeFile reads the exchange format strictly: an unknown field, another format version or
-// trailing data is an error. It checks each snapshot's source and that every offer is for a
-// provider type and a model name; the price rules run again when proposals are made.
-func DecodeFile(r io.Reader) (File, error) {
+// trailing data is an error. It then runs CheckFile against now, the importing install's clock.
+func DecodeFile(r io.Reader, now time.Time) (File, error) {
 	body, err := io.ReadAll(io.LimitReader(r, MaxBodyBytes+1))
 	if err != nil {
 		return File{}, fmt.Errorf("pricefetch: read: %w", err)
@@ -178,15 +212,8 @@ func DecodeFile(r io.Reader) (File, error) {
 	if f.Format != FileFormat {
 		return File{}, fmt.Errorf("pricefetch: format %q is not %q", f.Format, FileFormat)
 	}
-	for i, s := range f.Snapshots {
-		if !knownSource(s.Source) {
-			return File{}, fmt.Errorf("pricefetch: snapshot %d: unknown source %q", i, s.Source)
-		}
-		for _, o := range s.Offers {
-			if o.Model == "" || o.ProviderType == "" {
-				return File{}, fmt.Errorf("pricefetch: snapshot %d: an offer without a model or provider type", i)
-			}
-		}
+	if err := CheckFile(f, now); err != nil {
+		return File{}, err
 	}
 	return f, nil
 }

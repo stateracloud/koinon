@@ -44,7 +44,9 @@ VALUES (@source, @url, @fetched_at, @result, @error, @sha256, @etag, @commit_sha
 RETURNING *;
 
 -- name: GetLastGoodPriceSourceFetch :one
-SELECT * FROM price_source_fetches WHERE source = @source AND result = 'ok' ORDER BY fetched_at DESC LIMIT 1;
+-- The last good fetch the install made itself (the half-of-last-good floor). An import is left out:
+-- its time and model count are the uploader's word, so a file cannot move the floor.
+SELECT * FROM price_source_fetches WHERE source = @source AND result = 'ok' AND trigger <> 'import' ORDER BY fetched_at DESC LIMIT 1;
 
 -- name: ListPriceSourceFetches :many
 SELECT * FROM price_source_fetches ORDER BY fetched_at DESC LIMIT @max_rows;
@@ -62,14 +64,16 @@ ON CONFLICT (source, model) DO UPDATE SET
 RETURNING *;
 
 -- name: UpsertPriceProposal :one
--- A fetch's proposal. A live open one with the same source, model and values is refreshed (its
--- class and the numbers can change as the stability and agreement facts do); a dismissed one is
--- remembered and returns no row.
+-- A fetch's or an import's proposal. A live open one with the same source, origin, model and values
+-- is refreshed (its class and the numbers can change as the stability and agreement facts do); a
+-- dismissed one is remembered and returns no row. The origin is part of the key: an import never
+-- rewrites a fetch proposal's provenance (which auto-apply would then trust), and an import that
+-- came first never holds the key a fetch needs.
 INSERT INTO price_proposals (source, origin, provider_type, model, current_ref, current_entry, proposed_entry,
                              changes, provenance, agreeing_sources, class, failed_rules, values_hash)
 VALUES (@source, @origin, @provider_type, @model, @current_ref, @current_entry, @proposed_entry,
         @changes, @provenance, @agreeing_sources, @class, @failed_rules, @values_hash)
-ON CONFLICT (source, model, values_hash) WHERE state IN ('open', 'dismissed') DO UPDATE SET
+ON CONFLICT (source, origin, model, values_hash) WHERE state IN ('open', 'dismissed') DO UPDATE SET
     current_ref = EXCLUDED.current_ref, current_entry = EXCLUDED.current_entry, proposed_entry = EXCLUDED.proposed_entry,
     changes = EXCLUDED.changes, provenance = EXCLUDED.provenance, agreeing_sources = EXCLUDED.agreeing_sources,
     class = EXCLUDED.class, failed_rules = EXCLUDED.failed_rules, updated_at = now()
@@ -139,7 +143,9 @@ WHERE p.type = @provider_type AND m.disabled_reason IS NULL AND p.disabled_reaso
 ORDER BY m.org_id, m.name;
 
 -- name: GetLastPriceSourceFetch :one
-SELECT * FROM price_source_fetches WHERE source = @source ORDER BY fetched_at DESC LIMIT 1;
+-- The last fetch the install made itself (whether the scheduled refresh is due). An import is left
+-- out: its fetched_at is the file's time, which must not delay or block a fetch.
+SELECT * FROM price_source_fetches WHERE source = @source AND trigger <> 'import' ORDER BY fetched_at DESC LIMIT 1;
 
 -- name: SetPriceProposalClass :exec
 -- Moves an open proposal to another class with the rule that decided it (the daily cap).
