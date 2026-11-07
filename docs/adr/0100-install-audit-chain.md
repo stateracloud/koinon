@@ -1,6 +1,6 @@
 # 0100. An install-level audit chain for platform actions
 
-- Status: Proposed
+- Status: Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1)
 - Date: 2026-11-07
 - Amends: [0023](0023-observability-and-audit.md) (the 2026-10-26 amendment's "no org-less events
   and no platform chain"; the lock order; the deferred superuser item and open question 1)
@@ -313,10 +313,17 @@ keys in `before` and `after`. Settings an admin changes through the API are audi
 call, not here. The list is a Go table next to the flags; adding a flag means deciding whether it is
 on it, and a test lists the flags that are not, so none is forgotten.
 
-### 4. Anchors and signed checkpoints: designed now, built after v0.1
+### 4. Anchors in v0.1; signed checkpoints designed now, built after v0.1
 
-The format above is version 1 and stays as it is when these arrive; they are new install events and
-new tables, not a new encoding.
+Maintainer decision 2026-11-07: anchors (4.1) ship in v0.1; signed checkpoints (4.2) stay after
+v0.1. The format above is version 1 and stays as it is when checkpoints arrive; they are new install
+events and a new Secret, not a new encoding.
+
+Anchors on their own do not stop someone who can rewrite the install chain. A database superuser
+can rewrite the install chain, its anchors and the org chains together, and `audit verify` still
+passes. Anchors catch a rewrite or rollback of an org chain behind an anchor while the install
+chain is intact, and they make the install head the one value that commits to every chain. Signed
+checkpoints (4.2), exported off the cluster, close the remaining gap.
 
 **4.1 Anchors.** On a schedule (default hourly, and on demand by `koinon-api audit anchor`), the
 `system koinon-api:audit-anchor` actor writes one `audit.anchor` install event. In the same
@@ -337,7 +344,9 @@ The event's summary holds `org_count` and `heads_root`: sha256 over the encoded 
 hash)` triples in org ID order, each field length-prefixed as in decision 1.3. The verifier
 recomputes the root from the side table and checks that each org chain still has the anchored hash
 at the anchored `chain_seq`. An org chain rewritten or rolled back behind an anchor then fails, as
-long as the install chain is intact.
+long as the install chain is intact. An org created after the last anchor is simply not in it yet;
+an org in an anchor whose chain is gone (its head row missing) fails verification, as a deleted
+chain would.
 
 **4.2 Signed checkpoints.** After each anchor, `koinon-api` signs the install head. The checkpoint is
 a signed note in Koinon's own format. It borrows the layout of a C2SP signed note (origin line, body,
@@ -384,8 +393,8 @@ effects in their own chain, with the pointer back. A read-only platform auditor 
 may come later.
 
 **Verify.** `koinon-api audit verify` checks the install chain as well as the org chains by default
-(`--install` for the install chain alone, `--org <id>` as today), and once anchors exist also checks
-every anchor against the org chains.
+(`--install` for the install chain alone, `--org <id>` as today), and also checks every anchor
+against the org chains.
 
 **Export.** `koinon-api audit export --scope install|org [--org <id>] [--from-seq N]` and `GET
 /admin/v1/audit/export` (same scope rules as the read) write JSON lines: a header line
@@ -407,8 +416,8 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 **Metrics** (fixed labels, ADR 0023 label rule; no org, user, key or actor ID):
 
 - `koinon_audit_writes_total{chain="org"|"install", result="ok"|"error"}`;
-- once built, `koinon_audit_anchor_age_seconds` and `koinon_audit_checkpoint_age_seconds`
-  (gauges, no labels), so an alert can say anchoring stopped.
+- `koinon_audit_anchor_age_seconds` (gauge, no labels, from v0.1), so an alert can say anchoring
+  stopped, and, with checkpoints, `koinon_audit_checkpoint_age_seconds` (gauge, no labels).
 
 ## Alternatives considered
 
@@ -426,8 +435,11 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
   or is not a platform admin. #305 can merge with platform prices audited.
 - Positive: org chains, their encoding and their verification do not change; org admins see the
   same log as before, plus pointers to install causes.
-- Positive: the install chain is the anchor that later closes the superuser-rewrite gap for all
-  chains at once, and the version 1 format already allows it.
+- Positive: from v0.1 the install chain anchors every org chain, so a rollback of an org chain
+  behind an anchor is detected. Signed checkpoints later close the superuser-rewrite gap for all
+  chains at once, and the version 1 format already allows them.
+- Negative: until checkpoints ship, someone who can rewrite the install chain (a database
+  superuser or the table owner) can still rewrite every chain undetected.
 - Negative: a second table, trigger, hash function and verify path to keep in step with the first;
   the shared Go encoder and a SQL/Go agreement test for each tag contain it.
 - Negative: one more lock order rule (install head first) that code review must hold; a test that
@@ -443,7 +455,8 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 
 ## Implementation plan
 
-Each item is its own issue; the first blocks #316 and #305.
+Each item is its own issue; the first blocks #316 and #305. Issues 1 to 6 are v0.1; issue 7 is after
+v0.1 (maintainer decision 2026-11-07).
 
 1. **Install audit chain, and platform prices in it.** Migration (tables, hash function, triggers
    with the head's `pg_trigger_depth()` exception, grants), the `koinon_install_audit_writer` group
@@ -475,8 +488,8 @@ Each item is its own issue; the first blocks #316 and #305.
    advisory lock, and the test that lists flags left off it.
 5. **Export.** JSON lines export (CLI and admin API), `audit verify --file`, and the export format
    in the docs site.
-6. **Anchors** (after v0.1). `install_audit_anchor_heads`, the hourly job, verifier checks, anchor
-   age gauge.
+6. **Anchors** (v0.1). `install_audit_anchor_heads`, the hourly job and `koinon-api audit anchor`,
+   verifier checks, anchor age gauge.
 7. **Signed checkpoints** (after v0.1). The signing Secret, `audit.signing_key.added`,
    `audit.checkpoint`, the signed note, off-cluster verification, checkpoint age gauge, rotation.
 
@@ -484,13 +497,13 @@ Retention stays with #29 and is designed against decision 5.
 
 ## Open questions
 
-1. Should anchors (decision 4.1) ship in v0.1 after all? They are database-only and about one pull
-   request, and they catch a rewrite or rollback of an org chain behind an anchor. The catch:
-   without an exported signed checkpoint they do not stop someone who can rewrite the install chain
-   itself, anchors included. The maintainer decision puts them after v0.1 with checkpoints.
+None open.
 
-Answered while drafting: `koinon-api` already has `get` and `list` on Secrets in its namespace, so
-`keys.observed` needs no new RBAC (decision 3); the Helm-settings list is the one in decision 3.
+- ~~Should anchors ship in v0.1?~~ Yes, maintainer decision 2026-11-07 (decision 4); signed
+  checkpoints stay after v0.1.
+- ~~New RBAC for `keys.observed`?~~ No: `koinon-api` already has `get` and `list` on Secrets in its
+  namespace (decision 3).
+- ~~Which flags are on the Helm-settings list?~~ The list in decision 3.
 
 ## Links
 

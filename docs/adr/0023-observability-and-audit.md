@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain proposed in [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
+- Status: Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 
@@ -108,11 +108,11 @@ outside the database or periodic external anchoring of the head hash, both still
 `created_at` of an event is the start time of its transaction, so it can differ from chain order by the
 length of a transaction. HMAC key custody and which OCSF events enter the log stay open.
 
-**Note (2026-11-07).** [ADR 0100](0100-install-audit-chain.md) (Proposed) supersedes the sentence
-"there are no org-less events and no platform chain" above and the copies of platform actions into
-personal orgs: install-wide actions go to a separate install chain, read by platform admins only. It
-also proposes the install head as the anchor for the superuser gap of the previous paragraph, and
-extends the lock order: the install head first, then org heads in org ID order. The line "No current
+**Note (2026-11-07).** [ADR 0100](0100-install-audit-chain.md) (Accepted 2026-11-07) supersedes the
+sentence "there are no org-less events and no platform chain" above and the copies of platform
+actions into personal orgs: install-wide actions go to a separate install chain, read by platform
+admins only. From v0.1 the install chain anchors every org chain; signed checkpoints after v0.1
+close the superuser gap of the previous paragraph. It also extends the lock order: the install head first, then org heads in org ID order. The line "No current
 path audits two orgs in one transaction" above is wrong: `SetPlatformCeiling` writes
 `trace.settings.lowered` in every affected org in one transaction, and the query it uses
 (`LowerOrgTraceLevels`) does not order them by org ID; ADR 0100's implementation fixes both. The
