@@ -91,20 +91,6 @@ func (u Usage) Context() int64 { return u.Input + u.CacheRead + u.CacheWrite }
 // Total is every token.
 func (u Usage) Total() int64 { return u.Context() + u.Output + u.Reasoning }
 
-// Split converts provider counts in the OpenAI convention (input includes cache reads and
-// writes, output includes reasoning) to non-overlapping buckets. Counts that do not add up are
-// clamped at zero rather than going negative.
-func Split(input, cacheRead, cacheWrite, output, reasoning int64) Usage {
-	cacheRead, cacheWrite, reasoning = max(cacheRead, 0), max(cacheWrite, 0), max(reasoning, 0)
-	return Usage{
-		Input:      max(input-cacheRead-cacheWrite, 0),
-		CacheRead:  cacheRead,
-		CacheWrite: cacheWrite,
-		Output:     max(output-reasoning, 0),
-		Reasoning:  reasoning,
-	}
-}
-
 func parseRate(name, s string) (*money.Rate, error) {
 	if s == "" {
 		return nil, nil

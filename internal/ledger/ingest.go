@@ -211,7 +211,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		entryID, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			OrgID: org.ID, AgentID: agent.ID, Principal: PrincipalAgent, RunID: run.ID, TaskID: run.TaskID,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
-			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
+			InputTokens: pr.totalIn(), OutputTokens: pr.totalOut(),
 			CacheReadTokens: pr.cacheRead, CacheWriteTokens: pr.cacheWrite, ReasoningTokens: pr.reasoning, ReasoningKnown: pr.reasoningKnown,
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
@@ -242,7 +242,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		}
 		if run.ID.Valid {
 			// Tokens are reported, not enforced (ADR 0081). Estimated tokens count like reported ones.
-			if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org.ID, ID: run.ID, Tokens: pr.inTokens + pr.outTokens}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org.ID, ID: run.ID, Tokens: pr.totalIn() + pr.totalOut()}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("record run tokens: %w", err)
 			}
 		}
@@ -291,7 +291,7 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			OrgID: org.ID, Principal: PrincipalSystem,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
-			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
+			InputTokens: pr.totalIn(), OutputTokens: pr.totalOut(),
 			CacheReadTokens: pr.cacheRead, CacheWriteTokens: pr.cacheWrite, ReasoningTokens: pr.reasoning, ReasoningKnown: pr.reasoningKnown,
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,

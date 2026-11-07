@@ -237,8 +237,8 @@ var _ = Describe("Decode", func() {
 	})
 
 	// agentgateway v1.7.0's Messages path sets no reasoning count, so the record carries no
-	// koinon.reasoning (a failed log expression is left out); the output count still includes the
-	// thinking (#78).
+	// koinon.reasoning (a failed log expression is left out); the output count then stays the
+	// whole output, the thinking included (#78); with the split, the record's output is without it.
 	It("records the thinking split as known only when the gateway logged it, 0 included", func() {
 		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
 		entries, rejected, reason := agentgateway.Decode(export(
@@ -253,7 +253,38 @@ var _ = Describe("Decode", func() {
 		}
 		Expect(got["r-messages"]).To(And(HaveField("ReasoningKnown", false), HaveField("ReasoningTokens", int64(0)), HaveField("OutputTokens", int64(900))))
 		Expect(got["r-zero"]).To(And(HaveField("ReasoningKnown", true), HaveField("ReasoningTokens", int64(0))))
-		Expect(got["r-split"]).To(And(HaveField("ReasoningKnown", true), HaveField("ReasoningTokens", int64(600)), HaveField("OutputTokens", int64(900))))
+		Expect(got["r-split"]).To(And(HaveField("ReasoningKnown", true), HaveField("ReasoningTokens", int64(600)), HaveField("OutputTokens", int64(300))))
+	})
+
+	// ADR 0097 decision 3: agentgateway logs totals, the usage record carries disjoint buckets.
+	It("maps agentgateway's totals to disjoint buckets", func() {
+		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
+		entries, rejected, reason := agentgateway.Decode(export(
+			llmRecord(id("r-all"), num(agentgateway.LogFieldInput, 100), num(agentgateway.LogFieldCacheRead, 30),
+				num(agentgateway.LogFieldCacheWrite, 20), num(agentgateway.LogFieldOutput, 40), num(agentgateway.LogFieldReasoning, 25)),
+			// Parts that exceed their total clamp at zero instead of going negative.
+			llmRecord(id("r-over"), num(agentgateway.LogFieldInput, 10), num(agentgateway.LogFieldCacheRead, 30),
+				num(agentgateway.LogFieldOutput, 5), num(agentgateway.LogFieldReasoning, 25)),
+		))
+		Expect(rejected).To(BeZero(), reason)
+		got := map[string]ledger.Entry{}
+		for _, e := range entries {
+			got[e.RequestID] = e
+		}
+		Expect(got["r-all"]).To(And(
+			HaveField("InputTokens", int64(50)), HaveField("CacheReadTokens", int64(30)), HaveField("CacheWriteTokens", int64(20)),
+			HaveField("OutputTokens", int64(15)), HaveField("ReasoningTokens", int64(25))))
+		Expect(got["r-over"]).To(And(HaveField("InputTokens", int64(0)), HaveField("OutputTokens", int64(0))))
+	})
+
+	It("still rejects a negative total instead of clamping it to zero", func() {
+		id := func(n string) *commonpb.KeyValue { return str(agentgateway.LogFieldRequest, n) }
+		entries, rejected, _ := agentgateway.Decode(export(
+			llmRecord(id("r-neg-in"), num(agentgateway.LogFieldInput, -5), num(agentgateway.LogFieldCacheRead, 3)),
+			llmRecord(id("r-neg-out"), num(agentgateway.LogFieldOutput, -5), num(agentgateway.LogFieldReasoning, 3)),
+		))
+		Expect(entries).To(BeEmpty())
+		Expect(rejected).To(Equal(int64(2)))
 	})
 
 	It("accepts numeric costs and tokens", func() {
