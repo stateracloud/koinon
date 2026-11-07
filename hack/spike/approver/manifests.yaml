@@ -9,13 +9,13 @@ spec:
   template:
     metadata: {labels: {app: approver}}
     spec:
-      imagePullSecrets: [{name: zot-pull}]
+      imagePullSecrets: [{name: <pull-secret>}]
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: approver
-          image: zot.apps.lab.example.invalid/koinon/spike-approver:2
+          image: registry.example.invalid/koinon/spike-approver:2
           env:
             - name: GITEA_TOKEN
               valueFrom: {secretKeyRef: {name: approver-gitea, key: token}}

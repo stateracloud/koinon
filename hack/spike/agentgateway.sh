@@ -8,7 +8,7 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/agentgateway"
-K=(kubectl --context homelab)
+K=(kubectl --context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}")
 "${K[@]}" apply -f manifests.yaml
 "${K[@]}" -n agentgateway-system create configmap agentgateway-config --from-file=config.yaml \
   --dry-run=client -o yaml | "${K[@]}" apply -f -

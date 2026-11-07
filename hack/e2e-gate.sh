@@ -10,8 +10,8 @@
 #   2. another e2e-kind run on the head (a `gh workflow run e2e-kind.yml --ref <branch>` dispatch,
 #      the `e2e` label's dispatch) has a go-suite `quickstart` job that succeeded (not a bisect
 #      dispatch of another commit, not the web suite);
-#   3. the commit status `e2e-lab` is success (posted by hack/e2e-remote.sh --argo after a green lab
-#      run, hack/e2e-status.sh). Its newest status counts.
+#   3. the commit status `e2e-lab` is success (an external e2e run that passed on this commit, posted with
+#      hack/e2e-status.sh). Its newest status counts.
 #
 # A status event does not start a workflow, so a later `e2e-lab` (or a dispatched run) does not
 # re-evaluate this job by itself: hack/e2e-status.sh and the dispatched run's own `e2e result` job
@@ -22,7 +22,7 @@
 # drop this gate. The guard is the ruleset's required review on `.github/**` (not CODEOWNERS:
 # require_code_owner_review is false). `e2e result` is not pinned to an app and `e2e-lab` can be
 # posted by anyone with write access: a guardrail against mistakes, not against a malicious member.
-# The follow-up is a pinned integration_id / the lab's own GitHub App (koinon-private#568).
+# The follow-up is a pinned integration_id (koinon-private#568).
 #
 # Environment: DECIDE and QUICKSTART (the `needs.<job>.result` values), REQUIRED (true|false), SHA
 # (the pull request head), BRANCH (its head branch, for the hint), GH (the gh command), GH_REPO,
@@ -42,8 +42,8 @@ echo "decide: $DECIDE, quickstart: $QUICKSTART, e2e required: ${REQUIRED:-false}
 case $DECIDE in success | skipped) ;; *) echo "::error::the e2e did not pass (decide: $DECIDE)"; exit 1 ;; esac
 case $QUICKSTART in
 success | skipped) ;;
-# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, the
-# lab stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
+# This run's own quickstart failed or was cancelled (a flake, say). When the e2e is required, an external
+# run stays an accelerator: fall through to the evidence checks (another run's quickstart, e2e-lab)
 # instead of failing here; with none, the gate still fails below.
 failure | cancelled) [[ $REQUIRED == true ]] || { echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1; } ;;
 *) echo "::error::the e2e did not pass (quickstart: $QUICKSTART)"; exit 1 ;;
@@ -73,7 +73,7 @@ if [[ -n $SHA && -n $GH_REPO ]]; then
       pass "quickstart succeeded in e2e-kind run $id on ${SHA:0:12}"
     fi
   done
-  # The lab's status (the newest e2e-lab status is first). An API error (a 403 when the job lacks
+  # The e2e-lab status (the newest e2e-lab status is first). An API error (a 403 when the job lacks
   # `statuses: read`, koinon-private#588) or a body that is not JSON is reported as such, not as "no e2e-lab";
   # the gate still fails closed.
   lab="" laberr=""
@@ -94,7 +94,7 @@ else
 fi
 
 msg="This change needs the kind e2e (hack/needs-e2e.sh, or the e2e label) and the head ${SHA:0:12} has no passing one: no successful quickstart job in this${QUICKSTART:+ ($QUICKSTART)} or another e2e-kind run${lab:+, e2e-lab is $lab}${laberr:+, and e2e-lab could not be read ($laberr; the job needs statuses: read)}."
-how="Produce one: run \`hack/e2e-remote.sh --argo\` (the lab posts the status e2e-lab), or run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub. Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
+how="Produce one: run \`gh workflow run e2e-kind.yml --ref $BRANCH\` on GitHub (or post the commit status e2e-lab from an external e2e run that passed on this commit). Then re-run this job: \"Re-run failed jobs\" on this e2e-kind run (hack/e2e-status.sh and a dispatched run's result job do it for you)."
 echo "::error::$msg"
 echo "$how"
 [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || printf '## e2e result\n\n%s\n\n%s\n' "$msg" "$how" >>"$GITHUB_STEP_SUMMARY"

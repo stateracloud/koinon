@@ -454,7 +454,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
 	}, NodeTimeout(2*time.Minute))
 
-	// Kata is a manual release gate (ADR 0045): the home lab's dev profile may run sandboxes
+	// Kata is a manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes
 	// under another runtime class, and CI has no Kata at all.
 	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
 		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a Kata guest.

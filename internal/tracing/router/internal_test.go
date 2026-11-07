@@ -213,7 +213,7 @@ func newRouter(t *testing.T, cfg Config) *Router {
 }
 
 // hangBound tells a hang from a slow machine: a test waits on state, never on a time, and this
-// deadline only ends a wait that would otherwise never end. The lab's loaded 3-CPU gate has taken
+// deadline only ends a wait that would otherwise never end. A loaded 3-CPU external gate has taken
 // more than 2 s for a step that takes milliseconds alone (koinon-private#533, koinon-private#612).
 const hangBound = time.Minute
 

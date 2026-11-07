@@ -23,7 +23,7 @@ import (
 // (ADR 0045 decision 6). The envtest specs in admission_test.go cover the rules; this one covers
 // that the cluster enforces them where sandboxes run. Requests are server side dry runs made as
 // the Agent Sandbox controller, so the rules under test are the runtime class and the Kata
-// annotations, not the one that limits who may create pods. Nothing is created. The home lab's
+// annotations, not the one that limits who may create pods. Nothing is created. A maintainer cluster's
 // dev profile does not install the chart's policies, and the spec skips there.
 //
 //	KOINON_ESCAPE_NAMESPACE     the namespace of the OpenShell workspace under test (required)

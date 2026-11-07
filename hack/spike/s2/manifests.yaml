@@ -43,7 +43,7 @@ spec:
       models:
       - name: "qwen3.5:4b"
         provider: {custom: {providerOverride: ollama, formats: [{type: completions}]}}
-        params: {baseUrl: "http://ollama.lab.example.invalid:11434/v1"}
+        params: {baseUrl: "http://ollama.example.invalid:11434/v1"}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway

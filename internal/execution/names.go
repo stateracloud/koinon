@@ -11,7 +11,7 @@ import (
 // renders an agent and records them in agent_sandboxes, which koinon-agentd reads; these
 // functions are the one place that derives them. Names come from IDs, never display names.
 
-// MaxSandboxName is OpenShell 0.1.5's limit on sandbox names (found on the home lab, PR koinon-private#21).
+// MaxSandboxName is OpenShell 0.1.5's limit on sandbox names (found on a real cluster, PR koinon-private#21).
 // Provider names follow the same limit to be safe.
 const MaxSandboxName = 19
 

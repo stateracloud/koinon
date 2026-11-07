@@ -7,7 +7,7 @@
 ## Context
 
 Kata Containers needs hardware virtualization, which GitHub-hosted runners do not offer reliably,
-and cloud clusters with nested virtualization cost money. procoduck has a Talos cluster at home with the
+and cloud clusters with nested virtualization cost money. A maintainer has a Talos cluster with the
 Kata runtime installed. Public CI must never run untrusted pull-request code on that cluster.
 
 For licensing, Koinon reuses Apache-2.0 projects (OpenShell, Agent Sandbox, agentgateway) and wants
@@ -15,7 +15,7 @@ a low barrier for contributors and adopters, including companies.
 
 ## Decision
 
-- The home-lab Talos cluster with Kata is for development and local testing only. It is never
+- The maintainer's Talos+Kata cluster is for development and local testing only. It is never
   connected to public CI.
 - License: Apache-2.0.
 - Contributions are signed off under the Developer Certificate of Origin (`git commit -s`). No CLA.
@@ -70,3 +70,13 @@ The merge rule and the exit codes are in ADR [0025](0025-testing-strategy.md) (a
 - [design.md](../design.md), decision 26
 - ADR [0025](0025-testing-strategy.md), [0038](0038-governance.md),
   [0039](0039-development-setup.md)
+
+## Note (2026-11-07, issue #300)
+
+The maintainer lab tooling left the repository: the remote-run client, its pod-side scripts, its
+configuration and the document that described the setup are no longer tracked. The repository's e2e path
+is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
+says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
+still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
+on a commit. Private infrastructure detail was removed in the same change (maintainer decision
+2026-11-07). The domain lint that guarded this left the repository too.
