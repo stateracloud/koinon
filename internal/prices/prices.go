@@ -3,9 +3,9 @@
 // Package prices finds the price of a model request and manages org price overrides and the
 // default list's versions (plan item PV2, ADR 0056 amendment 2026-10-24).
 //
-// Precedence, highest first: the org's own price entries, the default list. Within a layer see
-// pricing.Select. The per-model rates of PV1 were folded into dated org entries (migration
-// 00014, ADR 0056). Every answer carries a ref ("default@<list version>#<id>" or "org#<id>")
+// Precedence, highest first: the org's own price entries, the install's platform price list
+// (ADR 0098), the default list. Within a layer see pricing.Select. The per-model rates of PV1 were folded into dated org entries (migration
+// 00014, ADR 0056). Every answer carries a ref ("default@<list version>#<id>", "platform@<version>#<id>" or "org#<id>")
 // that the ledger stores, so each ledger entry names the price version it used. Ledger entries
 // written before the migration may still cite "model#<id>@<unix time>".
 package prices
@@ -31,8 +31,9 @@ import (
 
 // Layers a price can come from.
 const (
-	SourceOrg     = "org"
-	SourceDefault = "default"
+	SourceOrg      = "org"
+	SourcePlatform = "platform"
+	SourceDefault  = "default"
 )
 
 // Model is the model a request asked for.
@@ -51,8 +52,10 @@ type Resolution struct {
 	Ref         string
 	Source      string
 	ListVersion string
-	Entry       pricing.Entry
-	Price       pricing.Price
+	// PlatformVersion is the platform price version of a SourcePlatform answer.
+	PlatformVersion int64
+	Entry           pricing.Entry
+	Price           pricing.Price
 	// Fallback is true when no entry was valid at the requested time and the current one was used.
 	Fallback bool
 }
@@ -93,7 +96,7 @@ func (e *BadPriceError) Unwrap() error { return e.Err }
 
 func bad(err error) error { return &BadPriceError{Err: err} }
 
-// Resolver finds prices: the org's entries first, then those of its ListSource. Build one with
+// Resolver finds prices: the org's entries first, then the platform list, then those of its ListSource. Build one with
 // NewResolver; the zero Resolver has no source and fails every lookup.
 type Resolver struct{ src pricing.ListSource }
 
@@ -148,6 +151,19 @@ func (rv Resolver) resolveEntries(ctx context.Context, q *store.Queries, org pgt
 		}
 		if r, ok := pricing.Select(rs, m.ProviderType, m.Name, t); ok {
 			return Resolution{Ref: "org#" + r.Entry.ID, Source: SourceOrg, Entry: r.Entry, Price: r.Price, Fallback: fallback}, nil
+		}
+		// The platform list is a step of its own, after the org's entries and before the default
+		// list, so a platform entry beats every default entry however specific the default's
+		// pattern is (ADR 0098 decision 1).
+		version, plat, err := platformEntries(ctx, q, t)
+		if err != nil {
+			return Resolution{}, err
+		}
+		if r, ok := pricing.Select(plat, m.ProviderType, m.Name, t); ok {
+			return Resolution{
+				Ref: PlatformRef(version, r.Entry.ID), Source: SourcePlatform, PlatformVersion: version,
+				Entry: r.Entry, Price: r.Price, Fallback: fallback,
+			}, nil
 		}
 		list, defs := rv.src.Current()
 		if r, ok := pricing.Select(defs, m.ProviderType, m.Name, t); ok {

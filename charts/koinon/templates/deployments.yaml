@@ -70,7 +70,7 @@ spec:
             httpGet: {path: /healthz, port: health}
           {{- end }}
           {{- if eq $component "api" }}
-          args: ["serve", "--addr", ":{{ $v.port }}", "--otlp-addr", ":{{ $v.otlpPort }}", "--tools-addr", ":{{ $v.toolsPort }}", "--saved-work-addr", ":{{ $v.savedWorkPort }}", "--saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}", "--guard-addr", ":{{ $v.guardPort }}", "--leak-guard-byte-cap", "{{ int $v.leakGuardByteCap }}"{{ if $v.durable.enabled }}, "--durable"{{ end }}]
+          args: ["serve", "--addr", ":{{ $v.port }}", "--otlp-addr", ":{{ $v.otlpPort }}", "--tools-addr", ":{{ $v.toolsPort }}", "--saved-work-addr", ":{{ $v.savedWorkPort }}", "--saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}", "--guard-addr", ":{{ $v.guardPort }}", "--leak-guard-byte-cap", "{{ int $v.leakGuardByteCap }}"{{ if $v.durable.enabled }}, "--durable"{{ end }}, "--prices-refresh", "{{ include "koinon.pricesRefreshMode" $ }}", "--prices-refresh-interval", "{{ $.Values.prices.refresh.interval }}"{{ with $.Values.prices.refresh.maxChangePercent }}, "--prices-refresh-max-change-percent", "{{ int . }}"{{ end }}{{ with $.Values.prices.refresh.maxAutoPerDay }}, "--prices-refresh-max-auto-per-day", "{{ int . }}"{{ end }}]
           ports:
             - name: http
               containerPort: {{ $v.port }}

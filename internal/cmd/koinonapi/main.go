@@ -90,6 +90,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
+	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -111,6 +112,11 @@ import (
 )
 
 type config struct {
+	pricesRefresh         string
+	pricesRefreshInterval time.Duration
+	pricesMaxChange       int
+	pricesMaxAutoPerDay   int
+
 	addr           string
 	databaseURL    string
 	migrate        bool
@@ -185,6 +191,14 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
+	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
+		"the scheduled price refresh (ADR 0098): auto fetches OpenRouter's public price list only while some org has an openrouter provider, "+
+			"on always fetches it, off never makes a request to any price source; a fetched change applies by itself only within the bounds below")
+	fs.DurationVar(&c.pricesRefreshInterval, "prices-refresh-interval", 24*time.Hour, "how often the scheduled price refresh fetches")
+	fs.IntVar(&c.pricesMaxChange, "prices-refresh-max-change-percent", pricefetch.DefaultBounds.MaxChangePercent,
+		"largest change, in percent of the last reviewed rate, that applies without a person; it can only be lowered")
+	fs.IntVar(&c.pricesMaxAutoPerDay, "prices-refresh-max-auto-per-day", pricefetch.DefaultBounds.MaxAutoPerDay,
+		"most automatic price changes in 24 hours; it can only be lowered")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
 
@@ -412,6 +426,13 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
+	}
+	// A platform entry the new default list caught up with is retired (ADR 0098 decision 1.5). It
+	// logs what it retired, and needs no platform admin (a fresh install has none yet). It is
+	// bookkeeping: a failure (a stored entry this binary refuses, a database hiccup) is a warning,
+	// never a reason not to serve; the next start tries again.
+	if _, err := priceSvc.RetireCaughtUp(ctx); err != nil {
+		slog.Warn("platform price retirement skipped; the platform entries stay as they are", "error", err)
 	}
 	// Orgs that existed before the stored default model (migration 00045) get the model they ran on.
 	if n, err := agentmodel.BackfillDefaults(ctx, pool, prices.NewResolver(pricing.Embedded()), time.Now()); err != nil {
@@ -656,6 +677,37 @@ func serve(ctx context.Context, cfg config) error {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
 	}
+	// The price refresh (ADR 0098, amended 2026-11-07). Off, koinon-api makes no request to any price
+	// source; auto fetches a source only while a provider of a type it prices exists.
+	priceMetrics := prices.NewMetrics(reg)
+	refreshMode, err := prices.ParseRefreshMode(cfg.pricesRefresh)
+	if err != nil {
+		return fmt.Errorf("--prices-refresh: %w", err)
+	}
+	if refreshMode != prices.RefreshOff && cfg.pricesRefreshInterval < minPricesRefreshInterval {
+		return fmt.Errorf("--prices-refresh-interval %s is below the minimum %s", cfg.pricesRefreshInterval, minPricesRefreshInterval)
+	}
+	refresher, err := prices.NewRefresher(priceSvc, prices.RefreshConfig{
+		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
+		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
+		Metrics:  priceMetrics,
+	})
+	if err != nil {
+		return fmt.Errorf("price refresh: %w", err)
+	}
+	// Startup bookkeeping never depends on a platform admin existing (a fresh install has none until
+	// the first login): without one, the change is recorded and logged, not audited in an org.
+	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); err != nil {
+		return err
+	}
+	if _, err := refresher.ReportUnpriced(ctx); err != nil {
+		slog.Warn("counting unpriced models", "err", err)
+	}
+	slog.Info("price refresh", "mode", refreshMode, "interval", cfg.pricesRefreshInterval,
+		"autoApply", refreshMode != prices.RefreshOff, "maxChangePercent", cfg.pricesMaxChange, "maxAutoPerDay", cfg.pricesMaxAutoPerDay)
+	safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
+		refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
+	})
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
@@ -892,3 +944,7 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 	}
 	return get()
 }
+
+// minPricesRefreshInterval keeps a misconfigured interval (0, negative, minutes) from polling the public
+// source in a tight loop; the 24h stability rule gains nothing from faster polling.
+const minPricesRefreshInterval = time.Hour

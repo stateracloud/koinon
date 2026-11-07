@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package prices
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/pricing"
+)
+
+// SetPlatformForTest writes a platform version holding exactly the given entries, valid from now
+// or, when validFrom is set, from then (a past time is refused like in production).
+func (s *Service) SetPlatformForTest(ctx context.Context, entries []pricing.Entry, validFrom ...time.Time) (PlatformVersion, error) {
+	var out PlatformVersion
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		if err := q.LockPlatformPrices(ctx); err != nil {
+			return err
+		}
+		w := versionWrite{Actor: audit.CLI("test"), Action: "platform_price.set", Reason: "test"}
+		if len(validFrom) > 0 {
+			w.ValidFrom = validFrom[0]
+		}
+		for _, e := range entries {
+			w.Entries = append(w.Entries, PlatformEntry{Entry: e, Reviewed: e.Spec})
+			w.Changed = append(w.Changed, e.ID)
+		}
+		var err error
+		out, err = writeVersion(ctx, q, w)
+		return err
+	})
+	return out, err
+}

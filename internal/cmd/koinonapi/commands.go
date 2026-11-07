@@ -36,7 +36,7 @@ func NewRootCommand() *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES", "KOINON_KEK_ACTIVE_PERIOD")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(), newMigrateCommand(), newPreflightCommand(), newEnsureSecretsCommand(),
-		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand())
+		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand())
 	return root
 }
 

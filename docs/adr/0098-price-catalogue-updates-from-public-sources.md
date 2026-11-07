@@ -106,6 +106,27 @@ off (ADR 0068), with no release.
    command), and on a schedule when a platform admin turns it on. Helm `prices.refresh.enabled:
    false` and `prices.refresh.interval: 24h` are the defaults. With the setting off, `koinon-api`
    makes no request to any source. The same setting turns on auto-apply (decision 3).
+
+   **Amendment, maintainer decision 2026-11-07.** The setting has three modes, and the default is
+   `auto`, not off. Helm `prices.refresh.enabled` unset (null) renders `auto`, `false` renders
+   `off`, `true` renders `on`; the chart passes one flag, `--prices-refresh=auto|off|on`, and knows
+   nothing about providers.
+   - `auto` fetches a source only while a provider that source prices is in use: OpenRouter while
+     some org has an enabled provider of type `openrouter`. `koinon-api` checks again on every tick,
+     so adding the first such provider starts the fetch and removing the last one stops it.
+   - `off` makes no request to any source, as the setting off did before.
+   - `on` fetches every source Koinon has an adapter for, whatever providers exist.
+
+   In `auto` and `on` the fetch auto-applies within the bounds of decision 3; the two-fetch,
+   24-hour stability rule of decision 2.4 is unchanged, so the first day brings no OpenRouter
+   estimate. Why: once the default list stops carrying OpenRouter's routed models, an install that
+   uses OpenRouter would otherwise have no price for them unless a person turned the refresh on, and
+   an unpriced model is the worse failure (its requests are refused unless a fallback price is
+   set, see Context). An install that uses
+   no OpenRouter provider still makes no request, and `off` keeps a zero-request install one value
+   away. `koinon-api` logs a count-only warning at start and on every tick while models of a priced
+   provider type have no price, and exports `koinon_price_unpriced_models{provider_type}`
+   (ADR 0023: no org or model label).
 3. **Fetch rules.**
    - Pinned hosts per adapter (`openrouter.ai`, `models.dev`, `api.github.com`,
      `raw.githubusercontent.com`), HTTPS only, no redirects, a body cap (16 MiB) and a strict
@@ -138,7 +159,8 @@ off (ADR 0068), with no release.
 The scheduled fetch may apply small changes by itself. Everything else waits for a person.
 
 **One switch, not two** (maintainer decision 2026-11-06). The scheduled fetch and auto-apply are one
-setting, off by default (decision 2.2). The chart values comment and the Platform *Prices* page say
+setting, off by default (decision 2.2; since the 2026-11-07 amendment its default is `auto`, which
+fetches and auto-applies only for sources whose provider type is in use). The chart values comment and the Platform *Prices* page say
 plainly that turning it on lets small price changes apply by themselves. Uploads (decision 6) are
 never auto-applied: a person is there to review them.
 
@@ -147,7 +169,7 @@ holds. They are constants in code. Helm can tighten them, never loosen them.
 
 | Rule | Default |
 |---|---|
-| The model already has a Koinon price (platform or default entry) | required |
+| The model already has a Koinon price (platform or default entry) | required; since the 2026-11-07 amendment below, a new model is auto-applied too |
 | Same provider type, same `id`, same tier boundaries (`context_over`) | required |
 | Same set of priced buckets: no bucket added or removed (adding `cache_read` changes caching, ADR 0068) | required |
 | Each rate moves by at most this much, measured against the **last person-reviewed rate** (the default list or the last platform version a person wrote), so repeated small moves cannot add up | 25% up or down |
@@ -161,7 +183,7 @@ copy of OpenRouter's API, so it does not count as a second source for an OpenRou
 direct Anthropic model there is no provider list, so two independent sources, such as OpenRouter and
 LiteLLM, must agree. models.dev never counts towards auto-apply (decision 7).
 
-**Waits for a person** (class `needs_review`): a new model, a new or removed bucket, a tier change, a
+**Waits for a person** (class `needs_review`): a new model (until the 2026-11-07 amendment below), a new or removed bucket, a tier change, a
 move over 25%, a price only one aggregator reports, sources that disagree, and any rule above that
 fails. The proposal says which rule failed, with the numbers.
 
@@ -173,6 +195,52 @@ fails. The proposal says which rule failed, with the numbers.
 - Any rate above 1,000 USD per million tokens.
 
 These are warnings with numbers, not silent refusals. The real DeepSeek drift was 7x on input.
+
+**Amendment, maintainer decision 2026-11-07.**
+
+- **New models auto-apply.** A model with no Koinon price is auto-applied once the stability rule
+  of decision 2.4 holds (two fetches at least 24 hours apart returned the same values), within the
+  same bounds as any other automatic change: the fetch floors, the refused class for structural
+  problems, the daily cap (it counts towards it), no zero rate, the confirmation for a rate above
+  1,000 USD per million, the same audit and rollback, actor `auto`. It has no baseline, so the 25%
+  bound does not apply and the unit mix-up check is made inside the entry: a base rate 100 or more
+  times (or 1/100 or less of) the input rate, or a tier rate that far from the base rate of its
+  bucket, needs the typed confirmation. A zero rate waits for a person (a free model is checked by
+  one), and so does a model the source gives no `max_output` for. A reasoning rate that differs
+  from output is imported by decision 8 and is no new bucket for a model with no price. The first
+  applied price becomes the reviewed baseline that later automatic changes are bounded against,
+  until a person accepts one. Why: once the default list stops carrying OpenRouter's routed models,
+  every model an org adds would otherwise be unpriced until a person acted, which is the worse
+  failure (decision 2.2 amendment).
+- **A proposal never overwrites a glob entry.** When the price in use comes from an entry that
+  also covers other models (a glob or regex match), the proposal makes its own per-model entry and
+  waits for a person ("another entry id"), as built in the first slice; this is now decided.
+- **OpenRouter tier boundaries** (open question 1, resolved): `context_over` is
+  `min_prompt_tokens` itself, and several overrides combine as OpenRouter documents them (decision
+  8).
+- **No auto-apply without an audit log.** Install-wide actions get an install-level audit chain of
+  their own, designed in an ADR through #324 and built later. Until the install-level audit chain
+  of #324 lands (it replaces this rule), platform-wide events are audited in every platform
+  admin's personal org, and with no platform admin (a fresh install) the auto-apply fails closed:
+  it applies nothing, leaves the proposals open in class `auto` and logs a warning with their
+  count; a later auto-apply run applies them once an admin exists. Start-up bookkeeping (the refresh
+  settings sync, retirement of entries a release caught up with) still goes ahead with a warning,
+  or koinon-api could not start on a fresh install; a person's decision is refused.
+- **Import and fetch stay apart.** A live proposal is keyed by source, origin, model and values,
+  so an import never rewrites a fetch proposal's provenance and never holds the key a fetch needs.
+  An import's fetch row keeps the file's time as provenance, but the due time of the scheduled
+  refresh and the half-of-last-good floor read only the install's own fetches. A file whose
+  `fetchedAt` is missing or in the future (beyond 5 minutes of clock skew), or whose model count is
+  below its offers or beyond 32 bits, is refused.
+- **A stored entry this binary refuses is skipped.** A platform entry that no longer decodes or
+  validates (a later binary's stricter rules) is left out and counted
+  (`koinon_price_platform_bad_entries`, no labels, and a warning with the count); its models fall
+  through to the default list. Auto-apply and retirement write no version that would silently drop
+  it (they wait, with a warning); a person's accept or rollback writes one without it and the audit
+  event says how many it dropped (`droppedBadEntries`). Retirement at start never fails the start.
+- **Reasoning compares as billed.** An unset reasoning rate bills at the output rate, so the diff
+  and the 25% bound read it as the output rate on both sides: a source that drops a reasoning rate
+  equal to output (decision 8) is no removed bucket against an entry that spells it out.
 
 **Refused** (structural): a rate that does not parse with `money.ParseRate`, a negative rate, tiers
 that do not ascend, or a non-zero price without `max_output` (today's rules).
@@ -212,7 +280,9 @@ records the page URL and "manual" as its source.
   never rewritten, and entries charged in between keep their `price_ref`.
 - **Metrics** (ADR 0023: fixed label sets, never an org, user, agent, ticket or run ID):
   `koinon_price_source_fetch_total{source,result}`, `koinon_price_proposals{class,state}` and
-  `koinon_price_auto_applied_total{source}`. `source` is the fixed set of adapters.
+  `koinon_price_auto_applied_total{source}`. `source` is the fixed set of adapters. Since the
+  2026-11-07 amendment also `koinon_price_unpriced_models{provider_type}` and
+  `koinon_price_platform_bad_entries` (no labels).
 
 ### 6. Air-gapped installs
 
@@ -260,8 +330,17 @@ records the page URL and "manual" as its source.
 - **A missing cache price never writes zero.** It stays unpriced and bills at the input rate, as
   today.
 - **Tier boundaries.** Koinon bills a tier when the input side is greater than `context_over`.
-  Whether OpenRouter's `min_prompt_tokens` means "at least" is not verified; the adapter needs a test
-  from OpenRouter's docs before it converts tiers (Open questions).
+  OpenRouter's own SDK (npm package `@openrouter/sdk` 1.5.64, file
+  `esm/models/pricingoverride.d.ts`, generated from OpenRouter's OpenAPI schema) documents
+  `min_prompt_tokens` as "Condition: the entry applies when the total prompt tokens of a request
+  are strictly greater than this threshold", so `context_over` is `min_prompt_tokens` unchanged
+  (`pricefetch.TierBoundaryOffset` is 0). The same type says: "An entry applies only when all of
+  its condition fields (e.g. min_prompt_tokens, or the utc_start/utc_end time window) match the
+  request; among applicable entries, later entries win per price key; price keys absent from an
+  entry inherit the base price." The adapter follows it: an override with any time condition
+  (`utc_days`, `utc_start`, `utc_end`) is never a tier; each tier carries, per rate, the value of
+  the last applicable override in list order, and a rate no applicable override sets keeps the base
+  price; two overrides at one threshold merge rather than conflict.
 
 ### 9. Prompt caching (ADR 0068)
 
@@ -291,11 +370,13 @@ records the page URL and "manual" as its source.
 ### 11. What stays as it is
 
 - **ADR 0097's rule still holds.** The gateway never downloads prices in the request path. Fetching
-  runs in `koinon-api`'s scheduler, off by default. A fetched price reaches a request only as a
+  runs in `koinon-api`'s scheduler, in `auto` mode by default (decision 2.2 amendment). A fetched price reaches a request only as a
   stored, versioned, audited platform or org entry. ADR 0097 rejects a runtime download of a price
   list "as a supply-chain path into cost truth". Bounded auto-apply narrows that path to small moves
   of existing models, confirmed by two sources or the provider, pinned, audited and reversible. It
-  does not remove it, which is why it is off by default and its one setting says so plainly.
+  does not remove it, which is why it was off by default and its one setting says so plainly.
+  Since 2026-11-07 the default `auto` opens the path only for a source whose provider type an org
+  uses, a model new to Koinon still always waits for a person, and `off` closes it.
 - ADR 0070's metadata snapshot still never prices a request by itself.
 - The default list keeps changing only through a reviewed pull request (`docs/ops/prices.md`).
 
@@ -323,7 +404,8 @@ data: never OpenRouter's (#68).
 v0.2, issue #265. Migrations are expand-only (ADR 0085): new tables for platform price versions,
 proposals and source fetches, and a new `price_ref` form. The work shares the fetch code with ADR
 0070's delivery PR 4 (online refresh and offline import), whichever lands first. A chart assertion
-in `hack/chart-check.d` checks that the default values render the refresh off.
+in `hack/chart-check.d` checks that the default values render the refresh in `auto` mode, and
+`false` and `true` render `off` and `on` (decision 2.2 amendment).
 
 ## Alternatives considered
 
@@ -370,8 +452,8 @@ others come from the research report.
 
 All tracked in #265 until it is split.
 
-1. **OpenRouter tier boundaries.** Does `min_prompt_tokens` mean "at least" or "more than"? A test
-   from its docs decides the conversion.
+1. **OpenRouter tier boundaries.** Resolved 2026-11-07: "strictly greater than", from
+   `@openrouter/sdk` 1.5.64 `esm/models/pricingoverride.d.ts` (decision 8).
 2. **Other provider lists.** Do OpenAI, Google or DeepSeek publish a machine-readable price list
    that could count as a primary source? Checked in the v0.2 build (#265).
 3. **The signed bundle** (decision 13): the signing tool (Sigstore or minisign), key custody, and
@@ -381,7 +463,9 @@ Decided at the maintainer's 2026-11-06 review and moved into the decisions: the 
 one switch for fetch and auto-apply (decisions 2.2 and 3), which proposals org admins see (decision
 1.6), and models.dev as a proposals-only source (decision 7). At the second 2026-11-06 review: org
 entries from proposals retire when a release ships the same price, hand-typed ones never (decision
-1.6).
+1.6). Decided on 2026-11-07: the three refresh modes with `auto` as the default (decision 2.2
+amendment); new models auto-apply, a proposal never overwrites a glob entry, and the OpenRouter tier
+boundary (decision 3 amendment).
 
 ## Upstream verification
 
@@ -392,8 +476,9 @@ entries from proposals retire when a release ships the same price, hand-typed on
 - 2026-11-06, Koinon source: `internal/agentd/run.go:1192-1206` (cache mode from the resolved
   price), `internal/prices/prices.go:96-161` (resolver order), `internal/prices/cache.go:107-121`
   (save-time warnings), `pricing/source.go` (`ListSource`).
-- Not verified: Anthropic has no price API (none found, not proven absent); OpenAI and Google lists;
-  OpenRouter's `min_prompt_tokens` boundary.
+- 2026-11-07, `@openrouter/sdk` 1.5.64 from npm, `esm/models/pricingoverride.d.ts` read (not run):
+  the `min_prompt_tokens` boundary and how overrides combine (decision 8).
+- Not verified: Anthropic has no price API (none found, not proven absent); OpenAI and Google lists.
 
 ## Links
 
