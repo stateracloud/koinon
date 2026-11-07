@@ -258,6 +258,24 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(section(es[1], "after")["done"]).To(BeEquivalentTo(4))
 		})
 
+		DescribeTable("a run in which every row fails still writes its closing event",
+			func(ctx SpecContext, recordStarted bool, want []string) {
+				_, err := pool.Exec(ctx, `UPDATE providers SET api_key = jsonb_set(api_key, '{kek_id}', '"gone"') WHERE id = ANY($1)`, ids)
+				Expect(err).NotTo(HaveOccurred())
+				mark := auditMark(ctx)
+				tool.RecordStarted = recordStarted
+				Expect(tool.Rewrap(ctx)).To(HaveOccurred())
+				es := keyEventsSince(ctx, mark)
+				Expect(actions(es)).To(Equal(want))
+				closing := es[len(es)-1]
+				Expect(section(closing, "after")["done"]).To(BeEquivalentTo(0))
+				Expect(section(closing, "after")["failed"]).To(BeEquivalentTo(4))
+				noKeyMaterial(ctx, es)
+			},
+			Entry("without --record-started", false, []string{keyscli.ActionRewrap}),
+			Entry("with --record-started", true, []string{keyscli.ActionRewrap + keyscli.StartedSuffix, keyscli.ActionRewrap}),
+		)
+
 		It("records reencrypt the same way", func(ctx SpecContext) {
 			mark := auditMark(ctx)
 			Expect(tool.Reencrypt(ctx)).To(Succeed())

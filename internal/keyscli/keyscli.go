@@ -795,8 +795,10 @@ func failureKind(err error) string {
 
 // each runs fn over every stored envelope, one transaction per row, and writes one install audit
 // event for the run after the loop (ADR 0100 decision 3): the counts done and failed, the failures by
-// kind and the KEK usage before and after. A run that changes no row writes nothing. With
-// RecordStarted it also writes action+".started" before the loop, when there is a row to change.
+// kind and the KEK usage before and after. A run that changes no row and fails none writes nothing.
+// With RecordStarted it also writes action+".started" before the loop, when there is a row to change;
+// a run that wrote it always writes the closing event, even when every row failed, so a .started never
+// stays open.
 func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
@@ -813,6 +815,7 @@ func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn)
 	}
 	a := t.auditor()
 	var usageBefore map[string]int
+	started := false
 	if a != nil {
 		if usageBefore, err = t.Usage(ctx); err != nil {
 			return err
@@ -858,7 +861,7 @@ func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn)
 		}
 	}
 	_, _ = fmt.Fprintf(t.Out, "%d value(s) %s.\n", total, verb)
-	if a != nil && total > 0 {
+	if a != nil && (started || total > 0 || failed > 0) {
 		after := map[string]any{"done": total, "failed": failed, "failures": failures, "active": ks.Active}
 		if usage, err := t.Usage(ctx); err == nil {
 			after["kek_usage"] = usage

@@ -114,6 +114,9 @@ func (s KeyState) normalized() KeyState {
 	return s
 }
 
+// Normalized returns s with nil lists made empty and every list sorted, as a recorded state has them.
+func (s KeyState) Normalized() KeyState { return s.normalized() }
+
 func cmpString(a, b string) int {
 	switch {
 	case a < b:

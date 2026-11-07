@@ -82,9 +82,16 @@ func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 		if err != nil {
 			return err
 		}
-		if prev != nil && id != k.kekSecret {
-			after.KEKs, after.Active, after.Retired = prev.KEKs, prev.Active, prev.Retired
+		if id != k.kekSecret {
+			// Not the KEK Secret: the KEK part is the last recorded one (empty on a first start), so a KEK
+			// from an existing Secret or a mounted directory is left for keys.observed.
+			var p keyscli.KeyState
+			if prev != nil {
+				p = *prev
+			}
+			after.KEKs, after.Active, after.Retired = p.KEKs, p.Active, p.Retired
 		}
+		after = after.Normalized()
 		return a.Record(ctx, keyscli.Event{Action: keyscli.ActionGenerated, TargetKind: kind, TargetID: id, After: after})
 	}()
 	if err != nil {

@@ -439,7 +439,7 @@ next `koinon-api` start records the key set as `keys.observed`.
 | Action | Actor | When |
 | --- | --- | --- |
 | `keys.add`, `keys.activate`, `keys.retire` | `cli`, `keys add` / `keys activate` / `keys retire` | right after the Secret update |
-| `keys.rewrap`, `keys.reencrypt` | `cli`, `keys rewrap` / `keys reencrypt` | once per run, after the loop: rows done and failed, failures by kind (`unknown_kek`, `open`, `envelope`, `database`), the KEK usage before and after. A run that changes no row writes nothing |
+| `keys.rewrap`, `keys.reencrypt` | `cli`, `keys rewrap` / `keys reencrypt` | once per run, after the loop: rows done and failed, failures by kind (`unknown_kek`, `open`, `envelope`, `database`), the KEK usage before and after. A run that changes no row and fails none writes nothing; a run that wrote a `.started`, or failed a row, always writes it |
 | `keys.rewrap.started`, `keys.reencrypt.started` | as above | only with `--record-started`, before the loop, when there is a row to change |
 | `keys.generated` | `system koinon-api:keys` | `koinon-api` made the first KEK Secret or the saved-work key |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` | `system koinon-api:key-admin` | the key-admin Job created the KEK Secret, added a KEK, recovered a lost active KEK, or bound a KEK to the install |

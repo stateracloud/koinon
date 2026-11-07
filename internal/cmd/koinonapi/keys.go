@@ -57,7 +57,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, activate, status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")

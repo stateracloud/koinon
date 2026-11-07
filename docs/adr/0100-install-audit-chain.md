@@ -366,7 +366,8 @@ in three ways, and the ADR says so rather than pretending otherwise:
   run, after the loop, with the counts done and failed, the failures by kind, and the KEK before and
   after; they may also write a `.started` event before the loop (`keys.rewrap.started`,
   `keys.reencrypt.started`, with `--record-started`), so a run that dies half way shows. A run that
-  changes no row writes nothing.
+  changes no row and fails none writes nothing; a run that wrote a `.started`, or failed a row, always
+  writes its closing event.
 - `keys forget` keeps its per-org events in each org's transaction and writes its platform part
   (the platform trace destination) as one install event.
 

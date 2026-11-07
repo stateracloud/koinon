@@ -4,6 +4,8 @@ package koinonapi
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -96,6 +98,43 @@ var _ = Describe("koinon-api's key events", func() {
 		var raw string
 		Expect(keyAud.pool.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.observed'`, m).Scan(&raw)).To(Succeed())
 		Expect(raw).To(ContainSubstring("koinon-session"))
+	})
+
+	keksOf := func(ctx context.Context, m int64, action, section string) string {
+		GinkgoHelper()
+		var raw string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT coalesce(summary->$3->'keks', 'null')::text FROM install_audit_events WHERE chain_seq > $1 AND action = $2`, m, action, section).Scan(&raw)).To(Succeed())
+		return raw
+	}
+
+	It("credits an existing KEK Secret to keys.observed, not to the saved-work key's keys.generated, on a first start", func(ctx SpecContext) {
+		_, err := kube.CoreV1().Secrets(ns).Create(ctx, secretOf("koinon-saved-work", "uid-1", false), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		m := mark(ctx)
+		keyAud.generatedEvent(ctx, "secret", "koinon-saved-work")
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+		Expect(keksOf(ctx, m, "keys.generated", "after")).To(Equal("[]"))
+		keyAud.startObserving(ctx, func() {})
+		Expect(count(ctx, "keys.observed", m)).To(Equal(1))
+		Expect(keksOf(ctx, m, "keys.observed", "after")).To(ContainSubstring("kek-20261107-aaaa"))
+		Expect(keksOf(ctx, m, "keys.observed", "before")).To(Equal("[]"))
+	})
+
+	It("does the same for KEKs from a mounted --kek-dir", func(ctx SpecContext) {
+		dir := GinkgoT().TempDir()
+		raw := make([]byte, secretstore.KeySize)
+		copy(raw, "koinon_test_not-a-real-kek-dir")
+		Expect(os.WriteFile(filepath.Join(dir, "kek-20261107-dddd"), secretstore.EncodeKey(raw), 0o600)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(dir, secretstore.ActiveFile), []byte("kek-20261107-dddd"), 0o600)).To(Succeed())
+		keyAud.keySet = keyscli.DirStore{Dir: dir}
+		_, err := kube.CoreV1().Secrets(ns).Create(ctx, secretOf("koinon-saved-work", "uid-1", false), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		m := mark(ctx)
+		keyAud.generatedEvent(ctx, "secret", "koinon-saved-work")
+		Expect(keksOf(ctx, m, "keys.generated", "after")).To(Equal("[]"))
+		keyAud.startObserving(ctx, func() {})
+		Expect(keksOf(ctx, m, "keys.observed", "after")).To(ContainSubstring("kek-20261107-dddd"))
+		Expect(keksOf(ctx, m, "keys.observed", "before")).To(Equal("[]"))
 	})
 
 	It("observes once, again when a generated Secret is re-created, and never records a value", func(ctx SpecContext) {
