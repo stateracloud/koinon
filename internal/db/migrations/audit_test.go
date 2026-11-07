@@ -26,15 +26,6 @@ var _ = Describe("00012_providers_audit_tokens", func() {
 		Expect(err).To(MatchError(ContainSubstring("append-only")))
 	})
 
-	It("refuses a new system event without a component ID, and keeps the other kinds as they were (00067, ADR 0100)", func(ctx SpecContext) {
-		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'system', '', 'test.unnamed', 'test')`, org)
-		Expect(err).To(MatchError(ContainSubstring("audit_events_system_actor_named")))
-		_, err = db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.unnamed', 'test')`, org)
-		Expect(err).To(MatchError(ContainSubstring("audit_events_system_actor_named")), "no ID at all is an empty one")
-		_, err = db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, 'cli', '', 'test.cli', 'test')`, org)
-		Expect(err).NotTo(HaveOccurred(), "the rule is for system actors")
-	})
-
 	It("revokes UPDATE, DELETE and TRUNCATE on audit_events from koinon_app, when that role exists", func(ctx SpecContext) {
 		// The chart's CNPG bootstrap creates koinon_app with default privileges; here we create it first.
 		err := pgtest.EnsureRole(ctx, db, "koinon_app_probe")

@@ -279,7 +279,18 @@ vocabulary:
 
 `audit.System()` takes the actor ID as an argument, so no caller can write an unnamed system actor.
 
-Rollout window: v0.1.0-rc.9 `audit.System()` returned an empty ID, and migration `00067` holds new `audit_events` rows to a named system actor. While old pods still run after the migration, their system audit inserts fail the CHECK. Those in a transaction (agentd stuck-run and sandbox-wait `agent.mark_unhealthy`, mcp sync and health, approval expiry, question retarget) roll back and are retried on the next loop pass; those outside one (the reconciler's `sandbox.recreate`, `sandbox.delete`, `sandbox.archive` and `agent.mark_unhealthy`, written after the deletion or mark they record) are not: the pass fails, the work is not repeated, and the event is lost; `token.use_failed` is best effort and dropped. The window ends when the last old pod is replaced.
+Rollout window (maintainer decision 2026-11-07): the CHECK `(actor_kind <> 'system' OR actor_id <> '') NOT VALID` on
+`audit_events` does not land with the named actors. It lands in #359, one release after them (expand, then
+contract). The reason is that v0.1.0-rc.9 `audit.System()` wrote an empty ID, and the old pods keep running
+during a rolling upgrade. A CHECK in the same release would make their system audit inserts fail. The writers
+inside a transaction would roll back and be retried on the next pass: agentd stuck-run and sandbox-wait
+`agent.mark_unhealthy`, `mcp_tool.sync` and `mcp_server.health`, `approval.expire`, `question.retarget`, and
+`question.answer`, `question.expire` and `question.dismiss` when the system resolves a question
+(`internal/questions`, `questions.go:429` at v0.1.0-rc.9). The reconciler writes `sandbox.recreate`,
+`sandbox.delete`, `sandbox.archive` and `agent.mark_unhealthy` after the work they record, outside a
+transaction, so those events would be lost, and for `sandbox.archive` the pass would also abort before it marks
+the sandbox archived. `token.use_failed` is best effort and would be dropped. With the CHECK one release later,
+every pod that can write an unnamed system actor is gone before it applies.
 A `cli` actor keeps the command as its ID (`keys forget`).
 
 **The ID format is frozen** (maintainer decision 2026-11-07, after review): `<component>:<function>`,
@@ -306,10 +317,9 @@ the audit log shows (`Actor.String()`), so the version history and the audit eve
 the same way. The edit to ADR 0098's wording lands with the first implementation issue, which also
 touches #316's code, so the two PRs do not both edit that ADR.
 
-Org chains follow the same rule from the second implementation issue on: the `system` writers in
-`koinon-reconciler` and `koinon-agentd` get component IDs (`koinon-reconciler:sandbox-repair`,
-`koinon-agentd:home-seed`, ...), and a `CHECK (actor_kind <> 'system' OR actor_id <> '') NOT VALID`
-on `audit_events` holds new rows to it without touching old ones.
+Org chains follow the same rule: the `system` writers in `koinon-reconciler` and `koinon-agentd` get
+component IDs (`koinon-reconciler:sandbox-repair`, `koinon-agentd:home-seed`, ...). The CHECK that holds
+new `audit_events` rows to it, without touching old ones, follows in #359 (see the rollout window above).
 
 ### 3. Scope for v0.1: everything install-wide
 
@@ -335,7 +345,7 @@ install event in the same start caused it.
 The actions are `org.identity_mode.set`, `org.group_mappings.set` and `org.bootstrap_sessions.revoked`. On
 the first start the creation is the one event: `platform_admin.bootstrap` stands for the grant that
 comes with it, and `platform_admin.grant` is written only when the grant insert adds a row for an
-admin that already exists (#329: the bootstrap event covers the grant made with it; this is the implementation's reading, open for review).
+admin that already exists (maintainer decision 2026-11-07: one event, `platform_admin.bootstrap`, which covers the grant made with it).
 
 **Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
 in three ways, and the ADR says so rather than pretending otherwise:
