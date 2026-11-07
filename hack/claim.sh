@@ -669,6 +669,9 @@ set_status() {
 assign() { gh api -X POST "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || warn "cannot assign $2 to #$1"; }
 unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=$2" >/dev/null 2>&1 || write_failed "cannot unassign $2 from #$1"; }
 add_label() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || write_failed "cannot label #$1 $2"; }
+# The updater runs on a GitHub App token without issues: write; its label only informs the author, so a
+# failed label write warns and never stops the update-branch step (koinon#315).
+add_label_soft() { gh api -X POST "repos/$REPO/issues/$1/labels" -f "labels[]=$2" >/dev/null 2>&1 || warn "cannot label #$1 $2"; }
 drop_label() { gh api -X DELETE "repos/$REPO/issues/$1/labels/$2" >/dev/null 2>&1 || true; }
 
 # upsert_comment N BODY: the one marked comment on the issue, edited in place.
@@ -1729,7 +1732,7 @@ cmd_update_oldest() {
   for n in $(jq -r '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "DIRTY" and ((.isInMergeQueue // false) | not)) | .number' <<<"$prs"); do
     if ! jq -e --argjson n "$n" '.[] | select(.number == $n) | .labels[]? | select(.name == "needs-update")' <<<"$prs" >/dev/null; then
       echo "#$n conflicts with main; labelling needs-update"
-      add_label "$n" needs-update
+      add_label_soft "$n" needs-update
     fi
   done
   for n in $(jq -r '.[] | select(.mergeStateStatus != "DIRTY" and ([.labels[]? | select(.name == "needs-update")] | length > 0)) | .number' <<<"$prs"); do
@@ -1740,7 +1743,7 @@ cmd_update_oldest() {
   head=$(jq -r --argjson n "$target" '.[] | select(.number == $n) | .headRefOid' <<<"$prs")
   gh_try -X PUT "repos/$REPO/pulls/$target/update-branch" -f "expected_head_sha=$head"
   if ((TRY_RC == 0)); then echo "updated #$target with main"
-  elif [[ $TRY_OUT == *"onflict"* ]]; then echo "#$target conflicts with main; labelling needs-update"; add_label "$target" needs-update
+  elif [[ $TRY_OUT == *"onflict"* ]]; then echo "#$target conflicts with main; labelling needs-update"; add_label_soft "$target" needs-update
   else die "update-branch failed for #$target: $TRY_OUT"; fi
 }
 

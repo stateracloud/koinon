@@ -911,6 +911,22 @@ if ((rp_rc != 0)); then ok "release-pr exits non-zero when a claim write dies"; 
 eq "release-pr still releases every closing issue after a failure" "$(grep -c released "$LOG")" 2
 rm -f "$LOG"
 
+# The updater's needs-update label is informational (its App token has no issues: write): a failing label
+# write in Actions mode must still reach update-branch for the target.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_upd.XXXXXX")
+up_rc=0
+(
+  GITHUB_ACTIONS=true; REPO=acme/koinon
+  gh() { case $* in *rules/branches*) echo false ;; *"/labels"*) return 1 ;; *update-branch*) echo "update-branch" >>"$LOG" ;; esac; }
+  server_now() { echo 1000; }; required_contexts() { echo '[]'; }
+  open_prs() { echo '[{"number":5,"autoMergeRequest":{},"mergeStateStatus":"DIRTY","labels":[]},{"number":6,"autoMergeRequest":{},"mergeStateStatus":"BEHIND","labels":[]}]'; }
+  update_target() { echo 6; }
+  cmd_update_oldest
+) >/dev/null 2>&1 || up_rc=$?
+eq "updater: a failing needs-update label does not fail the job" "$up_rc" 0
+eq "updater: a failing needs-update label still reaches update-branch" "$(grep -c update-branch "$LOG")" 1
+rm -f "$LOG"
+
 if [[ -z ${KOINON_CLAIM_TEST_REPO:-} ]]; then
   echo "(set KOINON_CLAIM_TEST_REPO=owner/scratch-repo to run the live tests)"
   exit "$fail"
