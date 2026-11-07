@@ -376,6 +376,30 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+
+			By("it refuses the ID of another removed KEK that still seals a value and is not the active one")
+			const otherRemoved = "kek-20251201-eeee"
+			_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
+				ON CONFLICT (singleton) DO NOTHING`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = jsonb_build_object('kek_id', $1::text)`, otherRemoved)
+			Expect(err).NotTo(HaveOccurred())
+			before, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect((keyscli.KeyAdmin{
+				Store: ks, AddID: otherRemoved, ActivateIfNoActive: true, Out: out,
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
+			}).Run(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+			after, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Data).To(Equal(before.Data), "the Secret is unchanged")
+			Expect(after.Data).NotTo(HaveKey(otherRemoved))
+			Expect(string(after.Data["active"])).To(Equal(lostKEK), "the active entry still names the lost KEK")
+			Expect(kms.Wraps()).To(BeZero())
+			_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = NULL`)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("with a new ID the recovery goes through")
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out,
 				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },

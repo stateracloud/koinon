@@ -144,13 +144,15 @@ func anyEnvelopeYet(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	return found, err
 }
 
-// kekIDUsedYet is keyscli.UsedID on a database that may not be migrated yet: a table that does not
-// exist holds no values.
+// kekIDUsedYet is keyscli.UsedID for the recovery path, which must not guess: the probe stops at the
+// first missing table, so on a database whose migrations have not all run it would say "unused" for
+// an ID that tables further on still carry. It fails closed instead, and the operator reruns the
+// recovery once the migrations are done.
 func kekIDUsedYet(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	used, err := keyscli.UsedID(ctx, pool, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
-		return false, nil
+		return false, fmt.Errorf("the database is not fully migrated (%s), so it cannot be told whether KEK ID %s is still in use; rerun the recovery once the migrations have finished: %w", pgErr.Message, id, err)
 	}
 	return used, err
 }
