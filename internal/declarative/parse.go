@@ -59,7 +59,7 @@ const (
 	// KeyCostAPIKey and KeyCostScope are optional, for anthropic and openai providers at their own
 	// API URL: the admin key the daily cost reconciliation reads, and the workspace, project or API
 	// key whose cost is the provider's (ADR 0056, amendment 2026-11-06).
-	KeyCostAPIKey = "costApiKey" //nolint:gosec // a data key name
+	KeyCostAPIKey = "costApiKey"
 	KeyCostScope  = "costScope"
 )
 

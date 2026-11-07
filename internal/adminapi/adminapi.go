@@ -420,8 +420,10 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 func (s *Server) UpdateProvider(ctx context.Context, req UpdateProviderRequestObject) (UpdateProviderResponseObject, error) {
 	p, actor := s.actor(ctx)
 	got, err := s.catalog.UpdateProvider(ctx, p.Org, actor, uid(req.ProviderId),
-		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId,
-			CostAPIKey: req.Body.CostApiKey, CostScope: req.Body.CostScope})
+		catalog.ProviderPatch{
+			Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId,
+			CostAPIKey: req.Body.CostApiKey, CostScope: req.Body.CostScope,
+		})
 	if err != nil {
 		st, e := s.problem(err)
 		return UpdateProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
