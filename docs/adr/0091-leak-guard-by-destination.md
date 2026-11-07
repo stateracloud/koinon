@@ -188,9 +188,11 @@ How the wait works, and what it leaves open (old issue 349 review, 2026-11-03):
   again as raw output, and an edit's two sides share most lines, so the texts of one report winnow
   to the same fingerprints more than once. The store holds each once and its write takes the
   repeats in one statement; a store that refuses them fails every report of such a tool, and the
-  run is given up worker after worker. A feed write that fails gives the run up whatever the
-  error, as a business event does (ADR 0074): telling a deterministic error from a transient one is
-  left to a classification shared with the run's event writes.
+  run is given up worker after worker. A feed write that fails gives the run up, as a business
+  event does (ADR 0074), and another worker resumes it. An error that cannot succeed on retry (a
+  database error of class 21, 22, 23, 42, 44 or 0A: `runoutcome.PermanentSQLState`) is not retried
+  and does not go through a takeover per worker: the run fails once, in the epoch that met it, with
+  a reason that names the SQLSTATE (koinon#123). Failing closed stays.
 - **A call outside a task adds no leg.** With no running run there is no feed to wait for and no
   leg is assumed: the call is decided on the legs the generation holds. Those are what earlier tasks
   left, and they only grow, so an `external-high` call outside a task from a generation that holds
