@@ -42,8 +42,8 @@ func TestCostBucketsDoNotOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// OpenAI convention: 1000 input tokens include 300 cache reads and 100 cache writes.
-	u := pricing.Split(1000, 300, 100, 50, 0)
+	// Disjoint buckets: 600 plain input, 300 cache reads, 100 cache writes.
+	u := pricing.Usage{Input: 600, CacheRead: 300, CacheWrite: 100, Output: 50}
 	if u.Input != 600 || u.Context() != 1000 {
 		t.Fatalf("split %+v", u)
 	}

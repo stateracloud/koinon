@@ -59,7 +59,9 @@ type Image struct{ Width, Height int }
 
 // Input describes one request whose usage is partly or wholly missing.
 type Input struct {
-	// ReportedInput and ReportedOutput are counts the provider did report (nil if not).
+	// ReportedInput and ReportedOutput are counts the provider did report (nil if not), as totals:
+	// input with its cache parts, output with its reasoning. The estimate works in totals; the
+	// caller splits the parts off (the ledger's usage record is disjoint).
 	ReportedInput, ReportedOutput *int64
 	// RequestBytes and ResponseBytes are UTF-8 byte counts of what was sent and what was
 	// received before the stream ended (-1 or 0 when unknown). No text is passed: Koinon never

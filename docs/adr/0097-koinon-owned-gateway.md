@@ -188,7 +188,9 @@ decodes from the access log:
 - model, API format (ADR 0069), streamed or not, HTTP status, whether the upstream answered, the
   gateway's error reason (a cut stream);
 - input, output, cache read, cache write and reasoning tokens, each with a "known" flag, in disjoint
-  buckets (input excludes cache, output includes reasoning, as today's `koinon.*` fields);
+  buckets (input excludes cache reads and writes, output excludes reasoning). The driver maps its
+  gateway's totals to them (agentgateway's `koinon.*` fields are totals); the ledger prices the
+  buckets as they stand and stores the provider's totals in `spend_entries` (#302);
 - request `max_tokens` and request bytes (for estimates and reserves, ADR 0056), response ID;
 - the gateway's own cost, optional, only while a driver has one.
 
