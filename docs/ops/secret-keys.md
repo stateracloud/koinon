@@ -439,11 +439,29 @@ next `koinon-api` start records the key set as `keys.observed`.
 | Action | Actor | When |
 | --- | --- | --- |
 | `keys.add`, `keys.activate`, `keys.retire` | `cli`, `keys add` / `keys activate` / `keys retire` | right after the Secret update |
-| `keys.rewrap`, `keys.reencrypt` | `cli`, `keys rewrap` / `keys reencrypt` | once per run, after the loop: rows done and failed, failures by kind (`unknown_kek`, `open`, `envelope`, `database`), the KEK usage before and after. A run that changes no row and fails none writes nothing; a run that wrote a `.started`, or failed a row, always writes it |
+| `keys.rewrap`, `keys.reencrypt` | `cli`, `keys rewrap` / `keys reencrypt` | once per run, after the loop: rows done and failed, failures by kind (`unknown_kek`, `open`, `envelope`, `wrap`, `database`), the KEK usage before and after. A run that changes no row and fails none writes nothing; a run that wrote a `.started`, or failed a row, always writes it |
 | `keys.rewrap.started`, `keys.reencrypt.started` | as above | only with `--record-started`, before the loop, when there is a row to change |
 | `keys.generated` | `system koinon-api:keys` | `koinon-api` made the first KEK Secret or the saved-work key |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` | `system koinon-api:key-admin` | the key-admin Job created the KEK Secret, added a KEK, recovered a lost active KEK, or bound a KEK to the install |
-| `keys.observed` | `system koinon-api:startup` | a start found the key set different from the last recorded key event |
+| `keys.observed` | `system koinon-api:startup`, or the actor of the key command that found the gap | a start found the key set different from the last recorded key event; or a key command (`add`, `activate`, `retire`, the key-admin Job) found the live KEKs different from it and recorded that before its own event |
+
+The failure kinds of `keys.rewrap` and `keys.reencrypt` are a fixed set: `unknown_kek` (the envelope
+names a KEK the key set does not hold), `open` (the envelope did not authenticate: wrong key or
+modified data), `envelope` (the stored value is not a readable envelope), `wrap` (the new envelope
+could not be made: the data key could not be wrapped, for example the KMS did not answer, or the value
+could not be sealed) and `database` (any other error, the row's transaction or the row listing).
+
+`--record-started` writes the `.started` event before the first row changes. If the chain cannot take
+it, the run is refused and says "nothing was changed": a run that could die half way is never started
+without its marker.
+
+The key-admin Job waits for the chain at most `--wait` in total, not per event. If it cannot read or
+write the chain, it prints a warning and succeeds; the Secret change stands and the next start records
+`keys.observed`.
+
+`koinon-api` does not know its Helm release name, so it lists the generated Secrets by the
+`koinon.dev/generated` label alone. Two releases in one namespace would see each other's generated
+Secrets in `keys.observed`.
 
 The summary of a key event holds `before` and `after`, each `{keks: [{id, fingerprint, wrapped_by,
 binding}], active, retired, generated: [{secret_name, uid, created_at}]}`. It names KEKs by ID and

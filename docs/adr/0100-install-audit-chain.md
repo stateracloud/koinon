@@ -330,10 +330,10 @@ new `audit_events` rows to it, without touching old ones, follows in #359 (see t
 | `platform_admin.bootstrap` (the first admin's creation, with the default org's ID as target) | not audited | `system koinon-api:bootstrap` |
 | `platform_admin.grant` by bootstrap (it re-grants the bootstrap admin on every start; an event whenever that grant inserts a row, so a removed grant coming back shows) | not audited | `system koinon-api:bootstrap` |
 | `trace.platform_destination.set`, `.delete`, `.test`; `trace.platform_ceiling.set` | the acting admin's personal org | user |
-| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (each with an optional `.started`), `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
+| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (only `keys.rewrap` and `keys.reencrypt` have an optional `.started`), `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
 | `keys.generated` (a KEK or the saved-work key `koinon-api` makes) | not audited | `system koinon-api:keys` |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` from the key-admin Job | not audited | `system koinon-api:key-admin` |
-| `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` |
+| `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` at a start; the actor of the key command (`cli` or `system koinon-api:key-admin`) when that command finds the gap before its own change |
 | `platform.settings.observed` (Helm-set platform settings that differ from the last recorded ones) | not audited | `system koinon-api:startup` |
 
 **The bootstrap admin's default org.** Bootstrap also changes the default org on every start (its
@@ -387,12 +387,30 @@ The key-set state that `after` (and `before`) carry is `{keks: [{id, fingerprint
 binding}], active, retired: [id], generated: [{secret_name, uid, created_at}]}`. A KEK that left the
 key set stays in `retired`, so `retire` is told from a KEK that never was there. The key events
 target `kek` (by ID), `secret` (by `secret_name`, for `keys.generated` and `keys.secret_created`) or
-`keys` (`keys.observed`, ID `keyset`). A writer that cannot list the generated Secrets (the CLI, and
-the key-admin Job, whose Role has `get` and `update` by name only) merges what it sees over the last
-recorded list, so it does not erase the saved-work key from the state. The key-admin Job retries
-the write while the chain is not ready and, when it still cannot write, warns and succeeds: the
-change stands and the next start records `keys.observed`. The CLI says so in an error
-(`ErrNotAudited`).
+`keys` (`keys.observed`, ID `keyset`). A writer that does not list the generated Secrets merges what
+it sees over the last recorded list, so it does not erase the saved-work key from the state. The CLI
+runs with `koinon-api`'s Role (`get` and `list` on Secrets) and chooses not to list; the key-admin
+Job's Role has `get` and `update` by name only, so it cannot. The key-admin Job retries the chain
+while it is not ready, with one `--wait` budget for the whole run (not per call), and when it still
+cannot read or write it warns and succeeds: the change stands, is not recorded, and the next start
+records `keys.observed`. The CLI says so in an error (`ErrNotAudited`).
+
+A key command takes its "before" from the live key set, so it must not absorb a change whose event was
+lost (an `activate` whose write failed, then an `add`). Before its own change, each command (the CLI's
+`add`, `activate` and `retire`, and the key-admin Job's) compares the live KEKs, the active KEK and
+the retired KEKs with the last recorded state and, when they differ, writes `keys.observed` first,
+under the advisory lock the start-up check uses. The actor of that event is the command's own, not
+`koinon-api:startup`: the writer is the command that found the gap, and a start-up actor would claim a
+start that did not happen. The command's event then has that observed state as its `before`. With no
+earlier key event there is nothing to compare, and the generated Secrets are left to the start-up
+check. The start-up check itself loads the key set and the generated Secrets inside the locked
+transaction, so a change recorded while it waited for the lock is not mistaken for a missing event.
+
+`koinon-api` does not know its Helm release name (no flag or environment variable carries it), so its
+label-selected list of generated Secrets (`koinon.dev/generated`) is not scoped by the chart's
+`koinon.dev/release` label: two releases in one namespace see each other's generated Secrets in their
+`keys.observed` state. Scoping it needs a new start-up input and is left for when a second release in
+a namespace is supported.
 
 **Helm-set settings.** `koinon-api` builds, on start, a fixed list of install-wide settings from its
 flags. For a flag that names a Secret, a file or a directory it records the name only, never the
