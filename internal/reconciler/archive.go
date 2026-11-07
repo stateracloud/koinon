@@ -2,7 +2,7 @@
 
 package reconciler
 
-// The archive tier (plan item AR1; ADR 0032 amendment, koinon-private#146 A7; practice B3).
+// The archive tier (plan item AR1; ADR 0032 amendment, old issue 146 A7; practice B3).
 //
 // A sandbox that has been stopped for ArchiveAfter is deleted together with its volume, but only
 // when its home's latest checkpoint is complete and was taken since the sandbox's last activity
@@ -34,7 +34,7 @@ const DefaultArchiveAfter = 7 * 24 * time.Hour
 const (
 	archivedPhase   = "Archived"
 	archivedMessage = "archived, restores on next run"
-	// idlePhase is recorded for an active agent whose sandbox is not created yet (koinon-private#315).
+	// idlePhase is recorded for an active agent whose sandbox is not created yet (old issue 315).
 	idlePhase   = "Idle"
 	idleMessage = "no sandbox yet, it starts with the first run"
 )
@@ -86,7 +86,7 @@ func (r *Reconciler) archive(ctx context.Context, w *work, ws string, sb executi
 	}
 	r.log.Info("archived a stopped sandbox and its volume", w.logAttrs()...)
 	if err := audit.RecordErr(ctx, r.q, audit.Event{
-		Org: w.org.ID, Actor: audit.System(), Action: "sandbox.archive", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-archive"), Action: "sandbox.archive", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": w.names().Sandbox, "stopped_for": r.cfg.Now().Sub(w.sb.StoppedAt.Time).Round(time.Second).String(), "home_generation": w.sb.HomeGeneration.String},
 	}); err != nil {
 		return false, err

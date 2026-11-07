@@ -5,8 +5,8 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_struct, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/audit/v1alpha1/audit.proto.
  */
 export const file_koinon_audit_v1alpha1_audit: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vYXVkaXQvdjFhbHBoYTEvYXVkaXQucHJvdG8SFWtvaW5vbi5hdWRpdC52MWFscGhhMSKoAgoKQXVkaXRFdmVudBIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEgoKYWN0b3Jfa2luZBgDIAEoCRIQCghhY3Rvcl9pZBgEIAEoCRIOCgZhY3Rpb24YBSABKAkSEwoLdGFyZ2V0X2tpbmQYBiABKAkSEQoJdGFyZ2V0X2lkGAcgASgJEigKB3N1bW1hcnkYCCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnJlcXVlc3RfaWQYCSABKAkSLgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEQoJY2hhaW5fc2VxGAsgASgDEhEKCXByZXZfaGFzaBgMIAEoCRIMCgRoYXNoGA0gASgJItcBCgtMaXN0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSKQoFc2luY2UYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEikKBXVudGlsGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1hY3Rpb25fcHJlZml4GAQgASgJEhIKCmFjdG9yX2tpbmQYBSABKAkSEAoIYWN0b3JfaWQYBiABKAkSEQoJcGFnZV9zaXplGAcgASgFEhIKCnBhZ2VfdG9rZW4YCCABKAkiWgoMTGlzdFJlc3BvbnNlEjEKBmV2ZW50cxgBIAMoCzIhLmtvaW5vbi5hdWRpdC52MWFscGhhMS5BdWRpdEV2ZW50EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCTJkCgxBdWRpdFNlcnZpY2USVAoETGlzdBIiLmtvaW5vbi5hdWRpdC52MWFscGhhMS5MaXN0UmVxdWVzdBojLmtvaW5vbi5hdWRpdC52MWFscGhhMS5MaXN0UmVzcG9uc2UiA5ACAUJRWk9naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hdWRpdC92MWFscGhhMTthdWRpdHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("CiFrb2lub24vYXVkaXQvdjFhbHBoYTEvYXVkaXQucHJvdG8SFWtvaW5vbi5hdWRpdC52MWFscGhhMSKoAgoKQXVkaXRFdmVudBIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEgoKYWN0b3Jfa2luZBgDIAEoCRIQCghhY3Rvcl9pZBgEIAEoCRIOCgZhY3Rpb24YBSABKAkSEwoLdGFyZ2V0X2tpbmQYBiABKAkSEQoJdGFyZ2V0X2lkGAcgASgJEigKB3N1bW1hcnkYCCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnJlcXVlc3RfaWQYCSABKAkSLgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEQoJY2hhaW5fc2VxGAsgASgDEhEKCXByZXZfaGFzaBgMIAEoCRIMCgRoYXNoGA0gASgJIokCCgtMaXN0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSKQoFc2luY2UYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEikKBXVudGlsGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1hY3Rpb25fcHJlZml4GAQgASgJEhIKCmFjdG9yX2tpbmQYBSABKAkSEAoIYWN0b3JfaWQYBiABKAkSEQoJcGFnZV9zaXplGAcgASgFEhIKCnBhZ2VfdG9rZW4YCCABKAkSMAoFc2NvcGUYCSABKA4yIS5rb2lub24uYXVkaXQudjFhbHBoYTEuQXVkaXRTY29wZSJaCgxMaXN0UmVzcG9uc2USMQoGZXZlbnRzGAEgAygLMiEua29pbm9uLmF1ZGl0LnYxYWxwaGExLkF1ZGl0RXZlbnQSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJKlcKCkF1ZGl0U2NvcGUSGwoXQVVESVRfU0NPUEVfVU5TUEVDSUZJRUQQABITCg9BVURJVF9TQ09QRV9PUkcQARIXChNBVURJVF9TQ09QRV9JTlNUQUxMEAIyZAoMQXVkaXRTZXJ2aWNlElQKBExpc3QSIi5rb2lub24uYXVkaXQudjFhbHBoYTEuTGlzdFJlcXVlc3QaIy5rb2lub24uYXVkaXQudjFhbHBoYTEuTGlzdFJlc3BvbnNlIgOQAgFCUVpPZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYXVkaXQvdjFhbHBoYTE7YXVkaXR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} without secret values.
@@ -29,6 +29,8 @@ export type AuditEvent = Message<"koinon.audit.v1alpha1.AuditEvent"> & {
   id: string;
 
   /**
+   * org_id is empty for an install event.
+   *
    * @generated from field: string org_id = 2;
    */
   orgId: string;
@@ -79,7 +81,8 @@ export type AuditEvent = Message<"koinon.audit.v1alpha1.AuditEvent"> & {
   createdAt?: Timestamp | undefined;
 
   /**
-   * chain_seq, prev_hash and hash are the org's hash chain, the hashes in lower-case hex. See ADR 0023.
+   * chain_seq, prev_hash and hash are the org's hash chain (the install chain for an install event),
+   * the hashes in lower-case hex. See ADR 0023 and ADR 0100.
    *
    * @generated from field: int64 chain_seq = 11;
    */
@@ -108,7 +111,8 @@ export const AuditEventSchema: GenMessage<AuditEvent> = /*@__PURE__*/
  */
 export type ListRequest = Message<"koinon.audit.v1alpha1.ListRequest"> & {
   /**
-   * org_id names the org. Only a platform admin may leave it empty, to read every org.
+   * org_id names the org. Only a platform admin may leave it empty, to read every org. With scope
+   * AUDIT_SCOPE_INSTALL it must be empty.
    *
    * @generated from field: string org_id = 1;
    */
@@ -160,6 +164,14 @@ export type ListRequest = Message<"koinon.audit.v1alpha1.ListRequest"> & {
    * @generated from field: string page_token = 8;
    */
   pageToken: string;
+
+  /**
+   * scope defaults to the org scope (unspecified or AUDIT_SCOPE_ORG). AUDIT_SCOPE_INSTALL needs a
+   * platform admin.
+   *
+   * @generated from field: koinon.audit.v1alpha1.AuditScope scope = 9;
+   */
+  scope: AuditScope;
 };
 
 /**
@@ -194,6 +206,40 @@ export const ListResponseSchema: GenMessage<ListResponse> = /*@__PURE__*/
   messageDesc(file_koinon_audit_v1alpha1_audit, 2);
 
 /**
+ * AuditScope selects which audit chain List reads.
+ *
+ * @generated from enum koinon.audit.v1alpha1.AuditScope
+ */
+export enum AuditScope {
+  /**
+   * AUDIT_SCOPE_UNSPECIFIED reads the org scope, as before the install chain existed.
+   *
+   * @generated from enum value: AUDIT_SCOPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * AUDIT_SCOPE_ORG reads the events of an org (or, for a platform admin with no org_id, of every org).
+   *
+   * @generated from enum value: AUDIT_SCOPE_ORG = 1;
+   */
+  ORG = 1,
+
+  /**
+   * AUDIT_SCOPE_INSTALL reads the install chain: actions that belong to no org (ADR 0100).
+   *
+   * @generated from enum value: AUDIT_SCOPE_INSTALL = 2;
+   */
+  INSTALL = 2,
+}
+
+/**
+ * Describes the enum koinon.audit.v1alpha1.AuditScope.
+ */
+export const AuditScopeSchema: GenEnum<AuditScope> = /*@__PURE__*/
+  enumDesc(file_koinon_audit_v1alpha1_audit, 0);
+
+/**
  * AuditService reads the audit log (ADR 0023). The log is written by the services themselves and is
  * append-only; there is no way to change it here.
  *
@@ -204,7 +250,8 @@ export const AuditService: GenService<{
    * List returns audit events, newest first. An org admin or owner lists the events of their org
    * (org_id is required for them). A platform admin names any org, or leaves org_id empty to read
    * every org. A caller with a lower role in the org is refused, and an org the caller is not part
-   * of is NotFound.
+   * of is NotFound. With scope AUDIT_SCOPE_INSTALL it returns the install chain (ADR 0100): platform
+   * admins only, org_id must be empty, and everyone else gets PermissionDenied.
    *
    * @generated from rpc koinon.audit.v1alpha1.AuditService.List
    */

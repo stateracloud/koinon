@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-31
 - Relates to: [0045](0045-openshell-hardening-defaults.md), [0075](0075-isolation-tiers.md), [0020](0020-agent-builder-and-templates.md), [0027](0027-repo-and-versioning.md)
-- Issue: koinon-private#314 (decision by procoduck, 2026-10-31); this ADR covers the first slice
+- Issue: old issue 314 (decision by procoduck, 2026-10-31); this ADR covers the first slice
 
 ## Context
 
@@ -68,4 +68,4 @@ that cannot be reclaimed.
 
 ## Links
 
-- Issue koinon-private#314
+- Old issue 314

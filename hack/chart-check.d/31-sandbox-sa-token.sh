@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154,SC2046,SC2206,SC2015
-# Chart assertions: no ServiceAccount token on sandbox workload pods (ADR 0006, koinon-private#12).
+# Chart assertions: no ServiceAccount token on sandbox workload pods (ADR 0006, old issue 12).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 pol=templates/sandbox-policy.yaml

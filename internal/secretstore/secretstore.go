@@ -27,7 +27,7 @@
 //   - [Local] (kind, development, and every install before a KMS is configured): there is no
 //     wrapping key. The KEK Secret holds the KEK itself, and its backup is the key export
 //     ("koinon-api keys export").
-//   - A KMS adapter (OpenBao/Vault transit koinon-private#416, AWS KMS koinon-private#417; GCP and Azure later): the wrapping
+//   - A KMS adapter (OpenBao/Vault transit old issue 416, AWS KMS old issue 417; GCP and Azure later): the wrapping
 //     key never leaves the KMS. The KEK Secret holds the KMS's ciphertext of each KEK, and each
 //     process signs in with its pod identity (Kubernetes auth; the AWS default chain with IRSA):
 //     no credential in Helm values, env or a sandbox.
@@ -41,7 +41,7 @@
 //
 // What exists today: the interface, [Local], the stored form and [Fingerprint] (printed by
 // "keys status" and "keys export"). Not yet: the fingerprints recorded in the database and the
-// unreachable-key metric that calls [Wrapper.Probe] (415b), and the KMS adapters (koinon-private#416, koinon-private#417).
+// unreachable-key metric that calls [Wrapper.Probe] (415b), and the KMS adapters (old issue 416, old issue 417).
 //
 // # Additional authenticated data
 //

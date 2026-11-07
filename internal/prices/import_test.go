@@ -78,7 +78,7 @@ var _ = Describe("an import beside a fetch with the same values", func() {
 		for _, e := range pv.Entries {
 			if e.Entry.ID == got.Entry.ID {
 				Expect(e.Provenance.VouchedBy).To(BeEmpty())
-				Expect(e.Provenance.Approver).To(Equal("auto"))
+				Expect(e.Provenance.Approver).To(Equal("system koinon-api:price-refresh"))
 			}
 		}
 	})
@@ -126,14 +126,14 @@ var _ = Describe("what an import file says that the install cannot check", func(
 
 	It("does not delay the scheduled fetch, whatever fetch time the file carries", func(ctx SpecContext) {
 		pool, r, a, now := setup(ctx)
-		_, err := r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		_, err := r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.calls).To(Equal(1))
 
 		*now = now.Add(25 * time.Hour)
 		_, err = importSnap(ctx, r, snapAt(*now, 1)) // the newest row of the source, by fetched_at
 		Expect(err).NotTo(HaveOccurred())
-		_, err = r.Tick(ctx, prices.RefreshOn, 24*time.Hour)
+		_, err = r.TickForTest(ctx, prices.RefreshOn, 24*time.Hour)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.calls).To(Equal(2), "the import is not the install's last fetch")
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_source_fetches WHERE trigger = 'import' AND fetched_at = $1`, *now)).To(Equal(1),
@@ -210,7 +210,7 @@ var _ = Describe("a stored platform entry this binary refuses", func() {
 		// A person's rollback to that version writes it without the bad entries, and says so.
 		_, err = svc.Rollback(ctx, audit.CLI("test"), v.Version)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(countRows(ctx, pool, `SELECT count(*) FROM audit_events WHERE action = 'platform_price.rollback' AND (summary->'after'->>'droppedBadEntries')::int = 2`)).To(Equal(1))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'platform_price.rollback' AND (summary->'after'->>'droppedBadEntries')::int = 2`)).To(Equal(1))
 	})
 
 	It("keeps the auto-apply from writing a version that would leave the bad entries out", func(ctx SpecContext) {

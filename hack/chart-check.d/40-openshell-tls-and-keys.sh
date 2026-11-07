@@ -4,7 +4,7 @@
 # Chart assertions: the OpenShell channel TLS, key-encryption keys, DBOS, gateway egress.
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-# The OpenShell channel needs mTLS (koinon-private#103): without a client TLS Secret the chart renders only with
+# The OpenShell channel needs mTLS (old issue 103): without a client TLS Secret the chart renders only with
 # an explicit openshell.insecure=true, never with both, and each choice reaches the components.
 if render_raw >/dev/null 2>"$out/tls.err"; then fail "no client TLS Secret and no insecure must not render"; fi
 grep -q 'openshell.clientTLSSecret is required' "$out/tls.err" && grep -q 'openshell.insecure=true' "$out/tls.err" || fail "the TLS error must name both openshell.clientTLSSecret and openshell.insecure"
@@ -54,7 +54,7 @@ n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true
 # The DBOS runtime (ADR 0066) is opt-in; its tables come from the migration Job.
 lacks "the DBOS runtime is off by default" '"--durable"' --show-only templates/deployments.yaml
 lacks "the migration Job leaves the DBOS schema alone by default" '"--durable"' --show-only templates/migrate-job.yaml
-has "api.durable.enabled makes the migration Job create the DBOS tables" '"migrate", "--wait", "5m", "--durable"' --set api.durable.enabled=true --show-only templates/migrate-job.yaml
+has "api.durable.enabled makes the migration Job create the DBOS tables" '"migrate", "--wait", "4m", "--durable"' --set api.durable.enabled=true --show-only templates/migrate-job.yaml
 has "api.durable.enabled starts the DBOS runtime" '"--durable"' --set api.durable.enabled=true --show-only templates/deployments.yaml
 # The gateway mounts the provider keys Secret, and that Secret only.
 has "gateway mounts the provider keys" 'mountPath: /secrets/providers$' --show-only templates/gateway-standalone.yaml

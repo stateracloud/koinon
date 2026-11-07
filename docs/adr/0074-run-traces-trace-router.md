@@ -3,7 +3,7 @@
 - Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below)
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
-- Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), [koinon-private#213](https://github.com/stateracloud/koinon-private/issues/213)
+- Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), old issue 213
 - Pending verification: OpenShell passing `traceparent` through, and agentgateway v1.7.0's tracing policy with CEL attributes (both not yet tested)
 
 ## Context
@@ -498,7 +498,7 @@ by the amendment of the same date in [0050](0050-spend-ledger-ingestion-and-net-
 internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token from the Secret
 `koinon-otlp-token`. The gateway's log export and koinon-agentd's span export both send it
 (`--otlp-endpoint` and `--otlp-token-file` on koinon-agentd, `KOINON_OTLP_ENDPOINT` and
-`KOINON_OTLP_TOKEN_FILE` in the chart). This closes issue koinon-private#52.
+`KOINON_OTLP_TOKEN_FILE` in the chart). This closes old issue 52.
 
 ## Amendment (2026-10-30): how koinon-agentd emits the run's spans (rc.9)
 
@@ -722,14 +722,14 @@ session: one per task, spanning its runs, reloaded by each run (ADR 0029, 0051).
 tracing backend builds from `session.id` and `gen_ai.conversation.id`, which Koinon sets to the run
 ID. Read "session" in this ADR's trace attributes as "trace session".
 
-## Amendment (2026-10-31, koinon-private#343): stored run content is items, diagnostic events never fence, per-org retention
+## Amendment (2026-10-31, old issue 343): stored run content is items, diagnostic events never fence, per-org retention
 
 Decision of procoduck, 2026-10-31 ([#50](https://github.com/stateracloud/koinon/issues/50)): as
 proposed, shipping in v0.1.x at P1, with a 30-day default retention. The finding: agentd writes every
 ACP chunk as a synchronous `run_events` row and fences the run if a write fails; at about 9,000 rows a
 run and 10k runs a day that is about 90 M rows a day, and the content is stored whatever the org's
 trace content level. [0023](0023-observability-and-audit.md) carries the matching amendment for the
-event classes. The code lands in koinon-private#344 (items), koinon-private#345 (business and diagnostic events) and #69
+event classes. The code lands in old issue 344 (items), old issue 345 (business and diagnostic events) and #69
 (retention and purge), which point here.
 
 1. **`run_events` stores completed items.** agentd coalesces ACP chunks into completed items
@@ -757,15 +757,15 @@ event classes. The code lands in koinon-private#344 (items), koinon-private#345 
    level (decision 6): items are always stored, with the always-on secret scrubber, and the trace level
    governs only what the router exports to trace destinations. Retention is the privacy control for
    stored content.
-7. **Tool calls and message chunks are business events** (koinon-private#345, 2026-11-02). This overrides item 2
+7. **Tool calls and message chunks are business events** (old issue 345, 2026-11-02). This overrides item 2
    for tool calls: `acp.tool_call` and `acp.tool_call_update` are business events, not diagnostic
    ones as "tool-call items" in item 2 says, and so are the agent's message chunks
    (`acp.agent_message_chunk`). The rule that decides it: an event the run's outcome or the task's
    reply reads is business. The reply (`internal/runreply`) is built from the message chunks and uses
    the tool calls as the boundaries between the agent's messages; a dropped tool call would merge the
-   agent's interim narration ("I'll pull the data ...") into the reply the task posts. When koinon-private#344 turns
+   agent's interim narration ("I'll pull the data ...") into the reply the task posts. When old issue 344 turns
    chunks into items, the reply still needs those boundaries, so the items keep the class.
-8. **Live chunks travel in the NOTIFY payload** (koinon-private#344, procoduck, 2026-11-02 and 2026-11-04). Chunks are
+8. **Live chunks travel in the NOTIFY payload** (old issue 344, procoduck, 2026-11-02 and 2026-11-04). Chunks are
    live-only (item 1), and the way to the run page is the `koinon_run` NOTIFY that already reaches every
    API replica. agentd batches the chunks of a run about every 100 ms (`runwatch.ChunkPublisher`),
    joins neighbours of one kind and item, and sends each batch as `<org_id>/<run_id>/<JSON array of {k, t, i}>`,
@@ -797,7 +797,7 @@ event classes. The code lands in koinon-private#344 (items), koinon-private#345 
 
 - ~~The metric name for failed diagnostic writes.~~ `koinon_agentd_run_event_write_failures_total`,
   labelled `class` (`diagnostic`, `business`) and `reason` (`timeout`, `conn`, `transient`, `canceled`,
-  `other`) (koinon-private#345). It counts business writes too: those abandon the run, as before. The class of every kind
+  `other`) (old issue 345). It counts business writes too: those abandon the run, as before. The class of every kind
   agentd writes is the table in `internal/runoutcome/eventclass.go`; an unlisted kind is business. A
   diagnostic write is tried twice, each try with a 2 s deadline, a business one five times; a write that matches no row fences the
   run whatever its class, since the run is no longer the worker's.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: agentd rollout strategy and PodDisruptionBudget (ADR 0085, koinon-private#405).
+# Chart assertions: agentd rollout strategy and PodDisruptionBudget (ADR 0085, old issue 405).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 doc=$(render --show-only templates/deployments.yaml | awk 'BEGIN{RS="\n---\n"} /component: agentd/')

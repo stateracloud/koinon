@@ -65,7 +65,7 @@ RETURNING *;
 -- name: AppendCanceledRunEventOnce :one
 -- AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
 -- stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
--- what was said (koinon-private#344). Nothing else is recorded this way. No row: another epoch, the run is not
+-- what was said (old issue 344). Nothing else is recorded this way. No row: another epoch, the run is not
 -- canceled, or the event exists.
 WITH run AS (
     UPDATE runs

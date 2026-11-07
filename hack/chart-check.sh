@@ -26,7 +26,7 @@ out=$(mktemp -d "${TMPDIR:-/tmp}/chart-check.XXXXXX")
 trap 'rm -rf "$out"' EXIT
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
-# The chart requires openshell.clientTLSSecret or openshell.insecure=true (koinon-private#103); the default
+# The chart requires openshell.clientTLSSecret or openshell.insecure=true (old issue 103); the default
 # values set neither, so they are rendered with insecure, as are the assertions below (render).
 # The same goes for openshell.address (required, no default).
 # Value files choose for themselves. insecure_for <values file>: the extra helm arguments.

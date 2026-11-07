@@ -39,9 +39,9 @@ var _ = Describe("List", func() {
 	}
 
 	It("lists one org's events, newest first, and never another org's", func(ctx SpecContext) {
-		rec(ctx, org, audit.System(), "test.a")
-		rec(ctx, other, audit.System(), "test.secret")
-		rec(ctx, org, audit.System(), "test.b")
+		rec(ctx, org, audit.System("koinon-test:spec"), "test.a")
+		rec(ctx, other, audit.System("koinon-test:spec"), "test.secret")
+		rec(ctx, org, audit.System("koinon-test:spec"), "test.b")
 		rows, next, err := audit.List(ctx, q, audit.Filter{Org: org})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(actions(rows)).To(Equal([]string{"test.b", "test.a"}))
@@ -56,7 +56,7 @@ var _ = Describe("List", func() {
 		u := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 		rec(ctx, org, audit.User(u), "approval.approve")
 		rec(ctx, org, audit.User(u), "approval.deny")
-		rec(ctx, org, audit.System(), "agent.create")
+		rec(ctx, org, audit.System("koinon-test:spec"), "agent.create")
 		rec(ctx, org, audit.Token(u), "agent.archive")
 
 		rows, _, err := audit.List(ctx, q, audit.Filter{Org: org, ActionPrefix: "approval."})
@@ -85,7 +85,7 @@ var _ = Describe("List", func() {
 
 	It("pages with a cursor and reaches every event exactly once", func(ctx SpecContext) {
 		for i := range 7 {
-			rec(ctx, org, audit.System(), fmt.Sprintf("test.p%d", i))
+			rec(ctx, org, audit.System("koinon-test:spec"), fmt.Sprintf("test.p%d", i))
 		}
 		var got []string
 		token := ""

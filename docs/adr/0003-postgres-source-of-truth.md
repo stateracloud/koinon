@@ -68,7 +68,7 @@ flowchart LR
 - Does the reconciler watch Postgres (outbox polling, LISTEN/NOTIFY as a wake-up) or get called by
   the API? See [0010](0010-eventing.md).
 
-## Amendment (2026-10-26, issue koinon-private#98): role passwords are created by a hook Job
+## Amendment (2026-10-26, old issue 98): role passwords are created by a hook Job
 
 The chart no longer generates the CNPG role passwords (`randAlphaNum` plus a `lookup` of the live
 Secret). `lookup` returns nothing under `helm template`, Argo CD and Flux, so every sync produced

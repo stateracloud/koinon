@@ -24,7 +24,7 @@ func serveModel(ctx context.Context, e *env, org, name string, priced bool) (pro
 		org, "prov-"+guuid.NewString()).Scan(&providerID)).To(Succeed())
 	_, err := e.pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, org, providerID, name)
 	Expect(err).NotTo(HaveOccurred())
-	// The org's first model is its default, as catalog.CreateModel does (koinon-private#256).
+	// The org's first model is its default, as catalog.CreateModel does (old issue 256).
 	_, err = e.pool.Exec(ctx, `UPDATE orgs SET default_model = $2 WHERE id = $1 AND default_model IS NULL`, org, name)
 	Expect(err).NotTo(HaveOccurred())
 	if priced {

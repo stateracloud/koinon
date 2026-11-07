@@ -38,7 +38,7 @@ want() {
   got=$(env "$@" hack/e2e-decide.sh | sed -n 's/^needed=//p' | tail -1)
   if [[ $got == "$expect" ]]; then echo "ok: $desc"; else echo "FAIL: $desc (got '$got', want $expect)" >&2; fail=1; fi
 }
-# req <true|false> <description> [VAR=value...]: the `required=` line (what e2e result enforces, koinon-private#562).
+# req <true|false> <description> [VAR=value...]: the `required=` line (what e2e result enforces, old issue 562).
 req() {
   local expect=$1 desc=$2 got
   shift 2
@@ -59,7 +59,7 @@ want true "PR: full-rule failure runs the e2e" EVENT=pull_request STUB_FULL=2
 want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
 want false "PR: nothing relevant says so" EVENT=pull_request
 summary_has "nothing in this pull request"
-# koinon-private#468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
+# old issue 468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
 PRV=(PR=524 GH_REPO=o/r)
 want true "opened: the label added after the event counts" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["e2e"]'
 want false "opened: no label now either" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["bug"]'

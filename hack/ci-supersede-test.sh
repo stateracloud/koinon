@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of hack/ci-supersede.sh (koinon-private#675). gh is a stub: the run list and the PR head come from
+# Offline test of hack/ci-supersede.sh (old issue 675). gh is a stub: the run list and the PR head come from
 # env vars, every cancel is logged.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.

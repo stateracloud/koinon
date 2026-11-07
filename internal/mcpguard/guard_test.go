@@ -159,12 +159,12 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			}
 		}
 		Expect(hash).NotTo(BeEmpty(), tool)
-		_, err = svc.SetToolDeclaration(ctx, org, audit.System(), server.ID, tool, hash, d)
+		_, err = svc.SetToolDeclaration(ctx, org, audit.System("koinon-test:spec"), server.ID, tool, hash, d)
 		Expect(err).NotTo(HaveOccurred())
 	}
 	newServer := func(ctx SpecContext, name string, legs []string, tools ...string) mcpservers.Server {
 		GinkgoHelper()
-		s, err := svc.Create(ctx, org, audit.System(), user, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
+		s, err := svc.Create(ctx, org, audit.System("koinon-test:spec"), user, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
 		Expect(err).NotTo(HaveOccurred())
 		var listed []mcpservers.ListedTool
 		for _, t := range tools {
@@ -173,11 +173,11 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		_, err = svc.SyncTools(ctx, org, uuidOf(s.ID), listed)
 		Expect(err).NotTo(HaveOccurred())
 		for _, t := range tools {
-			_, err = svc.SetTier(ctx, org, audit.System(), s.ID, t, "auto")
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), s.ID, t, "auto")
 			Expect(err).NotTo(HaveOccurred())
 		}
 		if legs != nil {
-			s, err = svc.SetDataClass(ctx, org, audit.System(), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: legs})
+			s, err = svc.SetDataClass(ctx, org, audit.System("koinon-test:spec"), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: legs})
 			Expect(err).NotTo(HaveOccurred())
 		}
 		return s
@@ -235,13 +235,13 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(orgsettings.NewService(pool).ReplaceCodeHostRepos(ctx, org, audit.System(), conn.String(), []orgsettings.CodeHostRepo{
+		Expect(orgsettings.NewService(pool).ReplaceCodeHostRepos(ctx, org, audit.System("koinon-test:spec"), conn.String(), []orgsettings.CodeHostRepo{
 			{Owner: "northwind", Name: "platform-handbook", Visibility: "private"},
 		}, time.Now())).To(Succeed())
 		// tracker acts through that connection: its code-host tool is looked up in its list.
 		linked := mcpservers.DefaultDeclaration()
 		linked.CodeHostConnection = conn.String()
-		tracker, err = svc.SetDataClass(ctx, org, audit.System(), tracker.ID, linked)
+		tracker, err = svc.SetDataClass(ctx, org, audit.System("koinon-test:spec"), tracker.ID, linked)
 		Expect(err).NotTo(HaveOccurred())
 
 		opts = mcpguard.Options{
@@ -344,7 +344,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
 	})
 
-	Describe("a tool's declared result legs (ADR 0091 decision 4, koinon-private#643)", func() {
+	Describe("a tool's declared result legs (ADR 0091 decision 4, old issue 643)", func() {
 		legsOf := func(ctx SpecContext) mcpguard.Legs {
 			GinkgoHelper()
 			var l mcpguard.Legs
@@ -820,7 +820,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		})
 
 		It("treats the scope's own repository as external-high on a server linked to no code-host connection", func(ctx SpecContext) {
-			_, err := svc.SetDataClass(ctx, org, audit.System(), tracker.ID, mcpservers.DefaultDeclaration())
+			_, err := svc.SetDataClass(ctx, org, audit.System("koinon-test:spec"), tracker.ID, mcpservers.DefaultDeclaration())
 			Expect(err).NotTo(HaveOccurred())
 			r := call(ctx, "tracker", "commit_file", map[string]any{"owner": "northwind", "repo": "platform-handbook", "content": "x"})
 			Expect(reason(r)).To(HavePrefix("approval requested"))

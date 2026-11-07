@@ -57,7 +57,7 @@ var _ = Describe("Driver", func() {
 		Expect(del.configs[3]).To(Equal(del.configs[0]))
 	})
 
-	It("fails only the key of an agent with an invalid limit, and delivers the rest (issue koinon-private#245)", func(ctx SpecContext) {
+	It("fails only the key of an agent with an invalid limit, and delivers the rest (old issue 245)", func(ctx SpecContext) {
 		del := &recordingDeliverer{}
 		d := &standalone.Driver{Deliverer: del, Options: standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}}
 		s := gateway.State{}

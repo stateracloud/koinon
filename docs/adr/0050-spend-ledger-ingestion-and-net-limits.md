@@ -105,7 +105,7 @@ Amendment 2026-10-24 (PV2, BG1): the ledger recomputes cost itself and the net l
 remaining amount of the agent's daily limit, the org's monthly cap and the platform ceiling; the
 counter generation digests every spend that amount derives from. See ADR 0056.
 
-## Amendment (2026-10-29): exact decimals at the gateway edge, one bad key fails alone (issue koinon-private#245)
+## Amendment (2026-10-29): exact decimals at the gateway edge, one bad key fails alone (old issue 245)
 
 Standalone agentgateway v1.7.0 rejects its whole config when any USD budget has more than nine
 fraction digits. The ledger works in pico-USD (twelve digits) and the limit was a float64, so the
@@ -159,7 +159,7 @@ revocation, model or limit applied until the digits went away. Decisions:
    on the gateway's stats listener. A preflight check can be added when preflight grows a
    post-install mode.
 
-## Amendment (2026-10-30): the OTLP receiver requires a bearer token (issue koinon-private#52, ADR 0074)
+## Amendment (2026-10-30): the OTLP receiver requires a bearer token (old issue 52, ADR 0074)
 
 Decision 1 said the receiver has no authentication and relies on the NetworkPolicy. Every request to
 koinon-api's internal OTLP listener (`/v1/logs` and, from ADR 0074, `/v1/traces`) now needs

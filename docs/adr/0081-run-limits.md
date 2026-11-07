@@ -3,8 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-29
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (the run level of the net key limit is built), [0050](0050-spend-ledger-ingestion-and-net-limits.md) (decision 5, the token cap, is replaced), [0049](0049-v01-scope-decisions.md) (the per-run caps)
-- Relates to: [0066](0066-triggers-and-scheduling.md) (the wrap-up notice of issue koinon-private#183), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability-and-audit.md)
-- Issue: koinon-private#243 (decision by procoduck, 2026-10-29); the per-task spend cap of koinon-private#183 comes after v0.1.0
+- Relates to: [0066](0066-triggers-and-scheduling.md) (the wrap-up notice of old issue 183), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0068](0068-prompt-caching-always-on.md), [0023](0023-observability-and-audit.md)
+- Issue: old issue 243 (decision by procoduck, 2026-10-29); the per-task spend cap of old issue 183 comes after v0.1.0
 
 ## Context
 
@@ -14,7 +14,7 @@ puts cache reads and writes inside the input count, so the cap measured roughly 
 the number of requests*. On the rc.5 home-lab run two researcher tasks failed at 2.8M tokens after 29
 and 33 requests, six minutes in, with a 1M cap. A cache-heavy loop is cheap: with prompt caching on
 (ADR 0068, in effect since rc.5) the same requests cost a few cents. The cap stopped the cheapest
-runs and said nothing about cost or about loops (issue koinon-private#243).
+runs and said nothing about cost or about loops (old issue 243).
 
 The research (session scratchpad, `research/run-cap.md`, 2026-10-29) found that no provider bills
 "tokens"; every one bills token types at different rates. Tokens differ in size between models
@@ -52,7 +52,7 @@ with compaction instead of a stop.
    key level: agentgateway has no request count per key, and the ledger's count is exact.
 4. **One generic spend-scope check.** `scheduler.CheckRunLimits` reads the run's usage from the
    ledger and walks a list of *spend scopes*, each a budget level with the spend inside it
-   (`budget.RunLevel` is the only one). The per-task cap of koinon-private#183 is another entry of that list: a
+   (`budget.RunLevel` is the only one). The per-task cap of old issue 183 is another entry of that list: a
    level named for the task that sums the task's entries, with a nullable limit column on the task.
    The check, the cancel, the net key limit and the reconciler's stop need no change. It is not
    built here, and nothing in the run limits assumes it never will be.
@@ -68,10 +68,10 @@ with compaction instead of a stop.
    reasoning where the provider reports it) is summed from its ledger entries and returned on `Cost`
    with `GetRun` and `GetTask`. `limits.run.maxTokens` is **deprecated and ignored**: the template
    schema still accepts it, the proto fields `RunLimits.max_tokens` and `Run.max_tokens` stay
-   (marked deprecated, like `asked_to` in koinon-private#232, so `buf breaking` passes), the column
+   (marked deprecated, like `asked_to` in old issue 232, so `buf breaking` passes), the column
    `runs.max_tokens` stays and is no longer written, and nothing cancels a run on it. Runs queued
    before this decision have no request or spend limit; they run to their time limit.
-7. **The wrap-up notice covers all three limits** (issue koinon-private#183). The notice of ADR 0066 (an
+7. **The wrap-up notice covers all three limits** (old issue 183). The notice of ADR 0066 (an
    interrupted turn, then a prompt telling the agent to write up) fires once per run, for the first
    limit that reaches its window:
    - time: `WrapUpNotice` before the cap (5 minutes by default, so 83% of the default 30 minutes; a
@@ -131,7 +131,7 @@ The reasoning:
 - Standalone mode reloads the gateway config when a run starts and when it ends, because the key's
   limit changes with the run level. ADR 0073's per-run keys would cost the same.
 - A run limit reached ends the run (cancel), not parks it: the limit exists to stop a loop, and a
-  continuation belongs to koinon-private#183 with the per-task cap.
+  continuation belongs to old issue 183 with the per-task cap.
 - The `max_tokens` field and column carry no meaning now. Removing them is a breaking change for a
   later API version.
 
@@ -140,7 +140,7 @@ The reasoning:
 - **Price-weighted tokens**: correct with caching, but a cost-shaped unit that has neither the
   stability of a token count nor the meaning of money; "1M" is $0.10 on a small model and $4 on a
   large one.
-- **Uncached input plus output**: fixes the symptom of koinon-private#243, but a cache miss (a TTL expiry after a
+- **Uncached input plus output**: fixes the symptom of old issue 243, but a cache miss (a TTL expiry after a
   park, a provider switch, a compaction rewrite) counts the whole context again, thinking is
   underweighted four to eight times against its cost, and it means something different on every
   tokenizer.

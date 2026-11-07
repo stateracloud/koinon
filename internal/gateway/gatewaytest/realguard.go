@@ -63,7 +63,7 @@ func (g *RealGuard) Target(server string) string { return mcpservers.TargetName(
 // server whose results set neither leg. A tool nobody declared is external-high.
 func (g *RealGuard) Server(ctx context.Context, name string, legs []string, tools ...string) {
 	GinkgoHelper()
-	s, err := g.svc.Create(ctx, g.Org, audit.System(), g.User, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
+	s, err := g.svc.Create(ctx, g.Org, audit.System("koinon-test:realguard"), g.User, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
 	Expect(err).NotTo(HaveOccurred())
 	var listed []mcpservers.ListedTool
 	for _, t := range tools {
@@ -72,10 +72,10 @@ func (g *RealGuard) Server(ctx context.Context, name string, legs []string, tool
 	_, err = g.svc.SyncTools(ctx, g.Org, uuidOf(s.ID), listed)
 	Expect(err).NotTo(HaveOccurred())
 	for _, t := range tools {
-		_, err = g.svc.SetTier(ctx, g.Org, audit.System(), s.ID, t, "auto")
+		_, err = g.svc.SetTier(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, t, "auto")
 		Expect(err).NotTo(HaveOccurred())
 	}
-	_, err = g.svc.SetDataClass(ctx, g.Org, audit.System(), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: append([]string{}, legs...)})
+	_, err = g.svc.SetDataClass(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: append([]string{}, legs...)})
 	Expect(err).NotTo(HaveOccurred())
 }
 

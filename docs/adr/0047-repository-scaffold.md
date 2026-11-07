@@ -95,12 +95,12 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
 - When the repository goes public, standard GitHub-hosted runners are free again; revisit then.
 - _Amended (2026-10-29):_ `e2e-kind.yml` runs on GitHub-hosted `ubuntu-24.04`, not Blacksmith.
   Blacksmith's kernel (6.6, `lsm=capability,bpf,integrity`) has no Landlock, which the OpenShell
-  sandbox supervisor requires (issue koinon-private#159); `ubuntu-24.04` has it. The job's first step fails in
+  sandbox supervisor requires (old issue 159); `ubuntu-24.04` has it. The job's first step fails in
   seconds when the kernel lacks Landlock. While the repository is private, the job is dispatched by
   hand (about 22 minutes of the plan's included minutes per run); once it is public it runs on every
   pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
-  sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue koinon-private#234.
-  _Note (2026-11-02):_ `spike-kind.yml` was removed in koinon-private#561.
+  sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in old issue 234.
+  _Note (2026-11-02):_ `spike-kind.yml` was removed in old issue 561.
 - _Amended (2026-11-05, public repository, #135):_ the repository is public, so GitHub-hosted runners
   are free and every workflow runs on them: `ubuntu-latest` (4 vCPU, 16 GB) replaces both Blacksmith
   labels, and Blacksmith is no longer used anywhere. `e2e-kind.yml` stays on `ubuntu-24.04`
@@ -108,7 +108,7 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
   `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release
-  candidate let koinon-private#253 and koinon-private#254 merge with e2e regressions that surfaced at the rc.8 tag, two rounds
+  candidate let old issue 253 and old issue 254 merge with e2e regressions that surfaced at the rc.8 tag, two rounds
   late. Those paths are where the full install catches what unit and flavor tests miss: spend
   accounting, the rendered gateway config and the harness launch. Every other change still relies
   on the dispatch before a tag. Each run costs about 22 of the plan's included minutes.
@@ -141,14 +141,14 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
 - Negative: composite keys make every foreign key two columns wide; Postgres 18 excludes older
   managed offerings _(inferred)_; the dev loop depends on the dev registry and CloudNativePG operator.
 - Follow-ups: the branch ruleset is applied once the scaffold PR merges (so the checks exist);
-  `docs/adr/README.md` needs this ADR in its index after PR koinon-private#12 merges; the Starlight site and the
+  `docs/adr/README.md` needs this ADR in its index after PR old issue 12 merges; the Starlight site and the
   Helm chart content come later.
 
 ## Open questions
 
 - GitHub org name for the move (`koinon` is taken): decided before the v0.1 plan.
 - A project contact address for the code of conduct and security reports (needs `koinon.dev`).
-- Row-level security as a backstop (follow-up issue from PR koinon-private#12).
+- Row-level security as a backstop (follow-up issue from PR old issue 12).
 
 ## Upstream verification
 
@@ -168,6 +168,6 @@ other job (docs/dev/ci.md#cache-ownership, issue #147).
 ## Links
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
-- Issue [koinon-private#2](https://github.com/stateracloud/koinon-private/issues/2)
+- Old issue 2
 
 Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.

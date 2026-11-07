@@ -135,7 +135,7 @@ describe('Providers page', () => {
     expect(document.body.textContent).not.toContain('sk-or-secret-value')
   })
 
-  it('keeps a model form the person opened while a provider save is still refetching (koinon-private#520)', async () => {
+  it('keeps a model form the person opened while a provider save is still refetching (old issue 520)', async () => {
     let release = () => {}
     const hold = new Promise<void>((r) => (release = r))
     const calls = setup({ holdModelsRefetchAfterCreate: hold })

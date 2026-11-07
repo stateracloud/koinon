@@ -7,7 +7,7 @@
   where its input comes from; amendment 2026-10-28, rc.6). Touches [0045](0045-openshell-hardening-defaults.md)
   and [0075](0075-isolation-tiers.md) only to leave them as they are (decision 8)
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0023](0023-observability-and-audit.md),
-  [0061](0061-image-pull-secrets-and-registry-mirrors.md), [koinon-private#160](https://github.com/stateracloud/koinon-private/issues/160)
+  [0061](0061-image-pull-secrets-and-registry-mirrors.md), old issue 160
 - Pending verification: the home-lab re-run on a managed cluster (the kind e2e proves the mechanism)
 
 ## Context

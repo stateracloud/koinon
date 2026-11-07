@@ -19,7 +19,7 @@ import (
 )
 
 // With a registry mirror (global.registryMirrors / global.imageRegistry), the chart rewrites the
-// default sandboxPolicy.supervisorImages with it (koinon-private#130), so a supervisor pod that OpenShell pulls
+// default sandboxPolicy.supervisorImages with it (old issue 130), so a supervisor pod that OpenShell pulls
 // from the mirror is still admitted and the upstream reference is not. Applied to a real API
 // server like the policies in admission_test.go.
 var _ = Describe("Sandbox admission policy with a registry mirror", Label("escape", "admission"), Ordered, func() {

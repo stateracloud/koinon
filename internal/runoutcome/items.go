@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Items, not chunks (koinon-private#344). A harness streams a message or a thought as hundreds of small ACP
+// Items, not chunks (old issue 344). A harness streams a message or a thought as hundreds of small ACP
 // chunks (about 9,000 rows a run). The Owner stores one run event per completed item instead: the
 // chunks of one message (or thought) are joined into one event of the same kind and payload shape
 // as a chunk, so readers of the timeline (internal/runreply, the run page) work on it unchanged,

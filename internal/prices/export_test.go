@@ -36,3 +36,13 @@ func (s *Service) SetPlatformForTest(ctx context.Context, entries []pricing.Entr
 	})
 	return out, err
 }
+
+// TickForTest is one round of the schedule in the configured setting, as if Effective allowed it.
+func (r *Refresher) TickForTest(ctx context.Context, mode RefreshMode, interval time.Duration) (RunResult, error) {
+	return r.runSchedule(ctx, r.Configured(mode, interval))
+}
+
+// RunScheduleForTest is one round of the schedule sc (Loop runs it with sc from Effective).
+func (r *Refresher) RunScheduleForTest(ctx context.Context, sc Schedule) (RunResult, error) {
+	return r.runSchedule(ctx, sc)
+}

@@ -2,7 +2,7 @@
 
 // Package testenv declares what a Ginkgo suite or spec needs from the machine it runs on (Docker,
 // envtest assets, a variable that points at a live system) and decides what happens when it is
-// missing (koinon-private#507).
+// missing (old issue 507).
 //
 // Without the requirement a test skips, so `make test` keeps working on a laptop without Docker.
 // The skip message starts with Prefix and the requirement's name ("koinon:requires=docker: ..."),

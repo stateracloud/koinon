@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests for hack/preflight.sh (koinon-private#391): per-worktree log directories, the pid file and --stop
+# Offline tests for hack/preflight.sh (old issue 391): per-worktree log directories, the pid file and --stop
 # stopping only its own worktree's run. Each fixture repo carries stub hack/adr-lint.sh and hack/adr-lint-test.sh.
 # shellcheck disable=SC2015,SC2329 # "A && ok || bad" is the test idiom; cleanup runs from a trap
 

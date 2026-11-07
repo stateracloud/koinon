@@ -114,7 +114,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 	var store keyscli.Store
 	// These commands run in the koinon-api pod, so they are a service: with the default local KEK
 	// they add keys as before; with an opted-in KMS, only the key-admin Job adds them.
-	// KMS-wrapped KEKs are bound to the install ID in the database (koinon-private#615), and the bound-only marker
+	// KMS-wrapped KEKs are bound to the install ID in the database (old issue 615), and the bound-only marker
 	// is there too: every command that opens them, export too, reads both there, and only when such
 	// a KEK is opened. Without a database a KMS KEK stored unbound does not open (fail closed).
 	var pool *pgxpool.Pool

@@ -103,25 +103,74 @@ allows), so the chain trigger can move the head and nothing else can. A statemen
 **1.1a Who may insert.** Only the `koinon-api` binary writes this chain (decision 1.2);
 `koinon-reconciler` and `koinon-agentd` cannot. The grant cannot name the login role `koinon_api`
 directly: with the chart's CloudNativePG setup that role is a managed role the operator creates
-asynchronously, and the migrate Job may already have run by then, so a "grant when the role exists"
-would be skipped for good and `koinon-api` would fail its first install write. Instead:
+asynchronously, and the migrate Job may already have run by then. Instead:
 
 - the chart's `postInitApplicationSQL` creates a `NOLOGIN` group role
   `koinon_install_audit_writer` next to `koinon_app`, so it exists before any migration runs;
 - the `koinon_api` managed role lists it in `inRoles` (`[koinon_app, koinon_install_audit_writer]`);
   the reconciler and agentd roles do not;
 - the migration `REVOKE`s `INSERT, UPDATE, DELETE, TRUNCATE` on both tables from `koinon_app`
-  (which the default privileges would otherwise give it), `GRANT`s `SELECT` on both to
-  `koinon_app`, and `GRANT INSERT ON install_audit_events TO koinon_install_audit_writer`. The
-  migration creates the group role itself when it is missing (`CREATE ROLE ... NOLOGIN` in a `DO`
-  block), so a cluster initialised before this change still gets it; the managed role's `inRoles`
-  then picks it up on the operator's next reconcile.
+  (which the default privileges would otherwise give it) and `GRANT`s `SELECT` on both to
+  `koinon_app`. It does not touch the group role. The chart also lists the group role as a CNPG
+  managed role (`ensure: present`, `login: false`), so a cluster initialised before this change gets
+  it from the operator;
+- the grants to the group role (`INSERT` on `install_audit_events`, `SELECT` on both) are an
+  idempotent step of `koinon-api migrate` after goose (`migrations.GrantInstallAuditWriter`), not part
+  of the migration. A Helm `pre-upgrade` hook runs before the updated Cluster reaches the API server,
+  and the migrate role has no `CREATEROLE`, so a migration that needs the role would fail on an
+  existing cnpg install and abort the upgrade before the role could appear, on every retry. When the
+  role is missing the step logs a warning and grants nothing. New installs have the role from
+  `postInitApplicationSQL` and never see this;
+- in cnpg mode the chart adds a `post-upgrade` hook Job (`templates/install-audit-grants.yaml`; Argo
+  CD: `PostSync`) that runs `koinon-api migrate --grants-only` as the migrate role: no migration, only
+  the grant step, polled until the role and the tables exist, within `migrations.wait`. Helm runs it
+  after the release's objects, so after the updated Cluster, and with `--wait` once the pods are
+  ready. Running out of time fails the hook, so the upgrade reports a role CNPG never created. One
+  `helm upgrade` (or sync) is enough (maintainer decision 2026-11-07, after review: an earlier
+  version of this decision asked for a second `helm upgrade`). The hook waits only for the role to
+  exist, not for `koinon_api`'s membership in it, which CNPG adds on its own schedule and may add
+  after the hook succeeded; that is harmless, because `koinon-api` retries every refused install
+  write (next item) until the membership lands. `migrations.wait` (default 4m) stays below Helm's
+  default `--timeout` (5m), so a role CNPG never created fails the hook with its own message;
+- with `postgres.mode: external` nothing creates the role after the migrate Job, so the chart passes
+  `koinon-api migrate --require-install-writer` and a missing role fails the Job, naming the role and
+  `docs/ops/secret-keys.md`, instead of `koinon-api` logging a refused write every 30 seconds with no
+  hook to end it (maintainer decision 2026-11-07, after review);
+- `koinon-api` never needs the grant to start, or the post-upgrade hook could never run under
+  `--wait`: an install event the database refuses for lack of privilege (SQLSTATE 42501, wrapped as
+  `audit.ErrInstallWriteDenied`) at startup (the price refresh setting, the retirement of caught-up
+  platform prices) is logged as an error and retried in the background every 30 seconds until the
+  grant lands. Requests that write install events (platform price changes) fail with the permission
+  error in that window, which is the hook's runtime. A setting whose event is not recorded does not
+  take effect where it would widen what runs: the scheduled price refresh runs each tick in the
+  recorded setting (`price_refresh_settings`) wherever that fetches less, less often or applies
+  less than the configured one (`prices.Refresher.Effective`: the mode, the interval and both
+  auto-apply bounds, which the row records with the same event), so a change to `on` or to a looser
+  bound runs only from the first tick after its `price.refresh.settings_changed` event is written. A
+  change that does less (to `off`, a tighter bound) applies at once. The same rule keeps an old replica of a rolling upgrade to what a new one recorded
+  (maintainer decision 2026-11-07, after review);
+- `koinon-api` checks its own membership, at startup and every 30 seconds on its own pool
+  (`SELECT current_user, pg_has_role(current_user, 'koinon_install_audit_writer', 'USAGE')`, a
+  missing role counting as not a member; `audit.InstallWriterCheck`). On a missing role or
+  membership it logs one error per change of state with the statement for its own login filled in
+  (`GRANT koinon_install_audit_writer TO "<current_user>"`, the identifier quoted) and sets the gauge
+  `koinon_install_audit_writer_ok` (no labels, ADR 0023) to 0, and never fails readiness; the
+  documented alert fires on the gauge as well as on refused writes, so a missing grant shows before
+  anything writes. `koinon-reconciler` and `koinon-agentd` warn at startup when their own login can
+  write the chain (a shared login). The check runs in the API, not in the migrate Job and not from a
+  chart value naming the api login (maintainer decision 2026-11-07, after research): the api login
+  already lives in the api URI Secret, and a second copy in a value drifts; the name in that value is
+  wrong where the server sees another role than the URI names (a Cloud SQL group login connects as
+  its own IAM user, an Azure Entra group connects as the group role, PgBouncer can force `user=`);
+  and under workload identity the migrate Job runs as another ServiceAccount and cannot log in as the
+  API. Only the process that connects knows its `current_user`. Cloud IAM token logins (RDS IAM,
+  Entra) are out of scope here (#353).
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:
 
 ```sql
-CREATE ROLE koinon_install_audit_writer NOLOGIN;  -- when the migration could not
+CREATE ROLE koinon_install_audit_writer NOLOGIN;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <app role>;
 GRANT SELECT ON install_audit_events, install_audit_chain_head TO <app role>;
 GRANT koinon_install_audit_writer TO <koinon-api login role>;
@@ -228,6 +277,22 @@ vocabulary:
 
 `audit.System()` takes the actor ID as an argument, so no caller can write an unnamed system actor.
 A `cli` actor keeps the command as its ID (`keys forget`).
+
+**The ID format is frozen** (maintainer decision 2026-11-07, after review): `<component>:<function>`,
+both lower-case kebab-case; the component is the binary that acts (`koinon-api`, `koinon-reconciler`,
+`koinon-agentd`), the function a short noun for what acted, unique within the component. An ID is
+never renamed once written, since the audit log, its exports and the price tables' actor column keep
+it; a new system writer takes a new ID in this format, and one that does the same work as an
+existing writer reuses its ID. The IDs written today (`audit.System(` callers), beyond the table
+above:
+
+| Component | Functions |
+| --- | --- |
+| `koinon-api` | `approvals`, `questions`, `question-timers`, `agent-model`, `token-use` |
+| `koinon-reconciler` | `sandbox-repair`, `sandbox-archive`, `ephemeral-cleanup`, `mcp-sync` |
+| `koinon-agentd` | `home-seed`, `resync`, `run-outcome`, `stuck-run`, `prefix-taken` |
+
+Tests use the component `koinon-test` (`koinon-test:spec`), which no binary writes.
 
 **Alignment with ADR 0098.** ADR 0098 calls the auto-apply's actor `auto`; the code on PR #316 is
 `AutoActor = audit.Actor{Kind: system, ID: "auto"}`. Under this ADR its ID is
@@ -416,6 +481,8 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 **Metrics** (fixed labels, ADR 0023 label rule; no org, user, key or actor ID):
 
 - `koinon_audit_writes_total{chain="org"|"install", result="ok"|"error"}`;
+- `koinon_install_audit_writer_ok` (gauge, no labels, koinon-api only): 1 while koinon-api's login
+  inherits the writer role, 0 otherwise (decision 1.1a, maintainer decision 2026-11-07);
 - `koinon_audit_anchor_age_seconds` (gauge, no labels, from v0.1), so an alert can say anchoring
   stopped, and, with checkpoints, `koinon_audit_checkpoint_age_seconds` (gauge, no labels).
 

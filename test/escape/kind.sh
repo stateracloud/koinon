@@ -5,15 +5,15 @@
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
-# nvcr.io or apt at run time, koinon-private#357) and loaded into the node; the gateway is reached through a
+# nvcr.io or apt at run time, old issue 357) and loaded into the node; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
-# The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, koinon-private#270): unless
+# The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, old issue 270): unless
 # KOINON_ESCAPE_GATEWAY_HOST already names one, or KOINON_ESCAPE_STANDIN=0, it is built from
 # cmd/koinon-fakemodel with ko and run in namespace koinon-fixtures, as the RT1 fixtures do.
 #
 # The Gitea read-grant specs need a TLS server behind the host their grant names, because the proxy
-# dials an allowed host before it judges the request (koinon-private#371). Unless KOINON_ESCAPE_GITEA_URL is set,
+# dials an allowed host before it judges the request (old issue 371). Unless KOINON_ESCAPE_GITEA_URL is set,
 # or KOINON_ESCAPE_STANDIN=0, a stand-in (koinon-fakemodel -standin over TLS, in koinon-fixtures)
 # gets a certificate from a throwaway CA. OpenShell 0.1.5's supervisor (its own container and image,
 # not the sandbox image) verifies upstream TLS against webpki roots plus the supervisor image's

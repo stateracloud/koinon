@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -90,6 +92,8 @@ func describeMode(name, valuesFile string) {
 			dbURL, err = pg.ConnectionString(ctx, "sslmode=disable")
 			Expect(err).NotTo(HaveOccurred())
 
+			bootstrapDatabase(ctx, dbURL)
+
 			cl = startCluster()
 
 			docker, err := testcontainers.NewDockerClientWithOpts(ctx)
@@ -163,6 +167,11 @@ func describeMode(name, valuesFile string) {
 					By(fmt.Sprintf("hook weight %d: %s", w, j.Name))
 					runJob(ctx, rn, j)
 					ran = append(ran, j.Name)
+					if j.Name == "koinon-migrate" {
+						// CNPG reconciles its managed roles on its own schedule, after the migration
+						// may have run: the login roles appear here, never before.
+						createComponentRoles(ctx, dbURL)
+					}
 				}
 			}
 			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
@@ -198,7 +207,7 @@ func describeMode(name, valuesFile string) {
 		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret
 		// holds no key in the clear, and koinon-api, which may only decrypt, starts from it below.
 		// Each KEK is bound (format 2) to the install ID the migration wrote into the database
-		// (koinon-private#615), which the Job reads with the database settings the chart gives it, and the Job
+		// (old issue 615), which the Job reads with the database settings the chart gives it, and the Job
 		// set the bound-only marker of the new install.
 		It("wraps every KEK with the KMS, bound to the install", func(ctx SpecContext) {
 			k := kmsOf(r)
@@ -290,6 +299,198 @@ func describeMode(name, valuesFile string) {
 			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
 		}, SpecTimeout(3*time.Minute))
 
+		// The install audit chain (ADR 0100): the group role existed before the migration, the login
+		// roles came after it, and koinon-api, which connects as koinon_api, can append to the chain.
+		// A first start in mode auto records nothing (the default is not a change), so the event is
+		// asserted where the values file turns the refresh on; the privilege checks run in every mode.
+		It("lets koinon-api, and only it, append to the install audit chain", func(ctx SpecContext) {
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+
+			var n int
+			args := r.deployment("koinon-api").Spec.Template.Spec.Containers[0].Args
+			if i := slices.Index(args, "--prices-refresh"); i >= 0 && i+1 < len(args) && args[i+1] != "auto" {
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM install_audit_events
+					WHERE action = 'price.refresh.settings_changed' AND actor_kind = 'system' AND actor_id = 'koinon-api:price-refresh'`).Scan(&n)).To(Succeed())
+				Expect(n).To(Equal(1), "koinon-api wrote an install event on its first start, as koinon_api")
+			}
+
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(Succeed(), "koinon_api is in the writer group")
+			Expect(installWriterOK(ctx, ready["koinon-api"][0])).To(Equal("1"), "koinon-api found its own login in the writer group")
+			for _, role := range []string{"koinon_reconciler", "koinon_agentd"} {
+				err := insertInstallEventAs(ctx, dbURL, role)
+				Expect(err).To(HaveOccurred(), "%s may not append to the install audit chain", role)
+				Expect(err.Error()).To(ContainSubstring("permission denied"), role)
+			}
+		}, SpecTimeout(time.Minute))
+
+		// A koinon-api that starts before the writer grant (#328 review): it gets ready, the changed
+		// price refresh setting is not recorded (its install event is refused) and the scheduled refresh
+		// runs in the recorded mode; once the grant lands the retry records the setting with exactly
+		// one event, and the refresh switches to the configured mode. Only a values file that turns the
+		// refresh on can show it: the stored row is set back to auto to make the start a change.
+		It("starts koinon-api before the writer grant and records the refresh setting once it lands", func(ctx SpecContext) {
+			args := r.deployment("koinon-api").Spec.Template.Spec.Containers[0].Args
+			i := slices.Index(args, "--prices-refresh")
+			if i < 0 || i+1 >= len(args) || args[i+1] != "on" {
+				Skip("the values file leaves the price refresh in auto mode")
+			}
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			count := func(ctx context.Context) int {
+				var n int
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM install_audit_events
+					WHERE action = 'price.refresh.settings_changed' AND actor_id = 'koinon-api:price-refresh'`).Scan(&n)).To(Succeed())
+				return n
+			}
+			storedMode := func(ctx context.Context) string {
+				var m string
+				Expect(conn.QueryRow(ctx, `SELECT mode FROM price_refresh_settings`).Scan(&m)).To(Succeed())
+				return m
+			}
+			before := count(ctx)
+
+			By("the grant is missing and the recorded setting is auto; koinon-api restarts")
+			for _, stmt := range []string{`REVOKE koinon_install_audit_writer FROM koinon_api`, `UPDATE price_refresh_settings SET mode = 'auto'`} {
+				_, err := conn.Exec(ctx, stmt)
+				Expect(err).NotTo(HaveOccurred(), stmt)
+			}
+			for _, w := range ready["koinon-api"] {
+				Expect(w.Ctr.Stop(ctx, nil)).To(Succeed())
+			}
+			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
+			api := ready["koinon-api"][0]
+
+			By("it is ready, its setting is not recorded, and the refresh runs in the recorded mode")
+			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(30 * time.Second).Should(And(
+				ContainSubstring("the price refresh setting is not recorded yet"),
+				ContainSubstring("runs in the recorded mode until koinon-api's setting is recorded")))
+
+			By("koinon-api checked its own login: ready, the gauge reads 0, and the log names the GRANT for it")
+			Expect(installWriterOK(ctx, api)).To(Equal("0"))
+			Expect(api.Logs(ctx)).To(ContainSubstring(`GRANT koinon_install_audit_writer TO "koinon_api"`))
+			Expect(api.Logs(ctx)).NotTo(ContainSubstring("runs in the configured mode"), "no tick in mode on before the event")
+			Expect(storedMode(ctx)).To(Equal("auto"))
+			Expect(count(ctx)).To(Equal(before))
+
+			By("the grant lands: the retry records the setting with one event")
+			_, err = conn.Exec(ctx, `GRANT koinon_install_audit_writer TO koinon_api`)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(count).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Equal(before + 1))
+			Expect(storedMode(ctx)).To(Equal("on"))
+			Consistently(count).WithContext(ctx).WithTimeout(5 * time.Second).WithPolling(time.Second).Should(Equal(before + 1))
+			Expect(api.Logs(ctx)).To(ContainSubstring("recorded after a retry"))
+			Eventually(func(ctx context.Context) string { return installWriterOK(ctx, api) }).WithContext(ctx).WithTimeout(time.Minute).WithPolling(2*time.Second).
+				Should(Equal("1"), "the next 30-second check sees the grant")
+
+			By("the next scheduled tick runs in the configured mode")
+			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(90 * time.Second).WithPolling(2 * time.Second).
+				Should(ContainSubstring("runs in the configured mode"))
+			Expect(api.Running(ctx)).To(BeTrue(), "koinon-api still serves; logs:\n%s", api.Logs(ctx))
+		}, SpecTimeout(4*time.Minute))
+
+		// An upgrade, in cnpg mode, of a cluster initialised before ADR 0100 (#328): the pre-upgrade
+		// migrate Job runs before the updated Cluster creates the managed group role, so it finds no role
+		// and grants nothing; CNPG then creates the role (and adds koinon_api to it) on its own schedule,
+		// and the post-upgrade hook, which waits for the role, grants it. The hook is rendered in cnpg
+		// mode with --is-upgrade; it connects as the migrate Job does here (the cnpg URI verifies the
+		// CNPG cluster's CA, see externalDatabase), the rest of its pod spec is the chart's.
+		It("grants the writer role once an upgraded cluster creates it, in the post-upgrade hook", func(ctx SpecContext) {
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			execAll := func(stmts ...string) {
+				GinkgoHelper()
+				for _, stmt := range stmts {
+					_, err := conn.Exec(ctx, stmt)
+					Expect(err).NotTo(HaveOccurred(), stmt)
+				}
+			}
+
+			By("a cluster from before ADR 0100: no writer role, koinon_api in koinon_app only")
+			execAll(
+				`REVOKE ALL ON install_audit_events, install_audit_chain_head FROM koinon_install_audit_writer`,
+				`REVOKE koinon_install_audit_writer FROM koinon_api`,
+				`DROP ROLE koinon_install_audit_writer`,
+			)
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
+
+			var migrate *batchv1.Job
+			for _, j := range r.Jobs {
+				if j.Name == "koinon-migrate" {
+					migrate = j
+				}
+			}
+			Expect(migrate).NotTo(BeNil())
+
+			// The check runs before any migration (no migration was applied). This database is migrated
+			// already, so goose's version table is the witness that the failed Job left it as it was;
+			// the Docker spec of internal/cmd/koinonapi proves it on an empty database.
+			migrations := func() int {
+				GinkgoHelper()
+				var n int
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM goose_db_version`).Scan(&n)).To(Succeed())
+				return n
+			}
+			before := migrations()
+
+			By("on an external database (this render) the migrate Job fails without the role, naming the remedy")
+			mc := migrate.Spec.Template.Spec.Containers[0]
+			Expect(mc.Args).To(ContainElement("--require-install-writer"))
+			w := rn.start(ctx, migrate.Name, migrate.Spec.Template.Spec, mc, jobDeadline)
+			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
+			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md"),
+				ContainSubstring("no migration was applied")))
+			Expect(migrations()).To(Equal(before))
+
+			By("the cnpg pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
+			// In cnpg mode the chart does not pass --require-install-writer (hack/chart-check.d/45 and
+			// TestChartContract pin both renders); the rest of its pod spec is this one.
+			migrate = migrate.DeepCopy()
+			c := &migrate.Spec.Template.Spec.Containers[0]
+			c.Args = slices.DeleteFunc(c.Args, func(a string) bool { return a == "--require-install-writer" })
+			runJob(ctx, rn, migrate)
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
+
+			By("the post-upgrade hook waits while CNPG reconciles its managed roles, then grants")
+			up := helmRenderWith(ctx, valuesFile, cnpgUpgrade...)
+			Expect(up.Jobs).To(HaveLen(1))
+			grants := up.Jobs[0].DeepCopy()
+			Expect(grants.Annotations).To(HaveKeyWithValue("helm.sh/hook", "post-upgrade"))
+			Expect(grants.Annotations).To(HaveKeyWithValue("argocd.argoproj.io/hook", "PostSync"))
+			Expect(grants.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--grants-only"))
+			ps, mps := &grants.Spec.Template.Spec, migrate.Spec.Template.Spec
+			ps.Volumes = append(slices.DeleteFunc(slices.Clone(ps.Volumes), func(v corev1.Volume) bool { return v.Name == "db-ca" || v.Name == "tmp" }), mps.Volumes...)
+			ps.Containers[0].Env = mps.Containers[0].Env
+			ps.Containers[0].VolumeMounts = mps.Containers[0].VolumeMounts
+			for _, o := range up.Objects {
+				Expect(applyObject(ctx, cl, o)).To(Succeed(), "the hook's ServiceAccount, a hook of a lower weight")
+			}
+			created := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				select {
+				case <-ctx.Done():
+					created <- ctx.Err()
+					return
+				case <-time.After(3 * time.Second):
+				}
+				_, err := conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+				if err == nil {
+					_, err = conn.Exec(ctx, `GRANT koinon_install_audit_writer TO koinon_api`)
+				}
+				created <- err
+			}()
+			runJob(ctx, rn, grants)
+			Expect(<-created).To(Succeed(), "CNPG's role reconcile, simulated")
+
+			By("koinon_api can now append to the install audit chain, without another upgrade")
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(Succeed())
+			Expect(insertInstallEventAs(ctx, dbURL, "koinon_reconciler")).To(MatchError(ContainSubstring("permission denied")))
+		}, SpecTimeout(3*time.Minute))
+
 		// The MCP leak guard (ADR 0091): agentgateway fails every org MCP call closed when it cannot
 		// reach the guard, so the guard koinon-api serves must be where the chart's reconciler config
 		// points, and answer there.
@@ -311,7 +512,7 @@ func describeMode(name, valuesFile string) {
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
-			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, koinon-private#408)
+			// Its readiness probe is /readyz on the health port: the schema gate (ADR 0085, old issue 408)
 			// reads goose_db_version and schema_compat of the migrated database and must find the schema supported.
 			// The drain on SIGTERM must fit in the pod's grace period (ADR 0085): the kubelet
 			// would otherwise kill agentd mid-drain and the leases would not be released.
@@ -422,6 +623,27 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 	}
 }
 
+// installWriterOK is the value of koinon_install_audit_writer_ok on the koinon-api container's
+// metrics port ("" when it is not exported).
+func installWriterOK(ctx context.Context, api *workload) string {
+	GinkgoHelper()
+	mapped, err := api.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", api.portNumber(intOrName{name: "metrics"})))
+	Expect(err).NotTo(HaveOccurred())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:"+mapped.Port()+"/metrics", nil)
+	Expect(err).NotTo(HaveOccurred())
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+	for _, line := range strings.Split(string(body), "\n") {
+		if v, ok := strings.CutPrefix(line, "koinon_install_audit_writer_ok "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // startDeployment starts each container of the Deployment's pod template and requires its
 // probes (startup, readiness, liveness) to answer within a minute. A container without HTTP
 // probes must serve /metrics on its "metrics" port instead, which the chart scrapes.
@@ -478,4 +700,56 @@ func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 		return fmt.Errorf("applyObject: %T is not modelled", o)
 	}
 	return err
+}
+
+// insertInstallEventAs appends a probe event to the install audit chain as the login role.
+func insertInstallEventAs(ctx context.Context, dbURL, role string) error {
+	GinkgoHelper()
+	c, err := pgx.Connect(ctx, strings.Replace(dbURL, "//koinon:", "//"+role+":", 1))
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = c.Close(ctx) }()
+	_, err = c.Exec(ctx, `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
+		VALUES ('system', 'koinon-test:chartsmoke', 'chartsmoke.probe', 'probe', 'x', '{}')`)
+	return err
+}
+
+// bootstrapDatabase is what the chart's CNPG bootstrap (postInitApplicationSQL in
+// templates/postgres-cnpg.yaml) does before any migration runs: the group roles, in the chart's
+// order, and the owner's default privileges. hack/chart-check.d/45-install-audit-writer-role.sh
+// pins the chart side of the roles.
+func bootstrapDatabase(ctx context.Context, dbURL string) {
+	GinkgoHelper()
+	conn, err := pgx.Connect(ctx, dbURL)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = conn.Close(ctx) }()
+	for _, stmt := range []string{
+		`CREATE ROLE koinon_app NOLOGIN`,
+		`CREATE ROLE koinon_install_audit_writer NOLOGIN`,
+		`GRANT CONNECT ON DATABASE koinon TO koinon_app`,
+		`GRANT USAGE ON SCHEMA public TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO koinon_app`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO koinon_app`,
+	} {
+		_, err := conn.Exec(ctx, stmt)
+		Expect(err).NotTo(HaveOccurred(), stmt)
+	}
+}
+
+// createComponentRoles creates the managed login roles of the chart (inRoles as rendered): all in
+// koinon_app, koinon_api also in the install audit writer group.
+func createComponentRoles(ctx context.Context, dbURL string) {
+	GinkgoHelper()
+	conn, err := pgx.Connect(ctx, dbURL)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = conn.Close(ctx) }()
+	for _, c := range []struct{ role, groups string }{
+		{"koinon_api", "koinon_app, koinon_install_audit_writer"},
+		{"koinon_reconciler", "koinon_app"},
+		{"koinon_agentd", "koinon_app"},
+	} {
+		stmt := fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s`, c.role, dbSecretPassword, c.groups)
+		_, err := conn.Exec(ctx, stmt)
+		Expect(err).NotTo(HaveOccurred(), c.role)
+	}
 }

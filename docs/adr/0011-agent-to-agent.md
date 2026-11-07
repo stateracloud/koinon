@@ -80,10 +80,10 @@ Delegations that write, and delegations from tickets, are persisted as tickets a
   never talk to each other over the network.
 - **The external A2A gateway comes in v1.0** and maps onto the same tasks. The agent card path
   `/.well-known/agent-card.json` was verified on 2026-10-26 (A2A v1.0.0 §8.2).
-- `ask_agent` ships in v0.2 (koinon-private#146), not v0.3.
+- `ask_agent` ships in v0.2 (old issue 146), not v0.3.
 - Not decided: whether a read-only delegation from a chat (amendment of 2026-10-23) stays
   ephemeral now that a request is a child task.
-- **Guards** (koinon-private#146 A3) are decided in [0065](0065-work-model-tasks-inbox.md): refused when the asked
+- **Guards** (old issue 146 A3) are decided in [0065](0065-work-model-tasks-inbox.md): refused when the asked
   agent is already in the chain, at most 3 deep, at most 5 open questions per agent, and the same
   question to the same agent in the same task returns the existing child. This answers the open
   question on depth and cycle key below.

@@ -447,7 +447,7 @@ var _ = Describe("Importer", func() {
 			Expect(auditOf(ctx, "connection.declare")).To(HaveLen(2), "the first import and the re-write")
 		})
 
-		It("stops a removed connection from making a repository internal, at once (ADR 0091, koinon-private#350)", func(ctx SpecContext) {
+		It("stops a removed connection from making a repository internal, at once (ADR 0091, old issue 350)", func(ctx SpecContext) {
 			put(ctx, "gh", declarative.TypeConnection, slug, conn())
 			Expect(imp.Sync(ctx)).To(Succeed())
 			rows, err := store.New(pool).ListConnections(ctx, org)

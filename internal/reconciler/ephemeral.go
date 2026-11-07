@@ -89,7 +89,7 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 			r.log.Info("deleted the sandbox of an ended task", w.logAttrs()...)
 			// Not "sandbox.recreate" and no phase: ADR 0054's loop guard counts those.
 			if err := audit.RecordErr(ctx, r.q, audit.Event{
-				Org: w.org.ID, Actor: audit.System(), Action: "sandbox.delete", TargetKind: "agent", TargetID: w.agent.ID.String(),
+				Org: w.org.ID, Actor: audit.System("koinon-reconciler:ephemeral-cleanup"), Action: "sandbox.delete", TargetKind: "agent", TargetID: w.agent.ID.String(),
 				After: map[string]any{"sandbox": cur, "reason": "ephemeral task ended"},
 			}); err != nil {
 				return false, err

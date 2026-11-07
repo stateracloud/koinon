@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests for hack/wt.sh `new`: the web dependency install (koinon-private#391). A fake pnpm on PATH records
+# Offline tests for hack/wt.sh `new`: the web dependency install (old issue 391). A fake pnpm on PATH records
 # how it was called; nothing touches the network or a cluster.
 # shellcheck disable=SC2015,SC2329 # "A && ok || bad" is the test idiom; cleanup runs from a trap
 

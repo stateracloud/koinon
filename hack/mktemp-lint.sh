@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# mktemp lint (koinon-private#535): every mktemp call carries a template, `mktemp -d "${TMPDIR:-/tmp}/name.XXXXXX"`.
+# mktemp lint (old issue 535): every mktemp call carries a template, `mktemp -d "${TMPDIR:-/tmp}/name.XXXXXX"`.
 # A bare `mktemp`, `mktemp -d`, `mktemp -q` or `mktemp -t x` writes to /var/folders on macOS (it ignores
 # TMPDIR), which the Claude Code sandbox blocks. Scans hack/**/*.sh, test/**/*.sh, the Makefile and
 # .github/workflows/*.yml; comment lines are ignored. A call is fine when its own arguments (up to the end
@@ -101,7 +101,7 @@ done < <(
 
 if ((fail)); then
 	# shellcheck disable=SC2016 # the hint shows a literal ${TMPDIR}
-	echo 'mktemp-lint: give every mktemp a template, e.g. mktemp -d "${TMPDIR:-/tmp}/<script>.XXXXXX" (macOS mktemp ignores TMPDIR without one; koinon-private#535)' >&2
+	echo 'mktemp-lint: give every mktemp a template, e.g. mktemp -d "${TMPDIR:-/tmp}/<script>.XXXXXX" (macOS mktemp ignores TMPDIR without one; old issue 535)' >&2
 	exit 1
 fi
 echo "mktemp-lint: $n files, every mktemp has a template"

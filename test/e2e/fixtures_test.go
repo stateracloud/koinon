@@ -42,7 +42,7 @@ func readProvider(t *testing.T, file string) (name string, models []string) {
 }
 
 // The quickstart steps run on the org default model: the repo-helper template names none. The org
-// default is stored (orgs.default_model, koinon-private#256). The org's first model sets it, which here would
+// default is stored (orgs.default_model, old issue 256). The org's first model sets it, which here would
 // depend on the importer's order over the two declared Secrets (creation time, then name), so step 3
 // of the e2e states it with PUT /admin/v1/default-model. That needs repo-helper to be a model of the
 // quickstart's provider, which this check pins offline with `go test ./...`; the e2e suite itself

@@ -36,7 +36,7 @@ type Querier interface {
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
 	// stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
-	// what was said (koinon-private#344). Nothing else is recorded this way. No row: another epoch, the run is not
+	// what was said (old issue 344). Nothing else is recorded this way. No row: another epoch, the run is not
 	// canceled, or the event exists.
 	AppendCanceledRunEventOnce(ctx context.Context, arg AppendCanceledRunEventOnceParams) (RunEvent, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
@@ -152,7 +152,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
-	CountAutoAppliedPriceProposalsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
+	CountAutoAppliedPriceProposalsSince(ctx context.Context, arg CountAutoAppliedPriceProposalsSinceParams) (int64, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
@@ -299,7 +299,7 @@ type Querier interface {
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// The leak guard's state (ADR 0084, ADR 0091; koinon-private#349): sessions per home generation with their legs,
+	// The leak guard's state (ADR 0084, ADR 0091; old issue 349): sessions per home generation with their legs,
 	// the taint store of fingerprints, and the budgets of a run. Every query takes @org_id and filters
 	// on it (TestQueriesAreOrgScoped).
 	// The session of one home generation, created with @fp_key the first time. A concurrent first call
@@ -436,9 +436,10 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// The install ID (koinon-private#615): created once by a migration, never changed. KMS-wrapped KEKs are bound
+	// The install ID (old issue 615): created once by a migration, never changed. KMS-wrapped KEKs are bound
 	// to it.
 	GetInstallID(ctx context.Context) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -484,7 +485,7 @@ type Querier interface {
 	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
-	// The model agents without a model setting run on (koinon-private#256); '' when the org has none.
+	// The model agents without a model setting run on (old issue 256); '' when the org has none.
 	GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
@@ -583,6 +584,8 @@ type Querier interface {
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
+	InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error)
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -764,9 +767,15 @@ type Querier interface {
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
+	// One page of the install chain in chain order, with the fields the hash covers as text. The
+	// install ID is read from install_identity, which never changes.
+	ListInstallAuditChainRows(ctx context.Context, arg ListInstallAuditChainRowsParams) ([]ListInstallAuditChainRowsRow, error)
+	// The install-scope read path (AuditService.List with AUDIT_SCOPE_INSTALL): the filters of
+	// ListAuditEventsAllOrgs over the install chain.
+	ListInstallAuditEventsFiltered(ctx context.Context, arg ListInstallAuditEventsFilteredParams) ([]InstallAuditEvent, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// KEK fingerprints (koinon-private#591, ADR 0085 decision 12): what each key-encryption key was when a process
+	// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
 	// first loaded it. No key material.
 	ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
@@ -774,7 +783,7 @@ type Querier interface {
 	// unlink the foreign key (ON DELETE SET NULL) is about to do.
 	ListMCPServersLinkedToConnectionForUpdate(ctx context.Context, arg ListMCPServersLinkedToConnectionForUpdateParams) ([]McpServer, error)
 	// The servers an agent may use that the gateway should serve right now, with the tools it should
-	// list for each by tier, for the live check agentd runs before the harness starts (issue koinon-private#488). An
+	// list for each by tier, for the live check agentd runs before the harness starts (old issue 488). An
 	// unhealthy server is left out: ListMissingMCPServersOfAgent has it already and the planner withdraws
 	// its tools. A server with no present, permitted tool (never probed, or all in the never tier) is
 	// returned with empty lists and not expected to list anything.
@@ -784,7 +793,7 @@ type Querier interface {
 	// The servers an agent may use that Koinon has found not serving tools right now, and has not
 	// withdrawn on purpose (a disabled, removed or credential-lost server is only mentioned in the note, see
 	// ListUnavailableMCPServersOfAgent): unhealthy, or failing probes that have not yet reached the
-	// threshold, which is what a server overloaded for a minute looks like (issue koinon-private#326). agentd checks
+	// threshold, which is what a server overloaded for a minute looks like (old issue 326). agentd checks
 	// this before it starts the harness; a server never probed (unknown) is not a miss.
 	ListMissingMCPServersOfAgent(ctx context.Context, arg ListMissingMCPServersOfAgentParams) ([]ListMissingMCPServersOfAgentRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
@@ -1184,7 +1193,7 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
-	// Whether an org admin asks for the agent's sandbox to stay up (koinon-private#315). The operator's per-org cap
+	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 	// decides how many of the requests the reconciler grants. Not a new version.
 	SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.

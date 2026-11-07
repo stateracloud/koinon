@@ -149,6 +149,42 @@ var _ = Describe("AuditService and the audit coverage", func() {
 		Expect(orgs).To(HaveKey(other))
 	})
 
+	It("serves the install chain to platform admins only", func(ctx SpecContext) {
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		pa := e.userIn(ctx, org, store.OrgRoleMember)
+		_, err := e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, pa.userID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
+			VALUES ('system', 'koinon-test:spec', 'platform_price.set', 'platform_price', 'x', '{}')`)
+		Expect(err).NotTo(HaveOccurred())
+
+		res, err := auditClient(pa).List(ctx, &auditv1alpha1.ListRequest{Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL, ActionPrefix: "platform_price."})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetEvents()).NotTo(BeEmpty())
+		for _, ev := range res.GetEvents() {
+			Expect(ev.GetOrgId()).To(BeEmpty())
+			Expect(ev.GetChainSeq()).To(BeNumerically(">", 0))
+			Expect(ev.GetHash()).To(HaveLen(64))
+		}
+
+		By("an org admin and an owner get PermissionDenied, with or without an org")
+		for _, c := range []*client{admin, owner} {
+			_, err = auditClient(c).List(ctx, &auditv1alpha1.ListRequest{Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL})
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			_, err = auditClient(c).List(ctx, &auditv1alpha1.ListRequest{OrgId: org, Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL})
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		}
+
+		By("an org id with the install scope is a bad request even for a platform admin")
+		_, err = auditClient(pa).List(ctx, &auditv1alpha1.ListRequest{OrgId: org, Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+
+		By("the org scope never shows install events")
+		all, err := auditClient(pa).List(ctx, &auditv1alpha1.ListRequest{Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_ORG, ActionPrefix: "platform_price."})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all.GetEvents()).To(BeEmpty())
+	})
+
 	It("filters and pages", func(ctx SpecContext) {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		for range 4 {

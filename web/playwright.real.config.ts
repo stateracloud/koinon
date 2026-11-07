@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 const port = 5180
 
-// Browser e2e against a REAL Koinon install (issue koinon-private#50, plan items W1 and E1): the Vite dev
+// Browser e2e against a REAL Koinon install (old issue 50, plan items W1 and E1): the Vite dev
 // server proxies to koinon-api on KOINON_API_URL, which runs with the reconciler, agentd,
 // Postgres, OpenShell and the fake model server on kind. Nothing is mocked in the browser.
 // Run it with `make test-e2e-web` (test/e2e/run.sh with SUITE=web); the mocked specs in e2e/

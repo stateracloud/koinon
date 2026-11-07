@@ -15,7 +15,7 @@ export type WatchHandlers = {
   onEvent: (event: RunEvent) => void
   onStatus: (status: WatchStatus, error?: ConnectError) => void
   /**
-   * Text the agent is typing, in the order typed (koinon-private#344). Live only: it has no seq, a reconnect does
+   * Text the agent is typing, in the order typed (old issue 344). Live only: it has no seq, a reconnect does
    * not replay it, and the event of the finished message follows with its whole text.
    */
   onLive?: (chunks: readonly LiveChunk[]) => void

@@ -129,9 +129,9 @@ turn ends cancelled after it refused a request it prompts the session again with
 refused action and the session directory (`internal/agentd/refusal.go`, run event `run.refusal`).
 The contract suite's `answers the harness's permission requests` spec covers it.
 
-**Subagents are off for every agent** (issue koinon-private#261). OpenCode 2.2.0's `subagent` tool is live by
+**Subagents are off for every agent** (old issue 261). OpenCode 2.2.0's `subagent` tool is live by
 default (depth 1; `explore` is the one configured subagent). A child session outlives a cancelled
-turn (`packages/cli/src/acp/turn.ts:303-311`), so the wall clock (koinon-private#243) and the wrap-up notice (koinon-private#183)
+turn (`packages/cli/src/acp/turn.ts:303-311`), so the wall clock (old issue 243) and the wrap-up notice (old issue 183)
 would leave work running, and its messages reach agentd only through the private extension
 `opencode/session/child_update` (gated on `_meta["opencode/child-session-updates"]`, which agentd
 does not advertise), so ADR 0074 traces would miss it. The config therefore ends the top-level
@@ -167,11 +167,11 @@ or failing probes below the threshold; a disabled or removed server only gets th
 start). The reconciler's prober refreshes that record every 60 s, so a server that drops between two
 probes is not caught by the record alone. So agentd also asks the gateway what it lists to the agent
 right now, under the agent's own key (koinon-api holds it and lists the tools; agentd and the sandbox
-never see it; ADR 0057 amendment 2026-11-01, issue koinon-private#488). A miss, from either, records the run event `run.mcp_server_missing`, waits `MCPRetryDelay`
+never see it; ADR 0057 amendment 2026-11-01, old issue 488). A miss, from either, records the run event `run.mcp_server_missing`, waits `MCPRetryDelay`
 (75 s by default, a probe interval plus slack) and looks once more. If the servers are back the run
 records `run.mcp_server_recovered` and the first turn's root span carries `koinon.mcp.missing_servers`
 and `koinon.mcp.missing_attempts=1`. A second miss fails the run before any turn starts: it has no
-span, and `run.mcp_server_missing` with `attempt: 2` is its record (issue koinon-private#326).
+span, and `run.mcp_server_missing` with `attempt: 2` is its record (old issue 326).
 
 ## Model selection
 
@@ -206,7 +206,7 @@ refused every request (`thinking.adaptive.block_binding: Extra inputs are not pe
 
 Koinon states the choice, so neither the ID nor a provider default decides. koinon-agentd passes
 `--thinking` (`internal/flavor` `ThinkingArg`) with the form from the model's row in
-`internal/thinking` and the agent's setting. Thinking on and off are both sent explicitly (koinon-private#316):
+`internal/thinking` and the agent's setting. Thinking on and off are both sent explicitly (old issue 316):
 provider defaults differ per route (direct Anthropic defaults Claude 5.x to `display: omitted`, which
 bills the thinking and returns empty thinking blocks; OpenRouter summarizes). The entry script turns
 OpenCode's own thinking block off with the model's `compatibility` in `OPENCODE_CONFIG_CONTENT`
@@ -250,7 +250,7 @@ session whose call was `functions.write:0` replays as `functions_write_0`; the s
 | Built-in provider plugins (Copilot, Bedrock, OpenRouter, …) | plugin `-opencode.provider.*`; `opencode.provider.opencode` is guarded and stays (see below) | `packages/core/src/plugin/provider/`, `packages/core/src/plugin/internal.ts` |
 | Web search | plugins `-opencode.websearch.*`, `-opencode.tool.websearch` | `packages/core/src/tool/plugin/websearch.ts` |
 | Built-in `webfetch`, for an agent without web egress | `--no-web-tools` (set by koinon-agentd unless `agentconfig.Config.WebEgress`, ADR 0080) adds the permission rule `webfetch` `*` deny to the config overlay; a denied tool is not offered to the model, so the agent uses the org's MCP tools, which its instructions name. The contract suite checks the tool list with and without the switch | `packages/core/src/permission.ts` |
-| Subagents (`subagent` tool) | the permission rule `subagent` `*` deny in the config, top level and `agents.explore`; a denied tool is not offered to the model. Children outlive a cancelled turn and agentd does not see their events (issue koinon-private#261) | `packages/core/src/tool.ts`, `packages/core/src/tool/plugin/subagent.ts` |
+| Subagents (`subagent` tool) | the permission rule `subagent` `*` deny in the config, top level and `agents.explore`; a denied tool is not offered to the model. Children outlive a cancelled turn and agentd does not see their events (old issue 261) | `packages/core/src/tool.ts`, `packages/core/src/tool/plugin/subagent.ts` |
 | Logins for well-known integrations | plugin `-opencode.wellknown` | `packages/core/src/wellknown/plugin.ts` |
 | ripgrep download from GitHub | `rg` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
 | Telemetry | OpenTelemetry export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which the entry script unsets | `packages/util/src/observability/otlp.ts` |
@@ -282,7 +282,7 @@ endpoints.
 ## Model retries
 
 Exactly one layer retries a failed model request, with Koinon's policy (ADR 0056 amendment
-2026-10-31, point 3; issue koinon-private#341). For this flavor that layer is OpenCode: the flavor table sets
+2026-10-31, point 3; old issue 341). For this flavor that layer is OpenCode: the flavor table sets
 `RetriesModelRequests` (`internal/flavor`), so koinon-agentd does not repeat the turn, and it
 launches the entry script with the policy from its own config (`ModelRetries`, `RetryBackoff`,
 `MaxRetryAfter` in `internal/agentd`):
@@ -344,7 +344,7 @@ The global config directory is read-only and holds no plugins, project configura
 `~/.config/opencode` is no config directory, so the list is the only way in
 (`packages/core/src/config.ts` merges `OPENCODE_CONFIG_CONTENT` after the global config;
 `packages/core/src/config/plugin/source.ts` takes absolute directories). Plugins run inside
-OpenCode with its full privileges (issue koinon-private#84): a broken one can keep OpenCode from ever getting
+OpenCode with its full privileges (old issue 84): a broken one can keep OpenCode from ever getting
 ready, which agentd's readiness timeout bounds; the sandbox policy and agentgateway, not
 OpenCode, remain the boundary.
 

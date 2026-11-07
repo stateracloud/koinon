@@ -62,11 +62,11 @@ var _ = Describe("Run content retention", func() {
 		Expect(days).To(Equal(30))
 
 		seven := 7
-		Expect(svc.SetRunContentRetention(ctx, org, audit.System(), &seven)).To(Succeed())
+		Expect(svc.SetRunContentRetention(ctx, org, audit.System("koinon-test:spec"), &seven)).To(Succeed())
 		days, _ = svc.RunContentRetentionDays(ctx, org)
 		Expect(days).To(Equal(7))
 
-		Expect(svc.SetRunContentRetention(ctx, org, audit.System(), nil)).To(Succeed())
+		Expect(svc.SetRunContentRetention(ctx, org, audit.System("koinon-test:spec"), nil)).To(Succeed())
 		days, _ = svc.RunContentRetentionDays(ctx, org)
 		Expect(days).To(Equal(30))
 
@@ -78,7 +78,7 @@ var _ = Describe("Run content retention", func() {
 	It("rejects a retention outside 1 to 365 days", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		for _, d := range []int{-1, 366} {
-			Expect(svc.SetRunContentRetention(ctx, org, audit.System(), &d)).To(MatchError(ContainSubstring("days")))
+			Expect(svc.SetRunContentRetention(ctx, org, audit.System("koinon-test:spec"), &d)).To(MatchError(ContainSubstring("days")))
 		}
 	})
 
@@ -89,7 +89,7 @@ var _ = Describe("Run content retention", func() {
 		fresh := finishedRun(ctx, a, 29*24*time.Hour, 3)
 		other := finishedRun(ctx, b, 31*24*time.Hour, 2)
 		ten := 10
-		Expect(svc.SetRunContentRetention(ctx, b, audit.System(), &ten)).To(Succeed())
+		Expect(svc.SetRunContentRetention(ctx, b, audit.System("koinon-test:spec"), &ten)).To(Succeed())
 
 		p := orgsettings.NewPurger(pool, nil, now)
 		n, err := p.PurgeOrg(ctx, a)

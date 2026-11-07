@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("the org's default model in the admin API (koinon-private#256)", func() {
+var _ = Describe("the org's default model in the admin API (old issue 256)", func() {
 	var e *env
 	BeforeEach(func(ctx SpecContext) { e = newEnv(ctx) })
 

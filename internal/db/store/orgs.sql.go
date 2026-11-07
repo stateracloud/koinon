@@ -74,7 +74,7 @@ SELECT coalesce(default_model, '')::text AS default_model FROM orgs
 WHERE id = $1 AND deleted_at IS NULL
 `
 
-// The model agents without a model setting run on (koinon-private#256); ” when the org has none.
+// The model agents without a model setting run on (old issue 256); ” when the org has none.
 func (q *Queries) GetOrgDefaultModel(ctx context.Context, orgID pgtype.UUID) (string, error) {
 	row := q.db.QueryRow(ctx, getOrgDefaultModel, orgID)
 	var default_model string

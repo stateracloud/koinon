@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: wrapping the KEKs with an AWS KMS key (ADR 0085 decision 12, koinon-private#417).
+# Chart assertions: wrapping the KEKs with an AWS KMS key (ADR 0085 decision 12, old issue 417).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 awskms_key=arn:aws:kms:eu-central-1:111122223333:key/0b1d2e3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5

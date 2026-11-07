@@ -163,7 +163,7 @@ func ListServed(ctx context.Context, rv prices.Resolver, q *store.Queries, org p
 	return out, nil
 }
 
-// OrgDefault is the org's stored default model (orgs.default_model, koinon-private#256): the model agents with
+// OrgDefault is the org's stored default model (orgs.default_model, old issue 256): the model agents with
 // no model setting run on. It is set by the org's first model or by an admin (Service.SetDefault)
 // and nothing else changes it. "" when the org has none.
 func OrgDefault(ctx context.Context, q *store.Queries, org pgtype.UUID) (string, error) {
@@ -438,7 +438,7 @@ func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolve
 			}
 			set = true
 			return audit.RecordErr(ctx, q, audit.Event{
-				Org: org, Actor: audit.System(), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
+				Org: org, Actor: audit.System("koinon-api:agent-model"), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 				Before: map[string]any{"model": ""}, After: map[string]any{"model": list[0].Name, "reason": "migrated"},
 			})
 		})

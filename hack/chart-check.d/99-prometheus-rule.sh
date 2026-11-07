@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck shell=bash disable=SC2154
-# Chart assertions: the alerting rules, metrics.prometheusRule (ADR 0085 decision 11, koinon-private#414).
+# Chart assertions: the alerting rules, metrics.prometheusRule (ADR 0085 decision 11, old issue 414).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-# The stranded-workflows alert (ADR 0085, decision 11, koinon-private#414): a PrometheusRule, off by default, that
+# The stranded-workflows alert (ADR 0085, decision 11, old issue 414): a PrometheusRule, off by default, that
 # needs its CRD; the durable group exists only with api.durable.enabled.
 lacks "no PrometheusRule by default" 'kind: PrometheusRule'
 pr=(--set metrics.prometheusRule.enabled=true --api-versions monitoring.coreos.com/v1/PrometheusRule)

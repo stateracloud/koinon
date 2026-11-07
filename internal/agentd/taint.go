@@ -200,7 +200,7 @@ var taintLegs = map[acp.ToolKind]mcpguard.Legs{
 }
 
 // An MCP tool's result does not set legs here. It passed the gateway, and the guard set the
-// session's legs there from the tool's own declaration (ADR 0091 decision 4, koinon-private#643): reporting the
+// session's legs there from the tool's own declaration (ADR 0091 decision 4, old issue 643): reporting the
 // ACP kind other as well would hold both legs for the first MCP call of a home generation and
 // undo every declaration. The call is recognised by the flavor's title prefix
 // (flavor.Descriptor.MCPToolPrefix); a call of kind other without it still sets both legs.

@@ -134,7 +134,7 @@ var _ = Describe("A fresh session with a handoff", func() {
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		// A run that succeeded completed its task (koinon-private#324); the restart marks open tasks, so a
+		// A run that succeeded completed its task (old issue 324); the restart marks open tasks, so a
 		// follow-up reopens it first.
 		_, err = db.Exec(ctx, `UPDATE tasks SET state = 'submitted', finished_at = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())

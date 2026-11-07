@@ -319,8 +319,8 @@ func (t *Tool) Status(ctx context.Context) error {
 	return t.fingerprintCheck(ctx, ks)
 }
 
-// bindingNote says whether a KMS-wrapped KEK is bound to the install (koinon-private#615): ", bound" or
-// ", unbound" (wrapped before koinon-private#615). A local KEK cannot be bound and gets nothing.
+// bindingNote says whether a KMS-wrapped KEK is bound to the install (old issue 615): ", bound" or
+// ", unbound" (wrapped before old issue 615). A local KEK cannot be bound and gets nothing.
 func bindingNote(ks KeySet, id string) string {
 	s, ok := ks.Stored[id]
 	switch {
@@ -334,7 +334,7 @@ func bindingNote(ks KeySet, id string) string {
 }
 
 // boundOnlyRefused prints the bound-only marker and every KEK of ks it makes this install refuse:
-// the KMS KEKs stored unbound (koinon-private#615).
+// the KMS KEKs stored unbound (old issue 615).
 func (t *Tool) boundOnlyRefused(ctx context.Context, ks KeySet) {
 	if t.Pool != nil {
 		if b, err := installid.ReadBoundOnly(ctx, t.Pool); err == nil && b.Set {
@@ -342,7 +342,7 @@ func (t *Tool) boundOnlyRefused(ctx context.Context, ks KeySet) {
 		}
 	}
 	for _, id := range secretstore.UnboundKEKs(ks.Stored) {
-		_, _ = fmt.Fprintf(t.Out, "REFUSED: KEK %s is stored unbound (wrapped before koinon-private#615) and this install accepts bound KEKs only. "+
+		_, _ = fmt.Fprintf(t.Out, "REFUSED: KEK %s is stored unbound (wrapped before old issue 615) and this install accepts bound KEKs only. "+
 			"Restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete the KEK Secret and rerun the key-admin Job.\n", id)
 	}
 }
@@ -368,9 +368,9 @@ func (t *Tool) installBinding(ctx context.Context, ks KeySet) error {
 			return err
 		}
 		if b.Set {
-			_, _ = fmt.Fprintf(t.Out, "Bound only: %s. KEKs stored unbound (wrapped before koinon-private#615) never open here.\n", b)
+			_, _ = fmt.Fprintf(t.Out, "Bound only: %s. KEKs stored unbound (wrapped before old issue 615) never open here.\n", b)
 		} else {
-			_, _ = fmt.Fprintln(t.Out, "Bound only: not set. KEKs stored unbound (wrapped before koinon-private#615) still open; the key-admin Job sets it once every KEK is bound (secrets.kek.kms.keyAdmin.rewrapUnbound).")
+			_, _ = fmt.Fprintln(t.Out, "Bound only: not set. KEKs stored unbound (wrapped before old issue 615) still open; the key-admin Job sets it once every KEK is bound (secrets.kek.kms.keyAdmin.rewrapUnbound).")
 		}
 	}
 	if !kms {
@@ -381,10 +381,10 @@ func (t *Tool) installBinding(ctx context.Context, ks KeySet) error {
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(t.Out, "The install ID is %s: KEKs wrapped by a KMS since koinon-private#615 are bound to it and open only next to this database.\n", install)
+		_, _ = fmt.Fprintf(t.Out, "The install ID is %s: KEKs wrapped by a KMS since old issue 615 are bound to it and open only next to this database.\n", install)
 	}
 	for _, id := range unbound {
-		_, _ = fmt.Fprintf(t.Out, "KEK %s is not bound to the install (wrapped before koinon-private#615): it would also open next to another install's database. Bind it with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound), or rotate it out.\n", id)
+		_, _ = fmt.Fprintf(t.Out, "KEK %s is not bound to the install (wrapped before old issue 615): it would also open next to another install's database. Bind it with the key-admin Job (secrets.kek.kms.keyAdmin.rewrapUnbound), or rotate it out.\n", id)
 	}
 	return nil
 }

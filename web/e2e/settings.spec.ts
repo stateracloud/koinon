@@ -113,7 +113,7 @@ test('owner adds a provider and a model; the pages pass axe in each state', asyn
   await expectAccessible(page)
   await page.getByRole('button', { name: 'Add model', exact: true }).click()
   // The open form previews the served name in a <code> too, until onDone closes it; the saved model
-  // is the row in the provider's list, so target that, not any text match (koinon-private#520).
+  // is the row in the provider's list, so target that, not any text match (old issue 520).
   await expect(page.getByRole('list', { name: 'Models of ollama-lab' }).getByText('default/llama3.1')).toBeVisible()
   await expect(page.getByRole('form', { name: 'Add model to ollama-lab' })).toHaveCount(0)
   expect(seen.modelCreate).toMatchObject({ providerId: 'p-new', name: 'llama3.1' })

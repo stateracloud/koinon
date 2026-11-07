@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package chartsmoke_test is the rendered startup smoke test (regressions like koinon-private#284, where the
+// Package chartsmoke_test is the rendered startup smoke test (regressions like old issue 284, where the
 // chart's migrate Job failed on a fresh install because a new required flag had no token mounted
 // into that Job). Unit tests call the flag parser, and hack/chart-check.sh only renders YAML;
 // nothing ran the real binary with the chart's real command line. This does:
@@ -31,8 +31,8 @@
 // short-lived and only answers authenticated requests (RBAC).
 //
 // What it proves, for example: moving the serve-only OTLP token check from serve to the root of
-// internal/cmd/koinonapi (koinon-private#285) makes "runs the migrate Job to completion" fail with "--otlp-token-dir is required with
-// --otlp-addr", the install failure of koinon-private#284.
+// internal/cmd/koinonapi (old issue 285) makes "runs the migrate Job to completion" fail with "--otlp-token-dir is required with
+// --otlp-addr", the install failure of old issue 284.
 //
 // Needs Docker, helm, Go (to build the images) and KUBEBUILDER_ASSETS (setup-envtest, as for
 // the admission suite); `make test-chart-smoke` sets it up. Skips without Docker or

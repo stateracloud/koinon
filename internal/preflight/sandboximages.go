@@ -131,8 +131,8 @@ func SupervisorImage(toml string) string {
 // It reads one ConfigMap. Its findings only warn: an environment variable on the gateway can override
 // the file. A ConfigMap that cannot be read fails when the chart configures a supervisor image
 // (sandboxPolicy.supervisorImages): the reconciler reads the same ConfigMap to put the supervisor image
-// in the sandbox spec hash (ADR 0085, koinon-private#410), so it would not recreate sandboxes after an OpenShell
-// upgrade (koinon-private#489). Without a supervisor image it warns, since it says nothing about the gateway.
+// in the sandbox spec hash (ADR 0085, old issue 410), so it would not recreate sandboxes after an OpenShell
+// upgrade (old issue 489). Without a supervisor image it warns, since it says nothing about the gateway.
 func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	wantSecrets := c.Config.ExpectSandboxPullSecrets
 	wantSupervisor := len(c.Config.SupervisorImages) > 0

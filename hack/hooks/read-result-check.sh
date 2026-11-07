@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Claude Code PreToolUse hook on the Read tool (issue koinon-private#534; docs/research/2026-11-token-tiers.md).
+# Claude Code PreToolUse hook on the Read tool (old issue 534; docs/research/2026-11-token-tiers.md).
 # A Bash result too large to show is saved under .../tool-results/ and agents then Read that file
 # whole: half of all Read characters in the research window. This hook refuses a Read whose
 # file_path contains /tool-results/ and that sets no limit. Exact match, no heuristics.

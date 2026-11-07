@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: ci
 
-# The run says whether it ran for a draft, from the event payload (koinon-private#676). hack/ci-skip-heavy.sh decides
+# The run says whether it ran for a draft, from the event payload (old issue 676). hack/ci-skip-heavy.sh decides
 # from the same flag (PR_DRAFT below), so a run's label and its behaviour always agree; a gate
 # can drop runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`
 # (the run `name` stays `ci`) without a time window. A re-run replays the event, so keeps its label.
@@ -9,7 +9,7 @@ run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
 
 on:
   # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
-  # marked ready (koinon-private#593).
+  # marked ready (old issue 593).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
@@ -23,7 +23,7 @@ on:
 permissions:
   contents: read
 
-# One run per head (koinon-private#675). Runs never cancel each other through the group: the group is the PR head
+# One run per head (old issue 675). Runs never cancel each other through the group: the group is the PR head
 # SHA (a push to main: its own SHA), cancel-in-progress is off. So a push followed by ready_for_review,
 # or a re-run, on one head queue behind each other instead of killing a live run (a cancelled run reads
 # as FAILED to hack/pr-wait.sh). GitHub keeps one running and one pending run per group; a third run
@@ -43,23 +43,23 @@ jobs:
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (koinon-private#593; `go` and `web` then FAIL on
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (old issue 593; `go` and `web` then FAIL on
   # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
   # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
-  # passed (koinon-private#595). `changes`, `quick checks` (koinon-private#594) and flavor-publish always run; `scripts` and
-  # `lint-shell` run except on that push to main (koinon-private#594). Read the script's header before changing this.
+  # passed (old issue 595). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
+  # `lint-shell` run except on that push to main (old issue 594). Read the script's header before changing this.
   changes:
     name: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Read rights: the pull request's head (hack/ci-supersede.sh), the check runs of its head and, for
-    # go-test-lab (koinon-private#610), its commit statuses. Write on actions only to cancel older heads' runs (koinon-private#675).
+    # go-test-lab (old issue 610), its commit statuses. Write on actions only to cancel older heads' runs (old issue 675).
     permissions:
       contents: read
       pull-requests: read # hack/ci-supersede.sh reads pulls/<n> for the current head
       checks: read
       statuses: read
-      actions: write # hack/ci-supersede.sh cancels the runs of older heads (koinon-private#675)
+      actions: write # hack/ci-supersede.sh cancels the runs of older heads (old issue 675)
     outputs:
       skip: ${{ steps.skip.outputs.skip }}
       reason: ${{ steps.skip.outputs.reason }}
@@ -120,10 +120,10 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
-      # go-test satisfied by an external run (koinon-private#610): a ready pull request whose head has the commit status
+      # go-test satisfied by an external run (old issue 610): a ready pull request whose head has the commit status
       # go-test-lab = success (an external go-test run that passed on exactly this head) does not run go-test on the runner; the
       # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
-      # Trust limit as for e2e-lab (koinon-private#568): anyone with write access can post the status, and this job
+      # Trust limit as for e2e-lab (old issue 568): anyone with write access can post the status, and this job
       # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
       - id: lab
         env:
@@ -136,7 +136,7 @@ jobs:
           hack/ci-skip-heavy.sh lab >"$RUNNER_TEMP/lab.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/lab.txt"
 
-  # The Go checks run as parallel jobs (koinon-private#217). They share one module and build cache
+  # The Go checks run as parallel jobs (old issue 217). They share one module and build cache
   # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every
   # push to main, so a pull request starts from main's entry (docs/dev/ci.md#cache-ownership). A job that
   # builds little can therefore never fill the entry first and leave go-test and go-race with nothing
@@ -193,7 +193,7 @@ jobs:
           version: v2.15.0
           skip-save-cache: true # warm-caches on main saves it
 
-  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (koinon-private#610).
+  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (old issue 610).
   go-test:
     needs: changes
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
@@ -245,7 +245,7 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
-          KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (koinon-private#507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
+          KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (old issue 507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -295,7 +295,7 @@ jobs:
   go:
     name: go
     needs: [changes, go-tidy, go-lint, go-test, go-race]
-    # Not on a push to main whose heavy jobs were switched off (koinon-private#595): the check then reports skipped
+    # Not on a push to main whose heavy jobs were switched off (old issue 595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
@@ -314,13 +314,13 @@ jobs:
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
           # `go` check run on a head must never be a vacuous success while the ready run is still
-          # going (koinon-private#593). Drafts cannot merge; marking ready runs everything on the same head.
+          # going (old issue 593). Drafts cannot merge; marking ready runs everything on the same head.
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
             echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
             exit 1
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
-          # go-test skipped because an external run proved it (koinon-private#610): that one skip counts as success. Any other
+          # go-test skipped because an external run proved it (old issue 610): that one skip counts as success. Any other
           # skipped part stays a failure, and so does a go-test skip with no green lab status.
           if [[ $GO_TEST == skipped && $LAB == true ]]; then
             echo "go-test passed in an external run: $LAB_REASON"
@@ -330,7 +330,7 @@ jobs:
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
 
-  # The short checks in one job (koinon-private#594). Every job pays a fixed start-up cost (runner, checkout,
+  # The short checks in one job (old issue 594). Every job pays a fixed start-up cost (runner, checkout,
   # toolchain) and each of these did about 10 s of work, so five jobs (proto, migrations, adr-lint,
   # claim-tests, dependency age) paid it five times for under one minute of work. The steps run one after another and each
   # runs even when an earlier one failed (!cancelled()), so one run still shows every failure, as
@@ -438,7 +438,7 @@ jobs:
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
         run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
 
-  # The web checks run as parallel jobs (koinon-private#218), each its own check; `web` below aggregates them and
+  # The web checks run as parallel jobs (old issue 218), each its own check; `web` below aggregates them and
   # keeps the required check name stable.
   web-lint:
     needs: changes
@@ -528,7 +528,7 @@ jobs:
   web:
     name: web
     needs: [changes, web-lint, web-test, web-e2e]
-    # Not on a push to main whose heavy jobs were switched off (koinon-private#595): the check then reports skipped
+    # Not on a push to main whose heavy jobs were switched off (old issue 595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
@@ -544,7 +544,7 @@ jobs:
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
           # `web` check run on a head must never be a vacuous success while the ready run is still
-          # going (koinon-private#593). Drafts cannot merge; marking ready runs everything on the same head.
+          # going (old issue 593). Drafts cannot merge; marking ready runs everything on the same head.
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
             echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
             exit 1
@@ -623,7 +623,7 @@ jobs:
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
-  # Rendered startup smoke test (koinon-private#284): the chart's Jobs and Deployments run as containers, with
+  # Rendered startup smoke test (old issue 284): the chart's Jobs and Deployments run as containers, with
   # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke. Required:
   # a run skipped because no chart file changed reports success.
   chart-smoke:
@@ -718,7 +718,7 @@ jobs:
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
   # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
-  # Skipped like `go` on a push to main whose heavy jobs are off (koinon-private#594): the pull request head passed it.
+  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594): the pull request head passed it.
   lint-shell:
     name: lint-shell
     needs: changes
@@ -751,7 +751,7 @@ jobs:
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
-  # Skipped like `go` on a push to main whose heavy jobs are off (koinon-private#594); see lint-shell.
+  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594); see lint-shell.
   scripts:
     name: scripts
     needs: changes
@@ -798,6 +798,8 @@ jobs:
       - run: hack/notes-expiry-test.sh
       - run: hack/mktemp-lint-test.sh
       - run: hack/mktemp-lint.sh
+      - run: hack/old-issue-refs-lint-test.sh
+      - run: hack/old-issue-refs-lint.sh
       - run: hack/bash5-lint-test.sh
       - run: hack/bash5-lint.sh
       - run: hack/ship-test.sh
@@ -824,7 +826,7 @@ jobs:
       - run: hack/ci-cache-test.sh
       - run: hack/chart-check-test.sh
 
-  # Main owns every CI cache (docs/dev/ci.md#cache-ownership, koinon-private#147). A pull request can read
+  # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
   # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so
   # this job fills them on every push to main. It is never skipped by `changes`: hack/ci-skip-heavy.sh
   # skips the heavy jobs on a push whose tree already passed as a pull request head, which used to
@@ -945,7 +947,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: docs/site
 
-  # Flavor contract suite (plan item E3, issue koinon-private#76): the flavor image is built from this
+  # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
   # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
@@ -1010,7 +1012,7 @@ jobs:
     name: flavor-publish
     needs: [changes, flavors]
     # Always runs on main when the flavors changed, also when the flavors job was switched off because
-    # the merge tree is a tested pull request head (koinon-private#595): publishing is not a test. A failed or
+    # the merge tree is a tested pull request head (old issue 595): publishing is not a test. A failed or
     # cancelled flavors job still stops it. flavors_publish is the value before the switch.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
     runs-on: ubuntu-latest

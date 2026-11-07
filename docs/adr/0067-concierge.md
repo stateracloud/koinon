@@ -2,10 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-10-26
-- Relates to: [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146) (round 4 and the releases)
+- Relates to: old issue 146 (round 4 and the releases)
 - Amends: [0005](0005-agent-identity.md) (an explicit exception: the concierge acts as the
   logged-in user)
-- Delivery: v0.3 (koinon-private#146)
+- Delivery: v0.3 (old issue 146)
 
 ## Context
 
@@ -138,7 +138,7 @@ Zapier and Rovo rest on search summaries only.
 
 ## Links
 
-- Issues [koinon-private#146](https://github.com/stateracloud/koinon-private/issues/146), [#11](https://github.com/stateracloud/koinon/issues/11)
+- Old issues 146, [#11](https://github.com/stateracloud/koinon/issues/11)
 - ADRs [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md),
   [0020](0020-agent-builder-and-templates.md), [0021](0021-connector-setup-guides.md),
   [0023](0023-observability-and-audit.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),

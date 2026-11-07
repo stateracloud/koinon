@@ -2,7 +2,7 @@
 
 // Package wrapping builds a process's key-wrapping keys (secretstore.Wrappers) from its
 // configuration. It is the one place that does: koinon-api, its "keys" commands and the reconciler
-// all call New, so a KMS adapter (koinon-private#416, koinon-private#417) is wired once and no process can miss it and write a
+// all call New, so a KMS adapter (old issue 416, old issue 417) is wired once and no process can miss it and write a
 // KEK in the clear.
 package wrapping
 
@@ -34,9 +34,9 @@ const (
 const (
 	// BackendLocal is the local Secret-held KEK (the default).
 	BackendLocal = secretstore.BackendLocal
-	// BackendOpenBao is an OpenBao (or Vault) transit key (koinon-private#416).
+	// BackendOpenBao is an OpenBao (or Vault) transit key (old issue 416).
 	BackendOpenBao = openbao.Backend
-	// BackendAWSKMS is an AWS KMS symmetric key (koinon-private#417).
+	// BackendAWSKMS is an AWS KMS symmetric key (old issue 417).
 	BackendAWSKMS = awskms.Backend
 )
 
@@ -80,7 +80,7 @@ func (c *Config) Flags(fs *pflag.FlagSet) {
 
 // New returns the wrappers for cfg in role. KEKs stored before a switch to a KMS still unwrap
 // (secretstore.Wrappers always opens a local one) until the key-admin Job rewraps them. boundOnly
-// reads the install's bound-only marker (koinon-private#615) and is required: see [secretstore.NewWrappers].
+// reads the install's bound-only marker (old issue 615) and is required: see [secretstore.NewWrappers].
 func New(_ context.Context, cfg Config, role Role, boundOnly secretstore.BoundOnlySource) (secretstore.Wrappers, error) {
 	if boundOnly == nil {
 		return secretstore.Wrappers{}, secretstore.ErrNoBoundOnlySource

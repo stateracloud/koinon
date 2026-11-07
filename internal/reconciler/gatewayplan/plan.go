@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package gatewayplan decides the gateway side of a reconcile pass (issue koinon-private#455, ADR 0058).
+// Package gatewayplan decides the gateway side of a reconcile pass (old issue 455, ADR 0058).
 //
 // The reconciler loads rows from Postgres and runs the steps; this package decides what the gateway
 // is told. Given the loaded rows and the time, a Planner returns the state to apply, the key files
@@ -235,7 +235,7 @@ type Planner struct {
 	appliedFile    map[string]string
 	appliedMCPFile map[string]string
 	// appliedMCPSig is what each served MCP server was last applied as (its URL, transport and
-	// credential file); a server whose signature is new or changed is probed at once (issue koinon-private#226).
+	// credential file); a server whose signature is new or changed is probed at once (old issue 226).
 	appliedMCPSig map[string]string
 	// probeKeys are the prober's keys, in memory only; probes are the servers the last applied state
 	// lets the prober list.
@@ -298,7 +298,7 @@ type Draft struct {
 	// Files are the key files to write first, by data key (providers' and MCP servers').
 	Files map[string][]byte
 	// Stops indexes the agents whose budget has nothing left: their runs are stopped with the budget
-	// reason before the Apply blocks or revokes the key (issue koinon-private#188).
+	// reason before the Apply blocks or revokes the key (old issue 188).
 	Stops []int
 	// LimitFailures are the agents whose budget could not be computed.
 	LimitFailures []LimitFailure
@@ -463,7 +463,7 @@ func (pl *Plan) Applied(res ApplyResult) Outcome {
 }
 
 // served computes, for every org, the models the applied state serves, which koinon-agentd waits on
-// before a run starts its harness (issue koinon-private#174). A provider whose new key file is still reaching the
+// before a run starts its harness (old issue 174). A provider whose new key file is still reaching the
 // gateway pod and that has no previous file is not in the state, so its models are not recorded; one
 // that keeps serving with its previous file stays recorded.
 func (pl *Plan) served(rejections []gateway.Rejection) []ServedModels {

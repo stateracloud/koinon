@@ -57,7 +57,7 @@ Checked 2026-10-21:
   https://github.com/kubernetes-sigs/agent-sandbox
 - DCO app configuration: https://github.com/dcoapp/app
 
-## Amendment (2026-11-02, koinon-private#547): a maintainer's agent may submit lab runs
+## Amendment (2026-11-02, old issue 547): a maintainer's agent may submit lab runs
 
 The lab is still not a CI runner and is still not connected to public CI: no GitHub workflow, and no
 pull request's code, reaches it by itself. A maintainer's own agent submits a run of the maintainer's

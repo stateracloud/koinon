@@ -277,7 +277,7 @@ var _ = Describe("EnsureRole", func() {
 		Expect(pgtest.EnsureRole(ctx, db, `x"; DROP ROLE y; --`)).NotTo(Succeed())
 	}, SpecTimeout(2*time.Minute))
 
-	It("survives a creator that is still in flight on the same name (the race of koinon-private#619)", func(ctx SpecContext) {
+	It("survives a creator that is still in flight on the same name (the race of old issue 619)", func(ctx SpecContext) {
 		dsn := pgtest.Run(ctx)
 		role := "pgtest_role_race_" + pgtest.ProcID()
 		dropRole(dsn, role)

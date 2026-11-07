@@ -83,7 +83,7 @@ type StoredKEK struct {
 	Backend string
 	KeyID   string
 	Wrapped []byte
-	// InstallID is the install the KEK was wrapped for (stored format 2, koinon-private#615): its wrap bound this
+	// InstallID is the install the KEK was wrapped for (stored format 2, old issue 615): its wrap bound this
 	// install ID into the associated data. Empty for a KEK wrapped before that (format 1, bound to
 	// its KEK ID only) and for a [Local] KEK, which cannot bind anything. It is not trusted: an
 	// unwrap binds the install ID of the process ([Wrappers.WithInstallID]), never this one, which
@@ -120,11 +120,11 @@ type storedJSON struct {
 	Install string `json:"install,omitempty"`
 }
 
-// The stored formats of a KMS-wrapped KEK. Format 1 (koinon-private#416) binds the KEK to its ID ([kekAAD]);
-// format 2 (koinon-private#615) binds it to its ID and the install ([kekInstallAAD]), so a KEK copied from
+// The stored formats of a KMS-wrapped KEK. Format 1 (old issue 416) binds the KEK to its ID ([kekAAD]);
+// format 2 (old issue 615) binds it to its ID and the install ([kekInstallAAD]), so a KEK copied from
 // another install, or restored next to another install's database, does not unwrap. Every new wrap
 // writes format 2; format 1 is read for as long as a Secret or a backup may hold it. A binary from
-// before koinon-private#615 refuses format 2 when it parses the key set ("unsupported format 2"): it fails closed
+// before old issue 615 refuses format 2 when it parses the key set ("unsupported format 2"): it fails closed
 // and never reads a bound KEK as an unbound one.
 const (
 	storedFormatV1 = 1
@@ -216,7 +216,7 @@ func StaticInstallID(id string) InstallIDSource {
 // process does not know the install ID: it has no source, or the source failed.
 var ErrNoInstallID = errors.New("secretstore: the install ID is not known")
 
-// BoundOnly is the install's "bound only" marker (koinon-private#615): once it is set, a KEK a KMS wrapped before
+// BoundOnly is the install's "bound only" marker (old issue 615): once it is set, a KEK a KMS wrapped before
 // the install binding (stored format 1) is refused, so an old KEK Secret backup, which holds the
 // same KEKs unbound, no longer opens next to this install's database or any other. It is set once,
 // by the key-admin Job when it creates the first KEK of an install or when --rewrap-unbound leaves
@@ -293,7 +293,7 @@ var ErrBoundOnly = errors.New("secretstore: this install accepts only KEKs bound
 // builds the Job's. With the [Local] primary both wrap, as before key wrapping. Processes build
 // them from their configuration in one place (package secretstore/wrapping), not here.
 //
-// A KMS-wrapped KEK is bound to the install ([Wrappers.WithInstallID], koinon-private#615): every new wrap with a
+// A KMS-wrapped KEK is bound to the install ([Wrappers.WithInstallID], old issue 615): every new wrap with a
 // KMS needs the install ID, and so does every unwrap of a KEK stored in format 2.
 type Wrappers struct {
 	primary   Wrapper
@@ -323,7 +323,7 @@ func (ws Wrappers) acceptUnbound(ctx context.Context, id string) error {
 		return fmt.Errorf("secretstore: KEK %q is stored unbound (format 1) and whether this install still accepts that is not known: %w", id, err)
 	}
 	if b.Set {
-		return fmt.Errorf("%w: %w: KEK %q is stored unbound (format 1, wrapped before koinon-private#615), and the bound-only marker of this install was %s. "+
+		return fmt.Errorf("%w: %w: KEK %q is stored unbound (format 1, wrapped before old issue 615), and the bound-only marker of this install was %s. "+
 			"The KEK Secret is an old backup or belongs to another install: restore one taken after the KEKs were bound. "+
 			"If the database holds no encrypted values yet (a new install, where GitOps or a backup restore put an old Secret in place), "+
 			"delete the KEK Secret and rerun the key-admin Job instead: no values are lost (docs/ops/secret-keys.md)",
@@ -366,7 +366,7 @@ const CallTimeout = 10 * time.Second
 // NewWrappers returns a service's wrappers: primary is the wrapping key of the key set (new KEKs
 // are wrapped with it only when it is [Local]). Each backend and key ID pair appears once.
 //
-// boundOnly is required (koinon-private#615): it reads the install's "bound only" marker before a KMS KEK stored
+// boundOnly is required (old issue 615): it reads the install's "bound only" marker before a KMS KEK stored
 // unbound (format 1) is unwrapped. With the marker set, such a KEK is [ErrBoundOnly]; when the
 // marker cannot be read, it is refused too (fail closed). There is no "no marker" mode: a process
 // without a database passes a source that returns an error, and tests pass [StaticBoundOnly].
@@ -381,7 +381,7 @@ func NewKeyAdminWrappers(boundOnly BoundOnlySource, primary Wrapper, more ...Wra
 }
 
 // ErrNoBoundOnlySource means wrappers were built without a source for the bound-only marker.
-var ErrNoBoundOnlySource = errors.New("secretstore: no source for the bound-only marker (koinon-private#615)")
+var ErrNoBoundOnlySource = errors.New("secretstore: no source for the bound-only marker (old issue 615)")
 
 // WithCallTimeout returns ws with another per-call bound than [CallTimeout] (tests).
 func (ws Wrappers) WithCallTimeout(d time.Duration) Wrappers {

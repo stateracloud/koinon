@@ -570,7 +570,7 @@ type SetAgentKeepWarmParams struct {
 	ID       pgtype.UUID
 }
 
-// Whether an org admin asks for the agent's sandbox to stay up (koinon-private#315). The operator's per-org cap
+// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 // decides how many of the requests the reconciler grants. Not a new version.
 func (q *Queries) SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, setAgentKeepWarm, arg.KeepWarm, arg.OrgID, arg.ID)

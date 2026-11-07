@@ -4,7 +4,7 @@
 # Offline tests (no network) of expand_vars in hack/dep-age-check.sh: the version a file keeps in a
 # variable is what gets dated. Covers the shell, Dockerfile and YAML `NAME: value` forms (plain,
 # quoted, trailing comment, list item), and that a name defined with two different values or not at
-# all is left unexpanded (so dating it fails closed) instead of the first definition winning (koinon-private#549).
+# all is left unexpanded (so dating it fails closed) instead of the first definition winning (old issue 549).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }

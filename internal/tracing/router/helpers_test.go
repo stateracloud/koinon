@@ -38,7 +38,7 @@ const (
 )
 
 // The specs wait on state, never on a time. These deadlines only tell a hang from a slow machine: the
-// a loaded 3-CPU external gate has taken seconds for steps that take milliseconds alone (koinon-private#533, koinon-private#612).
+// a loaded 3-CPU external gate has taken seconds for steps that take milliseconds alone (old issue 533, old issue 612).
 const (
 	// hangBound ends a wait that would otherwise never end.
 	hangBound = time.Minute

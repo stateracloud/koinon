@@ -63,7 +63,7 @@ var eventClasses = map[string]EventClass{
 	"acp.tool_call":           ClassBusiness,
 	"acp.tool_call_update":    ClassBusiness,
 
-	// The rest of the harness's session updates. A chunk kind's event is one stored item (koinon-private#344,
+	// The rest of the harness's session updates. A chunk kind's event is one stored item (old issue 344,
 	// runoutcome.RecordUpdate); the classes stay with the kinds.
 	"acp.agent_thought_chunk": ClassDiagnostic,
 	"acp.user_message_chunk":  ClassDiagnostic,

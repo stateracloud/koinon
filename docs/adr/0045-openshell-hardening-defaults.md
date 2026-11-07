@@ -3,7 +3,7 @@
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
 - Date: 2026-10-21
 - Amends: none (implements ADR 0002, ADR 0006, ADR 0016 and "Execution layer details")
-- Verification: Pending: OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))
+- Verification: Pending: OpenShell spike (old issue 3)
 
 ## Context
 

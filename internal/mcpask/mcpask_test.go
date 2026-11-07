@@ -123,7 +123,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		gw = newFakeGateway(slug + "-tracker_create_issue")
 		DeferCleanup(func() { gw.CloseClientConnections(); go gw.Close() })
 		svc = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
-		server, err = svc.Create(ctx, org, audit.System(), user, mcpservers.Input{
+		server, err = svc.Create(ctx, org, audit.System("koinon-test:spec"), user, mcpservers.Input{
 			Name: "tracker", URL: "https://mcp.example.com/mcp", CredentialHeader: "X-Api-Key", CredentialValue: "not-a-real-token",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -134,9 +134,9 @@ var _ = Describe("the ask-tier proxy", func() {
 			{Name: "drop_table", Description: "Drop"},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.SetTier(ctx, org, audit.System(), server.ID, "search", "auto")
+		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "search", "auto")
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.SetTier(ctx, org, audit.System(), server.ID, "drop_table", "never")
+		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "drop_table", "never")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(q.InsertAgentMCPServer(ctx, store.InsertAgentMCPServerParams{OrgID: org, AgentID: agent.ID, ServerID: sid})).To(Succeed())
 
@@ -295,7 +295,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		sid := uuidOf(server.ID)
 		change := map[string]func(ctx SpecContext){
 			"never tier": func(ctx SpecContext) {
-				_, err := svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "never")
+				_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "never")
 				Expect(err).NotTo(HaveOccurred())
 			},
 			"changed description": func(ctx SpecContext) {
@@ -311,7 +311,7 @@ var _ = Describe("the ask-tier proxy", func() {
 			},
 			"new URL": func(ctx SpecContext) {
 				u := "https://mcp2.example.com/mcp"
-				_, err := svc.Update(ctx, org, audit.System(), server.ID, mcpservers.Patch{URL: &u})
+				_, err := svc.Update(ctx, org, audit.System("koinon-test:spec"), server.ID, mcpservers.Patch{URL: &u})
 				Expect(err).NotTo(HaveOccurred())
 			},
 		}
@@ -323,12 +323,12 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.Status).To(Equal(store.ApprovalStatusFailed), name)
 			// Put the world back for the next case.
-			_, _ = svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "ask")
+			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask")
 			_ = q.InsertAgentMCPServer(ctx, store.InsertAgentMCPServerParams{OrgID: org, AgentID: agent.ID, ServerID: sid})
 			u := "https://mcp.example.com/mcp"
-			_, _ = svc.Update(ctx, org, audit.System(), server.ID, mcpservers.Patch{URL: &u})
+			_, _ = svc.Update(ctx, org, audit.System("koinon-test:spec"), server.ID, mcpservers.Patch{URL: &u})
 			_, _ = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{{Name: "create_issue", Description: "Create an issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)}})
-			_, _ = svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "ask")
+			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask")
 		}
 		Expect(gw.count()).To(BeZero())
 	})
@@ -337,7 +337,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		// The gateway opens the executor's key to the auto tier too, for the leak guard's cards (ADR
 		// 0091), so the call reaches the server; only the never tier stops an approved call.
 		row := request(ctx, map[string]any{"title": "b"})
-		_, err := svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "auto")
+		_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "auto")
 		Expect(err).NotTo(HaveOccurred())
 		got, err := exec().Approve(ctx, org, row.ID, user, row.ArgsSha256, "")
 		Expect(err).NotTo(HaveOccurred())
@@ -383,20 +383,20 @@ var _ = Describe("the ask-tier proxy", func() {
 
 			_, err := svc.SyncTools(ctx, org, sid(), []mcpservers.ListedTool{{Name: "create_issue", Description: "Create an issue. Now also deletes things.", InputSchema: json.RawMessage(`{"type":"object"}`)}})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "ask") // an admin put it back to ask without reviewing
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask") // an admin put it back to ask without reviewing
 			Expect(err).NotTo(HaveOccurred())
 			Expect(request(ctx, map[string]any{"title": "after change"}).Status).To(Equal(store.ApprovalStatusPending))
 
 			By("the URL changing parks it too")
 			u := "https://mcp2.example.com/mcp"
-			_, err = svc.Update(ctx, org, audit.System(), server.ID, mcpservers.Patch{URL: &u})
+			_, err = svc.Update(ctx, org, audit.System("koinon-test:spec"), server.ID, mcpservers.Patch{URL: &u})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(request(ctx, map[string]any{"title": "after url"}).Status).To(Equal(store.ApprovalStatusPending))
 		})
 
 		It("never covers a tool that needs two approvers", func(ctx SpecContext) {
 			scoped(ctx)
-			_, err := svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", true)
+			_, err := svc.SetTwoApprovers(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", true)
 			Expect(err).NotTo(HaveOccurred())
 			next := request(ctx, map[string]any{"title": "two"})
 			Expect(next.Status).To(Equal(store.ApprovalStatusPending))
@@ -413,7 +413,7 @@ var _ = Describe("the ask-tier proxy", func() {
 				return u
 			}
 			second, third = mk(), mk()
-			_, err := svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", true)
+			_, err := svc.SetTwoApprovers(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", true)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -447,11 +447,11 @@ var _ = Describe("the ask-tier proxy", func() {
 		})
 
 		It("covers a request recorded before the flag was turned on", func(ctx SpecContext) {
-			_, err := svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", false)
+			_, err := svc.SetTwoApprovers(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", false)
 			Expect(err).NotTo(HaveOccurred())
 			row := request(ctx, map[string]any{"title": "early"})
 			Expect(row.ApprovalsRequired).To(BeEquivalentTo(1))
-			_, err = svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", true)
+			_, err = svc.SetTwoApprovers(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", true)
 			Expect(err).NotTo(HaveOccurred())
 			got, err := exec().Approve(ctx, org, row.ID, second, row.ArgsSha256, "")
 			Expect(err).NotTo(HaveOccurred())

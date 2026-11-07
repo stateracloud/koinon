@@ -22,6 +22,17 @@ func (q *Queries) GetAuditChainHead(ctx context.Context, orgID pgtype.UUID) (Aud
 	return i, err
 }
 
+const getInstallAuditChainHead = `-- name: GetInstallAuditChainHead :one
+SELECT singleton, seq, hash FROM install_audit_chain_head
+`
+
+func (q *Queries) GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error) {
+	row := q.db.QueryRow(ctx, getInstallAuditChainHead)
+	var i InstallAuditChainHead
+	err := row.Scan(&i.Singleton, &i.Seq, &i.Hash)
+	return i, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 
 INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
@@ -73,6 +84,51 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		&i.ChainSeq,
 		&i.PrevHash,
 		&i.Hash,
+	)
+	return i, err
+}
+
+const insertInstallAuditEvent = `-- name: InsertInstallAuditEvent :one
+INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, chain_seq, prev_hash, hash, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at
+`
+
+type InsertInstallAuditEventParams struct {
+	ActorKind  string
+	ActorID    string
+	Action     string
+	TargetKind string
+	TargetID   string
+	Summary    []byte
+	RequestID  string
+}
+
+// The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
+func (q *Queries) InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error) {
+	row := q.db.QueryRow(ctx, insertInstallAuditEvent,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.Action,
+		arg.TargetKind,
+		arg.TargetID,
+		arg.Summary,
+		arg.RequestID,
+	)
+	var i InstallAuditEvent
+	err := row.Scan(
+		&i.ID,
+		&i.ChainSeq,
+		&i.PrevHash,
+		&i.Hash,
+		&i.ActorKind,
+		&i.ActorID,
+		&i.Action,
+		&i.TargetKind,
+		&i.TargetID,
+		&i.Summary,
+		&i.RequestID,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -345,6 +401,139 @@ func (q *Queries) ListAuditEventsFiltered(ctx context.Context, arg ListAuditEven
 			&i.ChainSeq,
 			&i.PrevHash,
 			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstallAuditChainRows = `-- name: ListInstallAuditChainRows :many
+SELECT (SELECT install_id::text FROM install_identity) AS scope_text, id::text AS id_text, chain_seq,
+       actor_kind, actor_id, action, target_kind, target_id, summary::text AS summary_text, request_id,
+       (extract(epoch FROM created_at) * 1000000)::bigint AS created_micros,
+       prev_hash, hash
+FROM install_audit_events
+WHERE chain_seq > $1
+ORDER BY chain_seq
+LIMIT $2
+`
+
+type ListInstallAuditChainRowsParams struct {
+	AfterSeq int64
+	PageSize int32
+}
+
+type ListInstallAuditChainRowsRow struct {
+	ScopeText     string
+	IDText        string
+	ChainSeq      int64
+	ActorKind     string
+	ActorID       string
+	Action        string
+	TargetKind    string
+	TargetID      string
+	SummaryText   string
+	RequestID     string
+	CreatedMicros int64
+	PrevHash      []byte
+	Hash          []byte
+}
+
+// One page of the install chain in chain order, with the fields the hash covers as text. The
+// install ID is read from install_identity, which never changes.
+func (q *Queries) ListInstallAuditChainRows(ctx context.Context, arg ListInstallAuditChainRowsParams) ([]ListInstallAuditChainRowsRow, error) {
+	rows, err := q.db.Query(ctx, listInstallAuditChainRows, arg.AfterSeq, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInstallAuditChainRowsRow
+	for rows.Next() {
+		var i ListInstallAuditChainRowsRow
+		if err := rows.Scan(
+			&i.ScopeText,
+			&i.IDText,
+			&i.ChainSeq,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.SummaryText,
+			&i.RequestID,
+			&i.CreatedMicros,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstallAuditEventsFiltered = `-- name: ListInstallAuditEventsFiltered :many
+SELECT id, chain_seq, prev_hash, hash, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at FROM install_audit_events
+WHERE ($1::uuid IS NULL OR id < $1::uuid)
+  AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)
+  AND ($4::text IS NULL OR starts_with(action, $4::text))
+  AND ($5::text IS NULL OR actor_kind = $5::text)
+  AND ($6::text IS NULL OR actor_id = $6::text)
+ORDER BY id DESC
+LIMIT $7
+`
+
+type ListInstallAuditEventsFilteredParams struct {
+	BeforeID     pgtype.UUID
+	Since        pgtype.Timestamptz
+	Until        pgtype.Timestamptz
+	ActionPrefix pgtype.Text
+	ActorKind    pgtype.Text
+	ActorID      pgtype.Text
+	PageSize     int32
+}
+
+// The install-scope read path (AuditService.List with AUDIT_SCOPE_INSTALL): the filters of
+// ListAuditEventsAllOrgs over the install chain.
+func (q *Queries) ListInstallAuditEventsFiltered(ctx context.Context, arg ListInstallAuditEventsFilteredParams) ([]InstallAuditEvent, error) {
+	rows, err := q.db.Query(ctx, listInstallAuditEventsFiltered,
+		arg.BeforeID,
+		arg.Since,
+		arg.Until,
+		arg.ActionPrefix,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InstallAuditEvent
+	for rows.Next() {
+		var i InstallAuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChainSeq,
+			&i.PrevHash,
+			&i.Hash,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.Summary,
+			&i.RequestID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

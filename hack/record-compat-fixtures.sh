@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Record the persisted-state compatibility folder of a release (koinon-private#652): the stored agent configs,
+# Record the persisted-state compatibility folder of a release (old issue 652): the stored agent configs,
 # the home_checkpoints rows with their schema version and a kopia home backup, all written by the
 # code of the checkout you run this in. internal/compat loads every folder under testdata/compat/
 # with the code at head.

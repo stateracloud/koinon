@@ -3,7 +3,7 @@
 - Status: Proposed | Accepted | Superseded by [NNNN](NNNN-title.md) | Deprecated
 - Date: YYYY-MM-DD
 - Decision: [design.md#N](../design.md) (omit for ADRs that are not in the design doc)
-- Verification: optional, e.g. "Pending: OpenShell spike ([koinon-private#3](https://github.com/stateracloud/koinon-private/issues/3))"
+- Verification: optional, e.g. "Pending: OpenShell spike (old issue 3)"
 
 ## Context
 
