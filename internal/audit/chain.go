@@ -147,10 +147,12 @@ func walk(fetch func(afterSeq int64) ([]link, error)) (rows, last int64, prev []
 }
 
 // headBreak compares a chain head with the last row: it finds removed tail rows and a changed head.
-// found is false when there is no head row at all.
-func headBreak(found bool, headSeq int64, headHash []byte, last int64, prev []byte) *Break {
+// found is false when there is no head row at all; seeded says the chain always has one (the
+// install chain's, which migration 00066 creates), so a missing head is a break even with no rows.
+// An org's head appears with its first event, so an org with neither has an empty, intact chain.
+func headBreak(seeded, found bool, headSeq int64, headHash []byte, last int64, prev []byte) *Break {
 	switch {
-	case !found && last == 0:
+	case !found && last == 0 && !seeded:
 		return nil // no rows and no head
 	case !found:
 		return &Break{Seq: last + 1, Reason: "the chain head is missing"}
@@ -184,7 +186,7 @@ func VerifyOrg(ctx context.Context, q *store.Queries, org pgtype.UUID) (OrgResul
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return res, fmt.Errorf("audit verify: read head of org %s: %w", org.String(), err)
 	}
-	res.Break = headBreak(err == nil, head.Seq, head.Hash, last, prev)
+	res.Break = headBreak(false, err == nil, head.Seq, head.Hash, last, prev)
 	return res, nil
 }
 
@@ -199,7 +201,8 @@ type InstallResult struct {
 func (r InstallResult) OK() bool { return r.Break == nil }
 
 // VerifyInstall walks the install chain as VerifyOrg walks an org's, with the hash of tag
-// koinon.install_audit.v1.
+// koinon.install_audit.v1. The install head is seeded by the migration, so a missing head is a
+// break even before the first event.
 func VerifyInstall(ctx context.Context, q *store.Queries) (InstallResult, error) {
 	var res InstallResult
 	rows, last, prev, brk, err := walk(func(after int64) ([]link, error) {
@@ -221,7 +224,7 @@ func VerifyInstall(ctx context.Context, q *store.Queries) (InstallResult, error)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return res, fmt.Errorf("audit verify: read the install chain head: %w", err)
 	}
-	res.Break = headBreak(err == nil, head.Seq, head.Hash, last, prev)
+	res.Break = headBreak(true, err == nil, head.Seq, head.Hash, last, prev)
 	return res, nil
 }
 

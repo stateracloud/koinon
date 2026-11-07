@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,6 +82,22 @@ func TestChartContract(t *testing.T) {
 			}
 			if checked == 0 {
 				t.Fatalf("no container of %s runs a binary with a command tree", values)
+			}
+			// ADR 0100 decision 1.1a: on an external database (this render) nothing creates the install
+			// audit writer role after the migrate Job, so the Job requires it; the cnpg grant hook waits
+			// for it instead and must not.
+			for _, j := range r.Jobs {
+				args := j.Spec.Template.Spec.Containers[0].Args
+				switch j.Name {
+				case "koinon-migrate", "koinon-migrate-install":
+					if !slices.Contains(args, "--require-install-writer") {
+						t.Errorf("the external-database migrate Job %s lacks --require-install-writer: %v", j.Name, args)
+					}
+				case "koinon-migrate-grants":
+					if slices.Contains(args, "--require-install-writer") {
+						t.Errorf("the cnpg grant hook must wait for the role, not require it: %v", args)
+					}
+				}
 			}
 		})
 	}

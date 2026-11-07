@@ -355,7 +355,7 @@ Only `koinon-api` writes it. The migration takes every write privilege on both i
 from `koinon_app`; `koinon-api migrate` then grants INSERT to the group role
 `koinon_install_audit_writer` after the migrations, on every run, if the role exists. It never creates
 the role (the migrate role has no CREATEROLE): when it is missing the Job logs a warning and grants
-nothing. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new clusters)
+nothing, or, with `--require-install-writer` (the chart's external mode, below), fails. The chart's CloudNativePG setup creates the role in `postInitApplicationSQL` (new clusters)
 and as a managed role (clusters created before this release), and makes only the `koinon_api`
 managed role a member. On an upgrade of an older cluster the operator creates that managed role
 after the `pre-upgrade` migrate Job, so the chart also runs `koinon-api migrate --grants-only` as a
@@ -364,8 +364,23 @@ waits up to `migrations.wait` for the role and the tables, grants, and fails the
 never appears. One `helm upgrade` is enough. Until the grant lands `koinon-api` serves anyway: it
 logs an error for each startup install event the database refuses
 (`koinon_audit_writes_total{chain="install",result="error"}` counts them) and retries it every
-30 seconds, and platform price changes fail with a permission error. Do not let the api, reconciler and agentd share one login: the
-reconciler would then be able to write this chain.
+30 seconds, and platform price changes fail with a permission error. The scheduled price refresh
+keeps the setting already recorded until its change is recorded. Do not let the api, reconciler and
+agentd share one login: the reconciler would then be able to write this chain.
+
+A refused install write that lasts longer than an upgrade means the grant or the membership is
+missing. An alert for it:
+
+```yaml
+- alert: KoinonInstallAuditWritesFailing
+  expr: sum(increase(koinon_audit_writes_total{chain="install",result="error"}[15m])) > 0
+  for: 30m
+  annotations:
+    summary: koinon-api cannot write the install audit chain
+    description: >-
+      Check that koinon_install_audit_writer exists, that koinon-api's login role is a member, and
+      run koinon-api migrate --grants-only (docs/ops/secret-keys.md, The install audit chain).
+```
 
 With `postgres.mode: external` the roles are yours. Run this once as an administrator **before the
 first migration** (or before the upgrade that adds the chain; created later, run `koinon-api migrate`
@@ -376,7 +391,11 @@ CREATE ROLE koinon_install_audit_writer NOLOGIN;
 GRANT koinon_install_audit_writer TO <api role>;
 ```
 
-and, if the migration role is not the one that owns the tables or `koinon_app` does not exist, after
+In this mode the chart runs the migrate Job with `--require-install-writer`: without the role the Job
+fails (`the role koinon_install_audit_writer does not exist`) and so does the install or upgrade, since
+no hook would create the role later. Create it as above and run the same `helm upgrade` again.
+
+And, if the migration role is not the one that owns the tables or `koinon_app` does not exist, after
 it:
 
 ```sql

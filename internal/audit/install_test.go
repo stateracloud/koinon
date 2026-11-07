@@ -327,6 +327,20 @@ var _ = Describe("the install audit chain", func() {
 			Expect(err).To(MatchError(ContainSubstring("head is missing")), "the chain does not restart from zero")
 		})
 
+		It("notices a removed head on a chain with no events: the migration seeds it", func(ctx SpecContext) {
+			empty := pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
+			installOwner(ctx, empty, func(tx pgx.Tx) {
+				_, err := tx.Exec(ctx, `DELETE FROM install_audit_chain_head`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			r, err := audit.VerifyInstall(ctx, store.New(empty))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.Rows).To(BeZero())
+			Expect(r.Break).NotTo(BeNil(), "an empty install chain still has its seeded head")
+			Expect(r.Break.Seq).To(BeEquivalentTo(1))
+			Expect(r.Break.Reason).To(ContainSubstring("head is missing"))
+		})
+
 		It("notices a head that was moved back", func(ctx SpecContext) {
 			installOwner(ctx, db, func(tx pgx.Tx) {
 				_, err := tx.Exec(ctx, `UPDATE install_audit_chain_head SET seq = $1, hash = $2`, rows[3].ChainSeq, rows[3].Hash)

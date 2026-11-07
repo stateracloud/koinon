@@ -25,6 +25,12 @@ var _ = Describe("koinon-api's startup", func() {
 			To(MatchError(ContainSubstring("--grants-only and --durable are exclusive")))
 	})
 
+	It("runs the external-database migrate that requires the install audit writer role", func() {
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--wait", "4m")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--grants-only", "--require-install-writer")).
+			To(MatchError(ContainSubstring("--grants-only and --require-install-writer are exclusive")))
+	})
+
 	It("takes the database URL from the flag, KOINON_DATABASE_URL or DATABASE_URL", func() {
 		Expect(start(nil, "migrate", "--database-url="+db)).To(Succeed())
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate")).To(Succeed())

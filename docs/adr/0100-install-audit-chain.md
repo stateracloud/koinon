@@ -127,13 +127,27 @@ asynchronously, and the migrate Job may already have run by then. Instead:
   after the release's objects, so after the updated Cluster, and with `--wait` once the pods are
   ready. Running out of time fails the hook, so the upgrade reports a role CNPG never created. One
   `helm upgrade` (or sync) is enough (maintainer decision 2026-11-07, after review: an earlier
-  version of this decision asked for a second `helm upgrade`);
+  version of this decision asked for a second `helm upgrade`). The hook waits only for the role to
+  exist, not for `koinon_api`'s membership in it, which CNPG adds on its own schedule and may add
+  after the hook succeeded; that is harmless, because `koinon-api` retries every refused install
+  write (next item) until the membership lands. `migrations.wait` (default 4m) stays below Helm's
+  default `--timeout` (5m), so a role CNPG never created fails the hook with its own message;
+- with `postgres.mode: external` nothing creates the role after the migrate Job, so the chart passes
+  `koinon-api migrate --require-install-writer` and a missing role fails the Job, naming the role and
+  `docs/ops/secret-keys.md`, instead of `koinon-api` logging a refused write every 30 seconds with no
+  hook to end it (maintainer decision 2026-11-07, after review);
 - `koinon-api` never needs the grant to start, or the post-upgrade hook could never run under
   `--wait`: an install event the database refuses for lack of privilege (SQLSTATE 42501, wrapped as
   `audit.ErrInstallWriteDenied`) at startup (the price refresh setting, the retirement of caught-up
   platform prices) is logged as an error and retried in the background every 30 seconds until the
   grant lands. Requests that write install events (platform price changes) fail with the permission
-  error in that window, which is the hook's runtime.
+  error in that window, which is the hook's runtime. A setting whose event is not recorded does not
+  take effect where it would widen what runs: the scheduled price refresh runs each tick in the
+  recorded setting (`price_refresh_settings`) wherever that fetches less, or less often, than the
+  configured one (`prices.Refresher.Effective`), so a change to `on` fetches only from the first tick
+  after its `price.refresh.settings_changed` event is written. A change that fetches less (to `off`)
+  applies at once. The same rule keeps an old replica of a rolling upgrade to what a new one recorded
+  (maintainer decision 2026-11-07, after review).
 
 With `postgres.mode: external` the roles are the operator's. `docs/ops/secret-keys.md` ("Append-only
 audit log with an external database") gains the lines to run once as the schema owner:
@@ -246,6 +260,22 @@ vocabulary:
 
 `audit.System()` takes the actor ID as an argument, so no caller can write an unnamed system actor.
 A `cli` actor keeps the command as its ID (`keys forget`).
+
+**The ID format is frozen** (maintainer decision 2026-11-07, after review): `<component>:<function>`,
+both lower-case kebab-case; the component is the binary that acts (`koinon-api`, `koinon-reconciler`,
+`koinon-agentd`), the function a short noun for what acted, unique within the component. An ID is
+never renamed once written, since the audit log, its exports and the price tables' actor column keep
+it; a new system writer takes a new ID in this format, and one that does the same work as an
+existing writer reuses its ID. The IDs written today (`audit.System(` callers), beyond the table
+above:
+
+| Component | Functions |
+| --- | --- |
+| `koinon-api` | `approvals`, `questions`, `question-timers`, `agent-model`, `token-use` |
+| `koinon-reconciler` | `sandbox-repair`, `sandbox-archive`, `ephemeral-cleanup`, `mcp-sync` |
+| `koinon-agentd` | `home-seed`, `resync`, `run-outcome`, `stuck-run`, `prefix-taken` |
+
+Tests use the component `koinon-test` (`koinon-test:spec`), which no binary writes.
 
 **Alignment with ADR 0098.** ADR 0098 calls the auto-apply's actor `auto`; the code on PR #316 is
 `AutoActor = audit.Actor{Kind: system, ID: "auto"}`. Under this ADR its ID is

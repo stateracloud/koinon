@@ -55,7 +55,7 @@ for want in \
 	'^    helm\.sh/hook-delete-policy: before-hook-creation,hook-succeeded$' \
 	'^    argocd\.argoproj\.io/hook: PostSync$' \
 	'^    argocd\.argoproj\.io/hook-delete-policy: BeforeHookCreation$' \
-	'^          args: \["migrate", "--grants-only", "--wait", "5m"\]$' \
+	'^          args: \["migrate", "--grants-only", "--wait", "4m"\]$' \
 	'^ +name: koinon-db-migrate$' \
 	'^      serviceAccountName: koinon-migrate-grants$' \
 	'^      automountServiceAccountToken: false$' \
@@ -76,3 +76,15 @@ has "the grant hook takes global.imagePullSecrets" '^        - name: regcred$' -
 has "the grant hook takes global.imageRegistry" '^          image: mirror\.example/' --set global.imageRegistry=mirror.example "${grants[@]}"
 # External mode: the operator creates the role before the upgrade; the pre-upgrade migrate grants it.
 lacks "an external database render has no grant hook" 'migrate-grants' --set postgres.mode=external --set postgres.external.secretName=db
+
+# The wait stays below Helm's default --timeout (5m), which bounds each hook: the grant hook then fails
+# with its own message ("did not appear within 4m"), not a Helm timeout (docs upgrading.md).
+has "migrations.wait defaults below Helm's default --timeout" '"--wait", "4m"' --show-only templates/migrate-job.yaml
+# External mode: nothing creates the writer role after the migrate Job, so a missing role fails the Job
+# with the remedy (koinon-api migrate --require-install-writer); in cnpg mode the pre-upgrade migrate only
+# warns, because the Cluster creates the role after it and the post-upgrade hook grants it.
+ext=(--set postgres.mode=external --set postgres.external.secretName=db --show-only templates/migrate-job.yaml)
+has "the external-database migrate Job requires the writer role" '^          args: \["migrate", "--wait", "4m", "--require-install-writer"\]$' "${ext[@]}"
+has "the external-database durable migrate Job requires the writer role" '^          args: \["migrate", "--wait", "4m", "--durable", "--require-install-writer"\]$' "${ext[@]}" --set api.durable.enabled=true
+lacks "the cnpg migrate Job does not require the writer role" 'require-install-writer' --show-only templates/migrate-job.yaml
+lacks "the grant hook does not require the writer role" 'require-install-writer' "${grants[@]}"

@@ -390,6 +390,14 @@ _Avoid_: Built-in tools, system tools
 An org's tamper-evident record of every configuration change and every decision that matters, written with the change itself.
 _Avoid_: Activity log, event log, history
 
+**Install audit chain**:
+The install-wide audit log of platform actions that belong to no org, such as platform price changes, written only by koinon-api (ADR 0100).
+_Avoid_: Platform log, global audit log
+
+**System actor**:
+The actor of an audit event that Koinon itself caused, named `<component>:<function>`, such as `koinon-api:price-refresh`; the format is frozen and an ID is never renamed (ADR 0100 decision 2).
+_Avoid_: Bot, auto, system user
+
 **Run trace**:
 The spans of a run's turns, tool calls, waits and model calls, exported to a tracing backend an org or the platform chose.
 A backend groups them by run into a trace session, which is not the harness session.

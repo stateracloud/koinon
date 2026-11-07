@@ -59,3 +59,12 @@ as well.
   run when the next sync starts.
 - A schema-version readiness gate in `koinon-api` (not Ready until the schema is current) would
   protect old pods during a RollingUpdate in every mode. It is not part of this decision.
+
+## Note (2026-11-07, issue #328)
+
+In cnpg mode the chart has a second migration hook (maintainer decision 2026-11-07): a `post-upgrade`
+Job, `<release>-migrate-grants` (Argo CD: `PostSync`), that runs `koinon-api migrate --grants-only`
+with the migration role, applies no migration and grants the install audit writer role once the
+updated Cluster has created it. Why it runs after the release's objects, and what it waits for, is
+[ADR 0100](0100-install-audit-chain.md) decision 1.1a. In external mode the `pre-upgrade` migrate Job
+runs with `--require-install-writer` instead and fails when that role is missing.

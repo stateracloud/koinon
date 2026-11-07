@@ -335,7 +335,7 @@ func serve(ctx context.Context, cfg config) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if cfg.migrate {
-		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable, false); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait, migrateOptions{durable: cfg.durable}); err != nil {
 			return err
 		}
 	}
@@ -729,6 +729,9 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	slog.Info("price refresh", "mode", refreshMode, "interval", cfg.pricesRefreshInterval,
 		"autoApply", refreshMode != prices.RefreshOff, "maxChangePercent", cfg.pricesMaxChange, "maxAutoPerDay", cfg.pricesMaxAutoPerDay)
+	// The loop gets the configured setting but runs each tick in the recorded one where that fetches
+	// less (Refresher.Effective): while the retry above has not recorded the setting and its install
+	// event, mode on does not fetch on the strength of an unrecorded change.
 	safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
 		refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
 	})
@@ -892,10 +895,22 @@ func serve(ctx context.Context, cfg config) error {
 	}
 }
 
-// migrate applies pending migrations, first waiting up to wait for the
-// database: on a fresh install it may still be starting. With grantsOnly it applies no migration:
-// it waits, within the same wait, for the install audit writer role and grants it (grantInstallAuditWriter).
-func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable, grantsOnly bool) error {
+// migrateOptions are the flags of "koinon-api migrate".
+type migrateOptions struct {
+	// durable also creates the DBOS runtime's tables.
+	durable bool
+	// grantsOnly applies no migration: it waits, within the same wait, for the install audit writer
+	// role and grants it (grantInstallAuditWriter).
+	grantsOnly bool
+	// requireWriter fails the migration when the install audit writer role does not exist, instead
+	// of warning. The chart passes it on an external database, where no hook will create the role
+	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
+	requireWriter bool
+}
+
+// migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
+// it may still be starting.
+func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptions) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
@@ -907,7 +922,11 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable, g
 	if err := waitForDatabase(waitCtx, db); err != nil {
 		return err
 	}
-	if grantsOnly {
+	if o.grantsOnly {
+		// The wait ends once the role and the tables exist and the grant is made. It does not wait for
+		// koinon_api's membership in the role: CNPG adds the managed role's inRoles on its own schedule,
+		// possibly after this hook succeeds. That is harmless: koinon-api retries every install write
+		// the database refuses (retryInstallWrite) until the membership lands (ADR 0100 decision 1.1a).
 		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
 			return migrations.GrantInstallAuditWriter(ctx, db)
 		})
@@ -928,9 +947,15 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable, g
 	// external database). On a Helm upgrade of a CloudNativePG cluster it may appear only after this
 	// pre-upgrade hook, so a missing role is a warning, not a failure: the chart's post-upgrade hook
 	// (Argo CD: PostSync) runs "migrate --grants-only", which waits for it (ADR 0100 decision 1.1a).
+	// On an external database nothing creates it later, so the chart passes --require-install-writer.
 	granted, err := migrations.GrantInstallAuditWriter(ctx, db)
 	if err != nil {
 		return fmt.Errorf("grant the install audit writer: %w", err)
+	}
+	if !granted && o.requireWriter {
+		return fmt.Errorf("the role %s does not exist: create it and add koinon-api's database role to it "+
+			"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; "+
+			"without it koinon-api records no install audit event", migrations.InstallAuditWriterRole)
 	}
 	if !granted {
 		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet, so it was granted nothing: " +
@@ -941,7 +966,7 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable, g
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).
-	if !withDurable {
+	if !o.durable {
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())

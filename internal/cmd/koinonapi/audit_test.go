@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 var _ = Describe("koinon-api audit verify", func() {
@@ -96,4 +98,24 @@ var _ = Describe("startup install audit writes before the writer role is granted
 			return false, errors.New("permission denied for table install_audit_events")
 		})).To(MatchError(ContainSubstring("grant the install audit writer")), "a grant that fails is not waited out")
 	})
+
+	// An external database: nothing creates the role after the migrate Job, so the chart passes
+	// --require-install-writer and the Job fails with the remedy (the cnpg upgrade only warns).
+	It("fails the migration without the role when it is required, and only warns otherwise", func(ctx SpecContext) {
+		testenv.Require(testenv.Docker)
+		dsn, stop, err := pgtest.StartServer(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(stop)
+		err = migrate(ctx, dsn, time.Minute, migrateOptions{requireWriter: true})
+		Expect(err).To(MatchError(ContainSubstring("the role koinon_install_audit_writer does not exist")))
+		Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
+		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{})).To(Succeed(), "the cnpg pre-upgrade run goes on")
+
+		conn, err := pgx.Connect(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = conn.Close(ctx) })
+		_, err = conn.Exec(ctx, `CREATE ROLE koinon_install_audit_writer NOLOGIN`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(migrate(ctx, dsn, time.Minute, migrateOptions{requireWriter: true})).To(Succeed(), "the operator created the role")
+	}, SpecTimeout(3*time.Minute))
 })

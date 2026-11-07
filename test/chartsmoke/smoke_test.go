@@ -322,6 +322,66 @@ func describeMode(name, valuesFile string) {
 			}
 		}, SpecTimeout(time.Minute))
 
+		// A koinon-api that starts before the writer grant (#328 review): it gets ready, the changed
+		// price refresh setting is not recorded (its install event is refused) and the scheduled refresh
+		// runs in the recorded mode; once the grant lands the retry records the setting with exactly
+		// one event, and the refresh switches to the configured mode. Only a values file that turns the
+		// refresh on can show it: the stored row is set back to auto to make the start a change.
+		It("starts koinon-api before the writer grant and records the refresh setting once it lands", func(ctx SpecContext) {
+			args := r.deployment("koinon-api").Spec.Template.Spec.Containers[0].Args
+			i := slices.Index(args, "--prices-refresh")
+			if i < 0 || i+1 >= len(args) || args[i+1] != "on" {
+				Skip("the values file leaves the price refresh in auto mode")
+			}
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			count := func(ctx context.Context) int {
+				var n int
+				Expect(conn.QueryRow(ctx, `SELECT count(*) FROM install_audit_events
+					WHERE action = 'price.refresh.settings_changed' AND actor_id = 'koinon-api:price-refresh'`).Scan(&n)).To(Succeed())
+				return n
+			}
+			storedMode := func(ctx context.Context) string {
+				var m string
+				Expect(conn.QueryRow(ctx, `SELECT mode FROM price_refresh_settings`).Scan(&m)).To(Succeed())
+				return m
+			}
+			before := count(ctx)
+
+			By("the grant is missing and the recorded setting is auto; koinon-api restarts")
+			for _, stmt := range []string{`REVOKE koinon_install_audit_writer FROM koinon_api`, `UPDATE price_refresh_settings SET mode = 'auto'`} {
+				_, err := conn.Exec(ctx, stmt)
+				Expect(err).NotTo(HaveOccurred(), stmt)
+			}
+			for _, w := range ready["koinon-api"] {
+				Expect(w.Ctr.Stop(ctx, nil)).To(Succeed())
+			}
+			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
+			api := ready["koinon-api"][0]
+
+			By("it is ready, its setting is not recorded, and the refresh runs in the recorded mode")
+			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(30 * time.Second).Should(And(
+				ContainSubstring("the price refresh setting is not recorded yet"),
+				ContainSubstring("runs in the recorded mode until koinon-api's setting is recorded")))
+			Expect(api.Logs(ctx)).NotTo(ContainSubstring("runs in the configured mode"), "no tick in mode on before the event")
+			Expect(storedMode(ctx)).To(Equal("auto"))
+			Expect(count(ctx)).To(Equal(before))
+
+			By("the grant lands: the retry records the setting with one event")
+			_, err = conn.Exec(ctx, `GRANT koinon_install_audit_writer TO koinon_api`)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(count).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Equal(before + 1))
+			Expect(storedMode(ctx)).To(Equal("on"))
+			Consistently(count).WithContext(ctx).WithTimeout(5 * time.Second).WithPolling(time.Second).Should(Equal(before + 1))
+			Expect(api.Logs(ctx)).To(ContainSubstring("recorded after a retry"))
+
+			By("the next scheduled tick runs in the configured mode")
+			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(90 * time.Second).WithPolling(2 * time.Second).
+				Should(ContainSubstring("runs in the configured mode"))
+			Expect(api.Running(ctx)).To(BeTrue(), "koinon-api still serves; logs:\n%s", api.Logs(ctx))
+		}, SpecTimeout(4*time.Minute))
+
 		// An upgrade, in cnpg mode, of a cluster initialised before ADR 0100 (#328): the pre-upgrade
 		// migrate Job runs before the updated Cluster creates the managed group role, so it finds no role
 		// and grants nothing; CNPG then creates the role (and adds koinon_api to it) on its own schedule,
@@ -348,7 +408,6 @@ func describeMode(name, valuesFile string) {
 			)
 			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
 
-			By("the pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
 			var migrate *batchv1.Job
 			for _, j := range r.Jobs {
 				if j.Name == "koinon-migrate" {
@@ -356,6 +415,20 @@ func describeMode(name, valuesFile string) {
 				}
 			}
 			Expect(migrate).NotTo(BeNil())
+
+			By("on an external database (this render) the migrate Job fails without the role, naming the remedy")
+			mc := migrate.Spec.Template.Spec.Containers[0]
+			Expect(mc.Args).To(ContainElement("--require-install-writer"))
+			w := rn.start(ctx, migrate.Name, migrate.Spec.Template.Spec, mc, jobDeadline)
+			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
+			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md")))
+
+			By("the cnpg pre-upgrade migrate Job finds no role, grants nothing and does not fail the upgrade")
+			// In cnpg mode the chart does not pass --require-install-writer (hack/chart-check.d/45 and
+			// TestChartContract pin both renders); the rest of its pod spec is this one.
+			migrate = migrate.DeepCopy()
+			c := &migrate.Spec.Template.Spec.Containers[0]
+			c.Args = slices.DeleteFunc(c.Args, func(a string) bool { return a == "--require-install-writer" })
 			runJob(ctx, rn, migrate)
 			Expect(insertInstallEventAs(ctx, dbURL, "koinon_api")).To(MatchError(ContainSubstring("permission denied")))
 

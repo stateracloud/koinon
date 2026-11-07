@@ -160,6 +160,66 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 		Expect(hits.Load()).To(BeEquivalentTo(1))
 	})
 
+	// The scheduled tick runs no more than the recorded setting (#328 review): a koinon-api whose
+	// install audit event is refused (no writer grant yet, ADR 0100 decision 1.1a) keeps fetching as
+	// the recorded row says until its own setting and event are recorded.
+	It("holds the schedule to the recorded setting until the configured one and its event are recorded", func(ctx SpecContext) {
+		pool := freshDB(ctx)
+		srv, hits := countingServer()
+		now := time.Now()
+		r := refresherOn(pool, defaultList("2000-01-01.1", model), &httpAdapter{url: srv.URL, model: model}, &now)
+		scheduled := func(mode prices.RefreshMode, iv time.Duration) (prices.RefreshMode, time.Duration) {
+			GinkgoHelper()
+			eff, eiv, err := r.Effective(ctx, mode, iv)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = r.Tick(ctx, eff, eiv)
+			Expect(err).NotTo(HaveOccurred())
+			return eff, eiv
+		}
+
+		By("nothing recorded yet: the default, auto, which fetches nothing without an openrouter provider")
+		eff, _ := scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshAuto))
+		Expect(hits.Load()).To(BeZero())
+
+		By("the database refuses the install event: the setting is not recorded and on does not run")
+		_, err := pool.Exec(ctx, `CREATE FUNCTION deny_install_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN RAISE EXCEPTION 'permission denied for table install_audit_events' USING ERRCODE = '42501'; END $$`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `CREATE TRIGGER aaa_deny_install_audit BEFORE INSERT ON install_audit_events FOR EACH ROW EXECUTE FUNCTION deny_install_audit()`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(MatchError(audit.ErrInstallWriteDenied))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM price_refresh_settings`)).To(BeZero(), "the setting rolled back with its event")
+		eff, _ = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshAuto))
+		Expect(hits.Load()).To(BeZero(), "no fetch without the event")
+
+		By("the grant lands: the retry records the setting and its event, and the next tick runs on")
+		_, err = pool.Exec(ctx, `DROP TRIGGER aaa_deny_install_audit ON install_audit_events`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.SyncSettings(ctx, prices.RefreshOn, 12*time.Hour)).To(Succeed())
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM install_audit_events WHERE action = 'price.refresh.settings_changed'`)).To(Equal(1))
+		var iv time.Duration
+		eff, iv = scheduled(prices.RefreshOn, 12*time.Hour)
+		Expect(eff).To(Equal(prices.RefreshOn))
+		Expect(iv).To(Equal(12 * time.Hour))
+		Expect(hits.Load()).To(BeEquivalentTo(1))
+
+		By("a replica that fetches less runs its own setting at once; one that fetches more is held back")
+		eff, _, err = r.Effective(ctx, prices.RefreshOff, 12*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshOff))
+		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 6*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshOn))
+		Expect(iv).To(Equal(12*time.Hour), "not more often than recorded")
+		Expect(r.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
+		eff, iv, err = r.Effective(ctx, prices.RefreshOn, 12*time.Hour)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(eff).To(Equal(prices.RefreshAuto), "an old replica during a rolling upgrade")
+		Expect(iv).To(Equal(24 * time.Hour))
+	})
+
 	It("parses only auto, off and on", func() {
 		for _, s := range []string{"auto", "off", "on"} {
 			Expect(prices.ParseRefreshMode(s)).To(BeEquivalentTo(s))

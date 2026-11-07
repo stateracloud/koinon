@@ -95,11 +95,81 @@ func (s *Service) StoredBounds(ctx context.Context) (pricefetch.Bounds, error) {
 	return b, nil
 }
 
+// modeRank orders the modes by what they fetch: off nothing, auto the sources a provider uses, on all.
+func modeRank(m RefreshMode) int {
+	switch m {
+	case RefreshOff:
+		return 0
+	case RefreshAuto:
+		return 1
+	}
+	return 2
+}
+
+// Effective is the mode and interval a scheduled tick runs with: the configured ones, held back to
+// the recorded setting (price_refresh_settings, written by SyncSettings together with its install
+// audit event) wherever that one fetches less or less often. The recorded row is what the install
+// audit chain, StoredBounds and the prices commands see, so a replica never fetches more than it
+// says: while its SyncSettings is refused (the install audit writer is not granted yet, ADR 0100
+// decision 1.1a) it runs the recorded setting, and switches at the first tick after its own setting
+// and event are recorded; in a rolling upgrade an old replica fetches no more than the setting a new
+// replica recorded. A change to fetching less (to off, a longer interval) takes effect at once,
+// before its event is recorded: it widens nothing. No row yet: the default, auto at the configured
+// interval, which a first start in auto records without an event.
+func (r *Refresher) Effective(ctx context.Context, mode RefreshMode, interval time.Duration) (RefreshMode, time.Duration, error) {
+	if _, err := ParseRefreshMode(string(mode)); err != nil {
+		return "", 0, err
+	}
+	st, err := store.New(r.svc.pool).GetPriceRefreshSettings(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if modeRank(RefreshAuto) < modeRank(mode) {
+			mode = RefreshAuto
+		}
+		return mode, interval, nil
+	} else if err != nil {
+		return "", 0, err
+	}
+	stored, err := ParseRefreshMode(st.Mode)
+	if err != nil {
+		return "", 0, fmt.Errorf("stored price refresh setting: %w", err)
+	}
+	storedInterval, err := time.ParseDuration(st.Interval)
+	if err != nil {
+		return "", 0, fmt.Errorf("stored price refresh interval: %w", err)
+	}
+	if modeRank(stored) < modeRank(mode) {
+		mode = stored
+	}
+	return mode, max(interval, storedInterval), nil
+}
+
 // Loop runs Tick on a schedule until ctx ends: first a minute after the start (a restart does not
 // fetch at once), then every interval, at most an hour apart, so that auto mode notices a new
 // provider and the unpriced-model count stays current. koinon-api runs it in every mode; in off it
-// only counts unpriced models and makes no request.
+// only counts unpriced models and makes no request. Each tick runs in the Effective mode, read from
+// the recorded setting at that tick; a tick that cannot read it fetches nothing.
 func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Duration) {
+	var last RefreshMode
+	effective := func() (RefreshMode, time.Duration, bool) {
+		eff, iv, err := r.Effective(ctx, mode, interval)
+		if err != nil {
+			if ctx.Err() == nil {
+				r.log.Warn("scheduled price refresh: reading the recorded setting", "err", err)
+			}
+			return "", 0, false
+		}
+		if eff != last {
+			if eff != mode {
+				r.log.Warn("the scheduled price refresh runs in the recorded mode until koinon-api's setting is recorded",
+					"mode", eff, "configured", mode)
+			} else {
+				r.log.Info("the scheduled price refresh runs in the configured mode", "mode", eff)
+			}
+			last = eff
+		}
+		return eff, iv, true
+	}
+	effective() // says at the start which mode the first tick will run in
 	tick := time.NewTimer(time.Minute)
 	defer tick.Stop()
 	for {
@@ -108,8 +178,10 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 			return
 		case <-tick.C:
 		}
-		if _, err := r.Tick(ctx, mode, interval); err != nil && ctx.Err() == nil {
-			r.log.Warn("scheduled price refresh", "err", err)
+		if eff, iv, ok := effective(); ok {
+			if _, err := r.Tick(ctx, eff, iv); err != nil && ctx.Err() == nil {
+				r.log.Warn("scheduled price refresh", "err", err)
+			}
 		}
 		tick.Reset(min(interval, time.Hour))
 	}
