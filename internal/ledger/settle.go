@@ -380,13 +380,14 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 func (s *Settler) enforceSettled(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row store.ClaimDueSettlementsRow, cost money.USD, tokens int64) error {
 	q := store.New(tx)
 	x := enforcement{org: org, agent: row.AgentID, run: row.RunID, at: row.OccurredAt.Time}
-	if !x.agent.Valid {
-		return nil // an entry of a system key is never provisional
-	}
 	if before, err := money.ParseNumeric(row.CostUsd); err != nil {
 		return err
 	} else {
 		x.delta = cost.SubFloor(before)
+	}
+	if !x.agent.Valid {
+		// An entry of a system key (no agent, no run): the org's limits and the key's own budget.
+		return enforceSystem(ctx, tx, s.Notifier, s.now(), org, row.OccurredAt.Time, x.delta)
 	}
 	if row.RunID.Valid {
 		run, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: row.RunID})

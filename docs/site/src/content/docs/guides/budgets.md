@@ -105,7 +105,8 @@ pending, the gateway holds back the most the response could cost (its maximum ou
 agent's key, so the agent cannot spend past a limit; the hold is released when the figure arrives. The
 hold is not spend: what the Budgets page shows, the notifications and the stops count the charges
 only. The spend report shows provisional requests and the amount held apart from the cost. Requests
-the provider refused and requests on a system key are not settled.
+the provider refused are not settled. Requests on the org's system key (the provider echo check) are
+settled the same way but hold nothing back.
 
 Anthropic and OpenAI, called directly, report no per-request cost: their requests are charged
 Koinon's price, final at once. Each day of such a provider can be compared with its bill instead, see
