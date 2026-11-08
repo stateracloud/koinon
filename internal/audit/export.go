@@ -324,11 +324,15 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 			// line with a key twice says two things: refuse it, as a summary with a key twice is (a key
 			// twice inside the summary is already reported as such). With chain_seq itself twice its
 			// value cannot be trusted: the line is broken at the chain_seq that was due there.
-			if k, dup := duplicateKey(raw); dup && l.bad == "" {
+			// Another fault found by exportLink does not keep the forged chain_seq: it is replaced
+			// whether or not the line is already bad.
+			if k, dup := duplicateKey(raw); dup {
 				if k == "chain_seq" {
 					l.seq = next
 				}
-				l.bad = fmt.Sprintf("the line has the key %q twice", k)
+				if l.bad == "" {
+					l.bad = fmt.Sprintf("the line has the key %q twice", k)
+				}
 			}
 			page = append(page, l)
 			next = l.seq + 1

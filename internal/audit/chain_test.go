@@ -36,7 +36,7 @@ func record(ctx context.Context, org pgtype.UUID, action string) store.AuditEven
 // owner does to rewrite the log. It is rolled back when the spec ends, so a spec that tampers with
 // the chain leaves no broken chain in the shared database: other specs verify every org's chain.
 // The ALTER TABLE holds audit_events locked until then, so the spec reads and writes the log
-// through this transaction only (store.New(tx)); a query on the pool would wait for the lock.
+// through this transaction only (store.New(tx)); a write on the pool would wait for the lock.
 func ownerTx(ctx context.Context) pgx.Tx {
 	GinkgoHelper()
 	tx, err := pool.Begin(ctx)

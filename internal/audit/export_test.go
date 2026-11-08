@@ -221,7 +221,7 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		It("an event line with a top-level key twice, even when the last value is the true one", func() {
 			// A reader that keeps the first value sees mallory as the actor of a line that verifies.
 			Expect(lines[3]).To(HavePrefix("{"))
-			for _, key := range []string{"actor_id", `actor_id`, "summary_text", "hash"} {
+			for _, key := range []string{"actor_id", `actor\u005fid`, "summary_text", "hash"} {
 				l := append([]string{}, lines...)
 				l[3] = `{"` + key + `":"mallory",` + strings.TrimPrefix(l[3], "{")
 				res := verifyLines(l, audit.ExportVerifyOptions{})
@@ -245,6 +245,14 @@ var _ = Describe("audit export and off-cluster verify", func() {
 				Expect(res.Break.Seq).To(BeEquivalentTo(3), forged)
 				Expect(res.Break.Reason).To(ContainSubstring(`"chain_seq" twice`), forged)
 			}
+		})
+		It("chain_seq twice plus a bad hash: broken at the due seq, not the forged one", func() {
+			l := append([]string{}, lines...)
+			l[3] = editLine(l[3], func(m map[string]any) { m["hash"] = "zz" })
+			l[3] = `{"chain_seq":99,` + strings.TrimPrefix(l[3], "{")
+			res := verifyLines(l, audit.ExportVerifyOptions{})
+			Expect(res.Break).NotTo(BeNil())
+			Expect(res.Break.Seq).To(BeEquivalentTo(3))
 		})
 		It("a removed line", func() { brokenAt(remove(lines, 3), 4) })
 		It("swapped lines", func() {
