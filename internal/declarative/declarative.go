@@ -344,8 +344,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		return err
 	}
 	actor := audit.Secret(sec.Name)
-	err = pgx.BeginFunc(ctx, i.Pool, func(tx pgx.Tx) error {
-		tq := store.New(tx)
+	_, err = audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
 		after := map[string]any{
 			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
 			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "ciDirs": d.Site.CIDirs, "keyFingerprint": d.Fingerprint, "source": "secret",
@@ -372,7 +371,8 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			}); err != nil {
 				return err
 			}
-			return audit.RecordErr(ctx, tq, audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
+			b.Org(audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
+			return nil
 		}
 		if cur.Connector != d.Connector {
 			return &invalidError{fmt.Errorf("%s cannot change from %s to %s; delete the Secret and declare a new one", KeyConnector, cur.Connector, d.Connector)}
@@ -401,14 +401,12 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 				return err
 			}
 		}
-		if err := audit.RecordErr(ctx, tq, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),
 			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
-		}); err != nil {
-			return err
-		}
+		})
 		// A new baseUrl can leave MCP servers linked to a host that is no longer the connection's (#117).
-		return mcpservers.UnlinkMismatchedServers(ctx, tq, actor, updated)
+		return mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated)
 	})
 	if err != nil {
 		return err
@@ -465,16 +463,16 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 				continue
 			}
 			// Marked removed, not deleted: agents are bound to it and the audit log names it.
-			err := pgx.BeginFunc(ctx, i.Pool, func(tx pgx.Tx) error {
-				tq := store.New(tx)
+			_, err := audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
 				if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
 					return err
 				}
-				return audit.RecordErr(ctx, tq, audit.Event{
+				b.Org(audit.Event{
 					Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
 					TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
 					After: map[string]any{"removed": true},
 				})
+				return nil
 			})
 			if err != nil {
 				return err

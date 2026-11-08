@@ -207,7 +207,7 @@ func taskEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest, k
 // auditDecision records a decision on an approval request in the audit log, in the transaction
 // that made it (ADR 0005, 0023: who requested, who approved). actor is the approver, or Koinon
 // itself for an expiry. The request's arguments are not copied: their hash identifies them.
-func auditDecision(ctx context.Context, q *store.Queries, r store.ApprovalRequest, action string, actor audit.Actor, note string) error {
+func auditDecision(ctx context.Context, q *store.Queries, b audit.Batch, r store.ApprovalRequest, action string, actor audit.Actor, note string) error {
 	after := map[string]any{
 		"status": string(r.Status), "tool": r.Tool, "target": r.Target, "argsSha256": r.ArgsSha256,
 		"runId": r.RunID.String(), "taskId": r.TaskID.String(),
@@ -215,9 +215,10 @@ func auditDecision(ctx context.Context, q *store.Queries, r store.ApprovalReques
 	if note != "" {
 		after["note"] = note
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: r.OrgID, Actor: actor, Action: action, TargetKind: "approval", TargetID: r.ID.String(), After: after,
 	})
+	return nil
 }
 
 // Approve approves a pending request whose hash is argsSHA256 and executes it before
@@ -236,8 +237,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 		return store.ApprovalRequest{}, err
 	}
 	var row store.ApprovalRequest
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.LockApprovalRequest(ctx, store.LockApprovalRequestParams{OrgID: org, ID: id})
 		if err != nil {
 			return err
@@ -299,7 +299,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 				if err := taskEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note}); err != nil {
 					return err
 				}
-				return auditDecision(ctx, q, row, "approval.first_approve", audit.User(approver), note)
+				return auditDecision(ctx, q, b, row, "approval.first_approve", audit.User(approver), note)
 			}
 			if cur.FirstApprover == approver {
 				return ErrSameApprover
@@ -314,7 +314,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 		}
 		extra := map[string]any{"note": note}
 		if scope.Kind != ScopeOnce {
-			sc, err := s.createScope(ctx, q, row, approver, scope)
+			sc, err := s.createScope(ctx, q, b, row, approver, scope)
 			if err != nil {
 				return err
 			}
@@ -323,7 +323,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 		if err := taskEvent(ctx, q, row, KindApproved, approver, extra); err != nil {
 			return err
 		}
-		return auditDecision(ctx, q, row, "approval.approve", audit.User(approver), note)
+		return auditDecision(ctx, q, b, row, "approval.approve", audit.User(approver), note)
 	})
 	if err != nil {
 		return store.ApprovalRequest{}, err
@@ -341,8 +341,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 // Deny denies a pending request; its run resumes with the denial.
 func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note string) (store.ApprovalRequest, error) {
 	var row store.ApprovalRequest
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.LockApprovalRequest(ctx, store.LockApprovalRequestParams{OrgID: org, ID: id})
 		if err != nil {
 			return err
@@ -364,7 +363,7 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 		if err := taskEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
 			return err
 		}
-		if err := auditDecision(ctx, q, row, "approval.deny", audit.User(approver), note); err != nil {
+		if err := auditDecision(ctx, q, b, row, "approval.deny", audit.User(approver), note); err != nil {
 			return err
 		}
 		if row.System {
@@ -504,8 +503,7 @@ func (s *Service) Sweep(ctx context.Context) (SweepResult, error) {
 const expiredMessage = "approval request expired: nobody decided within 7 days"
 
 func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResult) error {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		expired, err := q.ExpirePendingApprovalRequests(ctx, org)
 		if err != nil {
 			return err
@@ -515,7 +513,7 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 			if err := taskEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
 				return err
 			}
-			if err := auditDecision(ctx, q, r, "approval.expire", audit.System("koinon-api:approvals"), ""); err != nil {
+			if err := auditDecision(ctx, q, b, r, "approval.expire", audit.System("koinon-api:approvals"), ""); err != nil {
 				return err
 			}
 			if !r.System { // Koinon's own request: no run waits for it

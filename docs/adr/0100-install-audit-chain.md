@@ -283,7 +283,7 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
 - The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
-  (issues 360, 370 and 371: step 2 moves the rest, step 3 deletes them and adds a lint check).
+  (issues 360, 370 and 371: step 2 moved the rest (done, #370); only tests remain, and step 3 deletes them and adds a lint check).
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.

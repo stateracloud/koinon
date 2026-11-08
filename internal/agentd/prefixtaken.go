@@ -93,7 +93,7 @@ func (p *Pool) recordTakenPrefix(ctx context.Context, org, agent pgtype.UUID, ep
 	var free, recorded int32
 	changed := false
 	prefix := checkpoint.EpochPrefix(org.String(), agent.String(), epoch)
-	err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+	_, err := audit.InPgTx(ctx, p.db, func(tx pgx.Tx, b audit.Batch) error {
 		free, recorded, changed = 0, 0, false
 		prefix = checkpoint.EpochPrefix(org.String(), agent.String(), epoch)
 		q := p.q.WithTx(tx)
@@ -150,12 +150,13 @@ func (p *Pool) recordTakenPrefix(ctx context.Context, org, agent pgtype.UUID, ep
 			return nil // recorded already
 		}
 		changed = true
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: audit.System("koinon-agentd:prefix-taken"), Action: PrefixTakenAction, TargetKind: "agent", TargetID: agent.String(),
 			After: map[string]any{
 				"repositoryEpoch": epoch, "prefix": prefix, "knownToDatabase": markRow, "nextEpochAtLeast": floor,
 			},
 		})
+		return nil
 	})
 	if err != nil {
 		return 0, 0, err

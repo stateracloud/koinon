@@ -214,7 +214,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		return nil, connect.NewError(connect.CodeUnavailable, "could not store the private key; try again")
 	}
 	var row store.Connection
-	err = s.inTx(requestCtx(ctx), func(q *store.Queries) error {
+	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
 		var err error
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
@@ -223,7 +223,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.create", TargetKind: "connection", TargetID: connID.String(),
 			After: map[string]any{
 				"connector": t.Metadata.ID, "displayName": name, "appId": req.GetAppId(),
@@ -231,6 +231,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 				"baseUrl": baseURL, "caBundle": caBundle != "", "ciDirs": ciDirs,
 			},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
@@ -326,7 +327,7 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	}
 	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFingerprint
 	var row store.Connection
-	err = s.inTx(requestCtx(ctx), func(q *store.Queries) error {
+	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
 		var err error
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
@@ -335,13 +336,14 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.create", TargetKind: "connection", TargetID: connID.String(),
 			After: map[string]any{
 				"connector": t.Metadata.ID, "displayName": name, "baseUrl": baseURL, "caBundle": caBundle != "",
 				"ciDirs": ciDirs, "fingerprints": fingerprint, "source": "ui",
 			},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
@@ -409,7 +411,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 
 	rctx := requestCtx(ctx)
 	var row store.Connection
-	err = s.inTx(rctx, func(q *store.Queries) error {
+	err = s.inAuditTx(rctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
@@ -453,11 +455,12 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		if err := orgsettings.ClearCodeHostScope(rctx, q, c.org, cur.ID); err != nil {
 			return err
 		}
-		return audit.RecordErr(rctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.secret.set", TargetKind: "connection", TargetID: cur.ID.String(),
 			Before: map[string]any{"displayName": cur.DisplayName, "fingerprint": cur.SecretFingerprint, "lost": cur.CredentialLostAt.Valid},
 			After:  map[string]any{"displayName": cur.DisplayName, "fingerprint": fingerprint},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")

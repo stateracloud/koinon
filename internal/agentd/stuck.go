@@ -219,7 +219,7 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 	}
 	outcome := stuckRecreate
 	var incidentID pgtype.UUID
-	err = pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
+	_, err = audit.InPgTx(ctx, r.p.db, func(tx pgx.Tx, b audit.Batch) error {
 		q := r.q.WithTx(tx)
 		n, err := q.CountRecentSandboxRecreations(ctx, store.CountRecentSandboxRecreationsParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		if err != nil {
@@ -308,7 +308,8 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 				return err
 			}
 		}
-		return audit.RecordErr(ctx, q, ev)
+		b.Org(ev)
+		return nil
 	})
 	if err != nil {
 		return 0, fmt.Errorf("record the stuck sandbox: %w", err)

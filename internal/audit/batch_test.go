@@ -241,6 +241,31 @@ var _ = Describe("the audit batch on Postgres", func() {
 			Expect(linked).To(Equal(6))
 		})
 
+		It("writes a batch into a transaction the caller opened, after the caller's own lock (WriteInTx)", func(ctx SpecContext) {
+			a, _, _ := pgtest.NewOrg(ctx, db)
+			tx, err := db.Begin(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+			_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('test.write-in-tx'))`)
+			Expect(err).NotTo(HaveOccurred())
+			w, err := audit.WriteInTx(ctx, tx, func(bt audit.Batch) {
+				bt.Org(orgEvent(a, "test.org"))
+				bt.Install(audit.InstallEvent{Actor: batchActor, Action: "test.install", TargetKind: "test", TargetID: "1"})
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(w.Install).To(HaveLen(1))
+			Expect(w.Org).To(HaveLen(1))
+			Expect(audit.SummaryOf(w.Org[0].Summary)).To(HaveKeyWithValue("install_event_id", w.Install[0].ID.String()))
+
+			By("nothing is visible until the caller commits")
+			var n int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'test.install'`).Scan(&n)).To(Succeed())
+			Expect(n).To(BeZero())
+			Expect(tx.Commit(ctx)).To(Succeed())
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'test.install'`).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		})
+
 		// Without the batch, a caller that writes org A then B while another writes B then A deadlocks on
 		// the org heads. The batch sorts, so both finish.
 		It("lets transactions that audit orgs A,B and B,A both finish (ADR 0100 decision 1.7)", func(ctx SpecContext) {
