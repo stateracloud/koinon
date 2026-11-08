@@ -101,7 +101,7 @@ func (s *Service) UpdateSettings(ctx context.Context, org pgtype.UUID, actor aud
 		return Settings{}, invalid("the platform copy cannot carry more than the org's own content level")
 	}
 	var out Settings
-	err := s.tx(ctx, func(q *store.Queries) error {
+	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// The ceiling row is share-locked so a lowering of the ceiling cannot pass this write, while
 		// two org writes do not wait for each other.
 		ceiling, err := q.ShareLockPlatformTraceSettings(ctx)
@@ -136,10 +136,11 @@ func (s *Service) UpdateSettings(ctx context.Context, org pgtype.UUID, actor aud
 		if out, err = s.settings(ctx, q, org); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "trace.settings.update", TargetKind: "trace_settings", TargetID: org.String(),
 			Before: settingsView(before), After: settingsView(out),
 		})
+		return nil
 	})
 	return out, err
 }

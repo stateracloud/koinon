@@ -27,7 +27,7 @@ const defaultParkTTL = 7 * 24 * time.Hour
 
 // begin runs fn in a transaction under the Owner's mutex with the next source seq, which the
 // closing run event of the transaction carries.
-func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, src int64) error) error {
+func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, b audit.Batch, src int64) error) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	// What the agent was saying when the run ends is cut off: the reply the verb posts reads it.
@@ -39,9 +39,10 @@ func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, src int64) 
 		cancel()
 	}
 	src := o.nextSrc()
-	return pgx.BeginFunc(ctx, o.cfg.DB, func(tx pgx.Tx) error {
-		return fn(o.q.WithTx(tx), src)
+	_, err := audit.InPgTx(ctx, o.cfg.DB, func(tx pgx.Tx, b audit.Batch) error {
+		return fn(o.q.WithTx(tx), b, src)
 	})
+	return err
 }
 
 // Delivered are the outcomes the turn's prompt carried: the decided approval requests and the
@@ -75,7 +76,7 @@ type TurnEnd struct {
 // of the caller's Turn, would win over that (EndRunTurn only ends an open row).
 func (o *Owner) EndTurn(ctx context.Context, d Delivered, turn Turn) (TurnEnd, error) {
 	var end TurnEnd
-	err := o.begin(ctx, func(q *store.Queries, src int64) error {
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
 		var err error
 		end, err = o.endTurnIn(ctx, q, src, d, turn)
 		return err
@@ -264,7 +265,7 @@ func (o *Owner) CancelAtTimeLimit(ctx context.Context, turn Turn, reason string)
 }
 
 func (o *Owner) end(ctx context.Context, turn Turn, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
-	err := o.begin(ctx, func(q *store.Queries, src int64) error {
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
@@ -370,7 +371,7 @@ func (o *Owner) postReply(ctx context.Context, q *store.Queries) error {
 // owner's last write; the next claim gives the run a new epoch. A run that was taken over, canceled
 // or finished meanwhile is ErrFenced.
 func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
-	err := o.begin(ctx, func(q *store.Queries, src int64) error {
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
@@ -438,7 +439,7 @@ const KindAgentUnhealthy = "agent.unhealthy"
 // amendment 2026-10-28). The agent's other queued runs stop being claimable at the same moment
 // (ClaimNextRun skips unhealthy agents), so their tasks must say why they stopped moving.
 func (o *Owner) SandboxUnavailable(ctx context.Context, turn Turn, u Unavailable) error {
-	err := o.begin(ctx, func(q *store.Queries, src int64) error {
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
@@ -459,16 +460,14 @@ func (o *Owner) SandboxUnavailable(ctx context.Context, turn Turn, u Unavailable
 		} else if err != nil {
 			return err
 		}
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: o.run.OrgID, Actor: audit.System("koinon-agentd:run-outcome"), Action: "agent.mark_unhealthy",
 			TargetKind: "agent", TargetID: o.run.AgentID.String(),
 			After: map[string]any{
 				"reason": reason, "cause": "sandbox_unavailable", "sandboxCause": string(u.Cause),
 				"runId": o.run.ID.String(), "waitedSeconds": int64(u.Waited.Seconds()),
 			},
-		}); err != nil {
-			return err
-		}
+		})
 		// The decision says "the agent's owners". Koinon has no per-agent owner (agents.created_by is
 		// only who created it): the people who can act are the ones who can resume an agent, the
 		// org's admins and owners.

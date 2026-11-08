@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
@@ -38,7 +39,7 @@ var _ = Describe("a question to a role", func() {
 	ask := func(ctx context.Context, target questions.Target) store.Question {
 		GinkgoHelper()
 		var row store.Question
-		Expect(tx(ctx, func(q *store.Queries) error {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			recipients, err := questions.Recipients(ctx, q, w.org, target)
 			if err != nil {
 				return err
@@ -64,8 +65,8 @@ var _ = Describe("a question to a role", func() {
 	}
 	yes := questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "Yes"}
 	respond := func(ctx context.Context, id, by pgtype.UUID) error {
-		return tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, id, by, yes)
+		return tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, id, by, yes)
 			return err
 		})
 	}
@@ -268,7 +269,13 @@ var _ = Describe("a question to a role", func() {
 		// An expiry holds the question's row, uncommitted, while the sweep runs.
 		resolving, err := pool.Begin(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = questions.Expire(ctx, store.New(resolving), w.org, row.ID)
+		// The Fake runs the expiry on the open transaction and keeps its audit event in memory, so the
+		// row lock is held without a commit.
+		fake := &audit.Fake{Queries: store.New(resolving)}
+		_, err = fake.InTx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Expire(ctx, q, b, w.org, row.ID)
+			return err
+		})
 		Expect(err).NotTo(HaveOccurred())
 		n, err := questions.RetargetOrphaned(ctx, pool)
 		Expect(err).NotTo(HaveOccurred())
@@ -293,7 +300,7 @@ var _ = Describe("a question to a role", func() {
 		row, _ := func() (store.Question, bool) {
 			var r store.Question
 			var created bool
-			Expect(tx(ctx, func(q *store.Queries) (err error) {
+			Expect(tx(ctx, func(q *store.Queries, b audit.Batch) (err error) {
 				a.Org, a.Task, a.Run, a.Agent = w.org, w.task, w.run.ID, w.agent
 				r, created, err = questions.Create(ctx, q, a)
 				return err

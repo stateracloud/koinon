@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
@@ -172,10 +173,11 @@ var _ = Describe("Reconciler latency defaults", func() {
 	}
 	answer := func(ctx context.Context, row store.Question) {
 		GinkgoHelper()
-		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := questions.Respond(ctx, store.New(tx), org, row.ID, user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us"})
+		_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, org, row.ID, user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us"})
 			return err
-		})).To(Succeed())
+		})
+		Expect(err).NotTo(HaveOccurred())
 	}
 
 	It("resumes an ask_user question answered within the warm window without a sandbox start", func(ctx SpecContext) {
