@@ -188,7 +188,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		// The call is audited even when the client has gone: detach from its context.
 		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := audit.RecordAfter(actx, store.New(s.pool), audit.Event{
+		if err := audit.RecordAfter(actx, s.pool, audit.Event{
 			Org: p.Org, Actor: audit.Token(p.TokenID), Action: "admin_api.call", TargetKind: "admin_api", TargetID: r.URL.Path,
 			After: map[string]any{"method": r.Method, "path": r.URL.Path, "status": rec.status},
 		}); err != nil {

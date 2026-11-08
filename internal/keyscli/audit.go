@@ -579,11 +579,15 @@ func (c *Change) insert(ctx context.Context, hook bool, evs ...audit.InstallEven
 		if err != nil {
 			return struct{}{}, err
 		}
-		for _, ev := range evs {
-			if _, err := audit.WriteInTx(ctx, sp, func(b audit.Batch) { b.Install(ev) }); err != nil {
-				_ = sp.Rollback(ctx)
-				return struct{}{}, fmt.Errorf("write the %s install audit event: %w", ev.Action, err)
+		// One batch carries every event: the module writes them in order, and its error names the
+		// event it refused.
+		if _, err := audit.WriteInTx(ctx, sp, func(b audit.Batch) {
+			for _, ev := range evs {
+				b.Install(ev)
 			}
+		}); err != nil {
+			_ = sp.Rollback(ctx)
+			return struct{}{}, fmt.Errorf("write the install audit events: %w", err)
 		}
 		return struct{}{}, sp.Commit(ctx)
 	})

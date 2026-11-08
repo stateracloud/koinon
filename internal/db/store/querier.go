@@ -578,20 +578,10 @@ type Querier interface {
 	// Gives a new agent its template's limit as its own editable limit.
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
-	// SPDX-License-Identifier: Apache-2.0
-	//
-	// The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
-	// delete query, and the table refuses them.
-	//
-	// Every query on an org-owned table takes @org_id and filters on it
-	// (TestQueriesAreOrgScoped).
-	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
-	// The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
-	InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error)
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -707,6 +697,14 @@ type Querier interface {
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
 	// verifier recomputes the hash without trusting audit_event_hash().
 	ListAuditChainRows(ctx context.Context, arg ListAuditChainRowsParams) ([]ListAuditChainRowsRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The audit log (plan item PV1, ADR 0023): the read queries. Append-only: there is no update or
+	// delete query, and the table refuses them. The inserts are not here: they live in
+	// internal/audit/internal/auditstore, so only internal/audit can write (ADR 0100 decision 1.7).
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	// ListAuditEventsFiltered across every org, for platform admins who name no org.
 	ListAuditEventsAllOrgs(ctx context.Context, arg ListAuditEventsAllOrgsParams) ([]AuditEvent, error)

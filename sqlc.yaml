@@ -11,3 +11,17 @@ sql:
         sql_package: pgx/v5
         emit_json_tags: false
         emit_interface: true
+  # The audit tables' write queries (ADR 0100 decision 1.7, #371): generated into an internal package
+  # of internal/audit, so nothing outside the audit module can call them. omit_unused_structs keeps
+  # the package to the models its queries return instead of a second copy of every table's model.
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/audit/internal/auditstore/queries
+    gen:
+      go:
+        package: auditstore
+        out: internal/audit/internal/auditstore
+        sql_package: pgx/v5
+        emit_json_tags: false
+        emit_interface: true
+        omit_unused_structs: true

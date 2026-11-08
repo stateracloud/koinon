@@ -5,6 +5,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -42,7 +43,7 @@ func (f *Fake) InTx(ctx context.Context, fn func(q *store.Queries, b Batch) erro
 		func(e InstallEvent) (store.InstallAuditEvent, error) {
 			raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
 			if err != nil {
-				return store.InstallAuditEvent{}, err
+				return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
 			}
 			n++
 			chain++
@@ -55,7 +56,7 @@ func (f *Fake) InTx(ctx context.Context, fn func(q *store.Queries, b Batch) erro
 		func(e Event) (store.AuditEvent, error) {
 			raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
 			if err != nil {
-				return store.AuditEvent{}, err
+				return store.AuditEvent{}, fmt.Errorf("audit: record %s: %w", e.Action, err)
 			}
 			n++
 			return store.AuditEvent{

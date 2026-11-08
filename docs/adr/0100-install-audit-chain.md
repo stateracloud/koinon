@@ -185,16 +185,17 @@ append install events. The chain still detects edits and removals; only who may 
 database role: its API handlers, its scheduler, its CLI subcommands run in its pod (`kubectl exec
 deploy/koinon-api -- koinon-api keys ...`), and the key-admin Job (`charts/koinon/templates/
 key-admin.yaml`, `koinon-api key-admin`, only with a KMS), which creates the KEK Secret, adds a
-KEK and, with `activateIfNoActive`, activates one. The Go entry point is `audit.RecordInstall(ctx,
-q, audit.InstallEvent{...})`, called with the transaction of the database change it records. A
-failed write fails the change, as `audit.RecordErr` does for org events. Where the change is not a
+KEK and, with `activateIfNoActive`, activates one. The Go entry point is the audit batch
+(decision 1.7): `audit.InTx` or `audit.InPgTx`, whose `b.Install(audit.InstallEvent{...})` writes
+the event in the transaction of the database change it records. A failed write fails the change,
+as it does for the org events of the same batch (`b.Org`). Where the change is not a
 database change (a Secret update) or is spread over many transactions (decision 3, keys), the
 event is written right after it and is not atomic with it; decision 3 says how a lost event is
 caught. Key material appears only as a KEK ID and fingerprint; a Secret only by name.
 
 **1.2a The event type.** `audit.Event` today fills only `before` and `after` into the summary. Both
 `audit.Event` and the new `audit.InstallEvent` gain `Reason`, `KoinonVersion` (filled by
-`RecordInstall` and `Record` from the build, not by callers) and, on `Event`, `InstallEventID`; they
+the audit batch and `audit.RecordAfter` from the build, not by callers) and, on `Event`, `InstallEventID`; they
 land in the summary as `reason`, `koinon_version` and `install_event_id`. Every summary key still
 passes the same scrubber (`ErrSecretInSummary`) and the request ID is taken from the context as
 today. Keys must not look like a secret value to the scrubber: a Secret is named under
@@ -284,9 +285,15 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
 - An event that is recorded after the work, not with it (the reconciler's, the admin API's call log,
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
-- The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
-  (issues 360, 370 and 371). Step 2 (#370) moved every non-test caller; step 3 deletes them and adds
-  a lint check.
+- The direct writes `audit.Record` and `audit.RecordInstall` are gone (step 3, #371). The compiler
+  enforces that only `internal/audit` writes: the sqlc inserts of the audit tables are generated into
+  `internal/audit/internal/auditstore` (a second `sql` entry in `sqlc.yaml`), which Go's internal rule
+  makes unreachable from any other package; the read queries stay in `internal/db/store`.
+  `hack/audit-batch-lint.sh`, run by `make lint`, preflight and CI, covers what the compiler cannot see:
+  it fails any code outside `internal/audit` that writes (INSERT/UPDATE/DELETE) into the audit tables
+  with raw SQL, or names one in a string literal of its own (dynamic SQL, `pgx.Identifier`), and limits
+  `audit.WriteInTx` to `internal/keyscli`. A test that must break the tables on purpose marks the one
+  statement with `// audit-lint:allow <reason>` on the line above.
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.
@@ -639,8 +646,9 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 - Negative: one more lock order rule (install head first). The audit module writes it (the audit
   batch, amended 1.7), so code review no longer holds it for callers that use the batch; a shared spec
   suite on the Postgres batch and the in-memory fake checks the order, and a Postgres spec shows two
-  transactions writing orgs A,B and B,A both finish. No non-test caller writes directly any more;
-  until step 3 removes the direct writes, review keeps new code off them.
+  transactions writing orgs A,B and B,A both finish. Since step 3 the compiler keeps every other
+  package off the audit inserts (`internal/audit/internal/auditstore`), and `hack/audit-batch-lint.sh`
+  keeps raw and dynamic SQL off the audit tables.
 - Negative: key events are not atomic with their change: Secret updates are recorded right after
   them, and `rewrap` and `reencrypt` once per run after a loop of per-row transactions. The start-up
   `keys.observed` pass compares the whole key-set state, so a lost event is caught at the next start,
@@ -658,7 +666,7 @@ v0.1 (maintainer decision 2026-11-07).
 1. **Install audit chain, and platform prices in it.** Migration (tables, hash function, triggers
    with the head's `pg_trigger_depth()` exception, grants), the `koinon_install_audit_writer` group
    role in the chart's `postInitApplicationSQL` and in `koinon_api`'s `inRoles` (decision 1.1a),
-   `audit.RecordInstall`, the `Event` fields of decision 1.2a, `audit.System(id)`, the shared
+   the install event write (now the audit batch's `b.Install`, decision 1.7), the `Event` fields of decision 1.2a, `audit.System(id)`, the shared
    encoder, `audit verify` over both kinds, the `koinon_audit_writes_total` metric, the
    install-scope `AuditService.List` read and `GET /admin/v1/audit?scope=install`, and
    `docs/ops/secret-keys.md`'s external-database lines. Replace `auditPlatform` on #316 (or a

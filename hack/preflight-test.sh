@@ -49,7 +49,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test bash5-lint bash5-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -147,6 +147,7 @@ check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
 check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
+check "go change selects audit" has '^audit:' "$tmp/l1"
 
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 check "workflow change does not select bash5" hasnt '^bash5:' "$tmp/l3"
@@ -278,6 +279,7 @@ echo "# adr" >docs/adr/0002-x.md
 echo "a: b" >charts/koinon/values.yaml
 echo "x" >web/app.ts
 printf '#!/bin/sh\n' >hack/new.sh
+echo "# touched" >>hack/audit-batch-lint.sh
 mkdir -p .github/workflows
 echo "on: push" >.github/workflows/y.yml
 commit_all
@@ -289,7 +291,7 @@ check "adr-lint-test ran" has '^adr-lint-test.sh' "$FAKE_LOG"
 check "docs-check ran" has '^docs-check.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
-check "shellcheck on the changed script" has '^shellcheck hack/new.sh' "$FAKE_LOG"
+check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"
 check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
@@ -300,6 +302,8 @@ rc=$(pf "$tmp/c5")
 check "a failing bash5 lint fails preflight" eq "$rc" 1
 check "bash5 FAIL line" has '^bash5 FAIL' "$tmp/c5"
 unset FAKE_BASH5_LINT_RC
+check "audit-batch-lint ran" has '^audit-batch-lint.sh' "$FAKE_LOG"
+check "audit-batch-lint-test ran" has '^audit-batch-lint-test.sh' "$FAKE_LOG"
 check "versions-check ran" has '^versions-check.sh' "$FAKE_LOG"
 check "versions-check-test ran" has '^versions-check-test.sh' "$FAKE_LOG"
 check "no Go change: no go test" hasnt '^go-test.sh' "$FAKE_LOG"

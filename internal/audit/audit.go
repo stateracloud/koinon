@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/audit/internal/auditstore"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 )
@@ -76,7 +77,7 @@ func (a Actor) String() string {
 }
 
 // Event is one audit entry. Before and After describe the target without secret values;
-// Record refuses a summary with a field that looks like one.
+// the write (the batch, or RecordAfter) refuses a summary with a field that looks like one.
 type Event struct {
 	Org        pgtype.UUID
 	Actor      Actor
@@ -88,8 +89,8 @@ type Event struct {
 	RequestID  string
 	// Reason is the reason a person gave, when the action takes one; it lands in the summary as "reason".
 	Reason string
-	// KoinonVersion is the build that wrote the entry. Record fills it from the build; callers leave
-	// it empty. It lands in the summary as "koinon_version".
+	// KoinonVersion is the build that wrote the entry. The write (the batch, or RecordAfter) fills it
+	// from the build; callers leave it empty. It lands in the summary as "koinon_version".
 	KoinonVersion string
 	// InstallEventID is the install event that caused this org event (ADR 0100 decision 1.6); it
 	// lands in the summary as "install_event_id".
@@ -97,7 +98,7 @@ type Event struct {
 }
 
 // InstallEvent is one entry of the install chain, an action that belongs to no org (ADR 0100).
-// Before and After describe the target without secret values; RecordInstall refuses a summary with a
+// Before and After describe the target without secret values; the batch refuses a summary with a
 // field that looks like one.
 type InstallEvent struct {
 	Actor      Actor
@@ -109,7 +110,7 @@ type InstallEvent struct {
 	RequestID  string
 	// Reason is the reason a person gave, when the action takes one ("reason" in the summary).
 	Reason string
-	// KoinonVersion is filled by RecordInstall from the build; callers leave it empty.
+	// KoinonVersion is filled by the batch from the build; callers leave it empty.
 	KoinonVersion string
 }
 
@@ -209,23 +210,17 @@ func buildSummary(before, after any, reason, version, installEventID string) ([]
 	return raw, nil
 }
 
-// Record writes e with q, which belongs to the transaction of the change being audited. It writes
-// at once, so the caller keeps the lock order of ADR 0100 decision 1.7 by hand. Only tests use it now;
-// code adds its events to an audit Batch (InTx) instead, and the module writes them in order. Record
-// goes away with step 3 (#371).
-func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
-	return record(ctx, q, e)
-}
-
-func record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
+// record writes e to its org's chain with q. The insert lives in auditstore, an internal package of
+// this module, so no code outside internal/audit can make it (ADR 0100 decision 1.7).
+func record(ctx context.Context, q *auditstore.Queries, e Event) (store.AuditEvent, error) {
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
 	if err != nil {
-		return store.AuditEvent{}, err
+		return store.AuditEvent{}, fmt.Errorf("audit: record %s: %w", e.Action, err)
 	}
 	if e.RequestID == "" {
 		e.RequestID = RequestID(ctx)
 	}
-	row, err := q.InsertAuditEvent(ctx, store.InsertAuditEventParams{
+	row, err := q.InsertAuditEvent(ctx, auditstore.InsertAuditEventParams{
 		OrgID: e.Org, ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
 		TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: e.RequestID,
 	})
@@ -233,45 +228,32 @@ func record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, e
 	if err != nil {
 		return store.AuditEvent{}, fmt.Errorf("audit: record %s: %w", e.Action, err)
 	}
-	return row, nil
+	return store.AuditEvent(row), nil
 }
 
 // RecordAfter records an event after the work it describes, outside the transaction of the change
 // (the reconciler's events, the admin API's call log, failed token checks). It is the one entry point
 // for an event that is not atomic with its change; the name says so. It must not run inside a
-// transaction that holds an audit head or that will write a Batch (ADR 0100 decision 1.7).
-func RecordAfter(ctx context.Context, q *store.Queries, e Event) error {
-	_, err := record(ctx, q, e)
+// transaction that holds an audit head or that will write a Batch (ADR 0100 decision 1.7). db is the
+// pool (or a connection) the event is written with.
+func RecordAfter(ctx context.Context, db store.DBTX, e Event) error {
+	_, err := record(ctx, auditstore.New(db), e)
 	return err
 }
 
-// RecordErr is Record for callers that only need the error.
-func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
-	_, err := Record(ctx, q, e)
-	return err
-}
-
-// RecordInstall writes e to the install chain with q, which belongs to the transaction of the change
-// being audited (ADR 0100 decision 1.2). Only tests call it now; code adds the event to an audit Batch
-// (Batch.Install). Only koinon-api may write it: the database refuses the insert
-// to any other role. The actor must be named (the chain refuses an empty ID). Lock order (decision
-// 1.7): write the install event before the org events of the same transaction, never after.
-func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
-	return recordInstall(ctx, q, e)
-}
-
-func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
-	if e.Actor.Kind == "" || e.Actor.ID == "" {
-		return store.InstallAuditEvent{}, errors.New("audit: an install event needs a named actor")
-	}
+// recordInstall writes e to the install chain with q, inside the transaction of the change being audited
+// (ADR 0100 decision 1.2); only the batch calls it, after plan() has refused an unnamed actor (the
+// chain refuses an empty ID too). Only koinon-api may write the install chain: the database refuses the
+// insert to any other role.
+func recordInstall(ctx context.Context, q *auditstore.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
 	if err != nil {
-		return store.InstallAuditEvent{}, err
+		return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
 	}
 	if e.RequestID == "" {
 		e.RequestID = RequestID(ctx)
 	}
-	row, err := q.InsertInstallAuditEvent(ctx, store.InsertInstallAuditEventParams{
+	row, err := q.InsertInstallAuditEvent(ctx, auditstore.InsertInstallAuditEventParams{
 		ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
 		TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: e.RequestID,
 	})
@@ -282,18 +264,12 @@ func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store
 		}
 		return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
 	}
-	return row, nil
+	return store.InstallAuditEvent(row), nil
 }
 
-// ErrInstallWriteDenied is in the error RecordInstall returns when the database refuses the insert
+// ErrInstallWriteDenied is in the error an install event write returns when the database refuses the insert
 // for lack of privilege: the connecting role is not (yet) a member of the install audit writer role,
 // or "koinon-api migrate --grants-only" has not yet granted that role its privileges (ADR 0100
 // decision 1.1a). On an upgrade of a CloudNativePG cluster this is the state between the new pods
 // and the chart's post-upgrade grant hook, so startup writes retry instead of failing the start.
 var ErrInstallWriteDenied = errors.New("the install audit writer role may not insert yet")
-
-// RecordInstallErr is RecordInstall for callers that only need the error.
-func RecordInstallErr(ctx context.Context, q *store.Queries, e InstallEvent) error {
-	_, err := RecordInstall(ctx, q, e)
-	return err
-}

@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
@@ -154,8 +155,10 @@ var _ = Describe("AuditService and the audit coverage", func() {
 		pa := e.userIn(ctx, org, store.OrgRoleMember)
 		_, err := e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, pa.userID)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = e.pool.Exec(ctx, `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
-			VALUES ('system', 'koinon-test:spec', 'platform_price.set', 'platform_price', 'x', '{}')`)
+		_, err = audit.InTx(ctx, e.pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "x"})
+			return nil
+		})
 		Expect(err).NotTo(HaveOccurred())
 
 		res, err := auditClient(pa).List(ctx, &auditv1alpha1.ListRequest{Scope: auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL, ActionPrefix: "platform_price."})

@@ -345,7 +345,7 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 		}
 	}
 	if reason != "" {
-		s.auditFailure(ctx, q, row, reason)
+		s.auditFailure(ctx, row, reason)
 		return Principal{}, &AuthError{Reason: reason, Prefix: prefix, TokenID: row.ID, Org: row.OrgID}
 	}
 	// Failing to record use must not fail the request.
@@ -373,10 +373,10 @@ func (s *Service) holdsRole(ctx context.Context, q *store.Queries, user, org pgt
 }
 
 // auditFailure writes "failed use of token <id>" to the token's org. It is best effort.
-func (s *Service) auditFailure(ctx context.Context, q *store.Queries, row store.GetAPITokenByPrefixRow, reason string) {
+func (s *Service) auditFailure(ctx context.Context, row store.GetAPITokenByPrefixRow, reason string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_ = audit.RecordAfter(actx, q, audit.Event{
+	_ = audit.RecordAfter(actx, s.pool, audit.Event{
 		Org: row.OrgID, Actor: audit.System("koinon-api:token-use"), Action: "token.use_failed", TargetKind: "token", TargetID: row.ID.String(),
 		After: map[string]any{"reason": reason, "tokenPrefix": row.Prefix},
 	})

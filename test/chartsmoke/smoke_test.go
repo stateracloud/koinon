@@ -708,6 +708,7 @@ func insertInstallEventAs(ctx context.Context, dbURL, role string) error {
 	c, err := pgx.Connect(ctx, strings.Replace(dbURL, "//koinon:", "//"+role+":", 1))
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = c.Close(ctx) }()
+	// audit-lint:allow tests the chart's grants: the insert as the login role must succeed or be refused by the database
 	_, err = c.Exec(ctx, `INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary)
 		VALUES ('system', 'koinon-test:chartsmoke', 'chartsmoke.probe', 'probe', 'x', '{}')`)
 	return err

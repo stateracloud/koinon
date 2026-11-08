@@ -55,7 +55,7 @@ test-web: ## Run web tests
 	cd web && $(PNPM) test
 
 .PHONY: lint
-lint: lint-go lint-web lint-proto migrate-lint adr-lint ## Run all linters
+lint: lint-go lint-web lint-proto migrate-lint adr-lint audit-batch-lint ## Run all linters
 
 .PHONY: lint-go
 lint-go: ## Lint Go code (per-worktree lock and cache, #236)
@@ -72,6 +72,11 @@ lint-proto: ## Lint protobuf definitions
 .PHONY: breaking
 breaking: ## Check protobuf changes against main
 	buf breaking --against '.git#branch=main'
+
+.PHONY: audit-batch-lint
+audit-batch-lint: ## Check that only internal/audit writes the audit tables (the audit batch, #371)
+	hack/audit-batch-lint-test.sh
+	hack/audit-batch-lint.sh
 
 .PHONY: adr-lint
 adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim.sh

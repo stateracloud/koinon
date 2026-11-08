@@ -20,12 +20,16 @@ import (
 
 func record(ctx context.Context, org pgtype.UUID, action string) store.AuditEvent {
 	GinkgoHelper()
-	row, err := audit.Record(ctx, store.New(pool), audit.Event{
-		Org: org, Actor: audit.System("koinon-test:spec"), Action: action, TargetKind: "test", TargetID: "t",
-		After: map[string]any{"n": action},
+	w, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+		b.Org(audit.Event{
+			Org: org, Actor: audit.System("koinon-test:spec"), Action: action, TargetKind: "test", TargetID: "t",
+			After: map[string]any{"n": action},
+		})
+		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
-	return row
+	Expect(w.Org).To(HaveLen(1))
+	return w.Org[0]
 }
 
 // asOwner runs fn with the append-only trigger of audit_events disabled, as the table owner does
@@ -103,11 +107,13 @@ var _ = Describe("the audit hash chain", func() {
 		errs := make(chan error, n)
 		for i := range n {
 			wg.Go(func() {
-				errs <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-					return audit.RecordErr(ctx, store.New(tx), audit.Event{
+				_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+					b.Org(audit.Event{
 						Org: org, Actor: audit.System("koinon-test:spec"), Action: fmt.Sprintf("test.c%d", i), TargetKind: "test",
 					})
+					return nil
 				})
+				errs <- err
 			})
 		}
 		wg.Wait()

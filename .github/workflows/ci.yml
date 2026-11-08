@@ -808,6 +808,8 @@ jobs:
       - run: hack/mktemp-lint.sh
       - run: hack/old-issue-refs-lint-test.sh
       - run: hack/old-issue-refs-lint.sh
+      - run: hack/audit-batch-lint-test.sh
+      - run: hack/audit-batch-lint.sh
       - run: hack/bash5-lint-test.sh
       - run: hack/bash5-lint.sh
       - run: hack/ship-test.sh

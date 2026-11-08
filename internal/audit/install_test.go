@@ -29,13 +29,25 @@ import (
 
 var priceActor = audit.System("koinon-api:price-refresh")
 
+// batchInstall writes e as the only event of a batch.
+func batchInstall(ctx context.Context, p audit.Beginner, e audit.InstallEvent) (audit.Written, error) {
+	return audit.InTx(ctx, p, func(_ *store.Queries, b audit.Batch) error {
+		b.Install(e)
+		return nil
+	})
+}
+
 func recordInstall(ctx context.Context, p *pgxpool.Pool, action string) store.InstallAuditEvent {
 	GinkgoHelper()
-	row, err := audit.RecordInstall(ctx, store.New(p), audit.InstallEvent{
-		Actor: priceActor, Action: action, TargetKind: "test", TargetID: "t", After: map[string]any{"n": action},
+	w, err := audit.InTx(ctx, p, func(_ *store.Queries, b audit.Batch) error {
+		b.Install(audit.InstallEvent{
+			Actor: priceActor, Action: action, TargetKind: "test", TargetID: "t", After: map[string]any{"n": action},
+		})
+		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
-	return row
+	Expect(w.Install).To(HaveLen(1))
+	return w.Install[0]
 }
 
 // installOwner runs fn with the append-only triggers of the install chain disabled, as the table
@@ -91,34 +103,23 @@ var _ = Describe("the install audit chain", func() {
 		db = pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
 	})
 
-	// This spec does not test the org order: audit.Record takes one org per call and the trigger locks that
-	// org's head row, so the order of the org writes is the caller's duty (ADR 0100 decision 1.7), and two
-	// transactions that write orgs A,B and B,A without an install event can deadlock. What it shows is that
-	// the install head, taken first, serialises every transaction that writes an install event, whatever the
-	// org writes after it.
-	It("serialises transactions that write an install event on the install head, so they do not deadlock on the org heads they write after it (ADR 0100 decision 1.7)", func(ctx SpecContext) {
+	// The order of the org heads among themselves is batch_test.go's (the batch sorts them by org ID).
+	// This spec shows the install head's part: it is taken first and held to commit, so transactions
+	// that write an install event run one after the other, and every org chain they write follows the
+	// order of the install chain.
+	It("serialises transactions that write an install event on the install head, so each org chain follows the install chain's order (ADR 0100 decision 1.7)", func(ctx SpecContext) {
 		a, _, _ := pgtest.NewOrg(ctx, db)
 		b, _, _ := pgtest.NewOrg(ctx, db)
 		orgs := []pgtype.UUID{a, b}
-		if orgs[0].String() > orgs[1].String() {
-			orgs[0], orgs[1] = orgs[1], orgs[0]
-		}
 		one := func(ctx context.Context, n int) error {
-			return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-				q := store.New(tx)
-				install, err := audit.RecordInstall(ctx, q, audit.InstallEvent{Actor: priceActor, Action: "test.cause", TargetKind: "test", TargetID: fmt.Sprint(n)})
-				if err != nil {
-					return err
-				}
-				for _, org := range orgs { // the callers' order rule; the install head already serialises these
-					if err := audit.RecordErr(ctx, q, audit.Event{
-						Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "test", TargetID: fmt.Sprint(n), InstallEventID: install.ID.String(),
-					}); err != nil {
-						return err
-					}
+			_, err := audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
+				b.Install(audit.InstallEvent{Actor: priceActor, Action: "test.cause", TargetKind: "test", TargetID: fmt.Sprint(n)})
+				for _, org := range orgs {
+					b.Org(audit.Event{Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "test", TargetID: fmt.Sprint(n)})
 				}
 				return nil
 			})
+			return err
 		}
 		Expect(one(ctx, 0)).To(Succeed())
 
@@ -145,6 +146,26 @@ var _ = Describe("the install audit chain", func() {
 		Expect(installs).To(Equal(1 + workers*rounds))
 		Expect(effects).To(Equal(2 * installs))
 		Expect(linked).To(Equal(effects), "each org event points back at its install event")
+
+		By("each org chain lists the events in the order of their install events")
+		rows, err := db.Query(ctx, `SELECT e.org_id::text, i.chain_seq FROM audit_events e
+			JOIN install_audit_events i ON i.id::text = e.summary->>'install_event_id'
+			WHERE e.action = 'test.effect' ORDER BY e.org_id, e.chain_seq`)
+		Expect(err).NotTo(HaveOccurred())
+		last := map[string]int64{}
+		var seen int
+		for rows.Next() {
+			var org string
+			var installSeq int64
+			Expect(rows.Scan(&org, &installSeq)).To(Succeed())
+			Expect(installSeq).To(BeNumerically(">", last[org]), "org %s: an org event is out of the install chain's order", org)
+			last[org] = installSeq
+			seen++
+		}
+		Expect(rows.Err()).NotTo(HaveOccurred())
+		Expect(seen).To(Equal(effects))
+		Expect(last).To(HaveLen(len(orgs)))
+
 		res, err := audit.VerifyInstall(ctx, store.New(db))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.OK()).To(BeTrue())
@@ -211,9 +232,11 @@ var _ = Describe("the install audit chain", func() {
 		errs := make(chan error, n)
 		for i := range n {
 			wg.Go(func() {
-				errs <- pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-					return audit.RecordInstallErr(ctx, store.New(tx), audit.InstallEvent{Actor: priceActor, Action: fmt.Sprintf("test.c%d", i), TargetKind: "test"})
+				_, err := audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
+					b.Install(audit.InstallEvent{Actor: priceActor, Action: fmt.Sprintf("test.c%d", i), TargetKind: "test"})
+					return nil
 				})
+				errs <- err
 			})
 		}
 		wg.Wait()
@@ -228,17 +251,22 @@ var _ = Describe("the install audit chain", func() {
 	})
 
 	It("writes the build, a reason and the before/after into the summary, and refuses a secret and an unnamed actor", func(ctx SpecContext) {
-		row, err := audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{
-			Actor: audit.CLI("prices accept"), Action: "test.summary", TargetKind: "test", TargetID: "t", Reason: "because", After: map[string]any{"a": 1},
+		w, err := audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{
+				Actor: audit.CLI("prices accept"), Action: "test.summary", TargetKind: "test", TargetID: "t", Reason: "because", After: map[string]any{"a": 1},
+			})
+			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		row := w.Install[0]
 		var s string
 		Expect(db.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE id = $1`, row.ID).Scan(&s)).To(Succeed())
 		Expect(s).To(And(ContainSubstring(`"reason": "because"`), ContainSubstring(`"koinon_version": "`+project.Version+`"`), ContainSubstring(`"after": {"a": 1}`)))
 
-		_, err = audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{Actor: priceActor, Action: "test.secret", TargetKind: "t", After: map[string]any{"password": "x"}})
+		_, err = batchInstall(ctx, db, audit.InstallEvent{Actor: priceActor, Action: "test.secret", TargetKind: "t", After: map[string]any{"password": "x"}})
 		Expect(err).To(MatchError(audit.ErrSecretInSummary))
-		_, err = audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{Actor: audit.Actor{Kind: audit.KindSystem}, Action: "test.unnamed", TargetKind: "t"})
+		Expect(err).To(MatchError(ContainSubstring("test.secret")), "the error names the refused event")
+		_, err = batchInstall(ctx, db, audit.InstallEvent{Actor: audit.Actor{Kind: audit.KindSystem}, Action: "test.unnamed", TargetKind: "t"})
 		Expect(err).To(HaveOccurred())
 		Expect(func() { audit.System("") }).To(Panic())
 		By("the database refuses an empty actor too")
@@ -249,10 +277,12 @@ var _ = Describe("the install audit chain", func() {
 	It("puts an org event's pointer back to its install event into the org's summary", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, db)
 		inst := recordInstall(ctx, db, "test.cause")
-		row, err := audit.Record(ctx, store.New(db), audit.Event{
-			Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "t", InstallEventID: inst.ID.String(),
+		w, err := audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{Org: org, Actor: priceActor, Action: "test.effect", TargetKind: "t", InstallEventID: inst.ID.String()})
+			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		row := w.Org[0]
 		Expect(string(row.Summary)).To(ContainSubstring(`"install_event_id": "` + inst.ID.String() + `"`))
 		Expect(string(row.Summary)).To(ContainSubstring(`"koinon_version"`))
 	})
@@ -382,7 +412,7 @@ var _ = Describe("the install audit chain", func() {
 			r := verify(ctx)
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Reason).To(ContainSubstring("head is missing"))
-			_, err := audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{Actor: priceActor, Action: "test.after", TargetKind: "t"})
+			_, err := batchInstall(ctx, db, audit.InstallEvent{Actor: priceActor, Action: "test.after", TargetKind: "t"})
 			Expect(err).To(MatchError(ContainSubstring("head is missing")), "the chain does not restart from zero")
 		})
 
@@ -501,7 +531,7 @@ var _ = Describe("the install audit chain", func() {
 			Expect(execAs(ctx, mconn, member, insertSQL)).To(MatchError(ContainSubstring("permission denied")))
 			_, err = mconn.Exec(ctx, `SET ROLE `+member)
 			Expect(err).NotTo(HaveOccurred())
-			err = audit.RecordInstallErr(ctx, store.New(mconn), audit.InstallEvent{Actor: priceActor, Action: "test.denied", TargetKind: "test"})
+			_, err = batchInstall(ctx, mconn, audit.InstallEvent{Actor: priceActor, Action: "test.denied", TargetKind: "test"})
 			Expect(err).To(MatchError(audit.ErrInstallWriteDenied), "koinon-api can tell a missing grant from other failures")
 			_, err = mconn.Exec(ctx, `RESET ROLE`)
 			Expect(err).NotTo(HaveOccurred())
@@ -560,13 +590,17 @@ var _ = Describe("koinon_audit_writes_total", func() {
 		db := pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
 		org, _, _ := pgtest.NewOrg(ctx, db)
 		recordInstall(ctx, db, "test.metric")
-		_, err := audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{Actor: priceActor, Action: "test.secret", TargetKind: "t", After: map[string]any{"password": "x"}})
+		_, err := batchInstall(ctx, db, audit.InstallEvent{Actor: priceActor, Action: "test.secret", TargetKind: "t", After: map[string]any{"password": "x"}})
 		Expect(err).To(HaveOccurred())
 		_, err = db.Exec(ctx, `ALTER TABLE install_audit_events DISABLE TRIGGER install_audit_events_chain`)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = audit.RecordInstall(ctx, store.New(db), audit.InstallEvent{Actor: priceActor, Action: "test.dberr", TargetKind: "t", After: map[string]any{"n": 1}})
+		_, err = batchInstall(ctx, db, audit.InstallEvent{Actor: priceActor, Action: "test.dberr", TargetKind: "t", After: map[string]any{"n": 1}})
 		Expect(err).To(HaveOccurred(), "the CHECKs refuse the unchained row")
-		Expect(audit.RecordErr(ctx, store.New(db), audit.Event{Org: org, Actor: priceActor, Action: "test.org", TargetKind: "t"})).To(Succeed())
+		_, err = audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{Org: org, Actor: priceActor, Action: "test.org", TargetKind: "t"})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 
 		fams, err := reg.Gather()
 		Expect(err).NotTo(HaveOccurred())
