@@ -583,19 +583,20 @@ chain would.
   export's hashes at the anchored `chain_seq` values. The install export verifies on its own first.
   An org export with no `--anchors` is internally consistent only, and says so.
 
-*Prior art.* Certificate Transparency (RFC 9162) and Trillian publish a signed tree head that commits
-to the whole log, and monitors check later heads against earlier ones. Anchors borrow that idea:
-one small value (the install head) commits to every chain, and a verifier compares an earlier
-commitment with the present chain. They differ on purpose: Koinon's chains are linear hash chains, not
-Merkle trees, so there are no consistency proofs, and the commitment (`heads_root`) is checked
-by reading the side table, not by a proof path. The signed note format of C2SP (checkpoint,
-tlog-checkpoint) is the layout decision 4.2 borrows; anchors do not use it because they are
-unsigned and live in the database. Sigstore Rekor and AWS CloudTrail log file digests do the signed
-version of the same thing (a signed tree head, and an hourly digest that names the previous digest
-and the files' hashes), which is decision 4.2 here. Postgres audit-chain projects hash rows inside
-the table and rely on a trigger, as the org chains do; they have no cross-chain commitment, which is
-what an anchor adds. RFC 9162 and the AWS CloudTrail page could not be fetched while writing this
-(the sandbox proxy refused the hosts); the descriptions are from memory and should be checked.
+*Prior art (sources read 2026-11-08).*
+
+- **Certificate Transparency** (RFC 9162, read from its source draft `draft-ietf-trans-rfc6962-bis-43` in google/certificate-transparency-rfcs). A signed tree head (`TreeHeadDataV2`: timestamp, tree_size, root_hash, extensions) commits to the whole log at one size. A client checks two heads against each other with a consistency proof.
+- **Trillian** (`types/logroot.go`). Its `LogRootV1` (TreeSize, RootHash, TimestampNanos, Metadata) is the same idea in a storage system.
+- **What anchors borrow.** One small value, the `audit.anchor` event with `heads_root` and `org_count` at an install `chain_seq`, commits to the state of every chain. A verifier later compares that commitment with the chains as they are now.
+- **Where anchors differ.** Koinon's chains are linear hash chains, not Merkle trees, so there are no consistency proofs. A verifier re-reads each org chain at the anchored `chain_seq` and compares the hash. That is linear in chain length, which is fine at audit-log sizes and needs no tree storage.
+- **C2SP tlog-checkpoint and signed-note** (C2SP/C2SP `tlog-checkpoint.md`, `signed-note.md`). A checkpoint is origin, tree size and root hash lines, then em-dash signature lines with a 4-byte key ID. A signer must not sign a checkpoint that is inconsistent with one it signed before. Decision 4.2 (issue 7) borrows the note layout. Anchors do not use it because they are unsigned and live in the database.
+- **AWS CloudTrail log file integrity digests** (awsdocs/aws-cloudtrail-user-guide, `cloudtrail-log-file-validation-digest-file-structure.md`). An hourly digest lists each log file's `hashValue` and links to the previous digest through `previousDigestHashValue` and `previousDigestSignature`. A digest is delivered even for an hour with no activity, with `"logFiles": []`.
+  - Anchors borrow the cadence (hourly by default) and the rule that an anchor is written every interval whether or not any head moved, so a missing anchor is itself a signal. That is what the `koinon_audit_anchor_age_seconds` gauge alerts on.
+  - Anchors also borrow the shape: one record naming the hash of every covered unit (here, every org chain head).
+  - They differ in two ways. The link to the previous anchor is the install chain itself, not a field. The record is not signed; signing is issue 7, and it is what moves trust outside the database the way CloudTrail's signed digest in S3 does.
+- **Postgres audit projects.** pgMemento (`src/SCHEMA.sql`, `src/LOG_UTIL.sql`) and supabase/supa_audit, now archived, record changes with triggers into a log table. Neither hashes rows; pgMemento's `row_log` has no hash column.
+  - Koinon's org chains already go further: hash-linked rows behind append-only triggers.
+  - No project we read commits several chains to one head. That is what an anchor adds.
 
 *Seams shared with issue 7 (signed checkpoints), not built here.* (1) Checkpoints sign the install
 head after an anchor, so the anchor event is what a checkpoint's one hash covers: `audit.checkpoint`
