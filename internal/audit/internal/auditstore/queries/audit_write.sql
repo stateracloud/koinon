@@ -18,3 +18,9 @@ RETURNING *;
 INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
 VALUES (@actor_kind, @actor_id, @action, @target_kind, @target_id, @summary, @request_id)
 RETURNING *;
+
+-- name: InsertInstallAnchorHead :exec
+-- One org head an audit.anchor install event commits to (ADR 0100 decision 4.1). org_id is the
+-- anchored org, not an owner: the table has no foreign key to orgs.
+INSERT INTO install_audit_anchor_heads (anchor_event_id, org_id, chain_seq, hash)
+VALUES (@anchor_event_id, @org_id, @chain_seq, @hash);

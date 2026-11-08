@@ -19,6 +19,9 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id.
 	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
+	// One org head an audit.anchor install event commits to (ADR 0100 decision 4.1). org_id is the
+	// anchored org, not an owner: the table has no foreign key to orgs.
+	InsertInstallAnchorHead(ctx context.Context, arg InsertInstallAnchorHeadParams) error
 	// The install chain (ADR 0100): no org.
 	InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error)
 }

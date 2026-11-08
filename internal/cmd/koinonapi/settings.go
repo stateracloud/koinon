@@ -111,6 +111,7 @@ var recordedSettings = []platformSetting{
 	{Flag: "otlp-token-dir", Key: "otlp-auth-dir", Kind: kindRef},
 	setting("durable", kindValue),
 	setting("run-cap-sweep-interval", kindValue),
+	setting("audit-anchor-interval", kindValue),
 
 	// the chart (the image's version is added by platformSettings)
 	setting("chart-version", kindValue),

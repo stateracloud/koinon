@@ -73,7 +73,7 @@ prog='
 use strict; use warnings;
 my ($owner, $wit, $allow) = map { qr/$_/ } @ENV{qw(OWNER_RE WRITEINTX_RE SQL_ALLOW_RE)};
 my $q = qr/\\?"/;                                      # a double quote, escaped inside a Go "string"
-my $tbl = qr/(?:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head)/;
+my $tbl = qr/(?:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head|install_audit_anchor_heads)/;
 my $name = qr/(?:$q$tbl$q|\b$tbl\b)/;                  # bare or quoted table name
 my $schema = qr/(?:$q\w+$q|\b\w+)\s*\.\s*/;            # optional schema qualifier, bare or quoted
 my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?|copy|merge\s+into)\s+(?:only\s+)?/i;

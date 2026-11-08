@@ -293,7 +293,9 @@ var _ = Describe("the install audit chain", func() {
 		It("refuses UPDATE, DELETE and TRUNCATE for the owner too", func(ctx SpecContext) {
 			for _, stmt := range []string{
 				`UPDATE install_audit_events SET actor_id = 'mallory'`, `DELETE FROM install_audit_events`,
-				`TRUNCATE install_audit_events`, `TRUNCATE install_audit_chain_head`,
+				// The anchored heads reference the events: Postgres refuses a lone TRUNCATE of the events on the
+				// foreign key before the trigger, so the guard is shown on the pair.
+				`TRUNCATE install_audit_events, install_audit_anchor_heads`, `TRUNCATE install_audit_chain_head`,
 			} {
 				_, err := db.Exec(ctx, stmt)
 				Expect(err).To(MatchError(ContainSubstring("append-only")), stmt)

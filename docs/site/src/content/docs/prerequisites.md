@@ -73,8 +73,8 @@ run this after the first migration, so that the reconciler and agentd can read t
 chain and not write it:
 
 ```sql
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler login role>, <agentd login role>;
-GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads FROM <reconciler login role>, <agentd login role>;
+GRANT SELECT ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads TO <reconciler login role>, <agentd login role>;
 ```
 
 Give `api`, `reconciler` and `agentd` separate logins: if they share one, the reconciler can write

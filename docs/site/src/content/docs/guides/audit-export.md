@@ -48,6 +48,7 @@ The first line is the header, then one line per event in `chain_seq` order. Ever
 | `org_id` | The org's ID, for `chain: org` only. |
 | `from_seq` | `chain_seq` of the first event line: 1 for the whole chain. |
 | `head` | `chain_seq` and `hash` of the chain's last event when the export started. Events appended later are not in the file. |
+| `anchors` | Install export only, left out when there is none: one entry per `audit.anchor` event in the file, `{"chain_seq","event_id","org_count","heads_root","heads":[{"org_id","chain_seq","hash"}]}`. See [Anchors](#anchors). |
 
 An event line has `chain_seq`, `id`, `actor_kind`, `actor_id`, `action`, `target_kind`, `target_id`,
 `request_id`, `created_at_micros` (microseconds since the Unix epoch), `prev_hash` and `hash` (64
@@ -110,10 +111,39 @@ koinon-api audit verify --file install-120.jsonl --after install.jsonl
 `prev_hash`. Without `--after` the partial file's own links are checked and the report says the first
 `prev_hash` was not.
 
-**A file verified alone proves internal consistency only, not authenticity; use `--after` (later
-anchors/checkpoints) to pin it.** `verify --file` prints this as a `note` line whenever no `--after` is
-given. The hashes show that the file is a consistent chain with the head it names, not that the head is
-the chain's real head: someone who rewrites a whole copy from the start, header included, gets a file
-that verifies. Compare the head with one you kept earlier (an earlier export given to `--after`). Anchors
-and signed checkpoints that pin the head outside the database are planned (ADR 0100); `verify --file` will
-check them when they exist.
+**A file verified alone proves internal consistency only, not authenticity; use `--after`, or `--anchors`
+with an install export (later checkpoints), to pin it.** `verify --file` prints this as a `note` line
+whenever neither is given. The hashes show that the file is a consistent chain with the head it names, not
+that the head is the chain's real head: someone who rewrites a whole copy from the start, header included,
+gets a file that verifies. Compare the head with one you kept earlier (an earlier export given to
+`--after`), or an org export with an install export you kept (`--anchors`). Signed checkpoints that pin
+the head outside the database are planned (ADR 0100); `verify --file` will check them when they exist.
+
+## Anchors
+
+Every hour (`--audit-anchor-interval` on koinon-api, at least one minute) and on demand with
+`koinon-api audit anchor`, koinon-api writes an `audit.anchor` event to the install chain. It commits to the
+head (`chain_seq` and `hash`) of every org chain at that moment: the event's summary holds `org_count` and
+`heads_root`, and the heads themselves are in an append-only table. Only one replica anchors per interval.
+
+`heads_root` is sha256 over fields written as in [The hash](#the-hash): the tag
+`koinon.install_audit.anchor.v1`, the install ID, the number of heads in decimal, then for each head in
+`org_id` order the `org_id` (lower-case UUID text), the `chain_seq` in decimal and the `hash` in lower-case hex.
+
+`koinon-api audit verify` on the database recomputes every root and checks that each org chain still has the
+anchored hash at the anchored `chain_seq`. A chain rewritten or removed behind an anchor fails and names the
+org and the anchor. An org created after the last anchor has nothing to check yet and passes.
+
+An install export carries the anchors of its range in the header, and `verify --file` checks them against the
+anchor events with no database. Keep an install export, then check an org export against it:
+
+```sh
+koinon-api audit verify --file org-0192.jsonl --anchors install.jsonl
+```
+
+The install file is verified first. Every anchor that names the org must find its anchored hash in the org
+file at the anchored `chain_seq`, and a break names the lowest such `chain_seq` and the anchor. This pins the
+org file to what the install chain said about it when the anchors were written, so a rewrite of the org chain
+after your copy of the install export was made cannot pass. It does not stop someone who can rewrite the install chain
+too (a database superuser); signed checkpoints, exported off the cluster, are for that. Watch the gauge
+`koinon_audit_anchor_age_seconds` (no labels): it grows while anchoring is stuck.

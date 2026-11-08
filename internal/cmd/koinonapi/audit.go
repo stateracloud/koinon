@@ -28,7 +28,7 @@ func newAuditCommand() *cobra.Command {
 		Short: "Audit-log tools",
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api audit verify",
 	}
-	var dbURL, orgID, file, after string
+	var dbURL, orgID, file, after, anchors string
 	var installOnly bool
 	verify := &cobra.Command{
 		Use:   "verify",
@@ -46,7 +46,7 @@ func newAuditCommand() *cobra.Command {
 				if orgID != "" || installOnly {
 					return errors.New("--file checks a file alone; it does not take --org or --install")
 				}
-				return verifyAuditFile(file, after, cmd.OutOrStdout())
+				return verifyAuditFile(file, after, anchors, cmd.OutOrStdout())
 			}
 			if after != "" {
 				return errors.New("--after needs --file")
@@ -67,8 +67,31 @@ func newAuditCommand() *cobra.Command {
 	verify.Flags().BoolVar(&installOnly, "install", false, "verify only the install chain")
 	verify.Flags().StringVar(&file, "file", "", "check this export file (\"-\" for stdin) instead of the database; needs no database")
 	verify.Flags().StringVar(&after, "after", "", "with --file: an earlier export that ends where this partial export starts")
+	verify.Flags().StringVar(&anchors, "anchors", "", "with --file of an org export: an install export whose anchors the org's chain is checked against")
 	cli.EnvAlias(verify, "database-url", "DATABASE_URL")
 	root.AddCommand(verify)
+
+	var anchorURL string
+	anchor := &cobra.Command{
+		Use:   "anchor",
+		Short: "Anchor every org audit chain in the install chain now (ADR 0100 decision 4.1)",
+		Long: "Writes one audit.anchor event to the install chain, with the head of every org chain it commits to, now. " +
+			"koinon-api also does this on a schedule (--audit-anchor-interval); this is the on-demand run. It waits for an " +
+			"anchor in progress, then writes its own. Run it in a koinon-api pod.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pool, err := pgxpool.New(cmd.Context(), anchorURL)
+			if err != nil {
+				return fmt.Errorf("connect to postgres: %w", err)
+			}
+			defer pool.Close()
+			return anchorAudit(cmd.Context(), pool, cmd.OutOrStdout())
+		},
+	}
+	anchor.Flags().StringVar(&anchorURL, "database-url", "", "Postgres connection string")
+	cli.EnvAlias(anchor, "database-url", "DATABASE_URL")
+	mustRequire(anchor, "database-url")
+	root.AddCommand(anchor)
 
 	var scope, out string
 	var fromSeq int64
@@ -140,10 +163,38 @@ func exportScope(scope, orgID string) (audit.ExportScope, error) {
 	return audit.ExportScope{}, fmt.Errorf("--scope must be install or org, got %q", scope)
 }
 
+// anchorAudit writes an anchor now and prints it.
+func anchorAudit(ctx context.Context, db audit.Beginner, out io.Writer) error {
+	res, err := audit.Anchor(ctx, db, audit.AnchorOptions{Wait: true})
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "anchored %d org chains at install chain_seq %d (event %s), heads_root %s\n", res.OrgCount, res.ChainSeq, res.EventID, res.HeadsRoot)
+	return nil
+}
+
 // verifyAuditFile checks an export file, with no database. after is the path of an earlier export
-// that a partial file continues. It returns audit.ErrBroken when the file does not hold.
-func verifyAuditFile(path, after string, out io.Writer) error {
+// that a partial file continues; anchors is the path of an install export whose anchors an org export
+// is checked against. It returns audit.ErrBroken when the file does not hold.
+func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
+	if anchors != "" {
+		inst, err := checkExportFile(anchors)
+		if err != nil {
+			return fmt.Errorf("--anchors %s: %w", anchors, err)
+		}
+		if !inst.OK() {
+			audit.WriteExportReport(out, inst)
+			return fmt.Errorf("--anchors %s does not verify: %w", anchors, audit.ErrBroken)
+		}
+		if inst.Header.Chain != audit.ChainInstall {
+			return fmt.Errorf("--anchors %s is an org export; give an install export", anchors)
+		}
+		if len(inst.Header.Anchors) == 0 {
+			_, _ = fmt.Fprintf(out, "note    --anchors %s holds no anchors: nothing to check the file against\n", anchors)
+		}
+		opt.Anchors = &audit.ExportAnchorSet{InstallID: inst.Header.InstallID, Anchors: inst.Header.Anchors}
+	}
 	if after != "" {
 		if after == "-" {
 			return errors.New("--after must be a file path, not stdin")
@@ -177,7 +228,7 @@ func verifyAuditFile(path, after string, out io.Writer) error {
 		return err
 	}
 	ok := audit.WriteExportReport(out, res)
-	if after == "" {
+	if after == "" && anchors == "" {
 		_, _ = fmt.Fprintln(out, "note    "+aloneNote)
 	}
 	if !ok {
@@ -188,7 +239,7 @@ func verifyAuditFile(path, after string, out io.Writer) error {
 
 // aloneNote is what verify --file says when no --after pins the file (ADR 0100): the hashes only
 // show that the file agrees with itself, and anyone can write a file that does.
-const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after (later anchors/checkpoints) to pin it"
+const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it"
 
 // checkExportFile verifies one export file alone.
 func checkExportFile(path string) (audit.ExportResult, error) {
