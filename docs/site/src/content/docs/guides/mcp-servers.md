@@ -117,6 +117,20 @@ The **FinOps analyst** template has no grants at all: it reads yesterday's costs
 (change the time and zone in the agent's triggers) through the cost, billing or metrics servers you allow
 here, and replies with a three-part report. Allow those servers on the agent's page after you create it.
 
+## What the text check does not catch
+
+For tools that reach outside the platform, Koinon also compares the text of a call with the private
+data the agent has read, and asks for approval on a match. This is a second alarm, not the main
+control: the byte cap and the rule that a call after untrusted input needs approval do the real work.
+It catches copies and simple encodings (base64, percent-encoding, escapes, hex), also when the text is
+split across several arguments of one call.
+
+Known limit: a secret split across two arguments and encoded as base64 with long runs of filler
+between the characters (each half longer than 1024 bytes) is not matched. The same holds when that
+padded base64 is itself wrapped in base64, `\u` escapes or percent-encoding. The same text in one
+argument is matched. Do not rely on the text check against an agent that is trying to hide data; keep
+tools that send data out in the Ask tier. The general fix is tracked in #369.
+
 ## Health
 
 Koinon checks every server every 60 seconds through the gateway: it connects like an agent would and
