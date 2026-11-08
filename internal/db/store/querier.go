@@ -77,6 +77,10 @@ type Querier interface {
 	// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
 	// gone): the verifier compares the two (ADR 0100 decision 4.1).
 	CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.UUID) ([]CheckAnchoredHeadsRow, error)
+	// One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+	// the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+	// instead of every anchor's heads (ADR 0100 decision 4.1).
+	CheckOrgAnchoredHeads(ctx context.Context, orgID pgtype.UUID) ([]CheckOrgAnchoredHeadsRow, error)
 	// Takes an approved request for execution for lease_seconds. No row: it is
 	// not approved, or another executor holds it.
 	ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error)

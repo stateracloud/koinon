@@ -104,11 +104,65 @@ type AnchorResult struct {
 	// transaction is anchoring) or "recent" (the newest anchor is younger than MinAge).
 	Written bool
 	Skipped string
-	// EventID, ChainSeq, OrgCount and HeadsRoot (hex) describe the anchor written.
-	EventID   string
-	ChainSeq  int64
-	OrgCount  int
-	HeadsRoot string
+	// EventID, ChainSeq, OrgCount and HeadsRoot (hex) describe the anchor written. InstallHead is the
+	// hash (hex) of the anchor event, the install chain's head after it.
+	EventID     string
+	ChainSeq    int64
+	OrgCount    int
+	HeadsRoot   string
+	InstallHead string
+	// Inconsistent lists what the consistency check found before the write (see Anchor); empty when the
+	// org chains agree with the last anchor. The anchor is written either way.
+	Inconsistent []AnchorInconsistency
+}
+
+// The reasons of an AnchorInconsistency, and the reason label values of koinon_audit_anchor_inconsistent_total.
+const (
+	// InconsistentHashChanged: the org chain has another hash (or no row) at the chain_seq the last anchor names.
+	InconsistentHashChanged = "hash_changed"
+	// InconsistentSeqRegressed: the org's chain head is below the chain_seq the last anchor names, or gone.
+	InconsistentSeqRegressed = "seq_regressed"
+)
+
+// AnchorInconsistency is one org whose chain disagrees with the newest earlier anchor.
+type AnchorInconsistency struct {
+	// Org is the org's ID as lower-case UUID text (logs may name it; the metric never does, ADR 0023).
+	Org string
+	// Reason is InconsistentHashChanged or InconsistentSeqRegressed.
+	Reason string
+	// AnchoredSeq is the chain_seq the earlier anchor names for the org.
+	AnchoredSeq int64
+}
+
+// checkConsistency compares the org chains with the newest earlier anchor before a new one is written,
+// the rule of C2SP tlog-checkpoint that a signer never signs a checkpoint inconsistent with one it signed
+// before. Per org it finds a hash other than the anchored one at the anchored chain_seq, and a head
+// below the anchored chain_seq. Only the newest anchor is checked, not every earlier one: each earlier
+// anchor was checked against the one before it when it was written, and VerifyAnchors checks the whole
+// history. This keeps the cost at one anchor's heads (one row per org) per tick, however old the install is.
+func checkConsistency(ctx context.Context, q *store.Queries, lastID string, now []AnchorHead) ([]AnchorInconsistency, error) {
+	var id pgtype.UUID
+	if err := id.Scan(lastID); err != nil {
+		return nil, fmt.Errorf("anchor id %q: %w", lastID, err)
+	}
+	prev, err := q.CheckAnchoredHeads(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read the heads of the newest anchor: %w", err)
+	}
+	cur := make(map[string]int64, len(now))
+	for _, h := range now {
+		cur[h.OrgID] = h.ChainSeq
+	}
+	var out []AnchorInconsistency
+	for _, r := range prev {
+		if r.OrgHash == nil || !bytes.Equal(r.OrgHash, r.Hash) {
+			out = append(out, AnchorInconsistency{Org: r.OrgText, Reason: InconsistentHashChanged, AnchoredSeq: r.ChainSeq})
+		}
+		if seq, ok := cur[r.OrgText]; !ok || seq < r.ChainSeq {
+			out = append(out, AnchorInconsistency{Org: r.OrgText, Reason: InconsistentSeqRegressed, AnchoredSeq: r.ChainSeq})
+		}
+	}
+	return out, nil
 }
 
 // Anchor writes one audit.anchor install event and the heads it commits to, in one transaction. The
@@ -116,11 +170,17 @@ type AnchorResult struct {
 // read of committed rows, so no anchor names a head that is not committed (an org write in flight holds
 // its head row and is not seen), and the install head is taken last by the event insert (ADR 0100
 // decision 1.7). A database that refuses the insert for lack of privilege returns ErrInstallWriteDenied.
+//
+// Before it writes, under the lock, Anchor checks the org chains against the newest earlier anchor
+// (checkConsistency). A mismatch is returned in AnchorResult.Inconsistent and counted in
+// koinon_audit_anchor_inconsistent_total, and the anchor is still written, so the chain of anchors goes on
+// and verify reports the break.
 func Anchor(ctx context.Context, db Beginner, opt AnchorOptions) (AnchorResult, error) {
 	var res AnchorResult
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		res = AnchorResult{}
 		q := store.New(tx)
+		var lastID string
 		if opt.Wait {
 			if err := q.LockAuditAnchor(ctx); err != nil {
 				return fmt.Errorf("audit anchor: lock: %w", err)
@@ -135,16 +195,16 @@ func Anchor(ctx context.Context, db Beginner, opt AnchorOptions) (AnchorResult, 
 				return nil
 			}
 		}
-		if opt.MinAge > 0 {
-			last, err := q.GetLastInstallAnchor(ctx)
-			switch {
-			case errors.Is(err, pgx.ErrNoRows):
-			case err != nil:
-				return fmt.Errorf("audit anchor: read the newest anchor: %w", err)
-			case last.AgeSeconds < opt.MinAge.Seconds():
-				res.Skipped = "recent"
-				return nil
-			}
+		last, err := q.GetLastInstallAnchor(ctx)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("audit anchor: read the newest anchor: %w", err)
+		case opt.MinAge > 0 && last.AgeSeconds < opt.MinAge.Seconds():
+			res.Skipped = "recent"
+			return nil
+		default:
+			lastID = last.IDText
 		}
 		installID, err := q.GetInstallID(ctx)
 		if err != nil {
@@ -157,6 +217,12 @@ func Anchor(ctx context.Context, db Beginner, opt AnchorOptions) (AnchorResult, 
 		heads := make([]AnchorHead, len(rows))
 		for i, r := range rows {
 			heads[i] = AnchorHead{OrgID: r.OrgID.String(), ChainSeq: r.Seq, Hash: r.Hash}
+		}
+		var inconsistent []AnchorInconsistency
+		if lastID != "" {
+			if inconsistent, err = checkConsistency(ctx, q, lastID, heads); err != nil {
+				return fmt.Errorf("audit anchor: consistency check: %w", err)
+			}
 		}
 		root := hex.EncodeToString(HeadsRoot(installID.String(), heads))
 		aq := auditstore.New(tx)
@@ -180,11 +246,17 @@ func Anchor(ctx context.Context, db Beginner, opt AnchorOptions) (AnchorResult, 
 				return fmt.Errorf("audit anchor: record the heads: %w", err)
 			}
 		}
-		res = AnchorResult{Written: true, EventID: ev.ID.String(), ChainSeq: ev.ChainSeq, OrgCount: len(heads), HeadsRoot: root}
+		res = AnchorResult{
+			Written: true, EventID: ev.ID.String(), ChainSeq: ev.ChainSeq, OrgCount: len(heads), HeadsRoot: root,
+			InstallHead: hex.EncodeToString(ev.Hash), Inconsistent: inconsistent,
+		}
 		return nil
 	})
 	if err != nil {
 		return AnchorResult{}, err
+	}
+	for _, i := range res.Inconsistent {
+		anchorInconsistent.WithLabelValues(i.Reason).Inc()
 	}
 	return res, nil
 }
@@ -196,15 +268,32 @@ var anchorAge = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help: "Seconds since the newest audit.anchor event in the install chain (since the process started while there is none); an alert on it says anchoring stopped.",
 })
 
-// RegisterAnchorMetric registers koinon_audit_anchor_age_seconds (AnchorJob) on reg. Only koinon-api
-// anchors, so only koinon-api registers it.
-func RegisterAnchorMetric(reg prometheus.Registerer) { reg.MustRegister(anchorAge) }
+// anchorInconsistent is koinon_audit_anchor_inconsistent_total: orgs found inconsistent with the newest
+// earlier anchor when a new one was written (Anchor), by reason. The labels are fixed (ADR 0023): never
+// an org, agent, user or run ID; the log line names the org.
+var anchorInconsistent = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "koinon_audit_anchor_inconsistent_total",
+	Help: "Orgs whose audit chain disagreed with the newest earlier anchor when a new anchor was written, by reason (hash_changed, seq_regressed); an alert on any increase says an org chain was rewritten or rolled back.",
+}, []string{"reason"})
+
+// RegisterAnchorMetric registers koinon_audit_anchor_age_seconds and koinon_audit_anchor_inconsistent_total
+// (AnchorJob, Anchor) on reg. Only koinon-api anchors, so only koinon-api registers them.
+func RegisterAnchorMetric(reg prometheus.Registerer) {
+	for _, r := range []string{InconsistentHashChanged, InconsistentSeqRegressed} {
+		anchorInconsistent.WithLabelValues(r)
+	}
+	reg.MustRegister(anchorAge, anchorInconsistent)
+}
 
 // AnchorDB is what AnchorJob needs of the database: transactions and plain queries (*pgxpool.Pool).
 type AnchorDB interface {
 	Beginner
 	store.DBTX
 }
+
+// AnchorLogMessage is the message of the log line of a written anchor: operators filter on it to ship the
+// witness off the cluster.
+const AnchorLogMessage = "anchored the org audit chains"
 
 // AnchorJob anchors the org chains every Interval (ADR 0100 decision 4.1) and keeps
 // koinon_audit_anchor_age_seconds. Every replica runs it; Anchor's lock and MinAge make the first one
@@ -251,7 +340,18 @@ func (j *AnchorJob) Tick(ctx context.Context) {
 	case res.Written:
 		anchorAge.Set(0)
 		j.state = ""
-		j.Log.Info("anchored the org audit chains", "chain_seq", res.ChainSeq, "orgs", res.OrgCount)
+		// The success line is a witness the database cannot rewrite once the logs are shipped off the
+		// cluster (guides/audit.md, "Anchors"); heads_root and install_head are audit chain hashes, not secrets.
+		j.Log.Info(AnchorLogMessage, "chain_seq", res.ChainSeq, "orgs", res.OrgCount,
+			"heads_root", res.HeadsRoot, "install_head", res.InstallHead)
+		if len(res.Inconsistent) > 0 {
+			items := make([]string, len(res.Inconsistent))
+			for i, x := range res.Inconsistent {
+				items[i] = fmt.Sprintf("%s %s at chain_seq %d", x.Org, x.Reason, x.AnchoredSeq)
+			}
+			j.Log.Error("org audit chains are inconsistent with the previous anchor; the anchor was written anyway, run the audit verify",
+				"count", len(items), "orgs", items)
+		}
 	default:
 		j.state = ""
 	}
@@ -380,20 +480,31 @@ func VerifyAnchors(ctx context.Context, q *store.Queries) (int64, []AnchorBreak,
 	}
 }
 
-// VerifyOrgAnchors checks one org's chain against the install anchors: the breaks of VerifyAnchors
-// that name org (its canonical lower-case UUID text). It does not walk the install chain, and anchor
-// faults that name no org (a wrong heads_root) are left to VerifyInstall. It returns the number of
-// anchors read and the org's breaks.
+// VerifyOrgAnchors checks one org's chain against the install anchors: that the org chain still has
+// the anchored hash at the chain_seq of every anchor that names the org (CheckOrgAnchoredHeads, an
+// org-filtered read, not every anchor's heads). The org is reported once, at the oldest anchor it fails,
+// as VerifyAnchors does. It does not walk the install chain, and anchor faults that name no org (a wrong
+// heads_root) are left to VerifyInstall. It returns the number of anchors that name the org and its breaks.
 func VerifyOrgAnchors(ctx context.Context, q *store.Queries, org string) (int64, []AnchorBreak, error) {
-	checked, all, err := VerifyAnchors(ctx, q)
+	var id pgtype.UUID
+	if err := id.Scan(org); err != nil {
+		return 0, nil, fmt.Errorf("audit verify: org id %q: %w", org, err)
+	}
+	rows, err := q.CheckOrgAnchoredHeads(ctx, id)
 	if err != nil {
-		return checked, nil, err
+		return 0, nil, fmt.Errorf("audit verify: read the anchored heads of org %s: %w", org, err)
 	}
-	var breaks []AnchorBreak
-	for _, b := range all {
-		if b.Org == org {
-			breaks = append(breaks, b)
+	for _, r := range rows {
+		var reason string
+		switch {
+		case r.OrgHash == nil:
+			reason = fmt.Sprintf("the org's chain has no row at chain_seq %d: rows were removed behind the anchor, or the chain is gone", r.ChainSeq)
+		case !bytes.Equal(r.OrgHash, r.Hash):
+			reason = fmt.Sprintf("the org's chain has another hash at chain_seq %d than the anchored one: it was rewritten behind the anchor", r.ChainSeq)
+		default:
+			continue
 		}
+		return int64(len(rows)), []AnchorBreak{{AnchorSeq: r.AnchorSeq, AnchorID: r.AnchorText, Org: org, Seq: r.ChainSeq, Reason: reason}}, nil
 	}
-	return checked, breaks, nil
+	return int64(len(rows)), nil, nil
 }

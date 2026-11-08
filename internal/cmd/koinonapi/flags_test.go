@@ -3,6 +3,8 @@
 package koinonapi
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -31,6 +33,13 @@ var _ = Describe("koinon-api's startup", func() {
 			To(MatchError(ContainSubstring("--grants-only and --require-install-writer are exclusive")))
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate", "--require-install-writer", "--install-writer-member", "koinon_api")).
 			To(MatchError(ContainSubstring("unknown flag: --install-writer-member")), "koinon-api checks its own membership")
+	})
+
+	It("refuses an --audit-anchor-interval below 5m: every anchor stores one row per org", func() {
+		Expect(validateAnchorInterval(5 * time.Minute)).To(Succeed())
+		Expect(validateAnchorInterval(time.Hour)).To(Succeed())
+		Expect(validateAnchorInterval(4*time.Minute + 59*time.Second)).To(MatchError(ContainSubstring("below the minimum 5m0s")))
+		Expect(validateAnchorInterval(time.Minute)).To(MatchError(ContainSubstring("--audit-anchor-interval 1m0s")))
 	})
 
 	It("takes the chart version the chart passes, as the first flag of serve", func() {

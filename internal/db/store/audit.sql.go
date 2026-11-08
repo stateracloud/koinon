@@ -53,6 +53,52 @@ func (q *Queries) CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.U
 	return items, nil
 }
 
+const checkOrgAnchoredHeads = `-- name: CheckOrgAnchoredHeads :many
+SELECT e.id::text AS anchor_text, e.chain_seq AS anchor_seq, h.chain_seq, h.hash, a.hash AS org_hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+LEFT JOIN audit_events a ON a.org_id = h.org_id AND a.chain_seq = h.chain_seq
+WHERE h.org_id = $1
+ORDER BY e.chain_seq
+`
+
+type CheckOrgAnchoredHeadsRow struct {
+	AnchorText string
+	AnchorSeq  int64
+	ChainSeq   int64
+	Hash       []byte
+	OrgHash    []byte
+}
+
+// One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+// the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+// instead of every anchor's heads (ADR 0100 decision 4.1).
+func (q *Queries) CheckOrgAnchoredHeads(ctx context.Context, orgID pgtype.UUID) ([]CheckOrgAnchoredHeadsRow, error) {
+	rows, err := q.db.Query(ctx, checkOrgAnchoredHeads, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CheckOrgAnchoredHeadsRow
+	for rows.Next() {
+		var i CheckOrgAnchoredHeadsRow
+		if err := rows.Scan(
+			&i.AnchorText,
+			&i.AnchorSeq,
+			&i.ChainSeq,
+			&i.Hash,
+			&i.OrgHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAuditChainHead = `-- name: GetAuditChainHead :one
 SELECT org_id, seq, hash FROM audit_chain_heads WHERE org_id = $1
 `

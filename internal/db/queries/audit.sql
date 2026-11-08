@@ -159,3 +159,14 @@ FROM install_audit_anchor_heads h
 LEFT JOIN audit_events e ON e.org_id = h.org_id AND e.chain_seq = h.chain_seq
 WHERE h.anchor_event_id = @anchor_event_id
 ORDER BY h.org_id;
+
+-- name: CheckOrgAnchoredHeads :many
+-- One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+-- the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+-- instead of every anchor's heads (ADR 0100 decision 4.1).
+SELECT e.id::text AS anchor_text, e.chain_seq AS anchor_seq, h.chain_seq, h.hash, a.hash AS org_hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+LEFT JOIN audit_events a ON a.org_id = h.org_id AND a.chain_seq = h.chain_seq
+WHERE h.org_id = @org_id
+ORDER BY e.chain_seq;

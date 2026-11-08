@@ -64,6 +64,25 @@ var _ = Describe("install audit anchors", func() {
 		return tx
 	}
 
+	// ownerTx opens a transaction that, like ownerTx of chain_test.go, disables only the append-only
+	// triggers of the org chain, as the table owner does. Unlike tamperTx it leaves the install chain's
+	// triggers on, so an anchor can be written in it. It is rolled back when the spec ends, so the
+	// tampering never reaches the database; the spec reads and writes through this transaction only.
+	ownerTx := func(ctx context.Context) pgx.Tx {
+		GinkgoHelper()
+		tx, err := db.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+		for _, stmt := range []string{
+			`ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`,
+			`ALTER TABLE audit_chain_heads DISABLE TRIGGER audit_chain_heads_guard`,
+		} {
+			_, err = tx.Exec(ctx, stmt)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		return tx
+	}
+
 	// rewriteOrg rewrites the org's chain from chain_seq from on with a new actor, recomputes every hash
 	// and moves the head to match: a self-consistent chain that VerifyOrg accepts.
 	rewriteOrg := func(ctx context.Context, tx pgx.Tx, org pgtype.UUID, from int64) {
@@ -462,6 +481,118 @@ var _ = Describe("install audit anchors", func() {
 			short := &audit.AnchorJob{DB: db, Interval: time.Second, Log: slog.New(slog.DiscardHandler)}
 			Eventually(func() int { short.Tick(ctx); return countAnchors(ctx) }, 10*time.Second, 200*time.Millisecond).Should(Equal(2))
 			Expect(gauge(reg)).To(BeNumerically("<", 5))
+		})
+
+		// inconsistent reads koinon_audit_anchor_inconsistent_total by reason; the counter is shared by the
+		// process, so a spec compares before and after.
+		inconsistent := func(reg *prometheus.Registry) map[string]float64 {
+			GinkgoHelper()
+			mfs, err := reg.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			out := map[string]float64{}
+			for _, mf := range mfs {
+				if mf.GetName() != "koinon_audit_anchor_inconsistent_total" {
+					continue
+				}
+				for _, m := range mf.GetMetric() {
+					Expect(m.GetLabel()).To(HaveLen(1), "one fixed reason label, no org (ADR 0023)")
+					Expect(m.GetLabel()[0].GetName()).To(Equal("reason"))
+					out[m.GetLabel()[0].GetValue()] = m.GetCounter().GetValue()
+				}
+				return out
+			}
+			Fail("koinon_audit_anchor_inconsistent_total is not registered")
+			return nil
+		}
+
+		It("logs heads_root and the install head of the anchor, and does not count a clean tick as inconsistent", func(ctx SpecContext) {
+			reg := prometheus.NewRegistry()
+			audit.RegisterAnchorMetric(reg)
+			before := inconsistent(reg)
+			var logs bytes.Buffer
+			job := &audit.AnchorJob{DB: db, Interval: time.Nanosecond, Log: slog.New(slog.NewJSONHandler(&logs, nil))}
+
+			first := anchor(ctx)
+			writeOrg(ctx, orgs[0], "test.n6")
+			job.Tick(ctx)
+			Expect(inconsistent(reg)).To(Equal(before), "a clean tick does not increment the counter")
+
+			var line map[string]any
+			Expect(json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &line)).To(Succeed(), "one success line, no inconsistency line")
+			Expect(line["msg"]).To(Equal(audit.AnchorLogMessage))
+			var root, head string
+			var seq int64
+			Expect(db.QueryRow(ctx, `SELECT summary->'after'->>'heads_root', encode(hash, 'hex'), chain_seq FROM install_audit_events WHERE action = 'audit.anchor' ORDER BY chain_seq DESC LIMIT 1`).Scan(&root, &head, &seq)).To(Succeed())
+			Expect(line["heads_root"]).To(Equal(root))
+			Expect(line["install_head"]).To(Equal(head))
+			Expect(line["chain_seq"]).To(BeEquivalentTo(seq))
+			Expect(seq).To(BeNumerically(">", first.ChainSeq))
+		})
+
+		Describe("an org chain that disagrees with the previous anchor", func() {
+			It("is counted and logged once per tick, and the anchor is still written", func(ctx SpecContext) {
+				reg := prometheus.NewRegistry()
+				audit.RegisterAnchorMetric(reg)
+				before := inconsistent(reg)
+				anchor(ctx)
+				tx := ownerTx(ctx)
+				rewriteOrg(ctx, tx, orgs[1], 3) // behind the anchor, which names chain_seq 5
+
+				var logs bytes.Buffer
+				job := &audit.AnchorJob{DB: tx, Interval: time.Nanosecond, Log: slog.New(slog.NewJSONHandler(&logs, nil))}
+				job.Tick(ctx)
+
+				after := inconsistent(reg)
+				Expect(after[audit.InconsistentHashChanged]).To(Equal(before[audit.InconsistentHashChanged] + 1))
+				Expect(after[audit.InconsistentSeqRegressed]).To(Equal(before[audit.InconsistentSeqRegressed]))
+
+				By("the anchor is written anyway, so the chain of anchors goes on")
+				var n int
+				Expect(tx.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'audit.anchor'`).Scan(&n)).To(Succeed())
+				Expect(n).To(Equal(2))
+
+				By("one log line names the org and the reason")
+				var warns []string
+				for _, l := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+					if strings.Contains(l, "inconsistent") {
+						warns = append(warns, l)
+					}
+				}
+				Expect(warns).To(HaveLen(1))
+				Expect(warns[0]).To(And(ContainSubstring(orgs[1].String()), ContainSubstring(audit.InconsistentHashChanged)))
+				Expect(logs.String()).To(ContainSubstring(audit.AnchorLogMessage))
+
+				By("verify reports the break at the anchor that was checked")
+				res, err := audit.VerifyInstall(ctx, store.New(tx))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.AnchorBreaks).To(HaveLen(1))
+				Expect(res.AnchorBreaks[0].Org).To(Equal(orgs[1].String()))
+			})
+
+			It("counts a chain head that went down, with the removed row", func(ctx SpecContext) {
+				reg := prometheus.NewRegistry()
+				audit.RegisterAnchorMetric(reg)
+				before := inconsistent(reg)
+				anchor(ctx)
+				tx := ownerTx(ctx)
+				// audit-lint:allow a tamper test: removes the newest row of an org chain, past the triggers
+				_, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND chain_seq = 5`, orgs[0])
+				Expect(err).NotTo(HaveOccurred())
+				// audit-lint:allow a tamper test: moves the head back to the row before
+				_, err = tx.Exec(ctx, `UPDATE audit_chain_heads SET seq = 4, hash = (SELECT hash FROM audit_events WHERE org_id = $1 AND chain_seq = 4) WHERE org_id = $1`, orgs[0])
+				Expect(err).NotTo(HaveOccurred())
+
+				res, err := audit.Anchor(ctx, tx, audit.AnchorOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Written).To(BeTrue())
+				Expect(res.Inconsistent).To(ConsistOf(
+					audit.AnchorInconsistency{Org: orgs[0].String(), Reason: audit.InconsistentHashChanged, AnchoredSeq: 5},
+					audit.AnchorInconsistency{Org: orgs[0].String(), Reason: audit.InconsistentSeqRegressed, AnchoredSeq: 5},
+				))
+				after := inconsistent(reg)
+				Expect(after[audit.InconsistentHashChanged]).To(Equal(before[audit.InconsistentHashChanged] + 1))
+				Expect(after[audit.InconsistentSeqRegressed]).To(Equal(before[audit.InconsistentSeqRegressed] + 1))
+			})
 		})
 
 		It("skips while another transaction is anchoring, and waits when asked to", func(ctx SpecContext) {
