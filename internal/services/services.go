@@ -68,9 +68,12 @@ import (
 	"github.com/stateracloud/koinon/pricing"
 )
 
-// ScopeSyncer refreshes the code-host scope of one connection (codehost/scopesync.Syncer).
+// ScopeSyncer is the code-host scope module (codehost/scopesync.Syncer), which owns every reading
+// of a connection's repositories. The services only tell it that a connection changed (Request);
+// the one-in-flight rule, the timeout and the credential record are its policy, not theirs.
 type ScopeSyncer interface {
-	Sync(ctx context.Context, row store.Connection, actor audit.Actor) error
+	Request(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{}
+	Drain(ctx context.Context)
 }
 
 // Keys is the secret store as the services use it.
@@ -110,9 +113,9 @@ type Options struct {
 	Keys Keys
 	// Tokens issues admin API tokens; defaults to a service on the pool.
 	Tokens *tokens.Service
-	// ScopeSync reads a code-host connection's repositories into the org's code-host scope when it
-	// is created, given a new secret or tested, in the background (the periodic refresh runs
-	// outside the services). Nil skips that.
+	// ScopeSync is the code-host scope module. The services ask it for a reading of a code-host
+	// connection's repositories when the connection is created, given a new secret or tested, and
+	// drain it at shutdown (the periodic refresh is the module's own). Nil skips that.
 	ScopeSync ScopeSyncer
 	// Hosts are the code-host providers that run connection checks and list repositories. Without
 	// it the shipped providers are used, with GitHub as the client below.
@@ -163,8 +166,6 @@ type Server struct {
 
 	keys      Keys
 	scopeSync ScopeSyncer
-	// scopeJobs runs the background scope readings: one per connection, drained at shutdown.
-	scopeJobs *scopeJobs
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
@@ -217,7 +218,6 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 	}
-	s.scopeJobs = newScopeJobs(opts.Logger, s.runScopeSync)
 	if s.dm != nil {
 		s.dm.bind(s)
 	}

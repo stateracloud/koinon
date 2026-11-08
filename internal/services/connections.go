@@ -665,46 +665,26 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection, actor
 	return row, checksProto(results), nil
 }
 
-// scopeSyncTimeout bounds the reading syncScope starts.
-const scopeSyncTimeout = 2 * time.Minute
-
-// syncScope reads the connection's repositories into the org's code-host scope (ADR 0091), so a
-// write into one of the org's own private repositories is not external-high for long after the
-// connection is created, re-keyed or tested. The reading runs in the background, detached from the
-// request and bounded by scopeSyncTimeout: listing a large installation takes many pages, and the
-// RPC must not wait for it (nor fail behind a proxy's timeout while it still runs). Nothing is
-// lost by not waiting, because until the reading lands every code-host write on the connection is
-// external-high. It is best effort: a failure leaves the stored scope to age out, which is the safe
-// side, and the periodic refresh retries. actor is audited on the replacement.
+// syncScope tells the code-host scope module (scopesync, ADR 0091) that the connection changed (it
+// was created, re-keyed or tested), so a write into one of the org's own private repositories is not
+// external-high for long. The module owns the reading and its policy, and it is asynchronous: the
+// RPC must not wait for a large installation's listing. Nothing is lost by not waiting, because
+// until the reading lands every code-host write on the connection is external-high. actor is
+// audited on the replacement.
 func (s *Server) syncScope(ctx context.Context, row store.Connection, actor audit.Actor) {
 	if s.scopeSync == nil {
 		return
 	}
-	s.scopeJobs.start(ctx, row, actor)
+	s.scopeSync.Request(ctx, row, actor)
 }
 
-// QueueScopeReading asks for a reading of the connection's repositories, as the periodic refresh
-// does (scopesync.Syncer.SetQueue): it shares the one-reading-per-connection rule and Drain with
-// the readings the RPCs start. The channel closes when a reading that covers the request has
-// finished, or at once when the server is draining.
-func (s *Server) QueueScopeReading(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
-	return s.scopeJobs.start(ctx, row, actor)
-}
-
-// runScopeSync is one bounded reading, run by scopeJobs.
-func (s *Server) runScopeSync(ctx context.Context, row store.Connection, actor audit.Actor) {
-	ctx, cancel := context.WithTimeout(ctx, scopeSyncTimeout)
-	defer cancel()
-	if err := s.scopeSync.Sync(ctx, row, actor); err != nil {
-		s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
-	}
-}
-
-// Drain stops the background code-host scope readings and waits for the running ones, until ctx
-// ends; then it cancels what still runs and waits for that to return. koinon-api calls it in its
-// shutdown, inside the shutdown deadline. After Drain no reading starts.
+// Drain waits for the code-host scope module's running readings until ctx ends, then cancels what
+// still runs (scopesync.Syncer.Drain). koinon-api calls it in its shutdown, inside the shutdown
+// deadline. After Drain no reading starts.
 func (s *Server) Drain(ctx context.Context) {
-	s.scopeJobs.drain(ctx)
+	if s.scopeSync != nil {
+		s.scopeSync.Drain(ctx)
+	}
 }
 
 // Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of
