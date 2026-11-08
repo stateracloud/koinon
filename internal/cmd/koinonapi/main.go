@@ -681,7 +681,6 @@ func serve(ctx context.Context, cfg config) error {
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The refresh reads through the service layer's queue (one reading per connection, drained at shutdown).
-	scopeSyncer.SetQueue(svc.QueueScopeReading)
 	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
