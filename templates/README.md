@@ -45,7 +45,7 @@ owner activates a version that holds them.
 
 A template may have no grants (`grants: []`): `finops-analyst` works only through the MCP servers an admin
 allows on the agent's page, which are not template grants.
-A scheduled task has no creator, so `ask_user` has no one to ask by default. The templates call
+A scheduled task has no creator, so `ask_user` cannot ask one. The templates call
 `ask_user` without `to`, and Koinon asks the trigger's notify target, by default the org's admins.
 The admin picks the notify person by name on Edit triggers, so the bootstrap admin, who has no
 email, needs nothing extra. The trigger instructions carry no `Ask:` line. `lcm-upgrader`'s trigger
