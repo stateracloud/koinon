@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -467,16 +468,16 @@ func (e ThinkingStateVersionSetting) Valid() bool {
 
 // Defines values for ListAuditEventsParamsScope.
 const (
-	Install ListAuditEventsParamsScope = "install"
-	Org     ListAuditEventsParamsScope = "org"
+	ListAuditEventsParamsScopeInstall ListAuditEventsParamsScope = "install"
+	ListAuditEventsParamsScopeOrg     ListAuditEventsParamsScope = "org"
 )
 
 // Valid indicates whether the value is a known member of the ListAuditEventsParamsScope enum.
 func (e ListAuditEventsParamsScope) Valid() bool {
 	switch e {
-	case Install:
+	case ListAuditEventsParamsScopeInstall:
 		return true
-	case Org:
+	case ListAuditEventsParamsScopeOrg:
 		return true
 	default:
 		return false
@@ -507,6 +508,24 @@ func (e ListAuditEventsParamsActorKind) Valid() bool {
 	case ListAuditEventsParamsActorKindToken:
 		return true
 	case ListAuditEventsParamsActorKindUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportAuditParamsScope.
+const (
+	ExportAuditParamsScopeInstall ExportAuditParamsScope = "install"
+	ExportAuditParamsScopeOrg     ExportAuditParamsScope = "org"
+)
+
+// Valid indicates whether the value is a known member of the ExportAuditParamsScope enum.
+func (e ExportAuditParamsScope) Valid() bool {
+	switch e {
+	case ExportAuditParamsScopeInstall:
+		return true
+	case ExportAuditParamsScopeOrg:
 		return true
 	default:
 		return false
@@ -1534,6 +1553,21 @@ type ListAuditEventsParamsScope string
 // ListAuditEventsParamsActorKind defines parameters for ListAuditEvents.
 type ListAuditEventsParamsActorKind string
 
+// ExportAuditParams defines parameters for ExportAudit.
+type ExportAuditParams struct {
+	// Scope `org` (the default) or `install`.
+	Scope *ExportAuditParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+
+	// Org With `scope=org`, the token's own org; any other org is 403.
+	Org *openapi_types.UUID `form:"org,omitempty" json:"org,omitempty"`
+
+	// FromSeq Start at this `chain_seq` (a partial export); 1 by default.
+	FromSeq *int64 `form:"fromSeq,omitempty" json:"fromSeq,omitempty"`
+}
+
+// ExportAuditParamsScope defines parameters for ExportAudit.
+type ExportAuditParamsScope string
+
 // GetDefaultPriceChangesParams defines parameters for GetDefaultPriceChanges.
 type GetDefaultPriceChangesParams struct {
 	From *string `form:"from,omitempty" json:"from,omitempty"`
@@ -1652,6 +1686,9 @@ type ServerInterface interface {
 	// ListAuditEvents Read the org's audit log, newest first.
 	// (GET /audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+	// ExportAudit Export an audit chain as JSON lines, verifiable off the cluster.
+	// (GET /audit/export)
+	ExportAudit(w http.ResponseWriter, r *http.Request, params ExportAuditParams)
 	// GetBudget The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(w http.ResponseWriter, r *http.Request)
@@ -2130,6 +2167,65 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportAudit operation middleware
+func (siw *ServerInterfaceWrapper) ExportAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportAuditParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", r.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "scope"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "org" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "org", r.URL.Query(), &params.Org, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "org"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "fromSeq" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "fromSeq", r.URL.Query(), &params.FromSeq, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "fromSeq"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fromSeq", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportAudit(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3262,6 +3358,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/agents/{agentId}/thinking", wrapper.SetAgentThinking)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/agents/{agentId}/triggers/{triggerId}/run", wrapper.RunAgentTrigger)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit/export", wrapper.ExportAudit)
 
 	return m
 }
@@ -3613,6 +3710,74 @@ type ListAuditEventsdefaultJSONResponse struct {
 }
 
 func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportAuditRequestObject struct {
+	Params ExportAuditParams
+}
+
+type ExportAuditResponseObject interface {
+	VisitExportAuditResponse(w http.ResponseWriter) error
+}
+
+type ExportAudit200ApplicationxNdjsonResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response ExportAudit200ApplicationxNdjsonResponse) VisitExportAuditResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type ExportAuditdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ExportAuditdefaultJSONResponse) VisitExportAuditResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5342,6 +5507,9 @@ type StrictServerInterface interface {
 	// ListAuditEvents Read the org's audit log, newest first.
 	// (GET /audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// ExportAudit Export an audit chain as JSON lines, verifiable off the cluster.
+	// (GET /audit/export)
+	ExportAudit(ctx context.Context, request ExportAuditRequestObject) (ExportAuditResponseObject, error)
 	// GetBudget The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(ctx context.Context, request GetBudgetRequestObject) (GetBudgetResponseObject, error)
@@ -5774,6 +5942,32 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportAudit operation middleware
+func (sh *strictHandler) ExportAudit(w http.ResponseWriter, r *http.Request, params ExportAuditParams) {
+	var request ExportAuditRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportAudit(ctx, request.(ExportAuditRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportAudit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportAuditResponseObject); ok {
+		if err := validResponse.VisitExportAuditResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

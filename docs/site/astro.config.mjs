@@ -12,7 +12,7 @@ export default defineConfig({
         { label: 'Start here', items: ['prerequisites', 'quickstart'] },
         {
           label: 'Guides',
-          items: ['guides/models', 'guides/prices', 'guides/budgets', 'guides/mcp-servers', 'guides/github-app', 'guides/ghes', 'guides/gitea', 'guides/oidc', 'guides/gateway-modes', 'guides/agent-health', 'guides/audit', 'guides/retention', 'guides/metrics', 'guides/private-registries', 'guides/upgrading', 'guides/backup-restore'],
+          items: ['guides/models', 'guides/prices', 'guides/budgets', 'guides/mcp-servers', 'guides/github-app', 'guides/ghes', 'guides/gitea', 'guides/oidc', 'guides/gateway-modes', 'guides/agent-health', 'guides/audit', 'guides/audit-export', 'guides/retention', 'guides/metrics', 'guides/private-registries', 'guides/upgrading', 'guides/backup-restore'],
         },
         {
           label: 'Working with agents',

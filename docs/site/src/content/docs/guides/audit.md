@@ -74,3 +74,5 @@ The command prints one line per chain and exits non-zero when a chain is broken.
 that someone with owner-level database access changed or removed events. The chain does not stop a
 database superuser who rewrites a whole chain from the start; keep database access tight and copy the
 log's last hash somewhere else if you need to prove more.
+
+To keep a copy that anyone can check without the database, see [Export and verify the audit log](/guides/audit-export/).

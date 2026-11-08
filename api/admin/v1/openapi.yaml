@@ -1073,6 +1073,44 @@ paths:
                 $ref: "#/components/schemas/AuditEventList"
         default:
           $ref: "#/components/responses/Error"
+  /audit/export:
+    get:
+      tags: [audit]
+      operationId: exportAudit
+      summary: Export an audit chain as JSON lines, verifiable off the cluster.
+      description: |
+        Streams the chain as `application/x-ndjson`, format `koinon.audit.export.v1` (ADR 0100): a
+        header line, then one line per event in `chain_seq` order with every hashed field. Check a
+        copy with `koinon-api audit verify --file`; the format and the hash encoding are in the
+        audit guide on the docs site.
+
+        The scope rules are those of the read (`GET /audit`). `scope=org` (the default) exports the
+        token's org; `org` may name it but never another org (403). `scope=install` needs a token whose
+        root user is a platform admin, checked on every request; any other token gets 403.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          description: "`org` (the default) or `install`."
+          schema: {type: string, enum: [org, install]}
+        - name: org
+          in: query
+          required: false
+          description: With `scope=org`, the token's own org; any other org is 403.
+          schema: {type: string, format: uuid}
+        - name: fromSeq
+          in: query
+          required: false
+          description: Start at this `chain_seq` (a partial export); 1 by default.
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: The chain as JSON lines.
+          content:
+            application/x-ndjson:
+              schema: {type: string, format: binary}
+        default:
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:

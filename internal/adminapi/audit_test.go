@@ -3,6 +3,7 @@
 package adminapi_test
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
 	"time"
@@ -171,5 +172,101 @@ var _ = Describe("GET /admin/v1/audit?scope=install", func() {
 		By("an unknown scope is a bad request")
 		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit?scope=all", nil)
 		Expect(st).To(Equal(http.StatusBadRequest))
+	})
+})
+
+var _ = Describe("GET /admin/v1/audit/export", func() {
+	It("exports the token's org as a file that verifies off the cluster, and nothing of another org", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
+		for _, action := range []string{"agent.create", "agent.archive", "approval.approve"} {
+			_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+				b.Org(audit.Event{Org: e.org, Actor: audit.User(e.user), Action: action, TargetKind: "test"})
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{Org: other, Actor: audit.User(otherUser), Action: "agent.create", TargetKind: "other-org-secret"})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit/export", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		Expect(string(raw)).NotTo(ContainSubstring("other-org-secret"))
+		res, err := audit.VerifyExport(bytes.NewReader(raw), audit.ExportVerifyOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Break).To(BeNil())
+		Expect(res.Header.Chain).To(Equal("org"))
+		Expect(res.Header.OrgID).To(Equal(e.org.String()))
+		Expect(res.Rows).To(BeNumerically(">=", 3))
+
+		By("scope=org and the token's own org name the same thing")
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=org&org="+e.org.String(), nil)
+		Expect(st).To(Equal(http.StatusOK))
+
+		By("a partial export starts at fromSeq")
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/audit/export?fromSeq=2", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		res, err = audit.VerifyExport(bytes.NewReader(raw), audit.ExportVerifyOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Break).To(BeNil())
+		Expect(res.Header.FromSeq).To(BeEquivalentTo(2))
+	})
+
+	It("refuses another org, the install scope for an org admin, a bad scope and no token", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		other, _, _ := pgtest.NewOrg(ctx, pool)
+
+		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=org&org="+other.String(), nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/audit/export?org="+other.String(), nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+		adminTok, err := e.tokens.Create(ctx, e.org, audit.User(e.user), tokens.Creator{User: e.user, Role: store.OrgRoleOwner}, "admin", store.OrgRoleAdmin, 0)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, adminTok.Secret, http.MethodGet, "/audit/export?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden), string(raw))
+
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=all", nil)
+		Expect(st).To(Equal(http.StatusBadRequest))
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?fromSeq=0", nil)
+		Expect(st).To(Equal(http.StatusBadRequest))
+		st, _ = e.call(ctx, "", http.MethodGet, "/audit/export", nil)
+		Expect(st).To(Equal(http.StatusUnauthorized))
+	})
+
+	It("exports the install chain to a token rooted at a platform admin, checked on every request", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{
+				Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "adminapi-install-export",
+			})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, e.user)
+		Expect(err).NotTo(HaveOccurred())
+
+		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=install", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		res, err := audit.VerifyExport(bytes.NewReader(raw), audit.ExportVerifyOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Break).To(BeNil())
+		Expect(res.Header.Chain).To(Equal("install"))
+		Expect(string(raw)).To(ContainSubstring("adminapi-install-export"))
+
+		By("an org parameter has no meaning for the install chain")
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=install&org="+e.org.String(), nil)
+		Expect(st).To(Equal(http.StatusBadRequest))
+
+		By("the access ends with the admin")
+		_, err = pool.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, e.user)
+		Expect(err).NotTo(HaveOccurred())
+		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=install", nil)
+		Expect(st).To(Equal(http.StatusForbidden))
 	})
 })

@@ -113,13 +113,23 @@ type link struct {
 	id         string
 	prev, hash []byte
 	want       []byte
+	// bad says the row cannot be checked at all (an export line that is not an event); the walk then
+	// breaks at seq with this reason.
+	bad string
 }
 
 // walk reads a chain page by page in order and returns the rows seen, the break (nil when the chain
 // holds), and the last chain_seq and hash. It checks that chain_seq counts from 1 without gaps, that
 // each prev_hash is the previous row's hash and that each hash matches the row.
 func walk(fetch func(afterSeq int64) ([]link, error)) (rows, last int64, prev []byte, brk *Break, err error) {
-	prev = ZeroHash
+	return walkFrom(0, ZeroHash, fetch)
+}
+
+// walkFrom is walk for a chain read from after chain_seq start, whose hash is startPrev. A nil
+// startPrev (a partial export with no earlier export to check against) takes the first row's prev_hash
+// as given.
+func walkFrom(start int64, startPrev []byte, fetch func(afterSeq int64) ([]link, error)) (rows, last int64, prev []byte, brk *Break, err error) {
+	last, prev = start, startPrev
 	for {
 		page, err := fetch(last)
 		if err != nil {
@@ -127,9 +137,11 @@ func walk(fetch func(afterSeq int64) ([]link, error)) (rows, last int64, prev []
 		}
 		for _, r := range page {
 			switch {
+			case r.bad != "":
+				brk = &Break{Seq: r.seq, Reason: r.bad}
 			case r.seq != last+1:
 				brk = &Break{Seq: r.seq, Reason: fmt.Sprintf("chain_seq %d follows %d: a row is missing or was inserted", r.seq, last)}
-			case !bytes.Equal(r.prev, prev):
+			case prev != nil && !bytes.Equal(r.prev, prev):
 				brk = &Break{Seq: r.seq, Reason: "prev_hash is not the hash of the previous row"}
 			case !bytes.Equal(r.hash, r.want):
 				brk = &Break{Seq: r.seq, Reason: fmt.Sprintf("hash does not match the content of row %s", r.id)}

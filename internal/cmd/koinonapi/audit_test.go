@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +65,88 @@ var _ = Describe("koinon-api audit verify", func() {
 		Expect(verifyAudit(ctx, pool, "", true, &out)).To(MatchError(audit.ErrBroken))
 		Expect(out.String()).To(ContainSubstring("chain_seq 2"))
 	}, SpecTimeout(3*time.Minute))
+})
+
+var _ = Describe("koinon-api audit export and verify --file", func() {
+	It("exports the install chain, and verify --file checks it with no database; --after continues a partial export", func(ctx SpecContext) {
+		pool := pgtest.Start(ctx)
+		write := func(n int) {
+			for range n {
+				_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+					b.Install(audit.InstallEvent{Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "cli"})
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}
+		export := func(name string, from int64) string {
+			path := filepath.Join(GinkgoT().TempDir(), name)
+			f, err := os.Create(path)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = f.Close() }()
+			Expect(audit.Export(ctx, store.New(pool), f, audit.ExportScope{Install: true}, from)).To(Succeed())
+			return path
+		}
+		write(3)
+		first := export("first.jsonl", 1)
+		write(2)
+		rest := export("rest.jsonl", 4)
+
+		run := func(args ...string) (string, error) {
+			var out bytes.Buffer
+			cmd := newAuditCommand()
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetArgs(args)
+			err := cmd.ExecuteContext(ctx)
+			return out.String(), err
+		}
+
+		By("no database URL is needed with --file")
+		out, err := run("verify", "--file", first)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).To(HavePrefix("ok      install chain (file): 3 events"))
+
+		By("a partial export: unchecked alone, checked with --after")
+		out, err = run("verify", "--file", rest)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).To(ContainSubstring("first prev_hash is not checked"))
+		out, err = run("verify", "--file", rest, "--after", first)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).NotTo(ContainSubstring("not checked"))
+
+		By("a tampered file exits non-zero with the first broken chain_seq")
+		raw, err := os.ReadFile(first)
+		Expect(err).NotTo(HaveOccurred())
+		bad := filepath.Join(GinkgoT().TempDir(), "bad.jsonl")
+		Expect(os.WriteFile(bad, bytes.Replace(raw, []byte("platform_price.set"), []byte("platform_price.xxx"), 3), 0o600)).To(Succeed())
+		out, err = run("verify", "--file", bad)
+		Expect(err).To(MatchError(audit.ErrBroken))
+		Expect(out).To(ContainSubstring("BROKEN  install chain (file): first broken link at chain_seq 1"))
+
+		By("flag combinations that make no sense are refused")
+		_, err = run("verify")
+		Expect(err).To(MatchError(ContainSubstring("database-url")))
+		_, err = run("verify", "--file", first, "--org", "00000000-0000-0000-0000-000000000001")
+		Expect(err).To(MatchError(ContainSubstring("--file")))
+		_, err = run("verify", "--after", first, "--database-url", "x")
+		Expect(err).To(MatchError(ContainSubstring("--after needs --file")))
+	}, SpecTimeout(3*time.Minute))
+
+	It("reads --scope and --org", func() {
+		sc, err := exportScope("install", "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sc.Install).To(BeTrue())
+		_, err = exportScope("install", "00000000-0000-0000-0000-000000000001")
+		Expect(err).To(HaveOccurred())
+		sc, err = exportScope("org", "00000000-0000-0000-0000-000000000001")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sc.Org.Valid).To(BeTrue())
+		for _, bad := range [][2]string{{"org", ""}, {"org", "nope"}, {"", ""}, {"all", ""}} {
+			_, err = exportScope(bad[0], bad[1])
+			Expect(err).To(HaveOccurred(), bad[0]+bad[1])
+		}
+	})
 })
 
 // lockedBuffer is a bytes.Buffer that the retry goroutine and the spec can use together.

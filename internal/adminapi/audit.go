@@ -38,7 +38,7 @@ func (s *Server) ListAuditEvents(ctx context.Context, req ListAuditEventsRequest
 		st, e := s.problem(fmt.Errorf("%w: scope must be org or install", audit.ErrBadFilter))
 		return ListAuditEventsdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	if req.Params.Scope != nil && *req.Params.Scope == Install {
+	if req.Params.Scope != nil && *req.Params.Scope == ListAuditEventsParamsScopeInstall {
 		return s.listInstallAuditEvents(ctx, p, req.Params)
 	}
 	if !p.Org.Valid {
@@ -91,19 +91,37 @@ func auditFilter(prm ListAuditEventsParams) audit.Filter {
 	return f
 }
 
+// installAuditDenied is the install chain's rule for reading and exporting: the token's root user must
+// be a platform admin, checked on every request, so demoting the admin takes the access away at once. It
+// returns the 403 body when the token may not, and an error when the check itself failed.
+func (s *Server) installAuditDenied(ctx context.Context, p tokens.Principal) (*Error, error) {
+	admin, err := store.New(s.pool).IsPlatformAdmin(ctx, p.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	if admin {
+		return nil, nil
+	}
+	return forbidden("the install audit log needs a token whose root user is a platform admin"), nil
+}
+
+// forbidden is the 403 body.
+func forbidden(msg string) *Error {
+	return &Error{Error: struct {
+		Code    ErrorCode `json:"code"`
+		Message string    `json:"message"`
+	}{PermissionDenied, msg}}
+}
+
 // listInstallAuditEvents reads the install chain (ADR 0100). The check is on the token's root
 // user at every request, not cached: demoting the admin takes the access away at once.
 func (s *Server) listInstallAuditEvents(ctx context.Context, p tokens.Principal, prm ListAuditEventsParams) (ListAuditEventsResponseObject, error) {
-	admin, err := store.New(s.pool).IsPlatformAdmin(ctx, p.CreatedBy)
-	if err != nil {
-		st, e := s.problem(err)
-		return ListAuditEventsdefaultJSONResponse{Body: e, StatusCode: st}, nil
-	}
-	if !admin {
-		return ListAuditEventsdefaultJSONResponse{Body: Error{Error: struct {
-			Code    ErrorCode `json:"code"`
-			Message string    `json:"message"`
-		}{PermissionDenied, "the install audit log needs a token whose root user is a platform admin"}}, StatusCode: http.StatusForbidden}, nil
+	if denied, err := s.installAuditDenied(ctx, p); denied != nil || err != nil {
+		if err != nil {
+			st, e := s.problem(err)
+			return ListAuditEventsdefaultJSONResponse{Body: e, StatusCode: st}, nil
+		}
+		return ListAuditEventsdefaultJSONResponse{Body: *denied, StatusCode: http.StatusForbidden}, nil
 	}
 	rows, next, err := audit.ListInstall(ctx, store.New(s.pool), auditFilter(prm))
 	if err != nil {
