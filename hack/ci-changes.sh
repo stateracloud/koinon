@@ -63,7 +63,7 @@ pattern() {
 	# Makefile and the generator configs and fails when one is missing here): the protos and
 	# the vendored OpenShell protos, the OpenAPI spec and its config, the sqlc inputs, the
 	# buf and sqlc configs, protoc-gen-es (web/package.json, its lockfile) and the outputs.
-	generate) echo '^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
+	generate) echo '^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
 	# chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh.
 	chart) echo '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)' ;;
 	# The binaries the chart starts, their flags and everything they import (the Go packages

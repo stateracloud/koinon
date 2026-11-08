@@ -62,106 +62,6 @@ func (q *Queries) GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent
 	return i, err
 }
 
-const insertAuditEvent = `-- name: InsertAuditEvent :one
-
-INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash
-`
-
-type InsertAuditEventParams struct {
-	OrgID      pgtype.UUID
-	ActorKind  string
-	ActorID    string
-	Action     string
-	TargetKind string
-	TargetID   string
-	Summary    []byte
-	RequestID  string
-}
-
-// SPDX-License-Identifier: Apache-2.0
-//
-// The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
-// delete query, and the table refuses them.
-//
-// Every query on an org-owned table takes @org_id and filters on it
-// (TestQueriesAreOrgScoped).
-func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error) {
-	row := q.db.QueryRow(ctx, insertAuditEvent,
-		arg.OrgID,
-		arg.ActorKind,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetKind,
-		arg.TargetID,
-		arg.Summary,
-		arg.RequestID,
-	)
-	var i AuditEvent
-	err := row.Scan(
-		&i.OrgID,
-		&i.ID,
-		&i.ActorKind,
-		&i.ActorID,
-		&i.Action,
-		&i.TargetKind,
-		&i.TargetID,
-		&i.Summary,
-		&i.RequestID,
-		&i.CreatedAt,
-		&i.ChainSeq,
-		&i.PrevHash,
-		&i.Hash,
-	)
-	return i, err
-}
-
-const insertInstallAuditEvent = `-- name: InsertInstallAuditEvent :one
-INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, chain_seq, prev_hash, hash, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at
-`
-
-type InsertInstallAuditEventParams struct {
-	ActorKind  string
-	ActorID    string
-	Action     string
-	TargetKind string
-	TargetID   string
-	Summary    []byte
-	RequestID  string
-}
-
-// The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
-func (q *Queries) InsertInstallAuditEvent(ctx context.Context, arg InsertInstallAuditEventParams) (InstallAuditEvent, error) {
-	row := q.db.QueryRow(ctx, insertInstallAuditEvent,
-		arg.ActorKind,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetKind,
-		arg.TargetID,
-		arg.Summary,
-		arg.RequestID,
-	)
-	var i InstallAuditEvent
-	err := row.Scan(
-		&i.ID,
-		&i.ChainSeq,
-		&i.PrevHash,
-		&i.Hash,
-		&i.ActorKind,
-		&i.ActorID,
-		&i.Action,
-		&i.TargetKind,
-		&i.TargetID,
-		&i.Summary,
-		&i.RequestID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const listAuditChainOrgs = `-- name: ListAuditChainOrgs :many
 SELECT org_id FROM audit_events
 UNION
@@ -260,6 +160,7 @@ func (q *Queries) ListAuditChainRows(ctx context.Context, arg ListAuditChainRows
 }
 
 const listAuditEvents = `-- name: ListAuditEvents :many
+
 SELECT org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash FROM audit_events
 WHERE org_id = $1
   AND ($2::uuid IS NULL OR id < $2::uuid)
@@ -273,6 +174,14 @@ type ListAuditEventsParams struct {
 	PageSize int32
 }
 
+// SPDX-License-Identifier: Apache-2.0
+//
+// The audit log (plan item PV1, ADR 0023): the read queries. Append-only: there is no update or
+// delete query, and the table refuses them. The inserts are not here: they live in
+// internal/audit/internal/auditstore, so only internal/audit can write (ADR 0100 decision 1.7).
+//
+// Every query on an org-owned table takes @org_id and filters on it
+// (TestQueriesAreOrgScoped).
 func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error) {
 	rows, err := q.db.Query(ctx, listAuditEvents, arg.OrgID, arg.BeforeID, arg.PageSize)
 	if err != nil {

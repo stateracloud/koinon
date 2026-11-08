@@ -1,15 +1,11 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
--- delete query, and the table refuses them.
+-- The audit log (plan item PV1, ADR 0023): the read queries. Append-only: there is no update or
+-- delete query, and the table refuses them. The inserts are not here: they live in
+-- internal/audit/internal/auditstore, so only internal/audit can write (ADR 0100 decision 1.7).
 --
 -- Every query on an org-owned table takes @org_id and filters on it
 -- (TestQueriesAreOrgScoped).
-
--- name: InsertAuditEvent :one
-INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
-VALUES (@org_id, @actor_kind, @actor_id, @action, @target_kind, @target_id, @summary, @request_id)
-RETURNING *;
 
 -- name: ListAuditEvents :many
 SELECT * FROM audit_events
@@ -65,12 +61,6 @@ LIMIT @page_size;
 
 -- name: GetAuditChainHead :one
 SELECT * FROM audit_chain_heads WHERE org_id = @org_id;
-
--- name: InsertInstallAuditEvent :one
--- The install chain (ADR 0100): no org. chain_seq, prev_hash and hash are set by the trigger.
-INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
-VALUES (@actor_kind, @actor_id, @action, @target_kind, @target_id, @summary, @request_id)
-RETURNING *;
 
 -- name: ListInstallAuditEventsFiltered :many
 -- The install-scope read path (AuditService.List with AUDIT_SCOPE_INSTALL): the filters of

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/audit/internal/auditstore"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -84,7 +85,7 @@ func InPgTx(ctx context.Context, db Beginner, fn func(tx pgx.Tx, b Batch) error)
 			return err
 		}
 		var err error
-		w, err = b.write(ctx, store.New(tx))
+		w, err = b.write(ctx, auditstore.New(tx))
 		return err
 	})
 	if err != nil {
@@ -105,7 +106,7 @@ func InPgTx(ctx context.Context, db Beginner, fn func(tx pgx.Tx, b Batch) error)
 func WriteInTx(ctx context.Context, tx pgx.Tx, fn func(b Batch)) (Written, error) {
 	b := &batch{}
 	fn(b)
-	return b.write(ctx, store.New(tx))
+	return b.write(ctx, auditstore.New(tx))
 }
 
 // ErrAmbiguousInstallLink is in the error of a batch that holds more than one install event and an
@@ -153,8 +154,9 @@ func needActor(a Actor, action string) error {
 	return nil
 }
 
-// write writes the batch with q: the install events first, then the org events by org ID.
-func (b *batch) write(ctx context.Context, q *store.Queries) (Written, error) {
+// write writes the batch with q, the audit inserts bound to the caller's transaction: the install
+// events first, then the org events by org ID.
+func (b *batch) write(ctx context.Context, q *auditstore.Queries) (Written, error) {
 	return b.writeWith(
 		func(e InstallEvent) (store.InstallAuditEvent, error) { return recordInstall(ctx, q, e) },
 		func(e Event) (store.AuditEvent, error) { return record(ctx, q, e) },
