@@ -42,13 +42,23 @@ var _ = Describe("ParseNetPolOutput", func() {
 })
 
 var _ = Describe("NetPolClient", func() {
-	// freePort returns a local port nothing listens on.
-	freePort := func() int {
+	// closing opens a port that accepts each connection and closes it at once, and holds it until
+	// the spec ends, so the port is never released for another parallel process to take. A client
+	// gets no answer from it, which is what a port that does not answer looks like.
+	closing := func() int {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		Expect(err).NotTo(HaveOccurred())
-		port := l.Addr().(*net.TCPAddr).Port
-		Expect(l.Close()).To(Succeed())
-		return port
+		DeferCleanup(l.Close)
+		go func() {
+			for {
+				c, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = c.Close()
+			}
+		}()
+		return l.Addr().(*net.TCPAddr).Port
 	}
 	// serve opens n probe ports and answers on them until the spec ends. The ports are open when
 	// serve returns, so a client never races the server's start, and a port is never picked and
@@ -87,13 +97,13 @@ var _ = Describe("NetPolClient", func() {
 	})
 
 	It("reports the denied port blocked when a connection to it fails", func(ctx SpecContext) {
-		control, denied := serve(1)[0], freePort()
+		control, denied := serve(1)[0], closing()
 		Expect(client(control, denied).Run(ctx)).To(Equal(preflight.NetPolResult{ControlReached: true}))
 	})
 
 	It("waits for the control port, then gives up", func(ctx SpecContext) {
 		start := time.Now()
-		Expect(client(freePort(), freePort()).Run(ctx)).To(Equal(preflight.NetPolResult{}))
+		Expect(client(closing(), closing()).Run(ctx)).To(Equal(preflight.NetPolResult{}))
 		Expect(time.Since(start)).To(BeNumerically(">=", 300*time.Millisecond))
 	})
 

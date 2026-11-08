@@ -98,10 +98,10 @@ func ParseNetPolOutput(log string) (NetPolResult, error) {
 	return NetPolResult{}, fmt.Errorf("no %q line in the probe client's log: %q", NetPolMarker, truncate(log, 200))
 }
 
-// ListenNetPolProbe opens every probe port before anything answers. Opening them all first
+// listenNetPolProbe opens every probe port before anything answers. Opening them all first
 // matters: a client that reaches the first port must find the others listening too, or it reads
 // a port that is merely not yet open as blocked. addr is the host to listen on, "" for all.
-func ListenNetPolProbe(ctx context.Context, addr string, ports ...int) ([]net.Listener, error) {
+func listenNetPolProbe(ctx context.Context, addr string, ports ...int) ([]net.Listener, error) {
 	if len(ports) == 0 {
 		ports = []int{NetPolDeniedPort, NetPolControlPort}
 	}
@@ -123,7 +123,7 @@ func ListenNetPolProbe(ctx context.Context, addr string, ports ...int) ([]net.Li
 // ServeNetPolProbe is what the server pod runs: it answers NetPolMarker on both probe ports
 // until ctx ends. addr is the host to listen on, "" for all.
 func ServeNetPolProbe(ctx context.Context, addr string, ports ...int) error {
-	listeners, err := ListenNetPolProbe(ctx, addr, ports...)
+	listeners, err := listenNetPolProbe(ctx, addr, ports...)
 	if err != nil {
 		return err
 	}
