@@ -465,6 +465,19 @@ describe('Providers page', () => {
       expect(key).toHaveValue('')
     })
 
+    it('refuses a cost scope typed without a cost key instead of dropping it', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      await userEvent.selectOptions(within(form).getByLabelText('Provider type'), 'anthropic')
+      await userEvent.type(within(form).getByLabelText('Name'), 'claude')
+      await userEvent.type(await within(form).findByLabelText('Cost scope'), 'wrkspc_01AbCd')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      expect(await within(form).findByText('A cost scope needs a cost API key. Type the key, or clear the scope.')).toBeInTheDocument()
+      expect(within(form).getByLabelText('Cost scope')).toBeInvalid()
+      expect(calls.providerCreates).toHaveLength(0)
+    })
+
     it('does not send a cost key for a type whose cost API Koinon does not read', async () => {
       const calls = setup()
       await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))

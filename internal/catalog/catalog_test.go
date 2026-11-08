@@ -442,11 +442,30 @@ var _ = Describe("Service", func() {
 			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE id = $1`, p.ID)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("a URL change that leaves the cost key alone succeeds")
-			url := "https://proxy.example.com"
-			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &url})
+			By("an edit that leaves the type and URL alone keeps the lost key's scope")
+			note := "https://api.anthropic.com/"
+			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &note})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(got.URL).To(Equal(url))
+			Expect([]any{got.CostScope, got.CostKeyLostAt != nil}).To(Equal([]any{scope, true}))
+
+			By("a URL change away from the provider's own API clears the lost key's scope and marker")
+			url := "https://proxy.example.com"
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &url})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.URL, got.CostScope, got.CostKeyLostAt}).To(Equal([]any{url, "", (*time.Time)(nil)}))
+
+			By("a type change does the same")
+			q, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic2", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+				CostAPIKey: admin, CostScope: scope,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE id = $1`, q.ID)
+			Expect(err).NotTo(HaveOccurred())
+			typ := "openrouter"
+			got, err = svc.UpdateProvider(ctx, org, actor, q.ID, catalog.ProviderPatch{Type: &typ, URL: &url})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.Type, got.CostScope, got.CostKeyLostAt}).To(Equal([]any{typ, "", (*time.Time)(nil)}))
 
 			By("removing the dead key clears the scope with it")
 			empty := ""
