@@ -2047,6 +2047,13 @@ type OrgBudget struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type OrgCodeHostReading struct {
+	OrgID             pgtype.UUID
+	ConnectionID      pgtype.UUID
+	SecretFingerprint string
+	CheckedAt         pgtype.Timestamptz
+}
+
 type OrgCodeHostRepo struct {
 	OrgID        pgtype.UUID
 	ConnectionID pgtype.UUID
