@@ -208,7 +208,7 @@ var _ = Describe("bootstrap", func() {
 				`GRANT USAGE ON SCHEMA public TO ` + role,
 				`GRANT ALL ON ALL TABLES IN SCHEMA public TO ` + role,
 				`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ` + role,
-				`REVOKE ALL ON install_audit_events, install_audit_chain_head FROM ` + role,
+				`REVOKE ALL ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads FROM ` + role,
 			} {
 				_, err := e.pool.Exec(ctx, stmt)
 				Expect(err).NotTo(HaveOccurred(), stmt)

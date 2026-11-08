@@ -411,7 +411,7 @@ func describeMode(name, valuesFile string) {
 
 			By("a cluster from before ADR 0100: no writer role, koinon_api in koinon_app only")
 			execAll(
-				`REVOKE ALL ON install_audit_events, install_audit_chain_head FROM koinon_install_audit_writer`,
+				`REVOKE ALL ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads FROM koinon_install_audit_writer`,
 				`REVOKE koinon_install_audit_writer FROM koinon_api`,
 				`DROP ROLE koinon_install_audit_writer`,
 			)
