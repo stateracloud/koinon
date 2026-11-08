@@ -2,7 +2,7 @@
 
 - Status: Accepted (maintainer decision 2026-11-04)
 - Date: 2026-11-08
-- Relates to: [0001](0001-full-multi-tenancy.md), [0012](0012-cross-org-sharing.md), [0045](0045-openshell-hardening-defaults.md), [0073](0073-agent-passport.md), [0075](0075-isolation-tiers.md)
+- Relates to: [0011](0011-agent-to-agent.md), [0042](0042-ask-tier-park-and-execute.md), [0045](0045-openshell-hardening-defaults.md), [0073](0073-agent-passport.md), [0075](0075-isolation-tiers.md), [0081](0081-run-limits.md)
 - Issue: [#130](https://github.com/stateracloud/koinon/issues/130)
 
 ## Context
@@ -59,6 +59,19 @@ host, spend ledger and run caps (ADR 0081), and approvals that Koinon executes o
    - OpenShell supports Substrate (a driver, or a microVM qualification of its supervisor).
    - Substrate is usable off GKE without beta APIs.
    - Koinon measures a density or cold-start problem that suspended sandboxes cannot meet.
+
+## Alternatives considered
+
+- **Adopt Agent Substrate in place of Agent Sandbox** _(reconstructed)_. Rejected: OpenShell needs
+  Landlock and seccomp user notification, which gVisor lacks, and OpenShell drives Agent Sandbox, not
+  Substrate actors. Substrate is pre-1.0 and broke upgrades twice in two weeks, and its strongest
+  features are GKE-first.
+- **Adopt kagent 1.x** _(reconstructed)_. Rejected: its rcs are rebuilt on a fork of Substrate with
+  pre-RC API breaks and no GA date. It covers the execution layer but not the work layer, and its
+  `requireApproval` is enforced inside the agent runtime rather than outside it.
+- **Ask OpenShell upstream for a Substrate driver** _(reconstructed)_. Not pursued now: whether the
+  OpenShell supervisor works inside a Substrate microVM is unverified, and Substrate has no
+  compatibility promise yet. This stays a revisit condition (see Decision 5), not a current request.
 
 ## Consequences
 
