@@ -34,53 +34,42 @@ func (f *Fake) InTx(ctx context.Context, fn func(q *store.Queries, b Batch) erro
 	if err := fn(f.Queries, b); err != nil {
 		return Written{}, err
 	}
-	orgs, err := b.plan()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.n
+	chain := int64(len(f.installs))
+	w, err := b.writeWith(
+		func(e InstallEvent) (store.InstallAuditEvent, error) {
+			raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
+			if err != nil {
+				return store.InstallAuditEvent{}, err
+			}
+			n++
+			chain++
+			return store.InstallAuditEvent{
+				ID: uuidOf(n), ChainSeq: chain, ActorKind: e.Actor.Kind, ActorID: e.Actor.ID,
+				Action: e.Action, TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw,
+				RequestID: requestIDOf(ctx, e.RequestID),
+			}, nil
+		},
+		func(e Event) (store.AuditEvent, error) {
+			raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
+			if err != nil {
+				return store.AuditEvent{}, err
+			}
+			n++
+			return store.AuditEvent{
+				OrgID: e.Org, ID: uuidOf(n), ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
+				TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: requestIDOf(ctx, e.RequestID),
+			}, nil
+		},
+	)
 	if err != nil {
 		return Written{}, err
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var w Written
-	installID := ""
-	var installs []store.InstallAuditEvent
-	var rows []store.AuditEvent
-	n := f.n
-	for _, e := range b.installs {
-		raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
-		if err != nil {
-			return Written{}, err
-		}
-		n++
-		row := store.InstallAuditEvent{
-			ID: uuidOf(n), ChainSeq: int64(len(f.installs) + len(installs) + 1), ActorKind: e.Actor.Kind, ActorID: e.Actor.ID,
-			Action: e.Action, TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw,
-			RequestID: requestIDOf(ctx, e.RequestID),
-		}
-		installs = append(installs, row)
-		if installID == "" {
-			installID = row.ID.String()
-		}
-	}
-	w.Install = installs
-	for _, e := range orgs {
-		if e.InstallEventID == "" {
-			e.InstallEventID = installID
-		}
-		raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
-		if err != nil {
-			return Written{}, err
-		}
-		n++
-		row := store.AuditEvent{
-			OrgID: e.Org, ID: uuidOf(n), ActorKind: e.Actor.Kind, ActorID: e.Actor.ID, Action: e.Action,
-			TargetKind: e.TargetKind, TargetID: e.TargetID, Summary: raw, RequestID: requestIDOf(ctx, e.RequestID),
-		}
-		rows = append(rows, row)
-	}
 	f.n = n
-	f.installs = append(f.installs, installs...)
-	f.orgs = append(f.orgs, rows...)
-	w.Org = rows
+	f.installs = append(f.installs, w.Install...)
+	f.orgs = append(f.orgs, w.Org...)
 	return w, nil
 }
 

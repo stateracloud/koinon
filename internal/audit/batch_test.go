@@ -74,20 +74,48 @@ func itWritesInOrder(newHarness func(ctx context.Context) batchHarness) {
 		Expect(h.orgEvents(ctx, hi)).To(Equal(2))
 	})
 
-	It("puts the first install event's ID in every org event's summary", func(ctx SpecContext) {
+	It("puts the install event's ID in every org event's summary when the batch has one", func(ctx SpecContext) {
 		w, err := h.runner.InTx(ctx, func(_ *store.Queries, b audit.Batch) error {
 			b.Org(orgEvent(hi, "test.effect"))
-			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.first", TargetKind: "test", TargetID: "1"})
-			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.second", TargetKind: "test", TargetID: "2"})
+			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.cause", TargetKind: "test", TargetID: "1"})
 			b.Org(orgEvent(lo, "test.effect"))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(w.Install).To(HaveLen(2))
-		Expect(w.Install[0].Action).To(Equal("test.first"), "install events keep the order they were added in")
+		Expect(w.Install).To(HaveLen(1))
+		Expect(w.Org).To(HaveLen(2))
 		for _, e := range w.Org {
 			Expect(audit.SummaryOf(e.Summary)).To(HaveKeyWithValue("install_event_id", w.Install[0].ID.String()))
 		}
+	})
+
+	It("writes several install events in the order added", func(ctx SpecContext) {
+		w, err := h.runner.InTx(ctx, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.first", TargetKind: "test", TargetID: "1"})
+			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.second", TargetKind: "test", TargetID: "2"})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.Install).To(HaveLen(2))
+		Expect(w.Install[0].Action).To(Equal("test.first"))
+		Expect(w.Install[1].Action).To(Equal("test.second"))
+		Expect(h.installs(ctx)).To(Equal(2))
+	})
+
+	It("refuses to guess the install event of an org event when the batch has several, and writes none of it", func(ctx SpecContext) {
+		named := orgEvent(lo, "test.named")
+		named.InstallEventID = "caller-chose-this"
+		_, err := h.runner.InTx(ctx, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.first", TargetKind: "test", TargetID: "1"})
+			b.Install(audit.InstallEvent{Actor: batchActor, Action: "test.second", TargetKind: "test", TargetID: "2"})
+			b.Org(named)
+			b.Org(orgEvent(hi, "test.unnamed"))
+			return nil
+		})
+		Expect(err).To(MatchError(audit.ErrAmbiguousInstallLink))
+		Expect(h.installs(ctx)).To(BeZero())
+		Expect(h.orgEvents(ctx, lo)).To(BeZero())
+		Expect(h.orgEvents(ctx, hi)).To(BeZero())
 	})
 
 	It("links nothing when the batch has no install event, and keeps an ID the caller set", func(ctx SpecContext) {

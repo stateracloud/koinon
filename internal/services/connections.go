@@ -514,9 +514,9 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 		if len(bound) > 0 {
 			names := make([]string, 0, len(bound))
 			detail := &connectionv1alpha1.BoundAgents{}
-			for _, b := range bound {
-				names = append(names, fmt.Sprintf("%s (%s)", b.DisplayName, b.ID.String()))
-				detail.Agents = append(detail.Agents, &connectionv1alpha1.BoundAgent{Id: b.ID.String(), DisplayName: b.DisplayName})
+			for _, agent := range bound {
+				names = append(names, fmt.Sprintf("%s (%s)", agent.DisplayName, agent.ID.String()))
+				detail.Agents = append(detail.Agents, &connectionv1alpha1.BoundAgent{Id: agent.ID.String(), DisplayName: agent.DisplayName})
 			}
 			// The message is for people and logs; the detail is what clients read.
 			e := connect.NewError(connect.CodeFailedPrecondition, "agents are still bound to this connection; unbind them first: "+strings.Join(names, ", "))

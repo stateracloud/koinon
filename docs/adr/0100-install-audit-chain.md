@@ -260,12 +260,20 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
 - The module opens the transaction (`audit.InTx`, or `audit.InPgTx` for a caller that needs the pgx
   transaction) and hands the caller its queries and an **audit batch**. The caller adds events to the
   batch as the change happens, in any order; just before commit the module writes the install events
-  in the order added, then the org events sorted by org ID (stable within an org), and puts the first
-  install event's ID into each org event's summary as `install_event_id` (decision 1.6; an ID the
-  caller set is kept). No caller chooses the order, so two transactions that audit orgs A,B and B,A
-  take the heads in the same order and cannot deadlock.
+  in the order added, then the org events sorted by org ID (stable within an org). No caller chooses
+  the order, so two transactions that audit orgs A,B and B,A take the heads in the same order and
+  cannot deadlock.
+- A batch may hold several install events (platform prices writes one per decision and one per
+  version in one transaction). An org event links to the install event of its transaction through
+  `install_event_id` in its summary (decision 1.6); the link means "written in the same transaction",
+  not "caused by". With exactly one install event in the batch, an org event that leaves the ID unset
+  gets that event's ID; an ID the caller set is kept. With several, the module does not guess: an org
+  event with no ID is refused (`audit.ErrAmbiguousInstallLink`) and the transaction rolls back. No
+  caller mixes several install events with org events today; a way to name one install event of the
+  batch is added when the first caller needs it.
 - An event commits with its change or not at all: a refused write (an unnamed actor, a summary that
-  looks like a secret, an org event with no org, a database refusal such as `ErrInstallWriteDenied`)
+  looks like a secret, an org event with no org, an ambiguous install link, a database refusal such as
+  `ErrInstallWriteDenied`)
   fails the function and rolls the whole transaction back. A caller that needs a stored event reads it
   from the result, after the commit.
 - The domain locks still come first, because the caller takes them while it makes its change and the
@@ -275,7 +283,7 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
 - The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
-  (issues 360 to 371: step 2 moves the rest, step 3 deletes them and adds a lint check).
+  (issues 360, 370 and 371: step 2 moves the rest, step 3 deletes them and adds a lint check).
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.

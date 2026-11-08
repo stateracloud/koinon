@@ -5,6 +5,7 @@ package audit
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -17,15 +18,19 @@ import (
 // Batch collects the audit events of one transaction (the audit batch, ADR 0100 decision 1.7). A
 // caller adds an event when the change happens and never chooses the order: just before commit the
 // audit module writes the install events first, in the order they were added, then the org events
-// sorted by org ID, with the ID of the first install event in each org event's summary as
-// install_event_id. Two transactions that audit
-// orgs A,B and B,A therefore take the heads in the same order and cannot deadlock.
+// sorted by org ID. Two transactions that audit orgs A,B and B,A therefore take the heads in the same
+// order and cannot deadlock.
+//
+// An org event links to its install event through install_event_id in its summary. The link means
+// "written in the same transaction", not "caused by". When the batch has exactly one install event,
+// an org event that leaves InstallEventID empty gets that event's ID. When it has several, the module
+// does not guess: an org event with no InstallEventID is refused (ErrAmbiguousInstallLink).
 //
 // Adding does not validate; the write does, and a refused event (an empty actor, a summary that
-// looks like a secret, a database refusal) fails the whole transaction, so an event commits with its
-// change or not at all.
+// looks like a secret, an ambiguous install link, a database refusal) fails the whole transaction, so
+// an event commits with its change or not at all.
 type Batch interface {
-	// Install adds an install event. The first one added is the cause the org events point at.
+	// Install adds an install event. A batch may hold several; they are written in the order added.
 	Install(e InstallEvent)
 	// Org adds an org event. Events of one org keep the order they were added in.
 	Org(e Event)
@@ -88,6 +93,11 @@ func InPgTx(ctx context.Context, db Beginner, fn func(tx pgx.Tx, b Batch) error)
 	return w, nil
 }
 
+// ErrAmbiguousInstallLink is in the error of a batch that holds more than one install event and an
+// org event with no InstallEventID: the module refuses to pick the install event it links to, and the
+// whole transaction rolls back (ADR 0100 decision 1.7).
+var ErrAmbiguousInstallLink = errors.New("audit: the batch has several install events; an org event must name its install_event_id")
+
 // batch is the Batch the Postgres runner and the Fake share, so both order and validate the same way.
 type batch struct {
 	installs []InstallEvent
@@ -113,6 +123,9 @@ func (b *batch) plan() ([]Event, error) {
 		if !e.Org.Valid {
 			return nil, fmt.Errorf("audit: org event %s has no org", e.Action)
 		}
+		if len(b.installs) > 1 && e.InstallEventID == "" {
+			return nil, fmt.Errorf("audit: org event %s: %w", e.Action, ErrAmbiguousInstallLink)
+		}
 	}
 	sort.SliceStable(orgs, func(i, j int) bool { return bytes.Compare(orgs[i].Org.Bytes[:], orgs[j].Org.Bytes[:]) < 0 })
 	return orgs, nil
@@ -125,29 +138,38 @@ func needActor(a Actor, action string) error {
 	return nil
 }
 
-// write writes the batch with q: the install event first, then the org events by org ID.
+// write writes the batch with q: the install events first, then the org events by org ID.
 func (b *batch) write(ctx context.Context, q *store.Queries) (Written, error) {
+	return b.writeWith(
+		func(e InstallEvent) (store.InstallAuditEvent, error) { return recordInstall(ctx, q, e) },
+		func(e Event) (store.AuditEvent, error) { return record(ctx, q, e) },
+	)
+}
+
+// writeWith is the one write loop: it plans the batch, then inserts the install events and the org
+// events in order with the two insert functions. The Postgres runner passes the store inserts, the
+// Fake its in-memory ones, so the order, the refusals and the install link cannot drift apart.
+func (b *batch) writeWith(
+	insertInstall func(InstallEvent) (store.InstallAuditEvent, error),
+	insertOrg func(Event) (store.AuditEvent, error),
+) (Written, error) {
 	orgs, err := b.plan()
 	if err != nil {
 		return Written{}, err
 	}
 	var w Written
-	installID := ""
 	for _, e := range b.installs {
-		row, err := recordInstall(ctx, q, e)
+		row, err := insertInstall(e)
 		if err != nil {
 			return Written{}, err
 		}
 		w.Install = append(w.Install, row)
-		if installID == "" {
-			installID = row.ID.String()
-		}
 	}
 	for _, e := range orgs {
-		if e.InstallEventID == "" {
-			e.InstallEventID = installID
+		if e.InstallEventID == "" && len(w.Install) == 1 {
+			e.InstallEventID = w.Install[0].ID.String()
 		}
-		row, err := record(ctx, q, e)
+		row, err := insertOrg(e)
 		if err != nil {
 			return Written{}, err
 		}
