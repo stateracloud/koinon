@@ -78,7 +78,7 @@ func servesMCP(conn store.Connection, serverURL string) error {
 // as it is now, does not serve: called in the transaction that changed the connection's config (a
 // declared connection's baseUrl), after the change. Each unlink is audited as
 // mcp_server.data_class.reset with reason connection_host_changed; the servers' kind and legs stay.
-func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, actor audit.Actor, conn store.Connection) error {
+func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection) error {
 	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
 	if err != nil {
 		return err
@@ -95,16 +95,14 @@ func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, actor audit.
 			return err
 		}
 		before, after := declarationOf(cur), declarationOf(out)
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: cur.OrgID, Actor: actor, Action: "mcp_server.data_class.reset", TargetKind: "mcp_server", TargetID: cur.ID.String(),
 			Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs, "codeHostConnectionId": before.CodeHostConnection},
 			After: map[string]any{
 				"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "codeHostConnectionId": after.CodeHostConnection,
 				"reason": "connection_host_changed",
 			},
-		}); err != nil {
-			return err
-		}
+		})
 	}
 	return nil
 }

@@ -195,8 +195,7 @@ func (s *Service) SetDefault(ctx context.Context, org pgtype.UUID, actor audit.A
 	if len(model) > 256 {
 		return &InvalidError{Msg: "the model name is longer than 256 characters"}
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		if model != "" {
 			var u *UnusableError
 			if err := Check(ctx, s.prices, q, org, model, at); errors.As(err, &u) && u.Reason == "not_served" {
@@ -217,11 +216,13 @@ func (s *Service) SetDefault(ctx context.Context, org pgtype.UUID, actor audit.A
 		if old == model {
 			return nil
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 			Before: map[string]any{"model": old}, After: map[string]any{"model": model},
 		})
+		return nil
 	})
+	return err
 }
 
 // View is an agent's model setting and what it resolves to.
@@ -365,8 +366,7 @@ func (s *Service) Set(ctx context.Context, org, agent pgtype.UUID, actor audit.A
 		return store.Agent{}, &InvalidError{Msg: "the model name is longer than 200 characters"}
 	}
 	var out store.Agent
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: org, ID: agent})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -392,11 +392,12 @@ func (s *Service) Set(ctx context.Context, org, agent pgtype.UUID, actor audit.A
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "agent.model.set", TargetKind: "agent", TargetID: agent.String(),
 			Before: map[string]any{"model": settingLabel(cur.Model.String)},
 			After:  map[string]any{"model": settingLabel(want)},
 		})
+		return nil
 	})
 	return out, err
 }
@@ -422,7 +423,7 @@ func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolve
 	n := 0
 	for _, org := range ids {
 		set := false
-		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		_, err := audit.InPgTx(ctx, pool, func(tx pgx.Tx, b audit.Batch) error {
 			set = false
 			q := store.New(tx)
 			if claimed, err := q.ClaimOrgDefaultModelBackfill(ctx, org); err != nil || claimed == 0 {
@@ -437,10 +438,11 @@ func BackfillDefaults(ctx context.Context, pool *pgxpool.Pool, rv prices.Resolve
 				return err
 			}
 			set = true
-			return audit.RecordErr(ctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: org, Actor: audit.System("koinon-api:agent-model"), Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 				Before: map[string]any{"model": ""}, After: map[string]any{"model": list[0].Name, "reason": "migrated"},
 			})
+			return nil
 		})
 		if err != nil {
 			return n, err

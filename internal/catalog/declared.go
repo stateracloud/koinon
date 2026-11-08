@@ -75,7 +75,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		seen[m.Name] = true
 	}
 	actor := audit.Secret(d.SecretName)
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		all, err := q.ListProviders(ctx, org)
 		if err != nil {
 			return err
@@ -92,7 +92,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				cur = &all[i]
 			case p.ManagedBySecret.String == d.SecretName:
 				// The Secret renamed its provider: the old entry goes.
-				if err := s.removeProvider(ctx, q, org, p); err != nil {
+				if err := s.removeProvider(ctx, q, b, org, p); err != nil {
 					return err
 				}
 			}
@@ -142,7 +142,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		if row, err = s.applyCostKey(ctx, q, org, row, ProviderPatch{CostAPIKey: &d.CostAPIKey, CostScope: &d.CostScope}); err != nil {
 			return err
 		}
-		if err := s.syncDeclaredModels(ctx, q, org, actor, row, d); err != nil {
+		if err := s.syncDeclaredModels(ctx, q, b, org, actor, row, d); err != nil {
 			return err
 		}
 		if err := refreshShadows(ctx, q, org); err != nil {
@@ -156,10 +156,11 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		slices.Sort(names)
 		after["models"] = names
 		changed = true
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.declare", TargetKind: "provider", TargetID: id.String(),
 			Before: before, After: after,
 		})
+		return nil
 	})
 	if err != nil {
 		return false, mapErr(err)
@@ -167,7 +168,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 	return changed, nil
 }
 
-func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, prov store.Provider, d DeclaredProvider) error {
+func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, prov store.Provider, d DeclaredProvider) error {
 	existing, err := q.ListModels(ctx, org)
 	if err != nil {
 		return err
@@ -212,7 +213,7 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 			}
 			return err
 		}
-		if err := adoptDefaultModel(ctx, q, org, actor, m.Name); err != nil {
+		if err := adoptDefaultModel(ctx, q, b, org, actor, m.Name); err != nil {
 			return err
 		}
 	}
@@ -222,7 +223,7 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 		}
 	}
 	if len(have) > 0 {
-		return clearDefaultIfGone(ctx, q, org, actor)
+		return clearDefaultIfGone(ctx, q, b, org, actor)
 	}
 	return nil
 }
@@ -241,7 +242,7 @@ func refreshShadows(ctx context.Context, q *store.Queries, org pgtype.UUID) erro
 // removeProvider marks a declared provider removed: it and its models stay as rows, disabled, so
 // the audit trail and anything that refers to them keep a target, and the Secret coming back
 // restores them.
-func (s *Service) removeProvider(ctx context.Context, q *store.Queries, org pgtype.UUID, p store.Provider) error {
+func (s *Service) removeProvider(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, p store.Provider) error {
 	if p.RemovedAt.Valid {
 		return nil
 	}
@@ -252,10 +253,11 @@ func (s *Service) removeProvider(ctx context.Context, q *store.Queries, org pgty
 	if err := q.DisableModelsOfProvider(ctx, store.DisableModelsOfProviderParams{OrgID: org, ProviderID: p.ID, Reason: reason}); err != nil {
 		return err
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: audit.Secret(p.ManagedBySecret.String), Action: "provider.undeclare", TargetKind: "provider",
 		TargetID: p.ID.String(), Before: providerSummary(p), After: map[string]any{"removed": true},
 	})
+	return nil
 }
 
 // DeclaredProviderSecrets returns the names of the Secrets that declare providers in org.
@@ -277,14 +279,14 @@ func (s *Service) DeclaredProviderSecrets(ctx context.Context, org pgtype.UUID) 
 // re-enables the UI entries it shadowed. The rows stay until the Secret returns or an admin
 // deletes them.
 func (s *Service) RemoveDeclared(ctx context.Context, org pgtype.UUID, secretName string) error {
-	return mapErr(s.tx(ctx, func(q *store.Queries) error {
+	return mapErr(s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		all, err := q.ListProviders(ctx, org)
 		if err != nil {
 			return err
 		}
 		for _, p := range all {
 			if p.Source == store.ConfigSourceSecret && p.ManagedBySecret.String == secretName {
-				if err := s.removeProvider(ctx, q, org, p); err != nil {
+				if err := s.removeProvider(ctx, q, b, org, p); err != nil {
 					return err
 				}
 			}

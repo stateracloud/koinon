@@ -163,7 +163,7 @@ func (p *Pool) resyncAgent(ctx context.Context, r store.HomeCheckpointResync) {
 	msg := truncateText(err.Error(), 400)
 	if int(r.Attempts) >= c.Attempts {
 		log.Error("checkpoint resync failed; the agent's checkpoints are as they were (see koinon_agentd_home_checkpoint_resyncs)", "err", msg)
-		if err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+		if _, err := audit.InPgTx(ctx, p.db, func(tx pgx.Tx, b audit.Batch) error {
 			q := p.q.WithTx(tx)
 			if n, err := q.FailHomeCheckpointResync(ctx, store.FailHomeCheckpointResyncParams{
 				OrgID: r.OrgID, AgentID: r.AgentID, RequestID: r.RequestID, Attempts: r.Attempts, Error: pgtype.Text{String: msg, Valid: true},
@@ -172,10 +172,11 @@ func (p *Pool) resyncAgent(ctx context.Context, r store.HomeCheckpointResync) {
 			} else if n != 1 {
 				return errResyncClaimLost
 			}
-			return audit.RecordErr(ctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: r.OrgID, Actor: audit.System("koinon-agentd:resync"), Action: ResyncFailedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 				After: map[string]any{"attempts": r.Attempts, "error": msg},
 			})
+			return nil
 		}); err != nil {
 			log.Warn("recording a failed checkpoint resync failed", "err", err)
 		}
@@ -274,7 +275,7 @@ func (p *Pool) listRepositories(ctx context.Context, r store.HomeCheckpointResyn
 // transaction under the agent's repository row lock.
 func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, listings []repositoryListing, taken int32) (resyncCounts, error) {
 	var n resyncCounts
-	err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+	_, err := audit.InPgTx(ctx, p.db, func(tx pgx.Tx, b audit.Batch) error {
 		n = resyncCounts{taken: taken}
 		q := p.q.WithTx(tx)
 		// The agent row first, as a claim and a cascading delete take it, then the repository row.
@@ -347,13 +348,14 @@ func (p *Pool) recordResync(ctx context.Context, r store.HomeCheckpointResync, l
 			return err
 		}
 		n.raised = raised == 1
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: r.OrgID, Actor: audit.System("koinon-agentd:resync"), Action: ResyncedAction, TargetKind: "agent", TargetID: r.AgentID.String(),
 			After: map[string]any{
 				"repositoryEpochs": slices.Clone(n.epochs), "snapshots": n.snapshots, "added": n.added,
 				"missing": n.missing, "skipped": n.skipped, "takenPrefixes": n.taken, "ownershipEpochRaisedTo": raisedTo(n),
 			},
 		})
+		return nil
 	})
 	return n, err
 }

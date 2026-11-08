@@ -216,7 +216,7 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 	// One check in flight per org (ADR 0041 amendment): the lock is held, in the transaction that
 	// stores the result, for as long as the request takes.
 	var res Result
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	_, err = audit.InPgTx(ctx, s.pool, func(tx pgx.Tx, b audit.Batch) error {
 		var got bool
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('modelcheck:' || $1::text, 0))`, org.String()).Scan(&got); err != nil {
 			return err
@@ -241,10 +241,11 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 			return err
 		}
 		res.CheckedAt = row.CheckedAt.Time
-		return audit.RecordErr(ctx, tq, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.echo_check", TargetKind: "provider", TargetID: p.ID.String(),
 			After: map[string]any{"model": model, "unchanged": unchanged},
 		})
+		return nil
 	})
 	return res, err
 }

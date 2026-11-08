@@ -116,8 +116,7 @@ func (s *Service) SetThinking(ctx context.Context, org, agent pgtype.UUID, actor
 		return store.Agent{}, &InvalidError{Msg: err.Error()}
 	}
 	var out store.Agent
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: org, ID: agent})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -144,11 +143,12 @@ func (s *Service) SetThinking(ctx context.Context, org, agent pgtype.UUID, actor
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "agent.thinking.set", TargetKind: "agent", TargetID: agent.String(),
 			Before: map[string]any{"thinking": thinkingLabel(cur.Thinking.String)},
 			After:  map[string]any{"thinking": thinkingLabel(string(want))},
 		})
+		return nil
 	})
 	return out, err
 }
