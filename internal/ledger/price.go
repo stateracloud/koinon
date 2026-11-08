@@ -5,7 +5,6 @@ package ledger
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -109,25 +108,20 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 		}
 	}
 
-	model, err := prices.Lookup(ctx, q, org, e.Model)
+	qt, err := in.Prices.Find(ctx, q, org, e.Model, e.Time)
+	p.model = qt.Model
 	if err == nil {
-		p.model = model
-		var res prices.Resolution
-		res, err = in.Prices.Resolve(ctx, q, org, model, e.Time)
+		var out priced
+		out, err = in.priceWith(ctx, q, org, e, p, qt, gw)
 		if err == nil {
-			out, perr := in.priceWith(ctx, q, org, e, p, res, gw)
-			var badPrice *prices.BadPriceError
-			if perr != nil && !errors.As(perr, &badPrice) {
-				return out, perr
-			}
-			if perr == nil {
-				return out, nil
-			}
-			err = perr
+			return out, nil
 		}
 	}
-	var badPrice *prices.BadPriceError
-	if errors.As(err, &badPrice) {
+	reason, ok := prices.Unpriceable(err)
+	if !ok {
+		return p, err
+	}
+	if reason == prices.ReasonUnusablePrice {
 		// A stored price that cannot be used (or overflows) must not stop the batch or return
 		// 503: record the request unpriced and flagged with the error. The gateway's cost, if
 		// any, stands in.
@@ -139,9 +133,6 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 		p.estimate, _ = json.Marshal(map[string]any{"price_error": err.Error()})
 		return p, nil
 	}
-	if !errors.Is(err, prices.ErrUnpriced) {
-		return p, err
-	}
 	// No Koinon price: the gateway's cost stands in, flagged by having no price version.
 	in.log().Warn("spend ledger: request for a model without a price", "agent", e.Agent.String(), "model", e.Model, "request", e.RequestID)
 	if e.CostUSD != "" {
@@ -150,7 +141,8 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 	return p, nil
 }
 
-func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry, p priced, res prices.Resolution, gw money.USD) (priced, error) {
+func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry, p priced, qt prices.Quote, gw money.USD) (priced, error) {
+	res := qt.Resolution
 	p.ref = pgtype.Text{String: res.Ref, Valid: true}
 	p.priced = true
 	meta := map[string]any{"price_ref": res.Ref}
@@ -214,11 +206,11 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 		if p.aborted && r.ReserveOutputTokens > p.totalOut() {
 			// The bound the gateway key holds back while the provider's figure is pending; never charged.
-			_, bound, err := res.Price.Cost(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
+			bound, err := qt.Price(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
 			if err != nil {
-				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
+				return p, err
 			}
-			p.reserve = bound // the charge is subtracted below, once it is known
+			p.reserve = bound.Cost // the charge is subtracted below, once it is known
 		}
 	}
 	if e.Cut && e.InputKnown && e.OutputKnown {
@@ -230,18 +222,19 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		meta["usage_partial"] = true
 		meta["estimate"] = map[string]any{"method": "partial", "reserve_output_tokens": bound, "max_output_fallback": fallback, "max_output_capped": capped}
 		if bound > p.totalOut() {
-			_, b, err := res.Price.Cost(p.usage(max(bound-p.reasoning, 0)))
+			b, err := qt.Price(p.usage(max(bound-p.reasoning, 0)))
 			if err != nil {
-				return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
+				return p, err
 			}
-			p.reserve = b
+			p.reserve = b.Cost
 		}
 	}
 	u := p.usage(p.output)
-	_, cost, err := res.Price.Cost(u)
+	charged, err := qt.Price(u)
 	if err != nil {
-		return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
+		return p, err
 	}
+	cost := charged.Cost
 	p.cost = cost
 	p.reserve = p.reserve.SubFloor(cost)
 	// Cost truth: our cost counts. A real (not estimated) request whose cost the gateway also

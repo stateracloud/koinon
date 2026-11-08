@@ -415,40 +415,34 @@ func (s *Settler) charge(ctx context.Context, q *store.Queries, org pgtype.UUID,
 	if cost, err = u.Billed(); err != nil {
 		return 0, nil, ref, false, nil, fmt.Errorf("the provider's bill: %w", err)
 	}
-	model, err := prices.Lookup(ctx, q, org, row.Model)
-	var res prices.Resolution
-	var listed money.USD
+	qt, err := s.Prices.Find(ctx, q, org, row.Model, row.OccurredAt.Time)
+	var listed prices.Priced
 	if err == nil {
-		res, err = s.Prices.Resolve(ctx, q, org, model, row.OccurredAt.Time)
+		listed, err = qt.Price(u.Buckets())
 	}
-	if err == nil {
-		_, listed, err = res.Price.Cost(u.Buckets())
-		if err != nil {
-			err = &prices.BadPriceError{Err: err}
+	if err != nil {
+		reason, ok := prices.Unpriceable(err)
+		switch {
+		case !ok:
+			return 0, nil, ref, false, nil, err
+		case reason == prices.ReasonNoPrice:
+			// No Koinon price: the bill needs none; nothing to compare.
+			return cost, nil, ref, false, note, nil
+		default:
+			// A stored price that cannot be used is flagged, as at ingest; the bill still counts.
+			note["price_error"] = err.Error()
+			return cost, nil, ref, true, note, nil
 		}
 	}
-	var bad *prices.BadPriceError
-	switch {
-	case err == nil:
-		ref = pgtype.Text{String: res.Ref, Valid: true}
-		if res.Ref != row.PriceRef && row.PriceRef != "" {
-			note["price_ref_was"] = row.PriceRef
-		}
-	case errors.Is(err, prices.ErrUnpriced):
-		// No Koinon price: the bill needs none; nothing to compare.
-		return cost, nil, ref, false, note, nil
-	case errors.As(err, &bad):
-		// A stored price that cannot be used is flagged, as at ingest; the bill still counts.
-		note["price_error"] = err.Error()
-		return cost, nil, ref, true, note, nil
-	default:
-		return 0, nil, ref, false, nil, err
+	ref = pgtype.Text{String: qt.Resolution.Ref, Valid: true}
+	if qt.Resolution.Ref != row.PriceRef && row.PriceRef != "" {
+		note["price_ref_was"] = row.PriceRef
 	}
-	if differs(listed, cost) {
+	if differs(listed.Cost, cost) {
 		flagged = true
-		note["provider_diff"] = map[string]any{"koinon_cost_usd": listed.String(), "provider_cost_usd": cost.String()}
+		note["provider_diff"] = map[string]any{"koinon_cost_usd": listed.Cost.String(), "provider_cost_usd": cost.String()}
 	}
-	return cost, &listed, ref, flagged, note, nil
+	return cost, &listed.Cost, ref, flagged, note, nil
 }
 
 // lookup asks the entry's provider for its record of the response.
