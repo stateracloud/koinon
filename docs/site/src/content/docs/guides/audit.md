@@ -81,4 +81,13 @@ chain rewritten behind an anchor fails even when the rewrite is self-consistent.
 chain itself is still not caught until signed checkpoints exist (issue 7). See
 [Anchors](/guides/audit-export/#anchors).
 
+Each anchor logs one line, `anchored the org audit chains`, with `heads_root` and `install_head` (the hash
+of the anchor event). Ship these log lines off the cluster, to a log store the database cannot write, to
+get a witness the database can't rewrite: a rewrite of the install chain that still passes `verify` no
+longer matches the logged hashes. Filter on the message. Before each anchor, koinon-api checks every org
+chain against the previous anchor. A mismatch is logged once per tick, naming the org, and counted in
+`koinon_audit_anchor_inconsistent_total{reason="hash_changed|seq_regressed"}` (no org label); the anchor is
+still written and `verify` reports the break. Alert on any increase of that counter. The interval is at
+least 5 minutes, because every anchor stores one row per org.
+
 To keep a copy that anyone can check without the database, see [Export and verify the audit log](/guides/audit-export/).

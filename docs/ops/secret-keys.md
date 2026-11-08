@@ -383,6 +383,18 @@ decision 4.1; `koinon-api audit anchor` does it now). The gauge `koinon_audit_an
 labels) is the age of the newest anchor; alert when it stays above a few intervals, for example
 `max(koinon_audit_anchor_age_seconds) > 3 * 3600` for 15 minutes with the default interval. While there is no anchor yet the gauge counts the seconds since the process started.
 
+The interval is at least 5 minutes: every anchor stores one row per org (`install_audit_anchor_heads`),
+so 100 orgs hourly is about 880 thousand rows a year. The age gauge keeps its last value when the read of
+the newest anchor fails, so with the database down it stops moving and can look healthy or stale
+depending on when the outage started: alert on the database being unreachable next to it, for example
+on `up` or your database exporter, instead of relying on the gauge alone.
+
+Before each anchor koinon-api checks every org's chain against the previous anchor (the rule of C2SP
+tlog-checkpoint: never sign a checkpoint inconsistent with an earlier one). A mismatch is logged once per
+tick, naming the org, and counted in `koinon_audit_anchor_inconsistent_total{reason}` (`hash_changed`,
+`seq_regressed`; no org label). The anchor is written anyway. Alert on any increase, for example
+`increase(koinon_audit_anchor_inconsistent_total[1h]) > 0`, then run `koinon-api audit verify`.
+
 A missing grant or membership that lasts longer than an upgrade, or a refused install write, needs
 an operator. An alert for both:
 

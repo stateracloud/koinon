@@ -121,7 +121,7 @@ the head outside the database are planned (ADR 0100); `verify --file` will check
 
 ## Anchors
 
-Every hour (`--audit-anchor-interval` on koinon-api, at least one minute) and on demand with
+Every hour (`--audit-anchor-interval` on koinon-api, at least 5 minutes, because every anchor stores one row per org) and on demand with
 `koinon-api audit anchor`, koinon-api writes an `audit.anchor` event to the install chain. It commits to the
 head (`chain_seq` and `hash`) of every org chain at that moment: the event's summary holds `org_count` and
 `heads_root`, and the heads themselves are in an append-only table. Only one replica anchors per interval.
@@ -148,4 +148,15 @@ after your copy of the install export was made cannot pass. A file that ends bef
 fails with a message naming both causes: rows were removed behind the anchor, or the file is older than the
 anchor (export the org after the install export). It does not stop someone who can rewrite the install chain
 too (a database superuser); signed checkpoints, exported off the cluster, are for that. Watch the gauge
-`koinon_audit_anchor_age_seconds` (no labels): it grows while anchoring is stuck.
+`koinon_audit_anchor_age_seconds` (no labels): it grows while anchoring is stuck. It keeps its last value
+when the database cannot be read, so alert on the database being down as well. Alert on any increase of
+`koinon_audit_anchor_inconsistent_total`: an org chain no longer matched the previous anchor when the next
+one was written.
+
+Ship the `anchored the org audit chains` log lines (they carry `heads_root` and `install_head`) off the
+cluster to get a witness the database can't rewrite.
+
+An install export carries every anchor in its range in one header line. On a large install export by
+period with `--from-seq`, so the header holds only that period's anchors. A full export from seq 1 puts
+every anchor in the header: about 110 MB a year at 100 orgs anchored hourly. Moving each anchor's heads
+into the stream next to its `audit.anchor` event is planned before v0.3.
