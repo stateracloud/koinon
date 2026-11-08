@@ -638,8 +638,9 @@ type Querier interface {
 	// foreign key check takes anyway. Taking it first keeps the order every path uses (connection row,
 	// then the scope lock, then the repository rows), so a replacement never holds the scope lock while
 	// it waits for a SetConnectionSecret or DeleteConnection that holds the row and waits for the lock.
-	// It returns the secret fingerprint as committed now: after a SetConnectionSecret or a declared
-	// update that held the row, the new one.
+	// It returns the secret fingerprint as committed now. That is the new one after a writer that held
+	// the row with FOR UPDATE (SetConnectionSecret via GetConnectionForUpdate, and the declared update,
+	// which locks the row the same way before its UPDATE); a plain UPDATE would not block this lock.
 	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (KeyShareConnectionRow, error)
 	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
 	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
