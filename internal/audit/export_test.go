@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -194,6 +195,28 @@ var _ = Describe("audit export and off-cluster verify", func() {
 			l[4] = editLine(l[4], func(m map[string]any) { m["hash"] = "zz" })
 			brokenAt(l, 4)
 		})
+		It("a changed first prev_hash in a whole file: it must be 32 zero bytes", func() {
+			l := append([]string{}, lines...)
+			l[1] = editLine(l[1], func(m map[string]any) { m["prev_hash"] = strings.Repeat("1", 64) })
+			brokenAt(l, 1)
+		})
+		It("a summary with a key twice, at any depth, even when the last value is the true one", func() {
+			// encoding/json keeps the last of two keys, so each forged line below still decodes to its
+			// summary_text; another reader may keep the first value.
+			for _, edit := range [][2]string{
+				{`"summary":{"after":`, `"summary":{"after":{"n":"forged"},"after":`},
+				{`{"n":"test.n2"}`, `{"n":"forged","n":"test.n2"}`},
+				{`{"n":"test.n2"}`, `{"n":"forged","\u006e":"test.n2"}`},
+			} {
+				Expect(lines[2]).To(ContainSubstring(edit[0]))
+				l := append([]string{}, lines...)
+				l[2] = strings.Replace(l[2], edit[0], edit[1], 1)
+				res := verifyLines(l, audit.ExportVerifyOptions{})
+				Expect(res.Break).NotTo(BeNil(), edit[1])
+				Expect(res.Break.Seq).To(BeEquivalentTo(2))
+				Expect(res.Break.Reason).To(ContainSubstring("twice"))
+			}
+		})
 		It("a removed line", func() { brokenAt(remove(lines, 3), 4) })
 		It("swapped lines", func() {
 			l := append([]string{}, lines...)
@@ -214,6 +237,57 @@ var _ = Describe("audit export and off-cluster verify", func() {
 			l[0] = editLine(l[0], func(m map[string]any) { m["org_id"] = "00000000-0000-0000-0000-000000000001" })
 			brokenAt(l, 1)
 		})
+	})
+
+	It("reports the same first broken chain_seq as the database verifier, for a chain tampered in the database", func(ctx SpecContext) {
+		asOwner(ctx, func(tx pgx.Tx) {
+			for _, q := range []string{
+				`UPDATE audit_events SET actor_id = 'mallory' WHERE org_id = $1 AND chain_seq = 6`,
+				`UPDATE audit_events SET summary = '{"after": {"n": "forged"}}' WHERE org_id = $1 AND chain_seq = 4`,
+			} {
+				_, err := tx.Exec(ctx, q, org)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+		db, err := audit.Verify(ctx, store.New(pool), org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(db).To(HaveLen(1))
+		Expect(db[0].Break).NotTo(BeNil())
+		Expect(db[0].Break.Seq).To(BeEquivalentTo(4))
+
+		file := verifyLines(exportLines(ctx, sc, 1), audit.ExportVerifyOptions{})
+		Expect(file.Break).NotTo(BeNil())
+		Expect(file.Break.Seq).To(Equal(db[0].Break.Seq), file.Break.Reason)
+	})
+
+	It("round-trips a summary with non-ASCII text, HTML characters, escapes and large numbers", func(ctx SpecContext) {
+		odd, _, _ := pgtest.NewOrg(ctx, pool)
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{
+				Org: odd, Actor: audit.System("koinon-test:spec"), Action: "test.odd", TargetKind: "test", TargetID: "Zürich <&> 東京",
+				After: map[string]any{
+					"text":    "héllo 世界 🎉 \u2028\u2029 <script>&amp;</script>",
+					"escapes": "quote \" backslash \\ newline \n tab \t nul-free \u0001 slash /",
+					"big":     json.Number("123456789012345678901234567890"),
+					"float":   json.Number("1.5e300"),
+					"max":     uint64(18446744073709551615),
+					"nested":  []any{map[string]any{"n": 1}, map[string]any{"n": 2}},
+					"twins":   map[string]any{"a": map[string]any{"n": "x"}, "b": map[string]any{"n": "y"}},
+				},
+			})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		lines := exportLines(ctx, audit.ExportScope{Org: odd}, 1)
+		Expect(lines).To(HaveLen(2))
+		res := verifyLines(lines, audit.ExportVerifyOptions{})
+		Expect(res.Break).To(BeNil(), "%+v", res.Break)
+		Expect(res.Rows).To(BeEquivalentTo(1))
+		var ev audit.ExportEvent
+		Expect(json.Unmarshal([]byte(lines[1]), &ev)).To(Succeed())
+		Expect(ev.SummaryText).To(ContainSubstring("世界 🎉"))
+		Expect(ev.SummaryText).To(ContainSubstring("123456789012345678901234567890"))
+		Expect(ev.TargetID).To(Equal("Zürich <&> 東京"))
 	})
 
 	Describe("a partial export", func() {

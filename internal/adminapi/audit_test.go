@@ -4,13 +4,18 @@ package adminapi_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -270,5 +275,74 @@ var _ = Describe("GET /admin/v1/audit/export", func() {
 		Expect(err).NotTo(HaveOccurred())
 		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?scope=install", nil)
 		Expect(st).To(Equal(http.StatusForbidden))
+	})
+
+	// get starts an export request and returns its response without reading the body.
+	get := func(ctx context.Context, e *env) (*http.Response, error) {
+		GinkgoHelper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.srv.URL+"/admin/v1/audit/export", nil)
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+e.token)
+		return http.DefaultClient.Do(req)
+	}
+
+	It("ends the export when the client goes away mid-stream, leaving no goroutine behind", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		exported := make(chan error, 1)
+		ended := make(chan struct{})
+		// An export longer than every buffer between the two ends: it only stops when a write fails.
+		adminapi.SetAuditExporter(e.api, func(_ context.Context, w io.Writer, _ audit.ExportScope, _ int64) error {
+			line := []byte(strings.Repeat("x", 1023) + "\n")
+			for {
+				if _, err := w.Write(line); err != nil {
+					exported <- err
+					return err
+				}
+			}
+		}, func() { close(ended) })
+
+		resp, err := get(ctx, e)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		_, err = io.ReadFull(resp.Body, make([]byte, 16))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.Body.Close()).To(Succeed(), "the client disconnects after a few bytes")
+
+		Eventually(exported).WithTimeout(30*time.Second).Should(Receive(MatchError(io.ErrClosedPipe)), "the export's write fails and it returns")
+		Eventually(ended).WithTimeout(10*time.Second).Should(BeClosed(), "the export goroutine ends")
+	})
+
+	It("aborts the connection when the export fails after the first byte, instead of ending a truncated body cleanly", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		ended := make(chan struct{})
+		adminapi.SetAuditExporter(e.api, func(_ context.Context, w io.Writer, _ audit.ExportScope, _ int64) error {
+			line := []byte(`{"chain_seq":1}` + strings.Repeat(" ", 1000) + "\n")
+			for range 64 {
+				if _, err := w.Write(line); err != nil {
+					return err
+				}
+			}
+			return errors.New("koinon-test: the database went away")
+		}, func() { close(ended) })
+
+		resp, err := get(ctx, e)
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			var raw []byte
+			raw, err = io.ReadAll(resp.Body)
+			Expect(string(raw)).NotTo(ContainSubstring(`"error"`), "no error object is appended to the stream")
+			Expect(raw).NotTo(BeEmpty(), "the stream had started")
+		}
+		Expect(err).To(HaveOccurred(), "the client sees a broken transfer, not a clean end")
+		Eventually(ended).WithTimeout(10 * time.Second).Should(BeClosed())
+
+		By("an ordinary error before the first byte is still an error response")
+		adminapi.SetAuditExporter(e.api, func(context.Context, io.Writer, audit.ExportScope, int64) error {
+			return audit.ErrBadFilter
+		}, nil)
+		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit/export", nil)
+		Expect(st).To(Equal(http.StatusBadRequest), string(raw))
+		Expect(string(raw)).To(ContainSubstring(`"error"`))
 	})
 })

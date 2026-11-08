@@ -17,14 +17,19 @@ kubectl -n koinon exec deploy/koinon-api -- koinon-api audit export --scope org 
 kubectl -n koinon exec deploy/koinon-api -- koinon-api audit export --scope install --from-seq 120 > install-120.jsonl
 
 # or over the admin API, streamed
-curl -H "Authorization: Bearer $TOKEN" "https://koinon.example.com/admin/v1/audit/export" > org.jsonl
-curl -H "Authorization: Bearer $TOKEN" "https://koinon.example.com/admin/v1/audit/export?scope=install" > install.jsonl
+curl -f -H "Authorization: Bearer $TOKEN" "https://koinon.example.com/admin/v1/audit/export" > org.jsonl
+curl -f -H "Authorization: Bearer $TOKEN" "https://koinon.example.com/admin/v1/audit/export?scope=install" > install.jsonl
 ```
 
 The admin API follows the rules of the read. `scope=org` (the default) exports the token's own org;
 naming another org with `org=` is 403. `scope=install` needs a token whose root user is a platform
 admin, checked on every request. The export reads the chain page by page and writes each line as it
 goes, so a long chain is not held in memory.
+
+A failure before the first line (a `fromSeq` beyond the chain, say) is an ordinary error response. A failure
+after it cannot change the status any more, so the server cuts the connection: the client sees a broken
+transfer (curl exits non-zero), never a body that ends cleanly. `koinon-api audit export --out <file>`
+creates a new file and removes it again when the export fails, so a partial file is never left behind.
 
 ## Format `koinon.audit.export.v1`
 
@@ -48,7 +53,8 @@ An event line has `chain_seq`, `id`, `actor_kind`, `actor_id`, `action`, `target
 `request_id`, `created_at_micros` (microseconds since the Unix epoch), `prev_hash` and `hash` (64
 lower-case hex digits), and the summary twice: `summary_text` is the text Postgres prints for the `jsonb`
 value, which is what the hash covers, and `summary` is the same value as a JSON object for readers. A
-verifier must hash `summary_text` and refuse a line where `summary` is another value. The summaries are
+verifier must hash `summary_text` and refuse a line where `summary` is another value, or holds a key twice
+at any depth (readers disagree on which of the two values counts). The summaries are
 the scrubbed audit data; an export holds no key material and no secret values.
 
 ## The hash
@@ -104,8 +110,10 @@ koinon-api audit verify --file install-120.jsonl --after install.jsonl
 `prev_hash`. Without `--after` the partial file's own links are checked and the report says the first
 `prev_hash` was not.
 
-An export proves that the file is a consistent chain with the head it names. It does not prove that the
-head is the chain's real head: someone who rewrites a whole copy from the start, header included, gets a
-file that verifies. Compare the head with one you kept earlier (an earlier export given to `--after`). Anchors
+**A file verified alone proves internal consistency only, not authenticity; use `--after` (later
+anchors/checkpoints) to pin it.** `verify --file` prints this as a `note` line whenever no `--after` is
+given. The hashes show that the file is a consistent chain with the head it names, not that the head is
+the chain's real head: someone who rewrites a whole copy from the start, header included, gets a file
+that verifies. Compare the head with one you kept earlier (an earlier export given to `--after`). Anchors
 and signed checkpoints that pin the head outside the database are planned (ADR 0100); `verify --file` will
 check them when they exist.

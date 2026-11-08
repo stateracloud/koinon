@@ -83,37 +83,22 @@ func newAuditCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			w := cmd.OutOrStdout()
-			closeOut := func() error { return nil }
-			if out != "" && out != "-" {
-				f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator names the output file
-				if err != nil {
-					return fmt.Errorf("create %s: %w", out, err)
-				}
-				closed := false
-				defer func() {
-					if !closed {
-						_ = f.Close()
-					}
-				}()
-				w = f
-				closeOut = func() error {
-					closed = true
-					if err := f.Close(); err != nil {
-						return fmt.Errorf("close %s: %w", out, err)
-					}
-					return nil
-				}
+			if out == "" || out == "-" {
+				return exportAudit(cmd.Context(), dbURL, cmd.OutOrStdout(), sc, fromSeq)
 			}
-			pool, err := pgxpool.New(cmd.Context(), dbURL)
+			f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator names the output file
 			if err != nil {
-				return fmt.Errorf("connect to postgres: %w", err)
+				return fmt.Errorf("create %s: %w", out, err)
 			}
-			defer pool.Close()
-			if err := audit.Export(cmd.Context(), store.New(pool), w, sc, fromSeq); err != nil {
-				return err
+			err = exportAudit(cmd.Context(), dbURL, f, sc, fromSeq)
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf("close %s: %w", out, cerr)
 			}
-			return closeOut()
+			if err != nil {
+				// A partial file is not an export, and the exclusive create would refuse the next run.
+				_ = os.Remove(out)
+			}
+			return err
 		},
 	}
 	export.Flags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
@@ -125,6 +110,16 @@ func newAuditCommand() *cobra.Command {
 	mustRequire(export, "database-url", "scope")
 	root.AddCommand(export)
 	return root
+}
+
+// exportAudit connects to dbURL and writes the export of sc from fromSeq to w.
+func exportAudit(ctx context.Context, dbURL string, w io.Writer, sc audit.ExportScope, fromSeq int64) error {
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("connect to postgres: %w", err)
+	}
+	defer pool.Close()
+	return audit.Export(ctx, store.New(pool), w, sc, fromSeq)
 }
 
 // exportScope reads --scope and --org of "audit export".
@@ -181,11 +176,19 @@ func verifyAuditFile(path, after string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if !audit.WriteExportReport(out, res) {
+	ok := audit.WriteExportReport(out, res)
+	if after == "" {
+		_, _ = fmt.Fprintln(out, "note    "+aloneNote)
+	}
+	if !ok {
 		return audit.ErrBroken
 	}
 	return nil
 }
+
+// aloneNote is what verify --file says when no --after pins the file (ADR 0100): the hashes only
+// show that the file agrees with itself, and anyone can write a file that does.
+const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after (later anchors/checkpoints) to pin it"
 
 // checkExportFile verifies one export file alone.
 func checkExportFile(path string) (audit.ExportResult, error) {

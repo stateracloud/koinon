@@ -58,22 +58,53 @@ func (s *Server) ExportAudit(ctx context.Context, req ExportAuditRequestObject) 
 		}
 		sc.Org = p.Org
 	}
+	export := s.exportAudit
+	if export == nil {
+		export = func(ctx context.Context, w io.Writer, sc audit.ExportScope, fromSeq int64) error {
+			return audit.Export(ctx, store.New(s.pool), w, sc, fromSeq)
+		}
+	}
 	pr, pw := io.Pipe()
 	go func() {
-		// A failure after the first byte ends the stream early: the file then fails verification
-		// (its last line is not the header's head), which is the signal the reader gets.
-		err := audit.Export(ctx, store.New(s.pool), pw, sc, fromSeq)
-		if err != nil {
+		if s.exportDone != nil {
+			defer s.exportDone()
+		}
+		err := export(ctx, pw, sc, fromSeq)
+		// A closed pipe or a cancelled request means the client went away: the response writer's
+		// own error says so, once (the response error handler logs it).
+		if err != nil && !errors.Is(err, io.ErrClosedPipe) && ctx.Err() == nil {
 			s.log.Error("audit export failed", "err", err)
 		}
 		_ = pw.CloseWithError(err)
 	}()
 	// Wait for the first bytes: a failure before the header is written (a fromSeq beyond the chain,
-	// an unreadable head) is still an ordinary error response, not a 200 with an empty body.
-	body := bufio.NewReader(pr)
-	if _, err := body.Peek(1); err != nil && !errors.Is(err, io.EOF) {
+	// an unreadable head) is still an ordinary error response, not a 200 with an empty body. The
+	// buffer is bufio's default size (4 KiB); it only holds what the first Peek read.
+	body := &exportBody{r: bufio.NewReader(pr), pr: pr}
+	if _, err := body.r.Peek(1); err != nil && !errors.Is(err, io.EOF) {
 		_ = pr.Close()
 		return fail(err)
 	}
 	return ExportAudit200ApplicationxNdjsonResponse{Body: body}, nil
 }
+
+// exportBody is the export's response body. Close closes the pipe's reader, so the export
+// goroutine's next write fails and it ends when the response ends early (the client went away):
+// the generated visitor closes a body that is an io.Closer. A read error other than io.EOF is the
+// export failing after the response started; it is returned as errStreamFailed, and the response
+// error handler aborts the connection rather than end a truncated body cleanly. It deliberately has
+// no WriteTo (as a bare *bufio.Reader would), so io.Copy cannot bypass that mapping.
+type exportBody struct {
+	r  *bufio.Reader
+	pr *io.PipeReader
+}
+
+func (b *exportBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, fmt.Errorf("%w: %w", errStreamFailed, err)
+	}
+	return n, err
+}
+
+func (b *exportBody) Close() error { return b.pr.Close() }

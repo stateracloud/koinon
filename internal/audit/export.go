@@ -214,11 +214,6 @@ type ExportVerifyOptions struct {
 	// After is the end of an earlier, verified export. A partial export (from_seq above 1) starts
 	// from its hash: its first prev_hash must equal it.
 	After *ExportEnd
-
-	// checkpoint and publicKey are the hook for issue 7 (signed checkpoints, ADR 0100 decision 4):
-	// `audit verify --file --checkpoint <note> --public-key <key>` checks the signed note against the
-	// export's chain. Not implemented; nothing sets them.
-	checkpoint, publicKey string //nolint:unused // hook for issue 7
 }
 
 // ExportResult is the verdict on an export file.
@@ -358,7 +353,12 @@ func exportLink(tag, scope string, ev ExportEvent) link {
 	case herr != nil:
 		l.bad = "hash: " + herr.Error()
 		return l
-	case !summaryMatches(ev.SummaryText, ev.Summary):
+	}
+	if k, dup := duplicateKey(ev.Summary); dup {
+		l.bad = fmt.Sprintf("summary has the key %q twice", k)
+		return l
+	}
+	if !summaryMatches(ev.SummaryText, ev.Summary) {
 		l.bad = "summary does not match summary_text"
 		return l
 	}
@@ -393,6 +393,52 @@ func summaryMatches(text string, parsed json.RawMessage) bool {
 		}
 	}
 	return reflect.DeepEqual(a, b)
+}
+
+// duplicateKey returns a key that an object in raw, at any depth, holds twice, and whether there is
+// one. encoding/json keeps the last of two equal keys and other readers may keep the first, so a
+// summary with one could show a reader a value the hashed summary_text does not hold; it is refused.
+// Keys are compared unescaped ("a" and "\u0061" are the same key). A syntax error is not reported
+// here: summaryMatches refuses the summary for it.
+func duplicateKey(raw []byte) (string, bool) {
+	type object struct {
+		keys    map[string]struct{}
+		wantKey bool
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var stack []*object // nil entries are arrays
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		var top *object
+		if len(stack) > 0 {
+			top = stack[len(stack)-1]
+		}
+		if t, ok := tok.(string); ok && top != nil && top.wantKey {
+			if _, dup := top.keys[t]; dup {
+				return t, true
+			}
+			top.keys[t], top.wantKey = struct{}{}, false
+			continue
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		// A value: the object holding it wants its next key.
+		if top != nil {
+			top.wantKey = true
+		}
+		switch tok {
+		case json.Delim('{'):
+			stack = append(stack, &object{keys: map[string]struct{}{}, wantKey: true})
+		case json.Delim('['):
+			stack = append(stack, nil)
+		}
+	}
 }
 
 // WriteExportReport prints the verdict on an export and reports whether it holds.
