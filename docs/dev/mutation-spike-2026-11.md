@@ -138,6 +138,27 @@ lines, so about **4,600 mutants**.
   That is 15-50 mutants: 2-5 min to generate (only the touched files) plus 3-5 min of tests at 4
   procs, so **about 10 min**.
 
+## Upstream patch (draft for a human to post)
+
+The fork branch is `stateracloud/go-mutesting` `koinon/select-arms`. Nothing is opened upstream; a
+human posts it, in their own words. Draft:
+
+> **statement/remove never removes statements inside a select arm**
+>
+> I ran go-mutesting on code that has a `select` with a `case <-ch:` arm, and none of the
+> statements inside the arms ever got a `statement/remove` mutant. A `select` arm is an
+> `*ast.CommClause`, but `MutatorRemoveStatement` only looks at the body of an `*ast.BlockStmt` or
+> an `*ast.CaseClause`, so the arm bodies are skipped. In my case that hid a real gap: the line
+> `backoff = first` inside the arm was never removed, so I could not see that no test depended on it.
+>
+> The change adds `case *ast.CommClause: l = n.Body` next to the `CaseClause` case. I added a
+> testdata file (`testdata/statement/remove_select.go`) with a `select` whose arm assigns a value,
+> and a test that expects exactly one mutant, the assignment replaced by `_ = backoff`. `go test
+> ./mutator/...` passes.
+>
+> `branch/case` has the same shape (it empties `CaseClause` bodies) and could get the same
+> treatment; I kept this patch to the one mutator.
+
 ## Problems hit
 
 1. **No mutation of `select` arms** (above): the main gap in the tool for Koinon's concurrent

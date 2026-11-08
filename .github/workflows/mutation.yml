@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Mutation-testing baseline (issue 401, docs/dev/mutation-spike-2026-11.md). Advisory: it is not in
+# ci.yml and not a required check. It runs by hand (workflow_dispatch) or on a pull request that
+# carries the label `mutation`, so it can be tried from a branch before it merges. One job per
+# allow-list package; each runs hack/mutation.sh and uploads its results. There is no cron yet: the
+# nightly comes with the ADR.
+name: mutation
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutate:
+    # A pull request runs only while it carries the label; a labeled event for another label is skipped.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'mutation')
+    name: mutate ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - ./internal/leakguard
+          - ./internal/declarative
+          - ./internal/auth
+          - ./internal/otlpauth
+          - ./internal/secretstore
+          - ./internal/secretstore/wrapping
+          - ./internal/ledger
+          - ./internal/prices
+          - ./internal/providerusage
+          - ./internal/gateway
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # hack/mutation.sh starts one shared Postgres through hack/pgserver (testcontainers, as
+      # hack/go-test.sh does); the hosted runner has Docker.
+      - name: mutate
+        id: mutate
+        env:
+          KUBECONFIG: /dev/null
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          out="$RUNNER_TEMP/mutation"
+          rc=0
+          bash hack/mutation.sh --packages "$PACKAGE" --max-procs "$(nproc)" --out "$out" >"$RUNNER_TEMP/summary.txt" || rc=$?
+          cat "$RUNNER_TEMP/summary.txt"
+          mkdir -p "$out"
+          cp "$RUNNER_TEMP/summary.txt" "$out/summary.txt"
+          echo "name=$(echo "${PACKAGE#./internal/}" | tr '/' '-')" >>"$GITHUB_OUTPUT"
+          # 1 means survivors: that is the result, not a failure of the job. 2 is a usage or setup error.
+          [ "$rc" = 0 ] || [ "$rc" = 1 ] || exit "$rc"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutation-${{ steps.mutate.outputs.name || strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/mutation/results.tsv
+            ${{ runner.temp }}/mutation/summary.txt
+            ${{ runner.temp }}/mutation/survivors
+            ${{ runner.temp }}/mutation/logs
+          if-no-files-found: warn
+          retention-days: 30
+
+  summary:
+    name: summary
+    needs: mutate
+    if: always() && needs.mutate.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutation-*
+          path: reports
+      - name: merge the counts
+        run: |
+          {
+            echo "## Mutation baseline"
+            echo
+            echo "| Package | Generated | Tested | Killed | Survived | Timeout | Error | Clean | Wall |"
+            echo "|---|---|---|---|---|---|---|---|---|"
+            for f in reports/*/summary.txt; do
+              [ -f "$f" ] || continue
+              # "<pkg>\tgenerated=N tested=N killed=N survived=N timeout=N error=N clean=Ns wall=Ns"
+              awk -F'\t' '/generated=/ {
+                n = split($2, kv, " "); delete v
+                for (i = 1; i <= n; i++) { split(kv[i], p, "="); v[p[1]] = p[2] }
+                printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, v["generated"], v["tested"], v["killed"], v["survived"], v["timeout"], v["error"], v["clean"], v["wall"]
+                next
+              } NF >= 2 { printf "| %s | %s | | | | | | | |\n", $1, $2 }' "$f"
+            done
+            echo
+            echo "Survivors, by package (the diffs are in each package's artifact):"
+            echo
+            echo '```'
+            cat reports/*/results.tsv 2>/dev/null | awk -F'\t' '$5 == "survived" { print $2 ":" $3 " " $4 }' | sort
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

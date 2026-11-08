@@ -26,3 +26,10 @@ require (
 	golang.org/x/tools v0.50.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// Our own patch (statement/remove walks select arms, i.e. *ast.CommClause) on top of the upstream
+// commit 9ce5f731e321 (2026-10-02, 37 days old at the time of the spike). The patch commit itself is
+// younger than ADR 0079's 3 days: a first-party exception, because the code is ours and reviewed here.
+// Exit condition: once the patch is merged upstream and 3 days old, delete this replace and require
+// the upstream version (issue 401).
+replace github.com/avito-tech/go-mutesting => github.com/stateracloud/go-mutesting v0.0.0-20261108180448-a04e65a00fdc
