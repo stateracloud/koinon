@@ -124,6 +124,16 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		Expect(err).To(MatchError(audit.ErrBroken))
 		Expect(out).To(ContainSubstring("BROKEN  install chain (file): first broken link at chain_seq 1"))
 
+		By("a database URL from the environment (the pod sets DATABASE_URL) does not stop --file")
+		GinkgoT().Setenv("DATABASE_URL", "postgres://koinon_test_not-a-real-host/db")
+		var rootOut bytes.Buffer
+		rootCmd := NewRootCommand()
+		rootCmd.SetOut(&rootOut)
+		rootCmd.SetErr(&rootOut)
+		rootCmd.SetArgs([]string{"audit", "verify", "--file", first})
+		Expect(rootCmd.ExecuteContext(ctx)).To(Succeed(), rootOut.String())
+		Expect(rootOut.String()).To(HavePrefix("ok      install chain (file): 3 events"))
+
 		By("flag combinations that make no sense are refused")
 		_, err = run("verify")
 		Expect(err).To(MatchError(ContainSubstring("database-url")))
