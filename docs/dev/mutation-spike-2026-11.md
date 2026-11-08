@@ -71,6 +71,16 @@ Results: 8 killed, 8 survived, 1 error (it does not build: `declared and not use
 Real gaps by package: `internal/declarative` 2 (`declarative.go:197`, `declarative.go:194`).
 Nothing else was mutated in this spike.
 
+### Pilot re-run with the patched generator (fork `koinon/select-arms`)
+
+Same command, same range, 4 procs, one run: 195 mutants generated, 19 in range, 9 killed, 9
+survived, 1 error (the same `declared and not used` build failure at :196). The tool now generates
+the pilot mutant itself: `declarative.go:181` `statement/remove` turns `backoff = first` into
+`_, _ = backoff, first`, and HEAD's tests **kill** it (30 s). The one extra mutant against the first
+run is :182, `statement/remove` of `time.Sleep(200 * time.Millisecond)`, which survives: the same
+(c) noise as the other :182 mutants. The two real gaps are unchanged (:197 `branch/case`, :194
+`statement/remove`). `branch/case` still skips `select` arms; this bug does not need it.
+
 ### Timing (Mac, warm build cache, 4 procs; Docker 29.8.2 via OrbStack was available)
 
 - Clean run of `./internal/declarative`: 21 s with a container per test process, 15 s with the
@@ -189,7 +199,8 @@ human posts it, in their own words. Draft:
 
 - **Generator:** go-mutesting, used only to generate mutants, pinned in `tools/mutation`. First,
   upstream support for `*ast.CommClause` in `statement/remove` and `branch/case`. Until that is
-  merged and 3 days old, pin a fork commit with a `replace` in `tools/mutation/go.mod`, with an
+  merged and 3 days old, a fork commit is pinned (done: `replace` in `tools/mutation/go.mod` to
+  `stateracloud/go-mutesting` `a04e65a00fdc`), with an
   issue whose exit condition is the upstream release. A Koinon-owned generator (go/ast plus
   go/printer, a few hundred lines, also fixing the per-file type-check cost) is the fallback if
   upstream does not move.
