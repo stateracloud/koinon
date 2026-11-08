@@ -145,7 +145,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 	})
 })
 
-// The periodic refresh reads through the services' queue, as koinon-api wires it (SetQueue): one
+// The periodic refresh reads through the scope module (Syncer.Request), as the services do: one
 // reading per connection at a time, and Drain waits for it.
 var _ = Describe("the periodic code-host scope refresh beside a person's reading (#245)", func() {
 	var (

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package services
+package scopesync
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-func scopeTestConn(b byte) store.Connection {
+func testConn(b byte) store.Connection {
 	return store.Connection{
 		OrgID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
 		ID:    pgtype.UUID{Bytes: [16]byte{b}, Valid: true},
@@ -69,14 +69,14 @@ func (f *fakeReader) run(ctx context.Context, row store.Connection, actor audit.
 	f.mu.Unlock()
 }
 
-var _ = Describe("scopeJobs", func() {
+var _ = Describe("the scope readings queue", func() {
 	var (
 		f *fakeReader
-		j *scopeJobs
+		j *jobs
 	)
 	BeforeEach(func() {
 		f = newFakeReader()
-		j = newScopeJobs(slog.Default(), f.run)
+		j = newJobs(slog.Default(), f.run)
 	})
 	AfterEach(func() {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -86,7 +86,7 @@ var _ = Describe("scopeJobs", func() {
 
 	It("runs at most one reading per connection and coalesces a burst into one more", func() {
 		for range 10 {
-			j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+			j.start(context.Background(), testConn(1), audit.Actor{})
 		}
 		Eventually(f.started).Should(Receive())
 		f.release <- struct{}{}
@@ -100,10 +100,10 @@ var _ = Describe("scopeJobs", func() {
 	})
 
 	It("carries the request ID of the request that queued a reading, the newest when requests coalesce", func() {
-		j.start(audit.WithRequestID(context.Background(), "req-1"), scopeTestConn(1), audit.Actor{})
+		j.start(audit.WithRequestID(context.Background(), "req-1"), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
-		j.start(audit.WithRequestID(context.Background(), "req-2"), scopeTestConn(1), audit.Actor{})
-		j.start(audit.WithRequestID(context.Background(), "req-3"), scopeTestConn(1), audit.Actor{})
+		j.start(audit.WithRequestID(context.Background(), "req-2"), testConn(1), audit.Actor{})
+		j.start(audit.WithRequestID(context.Background(), "req-3"), testConn(1), audit.Actor{})
 		f.release <- struct{}{}
 		Eventually(f.started).Should(Receive())
 		f.release <- struct{}{}
@@ -117,7 +117,7 @@ var _ = Describe("scopeJobs", func() {
 		periodic := audit.System("koinon-api:code-host-scope")
 		person := audit.User(pgtype.UUID{Bytes: [16]byte{9}, Valid: true})
 		named := func(name string) store.Connection {
-			row := scopeTestConn(1)
+			row := testConn(1)
 			row.DisplayName = name
 			return row
 		}
@@ -154,7 +154,7 @@ var _ = Describe("scopeJobs", func() {
 
 	It("does not carry the cancellation of the request, and Drain still cancels the reading", func() {
 		reqCtx, cancelReq := context.WithCancel(audit.WithRequestID(context.Background(), "req-1"))
-		j.start(reqCtx, scopeTestConn(1), audit.Actor{})
+		j.start(reqCtx, testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		cancelReq()
 		Consistently(func() int { f.mu.Lock(); defer f.mu.Unlock(); return f.canceled }, 100*time.Millisecond).Should(BeZero())
@@ -167,9 +167,9 @@ var _ = Describe("scopeJobs", func() {
 	})
 
 	It("reads a periodic refresh and a request for one connection one at a time, and tells each when it is done", func() {
-		periodic := j.start(context.Background(), scopeTestConn(1), audit.System("koinon-api:code-host-scope"))
+		periodic := j.start(context.Background(), testConn(1), audit.System("koinon-api:code-host-scope"))
 		Eventually(f.started).Should(Receive())
-		manual := j.start(audit.WithRequestID(context.Background(), "req-1"), scopeTestConn(1), audit.Actor{})
+		manual := j.start(audit.WithRequestID(context.Background(), "req-1"), testConn(1), audit.Actor{})
 		Consistently(f.started, 100*time.Millisecond).ShouldNot(Receive(), "no second reading while the first runs")
 		Expect(periodic).NotTo(BeClosed())
 		f.release <- struct{}{}
@@ -185,10 +185,10 @@ var _ = Describe("scopeJobs", func() {
 	})
 
 	It("closes the channel of a request coalesced away once the covering reading ends", func() {
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
-		replaced := j.start(context.Background(), scopeTestConn(1), audit.Actor{})
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		replaced := j.start(context.Background(), testConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		f.release <- struct{}{}
 		Eventually(f.started).Should(Receive())
 		Expect(replaced).NotTo(BeClosed())
@@ -199,12 +199,12 @@ var _ = Describe("scopeJobs", func() {
 
 	It("returns a closed channel after drain", func() {
 		j.drain(context.Background())
-		Expect(j.start(context.Background(), scopeTestConn(1), audit.Actor{})).To(BeClosed())
+		Expect(j.start(context.Background(), testConn(1), audit.Actor{})).To(BeClosed())
 	})
 
 	It("reads different connections side by side", func() {
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
-		j.start(context.Background(), scopeTestConn(2), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(2), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		Eventually(f.started).Should(Receive())
 		f.release <- struct{}{}
@@ -213,18 +213,18 @@ var _ = Describe("scopeJobs", func() {
 	})
 
 	It("reads a connection again after its reading ended", func() {
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		f.release <- struct{}{}
 		Eventually(func() int { j.mu.Lock(); defer j.mu.Unlock(); return len(j.running) }).Should(BeZero())
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		f.release <- struct{}{}
 		j.drain(context.Background())
 	})
 
 	It("drain waits for a running reading", func() {
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		done := make(chan struct{})
 		go func() { j.drain(context.Background()); close(done) }()
@@ -234,7 +234,7 @@ var _ = Describe("scopeJobs", func() {
 	})
 
 	It("drain cancels a reading that outlasts its deadline and returns", func() {
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Eventually(f.started).Should(Receive())
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
@@ -248,7 +248,7 @@ var _ = Describe("scopeJobs", func() {
 
 	It("starts no reading after drain", func() {
 		j.drain(context.Background())
-		j.start(context.Background(), scopeTestConn(1), audit.Actor{})
+		j.start(context.Background(), testConn(1), audit.Actor{})
 		Consistently(f.started, 100*time.Millisecond).ShouldNot(Receive())
 	})
 })
