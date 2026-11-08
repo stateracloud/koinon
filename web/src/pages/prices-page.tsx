@@ -3,6 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
+import { closeOnly } from '@/lib/editing'
 import { ConfirmAction } from '@/components/confirm-action'
 import { PriceForm } from '@/components/price-form'
 import { RequireAdmin } from '@/components/require-admin'
@@ -145,7 +146,7 @@ function PricesContent() {
                     </dl>
                     {g.versions.length > 1 && <p className="text-muted-foreground text-xs">{g.versions.length} versions; earlier requests keep the version they were charged at.</p>}
                     {editing === g.name ? (
-                      <PriceForm orgId={orgId} existing={g.current} actions={actions} onDone={() => setEditing(undefined)} onSaved={saved} />
+                      <PriceForm orgId={orgId} existing={g.current} actions={actions} onDone={closeOnly(setEditing, g.name)} onSaved={saved} />
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         <Button variant="outline" size="sm" aria-label={`Edit price ${g.name}`} onClick={() => setEditing(g.name)}>

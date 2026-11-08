@@ -28,7 +28,7 @@ const notice = (id: string, threshold: number, level = 'org_monthly', read = fal
   })
 
 function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string; path?: string; notices?: ReturnType<typeof notice>[] } = {}) {
-  const calls = { caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0 }
+  const calls = { caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0, gate: undefined as Promise<void> | undefined }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => create(WhoAmIResponseSchema, { ...whoAmI({ role: opts.role }), platformAdmin: !!opts.platformAdmin }) })
     service(BudgetService, {
@@ -38,12 +38,15 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
           budget: create(OrgBudgetSchema, { monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00', estimatedThisMonthUsd: '10.00', systemChecksThisMonthUsd: '0.30', platformCeilingUsd: opts.ceiling ?? '', monthStart: timestampFromMs(monthStart.getTime()) }),
         }
       },
-      listAgentBudgets: () => ({
+      listAgentBudgets: async () => {
+        await calls.gate
+        return {
         budgets: [
           create(AgentBudgetSchema, { agentId: 'a-1', agentName: 'Repo helper', dailyLimitUsd: '5.00', templateDefaultUsd: '10.00', spentTodayUsd: '1.25' }),
           create(AgentBudgetSchema, { agentId: 'a-2', agentName: 'Docs bot', dailyLimitUsd: '10.00', templateDefaultUsd: '10.00', spentTodayUsd: '0.00' }),
         ],
-      }),
+        }
+      },
       listNotifications: () => {
         calls.noticeCalls++
         return { notifications: opts.notices ?? [] }
@@ -119,6 +122,28 @@ describe('Budgets page', () => {
     await userEvent.type(input, '7.5')
     await userEvent.click(within(row).getByRole('button', { name: 'Save limit for Repo helper' }))
     await waitFor(() => expect(calls.limits).toEqual([expect.objectContaining({ agentId: 'a-1', dailyLimitUsd: '7.5' })]))
+  })
+
+  it('keeps another agent\'s limit form open while a save is still refreshing (old issue 111)', async () => {
+    const calls = setup()
+    const list = await screen.findByRole('list', { name: 'Agent daily limits' })
+    const one = within(list).getByRole('heading', { name: 'Repo helper' }).closest('li')
+    if (!one) throw new Error('Repo helper row not found')
+    const two = within(list).getByRole('heading', { name: 'Docs bot' }).closest('li')
+    if (!two) throw new Error('Docs bot row not found')
+    await userEvent.click(within(one).getByRole('button', { name: 'Change limit of Repo helper' }))
+    let release: () => void = () => undefined
+    calls.gate = new Promise<void>((r) => (release = r))
+    await userEvent.click(within(one).getByRole('button', { name: 'Save limit for Repo helper' }))
+    await waitFor(() => expect(calls.limits).toHaveLength(1))
+
+    // The save has returned but its refresh is pending, so the first form is still open.
+    await userEvent.click(within(two).getByRole('button', { name: 'Change limit of Docs bot' }))
+    expect(within(two).getByLabelText('Daily limit for Docs bot, in US dollars')).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(within(one).queryByLabelText('Daily limit for Repo helper, in US dollars')).not.toBeInTheDocument())
+    expect(within(two).getByLabelText('Daily limit for Docs bot, in US dollars')).toBeInTheDocument()
   })
 
   it('lists notifications and marks one read', async () => {
