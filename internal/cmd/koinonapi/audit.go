@@ -40,8 +40,10 @@ func newAuditCommand() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if file != "" {
-				if dbURL != "" || orgID != "" || installOnly {
-					return errors.New("--file checks a file alone; it does not take --database-url, --org or --install")
+				// A database URL is ignored here: the pod's DATABASE_URL reaches --database-url through
+				// the root's environment binding, so it is no sign the operator asked for the database.
+				if orgID != "" || installOnly {
+					return errors.New("--file checks a file alone; it does not take --org or --install")
 				}
 				return verifyAuditFile(file, after, cmd.OutOrStdout())
 			}
