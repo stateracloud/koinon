@@ -98,7 +98,7 @@ with it and with the code (`internal/reconciler`).
   holds. The reconciler creates (and starts) an agent's sandbox only when something wants it: an
   active run, a claimable run (`has_demand`), a pre-wake signal (package wake) or a keep-warm
   request. Until then the agent's sandbox row records state `deleting` and phase `Idle` ("no sandbox
-  yet, it starts with the first run"), or `Archived` for an archived agent. The agent still has
+  yet, it starts with the first run"), or `Archived` when its sandbox was archived (ADR 0032 amendment; it restores on the next run). The agent still has
   exactly one sandbox and one home volume ([0032](0032-agent-home-checkpoints.md)) once the first
   run has created them.
 - **Stopped, not only suspended.** The reconciler stops a sandbox after `IdleTimeout` without an
@@ -110,7 +110,7 @@ with it and with the code (`internal/reconciler`).
   (migration 00044). A keep-warm agent's sandbox is created while the agent is active, is never
   idle-stopped and is started when found stopped. The name `alwaysOn` was never built as a field.
   The operator caps keep-warm per org (`reconciler.keepWarmPerOrg` in the chart, default 2, negative
-  for none): each pass grants it to the org's oldest active agents up to the cap, and the others
+  for none): each pass grants it to the org's oldest active agents that set it (`created_at`, `id`), up to the cap, and the others
   start on demand. The "Always-on agents" alternative above is therefore bounded, not a free
   option, so idle cost no longer grows with the number of agents.
 - **Cost.** The first run of an agent waits for its sandbox to start (image pull, home volume). The
