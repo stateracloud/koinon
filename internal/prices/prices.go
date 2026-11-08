@@ -304,8 +304,7 @@ func (s *Service) SetOverride(ctx context.Context, org pgtype.UUID, actor audit.
 		return Override{}, err
 	}
 	var row store.PriceOverride
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		var err error
 		row, err = q.InsertPriceOverride(ctx, store.InsertPriceOverrideParams{
 			OrgID: org, ID: newUUID(), Name: e.ID, Entry: raw, ValidFrom: pgtype.Timestamptz{Time: from, Valid: true}, CreatedBy: actor.String(),
@@ -313,10 +312,11 @@ func (s *Service) SetOverride(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "price.set", TargetKind: "price", TargetID: e.ID,
 			After: map[string]any{"name": e.ID, "provider": e.Provider, "match": e.Match, "prices": e.Prices, "tiers": e.Tiers, "validFrom": from.Format(time.RFC3339)},
 		})
+		return nil
 	})
 	if err != nil {
 		if isUnique(err) {
@@ -329,8 +329,7 @@ func (s *Service) SetOverride(ctx context.Context, org pgtype.UUID, actor audit.
 
 // RetireOverride ends the named price now. Its rows stay for the ledger entries that cite them.
 func (s *Service) RetireOverride(ctx context.Context, org pgtype.UUID, actor audit.Actor, name string) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		n, err := q.RetirePriceOverrides(ctx, store.RetirePriceOverridesParams{OrgID: org, Name: name, At: pgtype.Timestamptz{Time: time.Now(), Valid: true}})
 		if err != nil {
 			return err
@@ -338,8 +337,10 @@ func (s *Service) RetireOverride(ctx context.Context, org pgtype.UUID, actor aud
 		if n == 0 {
 			return ErrNotFound
 		}
-		return audit.RecordErr(ctx, q, audit.Event{Org: org, Actor: actor, Action: "price.retire", TargetKind: "price", TargetID: name})
+		b.Org(audit.Event{Org: org, Actor: actor, Action: "price.retire", TargetKind: "price", TargetID: name})
+		return nil
 	})
+	return err
 }
 
 // DefaultsStatus is the installed default list and the versions before it.

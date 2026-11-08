@@ -80,11 +80,12 @@ func (s *Server) fireNow(ctx context.Context, in triggers.RunNow) (store.Task, e
 		Notify: tr.Notify,
 		Origin: store.RunOriginScheduled,
 		Fire:   triggers.FireManual, FiredBy: in.User,
-		OnCreate: func(ctx context.Context, q *store.Queries, t store.Task) error {
-			return audit.RecordErr(ctx, q, audit.Event{
+		OnCreate: func(ctx context.Context, q *store.Queries, b audit.Batch, t store.Task) error {
+			b.Org(audit.Event{
 				Org: in.Org, Actor: in.Actor, Action: "agent.trigger.run_now", TargetKind: "agent", TargetID: in.Agent.String(),
 				After: map[string]any{"trigger": in.Trigger, "version": tr.Version, "taskId": t.ID.String()},
 			})
+			return nil
 		},
 	})
 	switch {

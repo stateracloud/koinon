@@ -352,7 +352,11 @@ func (a *Auditor) Record(ctx context.Context, e Event) error {
 		if a.Write != nil {
 			return struct{}{}, a.Write(ctx, ev)
 		}
-		return struct{}{}, audit.RecordInstallErr(ctx, store.New(a.Pool), ev)
+		_, err := audit.InTx(ctx, a.Pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(ev)
+			return nil
+		})
+		return struct{}{}, err
 	})
 	if err != nil {
 		return fmt.Errorf("write the %s install audit event: %w", e.Action, err)
@@ -473,8 +477,9 @@ func (a *Auditor) Observe(ctx context.Context, load KeyLoader) (ObserveResult, e
 		actor = ActorStartup
 	}
 	var res ObserveResult
-	err := pgx.BeginFunc(ctx, a.Pool, func(tx pgx.Tx) error {
-		res = ObserveResult{}
+	wrote := false
+	_, err := audit.InPgTx(ctx, a.Pool, func(tx pgx.Tx, b audit.Batch) error {
+		res, wrote = ObserveResult{}, false
 		if err := lockKeys(ctx, tx); err != nil {
 			return err
 		}
@@ -485,13 +490,14 @@ func (a *Auditor) Observe(ctx context.Context, load KeyLoader) (ObserveResult, e
 		}
 		res = r
 		if ev != nil {
-			if err := audit.RecordInstallErr(ctx, store.New(tx), *ev); err != nil {
-				return err
-			}
-			res.Wrote = true
+			b.Install(*ev)
+			wrote = true
 		}
 		return nil
 	})
+	if err == nil {
+		res.Wrote = wrote
+	}
 	return res, err
 }
 
@@ -574,7 +580,7 @@ func (c *Change) insert(ctx context.Context, hook bool, evs ...audit.InstallEven
 			return struct{}{}, err
 		}
 		for _, ev := range evs {
-			if err := audit.RecordInstallErr(ctx, store.New(sp), ev); err != nil {
+			if _, err := audit.WriteInTx(ctx, sp, func(b audit.Batch) { b.Install(ev) }); err != nil {
 				_ = sp.Rollback(ctx)
 				return struct{}{}, fmt.Errorf("write the %s install audit event: %w", ev.Action, err)
 			}

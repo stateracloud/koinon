@@ -101,7 +101,7 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		return Provider{}, err
 	}
 	var row store.Provider
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		row, err = q.CreateProvider(ctx, store.CreateProviderParams{
 			OrgID: org, ID: id, Name: in.Name, Type: in.Type, Url: in.URL, ApiKey: key,
 			AnthropicWorkspaceID: text(in.AnthropicWorkspaceID),
@@ -118,7 +118,7 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		}
 		after := providerSummary(row)
 		after["costKeyChanged"] = in.CostAPIKey != ""
-		_, err = audit.Record(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.create", TargetKind: "provider", TargetID: id.String(),
 			After: after,
 		})
@@ -137,7 +137,7 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		return Provider{}, err
 	}
 	var out store.Provider
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetProvider(ctx, store.GetProviderParams{OrgID: org, ID: pid})
 		if err != nil {
 			return err
@@ -190,7 +190,7 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 			return err
 		}
 		if typ != cur.Type {
-			if err := refitModelFormats(ctx, q, org, actor, out); err != nil {
+			if err := refitModelFormats(ctx, q, b, org, actor, out); err != nil {
 				return err
 			}
 		}
@@ -200,7 +200,7 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		after := providerSummary(out)
 		after["keyChanged"] = patch.APIKey != nil
 		after["costKeyChanged"] = patch.CostAPIKey != nil
-		_, err = audit.Record(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.update", TargetKind: "provider", TargetID: id,
 			Before: providerSummary(cur), After: after,
 		})
@@ -218,7 +218,7 @@ func (s *Service) DeleteProvider(ctx context.Context, org pgtype.UUID, actor aud
 	if err != nil {
 		return err
 	}
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetProvider(ctx, store.GetProviderParams{OrgID: org, ID: pid})
 		if err != nil {
 			return err
@@ -231,12 +231,10 @@ func (s *Service) DeleteProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if _, err := q.DeleteProvider(ctx, store.DeleteProviderParams{OrgID: org, ID: pid}); err != nil {
 			return err
 		}
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.delete", TargetKind: "provider", TargetID: id, Before: providerSummary(cur),
-		}); err != nil {
-			return err
-		}
-		return clearDefaultIfGone(ctx, q, org, actor)
+		})
+		return clearDefaultIfGone(ctx, q, b, org, actor)
 	})
 	return mapErr(err)
 }
@@ -303,7 +301,7 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		return Model{}, err
 	}
 	var row store.Model
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		prov, err := q.GetProvider(ctx, store.GetProviderParams{OrgID: org, ID: pid})
 		if err != nil {
 			return err
@@ -331,12 +329,13 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
-		if err := adoptDefaultModel(ctx, q, org, actor, row.Name); err != nil {
+		if err := adoptDefaultModel(ctx, q, b, org, actor, row.Name); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "model.create", TargetKind: "model", TargetID: id.String(), After: modelSummary(row),
 		})
+		return nil
 	})
 	if err != nil {
 		return Model{}, mapErr(err)
@@ -354,7 +353,7 @@ func (s *Service) UpdateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		return Model{}, err
 	}
 	var out store.Model
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetModel(ctx, store.GetModelParams{OrgID: org, ID: mid})
 		if err != nil {
 			return err
@@ -385,10 +384,11 @@ func (s *Service) UpdateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "model.update", TargetKind: "model", TargetID: id,
 			Before: modelSummary(cur), After: modelSummary(out),
 		})
+		return nil
 	})
 	if err != nil {
 		return Model{}, mapErr(err)
@@ -402,7 +402,7 @@ func (s *Service) DeleteModel(ctx context.Context, org pgtype.UUID, actor audit.
 	if err != nil {
 		return err
 	}
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetModel(ctx, store.GetModelParams{OrgID: org, ID: mid})
 		if err != nil {
 			return err
@@ -413,12 +413,10 @@ func (s *Service) DeleteModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if _, err := q.DeleteModel(ctx, store.DeleteModelParams{OrgID: org, ID: mid}); err != nil {
 			return err
 		}
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "model.delete", TargetKind: "model", TargetID: id, Before: modelSummary(cur),
-		}); err != nil {
-			return err
-		}
-		return clearDefaultIfGone(ctx, q, org, actor)
+		})
+		return clearDefaultIfGone(ctx, q, b, org, actor)
 	})
 	return mapErr(err)
 }
@@ -459,7 +457,7 @@ func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} 
 // refitModelFormats follows a provider's type change (ADR 0069): a model whose format an admin set
 // must still be offered by the new type, or the change is refused; every other model takes the
 // new type's default.
-func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, prov store.Provider) error {
+func refitModelFormats(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, prov store.Provider) error {
 	models, err := q.ListModels(ctx, org)
 	if err != nil {
 		return err
@@ -482,12 +480,10 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 		if err != nil {
 			return err
 		}
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "model.update", TargetKind: "model", TargetID: m.ID.String(),
 			Before: modelSummary(m), After: modelSummary(after),
-		}); err != nil {
-			return err
-		}
+		})
 	}
 	return nil
 }
@@ -496,28 +492,30 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 // the transaction that deleted the model, and audits it (old issue 256). It never picks another model: that
 // silent change is what the stored default prevents. The agents without a model setting then fail
 // with agentmodel.NoDefaultMessage until an admin sets a default.
-func clearDefaultIfGone(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor) error {
+func clearDefaultIfGone(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor) error {
 	old, err := q.ClearOrgDefaultModelIfGone(ctx, org)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // the default stays, or there was none
 	} else if err != nil {
 		return err
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 		Before: map[string]any{"model": old}, After: map[string]any{"model": "", "reason": "model deleted"},
 	})
+	return nil
 }
 
 // adoptDefaultModel makes the org's first model its default model (old issue 256). An org that has a default
 // keeps it: a later provider or model never moves the agents that run on it. The change is audited.
-func adoptDefaultModel(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, model string) error {
+func adoptDefaultModel(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, model string) error {
 	n, err := q.SetOrgDefaultModelIfUnset(ctx, store.SetOrgDefaultModelIfUnsetParams{OrgID: org, DefaultModel: model})
 	if err != nil || n == 0 {
 		return err
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: actor, Action: "org.default_model.set", TargetKind: "org", TargetID: org.String(),
 		Before: map[string]any{"model": ""}, After: map[string]any{"model": model, "reason": "first model"},
 	})
+	return nil
 }

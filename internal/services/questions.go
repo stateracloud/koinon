@@ -10,6 +10,7 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
@@ -215,12 +216,12 @@ func (s *Server) ListAskableMembers(ctx context.Context, req *questionv1alpha1.L
 // resolveQuestion runs one resolution in a transaction and maps its errors. The agent's sandbox is
 // pre-woken after the commit, so a late answer does not wait for the reconciler to notice the run.
 func (s *Server) resolveQuestion(ctx context.Context, c caller, id pgtype.UUID,
-	do func(q *store.Queries) (store.Question, error),
+	do func(q *store.Queries, b audit.Batch) (store.Question, error),
 ) (store.Question, error) {
 	var out store.Question
-	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
+	err := s.commitAudit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
 		var err error
-		if out, err = do(q); err != nil {
+		if out, err = do(q, b); err != nil {
 			return nil, err
 		}
 		// Wake the sandbox only when this resolution made the run claimable; otherwise other
@@ -278,8 +279,8 @@ func (s *Server) AnswerQuestion(ctx context.Context, req *questionv1alpha1.Answe
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "an answer is a choice, the draft or text")
 	}
-	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries) (store.Question, error) {
-		return questions.Respond(ctx, q, c.org, id, c.actor(), ans)
+	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries, b audit.Batch) (store.Question, error) {
+		return questions.Respond(ctx, q, b, c.org, id, c.actor(), ans)
 	})
 	if err != nil {
 		return nil, err
@@ -301,8 +302,8 @@ func (s *Server) DismissQuestion(ctx context.Context, req *questionv1alpha1.Dism
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries) (store.Question, error) {
-		return questions.Dismiss(ctx, q, c.org, id, c.actor())
+	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries, b audit.Batch) (store.Question, error) {
+		return questions.Dismiss(ctx, q, b, c.org, id, c.actor())
 	})
 	if err != nil {
 		return nil, err

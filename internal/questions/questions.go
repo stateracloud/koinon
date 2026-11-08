@@ -376,7 +376,7 @@ func (a Answer) check(row store.Question) (Answer, error) {
 // resolve moves the open question to its end state, with the task event, the audit event and the
 // run's park, in the caller's transaction. The caller has not locked anything: it locks the run
 // first, then the question, in the same order as agentd's endTurn.
-func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgtype.UUID, state store.QuestionState,
+func resolve(ctx context.Context, q *store.Queries, b audit.Batch, org, id pgtype.UUID, by pgtype.UUID, state store.QuestionState,
 	check func(store.Question) (Answer, error),
 ) (store.Question, error) {
 	cur, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
@@ -460,12 +460,10 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 	if _, err := q.AppendTaskEvent(ctx, ev); err != nil {
 		return cur, err
 	}
-	if err := audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: actor, Action: action, TargetKind: "question", TargetID: row.ID.String(),
 		After: after,
-	}); err != nil {
-		return cur, err
-	}
+	})
 	// Resumes the run, once, when nothing else it waits for is open.
 	return row, runpark.Resolve(ctx, q, org, row.RunID)
 }
@@ -473,8 +471,8 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 // Respond records a person's answer and resumes the run. Only a recipient of the question may
 // answer, and the first answer wins. An answer to a question that is no longer open returns ErrNotOpen and changes
 // nothing.
-func Respond(ctx context.Context, q *store.Queries, org, id, by pgtype.UUID, ans Answer) (store.Question, error) {
-	return resolve(ctx, q, org, id, by, store.QuestionStateAnswered, ans.check)
+func Respond(ctx context.Context, q *store.Queries, b audit.Batch, org, id, by pgtype.UUID, ans Answer) (store.Question, error) {
+	return resolve(ctx, q, b, org, id, by, store.QuestionStateAnswered, ans.check)
 }
 
 func defaultOf(row store.Question) (Answer, error) {
@@ -483,14 +481,14 @@ func defaultOf(row store.Question) (Answer, error) {
 
 // Dismiss dismisses the question: its safe default is the answer, and the agent is told so. Only a
 // recipient may dismiss it, and a dismissal is an answer: the default applies for every recipient.
-func Dismiss(ctx context.Context, q *store.Queries, org, id, by pgtype.UUID) (store.Question, error) {
-	return resolve(ctx, q, org, id, by, store.QuestionStateDismissed, func(r store.Question) (Answer, error) { return defaultOf(r) })
+func Dismiss(ctx context.Context, q *store.Queries, b audit.Batch, org, id, by pgtype.UUID) (store.Question, error) {
+	return resolve(ctx, q, b, org, id, by, store.QuestionStateDismissed, func(r store.Question) (Answer, error) { return defaultOf(r) })
 }
 
 // Expire applies the question's safe default because nobody answered in time (TK4 calls it from its
 // sweep, in its own transaction per question). No person is the actor.
-func Expire(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Question, error) {
-	return resolve(ctx, q, org, id, pgtype.UUID{}, store.QuestionStateExpired, func(r store.Question) (Answer, error) { return defaultOf(r) })
+func Expire(ctx context.Context, q *store.Queries, b audit.Batch, org, id pgtype.UUID) (store.Question, error) {
+	return resolve(ctx, q, b, org, id, pgtype.UUID{}, store.QuestionStateExpired, func(r store.Question) (Answer, error) { return defaultOf(r) })
 }
 
 // CancelForRun cancels the run's asked and open questions, with a question.canceled task event each,
