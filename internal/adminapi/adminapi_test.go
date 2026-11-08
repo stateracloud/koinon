@@ -39,6 +39,7 @@ import (
 
 type env struct {
 	srv     *httptest.Server
+	api     *adminapi.Server
 	tokens  *tokens.Service
 	catalog *catalog.Service
 	mcp     *mcpservers.Service
@@ -66,8 +67,9 @@ func newEnv(ctx context.Context) *env {
 	e.mcp = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 	mux := http.NewServeMux()
 	e.chat = &fakeChat{}
-	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).
-		WithTriggers(services.New(pool, services.Options{Prices: pricing.Embedded()})).WithModelCheck(modelcheck.New(pool, e.chat, prices.NewResolver(pricing.Embedded()))).Mount(mux)
+	e.api = adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).
+		WithTriggers(services.New(pool, services.Options{Prices: pricing.Embedded()})).WithModelCheck(modelcheck.New(pool, e.chat, prices.NewResolver(pricing.Embedded())))
+	e.api.Mount(mux)
 	e.srv = httptest.NewServer(mux)
 	DeferCleanup(e.srv.Close)
 	e.org, e.user, _ = pgtest.NewOrg(ctx, pool)

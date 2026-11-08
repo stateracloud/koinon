@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -74,6 +75,10 @@ type Server struct {
 	modelCheck *modelcheck.Service
 	log        *slog.Logger
 	limiter    *limiter
+	// exportAudit writes an audit export (audit.Export when nil) and exportDone, when set, runs as
+	// the export goroutine ends; tests set both through export_test.go.
+	exportAudit func(ctx context.Context, w io.Writer, sc audit.ExportScope, fromSeq int64) error
+	exportDone  func()
 }
 
 var _ StrictServerInterface = (*Server)(nil)
@@ -100,6 +105,18 @@ func (s *Server) Mount(mux *http.ServeMux) {
 			writeError(w, http.StatusBadRequest, InvalidRequest, "invalid request: "+err.Error())
 		},
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			// A stream that failed after its first byte cannot turn into an error response: the
+			// status and part of the body are gone. Appending an error object would end the body
+			// cleanly and hand the client a truncated file that looks complete, so the connection
+			// is aborted instead (the client sees an unexpected EOF). A streamed body's own failure
+			// was logged where it happened (errStreamFailed); anything else is logged here.
+			if errors.Is(err, errStreamFailed) {
+				panic(http.ErrAbortHandler)
+			}
+			if rec, ok := w.(*statusRecorder); ok && rec.wrote {
+				s.log.Error("admin API response failed after its first byte", "err", err)
+				panic(http.ErrAbortHandler)
+			}
 			s.log.Error("admin API response failed", "err", err)
 			writeError(w, http.StatusInternalServerError, Internal, "internal error")
 		},
@@ -111,16 +128,26 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.Handle(BasePath+"/", s.authenticate(api))
 }
 
-// statusRecorder remembers the status a handler wrote.
+// statusRecorder remembers the status a handler wrote, and whether the response has started.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	wrote  bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	r.status, r.wrote = code, true
 	r.ResponseWriter.WriteHeader(code)
 }
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	r.wrote = true
+	return r.ResponseWriter.Write(b)
+}
+
+// errStreamFailed marks a streamed body whose source failed after the response started; the
+// failure was logged at its source, and the response error handler aborts the connection.
+var errStreamFailed = errors.New("streamed response failed")
 
 func newRequestID() string {
 	b := make([]byte, 8)
@@ -183,18 +210,34 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		r = r.WithContext(ctx)
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// The call is audited even when the handler aborts the connection (a stream that failed
+		// mid-body panics with http.ErrAbortHandler); the panic then carries on to net/http.
+		defer func() {
+			v := recover()
+			s.auditCall(ctx, p, r, rec.status, v != nil)
+			if v != nil {
+				panic(v)
+			}
+		}()
 		next.ServeHTTP(rec, r)
-
-		// The call is audited even when the client has gone: detach from its context.
-		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := audit.RecordAfter(actx, s.pool, audit.Event{
-			Org: p.Org, Actor: audit.Token(p.TokenID), Action: "admin_api.call", TargetKind: "admin_api", TargetID: r.URL.Path,
-			After: map[string]any{"method": r.Method, "path": r.URL.Path, "status": rec.status},
-		}); err != nil {
-			s.log.Error("could not audit an admin API call", "err", err)
-		}
 	})
+}
+
+// auditCall records one admin API call. It is audited even when the client has gone: detach from
+// its context.
+func (s *Server) auditCall(ctx context.Context, p tokens.Principal, r *http.Request, status int, aborted bool) {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	after := map[string]any{"method": r.Method, "path": r.URL.Path, "status": status}
+	if aborted {
+		after["aborted"] = true
+	}
+	if err := audit.RecordAfter(actx, s.pool, audit.Event{
+		Org: p.Org, Actor: audit.Token(p.TokenID), Action: "admin_api.call", TargetKind: "admin_api", TargetID: r.URL.Path,
+		After: after,
+	}); err != nil {
+		s.log.Error("could not audit an admin API call", "err", err)
+	}
 }
 
 // errorClass names the kind of an unexpected token-check failure without carrying its text.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,20 +23,37 @@ import (
 
 // newAuditCommand is "koinon-api audit".
 func newAuditCommand() *cobra.Command {
-	audit := &cobra.Command{
+	root := &cobra.Command{
 		Use:   "audit",
 		Short: "Audit-log tools",
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api audit verify",
 	}
-	var dbURL, orgID string
+	var dbURL, orgID, file, after string
 	var installOnly bool
 	verify := &cobra.Command{
 		Use:   "verify",
-		Short: "Walk the audit hash chain (ADR 0023) and report the first broken link",
-		Long: "Walks the audit hash chain of one org (default: every org) and reports the first broken link; " +
-			"exits non-zero when a chain does not hold.",
+		Short: "Walk the audit hash chain (ADR 0023, 0100) and report the first broken link",
+		Long: "Walks the audit hash chain of the install and of one org (default: every org) and reports the first " +
+			"broken link; exits non-zero when a chain does not hold.\n\n" +
+			"With --file it checks an export (koinon-api audit export) instead, with no database: the same hashing, " +
+			"run anywhere. A partial export (--from-seq) is checked against the end of an earlier export given with --after " +
+			"(a file path, not stdin). With --file the database URL (--database-url or DATABASE_URL) is ignored.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if file != "" {
+				// A database URL is ignored here: the pod's DATABASE_URL reaches --database-url through
+				// the root's environment binding, so it is no sign the operator asked for the database.
+				if orgID != "" || installOnly {
+					return errors.New("--file checks a file alone; it does not take --org or --install")
+				}
+				return verifyAuditFile(file, after, cmd.OutOrStdout())
+			}
+			if after != "" {
+				return errors.New("--after needs --file")
+			}
+			if dbURL == "" {
+				return errors.New(`required flag(s) "database-url" not set (or give --file to check an export)`)
+			}
 			pool, err := pgxpool.New(cmd.Context(), dbURL)
 			if err != nil {
 				return fmt.Errorf("connect to postgres: %w", err)
@@ -47,10 +65,139 @@ func newAuditCommand() *cobra.Command {
 	verify.Flags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
 	verify.Flags().StringVar(&orgID, "org", "", "verify only this org's chain (default: the install chain and every org)")
 	verify.Flags().BoolVar(&installOnly, "install", false, "verify only the install chain")
+	verify.Flags().StringVar(&file, "file", "", "check this export file (\"-\" for stdin) instead of the database; needs no database")
+	verify.Flags().StringVar(&after, "after", "", "with --file: an earlier export that ends where this partial export starts")
 	cli.EnvAlias(verify, "database-url", "DATABASE_URL")
-	mustRequire(verify, "database-url")
-	audit.AddCommand(verify)
-	return audit
+	root.AddCommand(verify)
+
+	var scope, out string
+	var fromSeq int64
+	export := &cobra.Command{
+		Use:   "export",
+		Short: "Write an audit chain as JSON lines that verify off the cluster (ADR 0100)",
+		Long: "Writes the install chain or one org's chain as JSON lines (format koinon.audit.export.v1): a header, then " +
+			"one line per event in chain_seq order. Check a copy anywhere with koinon-api audit verify --file.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			sc, err := exportScope(scope, orgID)
+			if err != nil {
+				return err
+			}
+			if out == "" || out == "-" {
+				return exportAudit(cmd.Context(), dbURL, cmd.OutOrStdout(), sc, fromSeq)
+			}
+			f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator names the output file
+			if err != nil {
+				return fmt.Errorf("create %s: %w", out, err)
+			}
+			err = exportAudit(cmd.Context(), dbURL, f, sc, fromSeq)
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf("close %s: %w", out, cerr)
+			}
+			if err != nil {
+				// A partial file is not an export, and the exclusive create would refuse the next run.
+				_ = os.Remove(out)
+			}
+			return err
+		},
+	}
+	export.Flags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
+	export.Flags().StringVar(&scope, "scope", "", "install or org")
+	export.Flags().StringVar(&orgID, "org", "", "the org to export (with --scope org)")
+	export.Flags().Int64Var(&fromSeq, "from-seq", 1, "start at this chain_seq (a partial export; verify it with --after)")
+	export.Flags().StringVar(&out, "out", "-", "write to this new file instead of stdout")
+	cli.EnvAlias(export, "database-url", "DATABASE_URL")
+	mustRequire(export, "database-url", "scope")
+	root.AddCommand(export)
+	return root
+}
+
+// exportAudit connects to dbURL and writes the export of sc from fromSeq to w.
+func exportAudit(ctx context.Context, dbURL string, w io.Writer, sc audit.ExportScope, fromSeq int64) error {
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("connect to postgres: %w", err)
+	}
+	defer pool.Close()
+	return audit.Export(ctx, store.New(pool), w, sc, fromSeq)
+}
+
+// exportScope reads --scope and --org of "audit export".
+func exportScope(scope, orgID string) (audit.ExportScope, error) {
+	switch scope {
+	case "install":
+		if orgID != "" {
+			return audit.ExportScope{}, errors.New("--org is for --scope org; the install chain has no org")
+		}
+		return audit.ExportScope{Install: true}, nil
+	case "org":
+		var org pgtype.UUID
+		if err := org.Scan(orgID); orgID == "" || err != nil || !org.Valid {
+			return audit.ExportScope{}, fmt.Errorf("--scope org needs --org <org id> (a UUID), got %q", orgID)
+		}
+		return audit.ExportScope{Org: org}, nil
+	}
+	return audit.ExportScope{}, fmt.Errorf("--scope must be install or org, got %q", scope)
+}
+
+// verifyAuditFile checks an export file, with no database. after is the path of an earlier export
+// that a partial file continues. It returns audit.ErrBroken when the file does not hold.
+func verifyAuditFile(path, after string, out io.Writer) error {
+	var opt audit.ExportVerifyOptions
+	if after != "" {
+		if after == "-" {
+			return errors.New("--after must be a file path, not stdin")
+		}
+		prev, err := checkExportFile(after)
+		if err != nil {
+			return fmt.Errorf("--after %s: %w", after, err)
+		}
+		if !prev.OK() {
+			audit.WriteExportReport(out, prev)
+			return fmt.Errorf("--after %s does not verify: %w", after, audit.ErrBroken)
+		}
+		opt.After = &prev.End
+		if prev.Partial && !prev.PrevChecked {
+			// Same note as WriteExportReport prints for an unchecked partial file: the chain this file
+			// continues is only as far checked as the --after file's own start.
+			_, _ = fmt.Fprintf(out, "note    --after %s starts at chain_seq %d: its first prev_hash is not checked (give the earlier export with its own --after)\n", after, prev.Header.FromSeq)
+		}
+	}
+	var r io.Reader = os.Stdin
+	if path != "-" {
+		f, err := os.Open(path) //nolint:gosec // the operator names the file to check
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		r = f
+	}
+	res, err := audit.VerifyExport(r, opt)
+	if err != nil {
+		return err
+	}
+	ok := audit.WriteExportReport(out, res)
+	if after == "" {
+		_, _ = fmt.Fprintln(out, "note    "+aloneNote)
+	}
+	if !ok {
+		return audit.ErrBroken
+	}
+	return nil
+}
+
+// aloneNote is what verify --file says when no --after pins the file (ADR 0100): the hashes only
+// show that the file agrees with itself, and anyone can write a file that does.
+const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after (later anchors/checkpoints) to pin it"
+
+// checkExportFile verifies one export file alone.
+func checkExportFile(path string) (audit.ExportResult, error) {
+	f, err := os.Open(path) //nolint:gosec // the operator names the file to check
+	if err != nil {
+		return audit.ExportResult{}, err
+	}
+	defer func() { _ = f.Close() }()
+	return audit.VerifyExport(f, audit.ExportVerifyOptions{})
 }
 
 // verifyAudit verifies the install chain and every org's chain, or one org's with orgID, or the
