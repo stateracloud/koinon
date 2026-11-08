@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -334,6 +335,22 @@ var _ = Describe("Importer", func() {
 			msg += e.Message
 		}
 		Expect(msg).To(ContainSubstring("no-such-org"))
+	})
+
+	It("does not retry a Secret without an org label (#395)", func(ctx SpecContext) {
+		put(ctx, "nolabel", declarative.TypeModelProvider, "", provider("p"))
+		var requested atomic.Int32
+		imp.Resync = time.Hour
+		imp.SetOrgBackoff(10 * time.Millisecond)
+		imp.SetAfter(func(time.Duration) <-chan time.Time { requested.Add(1); return nil })
+		runCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); imp.Run(runCtx) }()
+		DeferCleanup(func() { cancel(); <-done })
+
+		By("waiting for the Secret's rejection")
+		Eventually(func() int { return len(events(ctx)) }, "10s").Should(Equal(1))
+		Consistently(requested.Load, "500ms", "50ms").Should(BeZero())
 	})
 
 	It("imports a Secret that was applied before its org within the backoff, not at the next resync (#395)", func(ctx SpecContext) {

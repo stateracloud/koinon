@@ -109,6 +109,8 @@ type Importer struct {
 	orgBackoff time.Duration
 	// syncFn replaces sync in tests of the Run loop.
 	syncFn func(ctx context.Context) (bool, error)
+	// after returns a channel that fires once d has passed; nil means time.After. Tests record d.
+	after func(d time.Duration) <-chan time.Time
 
 	mu     sync.Mutex
 	warned map[string]string // secret -> version already warned about
@@ -125,7 +127,8 @@ func Selector() string {
 // Run imports on every change to a labelled Secret and on a timer, until ctx ends. While a
 // Secret waits for its org, which another process may create at any moment, it also retries on
 // a backoff that starts at 5 seconds and doubles up to the resync interval; the backoff starts
-// over when no Secret waits any more and on a Secret event.
+// over when no Secret waits any more and on a Secret event. A slug that never resolves, such as
+// an org that is never created, therefore settles at one retry per resync interval.
 func (i *Importer) Run(ctx context.Context) {
 	resync := i.Resync
 	if resync <= 0 {
@@ -159,13 +162,11 @@ func (i *Importer) Run(ctx context.Context) {
 	}
 	first = min(first, resync)
 	backoff := first
+	after := i.after
+	if after == nil {
+		after = time.After
+	}
 	var retry <-chan time.Time
-	var retryTimer *time.Timer
-	defer func() {
-		if retryTimer != nil {
-			retryTimer.Stop()
-		}
-	}()
 
 	t := time.NewTicker(resync)
 	defer t.Stop()
@@ -188,13 +189,9 @@ func (i *Importer) Run(ctx context.Context) {
 		if err != nil && ctx.Err() == nil {
 			i.log().Error("importing declarative Secrets failed", "err", err)
 		}
-		if retryTimer != nil {
-			retryTimer.Stop()
-		}
-		retry, retryTimer = nil, nil
+		retry = nil
 		if waiting {
-			retryTimer = time.NewTimer(backoff)
-			retry = retryTimer.C
+			retry = after(backoff)
 			backoff = min(backoff*2, resync)
 		} else {
 			backoff = first
@@ -278,7 +275,8 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 			return false, fmt.Errorf("look up org %q: %w", slug, err)
 		}
 		if !ok {
-			waitingForOrg = true
+			// An empty slug (no org label) never resolves, so it does not earn a retry.
+			waitingForOrg = waitingForOrg || slug != ""
 			i.reject(ctx, sec, version, fmt.Errorf("label %s=%q names no org", LabelOrg, slug))
 			continue
 		}
