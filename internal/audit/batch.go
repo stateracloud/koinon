@@ -99,6 +99,9 @@ func InPgTx(ctx context.Context, db Beginner, fn func(tx pgx.Tx, b Batch) error)
 // the whole change to InTx. The caller owns the lock order: it takes its own locks first, and this call
 // writes the install events, then the org events by org ID, as InTx does. A failed write leaves tx
 // aborted unless the caller wrapped the call in a savepoint.
+//
+// Only internal/keyscli may call WriteInTx; everything else uses InTx or InPgTx, which open and end
+// the transaction themselves. hack/audit-batch-lint.sh fails the build for any other caller (#371).
 func WriteInTx(ctx context.Context, tx pgx.Tx, fn func(b Batch)) (Written, error) {
 	b := &batch{}
 	fn(b)
