@@ -4,6 +4,7 @@ package declarative_test
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -17,55 +18,20 @@ import (
 )
 
 var _ = Describe("Run backoff", func() {
-	// run starts an Importer whose pass is fn, with a long resync so only the backoff retries.
-	run := func(fn func(context.Context) (bool, error)) *declarative.Importer {
-		GinkgoHelper()
-		imp := &declarative.Importer{Client: fake.NewClientset(), Namespace: ns, Resync: time.Minute}
-		imp.SetOrgBackoff(10 * time.Millisecond)
-		imp.SetSyncFn(fn)
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan struct{})
-		go func() { defer close(done); imp.Run(ctx) }()
-		DeferCleanup(func() { cancel(); <-done })
-		return imp
+	type request struct {
+		d    time.Duration
+		fire chan time.Time
 	}
 
-	It("retries while a Secret waits for its org, and stops once nothing waits", func() {
-		var calls, orgExists atomic.Int32
-		run(func(context.Context) (bool, error) {
-			calls.Add(1)
-			return orgExists.Load() == 0, nil
-		})
-		Eventually(calls.Load, "10s").Should(BeNumerically(">=", 3))
-
-		orgExists.Store(1)
-		Eventually(func() int32 { // one more pass sees the org; then the retries stop
-			a := calls.Load()
-			time.Sleep(100 * time.Millisecond)
-			return calls.Load() - a
-		}, "10s").Should(BeZero())
-		Consistently(calls.Load, "300ms", "50ms").Should(Equal(calls.Load()))
-	})
-
-	It("does not retry when no Secret waits for an org", func() {
-		var calls atomic.Int32
-		run(func(context.Context) (bool, error) { calls.Add(1); return false, nil })
-		Eventually(calls.Load, "10s").Should(Equal(int32(1)))
-		Consistently(calls.Load, "300ms", "50ms").Should(Equal(int32(1)))
-	})
-
-	It("requests a doubling wait capped at the resync interval, and starts over after a pass that does not wait", func() {
-		type request struct {
-			d    time.Duration
-			fire chan time.Time
-		}
+	// run starts an Importer whose pass is fn. Resync is an hour, so the real ticker never fires
+	// during a spec, and the test fires each requested wait itself: no wall-clock time decides
+	// the sequence. A wait is fired by sending on request.fire.
+	run := func(first time.Duration, fn func(context.Context) (bool, error)) (*declarative.Importer, func() request, chan request) {
+		GinkgoHelper()
 		requests := make(chan request, 16)
-		var waiting atomic.Bool
-		waiting.Store(true)
-		imp := &declarative.Importer{Client: fake.NewClientset(), Namespace: ns, Resync: 50 * time.Millisecond}
-		imp.SetOrgBackoff(10 * time.Millisecond)
-		imp.SetSyncFn(func(context.Context) (bool, error) { return waiting.Load(), nil })
-		// The test fires each wait itself, so no wall-clock time decides the sequence.
+		imp := &declarative.Importer{Client: fake.NewClientset(), Namespace: ns, Resync: time.Hour}
+		imp.SetOrgBackoff(first)
+		imp.SetSyncFn(fn)
 		imp.SetAfter(func(d time.Duration) <-chan time.Time {
 			fire := make(chan time.Time, 1)
 			requests <- request{d, fire}
@@ -75,28 +41,52 @@ var _ = Describe("Run backoff", func() {
 		done := make(chan struct{})
 		go func() { defer close(done); imp.Run(ctx) }()
 		DeferCleanup(func() { cancel(); <-done })
-
 		next := func() request {
 			GinkgoHelper()
 			var r request
 			Eventually(requests, "10s").Should(Receive(&r))
 			return r
 		}
-		for _, want := range []time.Duration{10, 20, 40, 50} {
-			r := next()
-			Expect(r.d).To(Equal(want * time.Millisecond))
-			r.fire <- time.Now()
-		}
+		return imp, next, requests
+	}
+	const first = 15 * time.Minute
 
-		By("the wait stays at the resync interval, and a pass that waits for nothing requests no retry")
+	It("retries while a Secret waits for its org, and stops once nothing waits", func() {
+		var calls, orgExists atomic.Int32
+		_, next, requests := run(first, func(context.Context) (bool, error) {
+			calls.Add(1)
+			return orgExists.Load() == 0, nil
+		})
+		next().fire <- time.Now()
+		r := next() // the second pass still saw no org
+		Expect(calls.Load()).To(Equal(int32(2)))
+
+		orgExists.Store(1)
+		r.fire <- time.Now()
+		Eventually(calls.Load, "10s").Should(Equal(int32(3)))
+		Consistently(requests, "300ms", "50ms").ShouldNot(Receive())
+	})
+
+	It("does not retry when no Secret waits for an org", func() {
+		var calls atomic.Int32
+		_, _, requests := run(first, func(context.Context) (bool, error) { calls.Add(1); return false, nil })
+		Eventually(calls.Load, "10s").Should(Equal(int32(1)))
+		Consistently(requests, "300ms", "50ms").ShouldNot(Receive())
+	})
+
+	It("requests a doubling wait, none once it reaches the resync interval, and starts over on a Secret event", func() {
+		imp, next, requests := run(first, func(context.Context) (bool, error) { return true, nil })
 		r := next()
-		Expect(r.d).To(Equal(50 * time.Millisecond))
-		waiting.Store(false)
+		Expect(r.d).To(Equal(15 * time.Minute))
+		r.fire <- time.Now()
+		r = next()
+		Expect(r.d).To(Equal(30 * time.Minute))
+
+		By("the backoff has reached the resync interval: the ticker covers it, so no retry is requested")
 		r.fire <- time.Now()
 		Consistently(requests, "300ms", "50ms").ShouldNot(Receive())
 
-		By("the next Secret event starts the backoff over")
-		waiting.Store(true)
+		By("a Secret event starts the backoff over, though the backoff was at the cap")
 		_, err := imp.Client.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "again", Namespace: ns,
@@ -104,6 +94,22 @@ var _ = Describe("Run backoff", func() {
 			},
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(next().d).To(Equal(10 * time.Millisecond))
+		Expect(next().d).To(Equal(first))
+	})
+
+	It("retries on the backoff after a pass that ended in an error, and starts over after a clean one", func() {
+		var fail atomic.Bool
+		fail.Store(true)
+		_, next, requests := run(first, func(context.Context) (bool, error) {
+			if fail.Load() {
+				return false, errors.New("transient")
+			}
+			return false, nil
+		})
+		r := next()
+		Expect(r.d).To(Equal(first))
+		fail.Store(false)
+		r.fire <- time.Now()
+		Consistently(requests, "300ms", "50ms").ShouldNot(Receive())
 	})
 })

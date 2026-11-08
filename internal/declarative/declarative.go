@@ -125,10 +125,12 @@ func Selector() string {
 }
 
 // Run imports on every change to a labelled Secret and on a timer, until ctx ends. While a
-// Secret waits for its org, which another process may create at any moment, it also retries on
-// a backoff that starts at 5 seconds and doubles up to the resync interval; the backoff starts
-// over when no Secret waits any more and on a Secret event. A slug that never resolves, such as
-// an org that is never created, therefore settles at one retry per resync interval.
+// Secret waits for its org, which another process may create at any moment, or a pass ends in
+// an error (a lock, a List or a lookup that failed once), it also retries on a backoff that
+// starts at 5 seconds and doubles up to the resync interval; the backoff starts over after a
+// pass that neither waits nor fails and on a Secret event. Once the backoff has reached the
+// resync interval no retry is requested, because the ticker is that retry: a slug that never
+// resolves, such as an org that is never created, settles at one pass per resync interval.
 func (i *Importer) Run(ctx context.Context) {
 	resync := i.Resync
 	if resync <= 0 {
@@ -190,12 +192,14 @@ func (i *Importer) Run(ctx context.Context) {
 			i.log().Error("importing declarative Secrets failed", "err", err)
 		}
 		retry = nil
-		if waiting {
+		switch {
+		case !waiting && err == nil:
+			backoff = first
+		case backoff < resync:
 			retry = after(backoff)
 			backoff = min(backoff*2, resync)
-		} else {
-			backoff = first
 		}
+		// Else the backoff has reached the resync interval, which the ticker covers.
 	}
 }
 
@@ -272,7 +276,7 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		version := string(sec.UID) + "/" + sec.ResourceVersion
 		org, ok, err := orgOf(slug)
 		if err != nil {
-			return false, fmt.Errorf("look up org %q: %w", slug, err)
+			return waitingForOrg, fmt.Errorf("look up org %q: %w", slug, err)
 		}
 		if !ok {
 			// An empty slug (no org label) never resolves, so it does not earn a retry.
@@ -293,7 +297,7 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		if applyErr != nil {
 			var ie *invalidError
 			if !errors.As(applyErr, &ie) && !isUserError(applyErr) {
-				return false, fmt.Errorf("apply Secret %s: %w", sec.Name, applyErr)
+				return waitingForOrg, fmt.Errorf("apply Secret %s: %w", sec.Name, applyErr)
 			}
 			i.reject(ctx, sec, version, applyErr)
 		}

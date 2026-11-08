@@ -92,6 +92,9 @@ stringData:
   org admin can delete a removed entry for good.
 - A Secret that does not parse is ignored. The previous state stays, and a Warning Event on the
   Secret and a line in the `koinon-api` log say why. Run `kubectl -n koinon describe secret <name>`.
+- A Secret applied before its org exists is retried on a backoff, from 5 seconds and doubling up to the
+  resync interval (5 minutes), and imported once the org exists. A `koinon.dev/org` slug that never
+  resolves gets one `names no org` Warning Event per Secret version and is retried every resync interval.
 - Every apply and removal is written to the audit log with the actor `secret <name>`.
 - The same labels and mechanism declare a GitHub connection: `koinon.dev/secret-type: connection`
   with `name`, `connector: github`, `appId`, `installationId` and `privateKey`, plus optional `baseUrl` and `caBundle` for a GitHub Enterprise Server, and optional `ciDirs`
