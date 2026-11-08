@@ -139,8 +139,9 @@ asynchronously, and the migrate Job may already have run by then. Instead:
 - `koinon-api` never needs the grant to start, or the post-upgrade hook could never run under
   `--wait`: an install event the database refuses for lack of privilege (SQLSTATE 42501, wrapped as
   `audit.ErrInstallWriteDenied`) at startup (the price refresh setting, the retirement of caught-up
-  platform prices) is logged as an error and retried in the background every 30 seconds until the
-  grant lands. Requests that write install events (platform price changes) fail with the permission
+  platform prices) is retried in the background every 30 seconds until the grant lands. Each startup
+  write (the bootstrap, the retirement of caught-up platform prices, the price refresh setting and the
+  key-set check) logs one error line when it is first refused and one more on each change of state. Requests that write install events (platform price changes) fail with the permission
   error in that window, which is the hook's runtime. A setting whose event is not recorded does not
   take effect where it would widen what runs: the scheduled price refresh runs each tick in the
   recorded setting (`price_refresh_settings`) wherever that fetches less, less often or applies
@@ -280,10 +281,10 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
   cover the hash chains and the locks.
 
 Two paths broke the rule before this amendment and issue 2 fixed them: `SetPlatformCeiling`
-(`internal/tracedest/platform.go`) writes each org's `trace.settings.lowered` before the platform
-event, and must write the install event first; and `LowerOrgTraceLevels`
-(`internal/db/queries/trace.sql`) returns the lowered orgs in no fixed order, and gains `ORDER BY
-org_id` so their events are written in org ID order. The second also means ADR 0023's line "no
+(`internal/tracedest/platform.go`) wrote each org's `trace.settings.lowered` before the platform
+event, and had to write the install event first (the audit batch now holds that order); and
+`LowerOrgTraceLevels` (`internal/db/queries/trace.sql`) returned the lowered orgs in no fixed order,
+and gained `ORDER BY org_id` for the row locks, while the audit batch orders the events. The second also means ADR 0023's line "no
 current path audits two orgs in one transaction" is wrong; the 2026-11-07 note there corrects it.
 
 ### 2. Every entry has an actor; system actors are named by component

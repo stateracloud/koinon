@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,12 +61,30 @@ var _ = Describe("koinon-api audit verify", func() {
 	}, SpecTimeout(3*time.Minute))
 })
 
+// lockedBuffer is a bytes.Buffer that the retry goroutine and the spec can use together.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 var _ = Describe("startup install audit writes before the writer role is granted", func() {
 	denied := fmt.Errorf("audit: record install event x: %w: permission denied for table install_audit_events", audit.ErrInstallWriteDenied)
 
 	It("retries a refused write until it is recorded, and stops with the server", func(ctx SpecContext) {
 		calls := 0
-		installWriteLoop(ctx, "probe", time.Millisecond, func(context.Context) error {
+		installWriteLoop(ctx, "probe", "", time.Millisecond, func(context.Context) error {
 			calls++
 			if calls < 3 {
 				return denied
@@ -74,7 +95,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		stopped, cancel := context.WithCancel(ctx)
 		cancel()
-		installWriteLoop(stopped, "probe", time.Hour, func(context.Context) error {
+		installWriteLoop(stopped, "probe", "", time.Hour, func(context.Context) error {
 			Fail("no write after the server stopped")
 			return nil
 		})
@@ -94,6 +115,32 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, write)).To(Succeed())
 		Eventually(landed).Should(BeClosed())
+	})
+
+	It("logs a refused write once for the same state: the first denial, then the landing", func(ctx SpecContext) {
+		var logs lockedBuffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		defer slog.SetDefault(prev)
+
+		bg, cancel := context.WithCancel(ctx)
+		defer cancel()
+		calls := 0
+		// The sequence is denied (the run that has just happened), denied (the first retry), then success.
+		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, func(context.Context) error {
+			calls++
+			if calls < 2 {
+				return denied
+			}
+			return nil
+		})).To(Succeed())
+		Eventually(logs.String).Should(ContainSubstring("recorded after a retry"))
+
+		lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+		Expect(lines).To(HaveLen(2), "one line for the first denial, one for the landing: %v", lines)
+		Expect(lines[0]).To(ContainSubstring("the probe is not recorded yet:"))
+		Expect(lines[1]).To(ContainSubstring("recorded after a retry"))
+		Expect(logs.String()).NotTo(ContainSubstring("still not recorded"))
 	})
 
 	It("retries any error when asked to, as the key-set check does", func(ctx SpecContext) {

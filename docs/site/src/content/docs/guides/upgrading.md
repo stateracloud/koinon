@@ -100,8 +100,9 @@ login and reports `koinon_install_audit_writer_ok 0`, and it keeps serving.
   before the updated Cluster reaches the API server and finds no role yet. A second Job,
   `<release>-migrate-grants`, is a `post-upgrade` hook (Argo CD: `PostSync`): it runs
   `koinon-api migrate --grants-only`, waits (up to `migrations.wait`) until the operator has created
-  the role, and grants it. Until then `koinon-api` serves, logs an error for each install audit event
-  it cannot write yet and retries it, and platform price changes fail with a permission error; the
+  the role, and grants it. Until then `koinon-api` serves, retries each startup install audit write
+  (bootstrap, price retirement, refresh setting, key-set check) every 30 seconds in the background, logging
+  one error line when it is first refused and one more on each change of state, and platform price changes fail with a permission error; the
   scheduled price refresh keeps the recorded setting until its change is recorded. If the operator
   does not create the role in time, the hook fails and so does the upgrade: check
   `kubectl get cluster` and the operator's log, then run the same `helm upgrade` again. Helm's

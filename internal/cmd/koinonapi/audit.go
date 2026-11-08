@@ -116,6 +116,7 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 	if !denied && !r.AnyError {
 		return first
 	}
+	state := installWriteState(first)
 	if denied {
 		slog.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
 			"install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", r.What, "err", first)
@@ -123,16 +124,25 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 		slog.Error("not recorded; retrying", "what", r.What, "err", first)
 	}
 	safego.GoOrStop(bg, slog.Default(), r.Goroutine, stop, func(ctx context.Context) {
-		installWriteLoop(ctx, r.What, interval, write)
+		installWriteLoop(ctx, r.What, state, interval, write)
 	})
 	return nil
 }
 
-// installWriteLoop calls write every interval until it succeeds or ctx ends. Each failed attempt is
-// logged as an error, so the state is never silent; a change of state (landed, or a refusal turning into
-// another failure) is a line of its own.
-func installWriteLoop(ctx context.Context, what string, interval time.Duration, write func(context.Context) error) {
-	var last string
+// installWriteState names the state of a failed install write: "denied" when the chain refused it
+// (audit.ErrInstallWriteDenied), "failed" for any other error.
+func installWriteState(err error) string {
+	if errors.Is(err, audit.ErrInstallWriteDenied) {
+		return "denied"
+	}
+	return "failed"
+}
+
+// installWriteLoop calls write every interval until it succeeds or ctx ends. A line is logged on a
+// change of state, not on every attempt: last is the state already logged for the first failure (the
+// caller logged it), a retry that fails in the same state stays quiet, a refusal turning into another
+// failure (or back) is a line of its own, and so is the write landing.
+func installWriteLoop(ctx context.Context, what, last string, interval time.Duration, write func(context.Context) error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -147,10 +157,7 @@ func installWriteLoop(ctx context.Context, what string, interval time.Duration, 
 		if ctx.Err() != nil {
 			return
 		}
-		state := "failed"
-		if errors.Is(err, audit.ErrInstallWriteDenied) {
-			state = "denied"
-		}
+		state := installWriteState(err)
 		if state == last {
 			continue
 		}
