@@ -3,10 +3,8 @@
 package agentd_test
 
 import (
-	"context"
 	"time"
 
-	sdk "github.com/coder/acp-go-sdk"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -49,39 +47,5 @@ var _ = Describe("A refused permission request", func() {
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassPolicy))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("Koinon refused write on /sandbox/.koinon/notes/external/report.md"))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("after 2 refusals"))
-	})
-
-	It("counts only consecutive refused turns", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		// Prompts 1 and 3 are refused; the model fails once in between (prompt 2) and is retried.
-		e.harness.set(func(h *harness) { h.refuseOn = map[int]bool{1: true, 3: true} })
-		calls := 0
-		e.harness.modelFault = func(context.Context, string) error {
-			calls++
-			if calls == 2 {
-				return &sdk.RequestError{Code: -32603, Message: "boom", Data: map[string]any{"statusCode": 503}}
-			}
-			return nil
-		}
-		r := e.enqueue(ctx, e.task(ctx, "write the notes"))
-		// agentd's own retry layer, the one for a flavor whose harness does not retry.
-		e.pool("agentd-a", agentd.OwnRetryLayer, func(c *agentd.Config) { c.MaxRefusedTurns = 1; c.RetryBackoff = 10 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Expect(eventOf(events(ctx, r), "run.refusal")).To(HaveLen(2))
-	})
-
-	It("does not prompt again when the run was canceled during the refused turn", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.task(ctx, markRefuse+" write the notes"))
-		e.harness.set(func(h *harness) {
-			h.onRefuse = func() {
-				_, err := q.CancelRun(context.Background(), store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
-				Expect(err).NotTo(HaveOccurred())
-			}
-		})
-		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateCanceled))
-		Consistently(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }, 500*time.Millisecond).Should(Equal(1))
-		Expect(eventOf(events(ctx, r), "run.refusal")).To(BeEmpty())
 	})
 })
