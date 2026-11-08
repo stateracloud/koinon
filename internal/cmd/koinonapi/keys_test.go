@@ -28,7 +28,8 @@ var _ = Describe("koinon-api keys on and off a terminal", func() {
 		old := prompterFor
 		defer func() { prompterFor = old }()
 		prompterFor = func(*cobra.Command) *cli.Prompter { return &cli.Prompter{Accessible: true} }
-		Expect(keys("activate")).To(Succeed())
+		Expect(keys("activate", "--database-url=postgres://x")).To(Succeed())
+		Expect(keys("activate")).To(MatchError(ContainSubstring("--database-url is required")), "activate records its install audit event")
 		Expect(keys("activate", "a", "b")).To(MatchError("accepts 1 arg(s), received 2"))
 		Expect(keys("retire", "--database-url=postgres://x")).To(Succeed())
 		Expect(keys("retire")).To(MatchError(ContainSubstring("--database-url is required")))

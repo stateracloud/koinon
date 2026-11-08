@@ -27,6 +27,8 @@ type keysOptions struct {
 	dbURL, kekSecret, kekDir, namespace, kubeconfig, id string
 	period                                              time.Duration
 	yes                                                 bool
+	// recordStarted writes the .started audit event of rewrap and reencrypt.
+	recordStarted bool
 	// all and agents choose the agents of new-repositories.
 	all    bool
 	agents []string
@@ -55,7 +57,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, activate, status, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
@@ -89,6 +91,12 @@ func newKeysCommand() *cobra.Command {
 		c.Flags().BoolVar(&o.yes, "yes", false, "on a terminal, do not ask for confirmation")
 		return c
 	}
+	// The per-row loop of rewrap and reencrypt is not atomic, so it may also record its start (ADR 0100
+	// decision 3): a run that dies half way then shows in the install audit log.
+	started := func(c *cobra.Command) *cobra.Command {
+		c.Flags().BoolVar(&o.recordStarted, "record-started", false, "also write a keys."+c.Name()+".started install audit event before the run, so a run that dies half way shows")
+		return c
+	}
 	add := sub("add", "Generate a new KEK (not active yet)", cobra.NoArgs, true)
 	newRepos := confirmed(sub("new-repositories", "After a compromise: give agents new home repositories (new master keys) seeded with their newest checkpoint, and drop the older checkpoints", cobra.NoArgs, true))
 	newRepos.Flags().BoolVar(&o.all, "all", false, "every agent with a home repository")
@@ -99,10 +107,10 @@ func newKeysCommand() *cobra.Command {
 	keys.AddCommand(
 		sub("status", "List the KEKs, the active one and the values each wraps", cobra.NoArgs, true),
 		add,
-		confirmed(sub("activate [ID]", "Make a KEK the one that wraps new data keys (on a terminal, pick it from a list without ID)", oneOrPrompt, false)),
-		confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true)),
+		confirmed(sub("activate [ID]", "Make a KEK the one that wraps new data keys; needs --database-url to record it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
+		started(confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true))),
 		confirmed(sub("retire [ID]", "Remove a KEK; refuses while any value uses it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
-		confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true)),
+		started(confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true))),
 		confirmed(sub("forget [ID]", "Give up on a lost KEK: mark every value it sealed as lost and start new home repositories (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		newRepos,
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore with kubectl apply)", cobra.NoArgs, false),
@@ -150,8 +158,10 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, SecretName: o.kekSecret, Wrappers: wrappers}
+	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
+	// With the database, every command that changes the key set also records it in the install audit chain
+	// (actor cli, "keys <command>").
 	if pool != nil && cmd != "export" {
 		tool.Pool = pool
 	}
