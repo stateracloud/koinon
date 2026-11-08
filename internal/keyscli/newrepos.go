@@ -172,8 +172,7 @@ func (t *Tool) confirmNewRepositories(ctx context.Context, n int) error {
 // one transaction. False: the agent has no home repository any more.
 func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h homeTarget) (bool, error) {
 	ok := false
-	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, t.Pool, func(q *store.Queries, b audit.Batch) error {
 		pw := checkpoint.Passwords{Q: q, Keys: ring}
 		// A deadline of now: the sweeper's guard keeps the old repository until the seed is there.
 		r, started, err := pw.NewEpochIn(ctx, q, h.org, h.agent, checkpoint.ReasonKeyCompromised, 0)
@@ -200,11 +199,12 @@ func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h h
 			return fmt.Errorf("the new repository epoch %d was not marked for its seed", r.Epoch)
 		}
 		ok = true
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: h.org, Actor: newRepositoriesActor, Action: NewRepositoriesAction, TargetKind: "agent", TargetID: h.agent.String(),
 			Before: map[string]any{"repositoryEpoch": prev},
 			After:  map[string]any{"repositoryEpoch": r.Epoch, "reason": checkpoint.ReasonKeyCompromised, "seedFromEpoch": prev},
 		})
+		return nil
 	})
 	return ok, err
 }

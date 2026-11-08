@@ -327,9 +327,10 @@ func (s *Server) inTx(ctx context.Context, fn func(q *store.Queries) error) erro
 
 // inAuditTx runs fn in a transaction like inTx, with the audit batch of the change: fn adds its audit
 // events to b and the audit module writes them just before commit, install event first and org events
-// by org ID (ADR 0100 decision 1.7), so the event commits with its change or not at all.
+// by org ID (ADR 0100 decision 1.7), so the event commits with its change or not at all. The batch stamps
+// the request ID of ctx on every event, so inAuditTx gives ctx one (requestCtx) when the caller has not.
 func (s *Server) inAuditTx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
-	_, err := audit.InTx(ctx, s.pool, fn)
+	_, err := audit.InTx(requestCtx(ctx), s.pool, fn)
 	return err
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/askuser"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -342,8 +343,8 @@ func answerThrice(ctx context.Context, a0 *askEnv, conns *pgxpool.Pool, qid stri
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- resolveIn(ctx, conns, func(q *store.Queries) error {
-				_, err := questions.Respond(ctx, q, a0.org, mustUUID(qid), a0.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
+			results <- resolveIn(ctx, conns, func(q *store.Queries, b audit.Batch) error {
+				_, err := questions.Respond(ctx, q, b, a0.org, mustUUID(qid), a0.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
 				return err
 			})
 		}()

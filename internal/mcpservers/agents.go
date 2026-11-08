@@ -62,7 +62,7 @@ func (s *Service) SetAgentServers(ctx context.Context, org pgtype.UUID, actor au
 			return nil, invalid("a server narrowed to no tools allows nothing; leave the server out instead")
 		}
 	}
-	err := s.tx(ctx, func(q *store.Queries) error {
+	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		ag, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent})
 		if err != nil {
 			return err
@@ -104,10 +104,11 @@ func (s *Service) SetAgentServers(ctx context.Context, org pgtype.UUID, actor au
 		for i, a := range allow {
 			after = append(after, map[string]any{"server": names[a.ServerID], "serverId": ids[i].String(), "tools": a.Tools})
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "agent.mcp_servers", TargetKind: "agent", TargetID: ag.ID.String(),
 			Before: map[string]any{"servers": summary(before)}, After: map[string]any{"servers": after},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, mapErr(err)

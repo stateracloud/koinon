@@ -101,7 +101,7 @@ func (s *Service) SetPlatformDestination(ctx context.Context, actor audit.Actor,
 	}
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// Only the version that was read (and tested against) is replaced.
 		now, err := q.LockPlatformTraceDestination(ctx)
 		switch {
@@ -130,14 +130,15 @@ func (s *Service) SetPlatformDestination(ctx context.Context, actor audit.Actor,
 		if before != nil {
 			ev.Before = auditView(*before)
 		}
-		return audit.RecordInstallErr(ctx, q, ev)
+		b.Install(ev)
+		return nil
 	})
 	return out, err
 }
 
 // DeletePlatformDestination removes the platform destination.
 func (s *Service) DeletePlatformDestination(ctx context.Context, actor audit.Actor) error {
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetPlatformTraceDestination(ctx)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -148,10 +149,11 @@ func (s *Service) DeletePlatformDestination(ctx context.Context, actor audit.Act
 		if _, err := q.DeletePlatformTraceDestination(ctx); err != nil {
 			return err
 		}
-		return audit.RecordInstallErr(ctx, q, audit.InstallEvent{
+		b.Install(audit.InstallEvent{
 			Actor: actor, Action: "trace.platform_destination.delete", TargetKind: "trace_platform_destination",
 			TargetID: "platform", Before: auditView(toPlatform(cur)),
 		})
+		return nil
 	})
 }
 
@@ -180,7 +182,7 @@ func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destinat
 	outcome, at := s.test(ctx, d, "", decodeMap(cur.ResourceAttributes))
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		n, err := q.SetPlatformTraceDestinationTest(ctx, store.SetPlatformTraceDestinationTestParams{
 			ExpectedVersion: cur.ConfigVersion, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
 		})
@@ -198,10 +200,11 @@ func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destinat
 			return ErrChanged
 		}
 		out = toPlatform(row)
-		return audit.RecordInstallErr(ctx, q, audit.InstallEvent{
+		b.Install(audit.InstallEvent{
 			Actor: actor, Action: "trace.platform_destination.test", TargetKind: "trace_platform_destination",
 			TargetID: "platform", After: map[string]any{"ok": outcome.OK, "status": outcome.Status, "rejectedSpans": outcome.Rejected},
 		})
+		return nil
 	})
 	return out, outcome, err
 }

@@ -119,3 +119,4 @@ are in [0046](0046-adr-conventions.md).
 | [0098](0098-price-catalogue-updates-from-public-sources.md) | Update the model price catalogue from public sources | Accepted (2026-11-06) |
 | [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Accepted (maintainer decision 2026-11-07) |
 | [0100](0100-install-audit-chain.md) | An install-level audit chain for platform actions | Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1) |
+| [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Accepted (maintainer decision 2026-11-04) |

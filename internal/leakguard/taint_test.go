@@ -152,7 +152,8 @@ var _ = Describe("TaintChecker", func() {
 	// A known gap, not a promise (#286, found in the #267 review): separator-padded base64 cut across
 	// two arguments that each exceed 2*JoinEndBytes. The join keeps only each argument's two ends, and
 	// the padding spreads the encoded text past them. This pins today's decision so a fix shows up as
-	// a failing spec: when #286 lands, move the entry into "catches the leak" and drop this one.
+	// a failing spec: when the general fix (#369) lands, move the entry into "catches the leak" and drop
+	// this one. #286 documents the gap (ADR 0091 decision 6) and adds no code.
 	It("passes separator-padded base64 split across two long arguments (known gap, #286)", func() {
 		w := leakguard.DefaultLimits().JoinEndBytes
 		// one separator of 150 bytes per four base64 characters: each half is longer than 2*w, and the
@@ -162,7 +163,7 @@ var _ = Describe("TaintChecker", func() {
 		args := []string{enc[:h], enc[h:]}
 		Expect(len(args[0])).To(BeNumerically(">", 2*w))
 		Expect(len(args[1])).To(BeNumerically(">", 2*w))
-		Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass), "#286 is fixed: this is now a catch")
+		Expect(check(args...).Reason).To(Equal(leakguard.ReasonPass), "the split base64 gap is closed (#369): this is now a catch")
 	})
 
 	Describe("joining in the orders the caller names (#256)", func() {

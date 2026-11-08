@@ -33,17 +33,18 @@ func (s *Service) RederiveFormats(ctx context.Context) (int, error) {
 			continue
 		}
 		changed := false
-		err := s.tx(ctx, func(q *store.Queries) error {
+		err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			done, err := q.SetDerivedModelFormat(ctx, store.SetDerivedModelFormatParams{OrgID: r.OrgID, ID: r.ID, Format: want})
 			if err != nil || done == 0 {
 				return err // a save that raced us set the format: leave it
 			}
 			changed = true
-			return audit.RecordErr(ctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: r.OrgID, Actor: FormatActor, Action: "model.format_rederived", TargetKind: "model", TargetID: r.ID.String(),
 				Before: map[string]any{"name": r.Name, "format": r.Format},
 				After:  map[string]any{"name": r.Name, "format": want},
 			})
+			return nil
 		})
 		if err != nil {
 			return n, err

@@ -348,7 +348,10 @@ var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() 
 				row, err := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: cid})
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(mcpservers.UnlinkMismatchedServers(ctx, q, audit.Secret("forge"), row)).To(Succeed())
+				_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+					return mcpservers.UnlinkMismatchedServers(ctx, q, b, audit.Secret("forge"), row)
+				})
+				Expect(err).NotTo(HaveOccurred())
 				got, err := svc.Get(ctx, org, moved.ID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(got.CodeHostConnectionID).To(BeEmpty(), "git.example.com is no longer the connection's host")

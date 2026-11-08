@@ -487,8 +487,8 @@ func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 // tx runs fn in a transaction. A concurrent change of the cap and the ceiling that would leave the
 // cap above the ceiling is caught by the table's CHECK (SQLSTATE 23514) and answered as a
 // validation error, so two admins cannot both succeed.
-func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23514" {
 		return &InvalidError{Msg: "the monthly cap cannot exceed the platform ceiling (changed at the same time); check the current values and try again"}
@@ -566,7 +566,7 @@ func (s *Service) SetOrgCap(ctx context.Context, org pgtype.UUID, actor audit.Ac
 			return err
 		}
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		before, err := GetOrg(ctx, q, org)
 		if err != nil {
 			return err
@@ -583,10 +583,11 @@ func (s *Service) SetOrgCap(ctx context.Context, org pgtype.UUID, actor audit.Ac
 		}
 		after := before
 		after.MonthlyCap = capUSD
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "budget.org_cap.set", TargetKind: "org_budget", TargetID: org.String(),
 			Before: summary(before), After: summary(after),
 		})
+		return nil
 	})
 }
 
@@ -598,7 +599,7 @@ func (s *Service) SetPlatformCeiling(ctx context.Context, org pgtype.UUID, actor
 			return err
 		}
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		ok, err := q.IsPlatformAdmin(ctx, user)
 		if err != nil {
 			return err
@@ -622,10 +623,11 @@ func (s *Service) SetPlatformCeiling(ctx context.Context, org pgtype.UUID, actor
 		}
 		after := before
 		after.PlatformCeiling = ceiling
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "budget.platform_ceiling.set", TargetKind: "org_budget", TargetID: org.String(),
 			Before: summary(before), After: summary(after),
 		})
+		return nil
 	})
 }
 
@@ -642,7 +644,7 @@ func (s *Service) SetAgentDaily(ctx context.Context, org, agent pgtype.UUID, act
 	if err := checkAmount("the daily limit", limit); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent}); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
@@ -657,10 +659,11 @@ func (s *Service) SetAgentDaily(ctx context.Context, org, agent pgtype.UUID, act
 		if _, err := q.SetAgentBudget(ctx, store.SetAgentBudgetParams{OrgID: org, AgentID: agent, DailyLimit: limit.Numeric(), UpdatedBy: actor.String()}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "budget.agent_daily.set", TargetKind: "agent", TargetID: agent.String(),
 			Before: before, After: map[string]any{"dailyLimitUSD": limit.String()},
 		})
+		return nil
 	})
 }
 
@@ -699,7 +702,7 @@ func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID,
 	case o.WallClock < 0 || o.WallClock > MaxRunDuration || o.WallClock%time.Second != 0:
 		return &InvalidError{Msg: fmt.Sprintf("the run duration must be a whole number of seconds, at most %s", MaxRunDuration)}
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent}); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
@@ -721,10 +724,11 @@ func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID,
 		}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "budget.agent_run_limits.set", TargetKind: "agent", TargetID: agent.String(),
 			Before: overrideSummary(before), After: overrideSummary(o),
 		})
+		return nil
 	})
 }
 
