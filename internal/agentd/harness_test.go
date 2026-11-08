@@ -543,13 +543,6 @@ func (p *process) resetCancel() {
 	p.cancelled = make(chan struct{})
 }
 
-// maxPromptsInFlight is the most prompts the fake ever had open at once.
-func (h *harness) maxPromptsInFlight() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.maxInFlight
-}
-
 func (p *process) Authenticate(context.Context, sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {
 	return sdk.AuthenticateResponse{}, nil
 }
