@@ -29,7 +29,6 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
-	"github.com/stateracloud/koinon/internal/safego"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -138,6 +137,9 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
 		name = "GitHub"
@@ -262,6 +264,9 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
 		name = "Gitea"
@@ -467,7 +472,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 
 	res := &connectionv1alpha1.SetConnectionSecretResponse{}
 	if req.GetTest() {
-		tested, results, err := s.testConnection(ctx, row, c.auditActor())
+		tested, results, err := s.testConnection(rctx, row, c.auditActor())
 		if err != nil {
 			// The secret is stored and cannot be entered again by a retry that fails the same way:
 			// answer with the stored connection and a failed test, not an error.
@@ -478,7 +483,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		}
 		res.Results = results
 	} else {
-		s.syncScope(ctx, row, c.auditActor())
+		s.syncScope(rctx, row, c.auditActor())
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -593,6 +598,9 @@ func (s *Server) TestConnection(ctx context.Context, req *connectionv1alpha1.Tes
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	id, err := parseID("connection_id", req.GetConnectionId())
 	if err != nil {
 		return nil, err
@@ -672,14 +680,31 @@ func (s *Server) syncScope(ctx context.Context, row store.Connection, actor audi
 	if s.scopeSync == nil {
 		return
 	}
-	bg := context.WithoutCancel(ctx)
-	safego.Go(bg, s.log, "code-host-scope-sync", func(bg context.Context) {
-		bg, cancel := context.WithTimeout(bg, scopeSyncTimeout)
-		defer cancel()
-		if err := s.scopeSync.Sync(bg, row, actor); err != nil {
-			s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
-		}
-	})
+	s.scopeJobs.start(ctx, row, actor)
+}
+
+// QueueScopeReading asks for a reading of the connection's repositories, as the periodic refresh
+// does (scopesync.Syncer.SetQueue): it shares the one-reading-per-connection rule and Drain with
+// the readings the RPCs start. The channel closes when a reading that covers the request has
+// finished, or at once when the server is draining.
+func (s *Server) QueueScopeReading(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
+	return s.scopeJobs.start(ctx, row, actor)
+}
+
+// runScopeSync is one bounded reading, run by scopeJobs.
+func (s *Server) runScopeSync(ctx context.Context, row store.Connection, actor audit.Actor) {
+	ctx, cancel := context.WithTimeout(ctx, scopeSyncTimeout)
+	defer cancel()
+	if err := s.scopeSync.Sync(ctx, row, actor); err != nil {
+		s.log.Warn("could not read the connection's repositories into the code-host scope", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
+	}
+}
+
+// Drain stops the background code-host scope readings and waits for the running ones, until ctx
+// ends; then it cancels what still runs and waits for that to return. koinon-api calls it in its
+// shutdown, inside the shutdown deadline. After Drain no reading starts.
+func (s *Server) Drain(ctx context.Context) {
+	s.scopeJobs.drain(ctx)
 }
 
 // Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of

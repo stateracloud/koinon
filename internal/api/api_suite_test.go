@@ -154,6 +154,8 @@ type env struct {
 	srv      *httptest.Server
 	svc      *auth.Service
 	hub      *runwatch.Hub
+	rpc      *services.Server
+	syncer   *scopesync.Syncer
 	pwFile   string
 	opts     envOptions
 	bootstrp auth.BootstrapResult
@@ -255,8 +257,10 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	e.traces = traces
 	hosts := providers.New(opts.github)
 	var scopeSync services.ScopeSyncer
+	var syncer *scopesync.Syncer
 	if opts.scopeSync {
-		scopeSync = scopesync.New(e.pool, hosts, openerOf(opts.keys), slog.New(slog.NewTextHandler(logOut, nil)))
+		syncer = scopesync.New(e.pool, hosts, openerOf(opts.keys), slog.New(slog.NewTextHandler(logOut, nil)))
+		scopeSync = syncer
 	}
 	rpc := services.New(e.pool, services.Options{
 		Hosts: hosts, ScopeSync: scopeSync,
@@ -273,6 +277,12 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 			Keys: openerOf(opts.keys), GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		}),
 	})
+
+	e.rpc, e.syncer = rpc, syncer
+	if syncer != nil {
+		// As koinon-api wires it: the periodic refresh reads through the services' queue.
+		syncer.SetQueue(rpc.QueueScopeReading)
+	}
 
 	handler, err = api.NewHandler(api.Options{
 		Auth:           svc,
