@@ -591,7 +591,9 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring, err = loadKeyring(ctx, kekStore, kekMonitor.Observer()); err != nil {
 			return err
 		}
-		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute, kekMonitor.Observer()) })
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) {
+			watchKeyring(ctx, keyring, kekStore, time.Minute, kekMonitor.Observer(), keyAudits.watchChanged)
+		})
 	case cfg.kekDir != "":
 		keyAudits.keySet = keyscli.DirStore{Dir: cfg.kekDir, Wrappers: wrappers}
 		if keyring, err = secretstore.LoadDir(ctx, cfg.kekDir, wrappers, kekMonitor.Observer()); err != nil {

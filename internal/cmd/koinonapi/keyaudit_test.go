@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -135,6 +136,47 @@ var _ = Describe("koinon-api's key events", func() {
 		keyAud.startObserving(ctx, func() {})
 		Expect(keksOf(ctx, m, "keys.observed", "after")).To(ContainSubstring("kek-20261107-dddd"))
 		Expect(keksOf(ctx, m, "keys.observed", "before")).To(Equal("[]"))
+	})
+
+	It("writes keys.observed on a first start even with no KEK and no generated Secret", func(ctx SpecContext) {
+		// The chain holds no key event yet (a new database), and this koinon-api has no key set.
+		empty := newKeyAudit(keyAud.pool, nil, ns, "koinon-kek")
+		Expect(empty.observe(ctx)).To(Succeed())
+		Expect(count(ctx, "keys.observed", 0)).To(Equal(1))
+		var raw string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE action = 'keys.observed'`).Scan(&raw)).To(Succeed())
+		Expect(raw).To(And(ContainSubstring(`"keks": []`), ContainSubstring(`"generated": []`)))
+		Expect(empty.observe(ctx)).To(Succeed())
+		Expect(count(ctx, "keys.observed", 0)).To(Equal(1), "recorded once")
+	})
+
+	It("checks for a lost change when the keyring watch sees the key set change", func(ctx SpecContext) {
+		Expect(keyAud.observe(ctx)).To(Succeed()) // the baseline
+		m := mark(ctx)
+		ring, err := loadKeyring(ctx, keyAud.keySet, nil)
+		Expect(err).NotTo(HaveOccurred())
+		wctx, cancel := context.WithCancel(ctx)
+		stopped := make(chan struct{})
+		go func() {
+			defer GinkgoRecover()
+			defer close(stopped)
+			watchKeyring(wctx, ring, keyAud.keySet, 50*time.Millisecond, nil, keyAud.watchChanged)
+		}()
+		DeferCleanup(func() { cancel(); <-stopped })
+		Consistently(func() int { return count(ctx, "keys.observed", m) }, 300*time.Millisecond).Should(BeZero(), "the key set is the recorded one")
+
+		By("a KEK is added with no event")
+		sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		raw := make([]byte, secretstore.KeySize)
+		copy(raw, "koinon_test_not-a-real-kek-bbbb")
+		sec.Data["kek-20261107-bbbb"] = secretstore.EncodeKey(raw)
+		_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() int { return count(ctx, "keys.observed", m) }).Should(Equal(1))
+		var actorID string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT actor_id FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.observed'`, m).Scan(&actorID)).To(Succeed())
+		Expect(actorID).To(Equal("koinon-api:keyring-watch"))
 	})
 
 	It("observes once, again when a generated Secret is re-created, and never records a value", func(ctx SpecContext) {

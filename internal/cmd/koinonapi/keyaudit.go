@@ -101,16 +101,33 @@ func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 
 // observe is the start-up check: keys.observed when the key-set state differs from the last recorded.
 func (k *keyAudit) observe(ctx context.Context) error {
+	return k.observeAs(ctx, keyscli.ActorStartup)
+}
+
+// observeAs runs the check (Auditor.Observe) as actor.
+func (k *keyAudit) observeAs(ctx context.Context, actor audit.Actor) error {
 	// The key set and the generated Secrets are loaded inside Observe, under its advisory lock.
-	res, err := k.auditor(keyscli.ActorStartup).Observe(ctx, k.load)
+	res, err := k.auditor(actor).Observe(ctx, k.load)
 	if err != nil {
 		return err
 	}
 	if res.Wrote {
 		slog.Warn("the key set differs from the last recorded key event; recorded keys.observed",
-			"active_kek", res.After.Active, "keks", len(res.After.KEKs), "retired", len(res.After.Retired), "generated_secrets", len(res.After.Generated))
+			"actor", actor.ID, "active_kek", res.After.Active, "keks", len(res.After.KEKs), "retired", len(res.After.Retired), "generated_secrets", len(res.After.Generated))
 	}
 	return nil
+}
+
+// watchChanged is the lost-change check of a running koinon-api: the keyring watch found a key set it
+// had not seen (watchKeyring). It runs the start-up check again, with the same loader and under the same
+// lock, so a key command whose event was lost is recorded without waiting for the next start. A key
+// command that is still between its Secret update and its event holds the lock, so the check waits for
+// it and finds the change recorded. The actor is koinon-api:keyring-watch, not a start that did not
+// happen. A failure is logged; the next change or start checks again.
+func (k *keyAudit) watchChanged(ctx context.Context) {
+	if err := k.observeAs(ctx, keyscli.ActorKeyringWatch); err != nil {
+		slog.Warn("the key-set check after a keyring change did not record its state", "err", err)
+	}
 }
 
 // startObserving runs the check once, and again in the background every installWriteRetry until it
