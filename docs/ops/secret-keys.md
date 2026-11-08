@@ -433,8 +433,15 @@ at the first broken link (`--install` for the install chain alone).
 
 Every change to the key set is written to the install audit chain (ADR 0100, "Keys: not atomic,
 so checked on start"). A Secret update is not a database write, so the event follows the update; if
-it cannot be written, the change stands (`koinon-api keys` prints that it was not recorded) and the
-next `koinon-api` start records the key set as `keys.observed`.
+it cannot be written, the change stands (`koinon-api keys` makes the change and returns an error that
+it was not recorded) and the next `koinon-api` start records the key set as `keys.observed`.
+
+A key command (`add`, `activate`, `retire`, and every change the key-admin Job makes) takes the key-set
+lock in the database before it reads the key set, and holds it through the Secret update and its
+event. A `koinon-api` start or keyring check in that window waits for the lock and then sees the
+change recorded, so a key change shows once, never also as `keys.observed`. `activate` and `retire`
+check the chosen KEK again on the key set read under the lock: on a terminal you pick and confirm
+first, and a KEK that changed meanwhile is refused then.
 
 | Action | Actor | When |
 | --- | --- | --- |
@@ -443,25 +450,33 @@ next `koinon-api` start records the key set as `keys.observed`.
 | `keys.rewrap.started`, `keys.reencrypt.started` | as above | only with `--record-started`, before the loop, when there is a row to change |
 | `keys.generated` | `system koinon-api:keys` | `koinon-api` made the first KEK Secret or the saved-work key |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` | `system koinon-api:key-admin` | the key-admin Job created the KEK Secret, added a KEK, recovered a lost active KEK, or bound a KEK to the install |
-| `keys.observed` | `system koinon-api:startup`, or the actor of the key command that found the gap | a start found the key set different from the last recorded key event; or a key command (`add`, `activate`, `retire`, the key-admin Job) found the live KEKs different from it and recorded that before its own event |
+| `keys.observed` | `system koinon-api:startup`, `system koinon-api:keyring-watch`, or the actor of the key command that found the gap | a start found the key set different from the last recorded key event (the first start always writes it, even with no KEK and no generated Secret: maintainer decision 2026-11-08); the running `koinon-api` saw the key set change and found it different; or a key command (`add`, `activate`, `retire`, the key-admin Job) found the live KEKs different from it and recorded that before its own event, under its own actor |
 
 The failure kinds of `keys.rewrap` and `keys.reencrypt` are a fixed set: `unknown_kek` (the envelope
 names a KEK the key set does not hold), `open` (the envelope did not authenticate: wrong key or
 modified data), `envelope` (the stored value is not a readable envelope), `wrap` (the new envelope
 could not be made: the data key could not be wrapped, for example the KMS did not answer, or the value
-could not be sealed) and `database` (any other error, the row's transaction or the row listing).
+could not be sealed) and `database` (any other error, the row's transaction or the row listing). A
+format or algorithm the keyring does not know counts as `envelope`.
+
+If the rows of a column cannot be listed, that counts as one `database` failure, however many rows the
+column has, and the run stops there: the columns after it are not tried. The closing event records the
+rows done so far and the failure, and the command fails; run it again once the database is back.
 
 `--record-started` writes the `.started` event before the first row changes. If the chain cannot take
 it, the run is refused and says "nothing was changed": a run that could die half way is never started
-without its marker.
+without its marker (maintainer decision 2026-11-08).
 
-The key-admin Job waits for the chain at most `--wait` in total, not per event. If it cannot read or
-write the chain, it prints a warning and succeeds; the Secret change stands and the next start records
-`keys.observed`.
+The key-admin Job waits for the chain at most `--wait` (5 minutes by default) in total, one budget per
+Job run, not per event. If it cannot read or write the chain, it prints a warning and succeeds; the
+Secret change stands and the next start records `keys.observed`. The CLI instead returns the
+not-recorded error. Both are maintainer decisions of 2026-11-08.
 
 `koinon-api` does not know its Helm release name, so it lists the generated Secrets by the
 `koinon.dev/generated` label alone. Two releases in one namespace would see each other's generated
-Secrets in `keys.observed`.
+Secrets in `keys.observed`, so one Koinon release per namespace stays the rule until release identity
+lands (#375, v0.2; maintainer decision
+2026-11-08).
 
 The summary of a key event holds `before` and `after`, each `{keks: [{id, fingerprint, wrapped_by,
 binding}], active, retired, generated: [{secret_name, uid, created_at}]}`. It names KEKs by ID and
@@ -470,8 +485,12 @@ holds a key, a value or a hash of one: Secrets are read by metadata only. A gene
 deleted and created again has a new UID, so the start after it writes `keys.observed`.
 
 `keys.observed` also appears on the first start after a KEK came from `secrets.kek.existingSecret`
-or from the ensure-secrets Job, since no command wrote it. `keys activate` now needs
-`--database-url`, like `add`, `retire` and `rewrap`, so that it can record its event.
+or from the ensure-secrets Job, since no command wrote it; those keys are never recorded as
+`keys.generated`, which is only for a key `koinon-api` made itself (maintainer decision 2026-11-08).
+The lost-change `keys.observed` a key command writes carries that command's actor, not
+`koinon-api:startup` (maintainer decision 2026-11-08). `keys activate` now needs `--database-url`
+(the `DATABASE_URL` alias still works), like `add`, `retire` and `rewrap`, so that it can record its
+event (maintainer decision 2026-11-08).
 
 ## Admin API tokens
 
