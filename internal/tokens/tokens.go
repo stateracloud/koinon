@@ -198,8 +198,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	id := pgtype.UUID{Bytes: uid, Valid: true}
 	var row store.ApiToken
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		if by.Parent != nil {
 			// Share-lock the parent until the child is committed: a concurrent revoke locks the tree
 			// for update first, so it waits and then sees (and revokes) the child. A parent revoked
@@ -225,9 +224,10 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if parentID.Valid {
 			after["parentTokenId"] = parentID.String()
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(), After: after,
 		})
+		return nil
 	})
 	if err != nil {
 		return Created{}, err
@@ -256,8 +256,7 @@ func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		return Token{}, ErrNotFound
 	}
 	var target store.ApiToken
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		var err error
 		if target, err = q.GetAPIToken(ctx, store.GetAPITokenParams{OrgID: org, ID: tid}); err != nil {
 			return err
@@ -279,10 +278,11 @@ func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			ids = append(ids, r.ID.String())
 		}
 		slices.Sort(ids)
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "token.revoke", TargetKind: "token", TargetID: id,
 			After: map[string]any{"name": target.Name, "tokenPrefix": target.Prefix, "revokedTokenIds": ids},
 		})
+		return nil
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Token{}, ErrNotFound

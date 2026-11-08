@@ -288,8 +288,11 @@ func (s *Service) WithPreflight(p Preflight) *Service {
 	return s
 }
 
-func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+// tx runs fn in the transaction of an audited change: events go into b, and the audit module writes
+// them in lock order just before commit (ADR 0100 decision 1.7).
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
+	return err
 }
 
 func isUnique(err error) bool {
@@ -539,7 +542,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	header := pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}
 	var row store.McpServer
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		p := store.CreateMCPServerParams{
 			OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 			CredentialHeader: header, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
@@ -559,9 +562,10 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.create", TargetKind: "mcp_server", TargetID: id.String(), After: serverSummary(row),
 		})
+		return nil
 	})
 	if err != nil {
 		return Server{}, mapErr(err)
@@ -593,7 +597,7 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		return Server{}, invalid("set a credential or remove it, not both")
 	}
 	var out store.McpServer
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -653,13 +657,11 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		after := serverSummary(out)
 		after["credentialChanged"] = patch.Credential != nil || patch.RemoveCredential
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.update", TargetKind: "mcp_server", TargetID: id,
 			Before: serverSummary(cur), After: after,
-		}); err != nil {
-			return err
-		}
-		return resetOnURLChange(ctx, q, org, actor, cur, out)
+		})
+		return resetOnURLChange(ctx, q, b, org, actor, cur, out)
 	})
 	if err != nil {
 		return Server{}, mapErr(err)
@@ -673,7 +675,7 @@ func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err != nil {
 		return err
 	}
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -686,9 +688,10 @@ func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if _, err := q.DeleteMCPServer(ctx, store.DeleteMCPServerParams{OrgID: org, ID: sid}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.delete", TargetKind: "mcp_server", TargetID: id, Before: serverSummary(cur),
 		})
+		return nil
 	})
 	return mapErr(err)
 }
@@ -743,7 +746,7 @@ func (s *Service) SetTwoApprovers(ctx context.Context, org pgtype.UUID, actor au
 		return Tool{}, err
 	}
 	var out store.McpTool
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -756,11 +759,12 @@ func (s *Service) SetTwoApprovers(ctx context.Context, org pgtype.UUID, actor au
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.two_approvers", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
 			Before: map[string]any{"server": srv.Name, "tool": tool, "required": cur.RequiresTwoApprovers},
 			After:  map[string]any{"server": srv.Name, "tool": tool, "required": required},
 		})
+		return nil
 	})
 	if err != nil {
 		return Tool{}, mapErr(err)
@@ -779,7 +783,7 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 		return Tool{}, err
 	}
 	var out store.McpTool
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -794,11 +798,12 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.tier", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
 			Before: map[string]any{"server": srv.Name, "tool": tool, "tier": string(cur.Tier), "reviewFlag": cur.ReviewReason.Valid},
 			After:  map[string]any{"server": srv.Name, "tool": tool, "tier": tier},
 		})
+		return nil
 	})
 	if err != nil {
 		return Tool{}, mapErr(err)
@@ -813,7 +818,7 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 		return Tool{}, err
 	}
 	var out store.McpTool
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -822,10 +827,11 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.review", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
 			After: map[string]any{"server": srv.Name, "tool": tool, "tier": string(out.Tier)},
 		})
+		return nil
 	})
 	if err != nil {
 		return Tool{}, mapErr(err)
@@ -880,7 +886,7 @@ type SyncResult struct {
 // no longer lists are marked absent. It is what the prober calls after a successful tools/list.
 func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtype.UUID, listed []ListedTool) (SyncResult, error) {
 	var res SyncResult
-	err := s.tx(ctx, func(q *store.Queries) error {
+	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: serverID})
 		if err != nil {
 			return err
@@ -935,7 +941,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					return err
 				}
 				// The query put the declaration back to the default; the audit says what it was.
-				if err := recordToolDeclarationReset(ctx, q, org, audit.System("koinon-reconciler:mcp-sync"), srv.Name, cur, out, ReasonContentChanged); err != nil {
+				if err := recordToolDeclarationReset(ctx, q, b, org, audit.System("koinon-reconciler:mcp-sync"), srv.Name, cur, out, ReasonContentChanged); err != nil {
 					return err
 				}
 				res.Changed = append(res.Changed, lt.Name)
@@ -965,10 +971,11 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 		slices.Sort(res.Changed)
 		slices.Sort(res.Demoted)
 		slices.Sort(res.Absent)
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: audit.System("koinon-reconciler:mcp-sync"), Action: "mcp_tool.sync", TargetKind: "mcp_server", TargetID: serverID.String(),
 			After: map[string]any{"server": srv.Name, "new": res.New, "changed": res.Changed, "demoted": res.Demoted, "absent": res.Absent},
 		})
+		return nil
 	})
 	return res, mapErr(err)
 }
@@ -979,7 +986,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 func (s *Service) RecordProbe(ctx context.Context, org, serverID pgtype.UUID, ok bool, reason string, synced bool) (Server, bool, error) {
 	var out Server
 	var changed bool
-	err := s.tx(ctx, func(q *store.Queries) error {
+	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		before, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: serverID})
 		if err != nil {
 			return err
@@ -998,11 +1005,12 @@ func (s *Service) RecordProbe(ctx context.Context, org, serverID pgtype.UUID, ok
 		if !changed || before.Health == store.McpHealthUnknown && row.Health == store.McpHealthHealthy {
 			return nil
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: audit.System("koinon-reconciler:mcp-sync"), Action: "mcp_server.health", TargetKind: "mcp_server", TargetID: serverID.String(),
 			Before: map[string]any{"name": before.Name, "health": string(before.Health)},
 			After:  map[string]any{"name": row.Name, "health": string(row.Health), "reason": row.HealthReason.String},
 		})
+		return nil
 	})
 	return out, changed, mapErr(err)
 }

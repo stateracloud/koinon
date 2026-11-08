@@ -133,7 +133,9 @@
 // key order unseen, and a call over MaxWorkBytes fails closed. A split across arguments that are not adjacent in
 // one of those orders is not reassembled (ADR 0091 decision 6; earlier rounds
 // joined every ordered pair of arguments and decoded windows around each boundary, removed with
-// the rescope). Splits across calls are not reassembled; the per-host and per-run URL budgets and
+// the rescope). Known limit (#286, ADR 0091 decision 6): the ends are raw bytes, so a split
+// secret in separator-padded base64 (or base64, \u escapes or percent-encoding of it) with each
+// half longer than 2*JoinEndBytes passes; the general fix is #369. Splits across calls are not reassembled; the per-host and per-run URL budgets and
 // the byte cap of a session with both legs bound them.
 //
 // # Fingerprints (winnowing)

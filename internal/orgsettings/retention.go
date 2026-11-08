@@ -94,7 +94,7 @@ func (s *Service) SetRunContentRetention(ctx context.Context, org pgtype.UUID, a
 		}
 		set = pgtype.Int4{Int32: int32(*days), Valid: true} //nolint:gosec // bounded by ValidateRunContentRetentionDays
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := Get(ctx, q, org, Defaults())
 		if err != nil {
 			return err
@@ -110,10 +110,11 @@ func (s *Service) SetRunContentRetention(ctx context.Context, org pgtype.UUID, a
 		if before == after {
 			return nil
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.run_content_retention.set", TargetKind: "org", TargetID: org.String(),
 			Before: map[string]any{"days": before}, After: map[string]any{"days": after},
 		})
+		return nil
 	})
 }
 

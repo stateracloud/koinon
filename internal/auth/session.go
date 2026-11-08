@@ -209,8 +209,7 @@ func (s *Service) logout(ctx context.Context, token string) error {
 	if token == "" {
 		return nil
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		uid, err := q.RevokeSessionReturningUser(ctx, store.RevokeSessionReturningUserParams{Now: ts(s.now()), TokenHash: hashToken(token)})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // expired, revoked or unknown: nothing ended now
@@ -225,10 +224,12 @@ func (s *Service) logout(ctx context.Context, token string) error {
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: user.PersonalOrgID, Actor: audit.User(uid), Action: "auth.logout", TargetKind: "user", TargetID: uid.String(),
 		})
+		return nil
 	})
+	return err
 }
 
 // Authenticate resolves a session token into a Principal. It extends the

@@ -10,10 +10,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -517,13 +517,13 @@ var _ = Describe("Service", func() {
 		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateInputRequired))
 
 		By("answering the question resumes the run, which is not canceled")
-		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := questions.Respond(ctx, store.New(tx), f.org, qrow.ID, f.owner, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "us-east-1"})
-			if err != nil {
+		_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+			if _, err := questions.Respond(ctx, q, b, f.org, qrow.ID, f.owner, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "us-east-1"}); err != nil {
 				return err
 			}
-			return runpark.Resolve(ctx, store.New(tx), f.org, f.run.ID)
-		})).To(Succeed())
+			return runpark.Resolve(ctx, q, f.org, f.run.ID)
+		})
+		Expect(err).NotTo(HaveOccurred())
 		run := f.getRun(ctx)
 		Expect(run.State).To(Equal(store.RunStateParked))
 		Expect(run.ReadyAt.Valid).To(BeTrue(), "ready to be claimed")

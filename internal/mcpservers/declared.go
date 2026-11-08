@@ -43,7 +43,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 		return false, err
 	}
 	actor := audit.Secret(d.SecretName)
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		all, err := q.ListMCPServers(ctx, org)
 		if err != nil {
 			return err
@@ -60,7 +60,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				cur = &all[i]
 			case r.ManagedBySecret.String == d.SecretName:
 				// The Secret renamed its server: the old entry goes.
-				if err := s.removeServer(ctx, q, org, r); err != nil {
+				if err := s.removeServer(ctx, q, b, org, r); err != nil {
 					return err
 				}
 			}
@@ -113,14 +113,12 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			return err
 		}
 		changed = true
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.declare", TargetKind: "mcp_server", TargetID: id.String(),
 			Before: before, After: serverSummary(row),
-		}); err != nil {
-			return err
-		}
+		})
 		if cur != nil {
-			return resetOnURLChange(ctx, q, org, actor, *cur, row)
+			return resetOnURLChange(ctx, q, b, org, actor, *cur, row)
 		}
 		return nil
 	})
@@ -132,17 +130,18 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 
 // removeServer marks a declared server removed: it stays as a disabled row, so the audit trail and
 // the tiers an admin set keep a target, and the Secret coming back restores it.
-func (s *Service) removeServer(ctx context.Context, q *store.Queries, org pgtype.UUID, r store.McpServer) error {
+func (s *Service) removeServer(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, r store.McpServer) error {
 	if r.RemovedAt.Valid {
 		return nil
 	}
 	if err := q.MarkMCPServerRemoved(ctx, store.MarkMCPServerRemovedParams{OrgID: org, ID: r.ID, Reason: pgtype.Text{String: ReasonRemoved, Valid: true}}); err != nil {
 		return err
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: audit.Secret(r.ManagedBySecret.String), Action: "mcp_server.undeclare", TargetKind: "mcp_server",
 		TargetID: r.ID.String(), Before: serverSummary(r), After: map[string]any{"removed": true},
 	})
+	return nil
 }
 
 // DeclaredSecrets returns the names of the Secrets that declare servers in org.
@@ -163,14 +162,14 @@ func (s *Service) DeclaredSecrets(ctx context.Context, org pgtype.UUID) ([]strin
 // RemoveDeclared marks what the Secret declared in org removed (its Secret was deleted), and
 // re-enables the UI servers it shadowed.
 func (s *Service) RemoveDeclared(ctx context.Context, org pgtype.UUID, secretName string) error {
-	return mapErr(s.tx(ctx, func(q *store.Queries) error {
+	return mapErr(s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		all, err := q.ListMCPServers(ctx, org)
 		if err != nil {
 			return err
 		}
 		for _, r := range all {
 			if r.Source == store.ConfigSourceSecret && r.ManagedBySecret.String == secretName {
-				if err := s.removeServer(ctx, q, org, r); err != nil {
+				if err := s.removeServer(ctx, q, b, org, r); err != nil {
 					return err
 				}
 			}

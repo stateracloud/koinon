@@ -72,7 +72,7 @@ func (sc Scope) normalize(now time.Time) (Scope, error) {
 
 // createScope records the scope an approval grants, with an audit entry, in the approval's
 // transaction. The scope is exact on the approved request's agent, connector, tool and target.
-func (s *Service) createScope(ctx context.Context, q *store.Queries, r store.ApprovalRequest, approver pgtype.UUID, sc Scope) (store.ApprovalScope, error) {
+func (s *Service) createScope(ctx context.Context, q *store.Queries, b audit.Batch, r store.ApprovalRequest, approver pgtype.UUID, sc Scope) (store.ApprovalScope, error) {
 	p := store.CreateApprovalScopeParams{
 		OrgID: r.OrgID, AgentID: r.AgentID, Connector: r.Connector, Tool: r.Tool, Target: r.Target,
 		Kind: store.ApprovalScopeKindAgent, ExpiresAt: pgtype.Timestamptz{Time: sc.Until, Valid: true},
@@ -85,10 +85,10 @@ func (s *Service) createScope(ctx context.Context, q *store.Queries, r store.App
 	if err != nil {
 		return store.ApprovalScope{}, err
 	}
-	return row, auditScope(ctx, q, row, AuditScopeCreate, audit.User(approver))
+	return row, auditScope(ctx, q, b, row, AuditScopeCreate, audit.User(approver))
 }
 
-func auditScope(ctx context.Context, q *store.Queries, sc store.ApprovalScope, action string, actor audit.Actor) error {
+func auditScope(ctx context.Context, q *store.Queries, b audit.Batch, sc store.ApprovalScope, action string, actor audit.Actor) error {
 	after := map[string]any{
 		"kind": string(sc.Kind), "agentId": sc.AgentID.String(), "connector": sc.Connector, "tool": sc.Tool,
 		"target": sc.Target, "expiresAt": sc.ExpiresAt.Time, "sourceApprovalId": sc.SourceApprovalID.String(),
@@ -96,9 +96,10 @@ func auditScope(ctx context.Context, q *store.Queries, sc store.ApprovalScope, a
 	if sc.TaskID.Valid {
 		after["taskId"] = sc.TaskID.String()
 	}
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: sc.OrgID, Actor: actor, Action: action, TargetKind: "approval_scope", TargetID: sc.ID.String(), After: after,
 	})
+	return nil
 }
 
 // ListScopes returns the agent's scopes that are active now.
@@ -112,8 +113,7 @@ func (s *Service) ListScopes(ctx context.Context, org, agent pgtype.UUID) ([]sto
 // Calls already approved by it keep running; the agent's next matching call parks again.
 func (s *Service) RevokeScope(ctx context.Context, org, id, by pgtype.UUID) (store.ApprovalScope, error) {
 	var out store.ApprovalScope
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		row, err := q.RevokeApprovalScope(ctx, store.RevokeApprovalScopeParams{OrgID: org, ID: id, RevokedBy: by})
 		if errors.Is(err, pgx.ErrNoRows) {
 			out, err = q.GetApprovalScope(ctx, store.GetApprovalScopeParams{OrgID: org, ID: id})
@@ -126,7 +126,7 @@ func (s *Service) RevokeScope(ctx context.Context, org, id, by pgtype.UUID) (sto
 			return err
 		}
 		out = row
-		return auditScope(ctx, q, row, AuditScopeRevoke, audit.User(by))
+		return auditScope(ctx, q, b, row, AuditScopeRevoke, audit.User(by))
 	})
 	return out, err
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -156,6 +157,24 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, send Sender, fn func(q *sto
 		notes, err = fn(store.New(tx))
 		return err
 	})
+	return afterCommit(ctx, send, notes, err)
+}
+
+// CommitAudit is Commit for a change that is audited: fn adds its audit events to b, and the audit
+// module writes them in lock order just before the commit (ADR 0100 decision 1.7).
+func CommitAudit(ctx context.Context, pool *pgxpool.Pool, send Sender, fn func(q *store.Queries, b audit.Batch) ([]Notification, error)) error {
+	var notes []Notification
+	_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+		var err error
+		notes, err = fn(q, b)
+		return err
+	})
+	return afterCommit(ctx, send, notes, err)
+}
+
+// afterCommit sends notes when the transaction committed (err is nil) and reports a failed send as a
+// *SendError.
+func afterCommit(ctx context.Context, send Sender, notes []Notification, err error) error {
 	if err != nil {
 		return err
 	}
