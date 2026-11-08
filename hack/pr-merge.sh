@@ -9,8 +9,9 @@
 #   1. refuses a draft (exit 5) and a PR that is not open
 #   2. hack/pr-wait.sh <PR> --checks, plus `--require e2e` when hack/needs-e2e.sh says the change needs
 #      the kind e2e (the ruleset's required contexts are read by --checks itself)
-#   3. reads every context of hack/ci-required.txt (not `advisory`) on the head SHA, newest run per
-#      name; each must be success or skipped, otherwise it exits 1 without merging
+#   3. reads every context of hack/ci-required.txt (not `advisory`) on the head SHA and judges it with
+#      hack/lib/pr-verdict.sh, the function pr-wait.sh uses too (#133): per workflow run, the newest counting run
+#      of each workflow decides; each context must be success or skipped, otherwise it exits 1 without merging
 #   4. only then: re-reads the PR (no longer OPEN: exit 3; head moved: exit 2; head not origin's
 #      branch tip: exit 6 STALE-HEAD), `gh pr merge --merge` (with --admin when given, else --auto),
 #      pinned to the head SHA that was read, then hack/claim.sh review <N> for each issue the PR closes,
@@ -32,6 +33,8 @@
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
 #       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 64 usage
 #       (pr-wait.sh's code passes through).
+#   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
+#   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -46,6 +49,8 @@ needs_sh=${PR_MERGE_NEEDS_E2E:-$here/needs-e2e.sh}
 claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
+# shellcheck source=/dev/null
+. "$here/lib/pr-verdict.sh"
 
 usage() {
   echo "usage: hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]" >&2
@@ -106,28 +111,24 @@ wait_rc=0
 "$wait_sh" "$pr" --checks ${req[@]+"${req[@]}"} || wait_rc=$?
 [ "$wait_rc" -eq 0 ] || { echo "pr-merge: pr-wait.sh exited $wait_rc; not merging" >&2; exit "$wait_rc"; }
 
-# Every required context of hack/ci-required.txt, read on the head SHA: the newest run of each name.
+# Every required context of hack/ci-required.txt, read on the head SHA and judged by hack/lib/pr-verdict.sh, the
+# same function hack/pr-wait.sh uses (#133): per workflow run, the newest counting run of each workflow decides.
 contexts=$(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$required_txt" |
   awk 'NF && $1 != "advisory" { sub(/^(aggregator|external) /, ""); print }')
 [ -n "$contexts" ] || { echo "pr-merge: no required contexts in $required_txt" >&2; exit 2; }
-runs=$(gh api "repos/{owner}/{repo}/commits/$sha/check-runs?per_page=100" --paginate \
-  --jq '.check_runs[] | {name: .name, ts: (.started_at // ""), v: (if .status == "completed" then (.conclusion // "none") else "pending" end)}' | jq -sc .) ||
-  { echo "pr-merge: cannot read the check runs of $sha" >&2; exit 2; }
-stats=$(gh api "repos/{owner}/{repo}/commits/$sha/status" \
-  --jq '.statuses[] | {name: .context, ts: (.created_at // ""), v: .state}' | jq -sc .) ||
-  { echo "pr-merge: cannot read the commit statuses of $sha" >&2; exit 2; }
-verdicts=$(jq -nr --argjson a "${runs:-[]}" --argjson b "${stats:-[]}" --arg want "$contexts" '
-  ($a + $b) as $all
-  | ($want | split("\n") | map(select(. != "")))[]
-  | . as $n
-  | ([$all[] | select(.name == $n)] | sort_by(.ts) | last // {v: "missing"}) as $r
-  | [$n, $r.v] | @tsv')
+runs=$(prv_check_rows "$sha") || { echo "pr-merge: cannot read the check runs of $sha" >&2; exit 2; }
+stats=$(prv_status_rows "$sha") || { echo "pr-merge: cannot read the commit statuses of $sha" >&2; exit 2; }
+wfruns=$(prv_runs "$sha") # empty when unreadable: nothing is dropped, so the verdict only gets stricter
+[ -n "$wfruns" ] || echo "pr-merge: cannot list the workflow runs of $sha; judging every check run on it" >&2
+rows=$(jq -nc --argjson a "${runs:-[]}" --argjson b "${stats:-[]}" '$a + $b')
+mapfile -t ctx_list <<<"$contexts"
+verdicts=$(prv_judge "$rows" "$wfruns" false "quickstart" "${ctx_list[@]}")
 green=0 bad=0
-while IFS=$'\t' read -r name v; do
+while IFS=$'\t' read -r name v _run; do
   case $v in
   success | skipped) green=$((green + 1)) ;;
   *)
-    echo "NOT GREEN $name ($v) on ${sha:0:7}" >&2
+    echo "NOT GREEN $name ($v${_run:+, run $_run}) on ${sha:0:7}" >&2
     bad=$((bad + 1))
     ;;
   esac
@@ -205,14 +206,14 @@ for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$pr_json"); do
   fi
 done
 
-if [ "$mode" = --auto ] && [ "$queue" = 1 ]; then
-  verb="added to the merge queue (merged by GitHub when the queue build is green; hack/pr-wait.sh $pr waits for it)"
-elif [ "$mode" = --auto ]; then
-  verb="auto-merge enabled"
-else
-  verb="merged ($mode)"
-fi
-note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest run per name; all success or skipped) against $base, then $verb."
+# What did `gh pr merge` achieve? It succeeds when GitHub accepted the request, not when the PR is queued or mergeable:
+# a PR blocked by a required review (required_reviewers) has auto-merge armed and is not in the queue (2026-11-07
+# printed "added to the merge queue" for one). Read the PR again and report what GitHub says (prv_merge_outcome).
+qs=no
+[ "$queue" = 0 ] || qs=$(prv_queue_state "$pr")
+after=$(gh pr view "$pr" --json state,mergeStateStatus,reviewDecision,autoMergeRequest 2>/dev/null) || after="{}"
+verb=$(prv_merge_outcome "$mode" "$qs" "$after")
+note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest counting run of each workflow; all success or skipped) against $base, then $verb."
 [ -z "$approved" ] || note+=" Approved at $approved."
 gh pr comment "$pr" --body "$note"
-echo "pr-merge: $verb for PR $pr at ${sha:0:7} ($green contexts green)"
+echo "pr-merge: PR $pr at ${sha:0:7}: $verb ($green contexts green)"
