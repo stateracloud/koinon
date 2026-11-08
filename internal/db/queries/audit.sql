@@ -97,3 +97,15 @@ SELECT * FROM install_audit_events
 WHERE starts_with(action, 'keys.') AND jsonb_exists(summary->'after', 'keks')
 ORDER BY chain_seq DESC
 LIMIT 1;
+
+-- name: LockPlatformSettings :exec
+-- Serialises the start-up record of the Helm-set platform settings across API replicas for the rest
+-- of the transaction (ADR 0100 decision 3). It is a domain lock, taken before the install head.
+SELECT pg_advisory_xact_lock(hashtext('koinon.platform_settings'));
+
+-- name: ListInstallSettingsEvents :many
+-- Every platform.settings.observed event, oldest first. An event holds only the keys that changed, so
+-- the last recorded settings are the events applied in turn (ADR 0100 decision 3). A few rows per install.
+SELECT * FROM install_audit_events
+WHERE action = 'platform.settings.observed'
+ORDER BY chain_seq;

@@ -482,3 +482,55 @@ func (q *Queries) ListInstallAuditEventsFiltered(ctx context.Context, arg ListIn
 	}
 	return items, nil
 }
+
+const listInstallSettingsEvents = `-- name: ListInstallSettingsEvents :many
+SELECT id, chain_seq, prev_hash, hash, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at FROM install_audit_events
+WHERE action = 'platform.settings.observed'
+ORDER BY chain_seq
+`
+
+// Every platform.settings.observed event, oldest first. An event holds only the keys that changed, so
+// the last recorded settings are the events applied in turn (ADR 0100 decision 3). A few rows per install.
+func (q *Queries) ListInstallSettingsEvents(ctx context.Context) ([]InstallAuditEvent, error) {
+	rows, err := q.db.Query(ctx, listInstallSettingsEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InstallAuditEvent
+	for rows.Next() {
+		var i InstallAuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChainSeq,
+			&i.PrevHash,
+			&i.Hash,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.Summary,
+			&i.RequestID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPlatformSettings = `-- name: LockPlatformSettings :exec
+SELECT pg_advisory_xact_lock(hashtext('koinon.platform_settings'))
+`
+
+// Serialises the start-up record of the Helm-set platform settings across API replicas for the rest
+// of the transaction (ADR 0100 decision 3). It is a domain lock, taken before the install head.
+func (q *Queries) LockPlatformSettings(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockPlatformSettings)
+	return err
+}
