@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -23,8 +22,14 @@ import (
 
 func exportLines(ctx context.Context, sc audit.ExportScope, from int64) []string {
 	GinkgoHelper()
+	return exportLinesFrom(ctx, store.New(pool), sc, from)
+}
+
+// exportLinesFrom exports through q, for a spec that reads the log inside its own transaction.
+func exportLinesFrom(ctx context.Context, q *store.Queries, sc audit.ExportScope, from int64) []string {
+	GinkgoHelper()
 	var buf bytes.Buffer
-	Expect(audit.Export(ctx, store.New(pool), &buf, sc, from)).To(Succeed())
+	Expect(audit.Export(ctx, q, &buf, sc, from)).To(Succeed())
 	return strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
 }
 
@@ -95,12 +100,8 @@ var _ = Describe("audit export and off-cluster verify", func() {
 
 	It("fails cleanly, and does not loop, when tail rows are gone and a newer event took their place", func(ctx SpecContext) {
 		// All inside one transaction that is rolled back: other specs verify every org's chain.
-		tx, err := pool.Begin(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
-		_, err = tx.Exec(ctx, `ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`)
-		Expect(err).NotTo(HaveOccurred())
-		_, err = tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND chain_seq >= 6`, org)
+		tx := ownerTx(ctx)
+		_, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND chain_seq >= 6`, org)
 		Expect(err).NotTo(HaveOccurred())
 		// chain_seq 8: the head says 8, rows 6 and 7 are missing.
 		_, err = audit.WriteInTx(ctx, tx, func(b audit.Batch) {
@@ -217,6 +218,34 @@ var _ = Describe("audit export and off-cluster verify", func() {
 				Expect(res.Break.Reason).To(ContainSubstring("twice"))
 			}
 		})
+		It("an event line with a top-level key twice, even when the last value is the true one", func() {
+			// A reader that keeps the first value sees mallory as the actor of a line that verifies.
+			Expect(lines[3]).To(HavePrefix("{"))
+			for _, key := range []string{"actor_id", `actor_id`, "summary_text", "hash"} {
+				l := append([]string{}, lines...)
+				l[3] = `{"` + key + `":"mallory",` + strings.TrimPrefix(l[3], "{")
+				res := verifyLines(l, audit.ExportVerifyOptions{})
+				Expect(res.Break).NotTo(BeNil(), key)
+				Expect(res.Break.Seq).To(BeEquivalentTo(3), key)
+				Expect(res.Break.Reason).To(ContainSubstring("twice"), key)
+			}
+
+			By("chain_seq twice: broken at the chain_seq due on that line, whatever either value says")
+			Expect(lines[3]).To(HaveSuffix("}"))
+			for _, forged := range []string{"first 1", "first 99", "last 99"} {
+				l := append([]string{}, lines...)
+				where, seq, _ := strings.Cut(forged, " ")
+				if where == "first" {
+					l[3] = `{"chain_seq":` + seq + `,` + strings.TrimPrefix(l[3], "{")
+				} else {
+					l[3] = strings.TrimSuffix(l[3], "}") + `,"chain_seq":` + seq + `}`
+				}
+				res := verifyLines(l, audit.ExportVerifyOptions{})
+				Expect(res.Break).NotTo(BeNil(), forged)
+				Expect(res.Break.Seq).To(BeEquivalentTo(3), forged)
+				Expect(res.Break.Reason).To(ContainSubstring(`"chain_seq" twice`), forged)
+			}
+		})
 		It("a removed line", func() { brokenAt(remove(lines, 3), 4) })
 		It("swapped lines", func() {
 			l := append([]string{}, lines...)
@@ -240,22 +269,24 @@ var _ = Describe("audit export and off-cluster verify", func() {
 	})
 
 	It("reports the same first broken chain_seq as the database verifier, for a chain tampered in the database", func(ctx SpecContext) {
-		asOwner(ctx, func(tx pgx.Tx) {
-			for _, q := range []string{
-				`UPDATE audit_events SET actor_id = 'mallory' WHERE org_id = $1 AND chain_seq = 6`,
-				`UPDATE audit_events SET summary = '{"after": {"n": "forged"}}' WHERE org_id = $1 AND chain_seq = 4`,
-			} {
-				_, err := tx.Exec(ctx, q, org)
-				Expect(err).NotTo(HaveOccurred())
-			}
-		})
-		db, err := audit.Verify(ctx, store.New(pool), org)
+		// Tampered, verified and exported inside one transaction that is rolled back: other specs
+		// verify every org's chain.
+		tx := ownerTx(ctx)
+		for _, q := range []string{
+			`UPDATE audit_events SET actor_id = 'mallory' WHERE org_id = $1 AND chain_seq = 6`,
+			`UPDATE audit_events SET summary = '{"after": {"n": "forged"}}' WHERE org_id = $1 AND chain_seq = 4`,
+		} {
+			_, err := tx.Exec(ctx, q, org)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		q := store.New(tx)
+		db, err := audit.Verify(ctx, q, org)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(db).To(HaveLen(1))
 		Expect(db[0].Break).NotTo(BeNil())
 		Expect(db[0].Break.Seq).To(BeEquivalentTo(4))
 
-		file := verifyLines(exportLines(ctx, sc, 1), audit.ExportVerifyOptions{})
+		file := verifyLines(exportLinesFrom(ctx, q, sc, 1), audit.ExportVerifyOptions{})
 		Expect(file.Break).NotTo(BeNil())
 		Expect(file.Break.Seq).To(Equal(db[0].Break.Seq), file.Break.Reason)
 	})

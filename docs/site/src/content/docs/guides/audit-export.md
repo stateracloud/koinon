@@ -53,8 +53,8 @@ An event line has `chain_seq`, `id`, `actor_kind`, `actor_id`, `action`, `target
 `request_id`, `created_at_micros` (microseconds since the Unix epoch), `prev_hash` and `hash` (64
 lower-case hex digits), and the summary twice: `summary_text` is the text Postgres prints for the `jsonb`
 value, which is what the hash covers, and `summary` is the same value as a JSON object for readers. A
-verifier must hash `summary_text` and refuse a line where `summary` is another value, or holds a key twice
-at any depth (readers disagree on which of the two values counts). The summaries are
+verifier must hash `summary_text` and refuse a line where `summary` is another value, or where the line
+or its `summary` holds a key twice at any depth (readers disagree on which of the two values counts). The summaries are
 the scrubbed audit data; an export holds no key material and no secret values.
 
 ## The hash

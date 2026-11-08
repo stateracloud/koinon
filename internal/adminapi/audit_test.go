@@ -337,6 +337,24 @@ var _ = Describe("GET /admin/v1/audit/export", func() {
 		Expect(err).To(HaveOccurred(), "the client sees a broken transfer, not a clean end")
 		Eventually(ended).WithTimeout(10 * time.Second).Should(BeClosed())
 
+		// exportCalls returns the summaries of the admin_api.call rows of the export path.
+		exportCalls := func(ctx context.Context) []string {
+			rows, err := store.New(pool).ListAuditEvents(ctx, store.ListAuditEventsParams{OrgID: e.org, PageSize: 100})
+			Expect(err).NotTo(HaveOccurred())
+			var calls []string
+			for _, r := range rows {
+				if r.Action == "admin_api.call" && strings.HasSuffix(r.TargetID, "/audit/export") {
+					calls = append(calls, string(r.Summary))
+				}
+			}
+			return calls
+		}
+		By("the aborted call is audited as aborted")
+		// The row is written after the handler returns, which can be after the client saw the abort.
+		Eventually(exportCalls).WithContext(ctx).WithTimeout(10 * time.Second).Should(ConsistOf(
+			And(ContainSubstring(`"aborted": true`), ContainSubstring(`"status": 200`)),
+		))
+
 		By("an ordinary error before the first byte is still an error response")
 		adminapi.SetAuditExporter(e.api, func(context.Context, io.Writer, audit.ExportScope, int64) error {
 			return audit.ErrBadFilter
@@ -344,5 +362,9 @@ var _ = Describe("GET /admin/v1/audit/export", func() {
 		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit/export", nil)
 		Expect(st).To(Equal(http.StatusBadRequest), string(raw))
 		Expect(string(raw)).To(ContainSubstring(`"error"`))
+
+		By("and a call that was not aborted has no aborted key")
+		Eventually(exportCalls).WithContext(ctx).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		Expect(exportCalls(ctx)).To(ContainElement(And(ContainSubstring(`"status": 400`), Not(ContainSubstring("aborted")))))
 	})
 })

@@ -305,18 +305,33 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 	rows, last, prev, brk, err := walkFrom(start, startPrev, func(int64) ([]link, error) {
 		var page []link
 		for len(page) < verifyPage && !failed {
+			var raw json.RawMessage
 			var ev ExportEvent
-			if err := dec.Decode(&ev); err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
+			err := dec.Decode(&raw)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err == nil {
+				err = json.Unmarshal(raw, &ev)
+			}
+			if err != nil {
 				failed = true
 				page = append(page, link{seq: next, bad: fmt.Sprintf("the line after chain_seq %d is not an event: %v", next-1, err)})
 				break
 			}
 			l := exportLink(tag, scope, ev)
+			// encoding/json keeps the last of two keys and another reader may keep the first, so a
+			// line with a key twice says two things: refuse it, as a summary with a key twice is (a key
+			// twice inside the summary is already reported as such). With chain_seq itself twice its
+			// value cannot be trusted: the line is broken at the chain_seq that was due there.
+			if k, dup := duplicateKey(raw); dup && l.bad == "" {
+				if k == "chain_seq" {
+					l.seq = next
+				}
+				l.bad = fmt.Sprintf("the line has the key %q twice", k)
+			}
 			page = append(page, l)
-			next = ev.ChainSeq + 1
+			next = l.seq + 1
 		}
 		return page, nil
 	})

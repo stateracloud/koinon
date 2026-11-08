@@ -32,19 +32,19 @@ func record(ctx context.Context, org pgtype.UUID, action string) store.AuditEven
 	return w.Org[0]
 }
 
-// asOwner runs fn with the append-only trigger of audit_events disabled, as the table owner does
-// to rewrite the log, and enables it again.
-func asOwner(ctx context.Context, fn func(tx pgx.Tx)) {
+// ownerTx opens a transaction with the append-only trigger of audit_events disabled, as the table
+// owner does to rewrite the log. It is rolled back when the spec ends, so a spec that tampers with
+// the chain leaves no broken chain in the shared database: other specs verify every org's chain.
+// The ALTER TABLE holds audit_events locked until then, so the spec reads and writes the log
+// through this transaction only (store.New(tx)); a query on the pool would wait for the lock.
+func ownerTx(ctx context.Context) pgx.Tx {
 	GinkgoHelper()
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`); err != nil {
-			return err
-		}
-		fn(tx)
-		_, err := tx.Exec(ctx, `ALTER TABLE audit_events ENABLE TRIGGER audit_events_no_update`)
-		return err
-	})
+	tx, err := pool.Begin(ctx)
 	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+	_, err = tx.Exec(ctx, `ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`)
+	Expect(err).NotTo(HaveOccurred())
+	return tx
 }
 
 var _ = Describe("the audit hash chain", func() {
@@ -138,16 +138,16 @@ var _ = Describe("the audit hash chain", func() {
 			record(ctx, other, "test.other")
 		})
 
-		verify := func(ctx context.Context, o pgtype.UUID) audit.OrgResult {
+		verify := func(ctx context.Context, q *store.Queries, o pgtype.UUID) audit.OrgResult {
 			GinkgoHelper()
-			res, err := audit.Verify(ctx, store.New(pool), o)
+			res, err := audit.Verify(ctx, q, o)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res).To(HaveLen(1))
 			return res[0]
 		}
 
 		It("passes on a good chain, for one org and for all", func(ctx SpecContext) {
-			r := verify(ctx, org)
+			r := verify(ctx, store.New(pool), org)
 			Expect(r.OK()).To(BeTrue())
 			Expect(r.Rows).To(BeEquivalentTo(5))
 			all, err := audit.Verify(ctx, store.New(pool), pgtype.UUID{})
@@ -159,17 +159,17 @@ var _ = Describe("the audit hash chain", func() {
 		})
 
 		It("reports the first altered row, not a later one", func(ctx SpecContext) {
-			asOwner(ctx, func(tx pgx.Tx) {
-				for _, e := range []store.AuditEvent{rows[3], rows[1]} {
-					_, err := tx.Exec(ctx, `UPDATE audit_events SET actor_id = 'mallory' WHERE org_id = $1 AND id = $2`, e.OrgID, e.ID)
-					Expect(err).NotTo(HaveOccurred())
-				}
-			})
-			r := verify(ctx, org)
+			tx := ownerTx(ctx)
+			for _, e := range []store.AuditEvent{rows[3], rows[1]} {
+				_, err := tx.Exec(ctx, `UPDATE audit_events SET actor_id = 'mallory' WHERE org_id = $1 AND id = $2`, e.OrgID, e.ID)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			q := store.New(tx)
+			r := verify(ctx, q, org)
 			Expect(r.OK()).To(BeFalse())
 			Expect(r.Break.Seq).To(BeEquivalentTo(2))
 			Expect(r.Break.Reason).To(ContainSubstring("hash does not match"))
-			Expect(verify(ctx, other).OK()).To(BeTrue(), "another org's chain is not affected")
+			Expect(verify(ctx, q, other).OK()).To(BeTrue(), "another org's chain is not affected")
 
 			var out bytes.Buffer
 			Expect(audit.WriteReport(&out, []audit.OrgResult{r})).To(BeFalse())
@@ -177,31 +177,28 @@ var _ = Describe("the audit hash chain", func() {
 		})
 
 		It("notices a removed row in the middle, a rewritten link and removed tail rows", func(ctx SpecContext) {
-			asOwner(ctx, func(tx pgx.Tx) {
-				_, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND id = $2`, rows[2].OrgID, rows[2].ID)
-				Expect(err).NotTo(HaveOccurred())
-			})
-			r := verify(ctx, org)
+			tx := ownerTx(ctx)
+			q := store.New(tx)
+			_, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND id = $2`, rows[2].OrgID, rows[2].ID)
+			Expect(err).NotTo(HaveOccurred())
+			r := verify(ctx, q, org)
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Seq).To(BeEquivalentTo(4))
 			Expect(r.Break.Reason).To(ContainSubstring("missing"))
 
 			By("a tail row removed, with the chain otherwise intact")
-			asOwner(ctx, func(tx pgx.Tx) {
-				_, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1`, other)
-				Expect(err).NotTo(HaveOccurred())
-			})
-			r = verify(ctx, other)
+			_, err = tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1`, other)
+			Expect(err).NotTo(HaveOccurred())
+			r = verify(ctx, q, other)
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Reason).To(ContainSubstring("removed"))
 		})
 
 		It("notices a changed prev_hash", func(ctx SpecContext) {
-			asOwner(ctx, func(tx pgx.Tx) {
-				_, err := tx.Exec(ctx, `UPDATE audit_events SET prev_hash = decode(repeat('ab', 32), 'hex') WHERE org_id = $1 AND id = $2`, rows[4].OrgID, rows[4].ID)
-				Expect(err).NotTo(HaveOccurred())
-			})
-			r := verify(ctx, org)
+			tx := ownerTx(ctx)
+			_, err := tx.Exec(ctx, `UPDATE audit_events SET prev_hash = decode(repeat('ab', 32), 'hex') WHERE org_id = $1 AND id = $2`, rows[4].OrgID, rows[4].ID)
+			Expect(err).NotTo(HaveOccurred())
+			r := verify(ctx, store.New(tx), org)
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Seq).To(BeEquivalentTo(5))
 			Expect(r.Break.Reason).To(ContainSubstring("prev_hash"))
