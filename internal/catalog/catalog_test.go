@@ -432,6 +432,29 @@ var _ = Describe("Service", func() {
 			Expect(since()).To(BeNil())
 		})
 
+		It("keeps a provider editable after its cost key was lost, and removes the dead key on request", func(ctx SpecContext) {
+			admin, scope := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace"
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+				CostAPIKey: admin, CostScope: scope,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE id = $1`, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a URL change that leaves the cost key alone succeeds")
+			url := "https://proxy.example.com"
+			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &url})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.URL).To(Equal(url))
+
+			By("removing the dead key clears the scope with it")
+			empty := ""
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &empty})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CostScope).To(BeEmpty())
+		})
+
 		It("takes a cost API key for anthropic and openai providers at their own API only", func(ctx SpecContext) {
 			p := create(ctx, "router", "koinon_test_not-a-real-token")
 			admin, scope := "koinon_test_not-a-real-admin-key", "proj_abc"

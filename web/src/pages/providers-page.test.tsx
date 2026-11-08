@@ -40,7 +40,7 @@ const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'op
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; withCostKey?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; withCostKey?: boolean; withLostCostKey?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -48,7 +48,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
       getDefaultModel: () => ({ model: '', available: [] }),
       listProviders: () => {
         calls.listed++
-        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }
+        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [opts.withLostCostKey ? create(ProviderSchema, { ...claude, costKeyLostAt: timestampFromMs(Date.now()), costScope: 'wrkspc_01Cost' }) : opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }
       },
       listModels: async () => {
         // Hold the refetch that follows a provider create, so the form's completion arrives late.
@@ -499,6 +499,16 @@ describe('Providers page', () => {
 
     it('removes a stored cost key on request', async () => {
       const calls = setup({ withAnthropic: true, withCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      await userEvent.click(await within(form).findByLabelText('Remove the stored cost key'))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].costApiKey).toBe('')
+    })
+
+    it('removes a cost key that was lost with its key-encryption key', async () => {
+      const calls = setup({ withAnthropic: true, withLostCostKey: true })
       await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
       const form = screen.getByRole('form', { name: 'Edit provider claude' })
       await userEvent.click(await within(form).findByLabelText('Remove the stored cost key'))

@@ -93,6 +93,11 @@ func (s *Service) sealCostKey(org, id pgtype.UUID, key string) ([]byte, error) {
 // removes the scope with it.
 func (s *Service) applyCostKey(ctx context.Context, q *store.Queries, org pgtype.UUID, out store.Provider, patch ProviderPatch) (store.Provider, error) {
 	hasKey, scope := len(out.CostApiKey) > 0, out.CostScope.String
+	// A key lost with its key-encryption key leaves the scope behind: there is nothing to
+	// validate until the operator re-enters or removes the key, so other edits still go through.
+	if !hasKey && out.CostApiKeyLostAt.Valid && patch.CostAPIKey == nil && patch.CostScope == nil {
+		return out, nil
+	}
 	if patch.CostAPIKey != nil {
 		hasKey = *patch.CostAPIKey != ""
 		if !hasKey && patch.CostScope == nil {

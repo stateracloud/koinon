@@ -98,10 +98,10 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         if (typeKnown) {
           const scope = costScope.trim()
           if (!takesCostKey || removeCostKey) {
-            if (provider.hasCostKey) change.costApiKey = ''
+            if (provider.hasCostKey || provider.costKeyLostAt) change.costApiKey = ''
           } else {
             if (costKeyValue) change.costApiKey = costKeyValue
-            if (scope !== provider.costScope && (costKeyValue || provider.hasCostKey)) change.costScope = scope
+            if (scope !== provider.costScope && (costKeyValue || provider.hasCostKey || provider.costKeyLostAt)) change.costScope = scope
           }
         }
         await onUpdate(provider.id, change)
@@ -226,7 +226,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
                 ? 'A cost key is stored and cannot be shown. Leave this empty to keep it, or type a new key to replace it.'
                 : `An ${type === 'anthropic' ? 'Anthropic' : 'OpenAI'} admin key that may read the cost API. Koinon reads it once a day to compare the provider's bill with its own ledger. It is stored encrypted, never shown again and never sent to the gateway.`}
             </p>
-            {editing && provider.hasCostKey && (
+            {editing && (provider.hasCostKey || provider.costKeyLostAt) && (
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={removeCostKey} onChange={(e) => setRemoveCostKey(e.target.checked)} />
                 Remove the stored cost key
