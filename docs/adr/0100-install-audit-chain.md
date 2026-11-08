@@ -262,7 +262,9 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
   batch as the change happens, in any order; just before commit the module writes the install events
   in the order added, then the org events sorted by org ID (stable within an org). No caller chooses
   the order, so two transactions that audit orgs A,B and B,A take the heads in the same order and
-  cannot deadlock.
+  cannot deadlock. One caller keeps its own transaction: the key-set change (decision 3) holds one
+  transaction across a Secret update, so it takes its advisory lock first and writes each event through
+  `audit.WriteInTx` on that transaction, which writes in the same order.
 - A batch may hold several install events (platform prices writes one per decision and one per
   version in one transaction). An org event links to the install event of its transaction through
   `install_event_id` in its summary (decision 1.6); the link means "written in the same transaction",
@@ -283,7 +285,8 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
 - The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
-  (issues 360, 370 and 371: step 2 moved the rest (done, #370); only tests remain, and step 3 deletes them and adds a lint check).
+  (issues 360, 370 and 371). Step 2 (#370) moved every non-test caller; step 3 deletes them and adds
+  a lint check.
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.
@@ -636,8 +639,8 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 - Negative: one more lock order rule (install head first). The audit module writes it (the audit
   batch, amended 1.7), so code review no longer holds it for callers that use the batch; a shared spec
   suite on the Postgres batch and the in-memory fake checks the order, and a Postgres spec shows two
-  transactions writing orgs A,B and B,A both finish. Until the last direct `audit.Record` caller has
-  moved, review still holds the order for those.
+  transactions writing orgs A,B and B,A both finish. No non-test caller writes directly any more;
+  until step 3 removes the direct writes, review keeps new code off them.
 - Negative: key events are not atomic with their change: Secret updates are recorded right after
   them, and `rewrap` and `reencrypt` once per run after a loop of per-row transactions. The start-up
   `keys.observed` pass compares the whole key-set state, so a lost event is caught at the next start,
