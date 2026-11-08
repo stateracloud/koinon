@@ -94,6 +94,10 @@ func verifyAudit(ctx context.Context, pool *pgxpool.Pool, orgID string, installO
 // refused (retryInstallWrite).
 const installWriteRetry = 30 * time.Second
 
+// installWriteFirstAttempt bounds the first, inline attempt of a startup write (startInstallWrite): a slow
+// or hung database must not hold the start. An attempt that times out is an ordinary failure.
+const installWriteFirstAttempt = 10 * time.Second
+
 // installRetry names a startup write that may be refused by the install audit chain.
 type installRetry struct {
 	// Goroutine names the background goroutine; What names the write in the log lines.
@@ -127,6 +131,15 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 		installWriteLoop(ctx, r.What, state, interval, write)
 	})
 	return nil
+}
+
+// startInstallWrite is retryInstallWrite for a write that has not run yet: it makes the first attempt
+// itself, bounded by firstAttempt, so a database that does not answer cannot block the start. The
+// background retries use the server's context, without that bound.
+func startInstallWrite(bg context.Context, stop func(), r installRetry, interval, firstAttempt time.Duration, write func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(bg, firstAttempt)
+	defer cancel()
+	return retryInstallWrite(bg, stop, r, interval, write(ctx), write)
 }
 
 // installWriteState names the state of a failed install write: "denied" when the chain refused it

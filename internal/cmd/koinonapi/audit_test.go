@@ -156,6 +156,28 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		Eventually(landed).Should(BeClosed())
 	})
 
+	It("does not let a hung first attempt hold the start, and still retries in the background", func(ctx SpecContext) {
+		bg, cancel := context.WithCancel(ctx)
+		defer cancel()
+		calls := 0
+		landed := make(chan struct{})
+		returned := make(chan error, 1)
+		go func() {
+			returned <- startInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond, 50*time.Millisecond,
+				func(c context.Context) error {
+					calls++
+					if calls == 1 {
+						<-c.Done() // a database that does not answer: only the first attempt's bound ends it
+						return c.Err()
+					}
+					close(landed)
+					return nil
+				})
+		}()
+		Eventually(returned, "2s").Should(Receive(BeNil()), "control returns within about the first-attempt timeout")
+		Eventually(landed).Should(BeClosed(), "the background retry still runs")
+	})
+
 	It("waits in the grant-only migrate for the role, and gives up with the wait", func(ctx SpecContext) {
 		calls := 0
 		Expect(grantInstallAuditWriter(ctx, time.Minute, time.Millisecond, func(context.Context) (bool, error) {

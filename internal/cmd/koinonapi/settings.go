@@ -28,8 +28,12 @@ type settingKind int
 const (
 	// kindValue is recorded as the flag prints it.
 	kindValue settingKind = iota
-	// kindURL is recorded without its user info and query, which could carry a credential.
+	// kindURL is recorded as scheme://host[:port] only: user info, path, query and fragment could carry
+	// a credential.
 	kindURL
+	// kindURLWithPath is kindURL plus the path, for a URL whose path identifies what it names (the OIDC
+	// issuer). User info, query and fragment are still dropped.
+	kindURLWithPath
 	// kindRef is a flag that names a Secret, a file or a directory. Only the name (the path) is
 	// recorded: the thing it names is never opened, read or hashed.
 	kindRef
@@ -59,7 +63,7 @@ var recordedSettings = []platformSetting{
 	{Flag: "bootstrap-password-file", Key: "bootstrap-admin-pw-file", Kind: kindRef},
 	setting("default-org-identity-mode", kindValue),
 	setting("default-org-group-mappings", kindValue),
-	setting("oidc-issuer-url", kindURL),
+	setting("oidc-issuer-url", kindURLWithPath),
 	setting("oidc-client-id", kindValue),
 	setting("oidc-redirect-url", kindURL),
 	setting("oidc-groups-claim", kindValue),
@@ -156,7 +160,7 @@ func platformSettings(fs *pflag.FlagSet) (map[string]string, error) {
 
 // render writes v as the event records it.
 func (k settingKind) render(v string) string {
-	if k != kindURL || v == "" {
+	if (k != kindURL && k != kindURLWithPath) || v == "" {
 		return v
 	}
 	u, err := url.Parse(v)
@@ -165,6 +169,9 @@ func (k settingKind) render(v string) string {
 		return "(set, not a URL)"
 	}
 	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	if k == kindURL {
+		u.Path, u.RawPath, u.Opaque = "", "", ""
+	}
 	return u.String()
 }
 
@@ -262,7 +269,7 @@ func observeSettings(ctx context.Context, run audit.Runner, cur map[string]strin
 	return wrote, err
 }
 
-// startObservingSettings records the settings once, and again in the background every
+// startObservingSettings records the settings once (for at most installWriteFirstAttempt), and again in the background every
 // installWriteRetry while the chain refuses the write (the CloudNativePG upgrade window, ADR 0100
 // decision 1.1a): the start does not wait for it. Any other failure is retried too, as for the key-set check.
 func startObservingSettings(ctx context.Context, stop func(), run audit.Runner, cur map[string]string) {
@@ -273,6 +280,6 @@ func startObservingSettings(ctx context.Context, stop func(), run audit.Runner, 
 		}
 		return err
 	}
-	_ = retryInstallWrite(ctx, stop, installRetry{Goroutine: "platform-settings-retry", What: "platform settings record", AnyError: true},
-		installWriteRetry, write(ctx), write)
+	_ = startInstallWrite(ctx, stop, installRetry{Goroutine: "platform-settings-retry", What: "platform settings record", AnyError: true},
+		installWriteRetry, installWriteFirstAttempt, write)
 }

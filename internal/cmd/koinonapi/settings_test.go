@@ -116,13 +116,15 @@ var _ = Describe("the Helm-set platform settings", func() {
 			Expect(string(raw)).NotTo(ContainSubstring("koinon_test_not-a-real-password"), "no file content")
 		})
 
-		It("drops the user info and the query of a URL", func() {
+		It("drops the user info, the path, the query and the fragment of a URL, and keeps the path only of the OIDC issuer", func() {
 			fs := serveFlags()
-			Expect(fs.Set("gateway-url", "http://user:koinon_test_not-a-real-password@gateway.koinon.svc:8080/v1?key=koinon_test_not-a-real-token#x")).To(Succeed())
+			Expect(fs.Set("gateway-url", "http://user:koinon_test_not-a-real-password@gateway.koinon.svc:8080/koinon_test_not-a-real-token?key=koinon_test_not-a-real-token#x")).To(Succeed())
+			Expect(fs.Set("oidc-issuer-url", "https://user:koinon_test_not-a-real-password@idp.example.test/realms/koinon?key=koinon_test_not-a-real-token#x")).To(Succeed())
 			Expect(fs.Set("github-api-url", "not a url")).To(Succeed())
 			settings, err := platformSettings(fs)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(settings).To(HaveKeyWithValue("gateway-url", "http://gateway.koinon.svc:8080/v1"))
+			Expect(settings).To(HaveKeyWithValue("gateway-url", "http://gateway.koinon.svc:8080"))
+			Expect(settings).To(HaveKeyWithValue("oidc-issuer-url", "https://idp.example.test/realms/koinon"))
 			Expect(settings).To(HaveKeyWithValue("github-api-url", "(set, not a URL)"))
 		})
 
@@ -133,7 +135,7 @@ var _ = Describe("the Helm-set platform settings", func() {
 			settings, err := platformSettings(fs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(settings).To(HaveKeyWithValue("chart-version", "0.3.1"))
-			Expect(settings).To(HaveKeyWithValue("public-url", "https://koinon.example.test/"))
+			Expect(settings).To(HaveKeyWithValue("public-url", "https://koinon.example.test"))
 		})
 	})
 
