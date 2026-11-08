@@ -279,10 +279,6 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	})
 
 	e.rpc, e.syncer = rpc, syncer
-	if syncer != nil {
-		// As koinon-api wires it: the periodic refresh reads through the services' queue.
-		syncer.SetQueue(rpc.QueueScopeReading)
-	}
 
 	handler, err = api.NewHandler(api.Options{
 		Auth:           svc,

@@ -1203,17 +1203,16 @@ type modelFacts struct {
 // as before, with chat completions and no cache: the gateway refuses it anyway. Only a database
 // error is returned.
 func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error) {
-	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
-	if errors.Is(err, prices.ErrUnpriced) {
-		return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+	qt, err := r.p.cfg.Prices.Find(ctx, r.q, r.run.OrgID, name, time.Now())
+	m := qt.Model
+	if _, ok := prices.Unpriceable(err); ok {
+		if m.Name == "" {
+			return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+		}
+		// The model exists but has no usable price: its format and provider type still apply.
+		return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}, nil
 	} else if err != nil {
 		return modelFacts{}, err
 	}
-	f := modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}
-	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
-	if err != nil {
-		return f, nil
-	}
-	f.Cache = prices.CacheModeFor(m.ProviderType, m.Name, f.Format, res.Price)
-	return f, nil
+	return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheModeFor(m.ProviderType, m.Name, m.Format, qt.Resolution.Price)}, nil
 }

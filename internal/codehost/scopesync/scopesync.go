@@ -65,7 +65,7 @@ type Syncer struct {
 	timeout  time.Duration
 	minAge   time.Duration
 	maxRepos int
-	queue    func(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{}
+	jobs     *jobs
 }
 
 // New returns a Syncer. keys opens the connections' secret fields; nil (Koinon without
@@ -74,26 +74,49 @@ func New(pool *pgxpool.Pool, hosts *codehost.Registry, keys connections.Opener, 
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Syncer{
+	s := &Syncer{
 		pool: pool, q: store.New(pool), scope: orgsettings.NewService(pool), hosts: hosts, keys: keys, log: log, now: time.Now,
 		timeout: DefaultTimeout, minAge: MinAge, maxRepos: orgsettings.MaxCodeHostRepos,
 	}
+	s.jobs = newJobs(log, s.run)
+	return s
 }
 
-// SetQueue makes the periodic refresh hand each reading to queue instead of running it itself, and
-// wait for the returned channel. koinon-api sets it to the service layer's queue, so a refresh and
-// a manual Test never list one connection at the same time and shutdown drains both. The queue
-// bounds the reading itself. Call it before Run.
-func (s *Syncer) SetQueue(queue func(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{}) {
-	s.queue = queue
+// Request asks for a reading of the connection's repositories, audited as actor (a person's reading
+// is always audited, the refresh's only on a change). It is the one entry to a reading: the periodic
+// round and the services' on-change signal (a connection created, re-keyed or tested) both come here,
+// and the one policy applies to both: at most one reading in flight per connection, a request that
+// arrives meanwhile coalesced into one more reading, each reading bounded by the timeout, the
+// credential it took recorded with it (orgsettings.ReplaceCodeHostRepos, #244), and Drain waiting for
+// it. Request never blocks and the reading is detached from ctx's cancellation, though it keeps ctx's
+// request ID for the audit event. The returned channel closes when a reading that covers the request
+// has finished, or at once after Drain. A failed reading is logged here and leaves the stored scope to
+// age out, which is the safe side.
+func (s *Syncer) Request(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
+	return s.jobs.start(ctx, row, actor)
 }
 
-// Sync reads one connection's repositories and replaces its part of the scope, audited as actor
-// (orgsettings.ReplaceCodeHostRepos: a person's sync is always audited, the refresh's only on a
-// change). The reading is dated at the start of the read, so a slow listing does not look
-// fresher than it is. A connection that is not a code host is skipped without error. On error the
-// stored scope is left as it was.
-func (s *Syncer) Sync(ctx context.Context, row store.Connection, actor audit.Actor) error {
+// Drain stops new readings and waits for the running ones until ctx ends; then it cancels what still
+// runs and waits for that to return. koinon-api calls it in its shutdown, inside the shutdown
+// deadline. After Drain no reading starts.
+func (s *Syncer) Drain(ctx context.Context) {
+	s.jobs.drain(ctx)
+}
+
+// run is one bounded reading, run by the queue.
+func (s *Syncer) run(ctx context.Context, row store.Connection, actor audit.Actor) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	if err := s.read(ctx, row, actor); err != nil {
+		s.log.Warn("code-host scope: could not read the connection's repositories; the stored reading ages out", "org", row.OrgID.String(), "connection", row.ID.String(), "connector", row.Connector, "err", err)
+	}
+}
+
+// read reads one connection's repositories and replaces its part of the scope, audited as actor.
+// The reading is dated at the start of the read, so a slow listing does not look fresher than it is.
+// A connection that is not a code host is skipped without error. On error the stored scope is left
+// as it was. Only run calls it; everything else asks through Request.
+func (s *Syncer) read(ctx context.Context, row store.Connection, actor audit.Actor) error {
 	p, ok := s.hosts.Get(row.Connector)
 	if !ok {
 		return nil
@@ -198,29 +221,18 @@ func (s *Syncer) syncOrg(ctx context.Context, org pgtype.UUID, minAge time.Durat
 			if minAge > 0 && s.readWithin(ctx, row, minAge) {
 				continue
 			}
-			err := s.syncOne(ctx, row)
-			if err != nil && ctx.Err() == nil {
-				s.log.Warn("code-host scope: refresh failed; the stored reading ages out", "org", org.String(), "connection", row.ID.String(), "connector", id, "err", err)
-			}
+			s.syncOne(ctx, row)
 		}
 	}
 }
 
-// syncOne reads one connection as the refresh. With a queue (SetQueue) the queue runs the reading,
-// bounded by its own timeout, and syncOne waits for it, so the refresh and a person's Test never
-// list one connection together and Drain waits for the refresh's reading too. A queue reports its
-// failures itself, so the error is nil there. Without one it runs Sync under s.timeout.
-func (s *Syncer) syncOne(ctx context.Context, row store.Connection) error {
-	if s.queue != nil {
-		select {
-		case <-s.queue(ctx, row, Actor):
-		case <-ctx.Done():
-		}
-		return nil
+// syncOne reads one connection as the refresh: it asks for the reading (Request) and waits for it,
+// so the round moves on only when the reading has finished or the round is canceled.
+func (s *Syncer) syncOne(ctx context.Context, row store.Connection) {
+	select {
+	case <-s.Request(ctx, row, Actor):
+	case <-ctx.Done():
 	}
-	cctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	return s.Sync(cctx, row, Actor)
 }
 
 // readWithin reports whether the connection's stored reading is younger than d. A failed lookup
