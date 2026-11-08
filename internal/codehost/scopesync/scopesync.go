@@ -65,6 +65,7 @@ type Syncer struct {
 	timeout  time.Duration
 	minAge   time.Duration
 	maxRepos int
+	queue    func(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{}
 }
 
 // New returns a Syncer. keys opens the connections' secret fields; nil (Koinon without
@@ -77,6 +78,14 @@ func New(pool *pgxpool.Pool, hosts *codehost.Registry, keys connections.Opener, 
 		pool: pool, q: store.New(pool), scope: orgsettings.NewService(pool), hosts: hosts, keys: keys, log: log, now: time.Now,
 		timeout: DefaultTimeout, minAge: MinAge, maxRepos: orgsettings.MaxCodeHostRepos,
 	}
+}
+
+// SetQueue makes the periodic refresh hand each reading to queue instead of running it itself, and
+// wait for the returned channel. koinon-api sets it to the service layer's queue, so a refresh and
+// a manual Test never list one connection at the same time and shutdown drains both. The queue
+// bounds the reading itself. Call it before Run.
+func (s *Syncer) SetQueue(queue func(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{}) {
+	s.queue = queue
 }
 
 // Sync reads one connection's repositories and replaces its part of the scope, audited as actor

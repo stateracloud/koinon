@@ -674,7 +674,15 @@ func (s *Server) syncScope(ctx context.Context, row store.Connection, actor audi
 	if s.scopeSync == nil {
 		return
 	}
-	s.scopeJobs.start(row, actor)
+	s.scopeJobs.start(ctx, row, actor)
+}
+
+// QueueScopeReading asks for a reading of the connection's repositories, as the periodic refresh
+// does (scopesync.Syncer.SetQueue): it shares the one-reading-per-connection rule and Drain with
+// the readings the RPCs start. The channel closes when a reading that covers the request has
+// finished, or at once when the server is draining.
+func (s *Server) QueueScopeReading(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
+	return s.scopeJobs.start(ctx, row, actor)
 }
 
 // runScopeSync is one bounded reading, run by scopeJobs.

@@ -16,7 +16,9 @@ import (
 type scopeKey struct{ org, id [16]byte }
 
 // scopeJobs runs the background code-host scope readings (syncScope): at most one reading runs per
-// connection, and Drain waits for the running ones at shutdown.
+// connection, and Drain waits for the running ones at shutdown. Readings asked for by a request (a
+// Test, a create, a re-key) and by the periodic refresh (scopesync.Syncer.Run) both go through it, so
+// a manual Test and a scheduled sync never list one connection at the same time.
 //
 // A request that arrives while its connection is being read does not start a second reading: it
 // leaves its row and actor as the one pending request, replacing an older pending one, and the
@@ -41,6 +43,11 @@ type scopeJobs struct {
 type scopeRequest struct {
 	row   store.Connection
 	actor audit.Actor
+	// requestID is the ID of the request that queued the reading ("" for the periodic refresh). The
+	// reading runs on scopeJobs' own context, so the ID that audit stamps on its event is carried here.
+	requestID string
+	// done are closed when a reading that covers this request has finished (or the request was dropped).
+	done []chan struct{}
 }
 
 func newScopeJobs(log *slog.Logger, run func(ctx context.Context, row store.Connection, actor audit.Actor)) *scopeJobs {
@@ -48,19 +55,27 @@ func newScopeJobs(log *slog.Logger, run func(ctx context.Context, row store.Conn
 	return &scopeJobs{log: log, run: run, ctx: ctx, cancel: cancel, running: map[scopeKey]*scopeRequest{}}
 }
 
-// start asks for a reading of row. It never blocks. After Drain it does nothing: the process is
-// stopping, and the periodic refresh reads the connection on the next start.
-func (j *scopeJobs) start(row store.Connection, actor audit.Actor) {
+// start asks for a reading of row. It never blocks. The reading is detached from ctx's cancellation
+// but carries its request ID, so the audit event has it; a request that replaces a pending one
+// brings its own. The returned channel is closed once a reading that covers this request has
+// finished. After Drain nothing starts and the channel is already closed: the process is stopping,
+// and the periodic refresh reads the connection on the next start.
+func (j *scopeJobs) start(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
 	key := scopeKey{org: row.OrgID.Bytes, id: row.ID.Bytes}
-	req := &scopeRequest{row: row, actor: actor}
+	done := make(chan struct{})
+	req := &scopeRequest{row: row, actor: actor, requestID: audit.RequestID(ctx), done: []chan struct{}{done}}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.closed {
-		return
+		close(done)
+		return done
 	}
-	if _, busy := j.running[key]; busy {
+	if old, busy := j.running[key]; busy {
+		if old != nil {
+			req.done = append(old.done, req.done...)
+		}
 		j.running[key] = req
-		return
+		return done
 	}
 	j.running[key] = nil
 	j.wg.Add(1)
@@ -68,22 +83,37 @@ func (j *scopeJobs) start(row store.Connection, actor audit.Actor) {
 		defer j.wg.Done()
 		j.loop(ctx, key, req)
 	})
+	return done
 }
 
 // loop reads first, then whatever request arrived meanwhile, until none is pending. The key is
 // released even when a reading panics, so the connection is not stuck.
 func (j *scopeJobs) loop(ctx context.Context, key scopeKey, req *scopeRequest) {
 	for req != nil {
-		safego.Do(j.log, "code-host-scope-sync", func() { j.run(ctx, req.row, req.actor) })
+		rctx := ctx
+		if req.requestID != "" {
+			rctx = audit.WithRequestID(ctx, req.requestID)
+		}
+		safego.Do(j.log, "code-host-scope-sync", func() { j.run(rctx, req.row, req.actor) })
+		closeAll(req.done)
 		j.mu.Lock()
 		req = j.running[key]
 		if req == nil || ctx.Err() != nil {
 			delete(j.running, key)
-			req = nil
-		} else {
-			j.running[key] = nil
+			j.mu.Unlock()
+			if req != nil {
+				closeAll(req.done)
+			}
+			return
 		}
+		j.running[key] = nil
 		j.mu.Unlock()
+	}
+}
+
+func closeAll(done []chan struct{}) {
+	for _, d := range done {
+		close(d)
 	}
 }
 
