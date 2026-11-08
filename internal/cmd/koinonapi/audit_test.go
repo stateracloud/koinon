@@ -51,6 +51,7 @@ var _ = Describe("koinon-api audit verify", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`)
 		Expect(err).NotTo(HaveOccurred())
+		// audit-lint:allow a tamper test: forges a row past the triggers so "audit verify" has a break to report
 		_, err = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = 'forged' WHERE chain_seq = 2`)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tx.Commit(ctx)).To(Succeed())

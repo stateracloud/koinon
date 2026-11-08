@@ -38,24 +38,6 @@ func f() { _ = audit.RecordAfter(ctx, q, e) }'
 case_ "a method named Record on another type passes" 0 internal/foo/a.go 'package foo
 func f() { _ = a.Record(ctx, e) }'
 
-case_ "audit.Record fails" 1 internal/foo/a.go 'package foo
-func f() { _, _ = audit.Record(ctx, q, e) }'
-case_ "audit.RecordErr fails" 1 internal/foo/a_test.go 'package foo
-func f() { _ = audit.RecordErr(ctx, q, e) }'
-case_ "audit.RecordInstall fails" 1 internal/foo/a.go 'package foo
-func f() { _, _ = audit.RecordInstall(ctx, q, e) }'
-case_ "audit.RecordInstallErr fails" 1 internal/foo/a_test.go 'package foo
-func f() { _ = audit.RecordInstallErr(ctx, q, e) }'
-case_ "a direct write inside internal/audit passes" 0 internal/audit/a.go 'package audit
-func f() { _, _ = record(ctx, q, e) }'
-
-case_ "InsertAuditEvent fails" 1 internal/foo/a.go 'package foo
-func f() { _, _ = q.InsertAuditEvent(ctx, store.InsertAuditEventParams{}) }'
-case_ "InsertInstallAuditEvent fails" 1 internal/foo/a_test.go 'package foo
-func f() { _, _ = q.InsertInstallAuditEvent(ctx, p) }'
-case_ "the store package itself passes" 0 internal/db/store/audit.sql.go 'package store
-func (q *Queries) InsertAuditEvent() {}'
-
 case_ "raw INSERT INTO audit_events fails" 1 internal/foo/a.go 'package foo
 var s = `INSERT INTO audit_events (org_id) VALUES ($1)`'
 case_ "raw INSERT with the table on the next line fails" 1 internal/foo/a_test.go 'package foo
@@ -73,10 +55,14 @@ case_ "an insert into another table passes" 0 internal/foo/a.go 'package foo
 var s = `INSERT INTO agents (id) VALUES ($1)`'
 case_ "a sqlc query that writes an audit table fails" 1 internal/db/queries/agents.sql '-- name: Bad :exec
 DELETE FROM audit_events WHERE org_id = $1;'
-case_ "the audit sqlc queries pass" 0 internal/db/queries/audit.sql '-- name: InsertAuditEvent :one
+case_ "an insert in the store's audit.sql fails (the inserts live in auditstore)" 1 internal/db/queries/audit.sql '-- name: InsertAuditEvent :one
 INSERT INTO audit_events (org_id) VALUES ($1) RETURNING *;'
-case_ "an allowlisted tamper test passes" 0 internal/cmd/koinonapi/audit_test.go 'package main
+case_ "the auditstore queries pass" 0 internal/audit/internal/auditstore/queries/audit_write.sql '-- name: InsertAuditEvent :one
+INSERT INTO audit_events (org_id) VALUES ($1) RETURNING *;'
+case_ "a once-allowlisted test path with no marker fails" 1 internal/cmd/koinonapi/audit_test.go 'package main
 var s = `UPDATE install_audit_events SET target_id = $1`'
+case_ "internal/api/audit_test.go is no longer allowlisted" 1 internal/api/audit_test.go 'package api_test
+var s = `INSERT INTO install_audit_events (actor_kind) VALUES ($1)`'
 case_ "a raw write inside internal/audit passes" 0 internal/audit/x_test.go 'package audit_test
 var s = `DELETE FROM audit_events`'
 
@@ -98,30 +84,7 @@ case_ "an aliased WriteInTx in keyscli passes" 0 internal/keyscli/a.go 'package 
 import au "github.com/stateracloud/koinon/internal/audit"
 func f() { _, _ = au.WriteInTx(ctx, tx, fn) }'
 
-# Rule 1 with an aliased or dot import.
-case_ "an aliased audit.Record fails" 1 internal/foo/a.go 'package foo
-import (
-	"context"
-	au "github.com/stateracloud/koinon/internal/audit"
-)
-func f() { _, _ = au.Record(ctx, q, e) }'
-case_ "an aliased audit.RecordInstallErr fails" 1 internal/foo/a.go 'package foo
-import au "github.com/stateracloud/koinon/internal/audit"
-func f() { _ = au.RecordInstallErr(ctx, q, e) }'
-case_ "a dot-imported Record fails" 1 internal/foo/a.go 'package foo
-import . "github.com/stateracloud/koinon/internal/audit"
-func f() { _, _ = Record(ctx, q, e) }'
-case_ "a dot-imported RecordErr fails" 1 internal/foo/a.go 'package foo
-import . "github.com/stateracloud/koinon/internal/audit"
-func f() { _ = RecordErr(ctx, q, e) }'
-case_ "a bare Record without a dot import of audit passes" 0 internal/foo/a.go 'package foo
-func Record(x int) {}
-func f() { Record(1) }'
-case_ "a method named Record with audit aliased passes" 0 internal/foo/a.go 'package foo
-import au "github.com/stateracloud/koinon/internal/audit"
-func f() { _ = a.Record(ctx, au.Event{}) }'
-
-# Rule 3: schema-qualified and quoted names, COPY, MERGE, pgx.Identifier.
+# Rule 1: schema-qualified and quoted names, COPY, MERGE; rule 2: pgx.Identifier.
 case_ "INSERT INTO public.audit_events fails" 1 internal/foo/a.go 'package foo
 var s = `INSERT INTO public.audit_events (org_id) VALUES ($1)`'
 case_ "INSERT INTO a quoted table fails" 1 internal/foo/a.go 'package foo
@@ -146,6 +109,88 @@ case_ "a SELECT of public.audit_events passes" 0 internal/foo/a.go 'package foo
 var s = `SELECT count(*) FROM public."audit_events"`'
 case_ "an allowlisted tamper test with a qualified name passes" 0 internal/db/migrations/audit_test.go 'package migrations
 var s = `UPDATE public.audit_events SET action = $1`'
+
+# Line markers: // audit-lint:allow <reason> on the line directly above the reported line, in a test.
+case_ "a marker with a reason passes" 0 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow a tamper test: forges a row so the verifier has a break to report
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a marker above a multi-line statement passes" 0 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow tests the database grants of the writer role
+	_, _ = c.Exec(ctx, `INSERT INTO install_audit_events (actor_kind)
+		VALUES ($1)`)
+}'
+case_ "a marker without a reason fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a marker with only blanks as a reason fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow   
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a marker that is not adjacent fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow a tamper test
+	x := 1
+
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a marker on the same line as the statement fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`) // audit-lint:allow a tamper test
+}'
+case_ "a marker outside a test fails" 1 internal/foo/a.go 'package foo
+func f() {
+	// audit-lint:allow not a test
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a marker above a line with no audit write fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow left behind
+	x := 1
+}'
+case_ "a marker covers the next line only" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow a tamper test
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+	_, _ = tx.Exec(ctx, `DELETE FROM audit_events`)
+}'
+case_ "a marker does not excuse WriteInTx" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow not for this rule
+	_, _ = audit.WriteInTx(ctx, tx, fn)
+}'
+
+# Rule 2: a whole string literal that is an audit table name (dynamic SQL).
+case_ "a concatenated INSERT INTO with the table as a literal fails" 1 internal/foo/a.go 'package foo
+func f() { t := "audit_events"; _, _ = db.Exec(ctx, "INSERT INTO "+t+" (org_id) VALUES ($1)", org) }'
+case_ "a Sprintf with the table as an argument fails" 1 internal/foo/a.go 'package foo
+func f() { _, _ = db.Exec(ctx, fmt.Sprintf("DELETE FROM %s", "install_audit_events")) }'
+case_ "a schema-qualified literal fails" 1 internal/foo/a.go 'package foo
+var t = "public.audit_chain_heads"'
+case_ "a raw-string literal fails" 1 internal/foo/a_test.go 'package foo
+var t = `install_audit_chain_head`'
+case_ "a quoted identifier as a literal fails" 1 internal/foo/a.go 'package foo
+var t = `"public"."install_audit_events"`'
+case_ "a longer string that contains the name does not trigger rule 2" 0 internal/foo/a.go 'package foo
+var a = "SELECT count(*) FROM audit_events"
+var b = "audit_events_total"
+var c = "the audit_events table"'
+case_ "a name that is not an audit table passes" 0 internal/foo/a.go 'package foo
+var t = "audit_chain_head"'
+case_ "a marked table literal in a test passes" 0 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow tests the database grants on the table
+	_, _ = conn.CopyFrom(ctx, pgx.Identifier{"install_audit_events"}, cols, src)
+}'
+case_ "a table literal inside internal/audit passes" 0 internal/audit/a.go 'package audit
+var t = "audit_events"'
+case_ "a table literal in an allowlisted migration test passes" 0 internal/db/migrations/audit_chain_test.go 'package migrations
+var t = "audit_chain_heads"'
 
 # A git checkout: untracked files that git does not ignore are scanned, ignored ones and deleted
 # tracked files are skipped.
