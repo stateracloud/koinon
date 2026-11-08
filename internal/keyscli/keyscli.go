@@ -139,6 +139,84 @@ type Tool struct {
 	// UsedID tells whether the database carries an envelope under a KEK ID. Add asks it; nil means
 	// the probe on Pool.
 	UsedID func(ctx context.Context, id string) (bool, error)
+	// Audit records the key events in the install audit chain (ADR 0100 decision 3). Nil means one
+	// on Pool, with the CLI actor; with no Pool nothing is recorded.
+	Audit *Auditor
+	// RecordStarted writes the optional .started event before the per-row loop of rewrap and
+	// reencrypt, so a run that dies half way shows.
+	RecordStarted bool
+	// AuditOptional makes Add carry on, and return ErrNotAudited after the change, when the chain
+	// cannot be read for the "before" state (the key-admin Job).
+	AuditOptional bool
+}
+
+// auditor is the Auditor the commands write with, or nil.
+func (t *Tool) auditor() *Auditor {
+	if t.Audit != nil {
+		return t.Audit
+	}
+	if t.Pool != nil {
+		return &Auditor{Pool: t.Pool}
+	}
+	return nil
+}
+
+// begin starts a key-set change: it takes the audit advisory lock (Auditor.Baseline) and returns the
+// key set loaded under it, which the command edits and saves, and the Change that keeps the lock until
+// the command's event is written. When the live KEKs differ from the last recorded state (an earlier
+// change whose event was lost), the Change writes that difference as keys.observed first, so this
+// change's event does not absorb it. With no Auditor it loads the key set and returns no Change. With
+// AuditOptional a chain that cannot be read is not an error: the key set is loaded without the lock,
+// no Change is returned and notAudited says so. The caller clears the key set and commits the Change.
+func (t *Tool) begin(ctx context.Context, command string) (c *Change, ks KeySet, notAudited, err error) {
+	a := t.auditor()
+	if a == nil {
+		ks, err = t.Store.Load(ctx)
+		return nil, ks, nil, err
+	}
+	c, ks, err = a.Baseline(ctx, t.Store.Load, command)
+	if err == nil {
+		return c, ks, nil, nil
+	}
+	if le, ok := errors.AsType[*KeyLoadError](err); ok {
+		return nil, KeySet{}, nil, le.Err
+	}
+	if !t.AuditOptional {
+		return nil, KeySet{}, nil, err
+	}
+	// The key-admin Job: a chain it cannot read is a warning, not a failure. The Secret changes without an
+	// event and the next koinon-api start records the key set as keys.observed.
+	notAudited = fmt.Errorf("%w: %w", ErrNotAudited, err)
+	ks, err = t.Store.Load(ctx)
+	return nil, ks, notAudited, err
+}
+
+// recordChange writes the event of a key-set change that has just been saved, in c, and commits c: the
+// key set is loaded again, so "after" is what the Secret holds. A failure is ErrNotAudited: the change
+// stands. A nil Change records nothing.
+func (t *Tool) recordChange(ctx context.Context, c *Change, action, kind, id string) error {
+	if c == nil {
+		return nil
+	}
+	err := func() error {
+		ks, err := t.Store.Load(ctx)
+		defer clearKeySet(ks)
+		if err != nil {
+			return err
+		}
+		after, err := c.After(ctx, ks)
+		if err != nil {
+			return err
+		}
+		return c.Record(ctx, Event{Action: action, TargetKind: kind, TargetID: id, Before: c.Before, After: after})
+	}()
+	if cerr := c.Commit(ctx); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrNotAudited, err)
+	}
+	return nil
 }
 
 // confirm asks unless there is nobody to ask or --yes was given.
@@ -497,10 +575,7 @@ func (t *Tool) Export(ctx context.Context) error {
 
 // Add generates a KEK, stores it in the key set (inactive) and prints its ID.
 func (t *Tool) Add(ctx context.Context, id string) error {
-	ks, err := t.Store.Load(ctx)
-	if err != nil {
-		return err
-	}
+	var err error
 	if id == "" {
 		if id, err = NewID(t.now()); err != nil {
 			return err
@@ -508,6 +583,15 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	}
 	if !secretstore.ValidKEKID(id) {
 		return fmt.Errorf("%q is not a valid KEK ID", id)
+	}
+	c, ks, notAudited, err := t.begin(ctx, "add")
+	defer clearKeySet(ks)
+	defer func() { _ = c.Commit(ctx) }()
+	if err != nil {
+		return err
+	}
+	if ks.Keys == nil {
+		ks.Keys = map[string][]byte{}
 	}
 	if _, ok := ks.Keys[id]; ok {
 		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
@@ -531,7 +615,10 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Added KEK %s. Back up the KEK Secret now, then run: koinon-api keys activate %s\n", id, id)
-	return nil
+	if err := t.recordChange(ctx, c, ActionAdd, "kek", id); err != nil {
+		return err
+	}
+	return notAudited
 }
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret
@@ -539,24 +626,44 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 //
 // With an empty id and a Prompt, the person picks one of the inactive KEKs.
 func (t *Tool) Activate(ctx context.Context, id string) error {
-	ks, err := t.Store.Load(ctx)
-	if err != nil {
-		return err
+	refuse := func(ks KeySet, id string) error {
+		if _, ok := ks.Keys[id]; !ok {
+			return fmt.Errorf("KEK %s is not in the key set", id)
+		}
+		// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
+		// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
+		if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
+			return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+		}
+		return nil
 	}
-	if id == "" {
-		if id, err = t.pickInactive(ctx, ks); err != nil {
+	if id == "" || t.asks() {
+		// The picker and the confirmation wait for a person, so they run before the lock, on a key set
+		// loaded for them; the change itself is checked again on the key set loaded under the lock.
+		ks, err := t.Store.Load(ctx)
+		defer clearKeySet(ks)
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			if id, err = t.pickInactive(ctx, ks); err != nil {
+				return err
+			}
+		}
+		if err := refuse(ks, id); err != nil {
+			return err
+		}
+		if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
 			return err
 		}
 	}
-	if _, ok := ks.Keys[id]; !ok {
-		return fmt.Errorf("KEK %s is not in the key set", id)
+	c, ks, _, err := t.begin(ctx, "activate")
+	defer clearKeySet(ks)
+	defer func() { _ = c.Commit(ctx) }()
+	if err != nil {
+		return err
 	}
-	// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
-	// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
-	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
-		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
-	}
-	if err := t.confirm(ctx, fmt.Sprintf("Activate %s?", id), "New values use it within about a minute."); err != nil {
+	if err := refuse(ks, id); err != nil {
 		return err
 	}
 	ks.Active, ks.ActivatedAt = id, t.now()
@@ -565,8 +672,11 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	}
 	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
-	return nil
+	return t.recordChange(ctx, c, ActionActivate, "kek", id)
 }
+
+// asks reports whether confirm will ask a person.
+func (t *Tool) asks() bool { return t.Prompt != nil && !t.Yes }
 
 // recordActivation records the fingerprints of the key set and the activation time in the database,
 // when there is one. The activation itself has happened, so a failure is printed, not returned.
@@ -656,7 +766,7 @@ func (t *Tool) Rewrap(ctx context.Context) error {
 			return err
 		}
 	}
-	return t.each(ctx, "rewrapped", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error) {
+	return t.each(ctx, "rewrapped", "rewrap", ActionRewrap, func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error) {
 		if env.KEKID == active {
 			return nil, nil
 		}
@@ -694,7 +804,7 @@ func (t *Tool) Reencrypt(ctx context.Context) error {
 			return cli.ErrCancelled
 		}
 	}
-	return t.each(ctx, "re-encrypted", func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, _ string) (*secretstore.Envelope, error) {
+	return t.each(ctx, "re-encrypted", "reencrypt", ActionReencrypt, func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, _ string) (*secretstore.Envelope, error) {
 		plain, err := ring.Open(b, env)
 		if err != nil {
 			return nil, err
@@ -716,26 +826,93 @@ func (t *Tool) keysAndUsage(ctx context.Context) (KeySet, map[string]int, error)
 
 type rowFn func(ring *secretstore.Keyring, b secretstore.Binding, env secretstore.Envelope, active string) (*secretstore.Envelope, error)
 
-func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
+// errUnreadable is a stored envelope that is not JSON.
+var errUnreadable = errors.New("unreadable envelope")
+
+// errWrap marks a row whose new envelope could not be made: the data key could not be wrapped or the
+// value sealed (the KMS did not answer, no active KEK).
+var errWrap = errors.New("wrap or seal the value")
+
+// failureKind names why a row failed, for the audit event's failures-by-kind: a fixed set, never the
+// row, the org or the error text.
+func failureKind(err error) string {
+	switch {
+	case errors.Is(err, errUnreadable):
+		return "envelope"
+	case errors.Is(err, secretstore.ErrOpen):
+		return "open"
+	case errors.Is(err, secretstore.ErrUnknownKEK):
+		return "unknown_kek"
+	case errors.Is(err, errWrap):
+		return "wrap"
+	}
+	return "database"
+}
+
+// each runs fn over every stored envelope, one transaction per row, and writes one install audit
+// event for the run after the loop (ADR 0100 decision 3): the counts done and failed, the failures by
+// kind and the KEK usage before and after. A run that changes no row and fails none writes nothing.
+// With RecordStarted it also writes action+".started" before the loop, when there is a row to change;
+// a run that wrote it always writes the closing event, even when every row failed, so a .started never
+// stays open.
+func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, k := range ks.Keys {
+			clear(k)
+		}
+	}()
 	ring, err := t.ring(ks)
 	if err != nil {
 		return err
 	}
-	total := 0
+	a := t.auditor()
+	var usageBefore map[string]int
+	started := false
+	if a != nil {
+		if usageBefore, err = t.Usage(ctx); err != nil {
+			return err
+		}
+		if t.RecordStarted {
+			pending := 0
+			for id, n := range usageBefore {
+				if command == "reencrypt" || id != ks.Active {
+					pending += n
+				}
+			}
+			if pending > 0 {
+				if err := a.Record(ctx, Event{
+					Command: command, Action: action + StartedSuffix, TargetKind: "kek", TargetID: ks.Active,
+					Before: map[string]any{"kek_usage": usageBefore}, After: map[string]any{"rows": pending, "active": ks.Active},
+				}); err != nil {
+					return fmt.Errorf("nothing was changed: %w", err)
+				}
+				started = true
+			}
+		}
+	}
+	total, failed := 0, 0
+	failures := map[string]int{}
 	var errs []error
 	for _, c := range Columns {
 		ids, err := t.rowIDs(ctx, c)
 		if err != nil {
-			return err
+			// The rows of a column could not be listed: the database is most likely gone for the rest of the
+			// run too. It counts as one database failure, whatever the number of rows, and the remaining
+			// columns are not tried (docs/ops/secret-keys.md): run the command again.
+			errs, failed = append(errs, err), failed+1
+			failures["database"]++
+			break
 		}
 		for _, r := range ids {
 			changed, err := t.one(ctx, c, r, ring, ks.Active, fn)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", c.Table, r.id, err))
+				failed++
+				failures[failureKind(err)]++
 				continue
 			}
 			if changed {
@@ -744,6 +921,18 @@ func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
 		}
 	}
 	_, _ = fmt.Fprintf(t.Out, "%d value(s) %s.\n", total, verb)
+	if a != nil && (started || total > 0 || failed > 0) {
+		after := map[string]any{"done": total, "failed": failed, "failures": failures, "active": ks.Active}
+		if usage, err := t.Usage(ctx); err == nil {
+			after["kek_usage"] = usage
+		}
+		if err := a.Record(ctx, Event{
+			Command: command, Action: action, TargetKind: "kek", TargetID: ks.Active,
+			Before: map[string]any{"kek_usage": usageBefore, "active": ks.Active}, After: after,
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %w", ErrNotAudited, err))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -792,11 +981,18 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 		}
 		var env secretstore.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
-			return errors.New("unreadable envelope")
+			return errUnreadable
+		}
+		// A format the keyring does not know is an unreadable envelope too, not a failed wrap.
+		if env.Format != secretstore.FormatV1 || env.Alg != secretstore.AlgAES256GCM {
+			return errUnreadable
 		}
 		out, err := fn(ring, secretstore.Binding{OrgID: r.org, Table: c.Table, RowID: r.id, Column: c.Column}, env, active)
 		if err != nil {
-			return err
+			if errors.Is(err, secretstore.ErrOpen) || errors.Is(err, secretstore.ErrUnknownKEK) {
+				return err
+			}
+			return fmt.Errorf("%w: %w", errWrap, err)
 		}
 		if out == nil {
 			return nil
@@ -818,7 +1014,34 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 // Retire removes a KEK from the key set. It refuses while the KEK is active or any value
 // uses it. With an empty id and a Prompt, the person picks one of the KEKs that can be retired.
 func (t *Tool) Retire(ctx context.Context, id string) error {
-	ks, err := t.Store.Load(ctx)
+	if id == "" || t.asks() {
+		// The picker and the confirmation wait for a person, so they run before the lock; the retirement
+		// is checked again on the key set and the usage read under the lock.
+		ks, err := t.Store.Load(ctx)
+		defer clearKeySet(ks)
+		if err != nil {
+			return err
+		}
+		usage, err := t.Usage(ctx)
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			if id, err = t.pickRetirable(ctx, ks, usage); err != nil {
+				return err
+			}
+		}
+		if err := t.retireBlock(ks, usage, id); err != nil {
+			return err
+		}
+		if err := t.confirm(ctx, fmt.Sprintf("Retire %s?", id),
+			"The KEK is removed from the key set. Keep a copy in your backup escrow for as long as database backups that used it exist."); err != nil {
+			return err
+		}
+	}
+	c, ks, _, err := t.begin(ctx, "retire")
+	defer clearKeySet(ks)
+	defer func() { _ = c.Commit(ctx) }()
 	if err != nil {
 		return err
 	}
@@ -826,16 +1049,7 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if id == "" {
-		if id, err = t.pickRetirable(ctx, ks, usage); err != nil {
-			return err
-		}
-	}
 	if err := t.retireBlock(ks, usage, id); err != nil {
-		return err
-	}
-	if err := t.confirm(ctx, fmt.Sprintf("Retire %s?", id),
-		"The KEK is removed from the key set. Keep a copy in your backup escrow for as long as database backups that used it exist."); err != nil {
 		return err
 	}
 	delete(ks.Keys, id)
@@ -843,7 +1057,7 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Retired KEK %s. Keep a copy in your backup escrow for as long as database backups that used it exist.\n", id)
-	return nil
+	return t.recordChange(ctx, c, ActionRetire, "kek", id)
 }
 
 // retireBlock is why id cannot be retired now, or nil.
