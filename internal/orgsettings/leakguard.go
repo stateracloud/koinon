@@ -205,8 +205,11 @@ type Service struct{ pool *pgxpool.Pool }
 // NewService returns a Service on pool.
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
-func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+// tx runs fn in the transaction of an audited change: events go into b, and the audit module writes
+// them in lock order just before commit (ADR 0100 decision 1.7).
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
+	return err
 }
 
 // LeakGuard returns the org's effective leak-guard configuration.
@@ -224,7 +227,7 @@ func (s *Service) SetMatchThreshold(ctx context.Context, org pgtype.UUID, actor 
 		}
 		set = pgtype.Int4{Int32: int32(*n), Valid: true} //nolint:gosec // bounded by ValidateMatchThreshold
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		before, err := LeakGuardOf(ctx, q, org)
 		if err != nil {
 			return err
@@ -239,10 +242,11 @@ func (s *Service) SetMatchThreshold(ctx context.Context, org pgtype.UUID, actor 
 		if before.MatchThreshold == after {
 			return nil
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.leak_guard.threshold.set", TargetKind: "org", TargetID: org.String(),
 			Before: map[string]any{"matchThreshold": before.MatchThreshold}, After: map[string]any{"matchThreshold": after},
 		})
+		return nil
 	})
 }
 
@@ -253,7 +257,7 @@ func (s *Service) AddTrustedHost(ctx context.Context, org pgtype.UUID, actor aud
 	if err != nil {
 		return "", err
 	}
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// The cap is checked under a lock on the org's settings row, so parallel adds cannot each see room
 		// for one more host.
 		if err := q.EnsureOrgSettings(ctx, org); err != nil {
@@ -278,10 +282,11 @@ func (s *Service) AddTrustedHost(ctx context.Context, org pgtype.UUID, actor aud
 		if err != nil || n == 0 {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.fetch_trusted_host.add", TargetKind: "org_fetch_trusted_host", TargetID: h,
 			Before: map[string]any{"trusted": false}, After: map[string]any{"host": h, "trusted": true},
 		})
+		return nil
 	})
 	return h, err
 }
@@ -293,7 +298,7 @@ func (s *Service) RemoveTrustedHost(ctx context.Context, org pgtype.UUID, actor 
 	if err != nil {
 		return err
 	}
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		n, err := q.DeleteOrgFetchTrustedHost(ctx, store.DeleteOrgFetchTrustedHostParams{OrgID: org, Host: h})
 		if err != nil {
 			return err
@@ -301,9 +306,10 @@ func (s *Service) RemoveTrustedHost(ctx context.Context, org pgtype.UUID, actor 
 		if n == 0 {
 			return ErrNotFound
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.fetch_trusted_host.remove", TargetKind: "org_fetch_trusted_host", TargetID: h,
 			Before: map[string]any{"host": h, "trusted": true}, After: map[string]any{"trusted": false},
 		})
+		return nil
 	})
 }

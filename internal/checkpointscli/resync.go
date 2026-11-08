@@ -149,17 +149,17 @@ func (t *Tool) targets(ctx context.Context, all bool, agents []string) ([]target
 
 // request records the agent's resync request and its audit event in one transaction.
 func (t *Tool) request(ctx context.Context, h target) (target, error) {
-	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, t.Pool, func(q *store.Queries, b audit.Batch) error {
 		r, err := q.RequestHomeCheckpointResync(ctx, store.RequestHomeCheckpointResyncParams{OrgID: h.org, AgentID: h.agent})
 		if err != nil {
 			return err
 		}
 		h.request = r.RequestID
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: h.org, Actor: actor, Action: RequestedAction, TargetKind: "agent", TargetID: h.agent.String(),
 			After: map[string]any{"requestId": r.RequestID.String()},
 		})
+		return nil
 	})
 	return h, err
 }

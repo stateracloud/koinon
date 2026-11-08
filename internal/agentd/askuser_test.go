@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,6 +19,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/askuser"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
@@ -134,8 +134,9 @@ func (a *askEnv) question(ctx context.Context, id string) store.Question {
 }
 
 // resolve runs fn in a transaction on pool.
-func resolveIn(ctx context.Context, pool *pgxpool.Pool, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+func resolveIn(ctx context.Context, pool *pgxpool.Pool, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, pool, fn)
+	return err
 }
 
 var _ = Describe("ask_user", func() {
@@ -213,8 +214,8 @@ var _ = Describe("ask_user", func() {
 		asked(ctx)
 		pool := a.serve()
 		var row store.Question
-		Expect(resolveIn(ctx, pool, func(q *store.Queries) (err error) {
-			row, err = questions.Respond(ctx, q, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
+		Expect(resolveIn(ctx, pool, func(q *store.Queries, b audit.Batch) (err error) {
+			row, err = questions.Respond(ctx, q, b, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
 			return err
 		})).To(Succeed())
 		Expect(row.State).To(Equal(store.QuestionStateAnswered))
@@ -236,8 +237,8 @@ var _ = Describe("ask_user", func() {
 	It("waits for a stopped sandbox, then resumes through session/load", func(ctx SpecContext) {
 		asked(ctx)
 		a.recordSandbox(ctx, store.SandboxStateStopped, "idle")
-		Expect(resolveIn(ctx, db, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "ap-south-1, please"})
+		Expect(resolveIn(ctx, db, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "ap-south-1, please"})
 			return err
 		})).To(Succeed())
 		Consistently(runState(ctx, r)).WithTimeout(time.Second).ShouldNot(Equal(store.RunStateSucceeded))
@@ -250,8 +251,8 @@ var _ = Describe("ask_user", func() {
 
 	It("applies the default when the question is dismissed, and says so", func(ctx SpecContext) {
 		asked(ctx)
-		Expect(resolveIn(ctx, db, func(q *store.Queries) error {
-			_, err := questions.Dismiss(ctx, q, a.org, mustUUID(qid), a.user)
+		Expect(resolveIn(ctx, db, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Dismiss(ctx, q, b, a.org, mustUUID(qid), a.user)
 			return err
 		})).To(Succeed())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -264,8 +265,8 @@ var _ = Describe("ask_user", func() {
 
 	It("applies the default on expiry, and says so", func(ctx SpecContext) {
 		asked(ctx)
-		Expect(resolveIn(ctx, db, func(q *store.Queries) error {
-			_, err := questions.Expire(ctx, q, a.org, mustUUID(qid))
+		Expect(resolveIn(ctx, db, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Expire(ctx, q, b, a.org, mustUUID(qid))
 			return err
 		})).To(Succeed())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -354,8 +355,8 @@ var _ = Describe("ask_user", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				results <- resolveIn(ctx, fresh, func(q *store.Queries) error {
-					_, err := questions.Respond(ctx, q, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "eu-west-1"})
+				results <- resolveIn(ctx, fresh, func(q *store.Queries, b audit.Batch) error {
+					_, err := questions.Respond(ctx, q, b, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "eu-west-1"})
 					return err
 				})
 			}()
@@ -473,8 +474,8 @@ var _ = Describe("ask_user", func() {
 
 	It("refuses an answer from someone else", func(ctx SpecContext) {
 		asked(ctx)
-		err := resolveIn(ctx, db, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, a.org, mustUUID(qid), pgtype.UUID{Bytes: [16]byte{9}, Valid: true}, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "x"})
+		err := resolveIn(ctx, db, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, a.org, mustUUID(qid), pgtype.UUID{Bytes: [16]byte{9}, Valid: true}, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "x"})
 			return err
 		})
 		Expect(err).To(MatchError(questions.ErrNotAskedTo))

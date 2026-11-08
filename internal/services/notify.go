@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
@@ -72,6 +73,11 @@ func (s *Server) commit(ctx context.Context, fn func(q *store.Queries) ([]durabl
 	return durable.Commit(ctx, s.pool, s.notifier, fn)
 }
 
+// commitAudit is commit for an audited change: fn adds its audit events to b (durable.CommitAudit).
+func (s *Server) commitAudit(ctx context.Context, fn func(q *store.Queries, b audit.Batch) ([]durable.Notification, error)) error {
+	return durable.CommitAudit(ctx, s.pool, s.notifier, fn)
+}
+
 // sendFailed logs a *durable.SendError, which leaves the committed change standing and the
 // request successful (the notification is best effort for the caller), and returns any other error.
 func (s *Server) sendFailed(err error, msg string) error {
@@ -106,7 +112,7 @@ type TriggeredTask struct {
 	// OnCreate, when set, runs in the creating transaction once the task and its run exist, so a
 	// record of the fire (an audit event) commits with it or not at all. It is not called for a
 	// replay.
-	OnCreate func(ctx context.Context, q *store.Queries, task store.Task) error
+	OnCreate func(ctx context.Context, q *store.Queries, b audit.Batch, task store.Task) error
 }
 
 // eventPayload adds to p what the events of a triggered task record about the fire: its source,
@@ -132,7 +138,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 	if fire == "" {
 		fire = triggers.FireScheduled
 	}
-	err = s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
+	err = s.commitAudit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
 		var notes []durable.Notification
 		out, err := durable.Once(ctx, q, in.Org, in.Source, in.Key, func(q *store.Queries) (string, pgtype.UUID, error) {
 			agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: in.Org, ID: in.Agent})
@@ -168,7 +174,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 				return "", pgtype.UUID{}, err
 			}
 			if in.OnCreate != nil {
-				if err := in.OnCreate(ctx, q, t); err != nil {
+				if err := in.OnCreate(ctx, q, b, t); err != nil {
 					return "", pgtype.UUID{}, err
 				}
 			}

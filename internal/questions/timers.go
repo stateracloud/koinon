@@ -26,7 +26,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -138,8 +137,8 @@ func RunOrgTimers(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, 
 		return res, err
 	}
 	for _, row := range due {
-		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := Expire(ctx, store.New(tx), org, row.ID)
+		_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+			_, err := Expire(ctx, q, b, org, row.ID)
 			return err
 		})
 		switch {
@@ -211,8 +210,7 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var errs []error
 	for _, org := range orgs {
 		n := 0
-		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			q := store.New(tx)
+		_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
 			orphans, err := q.ListOrphanedQuestions(ctx, org)
 			if err != nil {
 				return err
@@ -288,12 +286,10 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 				}); err != nil {
 					return err
 				}
-				if err := audit.RecordErr(ctx, q, audit.Event{
+				b.Org(audit.Event{
 					Org: org, Actor: audit.System("koinon-api:question-timers"), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
 					After: after,
-				}); err != nil {
-					return err
-				}
+				})
 				n++
 			}
 			return nil

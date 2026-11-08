@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
@@ -262,8 +263,8 @@ func parkedRunWith(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.Trace
 		between()
 	}
 	pool := a.serve()
-	Expect(resolveIn(ctx, pool, func(q *store.Queries) error {
-		_, err := questions.Respond(ctx, q, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
+	Expect(resolveIn(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+		_, err := questions.Respond(ctx, q, b, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
 		return err
 	})).To(Succeed())
 	Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))

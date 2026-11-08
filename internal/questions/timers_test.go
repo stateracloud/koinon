@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
@@ -55,7 +56,7 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 		w = newWorld(ctx)
 		base = time.Now()
 		sends = restart()
-		Expect(tx(ctx, func(q *store.Queries) (err error) {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) (err error) {
 			row, _, err = questions.Create(ctx, q, questions.Ask{
 				Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent,
 				Target: questions.Target{Kind: store.NotifyTargetKindUser, User: w.user}, Recipients: []pgtype.UUID{w.user},
@@ -107,8 +108,8 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 	})
 
 	It("does not remind about a question that was answered meanwhile", func(ctx SpecContext) {
-		Expect(tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})).To(Succeed())
 		res, err := run(ctx, sends, base.Add(2*questions.DefaultReminder))
@@ -144,8 +145,8 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 		Expect(events(ctx, questions.KindExpired)).To(Equal(1))
 
 		By("a late answer is refused")
-		err = tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		err = tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})
 		Expect(err).To(MatchError(questions.ErrNotOpen))

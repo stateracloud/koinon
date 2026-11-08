@@ -7,18 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
 )
 
-func tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, pool, func(t pgx.Tx) error { return fn(store.New(t)) })
+func tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, pool, fn)
+	return err
 }
 
 var _ = Describe("Ask.Validate", func() {
@@ -72,7 +73,7 @@ var _ = Describe("a question", func() {
 	})
 	create := func(ctx context.Context, a questions.Ask) (row store.Question, created bool) {
 		GinkgoHelper()
-		Expect(tx(ctx, func(q *store.Queries) (err error) {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) (err error) {
 			row, created, err = questions.Create(ctx, q, a)
 			return err
 		})).To(Succeed())
@@ -80,7 +81,7 @@ var _ = Describe("a question", func() {
 	}
 	open := func(ctx context.Context) {
 		GinkgoHelper()
-		Expect(tx(ctx, func(q *store.Queries) error {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			_, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task)
 			return err
 		})).To(Succeed())
@@ -88,7 +89,7 @@ var _ = Describe("a question", func() {
 
 	park := func(ctx context.Context) {
 		GinkgoHelper()
-		Expect(tx(ctx, func(q *store.Queries) error {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			_, err := q.ParkRun(ctx, store.ParkRunParams{
 				OrgID: w.org, ID: w.run.ID, Epoch: w.run.Epoch, ParkReason: store.RunParkReasonInputRequired,
 				ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
@@ -112,14 +113,14 @@ var _ = Describe("a question", func() {
 	It("can only be addressed to a member of the org", func(ctx SpecContext) {
 		stranger := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
 		ask.Target.User, ask.Recipients = stranger, []pgtype.UUID{stranger}
-		err := tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
+		err := tx(ctx, func(q *store.Queries, b audit.Batch) error { _, _, err := questions.Create(ctx, q, ask); return err })
 		Expect(err).To(MatchError(questions.ErrNotMember))
 	})
 
 	It("is not answerable until it is opened, and open questions show in the addressee's inbox only", func(ctx SpecContext) {
 		row, _ := create(ctx, ask)
-		err := tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		err := tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})
 		Expect(err).To(MatchError(questions.ErrNotOpen))
@@ -133,8 +134,8 @@ var _ = Describe("a question", func() {
 		bob := w.member(ctx)
 		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: bob})
 		Expect(inbox).To(BeEmpty())
-		err = tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, row.ID, bob, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		err = tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, row.ID, bob, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})
 		Expect(err).To(MatchError(questions.ErrNotAskedTo))
@@ -144,8 +145,8 @@ var _ = Describe("a question", func() {
 		func(ctx SpecContext, ans questions.Answer, want string) {
 			row, _ := create(ctx, ask)
 			open(ctx)
-			err := tx(ctx, func(q *store.Queries) error {
-				_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, ans)
+			err := tx(ctx, func(q *store.Queries, b audit.Batch) error {
+				_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, ans)
 				return err
 			})
 			if want == "" {
@@ -169,7 +170,7 @@ var _ = Describe("a question", func() {
 		ask.Question = "And the title?"
 		ask.Choices, ask.Draft, ask.Default = nil, "", "keep it"
 		second, _ := create(ctx, ask)
-		Expect(tx(ctx, func(q *store.Queries) error {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			if _, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task); err != nil {
 				return err
 			}
@@ -185,13 +186,13 @@ var _ = Describe("a question", func() {
 			return r.ReadyAt.Valid
 		}
 
-		Expect(tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, first.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, first.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})).To(Succeed())
 		Expect(ready()).To(BeFalse(), "another question is still open")
-		Expect(tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Dismiss(ctx, q, w.org, second.ID, w.user)
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Dismiss(ctx, q, b, w.org, second.ID, w.user)
 			return err
 		})).To(Succeed())
 		Expect(ready()).To(BeTrue())
@@ -212,7 +213,7 @@ var _ = Describe("a question", func() {
 		_, err := pool.Exec(ctx, `UPDATE org_memberships SET role = 'viewer' WHERE org_id = $1 AND user_id = $2`, w.org, viewer)
 		Expect(err).NotTo(HaveOccurred())
 		ask.Target.User, ask.Recipients = viewer, []pgtype.UUID{viewer}
-		err = tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
+		err = tx(ctx, func(q *store.Queries, b audit.Batch) error { _, _, err := questions.Create(ctx, q, ask); return err })
 		Expect(err).To(MatchError(questions.ErrNotMember))
 	})
 
@@ -220,7 +221,7 @@ var _ = Describe("a question", func() {
 		row, _ := create(ctx, ask)
 		ask.Question = "Never opened?"
 		asked, _ := create(ctx, ask)
-		Expect(tx(ctx, func(q *store.Queries) error {
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
 			_, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task)
 			return err
 		})).To(Succeed())
@@ -232,8 +233,8 @@ var _ = Describe("a question", func() {
 		Expect(err).NotTo(HaveOccurred())
 		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
 		Expect(inbox).To(BeEmpty(), "hidden at once, before the sweep")
-		err = tx(ctx, func(q *store.Queries) error {
-			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+		err = tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
 			return err
 		})
 		Expect(err).To(MatchError(questions.ErrNotOpen))
@@ -284,7 +285,10 @@ var _ = Describe("a question", func() {
 	It("expires without an actor and keeps the default as the answer", func(ctx SpecContext) {
 		row, _ := create(ctx, ask)
 		open(ctx)
-		Expect(tx(ctx, func(q *store.Queries) error { _, err := questions.Expire(ctx, q, w.org, row.ID); return err })).To(Succeed())
+		Expect(tx(ctx, func(q *store.Queries, b audit.Batch) error {
+			_, err := questions.Expire(ctx, q, b, w.org, row.ID)
+			return err
+		})).To(Succeed())
 		got, _ := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: row.ID})
 		Expect(got.State).To(Equal(store.QuestionStateExpired))
 		Expect(got.AnsweredBy.Valid).To(BeFalse())

@@ -145,8 +145,11 @@ func NewWithClient(pool *pgxpool.Pool, keys Keys, policy catalog.URLPolicy, clie
 	return &Service{pool: pool, keys: keys, policy: policy, client: client, log: log, now: time.Now}
 }
 
-func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+// tx runs fn in the transaction of an audited change: events go into b, and the audit module writes
+// them in lock order just before commit (ADR 0100 decision 1.7).
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
+	return err
 }
 
 func isUnique(err error) bool {
@@ -535,7 +538,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// The level may have been raised while the test was on its way.
 		if err := s.requireOwnerAtFull(ctx, q, org, who); err != nil {
 			return err
@@ -549,10 +552,11 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			return err
 		}
 		out = toDestination(row)
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "trace.destination.create", TargetKind: "trace_destination", TargetID: out.ID,
 			After: auditView(out),
 		})
+		return nil
 	})
 	if isUnique(err) {
 		return Destination{}, ErrConflict
@@ -614,7 +618,7 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	before := toDestination(cur)
 	var out Destination
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		row, err := q.UpdateTraceDestination(ctx, store.UpdateTraceDestinationParams{
 			OrgID: org, ID: cur.ID, ExpectedVersion: cur.ConfigVersion, Name: in.Name, Backend: store.TraceBackend(p.dest.Preset),
 			EndpointUrl: p.endpoint, Params: p.params, Credentials: p.envelope, SecretFields: p.fields,
@@ -627,10 +631,11 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			return err
 		}
 		out = toDestination(row)
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "trace.destination.update", TargetKind: "trace_destination", TargetID: out.ID,
 			Before: auditView(before), After: auditView(out),
 		})
+		return nil
 	})
 	if isUnique(err) {
 		return Destination{}, ErrConflict
@@ -640,7 +645,7 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 
 // Delete removes a destination.
 func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string) error {
-	return s.tx(ctx, func(q *store.Queries) error {
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		cur, err := s.row(ctx, q, org, id)
 		if err != nil {
 			return err
@@ -648,10 +653,11 @@ func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if _, err := q.DeleteTraceDestination(ctx, store.DeleteTraceDestinationParams{OrgID: org, ID: cur.ID}); err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "trace.destination.delete", TargetKind: "trace_destination", TargetID: cur.ID.String(),
 			Before: auditView(toDestination(cur)),
 		})
+		return nil
 	})
 }
 
@@ -677,7 +683,7 @@ func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, 
 	outcome, at := s.test(ctx, d, org.String(), decodeMap(cur.ResourceAttributes))
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		n, err := q.SetTraceDestinationTest(ctx, store.SetTraceDestinationTestParams{
 			OrgID: org, ID: cur.ID, ExpectedVersion: cur.ConfigVersion, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
 		})
@@ -695,10 +701,11 @@ func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, 
 			return err
 		}
 		out = toDestination(row)
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "trace.destination.test", TargetKind: "trace_destination", TargetID: out.ID,
 			After: map[string]any{"ok": outcome.OK, "status": outcome.Status, "rejectedSpans": outcome.Rejected},
 		})
+		return nil
 	})
 	return out, outcome, err
 }

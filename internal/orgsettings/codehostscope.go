@@ -108,7 +108,7 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 		owners, names, vis = append(owners, o), append(names, n), append(vis, string(v))
 		counts[string(v)]++
 	}
-	err := s.tx(ctx, func(q *store.Queries) error {
+	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// The connection must be the org's, also for an empty report, which would write nothing the
 		// foreign key could refuse. Its row is locked first (FOR KEY SHARE), before the scope lock:
 		// SetConnectionSecret and DeleteConnection lock the row and then the scope, so the reverse
@@ -172,7 +172,7 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 			// The periodic refresh of an unchanged list: its freshness shows in ScopeSummary and the log.
 			return nil
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "org.code_host_scope.replace", TargetKind: "connection", TargetID: connectionID,
 			Before: map[string]any{"repositories": before},
 			After: map[string]any{
@@ -180,6 +180,7 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 				"public": counts["public"], "unknown": counts["unknown"],
 			},
 		})
+		return nil
 	})
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23503" {

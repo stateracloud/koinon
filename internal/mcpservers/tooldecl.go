@@ -80,7 +80,7 @@ func (s *Service) SetToolDeclaration(ctx context.Context, org pgtype.UUID, actor
 		return Tool{}, invalid("contentHash is required: the hash of the tool you reviewed")
 	}
 	var out store.McpTool
-	err = s.tx(ctx, func(q *store.Queries) error {
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
@@ -99,10 +99,11 @@ func (s *Service) SetToolDeclaration(ctx context.Context, org pgtype.UUID, actor
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.declaration.set", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
 			Before: sinkSummary(srv.Name, tool, sinkOf(cur)), After: sinkSummary(srv.Name, tool, sinkOf(out)),
 		})
+		return nil
 	})
 	if err != nil {
 		return Tool{}, mapErr(err)
@@ -121,26 +122,27 @@ func mapSinkErr(err error) error {
 // recordToolDeclarationReset audits the reset a content change made to one tool's declaration (the
 // UpdateMCPToolContent query does the reset itself). It records nothing when the declaration was the
 // default already. The event is mcp_tool.declaration.reset with reason content_changed.
-func recordToolDeclarationReset(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, server string, cur, out store.McpTool, reason string) error {
+func recordToolDeclarationReset(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, server string, cur, out store.McpTool, reason string) error {
 	before, after := sinkOf(cur), sinkOf(out)
 	if before.Equal(after) {
 		return nil
 	}
 	a := sinkSummary(server, out.Name, after)
 	a["reason"] = reason
-	return audit.RecordErr(ctx, q, audit.Event{
+	b.Org(audit.Event{
 		Org: org, Actor: actor, Action: "mcp_tool.declaration.reset", TargetKind: "mcp_tool", TargetID: out.ServerID.String() + "/" + out.Name,
 		Before: sinkSummary(server, out.Name, before), After: a,
 	})
+	return nil
 }
 
 // resetOnURLChange is what a changed URL does besides the update itself: the server's data class and
 // every tool's declaration go back to the default, each audited. It does nothing when the URL is the same.
-func resetOnURLChange(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, cur, out store.McpServer) error {
+func resetOnURLChange(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, cur, out store.McpServer) error {
 	if cur.Url == out.Url {
 		return nil
 	}
-	if err := recordClassReset(ctx, q, org, actor, cur, out); err != nil {
+	if err := recordClassReset(ctx, q, b, org, actor, cur, out); err != nil {
 		return err
 	}
 	rows, err := q.ResetMCPToolDeclarations(ctx, store.ResetMCPToolDeclarationsParams{OrgID: org, ServerID: out.ID})
@@ -156,12 +158,10 @@ func resetOnURLChange(ctx context.Context, q *store.Queries, org pgtype.UUID, ac
 		}
 		after := sinkSummary(out.Name, r.Name, def)
 		after["reason"] = ReasonURLChanged
-		if err := audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.declaration.reset", TargetKind: "mcp_tool", TargetID: out.ID.String() + "/" + r.Name,
 			Before: sinkSummary(cur.Name, r.Name, before), After: after,
-		}); err != nil {
-			return err
-		}
+		})
 	}
 	return nil
 }

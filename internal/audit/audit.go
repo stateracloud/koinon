@@ -210,9 +210,9 @@ func buildSummary(before, after any, reason, version, installEventID string) ([]
 }
 
 // Record writes e with q, which belongs to the transaction of the change being audited. It writes
-// at once, so the caller keeps the lock order of ADR 0100 decision 1.7 by hand; new code adds its
-// events to an audit Batch (InTx) instead, and the module writes them in order. Record goes away
-// when the last caller has moved (#371).
+// at once, so the caller keeps the lock order of ADR 0100 decision 1.7 by hand. Only tests use it now;
+// code adds its events to an audit Batch (InTx) instead, and the module writes them in order. Record
+// goes away with step 3 (#371).
 func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
 	return record(ctx, q, e)
 }
@@ -252,7 +252,8 @@ func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
 }
 
 // RecordInstall writes e to the install chain with q, which belongs to the transaction of the change
-// being audited (ADR 0100 decision 1.2). Only koinon-api may call it: the database refuses the insert
+// being audited (ADR 0100 decision 1.2). Only tests call it now; code adds the event to an audit Batch
+// (Batch.Install). Only koinon-api may write it: the database refuses the insert
 // to any other role. The actor must be named (the chain refuses an empty ID). Lock order (decision
 // 1.7): write the install event before the org events of the same transaction, never after.
 func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {

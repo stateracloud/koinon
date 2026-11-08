@@ -93,6 +93,18 @@ func InPgTx(ctx context.Context, db Beginner, fn func(tx pgx.Tx, b Batch) error)
 	return w, nil
 }
 
+// WriteInTx adds events with fn and writes them in tx, a transaction the caller opened and ends itself
+// (Postgres only, like InPgTx). It is for the one caller whose transaction outlives a function: a key
+// change takes an advisory lock before it edits a Secret and writes its events after, so it cannot hand
+// the whole change to InTx. The caller owns the lock order: it takes its own locks first, and this call
+// writes the install events, then the org events by org ID, as InTx does. A failed write leaves tx
+// aborted unless the caller wrapped the call in a savepoint.
+func WriteInTx(ctx context.Context, tx pgx.Tx, fn func(b Batch)) (Written, error) {
+	b := &batch{}
+	fn(b)
+	return b.write(ctx, store.New(tx))
+}
+
 // ErrAmbiguousInstallLink is in the error of a batch that holds more than one install event and an
 // org event with no InstallEventID: the module refuses to pick the install event it links to, and the
 // whole transaction rolls back (ADR 0100 decision 1.7).

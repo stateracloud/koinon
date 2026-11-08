@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -182,8 +183,11 @@ func New(pool *pgxpool.Pool, keys Keys, log *slog.Logger) *Service {
 	return &Service{pool: pool, keys: keys, log: log}
 }
 
-func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+// tx runs fn in the transaction of an audited change: events go into b, and the audit module writes
+// them in lock order just before commit (ADR 0100 decision 1.7).
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
+	return err
 }
 
 func isUnique(err error) bool {

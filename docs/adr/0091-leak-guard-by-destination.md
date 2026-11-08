@@ -253,6 +253,26 @@ Their role changes:
 - A match becomes an ADR 0042 approval showing the matched text (ADR 0084 decision 7 stays), on an
   `external-low` call that would otherwise pass, and on an `external-high` call before both legs.
   On an `external-high` call that is already an approval, the match is marked on the card.
+- **Ends and separators (#286).** An argument longer than `2*JoinEndBytes` (default 512, so 1024
+  bytes) contributes its two ends to a join, and the ends are measured in **raw bytes**, before any
+  decoding. The projected decoders read through a separator of any length, so a sender can pad a
+  half past the ends and the join then holds too few encoded symbols to match. **Known limit:** a
+  secret split across two arguments and encoded as separator-padded base64, with each half longer
+  than the join ends, passes the text match. The same holds for three nested variants, where the
+  padding sits one decoding layer down: base64 of padded base64, `\u` escapes of padded base64 and
+  percent-encoding of padded base64. The same text in one argument is still caught, and the byte
+  cap and the session legs bound the damage (decision 8). The text match stays a secondary alarm
+  (this decision's first bullets), so the gap is accepted, not hidden.
+  - **No separator cap.** Bounding the separator a projected decoder accepts would let a padded
+    secret in a single argument pass, which is caught today. It would also need its own bound per
+    decoder and per nesting depth.
+  - **The general fix is a later option, not a promise:** measure the join ends in decoded symbols
+    at every decoding layer. It is gated on a benchmark of CPU, memory and the benign work caps
+    (`MaxWorkBytes`, 32 MiB) and tracked in #369. Until it lands, the doc.go promise of a separator
+    "of any length" holds for one argument, and for a split only while each raw end still holds a
+    whole match window.
+  - Halves encoded in different chains (one percent-padded, one `\u`-padded) and arguments that are
+    not adjacent in a join order are not paired; that cost class was removed with the any-pair joins.
 - **failClosed stays**, with the work budget and the 5 s backstop. A check that cannot finish
   refuses the call.
 
@@ -277,7 +297,7 @@ inside a list is refused, whatever its class would be.
 - Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
   the encoding.
 - Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
-  a person.
+  a person, except the split, separator-padded base64 case named under "Not guaranteed" below.
 - Writes into the org's own private repos are never blocked as leaks, so the #70 class of false
   alarm is gone by construction.
 
@@ -286,6 +306,10 @@ inside a list is refused, whatever its class would be.
 - **Leaks under the byte cap.** Up to the cap per run leaves through `external-low` sinks, and a run
   after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
   stay small, and keys belong in the secret store, not in the context.
+- **A split, separator-padded base64 secret.** A secret split across two arguments and encoded as
+  separator-padded base64, with each half longer than the join ends, passes the text match. The same
+  text in one argument is still caught, and the byte cap and the session legs bound the damage. See
+  decision 6 (known limit) and #369 for the general fix.
 - **A misclassified internal sink.** A repo or host declared internal that is in fact world-readable
   leaks freely. The classification has to be right; its default is external.
 - **Integrity attacks.** Injected content written into the org's own repo is an internal write and

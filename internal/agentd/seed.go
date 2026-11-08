@@ -134,7 +134,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 	}
 	key := store.CompleteHomeRepositorySeedParams{OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, SeedAttempts: e.SeedAttempts}
 	if err == nil {
-		err = pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+		_, err = audit.InPgTx(ctx, p.db, func(tx pgx.Tx, b audit.Batch) error {
 			q := p.q.WithTx(tx)
 			after := map[string]any{"repositoryEpoch": e.RepositoryEpoch}
 			if seeded != nil {
@@ -155,9 +155,10 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 			} else if n != 1 {
 				return whySeedNotRecorded(ctx, q, e)
 			}
-			return audit.RecordErr(ctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: e.OrgID, Actor: audit.System("koinon-agentd:home-seed"), Action: SeededAction, TargetKind: "agent", TargetID: e.AgentID.String(), After: after,
 			})
+			return nil
 		})
 		if err == nil {
 			if seeded != nil {
@@ -182,7 +183,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 	var perm *permanent
 	if errors.As(err, &perm) || int(e.SeedAttempts) >= c.Attempts {
 		log.Error("home repository seed failed; the old repository is kept (see koinon_agentd_home_repository_seeds)", "err", msg)
-		if err := pgx.BeginFunc(ctx, p.db, func(tx pgx.Tx) error {
+		if _, err := audit.InPgTx(ctx, p.db, func(tx pgx.Tx, b audit.Batch) error {
 			q := p.q.WithTx(tx)
 			if n, err := q.FailHomeRepositorySeed(ctx, store.FailHomeRepositorySeedParams{
 				OrgID: e.OrgID, AgentID: e.AgentID, RepositoryEpoch: e.RepositoryEpoch, SeedAttempts: e.SeedAttempts,
@@ -192,10 +193,11 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 			} else if n != 1 {
 				return whySeedNotRecorded(ctx, q, e)
 			}
-			return audit.RecordErr(ctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: e.OrgID, Actor: audit.System("koinon-agentd:home-seed"), Action: SeedFailedAction, TargetKind: "agent", TargetID: e.AgentID.String(),
 				After: map[string]any{"repositoryEpoch": e.RepositoryEpoch, "attempts": e.SeedAttempts, "error": msg},
 			})
+			return nil
 		}); errors.Is(err, errSeedSuperseded) || errors.Is(err, errSeedClaimLost) {
 			log.Warn("home repository seed: not recorded as given up", "why", err)
 		} else if err != nil {

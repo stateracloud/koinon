@@ -149,7 +149,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	}
 
 	var out *agentv1alpha1.Agent
-	err = s.inTx(ctx, func(q *store.Queries) error {
+	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{
 			OrgID: c.org, DisplayName: name, Flavor: flavor, TemplateID: row.ID, CreatedBy: c.actor(),
 		})
@@ -175,10 +175,11 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.create", TargetKind: "agent", TargetID: a.ID.String(),
 			After: map[string]any{"displayName": name, "flavor": string(flavor), "templateId": row.ID.String()},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
@@ -253,7 +254,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	}
 	var out *agentv1alpha1.Agent
 	restarting := 0
-	err = s.inTx(ctx, func(q *store.Queries) error {
+	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
@@ -309,7 +310,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.activate", TargetKind: "agent", TargetID: a.ID.String(),
 			After: map[string]any{
 				"version": versions[i].Version, "triggers": triggerAudit(newCfg.Triggers, false),
@@ -317,6 +318,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 			},
 			Before: map[string]any{"triggers": triggerAudit(oldCfg.Triggers, false)},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
@@ -363,7 +365,7 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	var out *agentv1alpha1.Agent
-	err = s.inTx(ctx, func(q *store.Queries) error {
+	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// A person who is asked must be a member who can answer (member or higher).
 		for i, t := range triggers {
 			if t.Notify == nil || t.Notify.Kind != templates.NotifyUser {
@@ -421,11 +423,12 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 		if out, err = s.agentView(ctx, q, a, nil, nil); err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.triggers.propose", TargetKind: "agent", TargetID: a.ID.String(),
 			Before: map[string]any{"version": versions[i].Version, "triggers": triggerAudit(before, true)},
 			After:  map[string]any{"version": v.Version, "triggers": triggerAudit(triggers, true)},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
@@ -446,7 +449,7 @@ func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgent
 		return nil, err
 	}
 	var out *agentv1alpha1.Agent
-	err = s.inTx(ctx, func(q *store.Queries) error {
+	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		before, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
@@ -473,11 +476,12 @@ func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgent
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.resume", TargetKind: "agent", TargetID: id.String(),
 			Before: map[string]any{"unhealthyReason": before.UnhealthyReason.String},
 			After:  map[string]any{"unhealthy": false},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
@@ -501,7 +505,7 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		return nil, err
 	}
 	var out *agentv1alpha1.Agent
-	err = s.inTx(ctx, func(q *store.Queries) error {
+	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		a, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: c.org, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id}); err != nil {
@@ -520,11 +524,12 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		if err != nil {
 			return err
 		}
-		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.archive", TargetKind: "agent", TargetID: a.ID.String(),
 			Before: map[string]any{"displayName": a.DisplayName},
 			After:  map[string]any{"archived": true, "runsCanceled": len(canceled)},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
