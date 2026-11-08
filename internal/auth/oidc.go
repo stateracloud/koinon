@@ -264,7 +264,7 @@ func (s *Service) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		token, _, err = s.createSession(ctx, q, user, store.AuthMethodOidc)
+		token, _, err = s.createSession(ctx, q, b, user, store.AuthMethodOidc)
 		return err
 	})
 	if errors.Is(err, errUserDisabled) {

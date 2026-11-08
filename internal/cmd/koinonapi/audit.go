@@ -117,8 +117,8 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 		return first
 	}
 	if denied {
-		slog.Error("not recorded yet: the database refuses koinon-api's install audit event; retrying until the install audit "+
-			"writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", r.What, "err", first)
+		slog.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
+			"install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", r.What, "err", first)
 	} else {
 		slog.Error("not recorded; retrying", "what", r.What, "err", first)
 	}

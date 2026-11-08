@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -111,9 +112,9 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}
 	var token string
-	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+	_, err = audit.InTx(r.Context(), s.pool, func(q *store.Queries, b audit.Batch) error {
 		var err error
-		token, _, err = s.createSession(r.Context(), store.New(tx), cred.UserID, store.AuthMethodPassword)
+		token, _, err = s.createSession(r.Context(), q, b, cred.UserID, store.AuthMethodPassword)
 		return err
 	})
 	if err != nil {
