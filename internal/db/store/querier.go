@@ -780,6 +780,9 @@ type Querier interface {
 	// The install-scope read path (AuditService.List with AUDIT_SCOPE_INSTALL): the filters of
 	// ListAuditEventsAllOrgs over the install chain.
 	ListInstallAuditEventsFiltered(ctx context.Context, arg ListInstallAuditEventsFilteredParams) ([]InstallAuditEvent, error)
+	// Every platform.settings.observed event, oldest first. An event holds only the keys that changed, so
+	// the last recorded settings are the events applied in turn (ADR 0100 decision 3). A few rows per install.
+	ListInstallSettingsEvents(ctx context.Context) ([]InstallAuditEvent, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
@@ -987,6 +990,9 @@ type Querier interface {
 	// Serializes writers of platform price versions and proposals' decisions: a transaction holds it to
 	// the commit. Version numbers are max + 1, so two writers must not interleave.
 	LockPlatformPrices(ctx context.Context) error
+	// Serialises the start-up record of the Helm-set platform settings across API replicas for the rest
+	// of the transaction (ADR 0100 decision 3). It is a domain lock, taken before the install head.
+	LockPlatformSettings(ctx context.Context) error
 	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
 	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 	// of the ceiling cannot pass each other.

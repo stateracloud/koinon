@@ -492,6 +492,34 @@ The lost-change `keys.observed` a key command writes carries that command's acto
 (the `DATABASE_URL` alias still works), like `add`, `retire` and `rewrap`, so that it can record its
 event (maintainer decision 2026-11-08).
 
+### Platform settings in the install audit chain
+
+On every start `koinon-api` records the install-wide settings that Helm sets through its flags as
+`platform.settings.observed` (actor `system koinon-api:startup`). In one transaction under an advisory
+lock it compares them with the settings recorded so far, and writes one event with only the keys that
+changed in `before` and `after`. The first start writes every setting; a restart with the same settings
+writes nothing; two replicas starting together write one event. Like the other start-up writes it is
+retried in the background every 30 seconds while the database refuses the install audit writer role.
+
+The list is the Go table `recordedSettings` in `internal/cmd/koinonapi/settings.go`: the auth and
+session flags, the network and gateway flags, the key and wrapping flags (`kek-*`, `openbao-*`,
+`awskms-*`, the saved-work flags), `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`,
+`chart-version` (the chart passes `.Chart.Version`) and `image-version`. A flag that names a Secret, a
+file or a directory is recorded by name only: `koinon-api` never opens it, reads its content or hashes
+it. A URL is recorded as `scheme://host[:port]` only: user info, path, query and fragment are dropped,
+because any of them could carry a credential. The one exception is `oidc-issuer-url`, whose path
+identifies the issuer and is kept; it too loses user info, query and fragment. Five keys differ from their flag, because the audit
+scrubber refuses a key that looks like a secret value: `bootstrap-password-file` is
+`bootstrap-admin-pw-file`, `kek-secret` is `kek-object`, `saved-work-secret` is `saved-work-object`,
+`otlp-token-dir` is `otlp-auth-dir` and `openbao-token-file` is `openbao-auth-file`. The price refresh
+flags are not on the list: they are `price.refresh.settings_changed` (ADR 0098). Settings an admin
+changes through the API are audited by that API call.
+
+During a rolling upgrade, each pod start that sees a different image version, chart version or
+settings table than the recorded ones writes an event. Old and new pods can therefore alternate
+events until the rollout ends; this is expected, and the last event after the rollout holds the new
+state.
+
 ## Admin API tokens
 
 A token made from a session starts a chain: 30 days by default, at most 90. A token may create tokens

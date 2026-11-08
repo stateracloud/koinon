@@ -129,10 +129,10 @@ func (k *keyAudit) watchChanged(ctx context.Context) {
 	}
 }
 
-// startObserving runs the check once, and again in the background every installWriteRetry until it
+// startObserving runs the check once (for at most installWriteFirstAttempt), and again in the background every installWriteRetry until it
 // succeeds when the chain cannot take the event yet (the CloudNativePG upgrade window, ADR 0100
 // decision 1.1a): the start does not wait for it.
 func (k *keyAudit) startObserving(ctx context.Context, stop func()) {
-	_ = retryInstallWrite(ctx, stop, installRetry{Goroutine: "keys-observed-retry", What: "key set check", AnyError: true},
-		installWriteRetry, k.observe(ctx), k.observe)
+	_ = startInstallWrite(ctx, stop, installRetry{Goroutine: "keys-observed-retry", What: "key set check", AnyError: true},
+		installWriteRetry, installWriteFirstAttempt, k.observe)
 }

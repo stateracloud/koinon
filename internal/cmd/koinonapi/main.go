@@ -162,6 +162,11 @@ type config struct {
 	secretsNamespace                                                     string
 	kubeconfig                                                           string
 	githubAPIURL                                                         string
+	// chartVersion is the Helm chart's version, which the chart passes; it is only recorded
+	// (platform.settings.observed).
+	chartVersion string
+	// flags is the flag set serve was started with, for the platform settings record.
+	flags *pflag.FlagSet
 
 	kekDir string
 	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
@@ -270,6 +275,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"listen address of the GitHub tools MCP server, for agentgateway only; empty disables it")
 	fs.StringVar(&c.secretsNamespace, "secrets-namespace", "",
 		"namespace of connection Secrets (default $POD_NAMESPACE); without one, connections cannot be created")
+	fs.StringVar(&c.chartVersion, "chart-version", "",
+		"version of the Helm chart that deployed this pod (the chart passes it); only recorded in the install audit log")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
@@ -885,6 +892,14 @@ func serve(ctx context.Context, cfg config) error {
 	// recorded key event and record the difference (ADR 0100 decision 3): a KEK made outside Koinon, a
 	// Secret the ensure-secrets Job generated, an activate or a retire whose event was lost.
 	keyAudits.startObserving(bgCtx, stop)
+	// Record the Helm-set platform settings that differ from the last recorded ones (ADR 0100 decision 3).
+	if cfg.flags != nil {
+		settings, err := platformSettings(cfg.flags)
+		if err != nil {
+			return err
+		}
+		startObservingSettings(bgCtx, stop, audit.NewRunner(pool), settings)
+	}
 	var guardSrv *grpc.Server
 	if cfg.guardAddr != "" {
 		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.guardAddr)

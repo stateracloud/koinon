@@ -33,6 +33,11 @@ var _ = Describe("koinon-api's startup", func() {
 			To(MatchError(ContainSubstring("unknown flag: --install-writer-member")), "koinon-api checks its own membership")
 	})
 
+	It("takes the chart version the chart passes, as the first flag of serve", func() {
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_ADDR": ""}, "serve", "--chart-version", "0.3.1", "--addr", ":8080")).To(Succeed())
+		Expect(start(nil, "migrate", "--database-url="+db, "--chart-version=0.3.1")).To(MatchError(ContainSubstring("unknown flag")))
+	})
+
 	It("takes the database URL from the flag, KOINON_DATABASE_URL or DATABASE_URL", func() {
 		Expect(start(nil, "migrate", "--database-url="+db)).To(Succeed())
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "migrate")).To(Succeed())

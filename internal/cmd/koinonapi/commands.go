@@ -85,7 +85,10 @@ func newServeCommand() *cobra.Command {
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, _ []string) error { return serve(cmd.Context(), c) },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c.flags = cmd.Flags()
+			return serve(cmd.Context(), c)
+		},
 	}
 	c.serveFlags(cmd.Flags())
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")

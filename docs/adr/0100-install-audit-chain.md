@@ -506,11 +506,17 @@ contents. The list:
 
 The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR
 0098 decision 5), and one change is recorded once. In one transaction under a fixed advisory lock
-(so replicas starting together write once) `koinon-api` compares the list with the `after` of the
-newest `platform.settings.observed` event and, when they differ, writes one event with the changed
-keys in `before` and `after`. Settings an admin changes through the API are audited by that API
+(so replicas starting together write once) `koinon-api` compares the list with the settings from
+all `platform.settings.observed` events applied in order (each holds only the changed keys) and,
+when they differ, writes one event with the changed keys in `before` and `after`. Settings an admin changes through the API are audited by that API
 call, not here. The list is a Go table next to the flags; adding a flag means deciding whether it is
 on it, and a test lists the flags that are not, so none is forgotten.
+
+**Amendment (maintainer decision 2026-11-08): summary keys.** Five flags that name a Secret, a file
+or a directory are recorded under a neutral summary key, because the audit scrubber refuses a key that
+looks like a secret value: `bootstrap-password-file` as `bootstrap-admin-pw-file`, `kek-secret` as `kek-object`,
+`saved-work-secret` as `saved-work-object`, `otlp-token-dir` as `otlp-auth-dir`, and
+`openbao-token-file` as `openbao-auth-file`. Every other flag is recorded under its own name.
 
 ### 4. Anchors in v0.1; signed checkpoints designed now, built after v0.1
 
