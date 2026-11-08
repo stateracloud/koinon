@@ -235,6 +235,8 @@ var _ = Describe("GET /admin/v1/audit/export", func() {
 		Expect(st).To(Equal(http.StatusBadRequest))
 		st, _ = e.call(ctx, e.token, http.MethodGet, "/audit/export?fromSeq=0", nil)
 		Expect(st).To(Equal(http.StatusBadRequest))
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/audit/export?fromSeq=1000000", nil)
+		Expect(st).To(Equal(http.StatusBadRequest), string(raw))
 		st, _ = e.call(ctx, "", http.MethodGet, "/audit/export", nil)
 		Expect(st).To(Equal(http.StatusUnauthorized))
 	})

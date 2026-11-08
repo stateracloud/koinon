@@ -36,7 +36,8 @@ func newAuditCommand() *cobra.Command {
 		Long: "Walks the audit hash chain of the install and of one org (default: every org) and reports the first " +
 			"broken link; exits non-zero when a chain does not hold.\n\n" +
 			"With --file it checks an export (koinon-api audit export) instead, with no database: the same hashing, " +
-			"run anywhere. A partial export (--from-seq) is checked against the end of an earlier export given with --after.",
+			"run anywhere. A partial export (--from-seq) is checked against the end of an earlier export given with --after " +
+			"(a file path, not stdin). With --file the database URL (--database-url or DATABASE_URL) is ignored.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if file != "" {
@@ -83,20 +84,36 @@ func newAuditCommand() *cobra.Command {
 				return err
 			}
 			w := cmd.OutOrStdout()
+			closeOut := func() error { return nil }
 			if out != "" && out != "-" {
 				f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator names the output file
 				if err != nil {
 					return fmt.Errorf("create %s: %w", out, err)
 				}
-				defer func() { _ = f.Close() }()
+				closed := false
+				defer func() {
+					if !closed {
+						_ = f.Close()
+					}
+				}()
 				w = f
+				closeOut = func() error {
+					closed = true
+					if err := f.Close(); err != nil {
+						return fmt.Errorf("close %s: %w", out, err)
+					}
+					return nil
+				}
 			}
 			pool, err := pgxpool.New(cmd.Context(), dbURL)
 			if err != nil {
 				return fmt.Errorf("connect to postgres: %w", err)
 			}
 			defer pool.Close()
-			return audit.Export(cmd.Context(), store.New(pool), w, sc, fromSeq)
+			if err := audit.Export(cmd.Context(), store.New(pool), w, sc, fromSeq); err != nil {
+				return err
+			}
+			return closeOut()
 		},
 	}
 	export.Flags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
@@ -133,8 +150,8 @@ func exportScope(scope, orgID string) (audit.ExportScope, error) {
 func verifyAuditFile(path, after string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
 	if after != "" {
-		if path == "-" && after == "-" {
-			return errors.New("--file and --after cannot both be stdin")
+		if after == "-" {
+			return errors.New("--after must be a file path, not stdin")
 		}
 		prev, err := checkExportFile(after)
 		if err != nil {
@@ -145,6 +162,11 @@ func verifyAuditFile(path, after string, out io.Writer) error {
 			return fmt.Errorf("--after %s does not verify: %w", after, audit.ErrBroken)
 		}
 		opt.After = &prev.End
+		if prev.Partial && !prev.PrevChecked {
+			// Same note as WriteExportReport prints for an unchecked partial file: the chain this file
+			// continues is only as far checked as the --after file's own start.
+			_, _ = fmt.Fprintf(out, "note    --after %s starts at chain_seq %d: its first prev_hash is not checked (give the earlier export with its own --after)\n", after, prev.Header.FromSeq)
+		}
 	}
 	var r io.Reader = os.Stdin
 	if path != "-" {

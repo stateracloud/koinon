@@ -3,7 +3,9 @@
 package adminapi
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,5 +68,12 @@ func (s *Server) ExportAudit(ctx context.Context, req ExportAuditRequestObject) 
 		}
 		_ = pw.CloseWithError(err)
 	}()
-	return ExportAudit200ApplicationxNdjsonResponse{Body: pr}, nil
+	// Wait for the first bytes: a failure before the header is written (a fromSeq beyond the chain,
+	// an unreadable head) is still an ordinary error response, not a 200 with an empty body.
+	body := bufio.NewReader(pr)
+	if _, err := body.Peek(1); err != nil && !errors.Is(err, io.EOF) {
+		_ = pr.Close()
+		return fail(err)
+	}
+	return ExportAudit200ApplicationxNdjsonResponse{Body: body}, nil
 }
