@@ -98,40 +98,61 @@ func ParseNetPolOutput(log string) (NetPolResult, error) {
 	return NetPolResult{}, fmt.Errorf("no %q line in the probe client's log: %q", NetPolMarker, truncate(log, 200))
 }
 
-// ServeNetPolProbe is what the server pod runs: it answers NetPolMarker on both probe ports
-// until ctx ends. addr is the host to listen on, "" for all.
-func ServeNetPolProbe(ctx context.Context, addr string, ports ...int) error {
+// listenNetPolProbe opens every probe port before anything answers. Opening them all first
+// matters: a client that reaches the first port must find the others listening too, or it reads
+// a port that is merely not yet open as blocked. addr is the host to listen on, "" for all.
+func listenNetPolProbe(ctx context.Context, addr string, ports ...int) ([]net.Listener, error) {
 	if len(ports) == 0 {
 		ports = []int{NetPolDeniedPort, NetPolControlPort}
 	}
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, NetPolMarker+"\n")
-	})
-	errs := make(chan error, len(ports))
-	var servers []*http.Server
 	var lc net.ListenConfig
+	var listeners []net.Listener
 	for _, port := range ports {
 		l, err := lc.Listen(ctx, "tcp", net.JoinHostPort(addr, strconv.Itoa(port)))
 		if err != nil {
-			for _, s := range servers {
-				_ = s.Close()
+			for _, o := range listeners {
+				_ = o.Close()
 			}
-			return err
+			return nil, err
 		}
+		listeners = append(listeners, l)
+	}
+	return listeners, nil
+}
+
+// ServeNetPolProbe is what the server pod runs: it answers NetPolMarker on both probe ports
+// until ctx ends. addr is the host to listen on, "" for all.
+func ServeNetPolProbe(ctx context.Context, addr string, ports ...int) error {
+	listeners, err := listenNetPolProbe(ctx, addr, ports...)
+	if err != nil {
+		return err
+	}
+	return ServeNetPolProbeOn(ctx, listeners...)
+}
+
+// ServeNetPolProbeOn answers NetPolMarker on the listeners until ctx ends, and closes them.
+func ServeNetPolProbeOn(ctx context.Context, listeners ...net.Listener) error {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, NetPolMarker+"\n")
+	})
+	errs := make(chan error, len(listeners))
+	var servers []*http.Server
+	for _, l := range listeners {
 		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 		servers = append(servers, srv)
 		go func() { errs <- srv.Serve(l) }()
 	}
+	closeAll := func() {
+		for _, s := range servers {
+			_ = s.Close()
+		}
+	}
 	select {
 	case <-ctx.Done():
-		for _, s := range servers {
-			_ = s.Close()
-		}
+		closeAll()
 		return nil
 	case err := <-errs:
-		for _, s := range servers {
-			_ = s.Close()
-		}
+		closeAll()
 		return err
 	}
 }
