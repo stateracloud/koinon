@@ -138,7 +138,15 @@ func Export(ctx context.Context, q *store.Queries, w io.Writer, sc ExportScope, 
 		}
 		for _, ev := range page {
 			if ev.ChainSeq > hdr.Head.ChainSeq {
+				if after < hdr.Head.ChainSeq {
+					// Rows at or below the head are gone and a newer event took their place: without this
+					// the loop would query the same page forever.
+					return fmt.Errorf("audit export: the chain ends at chain_seq %d but its head says %d: rows are missing", after, hdr.Head.ChainSeq)
+				}
 				break // appended after the export started
+			}
+			if ev.ChainSeq != after+1 {
+				return fmt.Errorf("audit export: chain_seq %d follows %d: rows are missing", ev.ChainSeq, after)
 			}
 			if err := enc.Encode(ev); err != nil {
 				return fmt.Errorf("audit export: write: %w", err)

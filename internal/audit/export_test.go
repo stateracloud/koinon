@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -90,6 +91,25 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		Expect(string(ev.Summary)).To(ContainSubstring("test.n1"))
 		Expect(ev.CreatedAtMicros).To(BeNumerically(">", 0))
 	})
+
+	It("fails cleanly, and does not loop, when tail rows are gone and a newer event took their place", func(ctx SpecContext) {
+		// All inside one transaction that is rolled back: other specs verify every org's chain.
+		tx, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+		_, err = tx.Exec(ctx, `ALTER TABLE audit_events DISABLE TRIGGER audit_events_no_update`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tx.Exec(ctx, `DELETE FROM audit_events WHERE org_id = $1 AND chain_seq >= 6`, org)
+		Expect(err).NotTo(HaveOccurred())
+		// chain_seq 8: the head says 8, rows 6 and 7 are missing.
+		_, err = audit.WriteInTx(ctx, tx, func(b audit.Batch) {
+			b.Org(audit.Event{Org: org, Actor: audit.System("koinon-test:spec"), Action: "test.n8", TargetKind: "test", TargetID: "t"})
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var buf bytes.Buffer
+		err = audit.Export(ctx, store.New(tx), &buf, sc, 1)
+		Expect(err).To(MatchError(ContainSubstring("rows are missing")))
+	}, SpecTimeout(30*time.Second))
 
 	It("round-trips the install chain, and an empty org chain", func(ctx SpecContext) {
 		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
