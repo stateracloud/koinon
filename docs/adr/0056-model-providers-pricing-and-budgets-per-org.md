@@ -668,8 +668,11 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    now covers complete responses, not only cut ones. A complete response is charged Koinon's price
    meanwhile and holds no reserve; a cut one keeps the `max_tokens` reserve of the RT1 amendment.
    Not queued: requests the provider refused or failed without usage (the 2026-10-29 and
-   2026-10-31 amendments: they ran up no bill to read), waived requests, and system-key entries
-   (the rc.6 amendment), which stay at Koinon's price.
+   2026-10-31 amendments: they ran up no bill to read) and waived requests. System-key entries
+   (the rc.6 amendment) are queued the same way (issue #239, maintainer decision 2026-11-06): the
+   system key goes through the same provider, so its bill is read from `/generation` too. They hold
+   no reserve, and a settlement that raises one is checked against the org's limits and the key's
+   daily budget, as an ingested system entry is.
 2. **What the settled entry charges.** `cost_usd` becomes OpenRouter's `total_cost`. The provider's
    reported tokens still replace the entry's, and Koinon prices them as before (the price valid at
    the request's time, cache writes kept from the gateway's log) to keep that figure beside the
@@ -678,7 +681,7 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    entry stands at the bill even when Koinon has no usable price.
 3. **An org price override** no longer changes what a settled OpenRouter entry charges: it is the
    org's own figure, and its difference from the bill is flagged per entry. It still prices the
-   provisional charge, every entry that is never settled (direct providers, system keys, entries
+   provisional charge, every entry that is never settled (direct providers, entries
    whose generation never appears before the settlement deadline), and the budget estimates before
    a request. An org whose contract price differs from OpenRouter's list therefore sees the bill,
    not the contract, in the ledger; a contract with OpenRouter itself is what `total_cost` reports.
