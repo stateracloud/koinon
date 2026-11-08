@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,7 +19,10 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
@@ -115,6 +119,62 @@ func loaderOf(set *keyscli.KeySet) keyscli.KeyLoader {
 		}
 		return c, nil
 	}
+}
+
+// observed is the outcome of a start-up check that observeAfterSave started.
+type observed struct {
+	res keyscli.ObserveResult
+	err error
+}
+
+// advisoryWaiting reports whether a session of this database waits for an advisory lock.
+func advisoryWaiting(ctx context.Context) bool {
+	var waiting bool
+	Expect(pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting)).To(Succeed())
+	return waiting
+}
+
+// observeAfterSave makes the next Secret update in kube, once it is applied, start a start-up check
+// (Observe) on another connection, and lets the update return only when that check has finished or
+// waits for the key events' advisory lock: the moment between a key command's Secret update and its
+// event. The check loads the key set with load from a mirror of kube's Secrets (the fake clientset
+// holds its lock while a reactor runs, so the check cannot read kube itself then). Its outcome arrives
+// on the returned channel.
+func observeAfterSave(ctx context.Context, kube *fake.Clientset, load func(kubernetes.Interface) keyscli.KeyLoader) <-chan observed {
+	GinkgoHelper()
+	mirror := fake.NewClientset()
+	list, err := kube.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	for i := range list.Items {
+		_, err := mirror.CoreV1().Secrets(list.Items[i].Namespace).Create(ctx, &list.Items[i], metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+	}
+	checked := make(chan observed, 1)
+	var once sync.Once
+	kube.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		handled := false
+		var obj runtime.Object
+		var err error
+		once.Do(func() {
+			handled = true
+			obj = action.(k8stesting.UpdateAction).GetObject()
+			if err = kube.Tracker().Update(action.GetResource(), obj, action.GetNamespace()); err != nil {
+				return
+			}
+			if err = mirror.Tracker().Update(action.GetResource(), obj.DeepCopyObject(), action.GetNamespace()); err != nil {
+				return
+			}
+			go func() {
+				defer GinkgoRecover()
+				res, err := (&keyscli.Auditor{Pool: pool, Authoritative: true}).Observe(ctx, load(mirror))
+				checked <- observed{res: res, err: err}
+			}()
+			Eventually(func() bool { return len(checked) > 0 || advisoryWaiting(ctx) }).Should(BeTrue())
+		})
+		return handled, obj, err
+	})
+	return checked
 }
 
 var _ = Describe("key events in the install audit chain", func() {
@@ -217,6 +277,45 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(MatchError(keyscli.ErrNotAudited))
 			Expect(newKeySet(ctx).Keys).To(HaveKey("kek-20261023-bbbb"), "the change stands")
 		})
+
+		DescribeTable("holds the lock from its Secret update to its event, so a start-up check in between records nothing",
+			func(ctx SpecContext, prepare, run func(ctx SpecContext) error, want string) {
+				Expect(prepare(ctx)).To(Succeed())
+				mark := auditMark(ctx)
+				checked := observeAfterSave(ctx, kube, func(c kubernetes.Interface) keyscli.KeyLoader {
+					m := ks
+					m.Client = c
+					return m.Load
+				})
+				Expect(run(ctx)).To(Succeed())
+				var o observed
+				Eventually(checked).Should(Receive(&o))
+				Expect(o.err).NotTo(HaveOccurred())
+				Expect(o.res.Wrote).To(BeFalse(), "the check found the change recorded")
+				Expect(actions(keyEventsSince(ctx, mark))).To(Equal([]string{want}), "one event for the change, and no keys.observed")
+			},
+			Entry("add",
+				func(SpecContext) error { return nil },
+				func(ctx SpecContext) error { return tool.Add(ctx, "kek-20261023-bbbb") },
+				keyscli.ActionAdd),
+			Entry("activate",
+				func(ctx SpecContext) error { return tool.Add(ctx, "kek-20261023-bbbb") },
+				func(ctx SpecContext) error { return tool.Activate(ctx, "kek-20261023-bbbb") },
+				keyscli.ActionActivate),
+			Entry("retire",
+				func(ctx SpecContext) error {
+					if err := tool.Add(ctx, "kek-20261023-bbbb"); err != nil {
+						return err
+					}
+					if err := tool.Activate(ctx, "kek-20261023-bbbb"); err != nil {
+						return err
+					}
+					now = now.Add(6 * time.Minute)
+					return nil
+				},
+				func(ctx SpecContext) error { return tool.Retire(ctx, first) },
+				keyscli.ActionRetire),
+		)
 	})
 
 	Describe("rewrap and reencrypt", func() {
@@ -263,6 +362,80 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(after["kek_usage"]).To(Equal(map[string]any{"kek-20261023-bbbb": float64(3), "gone": float64(1)}))
 			Expect(section(e, "before")["kek_usage"]).To(Equal(map[string]any{first: float64(3), "gone": float64(1)}))
 			noKeyMaterial(ctx, es)
+		})
+
+		// failuresOf runs rewrap (or run) and returns the closing event's after.
+		failuresOf := func(ctx SpecContext, run func(ctx SpecContext) error) map[string]any {
+			GinkgoHelper()
+			mark := auditMark(ctx)
+			err := run(ctx)
+			Expect(err).To(HaveOccurred(), "the failed rows are reported")
+			Expect(errors.Is(err, keyscli.ErrNotAudited)).To(BeFalse())
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(Equal([]string{keyscli.ActionRewrap}))
+			noKeyMaterial(ctx, es)
+			return section(es[0], "after")
+		}
+		rewrap := func(ctx SpecContext) error { return tool.Rewrap(ctx) }
+
+		It("counts an envelope that is not one, or has a format the keyring does not know, as envelope", func(ctx SpecContext) {
+			_, err := pool.Exec(ctx, `UPDATE providers SET api_key = jsonb_set(api_key, '{fmt}', '"one"') WHERE id = $1`, ids[0])
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET api_key = jsonb_set(api_key, '{fmt}', '99') WHERE id = $1`, ids[1])
+			Expect(err).NotTo(HaveOccurred())
+			after := failuresOf(ctx, rewrap)
+			Expect(after["failures"]).To(Equal(map[string]any{"envelope": float64(2)}))
+			Expect(after["done"]).To(BeEquivalentTo(2))
+			Expect(after["failed"]).To(BeEquivalentTo(2))
+		})
+
+		It("counts an envelope that does not authenticate as open", func(ctx SpecContext) {
+			// A data-key nonce of the wrong length: the wrapped data key cannot be opened.
+			_, err := pool.Exec(ctx, `UPDATE providers SET api_key = jsonb_set(api_key, '{dek_nonce}', '"AAAA"') WHERE id = $1`, ids[0])
+			Expect(err).NotTo(HaveOccurred())
+			after := failuresOf(ctx, rewrap)
+			Expect(after["failures"]).To(Equal(map[string]any{"open": float64(1)}))
+			Expect(after["done"]).To(BeEquivalentTo(3))
+		})
+
+		It("counts a new envelope that could not be made as wrap", func(ctx SpecContext) {
+			n := 0
+			after := failuresOf(ctx, func(ctx SpecContext) error {
+				return tool.RewrapWith(ctx, func(secretstore.Envelope) error {
+					if n++; n == 1 {
+						return errors.New("koinon_test the KMS did not answer")
+					}
+					return nil
+				})
+			})
+			Expect(after["failures"]).To(Equal(map[string]any{"wrap": float64(1)}))
+			Expect(after["failed"]).To(BeEquivalentTo(1))
+			Expect(after["done"]).To(BeEquivalentTo(0))
+		})
+
+		It("counts rows that could not be listed as one database failure and stops there", func(ctx SpecContext) {
+			// After the count and before the loop, the second column (providers.cost_api_key) goes away: its
+			// rows cannot be listed. The first column's rows are done; the remaining columns are not tried.
+			tool.RecordStarted = true
+			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(ctx context.Context, e audit.InstallEvent) error {
+				if e.Action == keyscli.ActionRewrap+keyscli.StartedSuffix {
+					_, err := pool.Exec(ctx, `ALTER TABLE providers RENAME COLUMN cost_api_key TO koinon_test_gone`)
+					Expect(err).NotTo(HaveOccurred())
+					DeferCleanup(func(ctx SpecContext) {
+						_, err := pool.Exec(ctx, `ALTER TABLE providers RENAME COLUMN koinon_test_gone TO cost_api_key`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+				}
+				return audit.RecordInstallErr(ctx, store.New(pool), e)
+			}}
+			mark := auditMark(ctx)
+			Expect(tool.Rewrap(ctx)).To(HaveOccurred())
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(Equal([]string{keyscli.ActionRewrap + keyscli.StartedSuffix, keyscli.ActionRewrap}))
+			after := section(es[1], "after")
+			Expect(after["failures"]).To(Equal(map[string]any{"database": float64(1)}))
+			Expect(after["failed"]).To(BeEquivalentTo(1))
+			Expect(after["done"]).To(BeEquivalentTo(4))
 		})
 
 		It("writes nothing for a run that changes nothing", func(ctx SpecContext) {
@@ -704,7 +877,17 @@ var _ = Describe("key-admin Job events", func() {
 		a.ActivateIfNoActive = true
 		recordLive(ctx, jobStore().LoadWithoutActive) // the Secret was provisioned before the Job; the chain has seen it
 		mark := auditMark(ctx)
+		// A start-up check between the Secret update and the two events waits for them.
+		checked := observeAfterSave(ctx, kube, func(c kubernetes.Interface) keyscli.KeyLoader {
+			m := jobStore()
+			m.Client = c
+			return m.LoadWithoutActive
+		})
 		Expect(a.Run(ctx)).To(Succeed())
+		var o observed
+		Eventually(checked).Should(Receive(&o))
+		Expect(o.err).NotTo(HaveOccurred())
+		Expect(o.res.Wrote).To(BeFalse(), "the check found the recovery recorded")
 		es := keyEventsSince(ctx, mark)
 		Expect(actions(es)).To(Equal([]string{keyscli.ActionAdd, keyscli.ActionActivate}))
 		for _, e := range es {
