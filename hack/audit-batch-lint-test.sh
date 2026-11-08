@@ -88,6 +88,82 @@ case_ "audit.WriteInTx in keyscli passes" 0 internal/keyscli/a.go 'package keysc
 func f() { _, _ = audit.WriteInTx(ctx, tx, fn) }'
 case_ "audit.WriteInTx in internal/audit passes" 0 internal/audit/batch.go 'package audit
 func f() { _, _ = WriteInTx(ctx, tx, fn) }'
+case_ "an aliased WriteInTx fails" 1 internal/foo/a.go 'package foo
+import au "github.com/stateracloud/koinon/internal/audit"
+func f() { _, _ = au.WriteInTx(ctx, tx, fn) }'
+case_ "a dot-imported WriteInTx fails" 1 internal/foo/a.go 'package foo
+import . "github.com/stateracloud/koinon/internal/audit"
+func f() { _, _ = WriteInTx (ctx, tx, fn) }'
+case_ "an aliased WriteInTx in keyscli passes" 0 internal/keyscli/a.go 'package keyscli
+import au "github.com/stateracloud/koinon/internal/audit"
+func f() { _, _ = au.WriteInTx(ctx, tx, fn) }'
+
+# Rule 1 with an aliased or dot import.
+case_ "an aliased audit.Record fails" 1 internal/foo/a.go 'package foo
+import (
+	"context"
+	au "github.com/stateracloud/koinon/internal/audit"
+)
+func f() { _, _ = au.Record(ctx, q, e) }'
+case_ "an aliased audit.RecordInstallErr fails" 1 internal/foo/a.go 'package foo
+import au "github.com/stateracloud/koinon/internal/audit"
+func f() { _ = au.RecordInstallErr(ctx, q, e) }'
+case_ "a dot-imported Record fails" 1 internal/foo/a.go 'package foo
+import . "github.com/stateracloud/koinon/internal/audit"
+func f() { _, _ = Record(ctx, q, e) }'
+case_ "a dot-imported RecordErr fails" 1 internal/foo/a.go 'package foo
+import . "github.com/stateracloud/koinon/internal/audit"
+func f() { _ = RecordErr(ctx, q, e) }'
+case_ "a bare Record without a dot import of audit passes" 0 internal/foo/a.go 'package foo
+func Record(x int) {}
+func f() { Record(1) }'
+case_ "a method named Record with audit aliased passes" 0 internal/foo/a.go 'package foo
+import au "github.com/stateracloud/koinon/internal/audit"
+func f() { _ = a.Record(ctx, au.Event{}) }'
+
+# Rule 3: schema-qualified and quoted names, COPY, MERGE, pgx.Identifier.
+case_ "INSERT INTO public.audit_events fails" 1 internal/foo/a.go 'package foo
+var s = `INSERT INTO public.audit_events (org_id) VALUES ($1)`'
+case_ "INSERT INTO a quoted table fails" 1 internal/foo/a.go 'package foo
+var s = `INSERT INTO "audit_events" (org_id) VALUES ($1)`'
+case_ "UPDATE public.\"audit_chain_heads\" fails" 1 internal/foo/a.go 'package foo
+var s = `UPDATE public."audit_chain_heads" SET seq = 0`'
+case_ "a quoted table in a Go string fails" 1 internal/foo/a.go 'package foo
+var s = "DELETE FROM \"public\".\"install_audit_events\""'
+case_ "COPY into an audit table fails" 1 internal/foo/a.go 'package foo
+var s = `COPY install_audit_events (actor_kind) FROM STDIN`'
+case_ "MERGE INTO an audit table fails" 1 internal/foo/a.go 'package foo
+var s = `MERGE INTO public.audit_events t USING src s ON false WHEN NOT MATCHED THEN INSERT DEFAULT VALUES`'
+case_ "a sqlc query with MERGE INTO fails" 1 internal/db/queries/agents.sql '-- name: Bad :exec
+MERGE INTO "audit_events" USING x ON false WHEN NOT MATCHED THEN DO NOTHING;'
+case_ "CopyFrom with pgx.Identifier fails" 1 internal/foo/a.go 'package foo
+func f() { _, _ = conn.CopyFrom(ctx, pgx.Identifier{"audit_events"}, cols, src) }'
+case_ "CopyFrom with a schema-qualified Identifier fails" 1 internal/foo/a_test.go 'package foo
+func f() { _, _ = tx.CopyFrom(ctx, pgx.Identifier{"public", "install_audit_chain_head"}, cols, src) }'
+case_ "a pgx.Identifier of another table passes" 0 internal/foo/a.go 'package foo
+func f() { _, _ = conn.CopyFrom(ctx, pgx.Identifier{"public", "agents"}, cols, src) }'
+case_ "a SELECT of public.audit_events passes" 0 internal/foo/a.go 'package foo
+var s = `SELECT count(*) FROM public."audit_events"`'
+case_ "an allowlisted tamper test with a qualified name passes" 0 internal/db/migrations/audit_test.go 'package migrations
+var s = `UPDATE public.audit_events SET action = $1`'
+
+# A git checkout: untracked files that git does not ignore are scanned, ignored ones and deleted
+# tracked files are skipped.
+g=$tmp/git
+mkdir -p "$g/internal/foo" "$g/internal/gone" "$g/internal/ign"
+git -C "$g" init -q
+printf 'package foo\n' >"$g/internal/foo/ok.go"
+printf 'package gone\nvar s = `DELETE FROM audit_events`\n' >"$g/internal/gone/gone.go"
+printf 'internal/ign/\n' >"$g/.gitignore"
+git -C "$g" add -A
+git -C "$g" -c user.name=t -c user.email=t@example.invalid commit -qm init
+rm "$g/internal/gone/gone.go"
+printf 'package ign\nvar s = `DELETE FROM audit_events`\n' >"$g/internal/ign/ign.go"
+if "$script" "$g" >/dev/null 2>&1; then ok "git: a deleted tracked file and an ignored file are skipped"; else bad "git: a deleted tracked file or an ignored file was scanned"; fi
+printf 'package foo\nvar s = `DELETE FROM audit_events`\n' >"$g/internal/foo/new.go"
+if "$script" "$g" >/dev/null 2>&1; then bad "git: an untracked new file was not scanned"; else ok "git: an untracked new file fails"; fi
+report=$("$script" "$g" 2>&1)
+if grep -q '^internal/foo/new.go:2: SQL write' <<<"$report"; then ok "git: the report names path:line"; else bad "git: the report does not name internal/foo/new.go:2"; fi
 
 # The real tree is clean.
 if "$script" >/dev/null 2>&1; then ok "repository is clean"; else bad "repository writes an audit table outside internal/audit"; fi
