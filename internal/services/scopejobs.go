@@ -21,7 +21,8 @@ type scopeKey struct{ org, id [16]byte }
 // a manual Test and a scheduled sync never list one connection at the same time.
 //
 // A request that arrives while its connection is being read does not start a second reading: it
-// leaves its row and actor as the one pending request, replacing an older pending one, and the
+// leaves its row and actor as the one pending request, replacing an older pending one (except that a
+// person's pending request is never replaced by the periodic refresh's), and the
 // running goroutine reads once more when it finishes. So a burst of Tests lists the host at most
 // twice, and a re-key that lands mid-reading is still read with the new secret afterwards.
 type scopeJobs struct {
@@ -72,6 +73,13 @@ func (j *scopeJobs) start(ctx context.Context, row store.Connection, actor audit
 	}
 	if old, busy := j.running[key]; busy {
 		if old != nil {
+			if old.actor.Kind != audit.KindSystem && actor.Kind == audit.KindSystem {
+				// A person's pending request wins over the periodic refresh's: its row may be newer
+				// (a re-key stores a new secret and fingerprint), so keep it whole and only let the
+				// refresh wait for the same reading.
+				old.done = append(old.done, done)
+				return done
+			}
 			req.done = append(old.done, req.done...)
 		}
 		j.running[key] = req

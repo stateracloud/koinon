@@ -198,14 +198,29 @@ func (s *Syncer) syncOrg(ctx context.Context, org pgtype.UUID, minAge time.Durat
 			if minAge > 0 && s.readWithin(ctx, row, minAge) {
 				continue
 			}
-			cctx, cancel := context.WithTimeout(ctx, s.timeout)
-			err := s.Sync(cctx, row, Actor)
-			cancel()
+			err := s.syncOne(ctx, row)
 			if err != nil && ctx.Err() == nil {
 				s.log.Warn("code-host scope: refresh failed; the stored reading ages out", "org", org.String(), "connection", row.ID.String(), "connector", id, "err", err)
 			}
 		}
 	}
+}
+
+// syncOne reads one connection as the refresh. With a queue (SetQueue) the queue runs the reading,
+// bounded by its own timeout, and syncOne waits for it, so the refresh and a person's Test never
+// list one connection together and Drain waits for the refresh's reading too. A queue reports its
+// failures itself, so the error is nil there. Without one it runs Sync under s.timeout.
+func (s *Syncer) syncOne(ctx context.Context, row store.Connection) error {
+	if s.queue != nil {
+		select {
+		case <-s.queue(ctx, row, Actor):
+		case <-ctx.Done():
+		}
+		return nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	return s.Sync(cctx, row, Actor)
 }
 
 // readWithin reports whether the connection's stored reading is younger than d. A failed lookup

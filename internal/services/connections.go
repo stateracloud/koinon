@@ -137,6 +137,9 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
 		name = "GitHub"
@@ -261,6 +264,9 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
 		name = "Gitea"
@@ -466,7 +472,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 
 	res := &connectionv1alpha1.SetConnectionSecretResponse{}
 	if req.GetTest() {
-		tested, results, err := s.testConnection(ctx, row, c.auditActor())
+		tested, results, err := s.testConnection(rctx, row, c.auditActor())
 		if err != nil {
 			// The secret is stored and cannot be entered again by a retry that fails the same way:
 			// answer with the stored connection and a failed test, not an error.
@@ -477,7 +483,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		}
 		res.Results = results
 	} else {
-		s.syncScope(ctx, row, c.auditActor())
+		s.syncScope(rctx, row, c.auditActor())
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
@@ -593,6 +599,9 @@ func (s *Server) TestConnection(ctx context.Context, req *connectionv1alpha1.Tes
 	if err != nil {
 		return nil, err
 	}
+	// One request ID for the whole call, so the reading it starts audits under the same ID as the
+	// call's own events (a UI request carries none).
+	ctx = requestCtx(ctx)
 	id, err := parseID("connection_id", req.GetConnectionId())
 	if err != nil {
 		return nil, err

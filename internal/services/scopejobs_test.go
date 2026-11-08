@@ -33,6 +33,8 @@ type fakeReader struct {
 	total      map[byte]int
 	canceled   int
 	requestIDs []string
+	actors     []audit.Actor
+	names      []string
 }
 
 func newFakeReader() *fakeReader {
@@ -42,10 +44,12 @@ func newFakeReader() *fakeReader {
 	}
 }
 
-func (f *fakeReader) run(ctx context.Context, row store.Connection, _ audit.Actor) {
+func (f *fakeReader) run(ctx context.Context, row store.Connection, actor audit.Actor) {
 	k := row.ID.Bytes[0]
 	f.mu.Lock()
 	f.requestIDs = append(f.requestIDs, audit.RequestID(ctx))
+	f.actors = append(f.actors, actor)
+	f.names = append(f.names, row.DisplayName)
 	f.active[k]++
 	f.total[k]++
 	if f.active[k] > f.maxSeen[k] {
@@ -107,6 +111,45 @@ var _ = Describe("scopeJobs", func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		Expect(f.requestIDs).To(Equal([]string{"req-1", "req-3"}))
+	})
+
+	It("keeps a person's pending request whole when the periodic refresh arrives, and lets a person replace the refresh's", func() {
+		periodic := audit.System("koinon-api:code-host-scope")
+		person := audit.User(pgtype.UUID{Bytes: [16]byte{9}, Valid: true})
+		named := func(name string) store.Connection {
+			row := scopeTestConn(1)
+			row.DisplayName = name
+			return row
+		}
+
+		By("a person's request waits behind a running reading, and the refresh's request joins it")
+		j.start(context.Background(), named("running"), periodic)
+		Eventually(f.started).Should(Receive())
+		j.start(audit.WithRequestID(context.Background(), "req-person"), named("person's row"), person)
+		refresh := j.start(context.Background(), named("refresh's row"), periodic)
+		f.release <- struct{}{}
+		Eventually(f.started).Should(Receive())
+		Expect(refresh).NotTo(BeClosed(), "the refresh waits for the reading that covers it")
+		f.release <- struct{}{}
+		Eventually(refresh).Should(BeClosed())
+
+		By("the refresh's request waits, and a person's request replaces it")
+		j.start(context.Background(), named("running"), periodic)
+		Eventually(f.started).Should(Receive())
+		j.start(context.Background(), named("refresh's row"), periodic)
+		j.start(audit.WithRequestID(context.Background(), "req-person-2"), named("newer person's row"), person)
+		f.release <- struct{}{}
+		Eventually(f.started).Should(Receive())
+		f.release <- struct{}{}
+		j.drain(context.Background())
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		Expect(f.names).To(Equal([]string{"running", "person's row", "running", "newer person's row"}))
+		Expect(f.actors[1]).To(Equal(person))
+		Expect(f.requestIDs[1]).To(Equal("req-person"))
+		Expect(f.actors[3]).To(Equal(person))
+		Expect(f.requestIDs[3]).To(Equal("req-person-2"))
 	})
 
 	It("does not carry the cancellation of the request, and Drain still cancels the reading", func() {
