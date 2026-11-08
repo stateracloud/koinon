@@ -56,7 +56,8 @@ Everyone else gets `PermissionDenied` (403). The automatic price changes are wri
 `system koinon-api:price-refresh`. Koinon records writes to both logs in
 `koinon_audit_writes_total{chain="org|install",result="ok|error"}`. `koinon_install_audit_writer_ok`
 is 1 while `koinon-api`'s database login may write the install log and 0 otherwise; when it is 0,
-`koinon-api`'s log names the `GRANT` to run.
+`koinon-api`'s log names the `GRANT` to run. `koinon_audit_anchor_age_seconds` grows while the hourly
+install anchors (see below) are not being written.
 
 ## Check that it was not changed
 
@@ -74,5 +75,10 @@ The command prints one line per chain and exits non-zero when a chain is broken.
 that someone with owner-level database access changed or removed events. The chain does not stop a
 database superuser who rewrites a whole chain from the start; keep database access tight and copy the
 log's last hash somewhere else if you need to prove more.
+
+`verify` also checks every org chain (or the one given with `--org`) against the install anchors, so an org
+chain rewritten behind an anchor fails even when the rewrite is self-consistent. A rewrite of the install
+chain itself is still not caught until signed checkpoints exist (issue 7). See
+[Anchors](/guides/audit-export/#anchors).
 
 To keep a copy that anyone can check without the database, see [Export and verify the audit log](/guides/audit-export/).

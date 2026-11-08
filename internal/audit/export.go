@@ -564,7 +564,7 @@ func checkOrgAnchors(res *ExportResult, opt ExportVerifyOptions, orgHashes map[i
 			case ah.ChainSeq < h.FromSeq:
 				res.AnchorsUnchecked++
 			case ah.ChainSeq > res.End.Seq:
-				return &Break{Seq: ah.ChainSeq, Reason: fmt.Sprintf("anchor at install chain_seq %d names chain_seq %d of this org, but the file ends at chain_seq %d: rows were removed behind the anchor", a.ChainSeq, ah.ChainSeq, res.End.Seq)}
+				return &Break{Seq: ah.ChainSeq, Reason: fmt.Sprintf("anchor at install chain_seq %d: the file ends at chain_seq %d, before the anchored chain_seq %d: rows were removed behind the anchor, or the file is older than the anchor (export the org after the install export)", a.ChainSeq, res.End.Seq, ah.ChainSeq)}
 			default:
 				res.Anchors++
 				want, err := decodeHash(ah.Hash)

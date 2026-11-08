@@ -144,6 +144,8 @@ koinon-api audit verify --file org-0192.jsonl --anchors install.jsonl
 The install file is verified first. Every anchor that names the org must find its anchored hash in the org
 file at the anchored `chain_seq`, and a break names the lowest such `chain_seq` and the anchor. This pins the
 org file to what the install chain said about it when the anchors were written, so a rewrite of the org chain
-after your copy of the install export was made cannot pass. It does not stop someone who can rewrite the install chain
+after your copy of the install export was made cannot pass. A file that ends before an anchored `chain_seq`
+fails with a message naming both causes: rows were removed behind the anchor, or the file is older than the
+anchor (export the org after the install export). It does not stop someone who can rewrite the install chain
 too (a database superuser); signed checkpoints, exported off the cluster, are for that. Watch the gauge
 `koinon_audit_anchor_age_seconds` (no labels): it grows while anchoring is stuck.

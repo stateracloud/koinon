@@ -218,6 +218,17 @@ var _ = Describe("install audit anchors", func() {
 			By("the other orgs are not reported")
 			Expect(res.AnchorBreaks).To(HaveLen(1))
 
+			By("the per-org check (verify --org) fails for the rewritten org and passes for another")
+			checked, obrks, err := audit.VerifyOrgAnchors(ctx, q, orgs[1].String())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(checked).To(BeEquivalentTo(1))
+			Expect(obrks).To(HaveLen(1))
+			Expect(obrks[0].Org).To(Equal(orgs[1].String()))
+			Expect(obrks[0].Seq).To(BeEquivalentTo(5))
+			_, obrks, err = audit.VerifyOrgAnchors(ctx, q, orgs[0].String())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(obrks).To(BeEmpty())
+
 			By("the file verifier, given the install export's anchors, fails the org export at the same chain_seq")
 			set := anchorSet(instLines)
 			fres := verifyLines(orgExport(ctx, q, orgs[1]), audit.ExportVerifyOptions{Anchors: set})

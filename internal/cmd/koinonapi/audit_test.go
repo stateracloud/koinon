@@ -216,6 +216,9 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		Expect(err).NotTo(HaveOccurred(), out)
 		Expect(out).To(ContainSubstring("1 anchors checked against the org chains"))
 
+		out, err = run("verify", "--org", org.String(), "--database-url", pool.Config().ConnString())
+		Expect(err).NotTo(HaveOccurred(), out)
+
 		inst := export("install.jsonl", audit.ExportScope{Install: true})
 		orgFile := export("org.jsonl", audit.ExportScope{Org: org})
 		out, err = run("verify", "--file", orgFile, "--anchors", inst)
@@ -231,8 +234,8 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		Expect(err).To(MatchError(audit.ErrBroken))
 
 		By("--anchors needs --file, and an install export")
-		_, err = run("verify", "--anchors", inst, "--database-url", "x")
-		Expect(err).To(HaveOccurred())
+		_, err = run("verify", "--anchors", inst)
+		Expect(err).To(MatchError(ContainSubstring("--anchors needs --file")))
 		_, err = run("verify", "--file", inst, "--anchors", inst)
 		Expect(err).To(HaveOccurred())
 	}, SpecTimeout(3*time.Minute))

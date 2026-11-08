@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
@@ -50,6 +51,9 @@ func newAuditCommand() *cobra.Command {
 			}
 			if after != "" {
 				return errors.New("--after needs --file")
+			}
+			if anchors != "" {
+				return errors.New("--anchors needs --file")
 			}
 			if dbURL == "" {
 				return errors.New(`required flag(s) "database-url" not set (or give --file to check an export)`)
@@ -279,6 +283,17 @@ func verifyAudit(ctx context.Context, pool *pgxpool.Pool, orgID string, installO
 			return err
 		}
 		if !audit.WriteReport(out, results) {
+			ok = false
+		}
+	}
+	if orgID != "" {
+		// The install chain is not walked for one org, so only that org's side of the anchors is checked.
+		_, breaks, err := audit.VerifyOrgAnchors(ctx, q, uuid.UUID(org.Bytes).String())
+		if err != nil {
+			return err
+		}
+		for _, b := range breaks {
+			_, _ = fmt.Fprintf(out, "BROKEN  %s\n", b)
 			ok = false
 		}
 	}

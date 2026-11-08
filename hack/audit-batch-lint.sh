@@ -10,7 +10,7 @@
 # This lint covers what the compiler cannot see. It fails when Go code, tests included, does any of
 # this outside internal/audit and internal/db/store:
 #   1. writes the audit tables with SQL (INSERT INTO, UPDATE, DELETE FROM, TRUNCATE, COPY, MERGE INTO
-#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, bare,
+#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, install_audit_anchor_heads, bare,
 #      schema-qualified or quoted), in a Go file or in a sqlc query file of internal/db/queries (the
 #      store's queries only read the audit tables);
 #   2. has a Go string literal whose whole value is one of those table names, bare, schema-qualified

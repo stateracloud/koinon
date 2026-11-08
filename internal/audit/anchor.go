@@ -379,3 +379,21 @@ func VerifyAnchors(ctx context.Context, q *store.Queries) (int64, []AnchorBreak,
 		}
 	}
 }
+
+// VerifyOrgAnchors checks one org's chain against the install anchors: the breaks of VerifyAnchors
+// that name org (its canonical lower-case UUID text). It does not walk the install chain, and anchor
+// faults that name no org (a wrong heads_root) are left to VerifyInstall. It returns the number of
+// anchors read and the org's breaks.
+func VerifyOrgAnchors(ctx context.Context, q *store.Queries, org string) (int64, []AnchorBreak, error) {
+	checked, all, err := VerifyAnchors(ctx, q)
+	if err != nil {
+		return checked, nil, err
+	}
+	var breaks []AnchorBreak
+	for _, b := range all {
+		if b.Org == org {
+			breaks = append(breaks, b)
+		}
+	}
+	return checked, breaks, nil
+}
