@@ -297,7 +297,7 @@ inside a list is refused, whatever its class would be.
 - Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
   the encoding.
 - Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
-  a person.
+  a person, except the split, separator-padded base64 case named under "Not guaranteed" below.
 - Writes into the org's own private repos are never blocked as leaks, so the #70 class of false
   alarm is gone by construction.
 
@@ -306,6 +306,10 @@ inside a list is refused, whatever its class would be.
 - **Leaks under the byte cap.** Up to the cap per run leaves through `external-low` sinks, and a run
   after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
   stay small, and keys belong in the secret store, not in the context.
+- **A split, separator-padded base64 secret.** A secret split across two arguments and encoded as
+  separator-padded base64, with each half longer than the join ends, passes the text match. The same
+  text in one argument is still caught, and the byte cap and the session legs bound the damage. See
+  decision 6 (known limit) and #369 for the general fix.
 - **A misclassified internal sink.** A repo or host declared internal that is in fact world-readable
   leaks freely. The classification has to be right; its default is external.
 - **Integrity attacks.** Injected content written into the org's own repo is an internal write and
