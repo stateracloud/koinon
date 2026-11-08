@@ -28,7 +28,7 @@ are in [0046](0046-adr-conventions.md).
 | [0006](0006-identity-layers.md) | Identity layers: per-agent ServiceAccount, no usable token in the sandbox | Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md) |
 | [0007](0007-connector-model.md) | Connector model: type, connection, grant | Accepted |
 | [0008](0008-approvals-and-risk-tiers.md) | Approvals: risk tiers per scope, enforced at the boundary | Accepted; amended by [0042](0042-ask-tier-park-and-execute.md) |
-| [0009](0009-agent-runtime.md) | Agent runtime: persistent agent, ephemeral compute | Accepted; amended 2026-10-30 (below) |
+| [0009](0009-agent-runtime.md) | Agent runtime: persistent agent, ephemeral compute | Accepted; amended 2026-10-30 and 2026-11-07 (below) |
 | [0010](0010-eventing.md) | Eventing: the ticket board is the queue | Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md) |
 | [0011](0011-agent-to-agent.md) | Agent-to-agent: A2A, persisted as tickets | Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md) |
 | [0012](0012-cross-org-sharing.md) | Cross-org sharing through links with exposure profiles | Accepted |

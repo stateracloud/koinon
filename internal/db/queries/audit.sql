@@ -99,3 +99,11 @@ LIMIT @page_size;
 
 -- name: GetInstallAuditChainHead :one
 SELECT * FROM install_audit_chain_head;
+
+-- name: GetLastInstallKeyEvent :one
+-- The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
+-- checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
+SELECT * FROM install_audit_events
+WHERE starts_with(action, 'keys.') AND jsonb_exists(summary->'after', 'keks')
+ORDER BY chain_seq DESC
+LIMIT 1;
