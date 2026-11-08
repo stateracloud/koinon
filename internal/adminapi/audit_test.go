@@ -34,11 +34,18 @@ var _ = Describe("GET /admin/v1/audit", func() {
 	It("reads the token's org only, filters, and pages", func(ctx SpecContext) {
 		e := newEnv(ctx)
 		other, otherUser, _ := pgtest.NewOrg(ctx, pool)
-		q := store.New(pool)
 		for _, action := range []string{"agent.create", "agent.archive", "approval.approve", "approval.deny", "provider.create"} {
-			Expect(audit.RecordErr(ctx, q, audit.Event{Org: e.org, Actor: audit.User(e.user), Action: action, TargetKind: "test"})).To(Succeed())
+			_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+				b.Org(audit.Event{Org: e.org, Actor: audit.User(e.user), Action: action, TargetKind: "test"})
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 		}
-		Expect(audit.RecordErr(ctx, q, audit.Event{Org: other, Actor: audit.User(otherUser), Action: "agent.create", TargetKind: "other-org-secret"})).To(Succeed())
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{Org: other, Actor: audit.User(otherUser), Action: "agent.create", TargetKind: "other-org-secret"})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 
 		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit?actionPrefix=agent.", nil)
 		Expect(st).To(Equal(http.StatusOK), string(raw))
@@ -124,10 +131,13 @@ var _ = Describe("GET /admin/v1/audit without an org", func() {
 var _ = Describe("GET /admin/v1/audit?scope=install", func() {
 	It("serves the install chain to a token rooted at a platform admin, checked on every request", func(ctx SpecContext) {
 		e := newEnv(ctx)
-		q := store.New(pool)
-		Expect(audit.RecordInstallErr(ctx, q, audit.InstallEvent{
-			Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "adminapi-install-scope",
-		})).To(Succeed())
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Install(audit.InstallEvent{
+				Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "adminapi-install-scope",
+			})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 
 		By("an org-admin token whose root user is no platform admin gets 403, owner or admin role")
 		st, raw := e.call(ctx, e.token, http.MethodGet, "/audit?scope=install", nil)

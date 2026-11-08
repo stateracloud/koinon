@@ -27,7 +27,7 @@ func countWrite(chain string, err error) {
 }
 
 // RegisterMetrics registers koinon_audit_writes_total on reg (nil: none) with every series at zero.
-// The counter is shared by the process, as Record and RecordInstall are package functions; register
+// The counter is shared by the process, as the batch writes are package functions; register
 // it once per registry.
 func RegisterMetrics(reg prometheus.Registerer) {
 	for _, c := range []string{ChainOrg, ChainInstall} {

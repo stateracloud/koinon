@@ -426,7 +426,7 @@ var _ = Describe("key events in the install audit chain", func() {
 						Expect(err).NotTo(HaveOccurred())
 					})
 				}
-				return audit.RecordInstallErr(ctx, store.New(pool), e)
+				return writeInstall(ctx, pool, e)
 			}}
 			mark := auditMark(ctx)
 			Expect(tool.Rewrap(ctx)).To(HaveOccurred())
@@ -483,7 +483,7 @@ var _ = Describe("key events in the install audit chain", func() {
 					// Out of band, after the count and before the loop: the pending rows are rewrapped.
 					Expect(other.Rewrap(ctx)).To(Succeed())
 				}
-				return audit.RecordInstallErr(ctx, store.New(pool), e)
+				return writeInstall(ctx, pool, e)
 			}}
 			mark := auditMark(ctx)
 			Expect(tool.Rewrap(ctx)).To(Succeed())
@@ -910,3 +910,12 @@ var _ = Describe("key-admin Job events", func() {
 		Expect(list.Items).To(HaveLen(1), "the Secret stands")
 	})
 })
+
+// writeInstall writes e as the only event of an audit batch, for a test that wraps the Auditor's Write.
+func writeInstall(ctx context.Context, pool *pgxpool.Pool, e audit.InstallEvent) error {
+	_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+		b.Install(e)
+		return nil
+	})
+	return err
+}

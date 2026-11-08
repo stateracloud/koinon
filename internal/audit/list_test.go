@@ -27,7 +27,10 @@ var _ = Describe("List", func() {
 
 	rec := func(ctx SpecContext, o pgtype.UUID, actor audit.Actor, action string) {
 		GinkgoHelper()
-		_, err := audit.Record(ctx, q, audit.Event{Org: o, Actor: actor, Action: action, TargetKind: "test"})
+		_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+			b.Org(audit.Event{Org: o, Actor: actor, Action: action, TargetKind: "test"})
+			return nil
+		})
 		Expect(err).NotTo(HaveOccurred())
 	}
 	actions := func(rows []store.AuditEvent) []string {

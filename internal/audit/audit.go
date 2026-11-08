@@ -97,7 +97,7 @@ type Event struct {
 }
 
 // InstallEvent is one entry of the install chain, an action that belongs to no org (ADR 0100).
-// Before and After describe the target without secret values; RecordInstall refuses a summary with a
+// Before and After describe the target without secret values; the batch refuses a summary with a
 // field that looks like one.
 type InstallEvent struct {
 	Actor      Actor
@@ -109,7 +109,7 @@ type InstallEvent struct {
 	RequestID  string
 	// Reason is the reason a person gave, when the action takes one ("reason" in the summary).
 	Reason string
-	// KoinonVersion is filled by RecordInstall from the build; callers leave it empty.
+	// KoinonVersion is filled by the batch from the build; callers leave it empty.
 	KoinonVersion string
 }
 
@@ -209,14 +209,6 @@ func buildSummary(before, after any, reason, version, installEventID string) ([]
 	return raw, nil
 }
 
-// Record writes e with q, which belongs to the transaction of the change being audited. It writes
-// at once, so the caller keeps the lock order of ADR 0100 decision 1.7 by hand. Only tests use it now;
-// code adds its events to an audit Batch (InTx) instead, and the module writes them in order. Record
-// goes away with step 3 (#371).
-func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
-	return record(ctx, q, e)
-}
-
 func record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
 	if err != nil {
@@ -245,21 +237,9 @@ func RecordAfter(ctx context.Context, q *store.Queries, e Event) error {
 	return err
 }
 
-// RecordErr is Record for callers that only need the error.
-func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
-	_, err := Record(ctx, q, e)
-	return err
-}
-
-// RecordInstall writes e to the install chain with q, which belongs to the transaction of the change
-// being audited (ADR 0100 decision 1.2). Only tests call it now; code adds the event to an audit Batch
-// (Batch.Install). Only koinon-api may write it: the database refuses the insert
-// to any other role. The actor must be named (the chain refuses an empty ID). Lock order (decision
-// 1.7): write the install event before the org events of the same transaction, never after.
-func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
-	return recordInstall(ctx, q, e)
-}
-
+// recordInstall writes e to the install chain with q, inside the transaction of the change being audited
+// (ADR 0100 decision 1.2); only the batch calls it. Only koinon-api may write the install chain: the
+// database refuses the insert to any other role. The actor must be named (the chain refuses an empty ID).
 func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
 	if e.Actor.Kind == "" || e.Actor.ID == "" {
 		return store.InstallAuditEvent{}, errors.New("audit: an install event needs a named actor")
@@ -285,15 +265,9 @@ func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store
 	return row, nil
 }
 
-// ErrInstallWriteDenied is in the error RecordInstall returns when the database refuses the insert
+// ErrInstallWriteDenied is in the error an install event write returns when the database refuses the insert
 // for lack of privilege: the connecting role is not (yet) a member of the install audit writer role,
 // or "koinon-api migrate --grants-only" has not yet granted that role its privileges (ADR 0100
 // decision 1.1a). On an upgrade of a CloudNativePG cluster this is the state between the new pods
 // and the chart's post-upgrade grant hook, so startup writes retry instead of failing the start.
 var ErrInstallWriteDenied = errors.New("the install audit writer role may not insert yet")
-
-// RecordInstallErr is RecordInstall for callers that only need the error.
-func RecordInstallErr(ctx context.Context, q *store.Queries, e InstallEvent) error {
-	_, err := RecordInstall(ctx, q, e)
-	return err
-}

@@ -25,11 +25,14 @@ import (
 var _ = Describe("koinon-api audit verify", func() {
 	It("walks the install chain by default, alone with --install, and reports a break", func(ctx SpecContext) {
 		pool := pgtest.Start(ctx)
-		q := store.New(pool)
 		for range 3 {
-			Expect(audit.RecordInstallErr(ctx, q, audit.InstallEvent{
-				Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "cli",
-			})).To(Succeed())
+			_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+				b.Install(audit.InstallEvent{
+					Actor: audit.System("koinon-test:spec"), Action: "platform_price.set", TargetKind: "platform_price", TargetID: "cli",
+				})
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 		}
 
 		By("an intact chain: the install line comes first, both modes exit zero")
