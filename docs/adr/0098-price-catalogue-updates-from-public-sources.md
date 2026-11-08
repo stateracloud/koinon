@@ -277,7 +277,7 @@ records the page URL and "manual" as its source.
 
 ### 5. Audit, rollback and metrics
 
-- **Audit**, with `audit.RecordErr` in the same transaction as the change (as `SetOverride` does):
+- **Audit**, with `audit.RecordErr` (now the audit batch, ADR 0100 decision 1.7) in the same transaction as the change (as `SetOverride` does):
   `price.proposal.accepted`, `price.proposal.dismissed`, `platform_price.set` (actor a user, a `cli`
   command or `system koinon-api:price-refresh`, formerly `auto`), `platform_price.rollback`, `platform_price.retired`, `org_price.retired`,
   `price.import.uploaded` and

@@ -285,9 +285,15 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
 - An event that is recorded after the work, not with it (the reconciler's, the admin API's call log,
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
-- The direct writes `audit.Record` and `audit.RecordInstall` are gone (step 3, #371). `hack/audit-batch-lint.sh`,
-  run by `make lint`, preflight and CI, fails any code outside `internal/audit` that calls the old names,
-  inserts into the audit tables or calls their sqlc queries, and limits `audit.WriteInTx` to `internal/keyscli`.
+- The direct writes `audit.Record` and `audit.RecordInstall` are gone (step 3, #371). The compiler
+  enforces that only `internal/audit` writes: the sqlc inserts of the audit tables are generated into
+  `internal/audit/internal/auditstore` (a second `sql` entry in `sqlc.yaml`), which Go's internal rule
+  makes unreachable from any other package; the read queries stay in `internal/db/store`.
+  `hack/audit-batch-lint.sh`, run by `make lint`, preflight and CI, covers what the compiler cannot see:
+  it fails any code outside `internal/audit` that writes (INSERT/UPDATE/DELETE) into the audit tables
+  with raw SQL, or names one in a string literal of its own (dynamic SQL, `pgx.Identifier`), and limits
+  `audit.WriteInTx` to `internal/keyscli`. A test that must break the tables on purpose marks the one
+  statement with `// audit-lint:allow <reason>` on the line above.
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.
@@ -640,8 +646,9 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 - Negative: one more lock order rule (install head first). The audit module writes it (the audit
   batch, amended 1.7), so code review no longer holds it for callers that use the batch; a shared spec
   suite on the Postgres batch and the in-memory fake checks the order, and a Postgres spec shows two
-  transactions writing orgs A,B and B,A both finish. No non-test caller writes directly any more;
-  until step 3 removes the direct writes, review keeps new code off them.
+  transactions writing orgs A,B and B,A both finish. Since step 3 the compiler keeps every other
+  package off the audit inserts (`internal/audit/internal/auditstore`), and `hack/audit-batch-lint.sh`
+  keeps raw and dynamic SQL off the audit tables.
 - Negative: key events are not atomic with their change: Secret updates are recorded right after
   them, and `rewrap` and `reencrypt` once per run after a loop of per-row transactions. The start-up
   `keys.observed` pass compares the whole key-set state, so a lost event is caught at the next start,
