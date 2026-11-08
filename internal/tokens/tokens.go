@@ -376,7 +376,7 @@ func (s *Service) holdsRole(ctx context.Context, q *store.Queries, user, org pgt
 func (s *Service) auditFailure(ctx context.Context, q *store.Queries, row store.GetAPITokenByPrefixRow, reason string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_, _ = audit.Record(actx, q, audit.Event{
+	_ = audit.RecordAfter(actx, q, audit.Event{
 		Org: row.OrgID, Actor: audit.System("koinon-api:token-use"), Action: "token.use_failed", TargetKind: "token", TargetID: row.ID.String(),
 		After: map[string]any{"reason": reason, "tokenPrefix": row.Prefix},
 	})

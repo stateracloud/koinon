@@ -124,8 +124,9 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 	if len(cfg.Username) > 64 || strings.TrimSpace(cfg.Username) != cfg.Username {
 		return res, fmt.Errorf("bootstrap admin username %q: want at most 64 characters, no surrounding spaces", cfg.Username)
 	}
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	// The audit batch writes the install event, then the default org's events, just before commit
+	// (ADR 0100 decision 1.7), so this function takes its domain locks and makes its changes in any order.
+	_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockBootstrap(ctx); err != nil {
 			return err
 		}
@@ -144,11 +145,6 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		if err != nil {
 			return fmt.Errorf("grant platform admin: %w", err)
 		}
-		// Audit events wait until every domain write of this transaction is done: the lock order is
-		// domain locks first, then the install event, then org events (ADR 0100 decision 1.7). An OIDC
-		// login takes its group-mapping locks before the install head, so bootstrap must too.
-		var orgEvents []audit.Event
-
 		org, err := q.GetOrgBySlug(ctx, DefaultOrgSlug)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -175,42 +171,23 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 				return fmt.Errorf("default org identity mode: %w", err)
 			}
 			if n > 0 {
-				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.identity_mode.set",
+				b.Org(bootstrapOrgEvent(org.ID, "org.identity_mode.set",
 					map[string]any{"identityMode": string(org.IdentityMode)}, map[string]any{"identityMode": string(cfg.DefaultOrgIdentityMode)}))
 			}
 		}
 
-		// flush writes the install event (the first admin's creation, or a grant that came back
-		// after it was removed), then the org events of this transaction.
-		flush := func() error {
-			var installID string
-			switch {
-			case res.CreatedAdmin:
-				ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
-					Actor: BootstrapActor, Action: "platform_admin.bootstrap", TargetKind: "org", TargetID: org.ID.String(),
-					After: map[string]any{"userId": admin.ID.String(), "source": "bootstrap", "defaultOrgSlug": org.Slug},
-				})
-				if err != nil {
-					return err
-				}
-				installID = ev.ID.String()
-			case grantedRows > 0:
-				ev, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
-					Actor: BootstrapActor, Action: "platform_admin.grant", TargetKind: "user", TargetID: admin.ID.String(),
-					After: map[string]any{"source": "bootstrap"},
-				})
-				if err != nil {
-					return err
-				}
-				installID = ev.ID.String()
-			}
-			for _, ev := range orgEvents {
-				ev.InstallEventID = installID
-				if err := audit.RecordErr(ctx, q, ev); err != nil {
-					return err
-				}
-			}
-			return nil
+		// The install event is the first admin's creation, or a grant that came back after it was removed.
+		switch {
+		case res.CreatedAdmin:
+			b.Install(audit.InstallEvent{
+				Actor: BootstrapActor, Action: "platform_admin.bootstrap", TargetKind: "org", TargetID: org.ID.String(),
+				After: map[string]any{"userId": admin.ID.String(), "source": "bootstrap", "defaultOrgSlug": org.Slug},
+			})
+		case grantedRows > 0:
+			b.Install(audit.InstallEvent{
+				Actor: BootstrapActor, Action: "platform_admin.grant", TargetKind: "user", TargetID: admin.ID.String(),
+				After: map[string]any{"source": "bootstrap"},
+			})
 		}
 
 		if cfg.OIDCIssuer != "" {
@@ -237,7 +214,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 				for _, m := range cfg.GroupMappings {
 					mappings = append(mappings, m.Group+"="+string(m.Role))
 				}
-				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.group_mappings.set", nil,
+				b.Org(bootstrapOrgEvent(org.ID, "org.group_mappings.set", nil,
 					map[string]any{"issuer": cfg.OIDCIssuer, "mappings": mappings, "added": changed, "removed": removed}))
 			}
 		}
@@ -251,14 +228,11 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 				return err
 			}
 			if n > 0 {
-				orgEvents = append(orgEvents, bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+				b.Org(bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
 			}
-			return flush()
+			return nil
 		}
-		if err := ensureCredential(ctx, q, cfg, admin.ID, &res); err != nil {
-			return err
-		}
-		return flush()
+		return ensureCredential(ctx, q, cfg, admin.ID, &res)
 	})
 	if errors.Is(err, audit.ErrInstallWriteDenied) && !cfg.LoginEnabled {
 		// The install writer role is not granted yet (ADR 0100 decision 1.1a), so the transaction above
@@ -281,8 +255,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 // when it ended any. A database with no default org yet has no session to end.
 func revokeBootstrapSessions(ctx context.Context, pool *pgxpool.Pool, now time.Time) (int64, error) {
 	var n int64
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockBootstrap(ctx); err != nil {
 			return err
 		}
@@ -299,7 +272,8 @@ func revokeBootstrapSessions(ctx context.Context, pool *pgxpool.Pool, now time.T
 		if err != nil || n == 0 {
 			return err
 		}
-		return audit.RecordErr(ctx, q, bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+		b.Org(bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+		return nil
 	})
 	if err != nil {
 		return 0, err

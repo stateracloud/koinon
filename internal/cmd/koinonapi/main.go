@@ -376,15 +376,13 @@ func serve(ctx context.Context, cfg config) error {
 	// A database that does not yet let this login write the chain (the CloudNativePG upgrade window,
 	// decision 1.1a) must not stop the start: the transaction rolled back, so bootstrap is idempotently
 	// retried in the background until the grant arrives.
+	// The transaction is deferred until the grant arrives (retried below, once the background context
+	// exists); bootstrap sessions are revoked meanwhile when bootstrap login is off.
 	bootstrapDenied := errors.Is(err, audit.ErrInstallWriteDenied)
+	bootstrapErr := err
 	if bootstrapDenied {
-		slog.Error("bootstrap is not recorded yet: the database refuses koinon-api's install audit event; "+
-			"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook); "+
-			"the bootstrap transaction is deferred until that grant arrives and the background retry succeeds; "+
-			"bootstrap sessions are revoked meanwhile when bootstrap login is off", "revoked_bootstrap_sessions", res.RevokedSessions, "err", err)
-		err = nil
-	}
-	if err != nil {
+		slog.Warn("bootstrap is deferred", "revoked_bootstrap_sessions", res.RevokedSessions)
+	} else if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
 	if !bootstrapDenied {
@@ -465,17 +463,15 @@ func serve(ctx context.Context, cfg config) error {
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg() // before pool.Close
 	if bootstrapDenied {
-		safego.GoOrStop(bgCtx, slog.Default(), "bootstrap-retry", stop, func(ctx context.Context) {
-			retryInstallWrite(ctx, "bootstrap", installWriteRetry, bootstrapRetryWrite(runBootstrap, cfg.bootstrapLogin))
-		})
+		_ = retryInstallWrite(bgCtx, stop, installRetry{Goroutine: "bootstrap-retry", What: "bootstrap"}, installWriteRetry,
+			bootstrapErr, bootstrapRetryWrite(runBootstrap, cfg.bootstrapLogin))
 	}
 	if errors.Is(retireErr, audit.ErrInstallWriteDenied) {
-		safego.GoOrStop(bgCtx, slog.Default(), "price-retire-caught-up", stop, func(ctx context.Context) {
-			retryInstallWrite(ctx, "platform price retirement", installWriteRetry, func(ctx context.Context) error {
+		_ = retryInstallWrite(bgCtx, stop, installRetry{Goroutine: "price-retire-caught-up", What: "platform price retirement"}, installWriteRetry,
+			retireErr, func(ctx context.Context) error {
 				_, err := priceSvc.RetireCaughtUp(ctx)
 				return err
 			})
-		})
 	}
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
@@ -745,15 +741,11 @@ func serve(ctx context.Context, cfg config) error {
 	// does it wait for the install audit writer's grant (ADR 0100 decision 1.1a): on an upgrade of a
 	// CloudNativePG cluster that grant is the chart's post-upgrade hook, which Helm runs only once these
 	// pods are ready, so a refused audit write is retried in the background instead of failing the start.
-	if err := refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval); errors.Is(err, audit.ErrInstallWriteDenied) {
-		slog.Error("the price refresh setting is not recorded yet: the database refuses koinon-api's install audit event; "+
-			"retrying until the install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "err", err)
-		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh-settings", stop, func(ctx context.Context) {
-			retryInstallWrite(ctx, "price refresh setting", installWriteRetry, func(ctx context.Context) error {
-				return refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval)
-			})
-		})
-	} else if err != nil {
+	syncSettings := func(ctx context.Context) error {
+		return refresher.SyncSettings(ctx, refreshMode, cfg.pricesRefreshInterval)
+	}
+	if err := retryInstallWrite(bgCtx, stop, installRetry{Goroutine: "price-refresh-settings", What: "price refresh setting"},
+		installWriteRetry, syncSettings(ctx), syncSettings); err != nil {
 		return err
 	}
 	if _, err := refresher.ReportUnpriced(ctx); err != nil {

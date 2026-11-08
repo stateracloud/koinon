@@ -207,16 +207,15 @@ func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destinat
 }
 
 // SetPlatformCeiling sets the highest content level an org may pick. Lowering it lowers every org
-// above it in the same transaction. The change is one install event, written first (ADR 0100
-// decision 1.7: domain locks, then the install event, then org events in org ID order); each lowered
-// org then gets a trace.settings.lowered event of its own, pointing back with install_event_id, so its
+// above it in the same transaction. The change is one install event (the audit batch writes it
+// first and the org events by org ID, ADR 0100 decision 1.7); each lowered org gets a trace.settings.lowered event of its own, pointing back with install_event_id, so its
 // admins see why the level changed. It returns how many orgs were lowered.
 func (s *Service) SetPlatformCeiling(ctx context.Context, actor audit.Actor, ceiling string) (int, error) {
 	if !ValidLevel(ceiling) {
 		return 0, invalid("ceiling must be none, redacted or full")
 	}
 	lowered := 0
-	err := s.tx(ctx, func(q *store.Queries) error {
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		before, err := q.LockPlatformTraceSettings(ctx)
 		if err != nil {
 			return err
@@ -231,23 +230,17 @@ func (s *Service) SetPlatformCeiling(ctx context.Context, actor audit.Actor, cei
 			return err
 		}
 		lowered = len(rows)
-		install, err := audit.RecordInstall(ctx, q, audit.InstallEvent{
+		b.Install(audit.InstallEvent{
 			Actor: actor, Action: "trace.platform_ceiling.set", TargetKind: "trace_platform_ceiling", TargetID: "platform",
 			Before: map[string]any{"ceiling": string(before.ContentCeiling)},
 			After:  map[string]any{"ceiling": ceiling, "orgsLowered": lowered},
 		})
-		if err != nil {
-			return err
-		}
-		for _, r := range rows { // LowerOrgTraceLevels returns them in org ID order
-			if err := audit.RecordErr(ctx, q, audit.Event{
+		for _, r := range rows {
+			b.Org(audit.Event{
 				Org: r.OrgID, Actor: actor, Action: "trace.settings.lowered", TargetKind: "trace_settings", TargetID: r.OrgID.String(),
-				Before:         map[string]any{"contentLevel": string(r.OldLevel), "platformCopyLevel": string(r.OldCopyLevel)},
-				After:          map[string]any{"contentLevel": ceiling, "platformCopyLevel": MinLevel(string(r.OldCopyLevel), ceiling), "ceiling": ceiling},
-				InstallEventID: install.ID.String(),
-			}); err != nil {
-				return err
-			}
+				Before: map[string]any{"contentLevel": string(r.OldLevel), "platformCopyLevel": string(r.OldCopyLevel)},
+				After:  map[string]any{"contentLevel": ceiling, "platformCopyLevel": MinLevel(string(r.OldCopyLevel), ceiling), "ceiling": ceiling},
+			})
 		}
 		return nil
 	})

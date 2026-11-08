@@ -486,8 +486,7 @@ func (r *Refresher) AutoApply(ctx context.Context, sources ...string) (int, erro
 // autoApply is AutoApply under bounds b, which the caller read from the recorded setting.
 func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources ...string) (int, error) {
 	applied := 0
-	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, r.svc.pool, func(q *store.Queries, ab audit.Batch) error {
 		if err := q.LockPlatformPrices(ctx); err != nil {
 			return err
 		}
@@ -566,7 +565,7 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 				"proposals", len(cands), "entries", a.Dropped)
 			return nil
 		}
-		pv, err := writeVersion(ctx, q, versionWrite{
+		pv, err := writeVersion(ctx, q, ab, versionWrite{
 			Actor: AutoActor, Action: "platform_price.set", Reason: fmt.Sprintf("%d automatic price update(s) within bounds", len(cands)),
 			RuleSet: pricefetch.RuleSetVersion, ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed,
 		})
@@ -574,7 +573,7 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 			return err
 		}
 		for _, p := range cands {
-			if err := r.decide(ctx, q, p, StateAccepted, AutoActor, pv.Version); err != nil {
+			if err := r.decide(ctx, q, ab, p, StateAccepted, AutoActor, pv.Version); err != nil {
 				return err
 			}
 			r.metrics.autoApplied(p.Source)
@@ -679,7 +678,7 @@ type applied struct {
 
 // decide marks a proposal accepted or dismissed and audits it. A proposal already decided is an
 // InvalidError.
-func (r *Refresher) decide(ctx context.Context, q *store.Queries, p Proposal, state string, actor audit.Actor, version int64) error {
+func (r *Refresher) decide(ctx context.Context, q *store.Queries, b audit.Batch, p Proposal, state string, actor audit.Actor, version int64) error {
 	id, err := parseUUID(p.ID)
 	if err != nil {
 		return err
@@ -701,7 +700,8 @@ func (r *Refresher) decide(ctx context.Context, q *store.Queries, p Proposal, st
 	if version > 0 {
 		after["platformVersion"] = version
 	}
-	return auditPlatform(ctx, q, actor, action, "price_proposal", p.ID, nil, after)
+	auditPlatform(b, actor, action, "price_proposal", p.ID, nil, after)
+	return nil
 }
 
 // ListProposals lists proposals, newest first; empty state or class mean all.
@@ -749,8 +749,7 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, op
 		return Accepted{}, &InvalidError{Msg: fmt.Sprintf("--max-output %d is negative", opts.MaxOutput)}
 	}
 	var out Accepted
-	err = pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockPlatformPrices(ctx); err != nil {
 			return err
 		}
@@ -794,7 +793,7 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, op
 		if err != nil {
 			return err
 		}
-		pv, err := writeVersion(ctx, q, versionWrite{
+		pv, err := writeVersion(ctx, q, b, versionWrite{
 			Actor: actor, Action: "platform_price.set", Reason: reason,
 			ProposalIDs: a.IDs, Entries: a.Entries, Changed: a.Changed, Dropped: a.Dropped,
 		})
@@ -802,7 +801,7 @@ func (r *Refresher) Accept(ctx context.Context, actor audit.Actor, id string, op
 			return err
 		}
 		out = Accepted{Version: pv, Warnings: EntryWarnings(*p.Proposed)}
-		return r.decide(ctx, q, p, StateAccepted, actor, pv.Version)
+		return r.decide(ctx, q, b, p, StateAccepted, actor, pv.Version)
 	})
 	if err == nil {
 		_ = r.metrics.refreshProposals(ctx, store.New(r.svc.pool))
@@ -817,8 +816,7 @@ func (r *Refresher) Dismiss(ctx context.Context, actor audit.Actor, id string) e
 	if err != nil {
 		return &InvalidError{Msg: "proposal id " + id + " is not a UUID"}
 	}
-	err = pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err = audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
 		row, err := q.GetPriceProposal(ctx, uid)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: proposal %s", ErrNotFound, id)
@@ -832,7 +830,7 @@ func (r *Refresher) Dismiss(ctx context.Context, actor audit.Actor, id string) e
 		if p.State != StateOpen {
 			return &InvalidError{Msg: "proposal " + id + " is " + p.State + ", not open"}
 		}
-		return r.decide(ctx, q, p, StateDismissed, actor, 0)
+		return r.decide(ctx, q, b, p, StateDismissed, actor, 0)
 	})
 	if err == nil {
 		_ = r.metrics.refreshProposals(ctx, store.New(r.svc.pool))
@@ -845,8 +843,7 @@ func (r *Refresher) Dismiss(ctx context.Context, actor audit.Actor, id string) e
 // never applied automatically. Returns how many proposals were created or refreshed.
 func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.File) (int, error) {
 	total := 0
-	err := pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
 		now := r.now()
 		if err := pricefetch.CheckFile(f, now); err != nil {
 			return &InvalidError{Msg: err.Error()}
@@ -882,7 +879,8 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 			total += n
 			uploaded = append(uploaded, map[string]any{"source": snap.Source, "fetchedAt": snap.FetchedAt.Format(time.RFC3339), "sha256": snap.SHA256, "models": snap.Count, "proposals": n})
 		}
-		return auditPlatform(ctx, q, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actor.String()})
+		auditPlatform(b, actor, "price.import.uploaded", "price_import", "", nil, map[string]any{"snapshots": uploaded, "vouchedBy": actor.String()})
+		return nil
 	})
 	if err == nil {
 		_ = r.metrics.refreshProposals(ctx, store.New(r.svc.pool))

@@ -499,7 +499,7 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 		return nil, err
 	}
 	rctx := requestCtx(ctx)
-	err = s.inTx(rctx, func(q *store.Queries) error {
+	err = s.inAuditTx(rctx, func(q *store.Queries, b audit.Batch) error {
 		// Lock order: the connection, then its linked MCP servers, as the link check
 		// (mcpservers.lockLinkTarget) and the importer's unlink take them; the other order deadlocks.
 		row, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
@@ -537,18 +537,17 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 			return err
 		}
 		for _, srv := range linked {
-			if err := audit.RecordErr(rctx, q, audit.Event{
+			b.Org(audit.Event{
 				Org: c.org, Actor: c.auditActor(), Action: "mcp_server.data_class.reset", TargetKind: "mcp_server", TargetID: srv.ID.String(),
 				Before: map[string]any{"name": srv.Name, "codeHostConnectionId": id.String()},
 				After:  map[string]any{"name": srv.Name, "codeHostConnectionId": nil, "reason": "connection_deleted"},
-			}); err != nil {
-				return err
-			}
+			})
 		}
-		return audit.RecordErr(rctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.delete", TargetKind: "connection", TargetID: id.String(),
 			Before: map[string]any{"displayName": row.DisplayName, "source": string(row.Source), "keyFingerprint": row.SecretFingerprint, "removed": row.RemovedAt.Valid},
 		})
+		return nil
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")

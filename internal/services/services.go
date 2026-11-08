@@ -322,6 +322,14 @@ func (s *Server) inTx(ctx context.Context, fn func(q *store.Queries) error) erro
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
 }
 
+// inAuditTx runs fn in a transaction like inTx, with the audit batch of the change: fn adds its audit
+// events to b and the audit module writes them just before commit, install event first and org events
+// by org ID (ADR 0100 decision 1.7), so the event commits with its change or not at all.
+func (s *Server) inAuditTx(ctx context.Context, fn func(q *store.Queries, b audit.Batch) error) error {
+	_, err := audit.InTx(ctx, s.pool, fn)
+	return err
+}
+
 // inSnapshot runs read-only fn in one repeatable-read snapshot.
 func (s *Server) inSnapshot(ctx context.Context, fn func(q *store.Queries) error) error {
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},

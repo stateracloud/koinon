@@ -63,7 +63,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 	It("retries a refused write until it is recorded, and stops with the server", func(ctx SpecContext) {
 		calls := 0
-		retryInstallWrite(ctx, "probe", time.Millisecond, func(context.Context) error {
+		installWriteLoop(ctx, "probe", time.Millisecond, func(context.Context) error {
 			calls++
 			if calls < 3 {
 				return denied
@@ -74,10 +74,35 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		stopped, cancel := context.WithCancel(ctx)
 		cancel()
-		retryInstallWrite(stopped, "probe", time.Hour, func(context.Context) error {
+		installWriteLoop(stopped, "probe", time.Hour, func(context.Context) error {
 			Fail("no write after the server stopped")
 			return nil
 		})
+	})
+
+	It("starts the one retry only for a refused install write (or any error when asked), and leaves other errors to the caller", func(ctx SpecContext) {
+		bg, cancel := context.WithCancel(ctx)
+		defer cancel()
+		landed := make(chan struct{})
+		write := func(context.Context) error { close(landed); return nil }
+
+		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, nil, write)).To(Succeed(), "nothing to retry")
+
+		other := errors.New("not a refusal")
+		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, other, write)).To(MatchError(other))
+		Consistently(landed, "50ms").ShouldNot(BeClosed(), "another error does not start a retry")
+
+		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, write)).To(Succeed())
+		Eventually(landed).Should(BeClosed())
+	})
+
+	It("retries any error when asked to, as the key-set check does", func(ctx SpecContext) {
+		bg, cancel := context.WithCancel(ctx)
+		defer cancel()
+		landed := make(chan struct{})
+		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond,
+			errors.New("a hiccup"), func(context.Context) error { close(landed); return nil })).To(Succeed())
+		Eventually(landed).Should(BeClosed())
 	})
 
 	It("waits in the grant-only migrate for the role, and gives up with the wait", func(ctx SpecContext) {

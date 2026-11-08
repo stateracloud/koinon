@@ -209,8 +209,15 @@ func buildSummary(before, after any, reason, version, installEventID string) ([]
 	return raw, nil
 }
 
-// Record writes e with q, which belongs to the transaction of the change being audited.
+// Record writes e with q, which belongs to the transaction of the change being audited. It writes
+// at once, so the caller keeps the lock order of ADR 0100 decision 1.7 by hand; new code adds its
+// events to an audit Batch (InTx) instead, and the module writes them in order. Record goes away
+// when the last caller has moved (#371).
 func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
+	return record(ctx, q, e)
+}
+
+func record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
 	if err != nil {
 		return store.AuditEvent{}, err
@@ -229,6 +236,15 @@ func Record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, e
 	return row, nil
 }
 
+// RecordAfter records an event after the work it describes, outside the transaction of the change
+// (the reconciler's events, the admin API's call log, failed token checks). It is the one entry point
+// for an event that is not atomic with its change; the name says so. It must not run inside a
+// transaction that holds an audit head or that will write a Batch (ADR 0100 decision 1.7).
+func RecordAfter(ctx context.Context, q *store.Queries, e Event) error {
+	_, err := record(ctx, q, e)
+	return err
+}
+
 // RecordErr is Record for callers that only need the error.
 func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
 	_, err := Record(ctx, q, e)
@@ -240,6 +256,10 @@ func RecordErr(ctx context.Context, q *store.Queries, e Event) error {
 // to any other role. The actor must be named (the chain refuses an empty ID). Lock order (decision
 // 1.7): write the install event before the org events of the same transaction, never after.
 func RecordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
+	return recordInstall(ctx, q, e)
+}
+
+func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store.InstallAuditEvent, error) {
 	if e.Actor.Kind == "" || e.Actor.ID == "" {
 		return store.InstallAuditEvent{}, errors.New("audit: an install event needs a named actor")
 	}

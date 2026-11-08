@@ -245,13 +245,41 @@ token is bound to an org).
 **1.7 Lock order.** The audit heads are the last locks a transaction takes. A transaction first
 takes its domain locks (the platform price lock `LockPlatformPrices`, `LockPlatformTraceSettings`,
 the key-set advisory lock of decision 3, row locks on what it changes), then writes the install event, then its org events in org ID order.
-This extends the ADR 0023 lock order (org heads in org ID order) with one head that always comes
+The audit module holds that order, not the caller (amended 2026-11-08, below). This extends the ADR 0023 lock order (org heads in org ID order) with one head that always comes
 first among the heads, so two such transactions cannot deadlock. A transaction that has already
 written an org event must not write an install event. Every install write serialises on the one
 head; the volume is small (a few rows on a quiet day, one per price version, one per key
 operation), and none of these transactions is long.
 
-Two paths break this today and issue 2 fixes them: `SetPlatformCeiling`
+**Amendment 2026-11-08: the audit batch.** A rule that only a comment and code review hold is broken
+by the next caller: six paths kept it by hand (bootstrap's flush closure, `LowerOrgTraceLevels`'s
+`ORDER BY org_id`, the OIDC sync, platform prices, `keys forget`, writers of several events), and
+`audit.Record` trusted that its `q` belonged to the change's transaction. So the module owns the order:
+
+- The module opens the transaction (`audit.InTx`, or `audit.InPgTx` for a caller that needs the pgx
+  transaction) and hands the caller its queries and an **audit batch**. The caller adds events to the
+  batch as the change happens, in any order; just before commit the module writes the install events
+  in the order added, then the org events sorted by org ID (stable within an org), and puts the first
+  install event's ID into each org event's summary as `install_event_id` (decision 1.6; an ID the
+  caller set is kept). No caller chooses the order, so two transactions that audit orgs A,B and B,A
+  take the heads in the same order and cannot deadlock.
+- An event commits with its change or not at all: a refused write (an unnamed actor, a summary that
+  looks like a secret, an org event with no org, a database refusal such as `ErrInstallWriteDenied`)
+  fails the function and rolls the whole transaction back. A caller that needs a stored event reads it
+  from the result, after the commit.
+- The domain locks still come first, because the caller takes them while it makes its change and the
+  batch is written after the function returns. The key-set check of decision 3 holds its advisory lock
+  before the install head for the same reason.
+- An event that is recorded after the work, not with it (the reconciler's, the admin API's call log,
+  failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
+  run inside a transaction that holds an audit head.
+- The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
+  (issues 360 to 371: step 2 moves the rest, step 3 deletes them and adds a lint check).
+- `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
+  caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
+  cover the hash chains and the locks.
+
+Two paths broke the rule before this amendment and issue 2 fixed them: `SetPlatformCeiling`
 (`internal/tracedest/platform.go`) writes each org's `trace.settings.lowered` before the platform
 event, and must write the install event first; and `LowerOrgTraceLevels`
 (`internal/db/queries/trace.sql`) returns the lowered orgs in no fixed order, and gains `ORDER BY
@@ -596,8 +624,11 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
   superuser or the table owner) can still rewrite every chain undetected.
 - Negative: a second table, trigger, hash function and verify path to keep in step with the first;
   the shared Go encoder and a SQL/Go agreement test for each tag contain it.
-- Negative: one more lock order rule (install head first) that code review must hold; a test that
-  writes both kinds in one transaction checks it.
+- Negative: one more lock order rule (install head first). The audit module writes it (the audit
+  batch, amended 1.7), so code review no longer holds it for callers that use the batch; a shared spec
+  suite on the Postgres batch and the in-memory fake checks the order, and a Postgres spec shows two
+  transactions writing orgs A,B and B,A both finish. Until the last direct `audit.Record` caller has
+  moved, review still holds the order for those.
 - Negative: key events are not atomic with their change: Secret updates are recorded right after
   them, and `rewrap` and `reencrypt` once per run after a loop of per-row transactions. The start-up
   `keys.observed` pass compares the whole key-set state, so a lost event is caught at the next start,
