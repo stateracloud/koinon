@@ -185,16 +185,17 @@ append install events. The chain still detects edits and removals; only who may 
 database role: its API handlers, its scheduler, its CLI subcommands run in its pod (`kubectl exec
 deploy/koinon-api -- koinon-api keys ...`), and the key-admin Job (`charts/koinon/templates/
 key-admin.yaml`, `koinon-api key-admin`, only with a KMS), which creates the KEK Secret, adds a
-KEK and, with `activateIfNoActive`, activates one. The Go entry point is `audit.RecordInstall(ctx,
-q, audit.InstallEvent{...})`, called with the transaction of the database change it records. A
-failed write fails the change, as `audit.RecordErr` does for org events. Where the change is not a
+KEK and, with `activateIfNoActive`, activates one. The Go entry point is the audit batch
+(decision 1.7): `audit.InTx` or `audit.InPgTx`, whose `b.Install(audit.InstallEvent{...})` writes
+the event in the transaction of the database change it records. A failed write fails the change,
+as it does for the org events of the same batch (`b.Org`). Where the change is not a
 database change (a Secret update) or is spread over many transactions (decision 3, keys), the
 event is written right after it and is not atomic with it; decision 3 says how a lost event is
 caught. Key material appears only as a KEK ID and fingerprint; a Secret only by name.
 
 **1.2a The event type.** `audit.Event` today fills only `before` and `after` into the summary. Both
 `audit.Event` and the new `audit.InstallEvent` gain `Reason`, `KoinonVersion` (filled by
-`RecordInstall` and `Record` from the build, not by callers) and, on `Event`, `InstallEventID`; they
+the audit batch and `audit.RecordAfter` from the build, not by callers) and, on `Event`, `InstallEventID`; they
 land in the summary as `reason`, `koinon_version` and `install_event_id`. Every summary key still
 passes the same scrubber (`ErrSecretInSummary`) and the request ID is taken from the context as
 today. Keys must not look like a secret value to the scrubber: a Secret is named under
@@ -658,7 +659,7 @@ v0.1 (maintainer decision 2026-11-07).
 1. **Install audit chain, and platform prices in it.** Migration (tables, hash function, triggers
    with the head's `pg_trigger_depth()` exception, grants), the `koinon_install_audit_writer` group
    role in the chart's `postInitApplicationSQL` and in `koinon_api`'s `inRoles` (decision 1.1a),
-   `audit.RecordInstall`, the `Event` fields of decision 1.2a, `audit.System(id)`, the shared
+   the install event write (now the audit batch's `b.Install`, decision 1.7), the `Event` fields of decision 1.2a, `audit.System(id)`, the shared
    encoder, `audit verify` over both kinds, the `koinon_audit_writes_total` metric, the
    install-scope `AuditService.List` read and `GET /admin/v1/audit?scope=install`, and
    `docs/ops/secret-keys.md`'s external-database lines. Replace `auditPlatform` on #316 (or a

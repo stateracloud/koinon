@@ -212,7 +212,7 @@ func buildSummary(before, after any, reason, version, installEventID string) ([]
 func record(ctx context.Context, q *store.Queries, e Event) (store.AuditEvent, error) {
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, e.InstallEventID)
 	if err != nil {
-		return store.AuditEvent{}, err
+		return store.AuditEvent{}, fmt.Errorf("audit: record %s: %w", e.Action, err)
 	}
 	if e.RequestID == "" {
 		e.RequestID = RequestID(ctx)
@@ -246,7 +246,7 @@ func recordInstall(ctx context.Context, q *store.Queries, e InstallEvent) (store
 	}
 	raw, err := buildSummary(e.Before, e.After, e.Reason, e.KoinonVersion, "")
 	if err != nil {
-		return store.InstallAuditEvent{}, err
+		return store.InstallAuditEvent{}, fmt.Errorf("audit: record install event %s: %w", e.Action, err)
 	}
 	if e.RequestID == "" {
 		e.RequestID = RequestID(ctx)

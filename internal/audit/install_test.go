@@ -103,15 +103,14 @@ var _ = Describe("the install audit chain", func() {
 		db = pgtest.StartTemplate(ctx, pgtest.Durable()).NewDB(ctx)
 	})
 
-	// This spec does not test the org order (batch_test.go does): it shows that the install head, taken
-	// first, serialises every transaction that writes an install event, whatever the org writes after it.
-	It("serialises transactions that write an install event on the install head, so they do not deadlock on the org heads they write after it (ADR 0100 decision 1.7)", func(ctx SpecContext) {
+	// The order of the org heads among themselves is batch_test.go's (the batch sorts them by org ID).
+	// This spec shows the install head's part: it is taken first and held to commit, so transactions
+	// that write an install event run one after the other, and every org chain they write follows the
+	// order of the install chain.
+	It("serialises transactions that write an install event on the install head, so each org chain follows the install chain's order (ADR 0100 decision 1.7)", func(ctx SpecContext) {
 		a, _, _ := pgtest.NewOrg(ctx, db)
 		b, _, _ := pgtest.NewOrg(ctx, db)
 		orgs := []pgtype.UUID{a, b}
-		if orgs[0].String() > orgs[1].String() {
-			orgs[0], orgs[1] = orgs[1], orgs[0]
-		}
 		one := func(ctx context.Context, n int) error {
 			_, err := audit.InTx(ctx, db, func(_ *store.Queries, b audit.Batch) error {
 				b.Install(audit.InstallEvent{Actor: priceActor, Action: "test.cause", TargetKind: "test", TargetID: fmt.Sprint(n)})
@@ -147,6 +146,26 @@ var _ = Describe("the install audit chain", func() {
 		Expect(installs).To(Equal(1 + workers*rounds))
 		Expect(effects).To(Equal(2 * installs))
 		Expect(linked).To(Equal(effects), "each org event points back at its install event")
+
+		By("each org chain lists the events in the order of their install events")
+		rows, err := db.Query(ctx, `SELECT e.org_id::text, i.chain_seq FROM audit_events e
+			JOIN install_audit_events i ON i.id::text = e.summary->>'install_event_id'
+			WHERE e.action = 'test.effect' ORDER BY e.org_id, e.chain_seq`)
+		Expect(err).NotTo(HaveOccurred())
+		last := map[string]int64{}
+		var seen int
+		for rows.Next() {
+			var org string
+			var installSeq int64
+			Expect(rows.Scan(&org, &installSeq)).To(Succeed())
+			Expect(installSeq).To(BeNumerically(">", last[org]), "org %s: an org event is out of the install chain's order", org)
+			last[org] = installSeq
+			seen++
+		}
+		Expect(rows.Err()).NotTo(HaveOccurred())
+		Expect(seen).To(Equal(effects))
+		Expect(last).To(HaveLen(len(orgs)))
+
 		res, err := audit.VerifyInstall(ctx, store.New(db))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.OK()).To(BeTrue())
@@ -246,6 +265,7 @@ var _ = Describe("the install audit chain", func() {
 
 		_, err = batchInstall(ctx, db, audit.InstallEvent{Actor: priceActor, Action: "test.secret", TargetKind: "t", After: map[string]any{"password": "x"}})
 		Expect(err).To(MatchError(audit.ErrSecretInSummary))
+		Expect(err).To(MatchError(ContainSubstring("test.secret")), "the error names the refused event")
 		_, err = batchInstall(ctx, db, audit.InstallEvent{Actor: audit.Actor{Kind: audit.KindSystem}, Action: "test.unnamed", TargetKind: "t"})
 		Expect(err).To(HaveOccurred())
 		Expect(func() { audit.System("") }).To(Panic())
