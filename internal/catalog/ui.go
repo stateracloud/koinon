@@ -32,6 +32,11 @@ type ProviderInput struct {
 	APIKey string
 	// AnthropicWorkspaceID is for type anthropic only.
 	AnthropicWorkspaceID string
+	// CostAPIKey is the optional cost API key (an admin key that reads the provider's cost API, for
+	// the daily reconciliation); CostScope names the workspace, project or API key whose cost is
+	// the provider's. A key needs a scope.
+	CostAPIKey string
+	CostScope  string
 }
 
 // ProviderPatch changes a provider; nil fields stay.
@@ -105,9 +110,17 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if err != nil {
 			return err
 		}
+		if in.CostAPIKey != "" || in.CostScope != "" {
+			// The same checks and sealing as an update; a failure rolls the provider back.
+			if row, err = s.applyCostKey(ctx, q, org, row, ProviderPatch{CostAPIKey: &in.CostAPIKey, CostScope: &in.CostScope}); err != nil {
+				return err
+			}
+		}
+		after := providerSummary(row)
+		after["costKeyChanged"] = in.CostAPIKey != ""
 		_, err = audit.Record(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "provider.create", TargetKind: "provider", TargetID: id.String(),
-			After: providerSummary(row),
+			After: after,
 		})
 		return err
 	})

@@ -125,15 +125,30 @@ scope, the part of the account whose cost is this provider key's:
 - OpenAI: the project that holds the key (`proj_…`), or the key's own ID (`key_…`, as the
   Admin API's project API keys list names it; the ID, never the key), which compares exactly this one key.
 
-For now the key and scope are set with `ProviderService.UpdateProvider`, the API the web UI uses
-(`cost_api_key` and `cost_scope`; an empty `cost_api_key` removes both). The admin REST API, the
-web UI and declared providers follow in
-[#241](https://github.com/stateracloud/koinon/issues/241).
+Set the key and scope on any of the four paths; each seals the key the same way and none returns it
+(a read shows `hasCostKey` and `costScope`):
 
-```json
-{"orgId": "<org ID>", "providerId": "<provider ID>",
- "costApiKey": "<admin key>", "costScope": "key_abc123"}
+- **Web UI.** The provider form shows **Cost API key** and **Cost scope** for `anthropic` and
+  `openai`. On an edit the key field stays empty: leave it to keep the stored key, type a new one to
+  replace it, or tick **Remove the stored cost key** (the scope goes with it).
+- **Admin REST API.** `costApiKey` and `costScope` on `POST /admin/v1/providers` and
+  `PATCH /admin/v1/providers/{id}`. On a PATCH an empty `costApiKey` removes both; `costScope` alone
+  changes the scope.
+- **ProviderService.** `cost_api_key` and `cost_scope` on `CreateProvider` and `UpdateProvider`, the
+  API the web UI uses.
+- **Declared providers.** `costApiKey` and `costScope` in the `model-provider` Secret. The Secret is
+  the source of truth: a Secret that leaves them out removes a stored cost key, and a key lost with
+  its key-encryption key is written again from the Secret.
+
+```sh
+curl -sS -H "Authorization: Bearer $KOINON_TOKEN" -H 'Content-Type: application/json' \
+  https://koinon.example.com/admin/v1/providers \
+  -d '{"name":"claude","type":"anthropic","url":"https://api.anthropic.com",
+       "apiKey":"<provider key>","costApiKey":"<admin key>","costScope":"wrkspc_01Ab"}'
 ```
+
+A key needs a scope, a scope needs a key, and both are refused for a provider type whose cost API
+Koinon does not read (OpenRouter's bill comes with each request) or one that is not at its own API URL.
 
 Once a day `koinon-reconciler` reads each of the last three complete UTC days that started after the
 key was stored (the day it is stored is skipped) and records one row per provider and day in
