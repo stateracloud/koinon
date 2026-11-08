@@ -466,9 +466,9 @@ wfrun() {
 wfruns() { local IFS=,; printf '{"total_count":%s,"workflow_runs":[%s]}' "$#" "$*" >"$FAKE_DIR/wfruns"; }
 # ciruns <id:title>...: ci.yml runs on the head, created one minute apart in the order given.
 ciruns() {
-  local out=() r i=0
-  for r in "$@"; do i=$((i + 1)); out+=("$(wfrun "${r%%:*}" ci.yml "${r#*:}" "2026-11-01T10:0$i:00Z")"); done
-  wfruns "${out[@]}"
+  local -a objs=(); local r i=0
+  for r in "$@"; do i=$((i + 1)); objs+=("$(wfrun "${r%%:*}" ci.yml "${r#*:}" "2026-11-01T10:0$i:00Z")"); done
+  wfruns "${objs[@]}"
 }
 # (#218, #133) a ready PR drops the check runs of the runs titled `ci (draft)`, by run id, never by time.
 # Cases of 2026-11-06: #233 (draft run 96 s before ready), #229 (13 s before), #231 (the same shape, no --checks).
@@ -603,6 +603,15 @@ printf 'go\n' >"$FAKE_DIR/rules"
 wfruns "$(wfrun 62 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:05:00Z)"
 run 7 --checks --require e2e --interval 0
 expect "#133: a green quickstart of an older e2e-kind run still passes --require e2e" 0 "checks 2/2 green"
+# a dispatched e2e-kind run (81) red, the PR run's (82) `e2e result` re-run to green: the newest row of the name decides
+e_dis=$(cr_at "e2e result" FAILURE 81 2026-11-01T10:20:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+e_pr1=$(cr_at "e2e result" FAILURE 82 2026-11-01T10:50:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+e_pr2=$(cr_at "e2e result" SUCCESS 82 2026-11-01T11:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+seq_set "$(rdh "$r_go,$e_dis,$e_pr1,$e_pr2")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 62 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)"
+run 7 --checks --require "e2e result" --interval 0
+expect "#133: a re-run green e2e result of the PR run outranks a red dispatched run" 0 "checks 2/2 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
 
 # 7d. (old issue 661) a stale PR head: GitHub's headRefOid is not origin's branch tip

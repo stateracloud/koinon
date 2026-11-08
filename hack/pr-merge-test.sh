@@ -324,6 +324,8 @@ grep -q 'cannot list the workflow runs' <<<"$out" || { echo "FAIL: says the runs
 
 # #133: a recorded real answer (PR #386's head while it was a draft: ci (draft) went red, dco green, secrets red).
 # Read as a ready PR: the draft run does not count, so go and quick checks are missing, never green; dco is green.
+# shellcheck disable=SC1091
+. "$repo/hack/lib/pr-verdict.sh"
 fx=$repo/hack/testdata/pr-verdict
 setup false ""
 jq -c '.check_runs[]' "$fx/check-runs-386-draft-era.json" | jq -sc '{check_runs: .}' >"$FAKE_DIR/runs"
@@ -335,15 +337,23 @@ grep -q 'NOT GREEN go (missing)' <<<"$out" || { echo "FAIL: recorded: go missing
 grep -q 'NOT GREEN dco' <<<"$out" && { echo "FAIL: recorded: dco is green" >&2; fail=1; }
 # the same answer read as a draft PR: the draft run counts and its red go is named
 rows=$(jq -c '[.check_runs[] | {name, status: (.status|ascii_upcase), conclusion: ((.conclusion // "")|ascii_upcase), startedAt: .started_at, completedAt: .completed_at, detailsUrl: .details_url, workflowName: ""}]' "$fx/check-runs-386-draft-era.json")
-v=$(. "$repo/hack/lib/pr-verdict.sh"; prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true "" go "quick checks" dco)
+v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true "" go "quick checks" dco)
 [ "$v" = "$(printf 'go\tfailure\t42471681674\nquick checks\tsuccess\t42471681674\ndco\tsuccess\t42471681684')" ] || { echo "FAIL: recorded, draft read: $v" >&2; fail=1; }
+
+# #133: a dispatched e2e-kind run (81) failed, e2e-lab passed, and the PR run's (82) `e2e result` was re-run to green: the
+# re-run keeps its created_at, but GitHub's newest check run per name is green, and so is the verdict.
+e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":"e2e-kind"}' "$1" "$2" "$2" "$3"; }
+e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
+e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
+v=$(prv_judge "$e2e_rows" "$e2e_runs" false "quickstart" "e2e result")
+[ "$v" = "$(printf 'e2e result\tsuccess\t81')" ] || { echo "FAIL: e2e result re-run green after a red dispatched run: $v" >&2; fail=1; }
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
 # review (required_reviewers): it is NOT in the queue (2026-11-07 printed "added to the merge queue" for it).
 setup false "$green"
 echo true >"$FAKE_DIR/rules"
 sed -i.bak 's/"reviewDecision":""/"reviewDecision":"REVIEW_REQUIRED"/;s/"mergeStateStatus":"CLEAN"/"mergeStateStatus":"BLOCKED"/' "$FAKE_DIR/pr.json"
-THREADS_RC=0 MSTATE=BLOCKED run 7
+export THREADS_RC=0 MSTATE=BLOCKED; run 7; unset THREADS_RC MSTATE
 check "#133: queue repository, PR blocked by a required review: merge command ok" 0 merge
 grep -q 'added to the merge queue' <<<"$out" && { echo "FAIL: not queued, must not say queued: $out" >&2; fail=1; }
 grep -q 'NOT queued.*required review' <<<"$out" || { echo "FAIL: says it waits for a required review: $out" >&2; fail=1; }

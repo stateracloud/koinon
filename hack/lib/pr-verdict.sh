@@ -65,7 +65,7 @@ def prv_drop($runs; $draft; $anyok):
     ($runs | map(.id | tostring)) as $known
     | [$runs[] | select($draft or (.display_title != "ci (draft)"))] as $live
     | ($live | map(.id | tostring)) as $liveids
-    | ($live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring)) as $cur
+    | ($live | group_by(.path) | map(if (.[0].path | endswith("/e2e-kind.yml")) then (.[] | .id | tostring) else (max_by([.created_at, .run_attempt]) | .id | tostring) end)) as $cur
     | map(prv_rid as $id | prv_name as $n
         | select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null
             or (($n | IN($anyok[])) and ($liveids | index($id)) != null)))

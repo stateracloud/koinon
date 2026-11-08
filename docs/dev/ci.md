@@ -485,7 +485,7 @@ green passed). The rule:
 A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.
 Tests replay API-shaped answers (`hack/testdata/pr-verdict/` holds a recorded real one, PR #386's draft-era head) through
 `gh` stubs: no live GitHub. A script that waits or merges calls `hack/pr-wait.sh` and `hack/pr-merge.sh`, never its own
-loop (a pipe after `pr-wait.sh` hides its exit code, `koinon-private#626`).
+loop (a pipe after `pr-wait.sh` hides its exit code, old issue 626).
 
 ### The merge queue (#225)
 
