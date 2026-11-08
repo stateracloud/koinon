@@ -72,6 +72,7 @@ function setup(opts: Opts = {}) {
     tests: [] as TestDestinationRequest[],
     settings: [] as UpdateSettingsRequest[],
     listed: 0,
+    gate: undefined as Promise<void> | undefined,
   }
   let stored = create(SettingsSchema, {
     contentLevel: opts.level ?? ContentLevel.NONE,
@@ -88,8 +89,9 @@ function setup(opts: Opts = {}) {
       getHomeBackupRetention: () => ({ retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }),
     })
     service(TraceDestinationService, {
-      listDestinations: () => {
+      listDestinations: async () => {
         calls.listed++
+        await calls.gate
         return { destinations: [create(DestinationSchema, { ...langfuse, configVersion: version }), broken, generic] }
       },
       getSettings: () => ({ settings: stored }),
@@ -249,6 +251,26 @@ describe('Observability page', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls.updates).toHaveLength(1))
     expect(calls.updates[0].destination).toMatchObject({ enabled: false, secrets: {}, removeSecrets: [] })
+  })
+
+  it('keeps the form of another destination open while a save is still refreshing (old issue 111)', async () => {
+    const calls = setup()
+    await screen.findByRole('list', { name: 'Destinations' })
+    await userEvent.click(screen.getByRole('button', { name: 'Edit destination datadog' }))
+    const form = screen.getByRole('form', { name: 'Edit destination datadog' })
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Enabled' }))
+    let release: () => void = () => undefined
+    calls.gate = new Promise<void>((r) => (release = r))
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.updates).toHaveLength(1))
+
+    // The save has returned but its refresh is pending, so the datadog form is still open.
+    await userEvent.click(screen.getByRole('button', { name: 'Edit destination langfuse' }))
+    expect(screen.getByRole('form', { name: 'Edit destination langfuse' })).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Edit destination datadog' })).not.toBeInTheDocument())
+    expect(screen.getByRole('form', { name: 'Edit destination langfuse' })).toBeInTheDocument()
   })
 
   it('changing the endpoint host drops the stored secrets and asks for them again', async () => {

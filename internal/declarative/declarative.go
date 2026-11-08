@@ -48,6 +48,7 @@
 package declarative
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -71,6 +72,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -373,12 +375,25 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		if err != nil {
 			return err
 		}
+		// Row lock first (FOR UPDATE, which conflicts with the FOR KEY SHARE of a scope replacement),
+		// then the scope: the order SetConnectionSecret uses. A plain UPDATE would take only FOR NO
+		// KEY UPDATE, and a concurrent ReplaceCodeHostRepos would read the old fingerprint (#244).
+		locked, err := tq.GetConnectionForUpdate(ctx, store.GetConnectionForUpdateParams{OrgID: org, ID: cur.ID})
+		if err != nil {
+			return err
+		}
 		updated, err := tq.UpdateDeclaredConnection(ctx, store.UpdateDeclaredConnectionParams{
 			OrgID: org, ID: cur.ID, DisplayName: d.DisplayName, Config: config, SecretEnvelope: env,
 			SecretFingerprint: d.Fingerprint, DeclaredVersion: pgtype.Text{String: version, Valid: true},
 		})
 		if err != nil {
 			return err
+		}
+		// A new secret or site reaches other repositories than the old one read (#244).
+		if locked.SecretFingerprint != d.Fingerprint || !bytes.Equal(locked.Config, updated.Config) {
+			if err := orgsettings.ClearCodeHostScope(ctx, tq, org, cur.ID); err != nil {
+				return err
+			}
 		}
 		if err := audit.RecordErr(ctx, tq, audit.Event{
 			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),

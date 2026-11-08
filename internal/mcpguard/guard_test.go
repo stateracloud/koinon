@@ -235,7 +235,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			SecretName: pgtype.Text{String: "conn-" + conn.String(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(orgsettings.NewService(pool).ReplaceCodeHostRepos(ctx, org, audit.System("koinon-test:spec"), conn.String(), []orgsettings.CodeHostRepo{
+		Expect(orgsettings.NewService(pool).ReplaceCodeHostRepos(ctx, org, audit.System("koinon-test:spec"), conn.String(), "", []orgsettings.CodeHostRepo{
 			{Owner: "northwind", Name: "platform-handbook", Visibility: "private"},
 		}, time.Now())).To(Succeed())
 		// tracker acts through that connection: its code-host tool is looked up in its list.

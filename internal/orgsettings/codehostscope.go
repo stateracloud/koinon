@@ -61,14 +61,18 @@ func (l LeakGuard) Scope() sinkclass.Scope {
 //
 // Replacements of one connection are serialised, and a reading older than the stored one is dropped
 // (nil, nothing written): the newest reading wins whatever order the replicas finish in.
-// Known gap (#244): a reading is not tied to the credential that took it, and an empty newest
-// reading leaves nothing to compare with, so an older reading (one taken under a replaced secret
-// included) can still land; it ages out with the freshness window.
+//
+// A reading is tied to the credential that took it (#244): credential is the secret fingerprint of
+// the connection row the connector opened. Under the scope lock it must equal the connection's
+// fingerprint as committed now, else ErrCredentialChanged and nothing is written: a sync that
+// began under a replaced secret cannot land after the replacement. The newest reading is kept in
+// org_code_host_readings, also when it is empty, so an older reading cannot land after an empty one.
+// ClearCodeHostScope drops both when a secret changes.
 //
 // Audited as org.code_host_scope.replace with counts, not the list: always for a person's (or any
 // non-system) actor, and for the system's periodic refresh only when the repositories or their
 // visibilities changed.
-func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, actor audit.Actor, connectionID string, repos []CodeHostRepo, checkedAt time.Time) error {
+func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, actor audit.Actor, connectionID, credential string, repos []CodeHostRepo, checkedAt time.Time) error {
 	var cid pgtype.UUID
 	if err := cid.Scan(connectionID); err != nil || !cid.Valid {
 		return ErrNotFound
@@ -109,7 +113,8 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 		// foreign key could refuse. Its row is locked first (FOR KEY SHARE), before the scope lock:
 		// SetConnectionSecret and DeleteConnection lock the row and then the scope, so the reverse
 		// order here would deadlock with them.
-		if _, err := q.KeyShareConnection(ctx, store.KeyShareConnectionParams{OrgID: org, ID: cid}); err != nil {
+		cur, err := q.KeyShareConnection(ctx, store.KeyShareConnectionParams{OrgID: org, ID: cid})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -120,14 +125,19 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 		if err := q.LockCodeHostConnectionScope(ctx, store.LockCodeHostConnectionScopeParams{OrgID: org, ConnectionID: cid}); err != nil {
 			return err
 		}
+		if cur.SecretFingerprint != credential {
+			return ErrCredentialChanged
+		}
+		last, err := q.GetCodeHostConnectionReading(ctx, store.GetCodeHostConnectionReadingParams{OrgID: org, ConnectionID: cid})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && last.CheckedAt.Time.After(checkedAt) {
+			return nil
+		}
 		stored, err := q.ListCodeHostConnectionRepos(ctx, store.ListCodeHostConnectionReposParams{OrgID: org, ConnectionID: cid})
 		if err != nil {
 			return err
-		}
-		for _, r := range stored {
-			if r.CheckedAt.Time.After(checkedAt) {
-				return nil
-			}
 		}
 		changed := len(stored) != len(owners)
 		if !changed {
@@ -152,6 +162,11 @@ func (s *Service) ReplaceCodeHostRepos(ctx context.Context, org pgtype.UUID, act
 			}); err != nil {
 				return err
 			}
+		}
+		if err := q.UpsertCodeHostConnectionReading(ctx, store.UpsertCodeHostConnectionReadingParams{
+			OrgID: org, ConnectionID: cid, SecretFingerprint: credential, CheckedAt: pgtype.Timestamptz{Time: checkedAt, Valid: true},
+		}); err != nil {
+			return err
 		}
 		if !changed && actor.Kind == audit.KindSystem {
 			// The periodic refresh of an unchanged list: its freshness shows in ScopeSummary and the log.
@@ -208,4 +223,22 @@ func (l LeakGuard) ScopeSummary(now time.Time) ScopeSummary {
 		}
 	}
 	return out
+}
+
+// ErrCredentialChanged is returned by ReplaceCodeHostRepos for a reading taken with a secret the
+// connection no longer has.
+var ErrCredentialChanged = errors.New("the connection's secret changed since the repositories were read")
+
+// ClearCodeHostScope drops one connection's repositories and its reading, for a change of the
+// connection's secret or site (#244): what the old credential read is not what the new one reaches.
+// Call it in the transaction that changes the connection row, after that change: it takes the scope
+// lock, which waits out a replacement in progress, whose rows are deleted too.
+func ClearCodeHostScope(ctx context.Context, q *store.Queries, org, connection pgtype.UUID) error {
+	if err := q.LockCodeHostConnectionScope(ctx, store.LockCodeHostConnectionScopeParams{OrgID: org, ConnectionID: connection}); err != nil {
+		return err
+	}
+	if _, err := q.DeleteCodeHostConnectionRepos(ctx, store.DeleteCodeHostConnectionReposParams{OrgID: org, ConnectionID: connection}); err != nil {
+		return err
+	}
+	return q.DeleteCodeHostConnectionReading(ctx, store.DeleteCodeHostConnectionReadingParams{OrgID: org, ConnectionID: connection})
 }

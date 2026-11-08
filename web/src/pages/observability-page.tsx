@@ -3,6 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
+import { closeOnly } from '@/lib/editing'
 import { RequireAdmin } from '@/components/require-admin'
 import { FullContentBadge, TraceDestinationCard } from '@/components/trace-destination-card'
 import { HomeBackupRetentionSettings } from '@/components/home-backup-retention-settings'
@@ -84,7 +85,7 @@ function ObservabilityContent() {
         <TraceDestinationForm
           connectionLocked={locked}
           save={(input) => actions.createDestination(input).then((r) => r.destination!)}
-          onDone={() => setEditing(undefined)}
+          onDone={closeOnly(setEditing, { kind: 'new' })}
           onSaved={(d, tested) => say(savedNotice(d.name, d, tested))}
         />
       )}
@@ -130,12 +131,12 @@ function ObservabilityContent() {
                       save={(input) => actions.updateDestination(d.id, input, editing.snapshot.configVersion).then((r) => r.destination!)}
                       connectionLocked={locked}
                       onConflict={(m) => {
-                        setEditing(undefined)
+                        closeOnly(setEditing, editing)()
                         setNotice(undefined)
                         setRefused(m)
                         void actions.reload()
                       }}
-                      onDone={() => setEditing(undefined)}
+                      onDone={closeOnly(setEditing, editing)}
                       onSaved={(saved, tested) => say(savedNotice(saved.name, saved, tested))}
                     />
                   ) : undefined
