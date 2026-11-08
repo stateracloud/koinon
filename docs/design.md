@@ -228,7 +228,9 @@ Verify before relying on it (OpenShell spike):
 | OpenSandbox (Apache-2.0) | Kata/gVisor/Firecracker, namespace tenancy, credential vault sidecar | sandbox only |
 | Kortix, Omnigent, Agyn | credential brokering, policies, harness wrapping | no Kubernetes-native org platform |
 | Paperclip, OpenClaw operator | company model, heartbeats, budgets | no Kubernetes-native isolation |
-| kagent, Ark, Kagenti | agents as CRDs, A2A, SPIFFE (Kagenti) | no sandbox credential model, tickets or tenancy |
+| kagent 1.x (v1.0.0-rc2, 2026-11-04) | agents as CRDs, A2A; kagent injects credentials outside the sandbox through Substrate's egress gateway, runs Claude and Codex harnesses | work layer (orgs, triggers, tasks, inbox, code host), approvals executed outside the runtime (`requireApproval` is enforced in its ADK), spend and run caps, org tenancy |
+| Ark, Kagenti | agents as CRDs, A2A, SPIFFE (Kagenti) | no sandbox credential model, tickets or tenancy |
+| Agent Substrate (v1.0.0-rc.2, 2026-11-04; CNCF Sandbox) | actor runtime with memory, rootfs and volume snapshots, gVisor or Cloud Hypervisor, SPIFFE per actor, egress credential injection | pre-1.0, no OpenShell support (gVisor lacks Landlock and seccomp notify), GKE-first; not adopted for v0.x, see ADR 0101 |
 | celld, Restate, Dapr Actors | Durable Objects / virtual actor patterns | building blocks, not adopted in v0.x |
 | Hindsight, Mem0, Letta MemFS | agent memory | building blocks |
 
