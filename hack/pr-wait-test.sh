@@ -457,10 +457,10 @@ rdh() { # <rollup>: a ready PR with a head commit
   printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234","statusCheckRollup":[%s]}' "$1"
 }
 cr_ci() { cr_at "$@" | sed 's/^{/{"workflowName":"ci",/'; }
-# wfrun <id> <path> <title> <created_at> [attempt]: one workflow run object as `GET actions/runs?head_sha=` prints it.
+# wfrun <id> <path> <title> <created_at> [attempt] [status] [conclusion]: one workflow run object as `GET actions/runs?head_sha=` prints it.
 wfrun() {
-  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"completed","conclusion":"success","created_at":"%s","run_started_at":"%s","run_attempt":%s}' \
-    "$1" "${2%.yml}" "$2" "$3" "$4" "$4" "${5:-1}"
+  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"%s","conclusion":"%s","created_at":"%s","run_started_at":"%s","run_attempt":%s}' \
+    "$1" "${2%.yml}" "$2" "$3" "${6:-completed}" "${7-success}" "$4" "$4" "${5:-1}"
 }
 # wfruns <run object>...: the answer of the runs listing.
 wfruns() { local IFS=,; printf '{"total_count":%s,"workflow_runs":[%s]}' "$#" "$*" >"$FAKE_DIR/wfruns"; }
@@ -575,7 +575,7 @@ expect "#133: a cancelled row with no startedAt does not lose to an older green"
 # the newest run is queued with no checks yet: the older green is not read; wait for it
 seq_set "$(rdh "$o_go")" "$(rdh "$o_go")" "$(rdh "$o_go,$(cr_ci go SUCCESS 72 2026-11-01T10:05:00Z)")"
 printf 'go\n' >"$FAKE_DIR/rules"
-wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z 1 queued "")"
 run 7 --checks --interval 0
 expect "#133: a newer run without checks is waited for, the older green is not used" 0 "waiting for the newest run of each workflow
 checks 1/1 green"
@@ -595,6 +595,21 @@ wfruns "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
 run 7 --checks --timeout 1s --interval 1
 expect "#133: a live re-run attempt outranks the cancelled one" 2 "checks 0/1 pending: go
 TIMEOUT"
+# review of 1f76b6ca5: one run, `go` green at 10:00 and a live re-run attempt at 11:00: the unfinished row wins, never green
+g_old=$(cr_ci go SUCCESS 72 2026-11-01T10:00:00Z)
+g_live=$(cr_ci go IN_PROGRESS 72 2026-11-01T11:00:00Z | sed 's/"status":"COMPLETED"/"status":"IN_PROGRESS"/;s/"conclusion":"IN_PROGRESS"/"conclusion":""/')
+seq_set "$(rdh "$g_old,$g_live")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --timeout 1s --interval 1
+expect "#133: an unfinished row in the run outranks an older green of the same name" 2 "checks 0/1 pending: go
+TIMEOUT"
+# the newest run ended without a single job (startup_failure): a failure naming the run, not a wait until the timeout
+seq_set "$(rdh "$o_go")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z 1 completed startup_failure)"
+run 7 --checks --timeout 1s --interval 1
+expect "#133: a completed newest run with no jobs fails, naming the run" 1 "FAILED ci: run 72 ended (startup_failure) with no jobs"
 # the e2e workflow is judged per run too: the dispatched run's green quickstart still counts (old issue 547)
 qs_old=$(cr_at quickstart SUCCESS 81 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
 qs_new=$(cr_at quickstart SKIPPED 82 2026-11-01T10:05:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')

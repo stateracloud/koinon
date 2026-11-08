@@ -309,6 +309,14 @@ while :; do
       wfruns=$(prv_runs "$head")
       if [ -n "$wfruns" ]; then
         is_draft=$(jq -r '.isDraft // false' <<<"$json")
+        # A completed newest run with no jobs at all (startup_failure) never gets checks: a failure, not a wait.
+        empty=$(jq -r --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'(.statusCheckRollup // []) | prv_empty($runs; $draft)[] | "\(.name)\t\(.id)\t\(.conclusion)"' <<<"$json")
+        if [ -n "$empty" ]; then
+          while IFS=$'\t' read -r ename eid econ; do
+            echo "FAILED $ename: run $eid ended ($econ) with no jobs"
+          done <<<"$empty"
+          exit 1
+        fi
         before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
         json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; ["quickstart"])' <<<"$json")
         if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then

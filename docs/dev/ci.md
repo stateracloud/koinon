@@ -475,12 +475,16 @@ green passed). The rule:
    green never outvotes a newer run that was cancelled, red, still running or has no checks yet (that one is
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
-   outranks finished ones; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
+   outranks every finished one, a green included (except under rule 4); else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
    never-started cancelled job with a null `startedAt`), then job id.
 3. Commit statuses (`e2e-lab`) and check runs without a run have nothing to choose: the newest row of that name wins.
-4. `quickstart` (the e2e gate, old issue 547) is the exception: any green row on the head from a non-draft run counts
-   unless a newer one failed, because a dispatched `e2e-kind` run and the skipped `pull_request` run are normal side by side.
-5. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
+4. `quickstart` (the e2e gate, old issue 547) and every other check of the `e2e-kind` workflow (`e2e result` and the
+   e2e-kind jobs) are the exception: any green row on the head from a non-draft run counts unless a newer one failed,
+   because a dispatched `e2e-kind` run and the skipped `pull_request` run are normal side by side. A newer cancelled
+   or unfinished e2e-kind run does not hide an older green; a newer red does (the e2e rule is "any green e2e on the head").
+5. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
+   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come.
+6. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
 
 A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.
 Tests replay API-shaped answers (`hack/testdata/pr-verdict/` holds a recorded real one, PR #386's draft-era head) through

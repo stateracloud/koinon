@@ -113,10 +113,10 @@ r() {
     "$j" "$1" "$st" "$c" "$2" "$2" "${4:-1}" "$j"
 }
 echo 100 >"$tmp/job"
-# wfrun <id> <path> <title> <created_at> [attempt]: one workflow run as `GET actions/runs?head_sha=` prints it.
+# wfrun <id> <path> <title> <created_at> [attempt] [status] [conclusion]: one workflow run as `GET actions/runs?head_sha=` prints it.
 wfrun() {
-  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"completed","conclusion":"success","created_at":"%s","run_attempt":%s}' \
-    "$1" "${2%.yml}" "$2" "$3" "$4" "${5:-1}"
+  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"%s","conclusion":"%s","created_at":"%s","run_attempt":%s}' \
+    "$1" "${2%.yml}" "$2" "$3" "${6:-completed}" "${7-success}" "$4" "${5:-1}"
 }
 wfruns() { local IFS=,; printf '{"total_count":%s,"workflow_runs":[%s]}' "$#" "$*" >"$FAKE_DIR/wfruns"; }
 
@@ -281,7 +281,7 @@ run 7 --admin
 check "#133: the same without a start time on the cancelled row" 1 nomerge
 setup false "$(r go 2026-11-01T10:00:00Z success 71)
 $(r 'quick checks' 2026-11-01T10:00:00Z success 71)"
-wfruns "$ci_old" "$ci_new"
+wfruns "$ci_old" "$(wfrun 72 ci.yml ci 2026-11-01T10:05:00Z 1 queued "")"
 run 7 --admin
 check "#133: a newer run that has no checks yet: the older green is not read" 1 nomerge
 grep -q 'NOT GREEN go (missing)' <<<"$out" || { echo "FAIL: missing, not green: $out" >&2; fail=1; }
@@ -298,6 +298,21 @@ $(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
 wfruns "$ci_old" "$ci_new"
 run 7 --admin
 check "#133: a newer run still in progress is pending, not green" 1 nomerge
+# review of 1f76b6ca5: inside one run an unfinished row outranks an older green of the same name
+setup false "$(r go 2026-11-01T10:00:00Z success 72)
+$(r go 2026-11-01T11:00:00Z pending 72)
+$(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
+wfruns "$ci_old" "$ci_new"
+run 7 --admin
+check "#133: a live re-run attempt hides an older green of the same run" 1 nomerge
+grep -q 'NOT GREEN go (pending, run 72)' <<<"$out" || { echo "FAIL: names the unfinished row: $out" >&2; fail=1; }
+# the newest run ended with no jobs at all (startup_failure): a failure naming the run
+setup false "$(r go 2026-11-01T10:00:00Z success 71)
+$(r 'quick checks' 2026-11-01T10:00:00Z success 71)"
+wfruns "$ci_old" "$(wfrun 72 ci.yml ci 2026-11-01T10:05:00Z 1 completed startup_failure)"
+run 7 --admin
+check "#133: a completed newest run with no jobs is refused" 1 nomerge
+grep -q 'NOT GREEN ci: run has no jobs (startup_failure) (failure, run 72)' <<<"$out" || { echo "FAIL: names the empty run: $out" >&2; fail=1; }
 # a re-run attempt inside the chosen run: the newest row of the name decides
 setup false "$(r go 2026-11-01T10:05:00Z failure 72)
 $(r go 2026-11-01T10:09:00Z success 72)
@@ -362,5 +377,11 @@ setup false "$green"
 sed -i.bak 's/"autoMergeRequest":{"enabledAt":"2026-11-08T10:00:00Z"}/"autoMergeRequest":null/' "$FAKE_DIR/pr.json"
 run 7
 grep -q 'has not armed auto-merge' <<<"$out" || { echo "FAIL: no auto-merge armed is said: $out" >&2; fail=1; }
+# review of 1f76b6ca5: a required review with NO auto-merge request must not say "armed"
+setup false "$green"
+sed -i.bak 's/"reviewDecision":""/"reviewDecision":"REVIEW_REQUIRED"/;s/"autoMergeRequest":{"enabledAt":"2026-11-08T10:00:00Z"}/"autoMergeRequest":null/' "$FAKE_DIR/pr.json"
+run 7
+grep -q 'armed but' <<<"$out" && { echo "FAIL: no auto-merge request, must not say armed: $out" >&2; fail=1; }
+grep -q 'auto-merge is NOT armed.*review is required' <<<"$out" || { echo "FAIL: says not armed, review required: $out" >&2; fail=1; }
 
 exit "$fail"
