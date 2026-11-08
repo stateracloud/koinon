@@ -97,9 +97,6 @@ type harness struct {
 	lingers bool
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
-	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
-	// many are being answered; maxInFlight is the most there ever were at once.
-	inFlight, maxInFlight int
 }
 
 func newHarness() *harness {
@@ -325,13 +322,6 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if firstHang {
 		p.h.hung = true
 	}
-	p.h.inFlight++
-	p.h.maxInFlight = max(p.h.maxInFlight, p.h.inFlight)
-	defer func() {
-		p.h.mu.Lock()
-		p.h.inFlight--
-		p.h.mu.Unlock()
-	}()
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
 	refuseAll := p.h.refuseAll
