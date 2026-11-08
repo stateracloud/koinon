@@ -63,12 +63,12 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   const typeKnown = !!typeInfo.data
   const takesWorkspaceId = !!typeInfo.data?.takesWorkspaceId
   // Likewise for the cost API key, which only types whose cost API Koinon reads take.
-  const takesCostKey = !!typeInfo.data?.takesCostKey
+  const takesCostKey = Boolean(typeInfo.data?.takesCostKey)
   // A cost scope names which workspace or project the cost key reads, so it has no meaning alone.
   // On an edit a stored (or lost) key counts, unless its removal is asked for.
-  const costKeyHeld = !!costKey || (editing && !removeCostKey && (provider.hasCostKey || !!provider.costKeyLostAt))
+  const costKeyHeld = Boolean(costKey) || (editing && !removeCostKey && (provider.hasCostKey || Boolean(provider.costKeyLostAt)))
   const costScopeError = takesCostKey && !removeCostKey && costScope.trim() && !costKeyHeld ? 'A cost scope needs a cost API key. Type the key, or clear the scope.' : undefined
-  const invalid = Object.values(errors).some(Boolean) || !!costScopeError
+  const invalid = Object.values(errors).some(Boolean) || Boolean(costScopeError)
 
   function pickType(v: string) {
     setTypeChoice(v)
@@ -241,7 +241,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="provider-cost-scope">Cost scope</Label>
-            <Input id="provider-cost-scope" value={costScope} onChange={(e) => setCostScope(e.target.value)} placeholder={type === 'anthropic' ? 'wrkspc_… or default' : 'proj_… or key_…'} autoComplete="off" spellCheck={false} disabled={removeCostKey} aria-invalid={!!(touched && costScopeError)} aria-describedby={touched && costScopeError ? 'provider-cost-scope-help provider-cost-scope-error' : 'provider-cost-scope-help'} />
+            <Input id="provider-cost-scope" value={costScope} onChange={(e) => setCostScope(e.target.value)} placeholder={type === 'anthropic' ? 'wrkspc_… or default' : 'proj_… or key_…'} autoComplete="off" spellCheck={false} disabled={removeCostKey} aria-invalid={Boolean(touched && costScopeError)} aria-describedby={touched && costScopeError ? 'provider-cost-scope-help provider-cost-scope-error' : 'provider-cost-scope-help'} />
             <p id="provider-cost-scope-help" className="text-muted-foreground text-xs">
               {type === 'anthropic'
                 ? 'The workspace whose cost is this provider key’s: its ID (wrkspc_…), or default for the default workspace. Needed with a cost key.'
