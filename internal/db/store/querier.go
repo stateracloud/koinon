@@ -450,6 +450,9 @@ type Querier interface {
 	// The last good fetch the install made itself (the half-of-last-good floor). An import is left out:
 	// its time and model count are the uploader's word, so a file cannot move the floor.
 	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
+	// The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
+	// checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
+	GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent, error)
 	// The last fetch the install made itself (whether the scheduled refresh is due). An import is left
 	// out: its fetched_at is the file's time, which must not delay or block a fetch.
 	GetLastPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)

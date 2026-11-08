@@ -103,6 +103,14 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		HasValues:          func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
 		UsedID:             func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
 		Out:                out,
+		// The Job writes as the koinon_api database role, like koinon-api (the chart gives it the api
+		// database Secret). It runs next to the migration Job, so it waits up to --wait for the install
+		// audit chain to take the event. It can get the KEK Secret by name and nothing else, so its view of
+		// the generated Secrets is that one.
+		Audit: &keyscli.Auditor{
+			Pool: pool, Actor: keyscli.ActorKeyAdmin, Wait: o.wait,
+			Generated: keyscli.GeneratedReader{Client: client, Namespace: o.namespace, Names: []string{o.kekSecret}}.Read,
+		},
 	}
 	_, _ = fmt.Fprintf(out, "Install ID %s: every KEK this Job wraps is bound to it.\n", install)
 	return job.Run(ctx)
