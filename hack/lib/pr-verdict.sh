@@ -60,6 +60,14 @@ def prv_collapse($anyok): group_by(.name)
   | map(if (.[0].name | IN($anyok[])) or all(.[]; .wf == "e2e-kind") then [prv_newest] else (group_by(.run) | map(prv_newest)) end)
   | add // [];
 # Rules 1, 3, 4, 5: drop the rows of runs that do not count. $runs is the array of prv_runs, or null when unreadable.
+# Rows that carry no workflowName (check runs read by REST, prv_check_rows) get it from their run, so an e2e-kind row is
+# recognised by its run, never by a name the source row may lack.
+def prv_stamp($runs):
+  map(prv_rid as $id
+    | if (.workflowName // "") == "" and $id != null then
+        (first($runs[] | select((.id | tostring) == $id)) // null) as $r
+        | if $r == null then . else .workflowName = (if ($r.path | endswith("/e2e-kind.yml")) then "e2e-kind" else ($r.name // "") end) end
+      else . end);
 def prv_drop($runs; $draft; $anyok):
   if $runs == null then . else
     ($runs | map(.id | tostring)) as $known
@@ -69,6 +77,7 @@ def prv_drop($runs; $draft; $anyok):
     | map(prv_rid as $id | prv_name as $n
         | select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null
             or (($n | IN($anyok[])) and ($liveids | index($id)) != null)))
+    | prv_stamp($runs)
   end;
 def prv_word: if .done | not then "pending" elif .skipped then "skipped" elif .cancelled then "cancelled" elif .bad then "failure" else "success" end;
 JQ
