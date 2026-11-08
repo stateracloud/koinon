@@ -254,7 +254,8 @@ The data model old issue 349 builds on, as shipped in migration `00050`:
   connection_id, secret_fingerprint, checked_at)` keeps the newest reading per connection, also an empty
   one. `ReplaceCodeHostRepos` takes the secret fingerprint of the connection row the connector opened and,
   under the scope lock, refuses (`ErrCredentialChanged`) a reading whose fingerprint is not the connection's
-  now, and drops one older than the stored reading. Every secret change (the UI path and a declared update
+  now, and drops one older than the stored reading. The connection row is locked first (FOR UPDATE by
+  both secret-change paths, FOR KEY SHARE by the replacement), then the scope. Every secret change (the UI path and a declared update
   with another key or site) deletes the connection's repositories and reading in the same transaction,
   and the scope read ignores repositories whose reading has another fingerprint.
 - **Threshold.** `org_settings.leak_match_threshold` is NULL for the default 24 and otherwise 12 to 256

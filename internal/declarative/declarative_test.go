@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -515,6 +516,50 @@ var _ = Describe("Importer", func() {
 			Expect(err).To(MatchError(orgsettings.ErrCredentialChanged))
 			Expect(stored()).To(BeZero())
 		})
+
+		It("leaves no old-key reading behind when a replacement races a declared rotation (#244)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			cid := rows[0].ID.String()
+			osvc := orgsettings.NewService(pool)
+			oldFP := rows[0].SecretFingerprint
+			reading := []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}
+			for range 15 {
+				// A sync that started under the old key writes while the Secret is rotated.
+				other := githubtest.New()
+				DeferCleanup(other.Server.Close)
+				rotated := conn()
+				rotated["privateKey"] = string(other.PEM)
+				put(ctx, "gh", declarative.TypeConnection, slug, rotated)
+				start := make(chan struct{})
+				var wg sync.WaitGroup
+				var rerr error
+				wg.Add(2)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					<-start
+					rerr = osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, oldFP, reading, time.Now())
+				}()
+				go func() { defer GinkgoRecover(); defer wg.Done(); <-start; Expect(imp.Sync(ctx)).To(Succeed()) }()
+				close(start)
+				wg.Wait()
+				if rerr != nil {
+					Expect(rerr).To(MatchError(orgsettings.ErrCredentialChanged))
+				}
+				var repos, readings int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_repos WHERE org_id = $1`, org).Scan(&repos)).To(Succeed())
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_readings WHERE org_id = $1`, org).Scan(&readings)).To(Succeed())
+				Expect(repos).To(BeZero(), "no repository of the old credential survives the rotation")
+				Expect(readings).To(BeZero())
+				// Next round rotates away from the key now declared.
+				cur, err := store.New(pool).ListConnections(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				oldFP = cur[0].SecretFingerprint
+			}
+		}, SpecTimeout(2*time.Minute))
 
 		It("can be read back with the keys", func(ctx SpecContext) {
 			ring := secretstoretest.Keyring()
