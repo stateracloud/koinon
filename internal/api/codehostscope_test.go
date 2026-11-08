@@ -3,8 +3,11 @@
 package api_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,6 +86,46 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(2))
 	})
 
+	It("audits the reading under the request ID of the call that asked for it", func(ctx SpecContext) {
+		events := func(action string) []store.AuditEvent {
+			GinkgoHelper()
+			rows, err := store.New(e.pool).ListAuditEvents(ctx, store.ListAuditEventsParams{OrgID: mustUUID(org), PageSize: 100})
+			Expect(err).NotTo(HaveOccurred())
+			var out []store.AuditEvent
+			for _, r := range rows {
+				if r.Action == action {
+					out = append(out, r)
+				}
+			}
+			return out
+		}
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, DisplayName: "acme", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		created := events("connection.create")
+		Expect(created).To(HaveLen(1))
+		Expect(created[0].RequestID).NotTo(BeEmpty())
+		Expect(replaces(ctx)[0].RequestID).To(Equal(created[0].RequestID), "the reading shares the create's request ID")
+
+		_, err = owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
+			OrgId: org, ConnectionId: res.GetConnection().GetId(),
+			Secret: &connectionv1alpha1.SetConnectionSecretRequest_Github{Github: &connectionv1alpha1.GitHubConnectionSecret{PrivateKey: string(gh.PEM)}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		rekeyed := events("connection.secret.set")
+		Expect(rekeyed).To(HaveLen(1))
+		Expect(rekeyed[0].RequestID).NotTo(BeEmpty())
+		Expect(rekeyed[0].RequestID).NotTo(Equal(created[0].RequestID))
+		ids := []string{}
+		for _, r := range replaces(ctx) {
+			ids = append(ids, r.RequestID)
+		}
+		Expect(ids).To(ContainElement(rekeyed[0].RequestID), "the re-key's reading shares the re-key's request ID")
+	})
+
 	It("drops what the old credential read when the secret is replaced", func(ctx SpecContext) {
 		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 			OrgId: org, DisplayName: "acme", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
@@ -101,6 +144,126 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 		Consistently(repos(ctx)).WithTimeout(time.Second).Should(BeEmpty())
 	})
 })
+
+// The periodic refresh reads through the services' queue, as koinon-api wires it (SetQueue): one
+// reading per connection at a time, and Drain waits for it.
+var _ = Describe("the periodic code-host scope refresh beside a person's reading (#245)", func() {
+	var (
+		e     *env
+		gh    *githubtest.Fake
+		org   string
+		owner *client
+		conn  string
+
+		mu       sync.Mutex
+		inFlight int
+		maxSeen  int
+		hold     chan struct{} // while non-nil, a listing of the installation's repositories waits on it
+	)
+	BeforeEach(func(ctx SpecContext) {
+		gh = githubtest.New()
+		DeferCleanup(gh.Server.Close)
+		gh.Repositories = []string{"handbook", "website"}
+		gh.Private = map[string]bool{"handbook": true}
+		next := gh.Server.Config.Handler
+		gh.Server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/installation/repositories") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			mu.Lock()
+			inFlight++
+			maxSeen = max(maxSeen, inFlight)
+			wait := hold
+			mu.Unlock()
+			defer func() { mu.Lock(); inFlight--; mu.Unlock() }()
+			if wait != nil {
+				select {
+				case <-wait:
+				case <-r.Context().Done():
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+		e = newEnv(ctx, envOptions{
+			keys:      secretstoretest.Keyring(),
+			github:    github.NewClient(github.Options{BaseURL: gh.URL()}),
+			ghFake:    gh,
+			scopeSync: true,
+		})
+		org, owner = e.newTeamOrg(ctx)
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, DisplayName: "acme", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		conn = res.GetConnection().GetId()
+		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { mu.Lock(); defer mu.Unlock(); return inFlight }).Should(BeZero())
+		mu.Lock()
+		hold, maxSeen = make(chan struct{}), 0
+		mu.Unlock()
+	})
+	releaseListings := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if hold != nil {
+			close(hold)
+			hold = nil
+		}
+	}
+	listing := func() int { mu.Lock(); defer mu.Unlock(); return inFlight }
+	// startRefresh runs the periodic refresh of the org (the path Run takes) in the background.
+	startRefresh := func(ctx context.Context) <-chan struct{} {
+		done := make(chan struct{})
+		go func() { defer GinkgoRecover(); defer close(done); e.syncer.SyncOrg(ctx, mustUUID(org)) }()
+		return done
+	}
+
+	It("never lists one connection twice at once, whoever asks", func(ctx SpecContext) {
+		DeferCleanup(releaseListings)
+		refresh := startRefresh(ctx)
+		Eventually(listing).Should(Equal(1))
+
+		_, err := owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: conn})
+		Expect(err).NotTo(HaveOccurred())
+		Consistently(listing).WithTimeout(500*time.Millisecond).Should(Equal(1), "the person's reading waits for the refresh's")
+
+		releaseListings()
+		Eventually(refresh).WithTimeout(10 * time.Second).Should(BeClosed())
+		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(10*time.Second).Should(Equal(2), "the person's reading ran after it")
+		mu.Lock()
+		defer mu.Unlock()
+		Expect(maxSeen).To(Equal(1))
+	})
+
+	It("is waited for by Drain", func(ctx SpecContext) {
+		DeferCleanup(releaseListings)
+		refresh := startRefresh(ctx)
+		Eventually(listing).Should(Equal(1))
+
+		drained := make(chan struct{})
+		go func() { defer GinkgoRecover(); defer close(drained); e.rpc.Drain(context.Background()) }()
+		Consistently(drained).WithTimeout(500 * time.Millisecond).ShouldNot(BeClosed())
+
+		releaseListings()
+		Eventually(drained).WithTimeout(10 * time.Second).Should(BeClosed())
+		Eventually(refresh).WithTimeout(10 * time.Second).Should(BeClosed())
+	})
+})
+
+// scopeReplaces are the org's code-host scope replacement audit events.
+func scopeReplaces(ctx context.Context, e *env, org string) []store.AuditEvent {
+	GinkgoHelper()
+	rows, err := store.New(e.pool).ListAuditEvents(ctx, store.ListAuditEventsParams{OrgID: mustUUID(org), PageSize: 100})
+	Expect(err).NotTo(HaveOccurred())
+	var out []store.AuditEvent
+	for _, r := range rows {
+		if r.Action == "org.code_host_scope.replace" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // A replacement of a connection's scope and a change of the connection itself (its secret, or
 // deleting it) lock the same things: the connection row, the connection's scope lock and its

@@ -676,11 +676,13 @@ func serve(ctx context.Context, cfg config) error {
 	// visibility, read when a connection is created or tested and again every few minutes, so the
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
 	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
-	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
 	svc := services.New(pool, services.Options{
 		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
+	// The refresh reads through the service layer's queue (one reading per connection, drained at shutdown).
+	scopeSyncer.SetQueue(svc.QueueScopeReading)
+	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
 	if sched != nil {
@@ -902,7 +904,9 @@ func serve(ctx context.Context, cfg config) error {
 	} else {
 		slog.Warn("the MCP leak guard is off (--guard-addr empty): the gateway refuses every org MCP call")
 	}
+	shutdownDone := make(chan struct{})
 	safego.Go(ctx, slog.Default(), "shutdown", func(context.Context) {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		if guardSrv != nil {
 			guardSrv.GracefulStop()
@@ -912,6 +916,9 @@ func serve(ctx context.Context, cfg config) error {
 		for _, s := range servers {
 			_ = s.Shutdown(shutdownCtx)
 		}
+		// Then the background code-host scope readings: the requests that start them have ended, so
+		// they finish, or are canceled, inside the same deadline.
+		svc.Drain(shutdownCtx)
 	})
 
 	slog.Info("starting koinon-api", "version", project.Version, "addr", cfg.addr,
@@ -919,6 +926,8 @@ func serve(ctx context.Context, cfg config) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// ListenAndServe returns as soon as Shutdown starts; the process must not exit before the drain.
+	<-shutdownDone
 	select {
 	case err := <-toolsErr:
 		return fmt.Errorf("github tools server: %w", err)
