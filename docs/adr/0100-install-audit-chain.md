@@ -284,9 +284,9 @@ by the next caller: six paths kept it by hand (bootstrap's flush closure, `Lower
 - An event that is recorded after the work, not with it (the reconciler's, the admin API's call log,
   failed token checks), goes through `audit.RecordAfter`, whose name says it is not atomic. It must not
   run inside a transaction that holds an audit head.
-- The direct writes `audit.Record` and `audit.RecordInstall` stay until every caller has moved
-  (issues 360, 370 and 371). Step 2 (#370) moved every non-test caller; step 3 deletes them and adds
-  a lint check.
+- The direct writes `audit.Record` and `audit.RecordInstall` are gone (step 3, #371). `hack/audit-batch-lint.sh`,
+  run by `make lint`, preflight and CI, fails any code outside `internal/audit` that calls the old names,
+  inserts into the audit tables or calls their sqlc queries, and limits `audit.WriteInTx` to `internal/keyscli`.
 - `audit.Fake` is an in-memory runner that orders and validates exactly as the Postgres one does, so a
   caller's unit test can check what it audited. One spec suite runs on both; only the Postgres specs
   cover the hash chains and the locks.
