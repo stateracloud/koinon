@@ -127,10 +127,12 @@ describe('Budgets page', () => {
   it('keeps another agent\'s limit form open while a save is still refreshing (old issue 111)', async () => {
     const calls = setup()
     const list = await screen.findByRole('list', { name: 'Agent daily limits' })
-    const one = within(list).getByRole('heading', { name: 'Repo helper' }).closest('li')!
-    const two = within(list).getByRole('heading', { name: 'Docs bot' }).closest('li')!
+    const one = within(list).getByRole('heading', { name: 'Repo helper' }).closest('li')
+    if (!one) throw new Error('Repo helper row not found')
+    const two = within(list).getByRole('heading', { name: 'Docs bot' }).closest('li')
+    if (!two) throw new Error('Docs bot row not found')
     await userEvent.click(within(one).getByRole('button', { name: 'Change limit of Repo helper' }))
-    let release = () => {}
+    let release: () => void = () => undefined
     calls.gate = new Promise<void>((r) => (release = r))
     await userEvent.click(within(one).getByRole('button', { name: 'Save limit for Repo helper' }))
     await waitFor(() => expect(calls.limits).toHaveLength(1))

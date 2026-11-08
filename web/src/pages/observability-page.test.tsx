@@ -259,7 +259,7 @@ describe('Observability page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Edit destination datadog' }))
     const form = screen.getByRole('form', { name: 'Edit destination datadog' })
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Enabled' }))
-    let release = () => {}
+    let release: () => void = () => undefined
     calls.gate = new Promise<void>((r) => (release = r))
     await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls.updates).toHaveLength(1))

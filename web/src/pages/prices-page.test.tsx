@@ -159,7 +159,7 @@ describe('Prices page', () => {
     const calls = setup()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit price sonnet-mine' }))
     const form = screen.getByRole('form', { name: 'New version of sonnet-mine' })
-    let release = () => {}
+    let release: () => void = () => undefined
     calls.gate = new Promise<void>((r) => (release = r))
     await userEvent.click(within(form).getByRole('button', { name: 'Save new version' }))
     await waitFor(() => expect(calls.sets).toHaveLength(1))
