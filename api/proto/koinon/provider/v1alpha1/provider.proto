@@ -197,6 +197,12 @@ message CreateProviderRequest {
   string api_key = 5 [debug_redact = true];
   // anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
   string anthropic_workspace_id = 6;
+  // cost_api_key is the optional cost API key (an Anthropic or OpenAI admin key that may read the
+  // cost API; write-only, never returned). anthropic and openai providers at their own API URL only;
+  // needs cost_scope.
+  string cost_api_key = 7 [debug_redact = true];
+  // cost_scope is the cost scope of that key (see Provider.cost_scope).
+  string cost_scope = 8;
 }
 
 message CreateProviderResponse {
@@ -305,6 +311,9 @@ message ProviderTypeInfoResponse {
   repeated ModelFormat formats = 1;
   // takes_workspace_id is set when the type takes an Anthropic workspace ID.
   bool takes_workspace_id = 2;
+  // takes_cost_key is set when Koinon reads the type's cost API (anthropic and openai, at their own
+  // API URL), so the provider takes a cost API key and a cost scope.
+  bool takes_cost_key = 3;
 }
 
 message GetDefaultModelRequest {

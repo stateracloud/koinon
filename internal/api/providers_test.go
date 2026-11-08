@@ -175,10 +175,12 @@ var _ = Describe("ProviderService", func() {
 		ti, err := owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ti.GetTakesWorkspaceId()).To(BeTrue())
+		Expect(ti.GetTakesCostKey()).To(BeTrue())
 		Expect(ti.GetFormats()).To(HaveLen(1))
 		ti, err = owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "openrouter"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ti.GetTakesWorkspaceId()).To(BeFalse())
+		Expect(ti.GetTakesCostKey()).To(BeFalse(), "OpenRouter's bill comes per request")
 		Expect(ti.GetFormats()).To(HaveLen(2))
 
 		// An override within what the provider offers is stored and marked.

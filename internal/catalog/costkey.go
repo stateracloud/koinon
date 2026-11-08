@@ -49,9 +49,9 @@ func OpenCostKey(keys Opener, org, id pgtype.UUID, envelope []byte) (string, err
 	return string(plain), nil
 }
 
-// validateCostKey checks the cost key and scope a provider of typ at rawURL would hold after a
+// ValidateCostKey checks the cost key and scope a provider of typ at rawURL would hold after a
 // change: none, or a scope the type's cost source can read, for a provider the source serves.
-func validateCostKey(typ, rawURL string, hasKey bool, scope string) error {
+func ValidateCostKey(typ, rawURL string, hasKey bool, scope string) error {
 	if !hasKey {
 		if scope != "" {
 			return invalid("a cost scope needs a cost API key")
@@ -93,6 +93,16 @@ func (s *Service) sealCostKey(org, id pgtype.UUID, key string) ([]byte, error) {
 // removes the scope with it.
 func (s *Service) applyCostKey(ctx context.Context, q *store.Queries, org pgtype.UUID, out store.Provider, patch ProviderPatch) (store.Provider, error) {
 	hasKey, scope := len(out.CostApiKey) > 0, out.CostScope.String
+	// A key lost with its key-encryption key leaves the scope behind: nothing is read until the
+	// operator re-enters or removes the key, so other edits still go through. A type or URL change
+	// that leaves the provider unable to take a cost key (or the scope unreadable) clears the lost
+	// key's scope and marker, so no stale scope outlives the change.
+	if !hasKey && out.CostApiKeyLostAt.Valid && patch.CostAPIKey == nil && patch.CostScope == nil {
+		if ValidateCostKey(out.Type, out.Url, true, scope) == nil {
+			return out, nil
+		}
+		return q.SetProviderCostKey(ctx, store.SetProviderCostKeyParams{OrgID: org, ID: out.ID, SetKey: true})
+	}
 	if patch.CostAPIKey != nil {
 		hasKey = *patch.CostAPIKey != ""
 		if !hasKey && patch.CostScope == nil {
@@ -102,7 +112,7 @@ func (s *Service) applyCostKey(ctx context.Context, q *store.Queries, org pgtype
 	if patch.CostScope != nil {
 		scope = *patch.CostScope
 	}
-	if err := validateCostKey(out.Type, out.Url, hasKey, scope); err != nil {
+	if err := ValidateCostKey(out.Type, out.Url, hasKey, scope); err != nil {
 		return out, err
 	}
 	if patch.CostAPIKey == nil && patch.CostScope == nil {

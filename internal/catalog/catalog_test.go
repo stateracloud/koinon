@@ -432,6 +432,48 @@ var _ = Describe("Service", func() {
 			Expect(since()).To(BeNil())
 		})
 
+		It("keeps a provider editable after its cost key was lost, and removes the dead key on request", func(ctx SpecContext) {
+			admin, scope := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace"
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+				CostAPIKey: admin, CostScope: scope,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE id = $1`, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("an edit that leaves the type and URL alone keeps the lost key's scope")
+			note := "https://api.anthropic.com/"
+			got, err := svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &note})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.CostScope, got.CostKeyLostAt != nil}).To(Equal([]any{scope, true}))
+
+			By("a URL change away from the provider's own API clears the lost key's scope and marker")
+			url := "https://proxy.example.com"
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &url})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.URL, got.CostScope, got.CostKeyLostAt}).To(Equal([]any{url, "", (*time.Time)(nil)}))
+
+			By("a type change does the same")
+			q, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic2", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+				CostAPIKey: admin, CostScope: scope,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE id = $1`, q.ID)
+			Expect(err).NotTo(HaveOccurred())
+			typ := "openrouter"
+			got, err = svc.UpdateProvider(ctx, org, actor, q.ID, catalog.ProviderPatch{Type: &typ, URL: &url})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{got.Type, got.CostScope, got.CostKeyLostAt}).To(Equal([]any{typ, "", (*time.Time)(nil)}))
+
+			By("removing the dead key clears the scope with it")
+			empty := ""
+			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostAPIKey: &empty})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.CostScope).To(BeEmpty())
+		})
+
 		It("takes a cost API key for anthropic and openai providers at their own API only", func(ctx SpecContext) {
 			p := create(ctx, "router", "koinon_test_not-a-real-token")
 			admin, scope := "koinon_test_not-a-real-admin-key", "proj_abc"
@@ -455,6 +497,45 @@ var _ = Describe("Service", func() {
 			sk := "sk-proj-abc"
 			_, err = svc.UpdateProvider(ctx, org, actor, o.ID, catalog.ProviderPatch{CostScope: &sk})
 			Expect(errors.As(err, &inv)).To(BeTrue(), "the key's ID, never the key: %v", err)
+		})
+
+		It("sets the cost API key and scope when the provider is created, sealed like the update path", func(ctx SpecContext) {
+			admin, scope := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace"
+			p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+				Name: "anthropic", Type: "anthropic", URL: "https://api.anthropic.com", APIKey: "koinon_test_not-a-real-token",
+				CostAPIKey: admin, CostScope: scope,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, scope}))
+			raw, _ := json.Marshal(p)
+			Expect(string(raw)).NotTo(ContainSubstring(admin))
+			var env []byte
+			Expect(pool.QueryRow(ctx, `SELECT cost_api_key FROM providers WHERE id = $1`, p.ID).Scan(&env)).To(Succeed())
+			Expect(string(env)).NotTo(ContainSubstring(admin))
+			plain, err := catalog.OpenCostKey(ring, org, mustUUID(p.ID), env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plain).To(Equal(admin))
+			for _, e := range events(ctx, "provider.create") {
+				Expect(string(e.Summary)).NotTo(ContainSubstring(admin))
+			}
+		})
+
+		It("refuses a cost API key on create that the update path would refuse, and keeps no provider", func(ctx SpecContext) {
+			admin, scope := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace"
+			for name, in := range map[string]catalog.ProviderInput{
+				"no scope":    {Name: "a", Type: "anthropic", URL: "https://api.anthropic.com", CostAPIKey: admin},
+				"scope only":  {Name: "b", Type: "anthropic", URL: "https://api.anthropic.com", CostScope: scope},
+				"wrong scope": {Name: "c", Type: "anthropic", URL: "https://api.anthropic.com", CostAPIKey: admin, CostScope: "proj_abc"},
+				"no cost API": {Name: "d", Type: "openrouter", URL: "https://openrouter.ai/api/v1", CostAPIKey: admin, CostScope: scope},
+				"not own API": {Name: "e", Type: "anthropic", URL: "https://anthropic-proxy.example.com", CostAPIKey: admin, CostScope: scope},
+			} {
+				_, err := svc.CreateProvider(ctx, org, actor, user, in)
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "%s: %v", name, err)
+			}
+			list, err := svc.ListProviders(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list).To(BeEmpty())
 		})
 	})
 
@@ -790,6 +871,51 @@ var _ = Describe("Service", func() {
 			Expect(ev[0].ActorKind).To(Equal("secret"))
 			Expect(ev[0].ActorID).To(Equal("openrouter-secret"))
 			Expect(string(ev[0].Summary)).NotTo(ContainSubstring("sk-declared"))
+		})
+
+		It("declares a cost API key and scope, rewrites a lost one, and removes it when the Secret drops it", func(ctx SpecContext) {
+			admin, scope := "koinon_test_not-a-real-admin-key", "wrkspc_01TestWorkspace"
+			d := catalog.DeclaredProvider{
+				SecretName: "claude-secret", Version: "v1", Name: "claude", Type: "anthropic", URL: "https://api.anthropic.com",
+				APIKey: "koinon_test_not-a-real-token", CostAPIKey: admin, CostScope: scope,
+			}
+			_, err := svc.ApplyDeclaredProvider(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, err := svc.ListProviders(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list).To(HaveLen(1))
+			Expect([]any{list[0].HasCostKey, list[0].CostScope}).To(Equal([]any{true, scope}))
+			var env []byte
+			Expect(pool.QueryRow(ctx, `SELECT cost_api_key FROM providers WHERE org_id = $1`, org).Scan(&env)).To(Succeed())
+			plain, err := catalog.OpenCostKey(ring, org, mustUUID(list[0].ID), env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plain).To(Equal(admin))
+			for _, e := range events(ctx, "provider.declare") {
+				Expect(string(e.Summary)).NotTo(ContainSubstring(admin))
+			}
+
+			By("a lost cost key is written again from the Secret at the same version")
+			_, err = pool.Exec(ctx, `UPDATE providers SET cost_api_key = NULL, cost_api_key_lost_at = now() WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			changed, err := svc.ApplyDeclaredProvider(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(changed).To(BeTrue())
+			list, _ = svc.ListProviders(ctx, org)
+			Expect([]any{list[0].HasCostKey, list[0].CostKeyLostAt}).To(Equal([]any{true, (*time.Time)(nil)}))
+
+			By("a Secret that drops the cost key removes the stored one")
+			d.Version, d.CostAPIKey, d.CostScope = "v2", "", ""
+			_, err = svc.ApplyDeclaredProvider(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, _ = svc.ListProviders(ctx, org)
+			Expect([]any{list[0].HasCostKey, list[0].CostScope}).To(Equal([]any{false, ""}))
+
+			By("a cost key the provider type cannot take is refused")
+			bad := declared("v3", flash)
+			bad.CostAPIKey, bad.CostScope = admin, scope
+			_, err = svc.ApplyDeclaredProvider(ctx, org, bad)
+			var inv *catalog.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
 		})
 
 		It("writes the key again from the Secret when it was lost, even at the same version", func(ctx SpecContext) {

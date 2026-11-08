@@ -137,6 +137,8 @@ type providerJSON struct {
 	DisabledReason  string `json:"disabledReason"`
 
 	AnthropicWorkspaceID string   `json:"anthropicWorkspaceId"`
+	HasCostKey           bool     `json:"hasCostKey"`
+	CostScope            string   `json:"costScope"`
 	Formats              []string `json:"formats"`
 }
 
@@ -448,6 +450,40 @@ var _ = Describe("the admin API", func() {
 				"name": "oa", "type": "openai", "url": "https://api.openai.com/v1", "anthropicWorkspaceId": "wrkspc_01Ab",
 			})
 			Expect(code).To(Equal(400))
+		})
+
+		It("sets, replaces and removes a provider's cost API key on create and update, never returning it", func(ctx SpecContext) {
+			const admin, rotated = "koinon_test_not-a-real-admin-key", "koinon_test_not-a-real-admin-key-2"
+			code, body := e.call(ctx, e.token, "POST", "/providers", map[string]any{
+				"name": "claude", "type": "anthropic", "url": "https://api.anthropic.com", "apiKey": "koinon_test_not-a-real-token",
+				"costApiKey": "koinon_test_not-a-real-admin-key", "costScope": "wrkspc_01Ab",
+			})
+			Expect(code).To(Equal(201), string(body))
+			Expect(string(body)).NotTo(ContainSubstring(admin))
+			p := decode[providerJSON](body)
+			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, "wrkspc_01Ab"}))
+
+			code, body = e.call(ctx, e.token, "PATCH", "/providers/"+p.ID, map[string]any{"costApiKey": rotated, "costScope": "default"})
+			Expect(code).To(Equal(200), string(body))
+			Expect(string(body)).NotTo(ContainSubstring(rotated))
+			p = decode[providerJSON](body)
+			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, "default"}))
+			p = decode[providerJSON](mustBody(e.call(ctx, e.token, "GET", "/providers/"+p.ID, nil)))
+			Expect(p.HasCostKey).To(BeTrue(), "a read shows the flag, not the key")
+
+			code, body = e.call(ctx, e.token, "PATCH", "/providers/"+p.ID, map[string]any{"costApiKey": ""})
+			Expect(code).To(Equal(200), string(body))
+			p = decode[providerJSON](body)
+			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{false, ""}))
+
+			code, body = e.call(ctx, e.token, "POST", "/providers", map[string]any{
+				"name": "or", "type": "openrouter", "url": "https://openrouter.ai/api/v1", "costApiKey": admin, "costScope": "proj_abc",
+			})
+			Expect(code).To(Equal(400), string(body))
+			code, body = e.call(ctx, e.token, "POST", "/providers", map[string]any{
+				"name": "noscope", "type": "anthropic", "url": "https://api.anthropic.com", "costApiKey": admin,
+			})
+			Expect(code).To(Equal(400), string(body))
 		})
 
 		It("create, read, change and delete, never returning the key", func(ctx SpecContext) {

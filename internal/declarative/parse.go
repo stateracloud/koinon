@@ -56,6 +56,11 @@ const (
 	KeyModels   = "models"
 	// KeyAnthropicWorkspaceID is optional, for provider anthropic only (ADR 0069).
 	KeyAnthropicWorkspaceID = "anthropicWorkspaceId"
+	// KeyCostAPIKey and KeyCostScope are optional, for anthropic and openai providers at their own
+	// API URL: the admin key the daily cost reconciliation reads, and the workspace, project or API
+	// key whose cost is the provider's (ADR 0056, amendment 2026-11-06).
+	KeyCostAPIKey = "costApiKey"
+	KeyCostScope  = "costScope"
 )
 
 // Data keys of a connection Secret.
@@ -93,6 +98,7 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 		SecretName: sec.Name, Version: version,
 		Name: get(KeyName), Type: get(KeyProvider), URL: get(KeyURL), APIKey: get(KeyAPIKey),
 		AnthropicWorkspaceID: get(KeyAnthropicWorkspaceID),
+		CostAPIKey:           get(KeyCostAPIKey), CostScope: get(KeyCostScope),
 	}
 	var errs []error
 	for _, k := range []string{KeyName, KeyURL, KeyProvider} {
@@ -105,6 +111,9 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 			errs = append(errs, err)
 		}
 		if err := catalog.ValidateWorkspaceID(d.Type, d.AnthropicWorkspaceID); err != nil {
+			errs = append(errs, err)
+		}
+		if err := catalog.ValidateCostKey(d.Type, d.URL, d.CostAPIKey != "", d.CostScope); err != nil {
 			errs = append(errs, err)
 		}
 	}

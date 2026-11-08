@@ -40,7 +40,7 @@ const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'op
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; withCostKey?: boolean; withLostCostKey?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -48,7 +48,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
       getDefaultModel: () => ({ model: '', available: [] }),
       listProviders: () => {
         calls.listed++
-        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [claude] : [])] }
+        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [opts.withLostCostKey ? create(ProviderSchema, { ...claude, costKeyLostAt: timestampFromMs(Date.now()), costScope: 'wrkspc_01Cost' }) : opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }
       },
       listModels: async () => {
         // Hold the refetch that follows a provider create, so the form's completion arrives late.
@@ -61,7 +61,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
       },
       providerTypeInfo: async (req) => {
         if (opts.slowTypeInfo) await opts.slowTypeInfo
-        return { formats: [], takesWorkspaceId: req.type === 'anthropic' }
+        return { formats: [], takesWorkspaceId: req.type === 'anthropic', takesCostKey: req.type === 'anthropic' || req.type === 'openai' }
       },
       updateModel: (req) => {
         calls.modelUpdates.push(req)
@@ -444,6 +444,90 @@ describe('Providers page', () => {
       await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
       await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
       expect(calls.providerCreates[0].anthropicWorkspaceId).toBe('')
+    })
+  })
+
+  describe('cost API key', () => {
+    it('sets the cost key and scope when an Anthropic provider is added', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      expect(within(form).queryByLabelText('Cost API key')).not.toBeInTheDocument()
+      await userEvent.selectOptions(within(form).getByLabelText('Provider type'), 'anthropic')
+      const key = await within(form).findByLabelText('Cost API key')
+      expect(key).toHaveAttribute('type', 'password')
+      await userEvent.type(within(form).getByLabelText('Name'), 'claude')
+      await userEvent.type(key, 'koinon_test_not-a-real-token')
+      await userEvent.type(within(form).getByLabelText('Cost scope'), 'wrkspc_01AbCd')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+      expect(calls.providerCreates[0]).toMatchObject({ type: 'anthropic', costApiKey: 'koinon_test_not-a-real-token', costScope: 'wrkspc_01AbCd' })
+      expect(key).toHaveValue('')
+    })
+
+    it('refuses a cost scope typed without a cost key instead of dropping it', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      await userEvent.selectOptions(within(form).getByLabelText('Provider type'), 'anthropic')
+      await userEvent.type(within(form).getByLabelText('Name'), 'claude')
+      await userEvent.type(await within(form).findByLabelText('Cost scope'), 'wrkspc_01AbCd')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      expect(await within(form).findByText('A cost scope needs a cost API key. Type the key, or clear the scope.')).toBeInTheDocument()
+      expect(within(form).getByLabelText('Cost scope')).toBeInvalid()
+      expect(calls.providerCreates).toHaveLength(0)
+    })
+
+    it('does not send a cost key for a type whose cost API Koinon does not read', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      await userEvent.type(within(form).getByLabelText('Name'), 'second')
+      expect(within(form).queryByLabelText('Cost API key')).not.toBeInTheDocument()
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+      expect(calls.providerCreates[0].costApiKey).toBe('')
+      expect(calls.providerCreates[0].costScope).toBe('')
+    })
+
+    it('leaves a stored cost key alone on an edit, and replaces it when a new one is typed', async () => {
+      const calls = setup({ withAnthropic: true, withCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      expect(await within(form).findByLabelText('Cost scope')).toHaveValue('wrkspc_01Cost')
+      await userEvent.clear(within(form).getByLabelText('URL'))
+      await userEvent.type(within(form).getByLabelText('URL'), 'https://proxy.example.com/v1')
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].costApiKey).toBeUndefined()
+      expect(calls.providerUpdates[0].costScope).toBeUndefined()
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const again = screen.getByRole('form', { name: 'Edit provider claude' })
+      await userEvent.type(await within(again).findByLabelText('New cost API key'), 'koinon_test_not-a-real-token')
+      await userEvent.click(within(again).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(2))
+      expect(calls.providerUpdates[1].costApiKey).toBe('koinon_test_not-a-real-token')
+    })
+
+    it('removes a stored cost key on request', async () => {
+      const calls = setup({ withAnthropic: true, withCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      await userEvent.click(await within(form).findByLabelText('Remove the stored cost key'))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].costApiKey).toBe('')
+    })
+
+    it('removes a cost key that was lost with its key-encryption key', async () => {
+      const calls = setup({ withAnthropic: true, withLostCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      await userEvent.click(await within(form).findByLabelText('Remove the stored cost key'))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].costApiKey).toBe('')
     })
   })
 })

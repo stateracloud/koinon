@@ -4,6 +4,7 @@ package catalog
 
 import (
 	"context"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -72,6 +73,8 @@ func (s *Service) ModelFormats(ctx context.Context, org pgtype.UUID, providerID,
 type TypeInfo struct {
 	Formats     []string
 	WorkspaceID bool
+	// CostKey is set when Koinon reads the type's cost API, so the type takes a cost API key.
+	CostKey bool
 }
 
 // ProviderTypeInfo returns what a provider type offers. The rules are the ones validation applies.
@@ -80,5 +83,5 @@ func ProviderTypeInfo(typ string) TypeInfo {
 	for _, x := range modelformat.Offered(typ) {
 		f = append(f, string(x))
 	}
-	return TypeInfo{Formats: f, WorkspaceID: typ == WorkspaceProviderType}
+	return TypeInfo{Formats: f, WorkspaceID: typ == WorkspaceProviderType, CostKey: slices.Contains(CostSources.Types(), typ)}
 }

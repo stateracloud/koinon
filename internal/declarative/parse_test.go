@@ -53,3 +53,46 @@ func TestParseProviderFormats(t *testing.T) {
 		}
 	}
 }
+
+// TestParseProviderCostKey covers the optional cost API key and scope, validated by the rules of the
+// API, with errors that never quote a value.
+func TestParseProviderCostKey(t *testing.T) {
+	const key = "koinon_test_not-a-real-admin-key"
+	with := func(provider, url, costKey, scope string) *corev1.Secret {
+		sec := providerSecret(provider, "", "")
+		sec.Data["url"] = []byte(url)
+		if costKey != "" {
+			sec.Data["costApiKey"] = []byte(costKey + "\n")
+		}
+		if scope != "" {
+			sec.Data["costScope"] = []byte(scope)
+		}
+		return sec
+	}
+	d, err := declarative.ParseProvider(with("anthropic", "https://api.anthropic.com", key, "wrkspc_01Ab"), "v")
+	if err != nil || d.CostAPIKey != key || d.CostScope != "wrkspc_01Ab" {
+		t.Errorf("anthropic: %+v, %v", d, err)
+	}
+	d, err = declarative.ParseProvider(with("openai", "https://api.openai.com/v1", key, "proj_abc"), "v")
+	if err != nil || d.CostAPIKey != key || d.CostScope != "proj_abc" {
+		t.Errorf("openai: %+v, %v", d, err)
+	}
+	d, err = declarative.ParseProvider(with("anthropic", "https://api.anthropic.com", "", ""), "v")
+	if err != nil || d.CostAPIKey != "" || d.CostScope != "" {
+		t.Errorf("none: %+v, %v", d, err)
+	}
+	for name, sec := range map[string]*corev1.Secret{
+		"key without a scope":        with("anthropic", "https://api.anthropic.com", key, ""),
+		"scope without a key":        with("anthropic", "https://api.anthropic.com", "", "wrkspc_01Ab"),
+		"a scope of the wrong kind":  with("anthropic", "https://api.anthropic.com", key, "proj_abc"),
+		"a type without a cost API":  with("openrouter", "https://openrouter.ai/api/v1", key, "proj_abc"),
+		"not the provider's own API": with("anthropic", "https://proxy.example.com", key, "wrkspc_01Ab"),
+	} {
+		_, err := declarative.ParseProvider(sec, "v")
+		if err == nil {
+			t.Errorf("%s: parsed", name)
+		} else if strings.Contains(err.Error(), key) {
+			t.Errorf("%s: the error quotes the key: %v", name, err)
+		}
+	}
+}

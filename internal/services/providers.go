@@ -123,6 +123,7 @@ func (s *Server) CreateProvider(ctx context.Context, req *providerv1alpha1.Creat
 	p, err := s.catalog.CreateProvider(requestCtx(ctx), c.org, c.auditActor(), c.actor(), catalog.ProviderInput{
 		Name: req.GetName(), Type: req.GetType(), URL: req.GetUrl(), APIKey: req.GetApiKey(),
 		AnthropicWorkspaceID: req.GetAnthropicWorkspaceId(),
+		CostAPIKey:           req.GetCostApiKey(), CostScope: req.GetCostScope(),
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -327,7 +328,7 @@ func (s *Server) ProviderTypeInfo(ctx context.Context, req *providerv1alpha1.Pro
 		return nil, err
 	}
 	info := catalog.ProviderTypeInfo(req.GetType())
-	return &providerv1alpha1.ProviderTypeInfoResponse{Formats: formatProtos(info.Formats), TakesWorkspaceId: info.WorkspaceID}, nil
+	return &providerv1alpha1.ProviderTypeInfoResponse{Formats: formatProtos(info.Formats), TakesWorkspaceId: info.WorkspaceID, TakesCostKey: info.CostKey}, nil
 }
 
 // formatProtos names formats with the labels of the format table.

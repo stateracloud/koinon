@@ -41,7 +41,10 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   const [urlEdited, setUrlEdited] = useState(editing)
   const [apiKey, setApiKey] = useState('')
   const [workspaceId, setWorkspaceId] = useState(provider?.anthropicWorkspaceId ?? '')
+  const [costKey, setCostKey] = useState('')
+  const [costScope, setCostScope] = useState(provider?.costScope ?? '')
   const [removeKey, setRemoveKey] = useState(false)
+  const [removeCostKey, setRemoveCostKey] = useState(false)
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -59,7 +62,13 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   // and must neither send nor clear it.
   const typeKnown = !!typeInfo.data
   const takesWorkspaceId = !!typeInfo.data?.takesWorkspaceId
-  const invalid = Object.values(errors).some(Boolean)
+  // Likewise for the cost API key, which only types whose cost API Koinon reads take.
+  const takesCostKey = Boolean(typeInfo.data?.takesCostKey)
+  // A cost scope names which workspace or project the cost key reads, so it has no meaning alone.
+  // On an edit a stored (or lost) key counts, unless its removal is asked for.
+  const costKeyHeld = Boolean(costKey) || (editing && !removeCostKey && (provider.hasCostKey || Boolean(provider.costKeyLostAt)))
+  const costScopeError = takesCostKey && !removeCostKey && costScope.trim() && !costKeyHeld ? 'A cost scope needs a cost API key. Type the key, or clear the scope.' : undefined
+  const invalid = Object.values(errors).some(Boolean) || Boolean(costScopeError)
 
   function pickType(v: string) {
     setTypeChoice(v)
@@ -74,7 +83,9 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
     setPending(true)
     setError(undefined)
     const key = apiKey
-    setApiKey('') // the key leaves this page with the request
+    const costKeyValue = costKey
+    setApiKey('') // the keys leave this page with the request
+    setCostKey('')
     try {
       if (provider) {
         const change: ProviderChange = {}
@@ -87,16 +98,30 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           const ws = takesWorkspaceId ? workspaceId.trim() : ''
           if (ws !== provider.anthropicWorkspaceId) change.anthropicWorkspaceId = ws
         }
+        // The cost key is write-only like the API key; its scope goes with it, and changes alone.
+        if (typeKnown) {
+          const scope = costScope.trim()
+          if (!takesCostKey || removeCostKey) {
+            if (provider.hasCostKey || provider.costKeyLostAt) change.costApiKey = ''
+          } else {
+            if (costKeyValue) change.costApiKey = costKeyValue
+            if (scope !== provider.costScope && (costKeyValue || provider.hasCostKey || provider.costKeyLostAt)) change.costScope = scope
+          }
+        }
         await onUpdate(provider.id, change)
       } else {
-        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: takesWorkspaceId ? workspaceId.trim() : undefined })
+        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: takesWorkspaceId ? workspaceId.trim() : undefined,
+          ...(takesCostKey && costKeyValue ? { costApiKey: costKeyValue, costScope: costScope.trim() } : {}),
+        })
       }
       onSaved?.(provider?.name ?? name)
       onDone()
     } catch (err) {
       const msg = ConnectError.from(err).rawMessage
       // The key left the page with the request, so the person has to supply it again.
-      setError(key ? `${msg} The API key was cleared from this page. Type the API key again.` : msg)
+      const cleared = [key && 'API key', costKeyValue && 'cost API key'].filter(Boolean)
+      const names = cleared.join(' and the ')
+      setError(cleared.length ? `${msg} The ${names} ${cleared.length > 1 ? 'were' : 'was'} cleared from this page. Type the ${names} again.` : msg)
     } finally {
       setPending(false)
     }
@@ -193,6 +218,42 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
             It looks like wrkspc_ followed by letters and digits.
           </p>
         </div>
+      )}
+      {takesCostKey && (
+        <fieldset className="grid gap-4 rounded-md border p-3">
+          <legend className="px-1 text-sm font-medium">Cost reconciliation (optional)</legend>
+          <div className="grid gap-1.5">
+            <Label htmlFor="provider-cost-key">{editing ? 'New cost API key' : 'Cost API key'}</Label>
+            <Input id="provider-cost-key" type="password" value={costKey} onChange={(e) => setCostKey(e.target.value)} autoComplete="new-password" spellCheck={false} aria-describedby="provider-cost-key-help" disabled={removeCostKey} />
+            <p id="provider-cost-key-help" className="text-muted-foreground text-xs">
+              {editing && provider.costKeyLostAt
+                ? 'The stored cost key was lost with a key-encryption key. Type it again to restore the daily comparison.'
+                : editing && provider.hasCostKey
+                ? 'A cost key is stored and cannot be shown. Leave this empty to keep it, or type a new key to replace it.'
+                : `An ${type === 'anthropic' ? 'Anthropic' : 'OpenAI'} admin key that may read the cost API. Koinon reads it once a day to compare the provider's bill with its own ledger. It is stored encrypted, never shown again and never sent to the gateway.`}
+            </p>
+            {editing && (provider.hasCostKey || provider.costKeyLostAt) && (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={removeCostKey} onChange={(e) => setRemoveCostKey(e.target.checked)} />
+                Remove the stored cost key
+              </label>
+            )}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="provider-cost-scope">Cost scope</Label>
+            <Input id="provider-cost-scope" value={costScope} onChange={(e) => setCostScope(e.target.value)} placeholder={type === 'anthropic' ? 'wrkspc_… or default' : 'proj_… or key_…'} autoComplete="off" spellCheck={false} disabled={removeCostKey} aria-invalid={Boolean(touched && costScopeError)} aria-describedby={touched && costScopeError ? 'provider-cost-scope-help provider-cost-scope-error' : 'provider-cost-scope-help'} />
+            <p id="provider-cost-scope-help" className="text-muted-foreground text-xs">
+              {type === 'anthropic'
+                ? 'The workspace whose cost is this provider key’s: its ID (wrkspc_…), or default for the default workspace. Needed with a cost key.'
+                : 'The OpenAI project ID (proj_…) or API key ID (key_…, the key’s ID, never the key) whose cost is this provider key’s. Needed with a cost key.'}
+            </p>
+            {touched && costScopeError && (
+              <p id="provider-cost-scope-error" className="text-destructive text-xs">
+                {costScopeError}
+              </p>
+            )}
+          </div>
+        </fieldset>
       )}
       {error && (
         <Alert variant="destructive" role="alert">

@@ -288,7 +288,16 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 		if err != nil {
 			return err
 		}
-		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+		// A response whose provider can say what it billed (an OpenRouter generation) is settled
+		// later at that bill, as an agent's is (ADR 0056, amendment 2026-11-06). The key's entries
+		// hold no reserve: a cut response is not held back from its small daily budget.
+		provisional, settleID := false, pgtype.Text{}
+		if pr.model.ProviderID.Valid && billedLater(e, pr) {
+			if _, ok := in.sources().For(pr.model.ProviderType, pr.model.ProviderURL, e.ResponseID); ok {
+				provisional, settleID = true, pgtype.Text{String: e.ResponseID, Valid: true}
+			}
+		}
+		entryID, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			OrgID: org.ID, Principal: PrincipalSystem,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
 			InputTokens: pr.totalIn(), OutputTokens: pr.totalOut(),
@@ -296,44 +305,64 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: pgtype.Timestamptz{Time: e.Time, Valid: true},
+			Provisional: provisional, ResponseID: pgtype.Text{String: e.ResponseID, Valid: e.ResponseID != ""},
 			UpstreamStatus: upstreamStatus(e), ProviderID: pr.model.ProviderID,
-		}); errors.Is(err, pgx.ErrNoRows) {
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {
 			return fmt.Errorf("insert spend entry: %w", err)
 		}
 		recorded = true
-		st, err := budget.ComputeSystem(ctx, q, org.ID, e.Time)
-		if err != nil {
-			return err
-		}
-		// People are told about the org's limits, not about the key's own daily budget.
-		orgOnly := budget.Status{Org: org.ID}
-		for _, l := range st.Levels {
-			if l.Name != budget.SystemDaily {
-				orgOnly.Levels = append(orgOnly.Levels, l)
+		if provisional {
+			if err := q.InsertSpendSettlement(ctx, store.InsertSpendSettlementParams{
+				OrgID: org.ID, EntryID: entryID, ProviderID: pr.model.ProviderID, ProviderType: pr.model.ProviderType,
+				ResponseID:    settleID,
+				NextAttemptAt: pgtype.Timestamptz{Time: in.now().Add(settleBackoff(0)), Valid: true},
+				Deadline:      pgtype.Timestamptz{Time: e.Time.Add(SettleWindow), Valid: true},
+			}); err != nil {
+				return fmt.Errorf("queue settlement: %w", err)
 			}
 		}
-		if err := budget.Alert(ctx, q, in.Notifier, orgOnly, pr.cost); err != nil {
-			return err
-		}
-		crossed := false
-		for _, r := range st.Current(in.now()) {
-			if r.Spent-pr.cost < r.Limit {
-				crossed = true
-			}
-		}
-		if crossed {
-			if err := q.NotifyReconciler(ctx, org.ID); err != nil {
-				return fmt.Errorf("wake the reconciler: %w", err)
-			}
-		}
-		if l, found := orgOnly.Pick(in.now()); found {
-			_, err = Stop(ctx, tx, org.ID, pgtype.UUID{}, l)
-		}
-		return err
+		return enforceSystem(ctx, tx, in.Notifier, in.now(), org.ID, e.Time, pr.cost)
 	})
 	return recorded, err
+}
+
+// enforceSystem is the budget side of a system-key entry, once it is recorded (delta is the cost it
+// added) or a settlement changed its cost: alerts for the org's limits, a wake-up of the reconciler
+// when a level was crossed, and the stop of an org whose limit is spent.
+func enforceSystem(ctx context.Context, tx pgx.Tx, nf budget.Notifier, now time.Time, org pgtype.UUID, at time.Time, delta money.USD) error {
+	q := store.New(tx)
+	st, err := budget.ComputeSystem(ctx, q, org, at)
+	if err != nil {
+		return err
+	}
+	// People are told about the org's limits, not about the key's own daily budget.
+	orgOnly := budget.Status{Org: org}
+	for _, l := range st.Levels {
+		if l.Name != budget.SystemDaily {
+			orgOnly.Levels = append(orgOnly.Levels, l)
+		}
+	}
+	if err := budget.Alert(ctx, q, nf, orgOnly, delta); err != nil {
+		return err
+	}
+	crossed := false
+	for _, r := range st.Current(now) {
+		if r.Spent-delta < r.Limit {
+			crossed = true
+		}
+	}
+	if crossed {
+		if err := q.NotifyReconciler(ctx, org); err != nil {
+			return fmt.Errorf("wake the reconciler: %w", err)
+		}
+	}
+	if l, found := orgOnly.Pick(now); found {
+		_, err = Stop(ctx, tx, org, pgtype.UUID{}, l)
+	}
+	return err
 }
 
 // enforcement is what enforce checks: the agent's, org's and platform's budgets and the run's own

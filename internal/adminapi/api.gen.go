@@ -1246,8 +1246,14 @@ type PriceVersion struct {
 // Provider defines model for Provider.
 type Provider struct {
 	// AnthropicWorkspaceId The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
-	AnthropicWorkspaceId *string   `json:"anthropicWorkspaceId,omitempty"`
-	CreatedAt            time.Time `json:"createdAt"`
+	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
+
+	// CostKeyLostAt Set when the cost API key was lost with the key that encrypted it; enter it again.
+	CostKeyLostAt *time.Time `json:"costKeyLostAt,omitempty"`
+
+	// CostScope The workspace, project or API key whose cost the daily reconciliation compares with the ledger. Unset without a cost API key.
+	CostScope *string   `json:"costScope,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 
 	// CredentialLostAt Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`): the provider is not served until the key is entered again.
 	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
@@ -1260,6 +1266,9 @@ type Provider struct {
 
 	// Formats The model formats the provider's type offers, preferred first (ADR 0069).
 	Formats []ModelFormat `json:"formats"`
+
+	// HasCostKey Whether a cost API key is stored. The key itself is never returned.
+	HasCostKey bool `json:"hasCostKey"`
 
 	// HasKey Whether an API key is stored. The key itself is never returned.
 	HasKey bool               `json:"hasKey"`
@@ -1285,9 +1294,15 @@ type ProviderCreate struct {
 
 	// ApiKey Omit for keyless upstreams such as Ollama.
 	ApiKey *string `json:"apiKey,omitempty"`
-	Name   string  `json:"name"`
-	Type   string  `json:"type"`
-	Url    string  `json:"url"`
+
+	// CostApiKey An admin key with which the daily reconciliation reads the provider's cost API. Write-only, never returned. Only for `anthropic` and `openai` providers at their own API URL; needs `costScope`.
+	CostApiKey *string `json:"costApiKey,omitempty"`
+
+	// CostScope The part of the account whose cost is this provider's: the Anthropic workspace ID (or `default`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
+	CostScope *string `json:"costScope,omitempty"`
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	Url       string  `json:"url"`
 }
 
 // ProviderList defines model for ProviderList.
@@ -1302,8 +1317,14 @@ type ProviderUpdate struct {
 
 	// ApiKey Replaces the key; an empty string removes it.
 	ApiKey *string `json:"apiKey,omitempty"`
-	Type   *string `json:"type,omitempty"`
-	Url    *string `json:"url,omitempty"`
+
+	// CostApiKey Replaces the cost API key; an empty string removes it and its scope. Write-only, never returned. Only for `anthropic` and `openai` providers at their own API URL.
+	CostApiKey *string `json:"costApiKey,omitempty"`
+
+	// CostScope Replaces the cost scope. A cost API key needs one.
+	CostScope *string `json:"costScope,omitempty"`
+	Type      *string `json:"type,omitempty"`
+	Url       *string `json:"url,omitempty"`
 }
 
 // Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
