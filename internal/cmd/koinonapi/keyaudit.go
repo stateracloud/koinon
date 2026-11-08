@@ -11,7 +11,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/keyscli"
-	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // keyAudit is koinon-api's own writer of key events (ADR 0100 decision 3): the keys it generates on
@@ -134,12 +133,6 @@ func (k *keyAudit) watchChanged(ctx context.Context) {
 // succeeds when the chain cannot take the event yet (the CloudNativePG upgrade window, ADR 0100
 // decision 1.1a): the start does not wait for it.
 func (k *keyAudit) startObserving(ctx context.Context, stop func()) {
-	err := k.observe(ctx)
-	if err == nil {
-		return
-	}
-	slog.Error("the key-set check did not record its state; retrying", "err", err)
-	safego.GoOrStop(ctx, slog.Default(), "keys-observed-retry", stop, func(ctx context.Context) {
-		retryInstallWrite(ctx, "key set check", installWriteRetry, k.observe)
-	})
+	_ = retryInstallWrite(ctx, stop, installRetry{Goroutine: "keys-observed-retry", What: "key set check", AnyError: true},
+		installWriteRetry, k.observe(ctx), k.observe)
 }

@@ -172,7 +172,7 @@ func hashToken(token string) []byte {
 }
 
 // createSession stores a new session for user and returns the cookie token.
-func (s *Service) createSession(ctx context.Context, q *store.Queries, userID pgtype.UUID, method store.AuthMethod) (string, store.Session, error) {
+func (s *Service) createSession(ctx context.Context, q *store.Queries, b audit.Batch, userID pgtype.UUID, method store.AuthMethod) (string, store.Session, error) {
 	token, hash, err := newToken()
 	if err != nil {
 		return "", store.Session{}, err
@@ -195,12 +195,12 @@ func (s *Service) createSession(ctx context.Context, q *store.Queries, userID pg
 	if err != nil {
 		return "", store.Session{}, fmt.Errorf("load user: %w", err)
 	}
-	if err := audit.RecordErr(ctx, q, audit.Event{
+	// It goes into the batch, not straight to the org head: a login that also grants or revokes platform
+	// admin adds an install event, and the batch writes that one first (ADR 0100 decision 1.7).
+	b.Org(audit.Event{
 		Org: user.PersonalOrgID, Actor: audit.User(userID), Action: "auth.login", TargetKind: "user", TargetID: userID.String(),
 		After: map[string]any{"method": string(method)},
-	}); err != nil {
-		return "", store.Session{}, err
-	}
+	})
 	return token, sess, nil
 }
 

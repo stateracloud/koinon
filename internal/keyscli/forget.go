@@ -198,7 +198,7 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
 	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
 	changed := false
-	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
+	_, err := audit.InPgTx(ctx, t.Pool, func(tx pgx.Tx, b audit.Batch) error {
 		tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
 			platform.Table, lostRules[platform].set(platform), platform.Column), id)
 		if err != nil {
@@ -207,10 +207,11 @@ func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult)
 		if changed = tag.RowsAffected() > 0; !changed {
 			return nil
 		}
-		return audit.RecordInstallErr(ctx, store.New(tx), audit.InstallEvent{
+		b.Install(audit.InstallEvent{
 			Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id,
 			After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
 		})
+		return nil
 	})
 	if err != nil {
 		return err
@@ -246,7 +247,7 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 	}
 	lost := map[string][]string{}
 	var epochs []string
-	err = pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
+	_, err = audit.InPgTx(ctx, t.Pool, func(tx pgx.Tx, b audit.Batch) error {
 		lost, epochs = map[string][]string{}, nil
 		agents := map[string]pgtype.UUID{}
 		for _, c := range Columns {
@@ -313,9 +314,10 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 		if len(epochs) > 0 {
 			after["newRepositoryEpochs"] = epochs
 		}
-		return audit.RecordErr(ctx, q, audit.Event{
+		b.Org(audit.Event{
 			Org: org, Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id, After: after,
 		})
+		return nil
 	})
 	if err != nil {
 		return err

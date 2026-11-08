@@ -223,7 +223,7 @@ type versionWrite struct {
 
 // writeVersion validates entries, writes the next version and audits it in the same
 // transaction as q. The caller holds the platform lock (LockPlatformPrices).
-func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (PlatformVersion, error) {
+func writeVersion(ctx context.Context, q *store.Queries, b audit.Batch, w versionWrite) (PlatformVersion, error) {
 	if !w.ValidFrom.IsZero() && w.ValidFrom.Before(time.Now().Add(-time.Second)) {
 		return PlatformVersion{}, &InvalidError{Msg: "a platform price version cannot start in the past: backdating would change what charged requests cost"}
 	}
@@ -290,19 +290,17 @@ func writeVersion(ctx context.Context, q *store.Queries, w versionWrite) (Platfo
 	if len(pv.ProposalIDs) > 0 {
 		after["proposals"] = pv.ProposalIDs
 	}
-	if err := auditPlatform(ctx, q, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after); err != nil {
-		return PlatformVersion{}, err
-	}
+	auditPlatform(b, w.Actor, w.Action, "platform_price", fmt.Sprint(row.Version), nil, after)
 	return pv, nil
 }
 
 // auditPlatform records a platform-wide event in the install audit chain (ADR 0100). It belongs to
 // no org and needs no platform admin: a change before the first admin exists is one install event
 // with a named actor, a user, a cli command or system koinon-api:price-refresh. It is written in the
-// transaction of the change, and a failed write fails the change. Callers hold the platform price
-// lock first (ADR 0100 decision 1.7: domain locks, then the install event).
-func auditPlatform(ctx context.Context, q *store.Queries, actor audit.Actor, action, kind, target string, before, after any) error {
-	return audit.RecordInstallErr(ctx, q, audit.InstallEvent{Actor: actor, Action: action, TargetKind: kind, TargetID: target, Before: before, After: after})
+// transaction of the change (the audit batch writes it just before commit, after the platform price
+// lock the caller holds, ADR 0100 decision 1.7), and a failed write fails the change.
+func auditPlatform(b audit.Batch, actor audit.Actor, action, kind, target string, before, after any) {
+	b.Install(audit.InstallEvent{Actor: actor, Action: action, TargetKind: kind, TargetID: target, Before: before, After: after})
 }
 
 // currentPlatform returns the version valid now (zero value, no entries, when none).
@@ -315,8 +313,7 @@ func currentPlatform(ctx context.Context, q *store.Queries) (PlatformVersion, er
 // is never rewritten, and requests charged in between keep their price_ref (ADR 0098 decision 5).
 func (s *Service) Rollback(ctx context.Context, actor audit.Actor, version int64) (PlatformVersion, error) {
 	var out PlatformVersion
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockPlatformPrices(ctx); err != nil {
 			return err
 		}
@@ -338,7 +335,7 @@ func (s *Service) Rollback(ctx context.Context, actor audit.Actor, version int64
 		if err != nil {
 			return err
 		}
-		out, err = writeVersion(ctx, q, versionWrite{
+		out, err = writeVersion(ctx, q, b, versionWrite{
 			Actor: actor, Action: "platform_price.rollback", Reason: fmt.Sprintf("rollback to version %d", version),
 			RestoredFrom: version, Entries: old.Entries, Changed: changedIDs(cur.Entries, old.Entries), Dropped: old.BadEntries,
 		})
@@ -390,8 +387,7 @@ func (s *Service) RetireCaughtUp(ctx context.Context) ([]string, error) {
 		}
 	}
 	var retired []string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockPlatformPrices(ctx); err != nil {
 			return err
 		}
@@ -417,7 +413,7 @@ func (s *Service) RetireCaughtUp(ctx context.Context) ([]string, error) {
 		if len(retired) == 0 {
 			return nil
 		}
-		_, err = writeVersion(ctx, q, versionWrite{
+		_, err = writeVersion(ctx, q, b, versionWrite{
 			Actor: AutoActor, Action: "platform_price.retired", Reason: "default price list " + list.Version + " caught up",
 			Entries: keep, Changed: retired,
 		})

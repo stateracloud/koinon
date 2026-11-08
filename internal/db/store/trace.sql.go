@@ -726,8 +726,8 @@ type LowerOrgTraceLevelsRow struct {
 
 // Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
 // caller's transaction. Returns the orgs it changed with their levels before, for the audit log, in org ID
-// order: the row locks are taken in that order, and the caller writes one audit event per org in that
-// order (ADR 0100 decision 1.7).
+// order: the ORDER BY stays for the row locks, which are taken in that order. The audit batch orders the
+// events it writes (ADR 0100 decision 1.7), so the caller does not depend on this order.
 func (q *Queries) LowerOrgTraceLevels(ctx context.Context, arg LowerOrgTraceLevelsParams) ([]LowerOrgTraceLevelsRow, error) {
 	rows, err := q.db.Query(ctx, lowerOrgTraceLevels, arg.Ceiling, arg.UpdatedBy)
 	if err != nil {

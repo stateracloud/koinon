@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 )
@@ -47,8 +48,7 @@ func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval
 	if _, err := ParseRefreshMode(string(mode)); err != nil {
 		return err
 	}
-	return pgx.BeginFunc(ctx, r.svc.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
 		want := store.UpsertPriceRefreshSettingsParams{
 			Mode: string(mode), Interval: interval.String(), MaxChangePercent: int32(r.bounds.MaxChangePercent), MaxAutoPerDay: int32(r.bounds.MaxAutoPerDay), // #nosec G115 -- validated bounds
 		}
@@ -73,9 +73,11 @@ func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval
 		if !first {
 			before = fmtSettings(old.Mode, old.Interval, old.MaxChangePercent, old.MaxAutoPerDay)
 		}
-		return auditPlatform(ctx, q, AutoActor, "price.refresh.settings_changed", "price_refresh", "", before,
+		auditPlatform(b, AutoActor, "price.refresh.settings_changed", "price_refresh", "", before,
 			fmtSettings(want.Mode, want.Interval, want.MaxChangePercent, want.MaxAutoPerDay))
+		return nil
 	})
+	return err
 }
 
 // StoredBounds returns the auto-apply bounds koinon-api last started with (SyncSettings), or the

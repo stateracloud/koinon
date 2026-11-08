@@ -390,6 +390,10 @@ _Avoid_: Built-in tools, system tools
 An org's tamper-evident record of every configuration change and every decision that matters, written with the change itself.
 _Avoid_: Activity log, event log, history
 
+**Audit batch**:
+The audit events one transaction collects before they are written: callers add events to it while they make the change, and the audit module writes them just before commit, the install events first and then the org events by org ID, so an event commits with its change or not at all and no caller chooses the order (ADR 0100 decision 1.7).
+_Avoid_: Audit queue, audit buffer, event list
+
 **Install audit chain**:
 The install-wide audit log of platform actions that belong to no org, such as platform price changes, written only by koinon-api (ADR 0100).
 _Avoid_: Platform log, global audit log

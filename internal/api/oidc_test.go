@@ -262,6 +262,12 @@ var _ = Describe("OIDC platform admin groups", func() {
 		Expect(isAdmin(ctx, "pia")).To(BeTrue())
 		Expect(events(ctx, "pia", "platform_admin.grant")).To(Equal(1))
 
+		By("writing the install event before the login event, which points at it (ADR 0100 decision 1.7)")
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events a
+			JOIN users u ON u.personal_org_id = a.org_id
+			JOIN install_audit_events i ON i.id::text = a.summary->>'install_event_id'
+			WHERE u.oidc_subject = 'pia' AND a.action = 'auth.login' AND i.action = 'platform_admin.grant' AND i.created_at <= a.created_at`)).To(Equal(1))
+
 		By("keeping the grant, without a second event, while the group stays")
 		e.browser().oidcLogin(ctx, "")
 		Expect(events(ctx, "pia", "platform_admin.grant")).To(Equal(1))

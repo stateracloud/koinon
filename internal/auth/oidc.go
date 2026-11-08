@@ -259,13 +259,12 @@ func (s *Service) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var token string
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
-		user, err := s.upsertOIDCUser(ctx, q, id)
+	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+		user, err := s.upsertOIDCUser(ctx, q, b, id)
 		if err != nil {
 			return err
 		}
-		token, _, err = s.createSession(ctx, q, user, store.AuthMethodOidc)
+		token, _, err = s.createSession(ctx, q, b, user, store.AuthMethodOidc)
 		return err
 	})
 	if errors.Is(err, errUserDisabled) {
@@ -289,7 +288,7 @@ var errUserDisabled = errors.New("user is disabled")
 
 // upsertOIDCUser finds or creates the user for (issuer, subject), refreshes
 // profile fields and reconciles IdP-sourced memberships with id.Groups.
-func (s *Service) upsertOIDCUser(ctx context.Context, q *store.Queries, id identity) (pgtype.UUID, error) {
+func (s *Service) upsertOIDCUser(ctx context.Context, q *store.Queries, b audit.Batch, id identity) (pgtype.UUID, error) {
 	user, err := q.GetUserByIdentity(ctx, store.GetUserByIdentityParams{
 		OidcIssuer: id.Issuer, OidcSubject: id.Subject,
 	})
@@ -324,7 +323,7 @@ func (s *Service) upsertOIDCUser(ctx context.Context, q *store.Queries, id ident
 	}); err != nil {
 		return pgtype.UUID{}, fmt.Errorf("sync group memberships: %w", err)
 	}
-	if err := s.syncPlatformAdmin(ctx, q, user, groups); err != nil {
+	if err := s.syncPlatformAdmin(ctx, q, b, user, groups); err != nil {
 		return pgtype.UUID{}, err
 	}
 	return user.ID, nil
@@ -337,8 +336,8 @@ var OIDCSyncActor = audit.System("koinon-api:oidc-sync")
 // syncPlatformAdmin grants or revokes platform admin from the user's groups (oidc.platformAdminGroups).
 // It never touches a grant from another source, such as the bootstrap admin's. A grant or revoke is an
 // install-wide action, so its event goes in the install audit chain (ADR 0100 decision 3), in the
-// transaction of the change, not in the user's personal org.
-func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user store.User, groups []string) error {
+// transaction of the change (through the audit batch), not in the user's personal org.
+func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, b audit.Batch, user store.User, groups []string) error {
 	if s.oidc == nil || len(s.oidc.cfg.PlatformAdminGroups) == 0 {
 		return nil
 	}
@@ -360,7 +359,8 @@ func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user 
 			return fmt.Errorf("grant platform admin: %w", err)
 		}
 		ev.Action, ev.After = "platform_admin.grant", map[string]any{"source": "oidc_group", "groups": matched}
-		return audit.RecordInstallErr(ctx, q, ev)
+		b.Install(ev)
+		return nil
 	}
 	_, err := q.RevokePlatformAdminFromGroup(ctx, user.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -370,7 +370,8 @@ func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user 
 		return fmt.Errorf("revoke platform admin: %w", err)
 	}
 	ev.Action, ev.Before = "platform_admin.revoke", map[string]any{"source": "oidc_group"}
-	return audit.RecordInstallErr(ctx, q, ev)
+	b.Install(ev)
+	return nil
 }
 
 // safeReturnTo keeps post-login redirects on this site: only absolute paths,

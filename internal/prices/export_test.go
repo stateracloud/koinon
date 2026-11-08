@@ -6,8 +6,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/pricing"
@@ -17,8 +15,7 @@ import (
 // or, when validFrom is set, from then (a past time is refused like in production).
 func (s *Service) SetPlatformForTest(ctx context.Context, entries []pricing.Entry, validFrom ...time.Time) (PlatformVersion, error) {
 	var out PlatformVersion
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
 		if err := q.LockPlatformPrices(ctx); err != nil {
 			return err
 		}
@@ -31,7 +28,7 @@ func (s *Service) SetPlatformForTest(ctx context.Context, entries []pricing.Entr
 			w.Changed = append(w.Changed, e.ID)
 		}
 		var err error
-		out, err = writeVersion(ctx, q, w)
+		out, err = writeVersion(ctx, q, b, w)
 		return err
 	})
 	return out, err
