@@ -93,26 +93,10 @@ type harness struct {
 	// refuseAll makes every prompt but the summary ask for an outside edit and end cancelled when
 	// it is rejected, so a run never gets past its refusals.
 	refuseAll bool
-	// refuseOn refuses the prompts with these 1-based positions (the summary prompt does not count).
-	refuseOn map[int]bool
-	// onRefuse runs when a refusing prompt is about to end cancelled.
-	onRefuse func()
 	// lingers: keep running after end-of-file on stdin, until the exec is closed.
 	lingers bool
-	// ignoreCancel makes a markWait turn ignore session/cancel (it ends only when the stream goes
-	// away); endOnCancel makes it answer a cancel with end_turn, as a turn that ended on its own at
-	// that moment does.
-	ignoreCancel, endOnCancel bool
-	// lateCancel makes a markWait turn honour session/cancel only this long after it arrived.
-	lateCancel time.Duration
-	// refuseAfterCancel makes a markWait turn, once cancelled, ask for an outside edit (which
-	// agentd refuses) before it ends cancelled.
-	refuseAfterCancel bool
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
-	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
-	// many are being answered; maxInFlight is the most there ever were at once.
-	inFlight, maxInFlight int
 }
 
 func newHarness() *harness {
@@ -338,17 +322,9 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if firstHang {
 		p.h.hung = true
 	}
-	p.h.inFlight++
-	p.h.maxInFlight = max(p.h.maxInFlight, p.h.inFlight)
-	defer func() {
-		p.h.mu.Lock()
-		p.h.inFlight--
-		p.h.mu.Unlock()
-	}()
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
-	refuseAll := p.h.refuseAll || p.h.refuseOn[len(p.h.prompts)]
-	onRefuse := p.h.onRefuse
+	refuseAll := p.h.refuseAll
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
@@ -395,9 +371,6 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		if res.Outcome.Selected != nil && res.Outcome.Selected.OptionId != "reject" {
 			return end, nil
 		}
-		if onRefuse != nil {
-			onRefuse()
-		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
 	case strings.HasPrefix(text, wrapUpMarker), strings.HasPrefix(text, limitWrapUpMarker):
@@ -438,51 +411,16 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 
 	case strings.Contains(text, markWait):
 		p.h.mu.Lock()
-		ignore, endOnCancel, noChunk := p.h.ignoreCancel, p.h.endOnCancel, p.h.noChunk
+		noChunk := p.h.noChunk
 		p.h.mu.Unlock()
 		if !noChunk {
 			if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
 				return sdk.PromptResponse{}, err
 			}
 		}
-		if ignore {
-			// The SDK cancels ctx on session/cancel; a harness that ignores the cancel keeps the
-			// turn open until the connection goes away.
-			<-p.agent().Done()
-			return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
-		}
 		select {
 		case <-p.cancelCh():
 		case <-ctx.Done():
-		}
-		p.h.mu.Lock()
-		late := p.h.lateCancel
-		p.h.mu.Unlock()
-		time.Sleep(late)
-		p.h.mu.Lock()
-		refuseAfter := p.h.refuseAfterCancel
-		p.h.mu.Unlock()
-		if refuseAfter {
-			tid, name, k := sdk.ToolCallId("refuse-after-cancel"), "write", sdk.ToolKindEdit
-			if err := p.say(context.WithoutCancel(ctx), id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
-				return sdk.PromptResponse{}, err
-			}
-			if _, err := p.agent().RequestPermission(context.WithoutCancel(ctx), sdk.RequestPermissionRequest{
-				SessionId: id,
-				ToolCall: sdk.ToolCallUpdate{
-					ToolCallId: tid, Title: &name, Kind: &k,
-					Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
-				},
-				Options: []sdk.PermissionOption{
-					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
-					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
-				},
-			}); err != nil {
-				return sdk.PromptResponse{}, err
-			}
-		}
-		if endOnCancel {
-			return end, nil
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
@@ -593,13 +531,6 @@ func (p *process) resetCancel() {
 	p.h.mu.Lock()
 	defer p.h.mu.Unlock()
 	p.cancelled = make(chan struct{})
-}
-
-// maxPromptsInFlight is the most prompts the fake ever had open at once.
-func (h *harness) maxPromptsInFlight() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.maxInFlight
 }
 
 func (p *process) Authenticate(context.Context, sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {
