@@ -20,9 +20,11 @@ export FAKE_DIR="$tmp/seq" PATH="$tmp/bin:$PATH" PR_THREADS_RETRY_SLEEPS="0 0 0"
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >>"$FAKE_DIR/calls"
-if [ "$1 $2" = "run list" ] && [[ $* == *--workflow\ ci.yml* ]]; then # the ci runs on the head (databaseId, displayTitle): $FAKE_DIR/ciruns (JSON), else gh "fails"
-  [ -f "$FAKE_DIR/ciruns" ] || exit 9
-  cat "$FAKE_DIR/ciruns"
+if [ "$1" = api ] && [[ $2 == */actions/runs* ]]; then # the workflow runs on the head, as the API prints them ({"workflow_runs":[...]}): $FAKE_DIR/wfruns, else gh "fails"
+  [ -f "$FAKE_DIR/wfruns" ] || exit 9
+  q=""
+  while [ $# -gt 0 ]; do [ "$1" != --jq ] || q=$2; shift; done
+  jq -r "${q:-.}" "$FAKE_DIR/wfruns"
   exit 0
 fi
 if [ "$1 $2" = "run list" ]; then
@@ -455,11 +457,18 @@ rdh() { # <rollup>: a ready PR with a head commit
   printf '{"state":"OPEN","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234","statusCheckRollup":[%s]}' "$1"
 }
 cr_ci() { cr_at "$@" | sed 's/^{/{"workflowName":"ci",/'; }
-# ciruns <id:title>...: the ci runs on the head as `gh run list --json databaseId,displayTitle` prints them.
+# wfrun <id> <path> <title> <created_at> [attempt]: one workflow run object as `GET actions/runs?head_sha=` prints it.
+wfrun() {
+  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"completed","conclusion":"success","created_at":"%s","run_started_at":"%s","run_attempt":%s}' \
+    "$1" "${2%.yml}" "$2" "$3" "$4" "$4" "${5:-1}"
+}
+# wfruns <run object>...: the answer of the runs listing.
+wfruns() { local IFS=,; printf '{"total_count":%s,"workflow_runs":[%s]}' "$#" "$*" >"$FAKE_DIR/wfruns"; }
+# ciruns <id:title>...: ci.yml runs on the head, created one minute apart in the order given.
 ciruns() {
-  local out="" r
-  for r in "$@"; do out+="${out:+,}{\"databaseId\":${r%%:*},\"displayTitle\":\"${r#*:}\"}"; done
-  printf '[%s]' "$out" >"$FAKE_DIR/ciruns"
+  local out=() r i=0
+  for r in "$@"; do i=$((i + 1)); out+=("$(wfrun "${r%%:*}" ci.yml "${r#*:}" "2026-11-01T10:0$i:00Z")"); done
+  wfruns "${out[@]}"
 }
 # (#218, #133) a ready PR drops the check runs of the runs titled `ci (draft)`, by run id, never by time.
 # Cases of 2026-11-06: #233 (draft run 96 s before ready), #229 (13 s before), #231 (the same shape, no --checks).
@@ -545,7 +554,56 @@ printf 'go\n' >"$FAKE_DIR/rules"
 ciruns "61:ci (draft)" "62:ci"
 run 7 --checks --require e2e --interval 0
 expect "a draft-era e2e-lab status satisfies --require e2e" 0 "checks 2/2 green"
-rm -f "$FAKE_DIR/rules" "$FAKE_DIR/ciruns"
+rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
+
+# (#133) one verdict per workflow run: the newest run of a workflow decides, not the newest row of a name.
+# The bug these pin: an older green `go` outvoted a newer cancelled run, because a cancelled row never counts as a failure.
+o_go=$(cr_ci go SUCCESS 71 2026-11-01T10:00:00Z)
+n_cx=$(cr_ci go CANCELLED 72 2026-11-01T10:05:00Z)
+seq_set "$(rdh "$o_go,$n_cx")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --interval 0
+expect "#133: a newer cancelled run with an older green is not green" 1 "FAILED go (run 72)"
+# a never-started cancelled row (null startedAt in the GraphQL rollup) sorts by completedAt, not first
+n_nostart='{"workflowName":"ci","name":"go","status":"COMPLETED","conclusion":"CANCELLED","startedAt":null,"completedAt":"2026-11-01T10:05:00Z","detailsUrl":"https://github.com/o/r/actions/runs/72/job/9"}'
+seq_set "$(rdh "$o_go,$n_nostart")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --interval 0
+expect "#133: a cancelled row with no startedAt does not lose to an older green" 1 "FAILED go (run 72)"
+# the newest run is queued with no checks yet: the older green is not read; wait for it
+seq_set "$(rdh "$o_go")" "$(rdh "$o_go")" "$(rdh "$o_go,$(cr_ci go SUCCESS 72 2026-11-01T10:05:00Z)")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --interval 0
+expect "#133: a newer run without checks is waited for, the older green is not used" 0 "waiting for the newest run of each workflow
+checks 1/1 green"
+# a red older run and a green newer run: green (re-run after a fix)
+o_red=$(cr_ci go FAILURE 71 2026-11-01T10:00:00Z)
+n_ok=$(cr_ci go SUCCESS 72 2026-11-01T10:05:00Z)
+seq_set "$(rdh "$o_red,$n_ok")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --interval 0
+expect "#133: a green newer run supersedes a red older run" 0 "checks 1/1 green"
+# a re-run attempt of the same run: the live attempt is waited for, the finished one is not final
+a2=$(cr_ci go IN_PROGRESS 72 2026-11-01T10:07:00Z | sed 's/"status":"COMPLETED"/"status":"IN_PROGRESS"/;s/"conclusion":"IN_PROGRESS"/"conclusion":""/')
+seq_set "$(rdh "$n_cx,$a2")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --timeout 1s --interval 1
+expect "#133: a live re-run attempt outranks the cancelled one" 2 "checks 0/1 pending: go
+TIMEOUT"
+# the e2e workflow is judged per run too: the dispatched run's green quickstart still counts (old issue 547)
+qs_old=$(cr_at quickstart SUCCESS 81 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+qs_new=$(cr_at quickstart SKIPPED 82 2026-11-01T10:05:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+seq_set "$(rdh "$r_go,$qs_old,$qs_new")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 62 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:05:00Z)"
+run 7 --checks --require e2e --interval 0
+expect "#133: a green quickstart of an older e2e-kind run still passes --require e2e" 0 "checks 2/2 green"
+rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
 
 # 7d. (old issue 661) a stale PR head: GitHub's headRefOid is not origin's branch tip
 cat >"$tmp/bin/git" <<'SH'

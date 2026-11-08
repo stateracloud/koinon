@@ -139,26 +139,12 @@ else
 fi
 [ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
-# One normalised row per check: CheckRuns (status/conclusion) and commit statuses (state) alike.
-# A required check is judged on its newest run only (by start time; rollup order breaks ties). A
-# cancelled or skipped run never outranks a queued or in-progress one (old issue 431): wait for the live run.
-# The checks of the e2e-kind workflow count the same way: several runs on one head are normal there.
+# One normalised row per check, judged by hack/lib/pr-verdict.sh (#133): the same rows and the same ordering as
+# hack/pr-merge.sh. A name is judged on its newest row of the workflow run that counts; see that file's header.
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "$0")" && pwd)/lib/pr-verdict.sh"
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
-norm='def ok: .done and (.bad | not) and (.skipped | not);
-def newest: sort_by(.ts) | . as $s | ($s | last) as $l
-  | ([$s[] | select(ok)] | last) as $g
-  | ([$s[] | select(.done and .bad and (.cancelled | not))] | last) as $f
-  | if $g != null and $f != null and $f.ts > $g.ts then $f elif $g != null then $g elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
-[(.statusCheckRollup // [])[] | {
-  name: (.name // .context // "?"),
-  ts: (.startedAt // .completedAt // ""),
-  cancelled: ((.conclusion // "") == "CANCELLED"),
-  url: (.detailsUrl // .targetUrl // ""),
-  wf: (.workflowName // ""),
-  done: ((.status == "COMPLETED") or ((.state // "") | IN("SUCCESS", "FAILURE", "ERROR"))),
-  skipped: ((.conclusion // "") == "SKIPPED"),
-  bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
-}] | group_by(.name) | map(if (.[0].name | IN($req[])) or all(.[]; .wf == "e2e-kind") then [newest] else . end) | add // []'
+norm="$PRV_JQ"'[(.statusCheckRollup // [])[] | prv_row] | prv_collapse($req)'
 
 reqjson="[]"
 jqn() { jq --argjson req "$reqjson" "$@"; }
@@ -166,10 +152,7 @@ jqn() { jq --argjson req "$reqjson" "$@"; }
 # head_runs <sha>: every check run of the commit as rollup-shaped rows (a JSON array); [] when gh fails.
 head_runs() {
   local rows
-  rows=$(gh api "repos/{owner}/{repo}/commits/$1/check-runs?per_page=100" --paginate --jq '.check_runs[] | {
-    name: .name, status: ((.status // "") | ascii_upcase), conclusion: ((.conclusion // "") | ascii_upcase),
-    startedAt: (.started_at // ""), completedAt: (.completed_at // ""), detailsUrl: (.details_url // .html_url // ""), workflowName: ""}' 2>/dev/null |
-    jq -sc . 2>/dev/null) || rows=""
+  rows=$(prv_check_rows "$1") || rows=""
   echo "${rows:-[]}"
 }
 
@@ -205,17 +188,7 @@ load_contexts() {
   return 0
 }
 
-# queue_state <PR>: `queued <position> <state>` while the PR is in the base branch's merge queue
-# (#225), `no` when the answer says it is not (a repository without a queue answers `no` too), and
-# `unknown` when the answer cannot be read (gh or jq failed, a GraphQL error, no pullRequest object).
-# `gh pr view --json` has no queue fields, so GraphQL. Callers must not take `unknown` for "left the queue".
-# shellcheck disable=SC2016 # $owner, $repo, $number are GraphQL variables
-queue_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { isInMergeQueue mergeQueueEntry { position state } } } }'
-queue_state() {
-  local raw
-  raw=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query="$queue_query" 2>/dev/null) || { echo unknown; return 0; }
-  jq -r '.data.repository.pullRequest | if type != "object" then "unknown" elif .isInMergeQueue == true then "queued \(.mergeQueueEntry.position // "?") \(.mergeQueueEntry.state // "")" else "no" end' <<<"$raw" 2>/dev/null || echo unknown
-}
+queue_state() { prv_queue_state "$1"; }
 
 no_live=0 last="" was_queued=0 dq_polls=0
 emit() { # print only when the line differs from the previous one
@@ -325,23 +298,21 @@ while :; do
       json=$(jq --argjson x "$extra" --argjson names "$(printf '%s\n' "${req_now[@]}" | jq -R . | jq -sc .)" \
         '.statusCheckRollup = ((.statusCheckRollup // []) + [$x[]? | select(.name | IN($names[]))])' <<<"$json")
     fi
-    # A PR that is not a draft ignores the check runs of its draft-era `ci` runs (#218, #133). The draft flag
-    # comes from the event payload, and GitHub names such a run `ci (draft)` (ci.yml run-name): that display
-    # title, matched by run id, is the only test. No time window: a draft run can precede the ready run by 13 s
-    # or by 96 s, and a by-hand re-run of it replays draft=true. A non-draft run (green, red or cancelled) is
-    # never dropped, so a red ready run still fails; when every ci check was a draft one, the missing required
-    # contexts make it wait for the ready run. When gh cannot list the runs nothing is dropped (a draft run's
-    # red then shows as FAILED, never as green).
-    if [ -n "$head" ] && [ "$(jq -r '.isDraft // false' <<<"$json")" != true ]; then
-      draft_ids=$(gh run list --commit "$head" --workflow ci.yml --limit 50 --json databaseId,displayTitle 2>/dev/null |
-        jq -r '[.[] | select(.displayTitle == "ci (draft)") | .databaseId | tostring] | join(",")' 2>/dev/null) || draft_ids=""
-      if [ -n "$draft_ids" ]; then
-        # shellcheck disable=SC2016 # jq program
-        drop='def rid: (((.detailsUrl // "") | capture("/runs/(?<r>[0-9]+)")? | .r) // null);
-          def draft($ids): rid as $id | $id != null and ((($ids | split(",")) | index($id)) != null);'
-        if jq -e --arg ids "$draft_ids" "$drop any((.statusCheckRollup // [])[]; draft(\$ids))" <<<"$json" >/dev/null; then
-          ready_dropped=1
-          json=$(jq --arg ids "$draft_ids" "$drop"' .statusCheckRollup |= map(select(draft($ids) | not))' <<<"$json")
+    # One verdict per workflow run (#133, hack/lib/pr-verdict.sh): only the newest counting run of each workflow
+    # on the head is read, by created_at then run_attempt. A run titled `ci (draft)` does not count once the PR is
+    # ready (#218), whatever its age: no time window, and a by-hand re-run of it replays draft=true. A red or
+    # cancelled newest run is never dropped, so it still fails; when the newest run has no checks yet the missing
+    # required contexts make this wait for it. When gh cannot list the runs nothing is dropped (a draft run's red
+    # then shows as FAILED, never as green).
+    ready_dropped=0 superseded=0
+    if [ -n "$head" ]; then
+      wfruns=$(prv_runs "$head")
+      if [ -n "$wfruns" ]; then
+        is_draft=$(jq -r '.isDraft // false' <<<"$json")
+        before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
+        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; ["quickstart"])' <<<"$json")
+        if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then
+          if jq -e 'any(.[]; .display_title == "ci (draft)")' <<<"$wfruns" >/dev/null; then ready_dropped=1; else superseded=1; fi
         fi
       fi
     fi
@@ -356,7 +327,7 @@ while :; do
         req_now=()
         for r in ${required[@]+"${required[@]}"}; do [ "$r" = quickstart ] || req_now+=("$r"); done
         no_live=1
-      elif jqn -e "$norm | any(.[]; .name == \"quickstart\" and ok)" <<<"$json" >/dev/null; then
+      elif jqn -e "$norm | any(.[]; .name == \"quickstart\" and prv_ok)" <<<"$json" >/dev/null; then
         # quickstart's newest verdict on the head is green (a newer failure would not be): a red e2e-lab is moot.
         json=$(jq '.statusCheckRollup |= map(select((.name // .context // "") != "e2e-lab" or (.state // "") == "SUCCESS"))' <<<"$json")
         no_live=1
@@ -438,6 +409,9 @@ while :; do
       elif [ -n "$missing_ctx" ] && [ "$ready_dropped" = 1 ]; then
         emit "waiting for the ready run"
         live=$missing_ctx
+      elif [ -n "$missing_ctx" ] && [ "$superseded" = 1 ]; then
+        emit "waiting for the newest run of each workflow (checks missing: $missing_ctx)"
+        live=$missing_ctx
       elif [ -n "$missing_ctx" ]; then
         emit "checks $ndone/$total done; waiting for required checks not on the head yet: $missing_ctx"
         live=$missing_ctx
@@ -488,6 +462,8 @@ while :; do
       emit "checks $ndone/$total pending: $pending"
     elif [ "$ready_dropped" = 1 ]; then
       emit "waiting for the ready run"
+    elif [ "$superseded" = 1 ]; then
+      emit "waiting for the newest run of each workflow"
     else
       emit "checks 0/0"
     fi

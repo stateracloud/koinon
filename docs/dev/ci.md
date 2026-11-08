@@ -273,7 +273,7 @@ event payload (old issue 676), not from the live state: the run is named `ci (dr
 when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
 that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
 ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
-`pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that (#218): no time window. A re-run replays the
+`pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that (#218, via `hack/lib/pr-verdict.sh`, "One verdict per workflow run"): no time window. A re-run replays the
 original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
 `web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
 `pr-wait.sh` ignores such a re-run (it was created before the ready event), so the ready run's
@@ -449,9 +449,9 @@ with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
-reads every required context of `hack/ci-required.txt` on the head SHA (newest run per name, success or
+reads every required context of `hack/ci-required.txt` on the head SHA with the shared verdict (below; success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
-`gh pr merge --merge` (`--admin`, else `--auto`, which prints `auto-merge enabled`, or `added to the merge queue` when the ruleset has a queue), and only after that
+`gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
 succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
 head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
 `ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
@@ -462,6 +462,30 @@ claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the
 dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
+
+### One verdict per workflow run (#133)
+
+`hack/lib/pr-verdict.sh` is the only place that decides what a head's checks say; `pr-wait.sh` and `pr-merge.sh`
+both source it, so they cannot disagree (they used to keep two orderings, and a cancelled newer run with an older
+green passed). The rule:
+
+1. Judge per workflow run, not per check name. For each workflow file on the head (`GET actions/runs?head_sha=`,
+   keyed by `path`) take the newest run that counts, by `created_at` then `run_attempt`. A run titled `ci (draft)` does
+   not count once the PR is ready (#218). The check runs of every other run of that workflow are dropped: an older
+   green never outvotes a newer run that was cancelled, red, still running or has no checks yet (that one is
+   `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
+2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
+   outranks finished ones; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
+   never-started cancelled job with a null `startedAt`), then job id.
+3. Commit statuses (`e2e-lab`) and check runs without a run have nothing to choose: the newest row of that name wins.
+4. `quickstart` (the e2e gate, old issue 547) is the exception: any green row on the head from a non-draft run counts
+   unless a newer one failed, because a dispatched `e2e-kind` run and the skipped `pull_request` run are normal side by side.
+5. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
+
+A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.
+Tests replay API-shaped answers (`hack/testdata/pr-verdict/` holds a recorded real one, PR #386's draft-era head) through
+`gh` stubs: no live GitHub. A script that waits or merges calls `hack/pr-wait.sh` and `hack/pr-merge.sh`, never its own
+loop (a pipe after `pr-wait.sh` hides its exit code, `koinon-private#626`).
 
 ### The merge queue (#225)
 
