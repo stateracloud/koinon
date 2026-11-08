@@ -477,6 +477,32 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(revisions(ctx)).To(HaveLen(1))
 	})
 
+	Describe("a settled system-key bill that crosses a limit (#239)", func() {
+		sysEntry := func(id string) ledger.Entry {
+			x := cut(id)
+			x.Agent = gateway.AgentRef{Org: e.slug, Name: gateway.ModelCheckAgentName}
+			x.KeyID = "k-system"
+			x.OutputKnown, x.OutputTokens, x.MaxTokens = true, 250, 0
+			return x
+		}
+
+		It("stops the org's runs at the org cap", func(ctx SpecContext) {
+			// Koinon's price for the request is $0.0007: under the cap until the bill arrives.
+			_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 0.001, 'test')`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = in.Ingest(ctx, []ledger.Entry{sysEntry("gen-sc")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "below the cap at Koinon's price")
+
+			src.answer("gen-sc", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0042")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateCanceled))
+			Expect(e.run(ctx, run.ID).OutcomeReason.String).To(HavePrefix("org monthly cap"))
+		})
+	})
+
 	It("charges a BYOK request OpenRouter's fee plus the upstream cost it reports", func(ctx SpecContext) {
 		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-b1")})
 		Expect(err).NotTo(HaveOccurred())
