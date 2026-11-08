@@ -7,6 +7,11 @@ function shallowEqual(a: object, b: object): boolean {
   return ka.length === Object.keys(b).length && ka.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k])
 }
 
+// Objects match field by field (a snapshot keeps its identity, a literal does not); ids and names match by value.
+function same<T>(a: T, b: T): boolean {
+  return typeof a === 'object' && a !== null && typeof b === 'object' && b !== null ? shallowEqual(a, b) : Object.is(a, b)
+}
+
 /**
  * closeOnly returns a done callback that closes the form described by mine and nothing else.
  *
@@ -14,6 +19,6 @@ function shallowEqual(a: object, b: object): boolean {
  * person opened another form. Clearing the page's editing state unconditionally would close that
  * other form (old issue 520), so the callback clears it only while it still names mine.
  */
-export function closeOnly<T extends object>(setEditing: Dispatch<SetStateAction<T | undefined>>, mine: T): () => void {
-  return () => setEditing((cur) => (cur !== undefined && shallowEqual(cur, mine) ? undefined : cur))
+export function closeOnly<T>(setEditing: Dispatch<SetStateAction<T | undefined>>, mine: NoInfer<T>): () => void {
+  return () => setEditing((cur) => (cur !== undefined && same(cur, mine) ? undefined : cur))
 }

@@ -3,6 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
+import { closeOnly } from '@/lib/editing'
 import { AmountForm } from '@/components/amount-form'
 import { ConfirmAction } from '@/components/confirm-action'
 import { RequireAdmin } from '@/components/require-admin'
@@ -173,7 +174,7 @@ function AgentLimits({ loading, list, actions }: { loading: boolean; list: Agent
                   submitLabel={`Save limit for ${a.agentName || 'the agent'}`}
                   initial={a.dailyLimitUsd}
                   onSave={(usd) => actions.setAgentLimit(a.agentId, usd)}
-                  onSaved={() => setEditing(undefined)}
+                  onSaved={closeOnly(setEditing, a.agentId)}
                 />
               ) : (
                 <div>

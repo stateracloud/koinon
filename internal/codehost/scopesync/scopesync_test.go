@@ -124,6 +124,21 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			Expect(s.Unknown).To(Equal(1), "GitHub's internal is stored as unknown, never as the scope's internal")
 		})
 
+		It("refuses a sync that took its credential before the secret was replaced (#244)", func(ctx SpecContext) {
+			conn := githubConn(ctx, fake)
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(Succeed())
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
+
+			By("the secret is replaced, which drops the scope")
+			_, err := pool.Exec(ctx, `UPDATE connections SET secret_fingerprint = 'SHA256:replaced' WHERE org_id = $1 AND id = $2`, conn.OrgID, conn.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(orgsettings.ClearCodeHostScope(ctx, q, conn.OrgID, conn.ID)).To(Succeed())
+
+			By("the sync that holds the row as it was cannot write")
+			Expect(syncer(hosts).Sync(ctx, conn, scopesync.Actor)).To(MatchError(orgsettings.ErrCredentialChanged))
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.ExternalHigh))
+		})
+
 		It("keeps a connection syncing when the last page crosses the bound, truncating the list", func(ctx SpecContext) {
 			fake.Repositories, fake.Private = nil, map[string]bool{}
 			for i := range 200 { // two full pages of 100; the bound falls inside the second

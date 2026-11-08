@@ -143,7 +143,7 @@ func (s *Syncer) Sync(ctx context.Context, row store.Connection, actor audit.Act
 		s.log.Warn("code-host scope truncated", "connection", row.ID.String(), "max", s.maxRepos)
 		repos = repos[:s.maxRepos]
 	}
-	return s.scope.ReplaceCodeHostRepos(ctx, row.OrgID, actor, row.ID.String(), repos, readAt)
+	return s.scope.ReplaceCodeHostRepos(ctx, row.OrgID, actor, row.ID.String(), row.SecretFingerprint, repos, readAt)
 }
 
 // visibility is what the connector reported; anything it did not say is unknown (external-high).

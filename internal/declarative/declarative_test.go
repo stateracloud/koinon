@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -461,7 +462,7 @@ var _ = Describe("Importer", func() {
 
 			osvc := orgsettings.NewService(pool)
 			now := time.Now()
-			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, now)).To(Succeed())
+			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint, []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, now)).To(Succeed())
 			code := sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
 			classify := func() sinkclass.Class {
 				l, err := osvc.LeakGuard(ctx, org)
@@ -474,6 +475,91 @@ var _ = Describe("Importer", func() {
 			Expect(imp.Sync(ctx)).To(Succeed())
 			Expect(classify()).To(Equal(sinkclass.ExternalHigh), "the reading is fresh but the connection is removed")
 		})
+
+		It("drops the code-host scope when the declared secret rotates, and keeps it when nothing changed (#244)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(HaveLen(1))
+			cid := rows[0].ID.String()
+			osvc := orgsettings.NewService(pool)
+			Expect(osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint,
+				[]orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, time.Now())).To(Succeed())
+			stored := func() int {
+				l, err := osvc.LeakGuard(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				return len(l.CodeHostRepos)
+			}
+			Expect(stored()).To(Equal(1))
+
+			By("the same Secret again keeps the reading")
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(stored()).To(Equal(1))
+
+			By("another private key is another credential: the old one's readings go")
+			other := githubtest.New()
+			DeferCleanup(other.Server.Close)
+			rotated := conn()
+			rotated["privateKey"] = string(other.PEM)
+			put(ctx, "gh", declarative.TypeConnection, slug, rotated)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(stored()).To(BeZero())
+			var readings int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_readings WHERE org_id = $1`, org).Scan(&readings)).To(Succeed())
+			Expect(readings).To(BeZero(), "the marker goes with the rows")
+
+			By("a reading taken with the old key is refused")
+			err = osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, rows[0].SecretFingerprint,
+				[]orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}, time.Now())
+			Expect(err).To(MatchError(orgsettings.ErrCredentialChanged))
+			Expect(stored()).To(BeZero())
+		})
+
+		It("leaves no old-key reading behind when a replacement races a declared rotation (#244)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			cid := rows[0].ID.String()
+			osvc := orgsettings.NewService(pool)
+			oldFP := rows[0].SecretFingerprint
+			reading := []orgsettings.CodeHostRepo{{Owner: "northwind", Name: "handbook", Visibility: "private"}}
+			for range 15 {
+				// A sync that started under the old key writes while the Secret is rotated.
+				other := githubtest.New()
+				DeferCleanup(other.Server.Close)
+				rotated := conn()
+				rotated["privateKey"] = string(other.PEM)
+				put(ctx, "gh", declarative.TypeConnection, slug, rotated)
+				start := make(chan struct{})
+				var wg sync.WaitGroup
+				var rerr error
+				wg.Add(2)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					<-start
+					rerr = osvc.ReplaceCodeHostRepos(ctx, org, audit.User(user), cid, oldFP, reading, time.Now())
+				}()
+				go func() { defer GinkgoRecover(); defer wg.Done(); <-start; Expect(imp.Sync(ctx)).To(Succeed()) }()
+				close(start)
+				wg.Wait()
+				if rerr != nil {
+					Expect(rerr).To(MatchError(orgsettings.ErrCredentialChanged))
+				}
+				var repos, readings int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_repos WHERE org_id = $1`, org).Scan(&repos)).To(Succeed())
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM org_code_host_readings WHERE org_id = $1`, org).Scan(&readings)).To(Succeed())
+				Expect(repos).To(BeZero(), "no repository of the old credential survives the rotation")
+				Expect(readings).To(BeZero())
+				// Next round rotates away from the key now declared.
+				cur, err := store.New(pool).ListConnections(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				oldFP = cur[0].SecretFingerprint
+			}
+		}, SpecTimeout(2*time.Minute))
 
 		It("can be read back with the keys", func(ctx SpecContext) {
 			ring := secretstoretest.Keyring()

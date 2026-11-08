@@ -135,6 +135,12 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 	for i := range reading {
 		reading[i] = orgsettings.CodeHostRepo{Owner: "acme", Name: fmt.Sprintf("repo-%03d", i), Visibility: "private"}
 	}
+	fp := func(ctx SpecContext, conn string) string {
+		GinkgoHelper()
+		var f string
+		Expect(e.pool.QueryRow(ctx, `SELECT secret_fingerprint FROM connections WHERE id = $1`, conn).Scan(&f)).To(Succeed())
+		return f
+	}
 	// race runs replace and change at the same moment and returns both errors.
 	race := func(replace, change func() error) (error, error) {
 		start := make(chan struct{})
@@ -166,7 +172,7 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		for range 25 {
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
@@ -187,10 +193,10 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		for range 15 {
 			conn := create(ctx)
 			// Rows for the delete's cascade to remove, so it waits on the replacement's.
-			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())).To(Succeed())
+			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())).To(Succeed())
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: conn})

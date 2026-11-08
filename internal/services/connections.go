@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -448,10 +449,7 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		// What the old credential read is not what the new one reaches: the connection's part of
 		// the code-host scope goes with it, and the sync below reads it again. The lock waits out a
 		// replacement in progress, so its rows are deleted too.
-		if err := q.LockCodeHostConnectionScope(rctx, store.LockCodeHostConnectionScopeParams{OrgID: c.org, ConnectionID: cur.ID}); err != nil {
-			return err
-		}
-		if _, err := q.DeleteCodeHostConnectionRepos(rctx, store.DeleteCodeHostConnectionReposParams{OrgID: c.org, ConnectionID: cur.ID}); err != nil {
+		if err := orgsettings.ClearCodeHostScope(rctx, q, c.org, cur.ID); err != nil {
 			return err
 		}
 		return audit.RecordErr(rctx, q, audit.Event{
