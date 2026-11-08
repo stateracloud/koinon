@@ -16,7 +16,7 @@ var _ = Describe("Resolver.Find", func() {
 	BeforeEach(func() { needDocker() })
 
 	It("reports a model nobody enabled as having no price", func(ctx SpecContext) {
-		rv := prices.NewResolver(defaultList("v1", "fake/known"))
+		rv := prices.NewResolver(defaultList("2026-10-24.1", "fake/known"))
 		qt, err := rv.Find(ctx, store.New(db), adminOrg, uniq(), time.Now())
 		Expect(err).To(MatchError(prices.ErrUnpriced))
 		Expect(qt.Model.Name).To(BeEmpty())
