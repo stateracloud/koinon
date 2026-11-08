@@ -118,6 +118,10 @@ func Export(ctx context.Context, q *store.Queries, w io.Writer, sc ExportScope, 
 			hdr.Head = ExportHead{ChainSeq: head.Seq, Hash: hex.EncodeToString(head.Hash)}
 		}
 	}
+	if fromSeq > hdr.Head.ChainSeq+1 {
+		// Nothing has been written yet: a caller that streams the output can still answer with an error.
+		return fmt.Errorf("%w: from-seq %d is beyond the chain, whose head is chain_seq %d", ErrBadFilter, fromSeq, hdr.Head.ChainSeq)
+	}
 	if err := exportAnchors(&hdr); err != nil {
 		return err
 	}

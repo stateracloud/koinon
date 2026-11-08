@@ -115,6 +115,22 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		Expect(err).NotTo(HaveOccurred(), out)
 		Expect(out).NotTo(ContainSubstring("not checked"))
 
+		By("an --after file that is itself partial is named in a note: the chain before it is not covered")
+		write(1)
+		tail := export("tail.jsonl", 6)
+		out, err = run("verify", "--file", tail, "--after", rest)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).To(ContainSubstring("note    --after " + rest + " starts at chain_seq 4"))
+		out, err = run("verify", "--file", rest, "--after", first)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).NotTo(ContainSubstring("--after " + first))
+
+		By("--after - is refused: it must be a file path")
+		out, err = run("verify", "--file", first, "--after", "-")
+		Expect(err).To(MatchError(ContainSubstring("--after must be a file path, not stdin")), out)
+		_, err = run("verify", "--file", "-", "--after", "-")
+		Expect(err).To(MatchError(ContainSubstring("--after must be a file path, not stdin")))
+
 		By("a tampered file exits non-zero with the first broken chain_seq")
 		raw, err := os.ReadFile(first)
 		Expect(err).NotTo(HaveOccurred())

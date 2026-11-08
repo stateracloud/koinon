@@ -130,6 +130,16 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		Expect(res.Rows).To(BeZero())
 	})
 
+	It("refuses a from-seq beyond the chain before it writes a byte, and accepts head+1 as an empty tail", func(ctx SpecContext) {
+		var buf bytes.Buffer
+		err := audit.Export(ctx, store.New(pool), &buf, sc, 9)
+		Expect(err).To(MatchError(audit.ErrBadFilter))
+		Expect(buf.Len()).To(BeZero())
+
+		lines := exportLines(ctx, sc, 8)
+		Expect(lines).To(HaveLen(1))
+	})
+
 	It("refuses what is not an export", func() {
 		for _, in := range []string{"", "not json\n", `{"format":"other.v9"}` + "\n", `{"format":"koinon.audit.export.v1","chain":"org"}` + "\n"} {
 			_, err := audit.VerifyExport(strings.NewReader(in), audit.ExportVerifyOptions{})
