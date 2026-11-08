@@ -107,7 +107,7 @@ func newKeysCommand() *cobra.Command {
 	keys.AddCommand(
 		sub("status", "List the KEKs, the active one and the values each wraps", cobra.NoArgs, true),
 		add,
-		confirmed(sub("activate [ID]", "Make a KEK the one that wraps new data keys (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
+		confirmed(sub("activate [ID]", "Make a KEK the one that wraps new data keys; needs --database-url to record it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		started(confirmed(sub("rewrap", "Wrap every stored data key under the active KEK (payloads are not decrypted)", cobra.NoArgs, true))),
 		confirmed(sub("retire [ID]", "Remove a KEK; refuses while any value uses it (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		started(confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true))),
