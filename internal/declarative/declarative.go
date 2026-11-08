@@ -104,16 +104,28 @@ type Importer struct {
 	// Resync is the time between full passes without a change event. Default 5 minutes.
 	Resync time.Duration
 
+	// orgBackoff is the first wait before re-reading Secrets that name an org not created yet;
+	// zero means defaultOrgBackoff. The wait doubles up to Resync. Set by tests only.
+	orgBackoff time.Duration
+	// syncFn replaces sync in tests of the Run loop.
+	syncFn func(ctx context.Context) (bool, error)
+
 	mu     sync.Mutex
 	warned map[string]string // secret -> version already warned about
 }
+
+// defaultOrgBackoff is the first retry delay for a Secret whose org does not exist yet.
+const defaultOrgBackoff = 5 * time.Second
 
 // Selector selects the Secrets the importer reads.
 func Selector() string {
 	return LabelSecretType + " in (" + TypeModelProvider + "," + TypeConnection + "," + TypeMCPServer + ")"
 }
 
-// Run imports on every change to a labelled Secret and on a timer, until ctx ends.
+// Run imports on every change to a labelled Secret and on a timer, until ctx ends. While a
+// Secret waits for its org, which another process may create at any moment, it also retries on
+// a backoff that starts at 5 seconds and doubles up to the resync interval; the backoff starts
+// over when no Secret waits any more and on a Secret event.
 func (i *Importer) Run(ctx context.Context) {
 	resync := i.Resync
 	if resync <= 0 {
@@ -137,6 +149,24 @@ func (i *Importer) Run(ctx context.Context) {
 	})
 	factory.Start(ctx.Done())
 
+	syncOnce := i.sync
+	if i.syncFn != nil {
+		syncOnce = i.syncFn
+	}
+	first := i.orgBackoff
+	if first <= 0 {
+		first = defaultOrgBackoff
+	}
+	first = min(first, resync)
+	backoff := first
+	var retry <-chan time.Time
+	var retryTimer *time.Timer
+	defer func() {
+		if retryTimer != nil {
+			retryTimer.Stop()
+		}
+	}()
+
 	t := time.NewTicker(resync)
 	defer t.Stop()
 	kick()
@@ -145,15 +175,29 @@ func (i *Importer) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-wake:
+			backoff = first
 			time.Sleep(200 * time.Millisecond) // coalesce a burst of events
 		case <-t.C:
+		case <-retry:
 		}
 		select {
 		case <-wake:
 		default:
 		}
-		if err := i.Sync(ctx); err != nil && ctx.Err() == nil {
-			i.Log.Error("importing declarative Secrets failed", "err", err)
+		waiting, err := syncOnce(ctx)
+		if err != nil && ctx.Err() == nil {
+			i.log().Error("importing declarative Secrets failed", "err", err)
+		}
+		if retryTimer != nil {
+			retryTimer.Stop()
+		}
+		retry, retryTimer = nil, nil
+		if waiting {
+			retryTimer = time.NewTimer(backoff)
+			retry = retryTimer.C
+			backoff = min(backoff*2, resync)
+		} else {
+			backoff = first
 		}
 	}
 }
@@ -173,14 +217,21 @@ type present struct {
 // are reported on the Secret and do not stop the others; the returned error is for failures
 // that stopped the whole pass.
 func (i *Importer) Sync(ctx context.Context) error {
+	_, err := i.sync(ctx)
+	return err
+}
+
+// sync is Sync that also reports whether a Secret was rejected only because its org does not
+// exist yet, which may change without any Secret event.
+func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 	// One replica imports at a time; the others wait, then find nothing changed.
 	lock, err := i.Pool.Acquire(ctx)
 	if err != nil {
-		return fmt.Errorf("lock the import: %w", err)
+		return false, fmt.Errorf("lock the import: %w", err)
 	}
 	defer lock.Release()
 	if _, err := lock.Exec(ctx, `SELECT pg_advisory_lock($1)`, int64(syncLockKey)); err != nil {
-		return fmt.Errorf("lock the import: %w", err)
+		return false, fmt.Errorf("lock the import: %w", err)
 	}
 	defer func() {
 		_, _ = lock.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, int64(syncLockKey))
@@ -189,7 +240,7 @@ func (i *Importer) Sync(ctx context.Context) error {
 	list, err := i.Client.CoreV1().Secrets(i.Namespace).List(ctx, metav1.ListOptions{LabelSelector: Selector()})
 	if err != nil {
 		// Not listing means not knowing which Secrets exist: remove nothing.
-		return fmt.Errorf("list declarative Secrets: %w", err)
+		return false, fmt.Errorf("list declarative Secrets: %w", err)
 	}
 	secrets := list.Items
 	sort.SliceStable(secrets, func(a, b int) bool {
@@ -224,9 +275,10 @@ func (i *Importer) Sync(ctx context.Context) error {
 		version := string(sec.UID) + "/" + sec.ResourceVersion
 		org, ok, err := orgOf(slug)
 		if err != nil {
-			return fmt.Errorf("look up org %q: %w", slug, err)
+			return false, fmt.Errorf("look up org %q: %w", slug, err)
 		}
 		if !ok {
+			waitingForOrg = true
 			i.reject(ctx, sec, version, fmt.Errorf("label %s=%q names no org", LabelOrg, slug))
 			continue
 		}
@@ -243,12 +295,12 @@ func (i *Importer) Sync(ctx context.Context) error {
 		if applyErr != nil {
 			var ie *invalidError
 			if !errors.As(applyErr, &ie) && !isUserError(applyErr) {
-				return fmt.Errorf("apply Secret %s: %w", sec.Name, applyErr)
+				return false, fmt.Errorf("apply Secret %s: %w", sec.Name, applyErr)
 			}
 			i.reject(ctx, sec, version, applyErr)
 		}
 	}
-	return i.removeAbsent(ctx, q, seen)
+	return waitingForOrg, i.removeAbsent(ctx, q, seen)
 }
 
 type invalidError struct{ err error }

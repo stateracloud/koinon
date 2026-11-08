@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -333,6 +334,48 @@ var _ = Describe("Importer", func() {
 			msg += e.Message
 		}
 		Expect(msg).To(ContainSubstring("no-such-org"))
+	})
+
+	It("imports a Secret that was applied before its org within the backoff, not at the next resync (#395)", func(ctx SpecContext) {
+		late := "late-" + slug
+		put(ctx, "p", declarative.TypeModelProvider, late, provider("p"))
+		imp.Resync = time.Hour
+		imp.SetOrgBackoff(50 * time.Millisecond)
+		runCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); imp.Run(runCtx) }()
+		DeferCleanup(func() { cancel(); <-done })
+
+		By("waiting for the Secret's one rejection")
+		Eventually(func() int { return len(events(ctx)) }).Should(Equal(1))
+
+		By("creating the org afterwards")
+		var lateOrg pgtype.UUID
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `INSERT INTO orgs (slug, display_name, kind) VALUES ($1, 'Org', 'personal') RETURNING id`, late).Scan(&lateOrg); err != nil {
+				return err
+			}
+			var u pgtype.UUID
+			if err := tx.QueryRow(ctx, `INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', $1, $2) RETURNING id`, pgtest.Uniq("sub"), lateOrg).Scan(&u); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role) VALUES ($1, $2, 'manual', 'owner')`, lateOrg, u)
+			return err
+		})).To(Succeed())
+		o := store.Org{ID: lateOrg}
+		Eventually(func() int {
+			list, _ := svc.ListProviders(ctx, o.ID)
+			return len(list)
+		}, "10s", "50ms").Should(Equal(1))
+
+		By("one Event per Secret version for the rejection, then the apply")
+		var rejected int
+		for _, e := range events(ctx) {
+			if strings.Contains(e.Message, "names no org") {
+				rejected++
+			}
+		}
+		Expect(rejected).To(Equal(1))
 	})
 
 	It("lets the oldest Secret win when two declare the same provider", func(ctx SpecContext) {
