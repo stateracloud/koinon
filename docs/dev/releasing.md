@@ -35,7 +35,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    patterns resolved by GitHub), so adding or removing a required check needs no edit to
    `hack/release-gate.sh`; if it cannot read the rules, or finds no required checks, it fails closed.
    Each context must have succeeded on the tagged commit itself, except three that a push to main does
-   not report as a result: `dco` (pull requests only), `claim` (`pull_request_target`; skipped on main) and
+   not report as a result: `dco` (pull requests only), `claim` (`pull_request`; skipped on main) and
    `e2e result` (a composite that also passes when the e2e was skipped on main; on a pull request it
    fails when the change needs the e2e and the head has none, old issue 562; its real subject, the kind
    e2e, the gate asks for through the `quickstart` rule below). `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age

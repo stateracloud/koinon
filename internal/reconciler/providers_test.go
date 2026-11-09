@@ -178,6 +178,24 @@ var _ = Describe("Provider delivery", func() {
 		Expect(string(sec.Data[name])).To(Equal("sk-upstream-secret"))
 	})
 
+	It("leaves a model on an ollama-type provider at ollama.com unpriced, never at zero (issue 310)", func(ctx SpecContext) {
+		org, user := newOrg(ctx)
+		actor := audit.User(user)
+		p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "cloud", Type: "ollama", URL: "https://ollama.com"})
+		Expect(err).NotTo(HaveOccurred())
+		cleanup(ctx, org, p.ID)
+		_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "gpt-oss:120b"})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		if got, ok := providerOf(mg.last(), orgSlug(ctx, org)); ok {
+			for _, m := range got.Models {
+				Expect(m.Price).To(BeNil(), "unpriced, never at a zero price")
+			}
+		}
+		Expect(servedRows(ctx, org)).NotTo(HaveKey("gpt-oss:120b"))
+	})
+
 	It("skips a model whose stored price cannot be used and still serves every other org", func(ctx SpecContext) {
 		orgA, userA := newOrg(ctx)
 		orgB, userB := newOrg(ctx)

@@ -26,7 +26,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # Required contexts that are not reported by a push to main, read instead from the head commit of
 # the pull request that merged the tagged commit (the newest run that started before the merge):
 #   dco                  its workflow runs on pull_request only.
-#   claim                runs on pull_request_target (hack/claim.sh check-pr, about the PR and its
+#   claim                runs on pull_request (hack/claim.sh check-pr, about the PR and its
 #                        claim); on a push to main it is skipped.
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
 #                        batched e2e was skipped; the real subject is the `quickstart` rule below,
