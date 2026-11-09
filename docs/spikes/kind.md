@@ -1,7 +1,7 @@
 # Spike S1: OpenShell on kind
 
 Plan item S1 (`docs/plans/v0.1.md`): can a single-node kind cluster carry Agent Sandbox v1.0.7
-and OpenShell 0.1.5 with a `runc` RuntimeClass, so that E1 (quickstart e2e) and E2 (escape
+and OpenShell 0.1.7 with a `runc` RuntimeClass, so that E1 (quickstart e2e) and E2 (escape
 suite on `runc`) can run on GitHub's free `ubuntu-latest` runners?
 
 Run locally on 2026-10-22. **Nothing in this document was run on a GitHub runner**; the
@@ -16,8 +16,8 @@ deleted in old issue 561.
 | Node image | `kindest/node:v1.37.0` | digest `sha256:a1ed56cf…` (kind v0.33.0 default) |
 | Agent Sandbox | v1.0.7, `sandbox-with-extensions.yaml` | manifest SHA-256 `136c10c9…` (same as the home lab) |
 | kube-network-policies | v1.1.2 manifest (image v1.1.1) | manifest SHA-256 `a8345bd4…` |
-| OpenShell chart | 0.1.5 | OCI digest `sha256:e88977ce…` (same as the home lab) |
-| OpenShell CLI | 0.1.5, `aarch64-apple-darwin` locally, `x86_64-unknown-linux-musl` in the workflow | SHA-256 from the release's `openshell-checksums-sha256.txt` |
+| OpenShell chart | 0.1.7 | OCI digest `sha256:3e5998c7…` (same as the home lab) |
+| OpenShell CLI | 0.1.7, `aarch64-apple-darwin` locally, `x86_64-unknown-linux-musl` in the workflow | SHA-256 from the release's `openshell-checksums-sha256.txt` |
 | metrics-server | v0.9.0 (optional, for `kubectl top`) | `--kubelet-insecure-tls` |
 | Sandbox image | `docker.io/library/busybox:1.37.0` | tag |
 

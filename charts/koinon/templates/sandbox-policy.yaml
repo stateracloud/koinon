@@ -3,7 +3,7 @@
 Native ValidatingAdmissionPolicies for OpenShell sandbox namespaces (ADR 0045, ADR 0048 decision 3;
 never Kyverno). Rules key on the requesting identity, which a pod's creator cannot choose:
 - only the Agent Sandbox controller creates pods or changes their spec, with two exceptions for
-  the OpenShell gateway, which OpenShell 0.1.5 needs: it creates supervisor pods (label
+  the OpenShell gateway, which OpenShell 0.1.7 needs: it creates supervisor pods (label
   openshell.ai/boundary-role=supervisor) next to the workload pod the controller creates, and it
   starts both by removing their openshell.ai/bootstrap scheduling gate. The gateway may change a
   pod's spec only by removing scheduling gates: containers, init containers, tolerations, node
@@ -24,7 +24,7 @@ containers, no io.katacontainers.* annotations (they can switch off guest seccom
 sandbox workload pods run on an allowed runtime class, set automountServiceAccountToken=false and
 project no ServiceAccount token (ADR 0006); supervisor pods run only the pinned supervisor image
 (sandboxPolicy.supervisorImages), set automountServiceAccountToken=false as well, and project
-exactly one kind of ServiceAccount token: the OpenShell 0.1.5 supervisor exchanges a token for the
+exactly one kind of ServiceAccount token: the OpenShell 0.1.7 supervisor exchanges a token for the
 audience openshell-gateway at startup (ADR 0006 amendment 2026-11-09), so every projected token on
 a supervisor pod needs that audience and an expiry of at most sandboxPolicy.supervisorTokenMaxSeconds.
 A CEL error denies under failurePolicy Fail; test against real OpenShell pods before relying on it.
@@ -110,7 +110,7 @@ spec:
     # Defence in depth for ADR 0006: Agent Sandbox templates default to no token, but nothing at
     # admission held a controller regression or compromise to it. The explicit false also keeps the
     # ServiceAccount admission plugin from injecting its kube-api-access projected volume. Supervisor
-    # pods follow the same automount rule but may project the one token OpenShell 0.1.5 needs (see
+    # pods follow the same automount rule but may project the one token OpenShell 0.1.7 needs (see
     # the supervisor rules below).
     - expression: >-
         !variables.workload ||
@@ -121,7 +121,7 @@ spec:
         object.spec.volumes.all(v, !has(v.projected) || !has(v.projected.sources) ||
           v.projected.sources.all(s, !has(s.serviceAccountToken)))
       message: sandbox workload pods must not project a ServiceAccount token
-    # Supervisor pods (OpenShell 0.1.5, driver-kubernetes sandbox_runtime.rs): automount false and
+    # Supervisor pods (OpenShell 0.1.7, driver-kubernetes sandbox_runtime.rs): automount false and
     # one projected token, audience openshell-gateway, which the supervisor exchanges for a gateway
     # JWT. The supervisor never calls the Kubernetes API, so a token for the API server audience
     # (an empty or missing audience means that) is denied, as is a long-lived one.

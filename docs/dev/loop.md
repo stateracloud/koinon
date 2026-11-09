@@ -12,7 +12,7 @@ everyone, no configuration) and **remote** (a cluster of your own, configured in
 | Context | `kind-koinon-*` (`make dev-kind-up` makes `kind-koinon-dev`) | any context listed under `contexts` in `hack/dev/local.yaml` |
 | Registry | none; ko and `kind load` put images into the node | yours (`registry` in local.yaml); Tilt pushes there |
 | Sandbox runtime | `runc` (kind has no VM runtime) | `openshell.runtimeClassName` (for example `kata`) |
-| OpenShell | OpenShell 0.1.5, installed by `make dev-kind-up` | the one already on the cluster (`openshell.*`) |
+| OpenShell | OpenShell 0.1.7, installed by `make dev-kind-up` | the one already on the cluster (`openshell.*`) |
 | Model | the fake model server (model `repo-helper`) | the provider manifest named by `modelProvider`, or add one in the UI |
 | GitHub | the fake GitHub App API | not configured |
 | Values | `hack/dev/values.yaml` + `values-kind.yaml` | `hack/dev/values.yaml` + local.yaml's keys and `values` files |

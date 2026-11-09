@@ -2,7 +2,7 @@
 
 // Package fakegateway is an in-process OpenShell gateway for tests. It implements the
 // parts of openshell.v1.OpenShell that Koinon's execution backend uses, with the gateway
-// semantics Koinon depends on (verified against OpenShell v0.1.5's server code):
+// semantics Koinon depends on (verified against OpenShell v0.1.7's server code):
 //
 //   - workspaces, sandboxes, providers and profiles report NotFound and AlreadyExists;
 //   - provider updates merge credentials and config (an empty value removes a key) and
@@ -10,7 +10,10 @@
 //   - profile updates check the expected resource version (Aborted on a mismatch);
 //   - a sandbox-scoped policy update may change network rules only, and an update equal
 //     to the latest revision keeps its version;
-//   - starting a running sandbox or stopping a stopped one fails with FailedPrecondition;
+//   - starting a sandbox that is not stopped and stopping one that is not ready fail with
+//     FailedPrecondition (the real gateway is wider: it also starts a Completed or Suspended
+//     sandbox, accepts a stop in more phases and treats a stop of a Stopped sandbox as settled,
+//     none of which this fake models);
 //   - ExecSandboxInteractive validates the start message, sends headers once the command
 //     runs, streams stdin until the client half-closes and ends with an exit event.
 //
