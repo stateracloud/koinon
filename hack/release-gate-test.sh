@@ -54,15 +54,17 @@ repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
+# the workflow runs of one commit: none unless a case adds some
+[[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
 # the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
 if [[ $f == mg-runs.json ]]; then
-	ev= st=
+	ev= st= hs=
 	IFS='&' read -ra kv <<<"$query"
 	for p in "${kv[@]}"; do
-		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; esac
+		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; head_sha=*) hs=${p#head_sha=} ;; esac
 	done
-	jq --arg ev "$ev" --arg st "$st" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st)))' "$FX/$f" |
+	jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$FX/$f" |
 		jq -r "$expr"
 	exit
 fi
@@ -106,10 +108,10 @@ set_ruleset() { # <context>...: the rules/branches answer
 	jq -n --argjson ctx "$ctx" \
 		'[{type: "deletion"}, {type: "required_status_checks", ruleset_id: 7, parameters: {required_status_checks: $ctx}}]' >"$FX/rules.json"
 }
-run_on() { # <sha> <name> <conclusion> [started_at]
+run_on() { # <sha> <name> <conclusion> [started_at] [workflow run id]
 	local f=$FX/checks-$1.json
 	[[ -f $f ]] || echo '{"check_runs":[]}' >"$f"
-	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c}]' "$f" >"$f.new"
+	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-1}" "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 n=0
@@ -351,6 +353,42 @@ check "quickstart: a green bisect dispatch does not excuse a red main head" "$(g
 qs_case
 run_on "$sha" "quickstart (commit)" success
 check "quickstart: only a bisect dispatch is no evidence" "$(gate_rc)" 1
+# the head_sha == SHA shortcut: the tagged commit is itself the queue commit, so no commit lookup is needed
+qs_case
+mg_run 90 "$sha" tree1 # writes commit-$sha.json too; the loop itself needs no lookup for a head equal to SHA
+check "quickstart: a green queue run on the tagged commit itself passes" "$(gate_rc)" 0
+check "...and names that queue run" "$(grep -c 'merge queue run 90' "$tmp/out")" 1
+# QUEUE_RUN_LIMIT is a per_page: 1..100 only
+for bad in 0 101 abc -1 3.5; do
+	qs_case
+	check "QUEUE_RUN_LIMIT '$bad' fails closed" "$(QUEUE_RUN_LIMIT=$bad gate_rc)" 1
+	check "...with a clear message ('$bad')" "$(grep -c 'QUEUE_RUN_LIMIT .* is not an integer from 1 to 100' "$tmp/err")" 1
+done
+for ok in 1 30 100; do
+	qs_case
+	run_on "$sha" quickstart success
+	check "QUEUE_RUN_LIMIT $ok is accepted" "$(QUEUE_RUN_LIMIT=$ok gate_rc)" 0
+done
+# #453: runs from before the fix still carry the name `quickstart`; their workflow run is titled as a bisect
+bisect_run() { # <run id> <sha> <display title>
+	local f=$FX/mg-runs.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --argjson i "$1" --arg h "$2" --arg t "$3" '.workflow_runs += [{id: $i, head_sha: $h, event: "workflow_dispatch", conclusion: "success", display_title: $t}]' "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z 10
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+bisect_run 11 "$sha" "e2e-kind (bbbb222) bisect 7"
+check "quickstart: an old-style green bisect run does not excuse a red head" "$(gate_rc)" 1
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+bisect_run 11 "$sha" "e2e-kind (bbbb222) bisect 7"
+check "quickstart: only an old-style bisect run is no evidence" "$(gate_rc)" 1
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 12
+bisect_run 12 "$sha" "e2e-kind"
+check "quickstart: a plainly titled run still counts" "$(gate_rc)" 0
 
 new_case
 rm "$FX/rules.json"
