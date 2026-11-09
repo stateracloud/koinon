@@ -272,7 +272,7 @@ Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides,
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
-are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
+are skipped only on a push to main whose heavy jobs are skipped; a draft skips the heavy jobs too. A skipped heavy job reports
 success, so every required check still reports.
 
 ### Path rules
@@ -324,23 +324,17 @@ status or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
 
 ### Draft pull request (old issue 593)
 
-Only `changes`, `quick checks`, `lint-shell` and `scripts` run, and `go` and `web` are RED on
-purpose ("draft: not tested, mark ready for review"): a green draft `go` would otherwise stay the
-newest run on the head while the ready run is still going. A draft cannot merge, so get WIP
-feedback from `hack/preflight.sh`, not CI. Marking it ready fires `ready_for_review`, which runs
-everything on the same head, and so does every push to a ready PR. The draft flag comes from the
-event payload (old issue 676), not from the live state: the run is named `ci (draft)` (ci.yml `run-name`)
-when `github.event.pull_request.draft` is true, else `ci`, and `hack/ci-skip-heavy.sh` decides from
-that same flag (`PR_DRAFT`), so a run's name and its behaviour always agree. A gate that must
-ignore draft runs drops the runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci` for every run, so never filter on it;
-`pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that (#218, via `hack/lib/pr-verdict.sh`, "One verdict per workflow run"): no time window. A re-run replays the
-original event: re-running a `ci (draft)` run after the PR is ready is a draft run again (`go` and
-`web` red, "not tested"). That is safe (it can never leave a green `go` on an untested head) but
-`pr-wait.sh` ignores such a re-run (it was created before the ready event), so the ready run's
-result stands; to re-run, use the `ci` run of `ready_for_review` (or push)
-instead. Mark the PR ready (`hack/ship.sh --ready`,
-`gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge
-evidence.
+A draft runs nothing heavy. Only `changes`, `quick checks`, `lint-shell`, `scripts`, `dco`, `gitleaks` and
+`claim` run; `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
+is green anyway). That is safe because nothing reads a draft's green: a draft cannot be enqueued or merged
+(`pr-merge.sh` and `pr-wait.sh --checks` exit 5), marking it ready fires `ready_for_review`, which runs
+everything on the same head (the newest `ci` run carries the verdict, "One verdict per workflow run"), and
+the merge queue re-runs every required check on its own commit. Get WIP feedback from `hack/preflight.sh`,
+not CI. The draft flag comes from the event payload (old issue 676), not from the live state, and
+`hack/ci-skip-heavy.sh` decides from that flag (`PR_DRAFT`). A re-run replays the original event: re-running
+a draft run after the PR is ready is a draft run again; re-run the `ready_for_review` run (or push) instead.
+There is no `ci (draft)` run name and no gate filters draft runs. Mark the PR ready (`hack/ship.sh --ready`,
+`gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge evidence.
 
 ### One run per head (old issue 675)
 
@@ -369,17 +363,16 @@ another commit: that workflow's PR group still cancels in progress, and a re-run
 
 ### Push to main (old issue 595)
 
-Everything runs, except when the push is a merge commit whose tree equals the tree of its second
-parent (the PR head) and every required check `ci.yml` produces is green (or skipped) on that
-head, newest run per check, made by GitHub Actions. Then the heavy jobs are skipped: the merge
-brought nothing the head was not tested with. The head must also contain the first parent, and
-`flavors` (advisory, but `flavor-publish` ships what it tested) must have passed on the head
-unless nothing it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell`
-report skipped (old issue 594). Any doubt (a merge of an out-of-date branch, an admin or direct push, a
-squash, a missing or red check, an API error) runs everything. `flavor-publish` and the kind e2e
-(batched on main, nightly) are unaffected. So what no single commit explains is caught by the
-nightly and batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main
-skipped from the merged PR's head.
+Everything runs, except when a successful `merge_group` `ci` run (the merge queue's build) tested a commit with
+the pushed commit's tree (`hack/ci-skip-heavy.sh decide_push` lists the last 30 queue runs and compares trees).
+Then the heavy jobs are skipped: the queue already ran the whole suite on exactly these files. `flavors`
+(advisory, but `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
+it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594).
+A pull request head's green never counts (a draft run is green by skipping). Any doubt (an admin or direct push,
+which has no queue run; an API error; no matching run) runs everything. `flavor-publish` and the kind e2e
+(batched on main, nightly) are unaffected. So what no single commit explains is caught by the nightly and
+batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main skipped from the merged PR's
+head (this changes with the release-gate follow-up: it will read the queue build).
 
 ## Cache ownership (#147)
 
@@ -475,15 +468,14 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
-| `updater.yml` | `push` to `main`, `workflow_run`, `schedule`, dispatch (no `auto_merge_enabled`) | App ID and key from the `claims-bot` Environment (branch policy `main`); token with `contents`, `pull-requests`, `workflows: write` and `checks`, `statuses: read` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
 Checks behind the table:
 
 - No workflow uses `pull_request_target` (#463). GitHub blocks it by default for public repositories (brownouts from 2026-11-09, permanent 2026-12-02); it runs with the base branch's secrets and a write token next to pull request content. `hack/runner-lint.sh` fails any workflow that names it, and bringing it back needs an ADR that amends ADR 0082 plus an admin Actions event policy.
-- The only Environment is `claims-bot` (`updater.yml`). No other workflow reads a secret besides
-  `GITHUB_TOKEN`.
+- No workflow reads a secret besides `GITHUB_TOKEN` (the `claims-bot` Environment went with the updater;
+  its leftover secrets are deleted by an owner, `docs/dev/work-claims-setup.md`).
 - Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
   fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
 - No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
@@ -583,12 +575,11 @@ skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
 succeeded a PR comment with the head SHA and the number of contexts it read. It does not call
 `claim.sh`, and `--lane` is a usage error (ADR 0104). `pr-wait.sh --checks` exits 5 on a draft. After
-`ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
-`--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
-re-run of a draft run is ignored too). A red or cancelled run of the ready `ci` is never dropped, and
-while the ready run has no checks yet it prints `waiting for the ready run`, never green. dco, gitleaks,
-claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, nothing is
-dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
+`ready_for_review` the ready run is the newest `ci` run and decides; there is no draft filter (a draft run
+is green by skipping, so it needs none). A red or cancelled newest run is never dropped, and
+while the ready run has no checks yet it prints `waiting for the newest run of each workflow`, never green. dco,
+gitleaks, claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, nothing is
+dropped (an older run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
 
@@ -599,8 +590,7 @@ both source it, so they cannot disagree (they used to keep two orderings, and a 
 green passed). The rule:
 
 1. Judge per workflow run, not per check name. For each workflow file on the head (`GET actions/runs?head_sha=`,
-   keyed by `path`) take the newest run that counts, by `created_at` then `run_attempt`. A run titled `ci (draft)` does
-   not count once the PR is ready (#218). The check runs of every other run of that workflow are dropped: an older
+   keyed by `path`) take the newest run that counts, by `created_at` then `run_attempt`. The check runs of every other run of that workflow are dropped: an older
    green never outvotes a newer run that was cancelled, red, still running or has no checks yet (that one is
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
@@ -672,10 +662,9 @@ slowest of the last 200 successful or failed `quickstart` jobs took 14.2 minutes
 so there are 45 minutes of headroom (measured 2026-11-09). A cold flavor build in the queue is not in that sample;
 if the queue starts timing out entries, raise `check_response_timeout_minutes` (to 90) then.
 
-The updater: `updater.yml` and `hack/pr-updater.sh update-oldest` (moved out of `claim.sh` by ADR 0104) stay until the queue is live. Meanwhile `update-oldest` skips
-a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
-a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
-and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.
+The updater is retired (ADR 0094, amendment): `updater.yml`, `hack/pr-updater.sh` and the `needs-update`
+label are gone. The queue tests each pull request on main's tip, so a branch is merged with `origin/main`
+only when GitHub reports a conflict (`pr-wait.sh` exit 4) or the queue drops the entry for one (exit 8).
 
 Cost: one full `ci` run per queue build, plus a `quickstart` of about 12 to 15 minutes (more for a cold flavor build) for each e2e-relevant entry
 (75-minute job timeout, 60-minute queue check timeout: the queue gives up first). Entries build concurrently (up to 5), so

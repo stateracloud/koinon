@@ -15,7 +15,8 @@
 - Date: 2026-11-05
 - Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e);
   [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
-  claims, outsider classes, leases or sweeper)
+  claims, outsider classes, leases or sweeper);
+  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced)
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
@@ -441,3 +442,20 @@ No result changes a decision.
 ## Amendment: trigger (2026-11-09, procoduck, #463)
 
 The `claim` check no longer runs from `pull_request_target`; see the amendment in ADR 0082. Decision 8 (the merge queue) is unchanged.
+
+## Amendment: the updater is retired (2026-11-10, procoduck)
+
+Decision 4 kept `updater.yml` until "the first week of green queue merges with strict off". That
+condition is replaced: the updater has been a no-op since the queue went live (`hack/pr-updater.sh`
+returns at once when the ruleset has a `merge_queue` rule, and `strict_required_status_checks_policy` is
+`false`), so there is nothing to wait for. Retired in the same change: `.github/workflows/updater.yml`,
+`hack/pr-updater.sh` and its test, the `needs-update` label (an owner deletes it), the `claims-bot`
+Environment with its App secrets (an owner deletes them, `docs/dev/work-claims-setup.md` step 7) and the
+AGENTS.md sync points. A branch is merged with `origin/main` only when GitHub reports a conflict
+(`pr-wait.sh` exit 4, or the queue drops the entry, exit 8); "merge `main`, never rebase" stays.
+
+Also in this change: a draft pull request runs nothing heavy (its `go` and `web` report success with
+"draft: not run"), and the push to main skips its heavy jobs only when a successful `merge_group` `ci` run
+tested the pushed tree. The route itself (what admin merges may still do) is unchanged here; the follow-up
+pull request that makes the queue the single route (decisions on `--admin`, the single e2e proof and the
+break-glass path) carries its own ADR.

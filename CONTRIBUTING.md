@@ -108,8 +108,8 @@ including how to point Tilt at a remote cluster of your own.
   [ADR 0104](docs/adr/0104-work-claims-reduced-to-the-lock.md)). Outside contributors do not claim:
   say on the issue that you are working on it. The `claim` check fails only when another person
   holds a claim on an issue the pull request closes, or reserved the number of an ADR it adds; it
-  names the holder and what to do. With strict checks, keep the branch up to date
-  with `main`; the updater bot also does it for auto-merge pull requests.
+  names the holder and what to do. There is no updater bot: merge `main` into
+  your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip).
 - ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
