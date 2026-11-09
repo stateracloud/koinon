@@ -228,6 +228,24 @@ Scope:
   untrusted: it sets both session legs (untrusted input and private data). The same holds for any MCP
   message kind the guard cannot see. The upstream fix is drafted for a human to post (AGENTS.md,
   OpenShell and upstream rules apply to agentgateway too).
+  Built (#254): the open-call ledger in `internal/mcpguard` covers a `tools/call` that ends in an error
+  reply or is cut short (both legs, a person decides); a reply of any other method the gateway might
+  hand the guard (`CheckResponse`, `Guard.CheckUnseen`) takes both legs on the session. What the guard
+  is never handed at all (tools/list descriptions, log notifications and server-initiated requests on a
+  call's stream) is not visible to any Koinon-side rule on this gateway; it stays the expected failure
+  `#254` in `AgentgatewayV170Gaps` until the step 2 gateway, which sees every message.
+  *Prior art* (read 2026-11-09; the Docker MCP Gateway's interceptor docs and source were not
+  retrievable here, only its README, which describes interceptors as per-call hooks; so the comparison
+  below is from the go-sdk source and the MCP specification as vendored in the go-sdk docs):
+  the go-sdk `LoggingTransport` wraps a `Connection` and sees every `Read` and `Write` of every message
+  kind, errors and notifications included, because it sits below the method dispatch; Koinon borrows
+  that placement for step 2 (the guard belongs on the connection, not on a per-method hook) and cannot
+  use it now, because agentgateway's hook is per method and per successful result. The spec makes
+  sampling, elicitation (form and URL mode) and roots server-to-client requests that a client may
+  decline by not declaring the capability; Koinon relies on that for the interim pin, not on a filter.
+  Scanners such as Invariant's mcp-scan inspect tool descriptions and results after the fact; Koinon
+  differs in deciding before the agent reads and failing closed (both legs) when it cannot.
+- **The interim fix has its issue: #269** (exit condition: "the step 2 gateway refuses these itself").
 - **Interim pin for server-initiated requests** (maintainer decision 2026-11-06). A #254 spec runs a
   fake MCP server that sends sampling, elicitation (form and URL) and `roots/list` during a
   `tools/call`, and checks that sampling is refused, elicitation never reaches the model, and roots

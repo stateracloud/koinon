@@ -69,6 +69,34 @@ func (g *Guard) CheckResult(ctx context.Context, r Result) error {
 	return g.recordResult(ctx, c, r, resultLegs(c.server, decl))
 }
 
+// CheckUnseen handles a reply of a kind the guard has no reading for (any method but tools/call; the
+// gateway is configured to send tools/call only, so this is a configuration drift or a gateway that
+// widened what it hooks). The guard cannot tell what the reply brings into the agent's session, so it
+// takes both legs, untrusted input and private data, on the session (#254, ADR 0097 step 1: fail
+// closed for any MCP message kind the guard cannot see). An error withholds the reply, as in
+// CheckResult. Koinon's own targets and its executor are exempt, as everywhere else.
+func (g *Guard) CheckUnseen(ctx context.Context, agent, target string) error {
+	ctx, cancel := context.WithTimeout(ctx, Deadline)
+	defer cancel()
+	c, refused, err := g.identify(ctx, agent, target)
+	if err != nil {
+		return err
+	}
+	if refused != nil {
+		return refusedError{text: refused.Text}
+	}
+	if c.exempt || c.own {
+		return nil
+	}
+	both := Legs{UntrustedInput: true, PrivateData: true}
+	if _, err := g.record(ctx, c, both, nil); err != nil {
+		return err
+	}
+	g.metrics.unseen(1)
+	g.metrics.legs(both)
+	return nil
+}
+
 // recordResult records a result the gateway reported and closes its call (#254): only once the
 // legs are recorded, so a result the guard could not record leaves its call open, and fails closed.
 func (g *Guard) recordResult(ctx context.Context, c caller, r Result, legs Legs) error {

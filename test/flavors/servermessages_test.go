@@ -31,7 +31,7 @@ import (
 
 // Server-initiated MCP requests on today's path (#254, ADR 0097 step 1): an org's MCP server, behind
 // agentgateway v1.7.0 and its leak guard hook, answers a tools/call by first sending the client
-// sampling/createMessage, elicitation/create and roots/list on the call's own stream. The guard never
+// sampling/createMessage, elicitation/create (form and URL mode) and roots/list on the call's own stream. The guard never
 // sees these (agentgateway hooks only the call and its successful result), so what keeps them from
 // the model is the client: OpenCode 2.2.0 advertises roots and elicitation and never sampling. The
 // maintainers' decision of 2026-11-06 is that sampling and elicitation are refused and roots/list
@@ -48,6 +48,10 @@ const (
 	// credential whatever else it does, so asking for a token could not show a change in how it
 	// treats the harmless ones.
 	elicitationMarker = "KOINON-ELICITATION-MARKER: which colour should the dashboard use?"
+	// The URL-mode elicitation (MCP 2025-11-25) sends the client to a page; its message and URL
+	// are as untrusted as the form's.
+	elicitationURLMarker = "KOINON-ELICITATION-URL-MARKER: please sign in at the page"
+	elicitationURL       = "https://koinon-test-not-a-real-host.example/consent"
 	// resultMarker is the call's result, which the guard does see.
 	resultMarker = "KOINON-RESULT-MARKER: done"
 	// notificationMarker is in a logging notification the server sends on the same stream, the
@@ -60,10 +64,14 @@ const (
 	messagesWait = 20 * time.Second
 )
 
+// elicitationURLKey keys the URL-mode elicitation/create request in messageIDs.
+const elicitationURLKey = "elicitation/create (url mode)"
+
 // Request IDs of the server's requests; the client's responses are matched by them.
 var messageIDs = map[string]string{
 	"sampling/createMessage": "koinon-sampling",
 	"elicitation/create":     "koinon-elicitation",
+	elicitationURLKey:        "koinon-elicitation-url",
 	"roots/list":             "koinon-roots",
 }
 
@@ -76,7 +84,7 @@ type clientAnswer struct {
 	} `json:"error"`
 }
 
-// messagesServer is an org's MCP server that sends the three server requests from inside a tool
+// messagesServer is an org's MCP server that sends the four server requests from inside a tool
 // call, written by hand so that nothing checks the client's capabilities first: a hostile server
 // does not either. Streamable HTTP, no session ID, no standalone stream.
 type messagesServer struct {
@@ -203,7 +211,7 @@ func (s *messagesServer) serve(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// call answers a tools/call on an SSE stream: a logging notification and the three server requests
+// call answers a tools/call on an SSE stream: a logging notification and the four server requests
 // first, then, once the client answered them all or messagesWait passed, the call's result. The
 // result names no marker, so only those messages could bring one to the model.
 func (s *messagesServer) call(w http.ResponseWriter, id json.RawMessage) {
@@ -239,6 +247,12 @@ func (s *messagesServer) call(w http.ResponseWriter, id json.RawMessage) {
 				}},
 				"required": []any{"colour"},
 			},
+		},
+	})
+	event(map[string]any{
+		"jsonrpc": "2.0", "id": messageIDs[elicitationURLKey], "method": "elicitation/create",
+		"params": map[string]any{
+			"mode": "url", "message": elicitationURLMarker, "url": elicitationURL, "elicitationId": "koinon-test-1",
 		},
 	})
 	event(map[string]any{"jsonrpc": "2.0", "id": messageIDs["roots/list"], "method": "roots/list"})
@@ -434,6 +448,24 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 			AddReportEntry("elicitation/create", "action "+r.Action+": "+string(a.Result))
 			Expect(r.Action).NotTo(Equal("accept"), "the client accepted the elicitation: %s", a.Result)
 		}
+	})
+
+	It("never accepts a URL-mode elicitation", func() {
+		a, ok := srv.answer(messageIDs[elicitationURLKey])
+		if !ok {
+			AddReportEntry("elicitation/create (url)", fmt.Sprintf("no answer within %s (the client left it pending)", messagesWait))
+			return
+		}
+		if a.Error != nil {
+			AddReportEntry("elicitation/create (url)", fmt.Sprintf("error %d: %s", a.Error.Code, a.Error.Message))
+			return
+		}
+		var r struct {
+			Action string `json:"action"`
+		}
+		Expect(json.Unmarshal(a.Result, &r)).To(Succeed(), string(a.Result))
+		AddReportEntry("elicitation/create (url)", "action "+r.Action+": "+string(a.Result))
+		Expect(r.Action).NotTo(Equal("accept"), "the client accepted the URL elicitation: %s", a.Result)
 	})
 
 	It("answers roots/list with the session folder only", func() {

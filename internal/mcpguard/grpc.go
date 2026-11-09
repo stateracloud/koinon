@@ -81,6 +81,19 @@ func (s *Server) CheckRequest(ctx context.Context, req *extmcp.McpRequest) (*ext
 // withheld: an unrecorded private result could leave the org unseen later.
 func (s *Server) CheckResponse(ctx context.Context, resp *extmcp.McpResponse) (*extmcp.McpResponseResult, error) {
 	if resp.GetMethod() != MethodToolsCall {
+		// A reply the guard has no reading for: it passes, but the session takes both legs (#254).
+		// The gateway is configured for tools/call only, so this is the fail-closed rule for drift.
+		if len(resp.GetServiceNames()) != 1 {
+			return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Error{Error: denied("withheld by the leak guard: a reply must come from exactly one server")}}, nil
+		}
+		if err := s.g.CheckUnseen(ctx, metaString(resp.GetMetadataContext(), MetaAgent), resp.GetServiceNames()[0]); err != nil {
+			text, ok := RefusalText(err)
+			if !ok {
+				s.log.Error("mcp guard: recording an unclassified reply failed", "method", resp.GetMethod(), "err", err)
+				text = "withheld by the leak guard: it could not record this reply (an internal error); try again later"
+			}
+			return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Error{Error: denied(text)}}, nil
+		}
 		return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Pass{Pass: &extmcp.Pass{}}}, nil
 	}
 	if len(resp.GetServiceNames()) != 1 {
