@@ -446,9 +446,10 @@ Checks behind the table:
 - Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
   fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
 - No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
-- Script injection: expressions spliced into `run:` are SHAs and numbers, except one: the base branch
-  name in the `migrations (lint)` step of `ci.yml`. Fixed in this change: it goes through `env: BASE` now,
-  as the `buf breaking` step already did.
+- Script injection: expressions spliced into `run:` are SHAs and numbers, except two: the base branch
+  name in the `migrations (lint)` and `dependency age` steps of `ci.yml`. Fixed in this change: both go
+  through `env: BASE` now, as the `buf breaking` step already did. No user-chosen text is spliced into a
+  `run:` script any more.
 
 Not fixed here: GitHub's repository setting "Require approval for all outside collaborators" for fork
 pull request workflows is a setting, not a file; it is on the maintainer's list to confirm.

@@ -447,7 +447,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
-        run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
+          BASE: origin/${{ github.base_ref }}
+        run: hack/dep-age-check.sh "$BASE"
 
   # The web checks run as parallel jobs (old issue 218), each its own check; `web` below aggregates them and
   # keeps the required check name stable.
