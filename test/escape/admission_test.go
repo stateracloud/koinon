@@ -59,13 +59,22 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		bindings                []*admissionv1.ValidatingAdmissionPolicyBinding
 	)
 
-	// supervisor is an OpenShell supervisor pod as the gateway creates it (chart default image).
+	// supervisor is an OpenShell supervisor pod as the gateway creates it (chart default image):
+	// OpenShell 0.1.5 sets automount false and projects one openshell-gateway token (sa-token).
+	supervisorToken := func(aud string, exp int64) corev1.Volume {
+		return corev1.Volume{Name: "sa-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+			Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: aud, ExpirationSeconds: &exp, Path: "token"}}},
+		}}}
+	}
 	supervisor := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"openshell.ai/boundary-role": "supervisor"}},
 			Spec: corev1.PodSpec{
-				SchedulingGates: []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
-				Containers:      []corev1.Container{{Name: "supervisor", Image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}},
+				SchedulingGates:              []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
+				ServiceAccountName:           "default",
+				AutomountServiceAccountToken: new(false),
+				Containers:                   []corev1.Container{{Name: "supervisor", Image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}},
+				Volumes:                      []corev1.Volume{supervisorToken("openshell-gateway", 3600)},
 			},
 		}
 		for _, m := range mutate {
@@ -253,8 +262,17 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			p.Spec.Volumes = []corev1.Volume{*v}
 		}))).To(Succeed())
 
-		By("supervisor pods are not covered: the gateway creates them")
-		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-automount"))).To(Succeed())
+		By("supervisor pods: automount false and only a bounded openshell-gateway token")
+		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-real-shape"))).To(Succeed())
+		supMount := "sandbox supervisor pods must set automountServiceAccountToken to false"
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-automount-unset", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil })), supMount)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-automount-true", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = new(true) })), supMount)
+		const supAud = "may project only a ServiceAccount token for the audience openshell-gateway"
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-no-audience", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{supervisorToken("", 3600)} })), supAud)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-api-audience", func(p *corev1.Pod) {
+			p.Spec.Volumes = []corev1.Volume{supervisorToken("https://kubernetes.default.svc", 3600)}
+		})), supAud)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-long-token", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{supervisorToken("openshell-gateway", 86400)} })), "must bound the ServiceAccount token to 3600 seconds")
 	})
 
 	It("denies ephemeral containers, the controller's included", func(ctx SpecContext) {
