@@ -136,6 +136,30 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(err).NotTo(HaveOccurred())
 		}
 
+		By("a second release on the same cluster: another name, namespace and gateway ID")
+		// Its objects must not clash with the first release's by name, and each release's policies
+		// must bind to their own gateway's namespaces only (old issue 460).
+		policiesB, bindingsB := renderSandboxPolicyAs(ctx, "koinon-b", "koinon-b",
+			"--set", "openshell.gatewayId=prod",
+			"--set-json", `sandboxPolicy.identities.supervisorPods=["`+gatewayBUser+`"]`,
+			"--set-json", `sandboxPolicy.identities.secrets=["`+gatewayBUser+`"]`,
+			"--set-json", `sandboxPolicy.identities.sandboxes=["`+gatewayBUser+`","`+controllerUser+`"]`)
+		names := map[string]bool{}
+		for _, p := range policies {
+			names[p.Name] = true
+		}
+		for _, b := range bindings {
+			names[b.Name] = true
+		}
+		for _, p := range policiesB {
+			Expect(names).NotTo(HaveKey(p.Name), "policy name clash between releases")
+		}
+		for _, b := range bindingsB {
+			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
+			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
+		}
+		policies, bindings = append(policies, policiesB...), append(bindings, bindingsB...)
+
 		for _, p := range policies {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, p, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -178,6 +202,14 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		// The same identity is still denied in a namespace of release A's gateway.
 		denied(createPod(ctx, gatewayBUser, ns, supervisor("b-in-a")), "may create pods in sandbox namespaces")
 		_, err = as[gatewayBUser].CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
+		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
+
+		By("symmetric: gateway A's identity is admitted in its own namespace and denied in gateway B's")
+		Expect(createPod(ctx, gatewayUser, ns, supervisor("a-supervisor"))).To(Succeed())
+		_, err = as[gatewayUser].CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "a-secret"}}, dryRun)
+		Expect(err).NotTo(HaveOccurred())
+		denied(createPod(ctx, gatewayUser, nsB, supervisor("a-in-b")), "may create pods in sandbox namespaces")
+		_, err = as[gatewayUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "a-secret"}}, dryRun)
 		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
 	})
 
@@ -573,11 +605,17 @@ func supervisorPod(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 // any extra helm arguments.
 func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	GinkgoHelper()
+	return renderSandboxPolicyAs(ctx, "koinon", "koinon", extraArgs...)
+}
+
+// renderSandboxPolicyAs renders the same template as the Helm release `release` in `namespace`.
+func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
+	GinkgoHelper()
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	Expect(err).NotTo(HaveOccurred(), "helm renders the chart's policies")
 	var out, stderr bytes.Buffer
 	args := append([]string{
-		"template", "koinon", "../../charts/koinon", "--namespace", "koinon",
+		"template", release, "../../charts/koinon", "--namespace", namespace,
 		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-policy.yaml",
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)

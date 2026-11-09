@@ -179,6 +179,31 @@ kid_path = "/etc/openshell-jwt/kid"
 			Expect(preflight.Write(&discard{}, results)).To(BeZero())
 		})
 
+		It("warns on an unset gateway_id when the policies are scoped and openshell.gatewayId is OpenShell's default", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "openshell"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("default"))
+			Expect(preflight.Write(&discard{}, results)).To(BeZero())
+		})
+
+		It("fails on an unset gateway_id when the policies are scoped and openshell.gatewayId is not OpenShell's default", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "prod"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(And(ContainSubstring("default"), ContainSubstring("fail open")))
+			Expect(r.Fix).To(ContainSubstring("openshell.gatewayId"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		})
+
 		It("warns when the workspace mode is not managed", func(ctx SpecContext) {
 			r := find(withID(gatewayToml("openshell", "openshell", "operator"), "openshell").run(ctx), "OpenShell workspace mode")
 			Expect(r.Status).To(Equal(preflight.Warn))

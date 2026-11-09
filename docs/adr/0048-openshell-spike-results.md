@@ -201,6 +201,17 @@ adds one narrow, used grant: [0078](0078-sandbox-observer.md). A ClusterRole wit
 those bindings to OpenShell workspace namespaces with a fixed name, role and subject (decision 3's identity
 keyed rules, extended). Nothing in sandbox namespaces is written by a new identity.
 
+## Amendment (2026-11-10): the admission policies cover their own gateway's namespaces, old issue 460
+
+The `openshell.ai/managed-by` namespace selector matched every OpenShell namespace on the cluster, so a
+second Koinon release with another gateway ID was policed by the first release's identity lists. The
+chart's bindings now also select `openshell.ai/gateway-id=<openshell.gatewayId>` by default;
+`sandboxPolicy.scopeToGateway=false` restores the old scope (every OpenShell namespace). The preflight
+fails when `openshell.gatewayId` differs from the gateway's `gateway_id` (the policies would bind to no
+namespace of that gateway and the boundary would fail open), and when the key is unset and
+`openshell.gatewayId` is not OpenShell's default `openshell`. Namespaces of a gateway with no Koinon
+release are no longer policed by this release.
+
 ## Links
 
 - [Spike plan](../spikes/openshell.md) and [results](../../hack/spike/results/)
