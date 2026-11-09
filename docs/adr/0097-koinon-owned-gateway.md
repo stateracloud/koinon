@@ -226,9 +226,8 @@ Scope:
   against it; a changed expected-failure list is reviewed like code.
 - **Close #254 on Koinon's side, fail closed.** An MCP call whose reply the guard never saw counts as
   untrusted: it sets both session legs (untrusted input and private data). The same holds for any MCP
-  message kind the guard cannot see. The upstream fix is drafted for a human to post, in
-  [`docs/dev/upstream-agentgateway-4245.md`](../dev/upstream-agentgateway-4245.md) (AGENTS.md, OpenShell
-  and upstream rules apply to agentgateway too).
+  message kind the guard cannot see. The upstream fix (agentgateway#4245) is drafted in the #254 pull
+  request for a human to post in their own words (the AGENTS.md upstream rules apply to agentgateway too).
   Built (#254): the open-call ledger in `internal/mcpguard` covers a `tools/call` that ends in an error
   reply or is cut short (both legs, a person decides); a reply of any other method the gateway might
   hand the guard (`CheckResponse`, `Guard.CheckUnseen`) takes both legs on the session. What the guard
@@ -252,7 +251,7 @@ Scope:
   `tools/call`, and checks that sampling is refused, elicitation never reaches the model, and roots
   shows only the sandbox folder. This holds only because of OpenCode's defaults (it declares no
   sampling, and in ACP mode it cancels MCP elicitations), not because of Koinon, so it is an interim
-  fix with its own issue (issue to file), exit condition: "the step 2 gateway refuses these itself"
+  fix with its own issue (#269), exit condition: "the step 2 gateway refuses these itself"
   (decision 5).
 - **The usage record** (decision 3; #273) and the leakage cleanup (decision 2.5).
 - **The guard scans arguments in a canonical form** (#256): keys sorted, each value scanned on its own.

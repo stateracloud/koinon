@@ -32,8 +32,9 @@ type Metrics struct {
 	Evictions prometheus.Counter
 	// Legs counts responses that set a leg, by leg.
 	Legs *prometheus.CounterVec
-	// Unseen counts calls the guard passed whose reply it never saw (#254): no label, the session
-	// they set both legs on is in the guard's warning.
+	// Unseen counts replies the guard passed without reading (#254): a tools/call that never ended in
+	// a result it saw (an error reply or a cut call), or a reply of a method it has no reading for. No
+	// label; the session they set both legs on is in the guard's warning.
 	Unseen prometheus.Counter
 }
 
@@ -55,7 +56,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"leg"}),
 		Unseen: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_api_mcp_guard_unseen_replies_total",
-			Help: "Tool calls the MCP leak guard passed that never ended in a result it saw (an error reply or a cut call), so their session holds both legs.",
+			Help: "Replies the MCP leak guard passed without reading (a tool call with no result it saw, or a reply of a method it cannot read), so their session holds both legs.",
 		}),
 	}
 	for _, a := range actions {
