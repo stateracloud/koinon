@@ -859,6 +859,12 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The live orgs where a worker could claim or take over a run right now: a run that is claimable
+	// (ready_at set, ClaimNextRun) or whose owner's lease expired (TakeOverExpiredRun). agentd polls
+	// this every few tens of milliseconds, so its cost follows the orgs with work, not every org that
+	// ever existed (koinon issue 378). Both halves use partial indexes (runs_claimable, runs_leases).
+	// A superset is fine: the claim queries re-check every condition.
+	ListOrgIDsWithRunWork(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
 	// Orgs whose default model migration 00045 left for BackfillDefaults.

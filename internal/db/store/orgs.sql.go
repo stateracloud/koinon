@@ -123,6 +123,43 @@ func (q *Queries) ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error) {
 	return items, nil
 }
 
+const listOrgIDsWithRunWork = `-- name: ListOrgIDsWithRunWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT r.org_id FROM runs r WHERE r.ready_at IS NOT NULL
+    UNION
+    SELECT r.org_id FROM runs r
+    WHERE r.state IN ('starting', 'running') AND r.lease_expires_at < now()
+  )
+ORDER BY o.id
+`
+
+// The live orgs where a worker could claim or take over a run right now: a run that is claimable
+// (ready_at set, ClaimNextRun) or whose owner's lease expired (TakeOverExpiredRun). agentd polls
+// this every few tens of milliseconds, so its cost follows the orgs with work, not every org that
+// ever existed (koinon issue 378). Both halves use partial indexes (runs_claimable, runs_leases).
+// A superset is fine: the claim queries re-check every condition.
+func (q *Queries) ListOrgIDsWithRunWork(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithRunWork)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsPendingDefaultModel = `-- name: ListOrgsPendingDefaultModel :many
 SELECT id FROM orgs
 WHERE default_model_pending AND deleted_at IS NULL
