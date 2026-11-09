@@ -128,7 +128,7 @@ func main() {
 				os.Exit(2)
 			}
 			if len(bad) > 0 {
-				res = result{dir: dir, verdict: fail, passed: res.passed, why: parallelPlainWhy(bad)}
+				res = mergeParallelPlain(res, bad)
 			}
 		}
 		results = append(results, res)
@@ -190,8 +190,9 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 	}
 	defer func() { _ = f.Close() }()
 	type event struct{ Action, Package, Test, Output string }
-	pending := map[[2]string]string{} // (package, test) -> requirement named in its output
-	runSpecs := map[[2]string]bool{}  // tests that ran a Ginkgo suite: their pass says nothing on their own
+	pending := map[[2]string]string{}         // (package, test) -> requirement named in its output
+	runSpecs := map[[2]string]bool{}          // tests that ran a Ginkgo suite: their pass says nothing on their own
+	specTests := map[string]map[string]bool{} // package dir -> Test funcs calling RunSpecs (AST); nil when unreadable
 	dec := json.NewDecoder(f)
 	for {
 		var e event
@@ -216,6 +217,7 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 		key := [2]string{e.Package, e.Test}
 		switch e.Action {
 		case "output":
+			// Fallback only, for a directory the AST lookup cannot read.
 			if strings.Contains(e.Output, "Running Suite:") {
 				runSpecs[key] = true
 			}
@@ -233,11 +235,34 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 				p.failed = append(p.failed, e.Test)
 			}
 		case "pass":
-			if !strings.Contains(e.Test, "/") && !runSpecs[key] {
+			if strings.Contains(e.Test, "/") {
+				break
+			}
+			st, seen := specTests[dir]
+			if !seen {
+				st, _ = runSpecsTests(dir) // nil on an unreadable directory
+				specTests[dir] = st
+			}
+			isSuite := runSpecs[key]
+			if st != nil {
+				isSuite = st[e.Test]
+			}
+			if !isSuite {
 				p.passed++
 			}
 		}
 	}
+}
+
+// mergeParallelPlain fails res for the plain RequireT tests in bad, keeping everything else it holds;
+// an earlier failure reason is joined with the new one rather than replaced.
+func mergeParallelPlain(res result, bad []string) result {
+	why := parallelPlainWhy(bad)
+	if res.verdict == fail && res.why != "" {
+		why = res.why + "; " + why
+	}
+	res.verdict, res.why = fail, why
+	return res
 }
 
 func parallelPlainWhy(tests []string) string {
@@ -245,14 +270,23 @@ func parallelPlainWhy(tests []string) string {
 		strings.Join(tests, ", ") + " (make them Ginkgo specs, or take the package off PARALLEL_SUITES in hack/go-test.sh)"
 }
 
-// plainRequireTests returns the plain tests (func TestX(t *testing.T) that do not call RunSpecs) of the
-// package in dir whose bodies call RequireT. A directory without Go files gives none.
-func plainRequireTests(dir string) ([]string, error) {
+// pkgFuncs is the package-level (receiver-less) functions of the test files of one package directory.
+type pkgFuncs struct {
+	tests  []string                  // names of the func TestX declarations, sorted
+	bodies map[string]*ast.BlockStmt // every receiver-less function with a body, by name
+}
+
+// parsePkgFuncs parses the *_test.go files of dir. A directory without such files is an error, so a
+// caller can tell "no tests" from "could not look".
+func parsePkgFuncs(dir string) (*pkgFuncs, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	if len(files) == 0 {
+		return nil, fmt.Errorf("%s: no test files", dir)
+	}
+	pf := &pkgFuncs{bodies: map[string]*ast.BlockStmt{}}
 	fset := token.NewFileSet()
 	for _, f := range files {
 		af, err := parser.ParseFile(fset, f, nil, 0)
@@ -261,29 +295,84 @@ func plainRequireTests(dir string) ([]string, error) {
 		}
 		for _, d := range af.Decls {
 			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+			if !ok || fn.Recv != nil || fn.Body == nil {
 				continue
 			}
-			var requires, specs bool
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if c, ok := n.(*ast.CallExpr); ok {
-					switch fun := c.Fun.(type) {
-					case *ast.SelectorExpr:
-						requires = requires || fun.Sel.Name == "RequireT"
-						specs = specs || fun.Sel.Name == "RunSpecs"
-					case *ast.Ident:
-						requires = requires || fun.Name == "RequireT"
-						specs = specs || fun.Name == "RunSpecs"
-					}
-				}
-				return true
-			})
-			if requires && !specs {
-				out = append(out, fn.Name.Name)
+			pf.bodies[fn.Name.Name] = fn.Body
+			if strings.HasPrefix(fn.Name.Name, "Test") {
+				pf.tests = append(pf.tests, fn.Name.Name)
 			}
 		}
 	}
-	sort.Strings(out)
+	sort.Strings(pf.tests)
+	return pf, nil
+}
+
+// callees returns the names a function body calls (`F(...)` and `x.F(...)` both give "F").
+func callees(body *ast.BlockStmt) map[string]bool {
+	out := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if c, ok := n.(*ast.CallExpr); ok {
+			switch fun := c.Fun.(type) {
+			case *ast.SelectorExpr:
+				out[fun.Sel.Name] = true
+			case *ast.Ident:
+				out[fun.Name] = true
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// runSpecsTests returns the Test functions of the package in dir that call RunSpecs: the tests that run a
+// Ginkgo suite, whose go test pass says nothing on its own. It errors when the directory cannot be read.
+func runSpecsTests(dir string) (map[string]bool, error) {
+	pf, err := parsePkgFuncs(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, name := range pf.tests {
+		if callees(pf.bodies[name])["RunSpecs"] {
+			out[name] = true
+		}
+	}
+	return out, nil
+}
+
+// plainRequireTests returns the plain tests (func TestX(t *testing.T) that do not call RunSpecs) of the
+// package in dir that call RequireT, directly or through a package-local helper. The search is
+// conservative but shallow: it follows exactly one level of calls to functions declared in the
+// package's own test files, so a helper that reaches RequireT only through another helper, or a
+// helper in a non-test file or another package, is missed. A directory without Go files gives none.
+func plainRequireTests(dir string) ([]string, error) {
+	pf, err := parsePkgFuncs(dir)
+	if err != nil {
+		if files, _ := filepath.Glob(filepath.Join(dir, "*_test.go")); len(files) == 0 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []string
+	for _, name := range pf.tests {
+		calls := callees(pf.bodies[name])
+		if calls["RunSpecs"] {
+			continue
+		}
+		requires := calls["RequireT"]
+		for c := range calls {
+			if requires {
+				break
+			}
+			if helper, ok := pf.bodies[c]; ok && c != name {
+				requires = callees(helper)["RequireT"]
+			}
+		}
+		if requires {
+			out = append(out, name)
+		}
+	}
 	return out, nil
 }
 

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -354,13 +355,97 @@ func TestSuite(t *testing.T) { testenv.RequireT(t, testenv.Docker); RunSpecs(t, 
 		Expect(parallelPlainWhy([]string{"TestA"})).To(And(ContainSubstring("ginkgo -p"), ContainSubstring("TestA")))
 	})
 
+	It("finds a plain test that reaches RequireT through a package-local helper", func() {
+		dir := dirWith(`package x
+import "testing"
+func needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestViaHelper(t *testing.T) { needHelm(t) }
+func TestClean(t *testing.T) { other(t) }
+func other(t *testing.T) {}
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestViaHelper"}))
+	})
+
+	It("follows one level of calls only", func() {
+		dir := dirWith(`package x
+import "testing"
+func deep(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func mid(t *testing.T) { deep(t) }
+func TestTwoLevels(t *testing.T) { mid(t) }
+`)
+		Expect(plainRequireTests(dir)).To(BeEmpty())
+	})
+
 	It("has none in the real parallel suites", func() {
-		files, err := os.ReadFile("../go-test.sh")
+		out, err := exec.Command("bash", "../go-test.sh", "--list").Output()
 		Expect(err).NotTo(HaveOccurred())
-		for _, line := range strings.Split(string(files), "\n") {
-			if d, ok := strings.CutPrefix(strings.TrimSpace(line), "./internal/"); ok && !strings.Contains(d, " ") {
-				Expect(plainRequireTests("../../internal/"+d)).To(BeEmpty(), d)
+		var suites []string
+		for _, line := range strings.Split(string(out), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				suites = append(suites, line)
 			}
 		}
+		Expect(suites).NotTo(BeEmpty())
+		for _, d := range suites {
+			Expect(strings.HasPrefix(d, "./internal/")).To(BeTrue(), d)
+			Expect(plainRequireTests("../../"+d)).To(BeEmpty(), d)
+		}
+	})
+})
+
+var _ = Describe("runSpecsTests", func() {
+	It("finds the Test functions that call RunSpecs", func() {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(`package x
+import "testing"
+func TestSuite(t *testing.T) { ginkgo.RunSpecs(t, "x") }
+func TestPlain(t *testing.T) {}
+`), 0o600)).To(Succeed())
+		Expect(runSpecsTests(dir)).To(Equal(map[string]bool{"TestSuite": true}))
+	})
+
+	It("errors on a directory with no test files", func() {
+		_, err := runSpecsTests(GinkgoT().TempDir())
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("does not count the RunSpecs test as a passed plain test even without the Running Suite line (-ginkgo.succinct)", func() {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(`package x
+import "testing"
+func TestSuite(t *testing.T) { RunSpecs(t, "x") }
+func TestPlain(t *testing.T) {}
+`), 0o600)).To(Succeed())
+		// loadGoTest keys packages by directory relative to the module root, so run from there.
+		wd, err := os.Getwd()
+		Expect(err).NotTo(HaveOccurred())
+		rel, err := filepath.Rel(wd, dir)
+		Expect(err).NotTo(HaveOccurred())
+		pkg := project.ModulePath + "/" + filepath.ToSlash(rel)
+		f := filepath.Join(GinkgoT().TempDir(), "e.jsonl")
+		Expect(os.WriteFile(f, []byte(`{"Action":"pass","Package":"`+pkg+`","Test":"TestSuite"}
+{"Action":"pass","Package":"`+pkg+`","Test":"TestPlain"}
+`), 0o600)).To(Succeed())
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(f, pkgs)).To(Succeed())
+		Expect(pkgs[filepath.ToSlash(rel)].passed).To(Equal(1))
+	})
+})
+
+var _ = Describe("parallel plain-test verdict", func() {
+	It("keeps an earlier failure reason when a plain RequireT test is found too", func() {
+		res := result{dir: "./internal/x", verdict: fail, passed: 2, why: "spec failed", requires: []string{"docker"}}
+		got := mergeParallelPlain(res, []string{"TestA"})
+		Expect(got.verdict).To(Equal(fail))
+		Expect(got.why).To(And(ContainSubstring("spec failed"), ContainSubstring("TestA")))
+		Expect(got.requires).To(Equal([]string{"docker"}))
+		Expect(got.passed).To(Equal(2))
+	})
+
+	It("turns a passing suite into a failure naming the tests", func() {
+		got := mergeParallelPlain(result{dir: "./internal/x", verdict: pass, passed: 3}, []string{"TestA"})
+		Expect(got.verdict).To(Equal(fail))
+		Expect(got.why).To(ContainSubstring("TestA"))
+		Expect(got.passed).To(Equal(3))
 	})
 })
