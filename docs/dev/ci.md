@@ -468,20 +468,20 @@ release tags are cut only from a commit whose `quickstart` job concluded success
 Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
 (ADR 0047, amended 2026-11-09). `hack/runner-lint.sh` enforces it in the `scripts` job (required, so it
 reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` as the
-`runnerlint` gate. Redo this review when a workflow gains a trigger, a secret or a permission.
+`runnerlint` gate (it also holds the trigger rule below). Redo this review when a workflow gains a trigger, a secret or a permission.
 
 | Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
 |---|---|---|---|
 | `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
-| `claims.yml` | `pull_request_target` | `GITHUB_TOKEN`; the `claim` job has `contents: read, issues: read`; the `release` (`pull_request_target` closed) and `sweeper` (schedule, dispatch) jobs have `contents: write, issues: write` and run base-sha or default-branch `hack/claim.sh` only; no Environment, no App key | ok: the `claim` and `release` jobs check out `pull_request.base.sha` and run the base's `hack/claim.sh`; the PR's code never runs. The merge_group job takes its YAML from the queue commit; the guard is the required review on `.github/**` |
-| `updater.yml` | `pull_request_target` (`auto_merge_enabled`), `workflow_run` | App ID and key from the `claims-bot` Environment; token with `contents`, `pull-requests`, `workflows: write` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
+| `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); `schedule`, dispatch (`sweeper`) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` (push to `main`) and `sweeper` (schedule, dispatch; frees PRs closed without a merge) jobs have `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out `pull_request.base.sha` (or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` and `sweeper` run main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `updater.yml` | `push` to `main`, `workflow_run`, `schedule`, dispatch (no `auto_merge_enabled`) | App ID and key from the `claims-bot` Environment (branch policy `main`); token with `contents`, `pull-requests`, `workflows: write` and `checks`, `statuses: read` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
 Checks behind the table:
 
-- The only `pull_request_target` workflows are `claims.yml` and `updater.yml`; neither checks out the head.
+- No workflow uses `pull_request_target` (#463). GitHub blocks it by default for public repositories (brownouts from 2026-11-09, permanent 2026-12-02); it runs with the base branch's secrets and a write token next to pull request content. `hack/runner-lint.sh` fails any workflow that names it, and bringing it back needs an ADR that amends ADR 0082 plus an admin Actions event policy.
 - The only Environment is `claims-bot` (`updater.yml`). No other workflow reads a secret besides
   `GITHUB_TOKEN`.
 - Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
@@ -534,7 +534,7 @@ it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
 ### The `claim` check and claims by comment (ADR 0094, #163, #164)
 
-`claim` (`.github/workflows/claims.yml`, `pull_request_target`, read-only, `hack/claim.sh check-pr`)
+`claim` (`.github/workflows/claims.yml`, `pull_request`, read-only, `hack/claim.sh check-pr`)
 is required and is a conflict check: it fails only when someone else's human holds a live claim on an
 issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
 issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
@@ -548,6 +548,15 @@ handles `/claim` and `/release` on issues with `GITHUB_TOKEN`; it is no status c
 release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run a failed `claim`
 check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
 fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
+
+#### Workflow triggers: no `pull_request_target` (#463)
+
+No workflow uses `pull_request_target`; the per-workflow triggers, tokens and checkouts are in the
+[Workflow security review](#workflow-security-review) table, and `hack/runner-lint.sh` enforces the rule.
+
+Limit: on `pull_request` the workflow file is the PR head's, so a PR could edit `claims.yml` to pass
+its own `claim`. `.github/**` needs a CODEOWNERS review and the token is read-only without a secret; a
+ruleset "required workflow" could pin the file, and is a settings change (ADR 0082 amendment).
 
 ## Merging
 
@@ -633,10 +642,11 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
   sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  `release` (a `push` to main job) and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
-  only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
-  the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
+  only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
+  guard is the required CODEOWNERS review on `.github/**`. The trade-off is in the ADR 0082 amendment; the
+  ruleset "required workflow" option would run main's file instead.
 - `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
   e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That

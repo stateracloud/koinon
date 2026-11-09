@@ -57,6 +57,12 @@ case_ "trailing comment"              0 $W '    runs-on: ubuntu-latest # not sel
 case_ "a word that only contains it"  0 $W '    name: notself-hosted-ish'
 case_ "yaml extension"                1 .github/workflows/y.yaml '    runs-on: self-hosted'
 case_ "actionlint config label"       1 .github/actionlint.yaml 'self-hosted-runner:\n  labels: [my-box]'
+case_ "pull_request_target map key"   1 $W 'on:\n  pull_request_target:\n    types: [closed]'
+case_ "pull_request_target flow list" 1 $W 'on: [push, pull_request_target]'
+case_ "pull_request_target in an if"  1 $W 'jobs:\n  a:\n    if: github.event_name == '"'"'pull_request_target'"'"
+case_ "plain pull_request passes"     0 $W 'on:\n  pull_request:\n    types: [opened]'
+case_ "pull_request_target comment"   0 $W '# no pull_request_target here\non:\n  push: {}  # not pull_request_target'
+case_ "a longer trigger name passes"  0 $W 'on:\n  pull_request_targets_x: {}'
 case_ "no workflows at all"           0 README.md 'x'
 
 # The real tree is clean.
