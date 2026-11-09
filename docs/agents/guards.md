@@ -41,8 +41,12 @@ Owner: "repo" means a pull request changes it. "Owner" means only the human owne
 | Ship from a feature branch, with an allowed identity, to a branch named for an issue | `hack/ship.sh` (refuses `main`, a merged or closed PR, a bad branch name, a bad identity, a lost claim) | `ship: FAIL ...` (exit 1), exit 3 for a lost claim | Branch `<type>/<N>-<slug>`; set the repository identity; stop on exit 3 | repo |
 | Write only where the sandbox allows | Claude Code sandbox (`.claude/settings.json` `sandbox` entries); worktrees under `/tmp/kw` | `Operation not permitted` | `hack/wt.sh new`; `$TMPDIR`. `hack/lane-gates.sh` reports a sandbox denial as `notrun` | owner |
 | No cluster by default | rule in AGENTS.md "Working rules" (explicit `KUBECONFIG`); no hook | text only | `KUBECONFIG=/dev/null`, or an explicit file | repo |
+| Never tell the Homelab session (Rivet) that the owner approved something | `~/.config/koinon/hooks/relay-guard.sh`, PreToolUse on SendMessage and AskUserQuestion (header read only) | deny with a reason | Rivet asks the owner itself; the agent relays no approval | human owner only, not in the repository |
+| Compact the main session past 300k context | `~/.config/koinon/hooks/context-cap.sh`, PostToolUse hook and status line (header read only) | a message to compact, once per 50k step | Compact the session | human owner only, not in the repository |
+| Questions to the owner go through the question tool | `~/.config/koinon/hooks/grilling-question-tool.sh` (PreToolUse on Skill) and `prose-question-stop.sh` (Stop hook); headers read only | the stop is blocked once, with a request to ask again through the tool | Ask through `AskUserQuestion` | human owner only, not in the repository |
+| A question checklist before each owner question | `~/.config/koinon/hooks/question-checklist.sh`, PreToolUse on AskUserQuestion | context text; it never blocks | Check the list, then ask | human owner only, not in the repository |
 
-Guards in the table: 22.
+Guards in the table: 26.
 
 ## 2. Guards with no legal route today
 
@@ -58,7 +62,7 @@ Guards in the table: 22.
 3. **Brief and hook disagree on waiting.** `docs/agents/subagent-brief.md` allows "Monitor and an
    until-loop". `~/.config/koinon/hooks/sleep-chain.sh` denies a foreground `sleep` of 5 s or more,
    also inside a loop. The audit counted up to 93.6M tokens in one day. The loop in a Monitor runs
-   in the foreground command of the Monitor tool; the hook has no way to tell. Smallest fix: the
+   in the foreground command of the Monitor tool; I think the hook cannot tell a Monitor loop from a foreground loop (inferred from its regex, not tested). Smallest fix: the
    brief says "`hack/pr-wait.sh`, or `run_in_background`" only; or `sleep-chain.sh` allows a Monitor
    call. Pick the first: it needs no change outside the repository.
 4. **The hook set is split.** `sleep-chain.sh` and the digest live in `~/.config/koinon/hooks`, not
@@ -79,12 +83,21 @@ classifier record. They are from the audit.
 
 ## 3. Proposed hook change (text only)
 
-Claude Code PreToolUse hooks can return `updatedInput`, but the owner removed it on 2026-11-04
-(retro point 8): a rewritten prompt, changed after auto mode had judged it, made auto mode refuse the
-call (18 refusals on 2026-11-03). `additionalContext` on a PreToolUse hook reaches the calling model,
-not the subagent. So neither fits. The fit is a SubagentStart hook, which can return
-`additionalContext` to the subagent itself, and a spawn hook that denies only for a missing model.
-Check the SubagentStart output fields in the Claude Code hook documentation before applying.
+Checked against https://code.claude.com/docs/en/hooks on 2026-11-09:
+- `SubagentStart` exists. Its `hookSpecificOutput.additionalContext` is added to the subagent's
+  context at the start of its conversation, before its first prompt. It cannot block a spawn. Its
+  input has `agent_id` and `agent_type` only, no prompt.
+- PreToolUse `additionalContext` goes to the calling model, beside the tool result. It does not
+  reach the new subagent.
+- PreToolUse `updatedInput` is still supported. The page section "PreToolUse `updatedInput` in auto
+  mode" says that without a `permissionDecision`, auto mode can deny the changed call, because the
+  server reviewed the input that the model wrote. This is the documented cause of the 18 refusals on
+  2026-11-03 (the owner removed `updatedInput` on 2026-11-04). Whether `permissionDecision: "allow"`
+  prevents the denial: not verified.
+
+So the proposal is: the spawn hook denies only for a missing `model`, and a SubagentStart hook
+injects the digest. That hook cannot see the prompt, so it injects the digest into every subagent.
+This costs about the digest's size per spawn: `subagent-brief-digest.txt` is 1658 bytes, 255 words.
 
 In `agent-spawn-check.sh`, replace the brief case with:
 
