@@ -145,6 +145,7 @@ the workflows now run on GitHub-hosted runners, which cost nothing on a public r
 decisions stand; only the cost reasoning changed. What runs where: CI runs the admission half of the
 escape suite (`escape (admission)`, only the admission-labelled cases, path-gated by `hack/ci-changes.sh`); the OpenShell cases run on kind (`make test-escape-kind`) and
 on the maintainers' lab, where the Kata tier can be tested. The leak guard exfiltration case (label `leakguard`) runs from a sandbox inside the kind e2e (`e2e-kind`, #348).
+Update (2026-11-09, #109): the OpenShell cases also run in the kind e2e (`test/e2e/escape-openshell.sh`, after the Go driver) against the chart's real sandbox admission policy, and a skip there is a failure; `make test-escape-kind` and the lab remain.
 
 ## Links
 

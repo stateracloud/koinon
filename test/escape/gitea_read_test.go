@@ -38,7 +38,7 @@ import (
 // What a real Gitea does with the read token behind the policy (a push refused for the token's
 // missing write scope, 404 for a repository the bot is not a collaborator on) is covered by
 // the fake Gitea, which enforces both (internal/testing/fakegitea), and is confirmed on the home lab.
-var _ = Describe("Gitea read grant", Label("escape", "openshell"), Ordered, func() {
+var _ = Describe("Gitea read grant", Label("escape", "openshell", "gitea"), Ordered, func() {
 	var (
 		g         *gateway
 		base      = strings.TrimRight(envOr("KOINON_ESCAPE_GITEA_URL", "https://example.com/gitea"), "/")
