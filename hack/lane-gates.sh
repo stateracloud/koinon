@@ -130,8 +130,16 @@ run_cmd() {
 #    (ci-changes is wider than the preflight selection: go runs for a migration or pricing change).
 #    One preflight call per gate, so each has a time and a verdict of its own. A
 #    "skip (... not installed)" line is a gate that did not run.
-changes_out=$("$changes" "$base" 2>"$logdir/ci-changes.err")
-changes_rc=$?
+# No committed change (a lane with no commits yet, or only uncommitted edits): ci-changes.sh would
+# read the empty list as "everything" and start the 35-minute heavy gates, so do not ask it. The
+# path gates are notrun with that reason; the preflight gates below still run.
+changes_out="" changes_rc=0
+if [[ -z $(git diff --name-only --no-renames "$(git merge-base "$base" HEAD)" HEAD) ]]; then
+	report paths 0 0 notrun "no committed change" "$logdir/ci-changes.err"
+else
+	changes_out=$("$changes" "$base" 2>"$logdir/ci-changes.err")
+	changes_rc=$?
+fi
 if [[ $changes_rc -ne 0 ]]; then
 	echo "lane-gates FAIL: $changes failed (exit $changes_rc), so the heavy gates cannot be chosen; nothing was verified" >&2
 	sed 's/^/  | /' "$logdir/ci-changes.err" | head -5 >&2
