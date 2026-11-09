@@ -124,3 +124,17 @@ out=$(REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX") hack/go-test
 grep -q 'failing part(s): plain packages (exit 1)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the failing part is not named"; exit 1; }
 grep -q 'go-test verdict: FAILED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict line must say FAILED for a failed plain test, not ok"; exit 1; }
 echo "ok: a failing plain test fails the run, names the part and fails the verdict"
+
+# Plain RequireT tests in a ginkgo -p suite (#106): go-test.sh hands every parallel suite to the verdict as
+# -parallel, and the verdict fails a suite directory whose plain test reaches testenv.RequireT (here through a
+# helper), telling the developer how to fix it.
+grep -qF -e 'pflags+=(-parallel ' hack/go-test.sh || { echo "FAIL: go-test.sh does not pass its parallel suites to testverdict as -parallel"; exit 1; }
+pf=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+printf '// SPDX-License-Identifier: Apache-2.0\npackage zzparallel\n\nimport "testing"\n\nfunc needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }\n\nfunc TestNeedsHelm(t *testing.T) { needHelm(t) }\n' >"$pf/x_test.go"
+rc=0
+out=$(go run ./hack/testverdict -reports "$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")" -parallel "$pf" "$pf" 2>&1) || rc=$?
+[[ $rc != 0 ]] || { echo "$out"; echo "FAIL: testverdict passed a plain RequireT test in a -parallel suite"; exit 1; }
+grep -q 'TestNeedsHelm' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not name the plain RequireT test"; exit 1; }
+grep -q 'take the package off PARALLEL_SUITES' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not say how to fix it"; exit 1; }
+rm -rf "$pf"
+echo "ok: a plain RequireT test in a -parallel suite fails the verdict and says how to fix it"

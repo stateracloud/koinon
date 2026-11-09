@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -219,13 +220,32 @@ var _ = Describe("summarize, opt-in", func() {
 	})
 })
 
+// inModuleRoot runs the current spec from the module root, where loadGoTest's package directories
+// ("hack/testverdict/testdata/x") resolve, as they do when hack/go-test.sh runs the binary.
+func inModuleRoot() {
+	BeforeEach(func() {
+		wd, err := os.Getwd()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.Chdir("../..")).To(Succeed())
+		DeferCleanup(func() { Expect(os.Chdir(wd)).To(Succeed()) })
+	})
+}
+
 var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 	write := func(lines ...string) string {
 		f := filepath.Join(GinkgoT().TempDir(), "e.gotest.jsonl")
 		Expect(os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o600)).To(Succeed())
 		return f
 	}
-	const pkg = "github.com/stateracloud/koinon/test/chartsmoke"
+	// pkg is a fixture with a TestChartsmoke that calls RunSpecs and a plain TestChartContract, so the AST
+	// lookup (relative to the module root) is exercised. gone has no directory: only the output fallback
+	// can tell its suite test apart.
+	const (
+		pkg    = project.ModulePath + "/hack/testverdict/testdata/plainsuite"
+		gone   = project.ModulePath + "/internal/no-such-package"
+		fixDir = "hack/testverdict/testdata/plainsuite"
+	)
+	inModuleRoot()
 
 	It("counts a plain test skipped for helm into its suite, which is then incomplete", func() {
 		pkgs := map[string]*plainPkg{}
@@ -233,18 +253,90 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 			`{"Action":"run","Package":"`+pkg+`","Test":"TestChartContract"}`,
 			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartContract","Output":"    contract_test.go:46: koinon:requires=helm: helm is not on PATH\n"}`,
 			`{"Action":"skip","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartsmoke","Output":"Running Suite: chartsmoke\n"}`,
 			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartsmoke"}`,
 			`{"Action":"pass","Package":"`+pkg+`"}`,
 		), pkgs)).To(Succeed())
-		Expect(pkgs["test/chartsmoke"].requires()).To(Equal([]string{"helm"}))
+		Expect(pkgs[fixDir].requires()).To(Equal([]string{"helm"}))
 
 		// The suite itself skipped for the opt-in envtest; the plain test's helm makes it incomplete.
 		r := judgeWith("./test/chartsmoke", report(true,
 			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
-		), pkgs["test/chartsmoke"].requires(), "", "docker,git,helm")
+		), pkgs[fixDir].requires(), pkgs[fixDir].passed, "", "docker,git,helm")
 		Expect(r.verdict).To(Equal(skipped))
 		Expect(r.incomplete).To(BeTrue())
 		Expect(r.expected).To(Equal([]string{"helm"}))
+	})
+
+	It("reads partly run, not not run, when a plain test passed and the suite skipped (chartsmoke with helm, no envtest)", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartsmoke"}`,
+		), pkgs)).To(Succeed())
+		// The RunSpecs test passes whatever the specs did; only TestChartContract counts.
+		Expect(pkgs[fixDir].passed).To(Equal(1))
+
+		r := judgeWith("./test/chartsmoke", report(true,
+			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
+		), nil, pkgs[fixDir].passed, "", "docker,git,helm")
+		Expect(r.verdict).To(Equal(partial))
+		Expect(r.incomplete).To(BeFalse())
+		var out bytes.Buffer
+		Expect(summarize(&out, "go-test", []result{r})).To(Equal(0))
+		Expect(out.String()).To(ContainSubstring("opt-in suites partly run here"))
+		Expect(out.String()).NotTo(ContainSubstring("not run here"))
+	})
+
+	It("keeps NOT RUN when specs skipped without a declared requirement, whatever plain tests passed", func() {
+		r := judgeWith("./internal/x", report(true,
+			spec(types.NodeTypeIt, types.SpecStateSkipped, "no docker here"),
+		), nil, 5, "", "")
+		Expect(r.verdict).To(Equal(notRun))
+		r = judgeWith("./internal/x", report(true), nil, 5, "", "")
+		Expect(r.verdict).To(Equal(notRun))
+	})
+
+	It("does not count a suite's own RunSpecs test as a passed plain test (found by AST, no output line)", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartsmoke"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs[fixDir].passed).To(Equal(0))
+		r := judgeWith("./test/chartsmoke", report(true,
+			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: x"),
+		), nil, pkgs[fixDir].passed, "", "docker,git,helm")
+		Expect(r.verdict).To(Equal(skipped))
+	})
+
+	It("falls back to the Running Suite output when the directory cannot be read", func() {
+		// gone has no directory, so only the output line says TestSuite ran a Ginkgo suite.
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"output","Package":"`+gone+`","Test":"TestSuite","Output":"Running Suite: x\n"}`,
+			`{"Action":"pass","Package":"`+gone+`","Test":"TestSuite"}`,
+			`{"Action":"pass","Package":"`+gone+`","Test":"TestPlain"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs["internal/no-such-package"].passed).To(Equal(1))
+	})
+
+	It("keeps the output fallback when the AST does not name the test (a RunSpecs it cannot see)", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestElsewhere","Output":"Running Suite: x\n"}`,
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestElsewhere"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs[fixDir].passed).To(Equal(0))
+	})
+
+	It("does not count a suite that calls RunSpecs through a helper, without the output line", func() {
+		const helperPkg = project.ModulePath + "/hack/testverdict/testdata/helperpkg"
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"pass","Package":"`+helperPkg+`","Test":"TestSuiteViaHelper"}`,
+			`{"Action":"pass","Package":"`+helperPkg+`","Test":"TestPlainOK"}`,
+		), pkgs)).To(Succeed())
+		Expect(pkgs["hack/testverdict/testdata/helperpkg"].passed).To(Equal(1))
 	})
 
 	It("ignores a skip that names no requirement", func() {
@@ -253,7 +345,7 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 			`{"Action":"output","Package":"`+pkg+`","Test":"TestX","Output":"    x_test.go:1: short mode\n"}`,
 			`{"Action":"skip","Package":"`+pkg+`","Test":"TestX"}`,
 		), pkgs)).To(Succeed())
-		Expect(pkgs["test/chartsmoke"].requires()).To(BeEmpty())
+		Expect(pkgs[fixDir].requires()).To(BeEmpty())
 	})
 
 	It("rejects a file that is not a go test event stream", func() {
@@ -279,5 +371,177 @@ var _ = Describe("loadGoTest", func() {
 		Expect(pkgs["internal/x"].failed).To(Equal([]string{"TestBad", "(package)"}))
 		Expect(pkgs["internal/y"].failed).To(BeEmpty())
 		Expect(pkgs["internal/y"].passed).To(Equal(1))
+	})
+})
+
+var _ = Describe("plainRequireTests (parallel suites emit no go test events)", func() {
+	dirWith := func(src string) string {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o600)).To(Succeed())
+		return dir
+	}
+
+	It("finds a plain test that calls RequireT", func() {
+		dir := dirWith(`package x
+import "testing"
+func TestSuite(t *testing.T) { RunSpecs(t, "x") }
+func TestNeedsHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestPlain(t *testing.T) {}
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestNeedsHelm"}))
+	})
+
+	It("ignores the RunSpecs test and Ginkgo specs", func() {
+		dir := dirWith(`package x
+import "testing"
+func TestSuite(t *testing.T) { testenv.RequireT(t, testenv.Docker); RunSpecs(t, "x") }
+`)
+		Expect(plainRequireTests(dir)).To(BeEmpty())
+	})
+
+	It("names the offending tests in the failure", func() {
+		Expect(parallelPlainWhy([]string{"TestA"})).To(And(ContainSubstring("ginkgo -p"), ContainSubstring("TestA")))
+	})
+
+	It("finds a plain test that reaches RequireT through a package-local helper", func() {
+		dir := dirWith(`package x
+import "testing"
+func needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestViaHelper(t *testing.T) { needHelm(t) }
+func TestClean(t *testing.T) { other(t) }
+func other(t *testing.T) {}
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestViaHelper"}))
+	})
+
+	It("follows a chain of package-local helpers", func() {
+		dir := dirWith(`package x
+import "testing"
+func deep(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func mid(t *testing.T) { deep(t) }
+func TestTwoLevels(t *testing.T) { mid(t) }
+func TestClean(t *testing.T) {}
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestTwoLevels"}))
+	})
+
+	It("finds RequireT through a helper in a non-test file", func() {
+		Expect(plainRequireTests("testdata/helperpkg")).To(Equal([]string{"TestHelmViaFile"}))
+	})
+
+	It("ignores a test that reaches RunSpecs through a helper", func() {
+		dir := dirWith(`package x
+import "testing"
+func run(t *testing.T) { RunSpecs(t, "x"); testenv.RequireT(t, testenv.Docker) }
+func TestSuite(t *testing.T) { run(t) }
+`)
+		Expect(plainRequireTests(dir)).To(BeEmpty())
+	})
+
+	It("terminates on recursive helpers and still finds RequireT behind them", func() {
+		dir := dirWith(`package x
+import "testing"
+func ping(t *testing.T) { pong(t); ping(t) }
+func pong(t *testing.T) { ping(t); testenv.RequireT(t, testenv.Helm) }
+func loopA(t *testing.T) { loopB(t) }
+func loopB(t *testing.T) { loopA(t) }
+func TestHit(t *testing.T) { ping(t) }
+func TestLoopOnly(t *testing.T) { loopA(t) }
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestHit"}))
+	})
+
+	It("does not follow a helper in another package", func() {
+		dir := dirWith(`package x
+import "testing"
+func TestOther(t *testing.T) { otherpkg.Helper(t) }
+`)
+		Expect(plainRequireTests(dir)).To(BeEmpty())
+	})
+
+	It("unions the bodies of a name declared twice (build-tagged variants) instead of letting the last win", func() {
+		dir := dirWith(`package x
+import "testing"
+func needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestV(t *testing.T) { needHelm(t) }
+`)
+		Expect(os.WriteFile(filepath.Join(dir, "y_test.go"), []byte(`package x
+import "testing"
+func needHelm(t *testing.T) {}
+`), 0o600)).To(Succeed())
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestV"}))
+	})
+
+	It("has none in the real parallel suites", func() {
+		out, err := exec.Command("bash", "../go-test.sh", "--list").Output()
+		Expect(err).NotTo(HaveOccurred())
+		var suites []string
+		for _, line := range strings.Split(string(out), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				suites = append(suites, line)
+			}
+		}
+		Expect(suites).NotTo(BeEmpty())
+		for _, d := range suites {
+			Expect(strings.HasPrefix(d, "./internal/")).To(BeTrue(), d)
+			Expect(plainRequireTests("../../"+d)).To(BeEmpty(), d)
+		}
+	})
+})
+
+var _ = Describe("runSpecsTests", func() {
+	It("finds the Test functions that call RunSpecs", func() {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(`package x
+import "testing"
+func TestSuite(t *testing.T) { ginkgo.RunSpecs(t, "x") }
+func TestPlain(t *testing.T) {}
+`), 0o600)).To(Succeed())
+		Expect(runSpecsTests(dir)).To(Equal(map[string]bool{"TestSuite": true}))
+	})
+
+	It("errors on a directory with no test files", func() {
+		_, err := runSpecsTests(GinkgoT().TempDir())
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("does not count the RunSpecs test as a passed plain test even without the Running Suite line (-ginkgo.succinct)", func() {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(`package x
+import "testing"
+func TestSuite(t *testing.T) { RunSpecs(t, "x") }
+func TestPlain(t *testing.T) {}
+`), 0o600)).To(Succeed())
+		// loadGoTest keys packages by directory relative to the module root, so run from there.
+		wd, err := os.Getwd()
+		Expect(err).NotTo(HaveOccurred())
+		rel, err := filepath.Rel(wd, dir)
+		Expect(err).NotTo(HaveOccurred())
+		pkg := project.ModulePath + "/" + filepath.ToSlash(rel)
+		f := filepath.Join(GinkgoT().TempDir(), "e.jsonl")
+		Expect(os.WriteFile(f, []byte(`{"Action":"pass","Package":"`+pkg+`","Test":"TestSuite"}
+{"Action":"pass","Package":"`+pkg+`","Test":"TestPlain"}
+`), 0o600)).To(Succeed())
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(f, pkgs)).To(Succeed())
+		Expect(pkgs[filepath.ToSlash(rel)].passed).To(Equal(1))
+	})
+})
+
+var _ = Describe("parallel plain-test verdict", func() {
+	It("keeps an earlier failure reason when a plain RequireT test is found too", func() {
+		res := result{dir: "./internal/x", verdict: fail, passed: 2, why: "spec failed", requires: []string{"docker"}}
+		got := mergeParallelPlain(res, []string{"TestA"})
+		Expect(got.verdict).To(Equal(fail))
+		Expect(got.why).To(And(ContainSubstring("spec failed"), ContainSubstring("TestA")))
+		Expect(got.requires).To(Equal([]string{"docker"}))
+		Expect(got.passed).To(Equal(2))
+	})
+
+	It("turns a passing suite into a failure naming the tests", func() {
+		got := mergeParallelPlain(result{dir: "./internal/x", verdict: pass, passed: 3}, []string{"TestA"})
+		Expect(got.verdict).To(Equal(fail))
+		Expect(got.why).To(ContainSubstring("TestA"))
+		Expect(got.passed).To(Equal(3))
 	})
 })
