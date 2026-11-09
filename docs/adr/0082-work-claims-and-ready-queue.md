@@ -242,8 +242,9 @@ sentence of ADR 0094.
 - **`claim` check** (`claims.yml`): runs on `pull_request` (same activity types as before, `closed`
   dropped) and `merge_group`. The token is read-only (`contents`, `issues`, `pull-requests`: read),
   there is no secret and no Environment. The job still checks out the base commit
-  (`pull_request.base.sha`) and runs that commit's `hack/claim.sh check-pr`; it never runs the pull
-  request's code.
+  and runs that commit's `hack/claim.sh check-pr`; it never runs the pull request's code. Since ADR
+  0104 that commit is the base branch's tip at run time (`pull_request.base.ref`), not
+  `pull_request.base.sha`, which is the base of the PR's last push and can be far behind.
 - **Release on merge** (`release` job): runs on `push` to `main` from main's own workflow file. It runs
   `hack/claim.sh release-merged <before> <after>`: GitHub links every pushed commit to its pull
   requests, and the claims of each merged one are released as `release-pr` did. Pull requests closed

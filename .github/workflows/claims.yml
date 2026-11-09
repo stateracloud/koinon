@@ -103,10 +103,13 @@ jobs:
           n=${n%%-*}
           if [[ ! $n =~ ^[0-9]+$ ]]; then echo "::error::cannot read the pull request number from $GITHUB_REF"; exit 1; fi
           hack/claim.sh check-pr "$n"
+      # The base branch's tip at run time (base.ref, a branch name), not pull_request.base.sha: that is
+      # the base recorded when the PR was opened or last pushed, so a PR not updated since would run an
+      # old check-pr. The PR cannot change what the base branch holds.
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
       - if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}

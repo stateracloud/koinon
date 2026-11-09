@@ -104,11 +104,11 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
     (`released_by` without `/`) makes it report "lost" and exit 3. Stop those loops after the merge;
   - an old `mine` hides new claims, so an old `pr-merge.sh` warns on its `review` call and still merges;
   - an old `wt.sh rm` calls a new claim's state unknown and refuses without `--force` (safe).
-- The `claim` job of `claims.yml` (on `pull_request` since #463) checks out the PR's base SHA
-  (`pull_request.base.sha`), so a PR opened before this merge and not updated since can still run
-  the old `check-pr` for its `edited` events. This is harmless with one human: the old script reads
-  a new-format claim as free (no lease). The `release` job runs on the push to main with main's own
-  script, so it always runs the new `release-merged`.
+- The `claim` job of `claims.yml` (on `pull_request` since #463) checks out the base branch's tip at
+  run time (`pull_request.base.ref`), not `pull_request.base.sha` (the base of the PR's last push,
+  which can be many commits behind), so every run after this merge uses the new `check-pr`. A
+  `merge_group` run checks out `merge_group.base_sha`, the queue entry's base. The `release` job
+  runs on the push to main with main's own script, so it always runs the new `release-merged`.
 - New reservations (`state: reserved`) pass an old `check-pr`, which treats any state but `held` as
   released; only another human could collide, and there is none.
 
