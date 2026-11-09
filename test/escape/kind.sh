@@ -126,10 +126,11 @@ else
     [[ $IMAGE != *@* ]] || IMAGE=koinon/spike-probe:1
   fi
   echo "== probe image $IMAGE (built from hack/spike/probe)"
-  # KOINON_PROBE_BASE=<local image> builds on an image already on this machine (the e2e passes its flavor image);
-  # unset, the Dockerfile's pinned default base is pulled.
-  probe_args=()
-  [[ -z ${KOINON_PROBE_BASE:-} ]] || probe_args=(--build-arg "BASE=$KOINON_PROBE_BASE")
+  # KOINON_PROBE_BASE=<image> builds on an image already on this machine (the e2e passes its flavor image);
+  # unset, the base is the digest pin of the OpenCode flavor Dockerfile, the one definition of that base.
+  probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/flavors/opencode/Dockerfile" | head -n 1)}
+  [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in flavors/opencode/Dockerfile" >&2; exit 1; }
+  probe_args=(--build-arg "BASE=$probe_base")
   docker build -q "${probe_args[@]}" -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi
 kind load docker-image --name "$CLUSTER" "$IMAGE"
