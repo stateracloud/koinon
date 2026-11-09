@@ -143,17 +143,22 @@ sequenceDiagram
 
 - **What the supervisor needs.** The OpenShell supervisor does not call the Kubernetes API. It does
   need one pod-bound projected ServiceAccount token for the audience `openshell-gateway`, which it
-  exchanges at startup for a gateway JWT (`IssueSandboxToken`); the gateway checks it with a
-  TokenReview restricted to that audience, plus pod-bound claims. The supervisor pod already holds
-  credentials ([0045](0045-openshell-hardening-defaults.md)), and the token has a bounded lifetime
-  and no RBAC: the upstream chart's RoleBinding binds only the gateway ServiceAccount.
+  exchanges for a gateway JWT (`IssueSandboxToken`) at startup and again when a refresh is refused;
+  the gateway checks it with a TokenReview restricted to that audience, plus pod-bound claims. The
+  supervisor pod is already inside the trust boundary: it holds the sandbox's credentials and
+  enforces its policy ([0045](0045-openshell-hardening-defaults.md)), so the token gives it no new
+  reach. The token has a bounded lifetime and no RBAC: the upstream chart's RoleBinding binds only
+  the gateway ServiceAccount.
 - **Admission pins it.** Supervisor pods must set `automountServiceAccountToken: false`, may project
   only a token with audience `openshell-gateway` (an empty audience means the API server, so it is
   denied) and an `expirationSeconds` of at most `sandboxPolicy.supervisorTokenMaxSeconds` (default
   3600). Workload pods are unchanged: no token at all.
+- **The ServiceAccount name is not pinned.** The gateway sets and creates that ServiceAccount itself,
+  and its TokenReview checks the name; it is an operator setting of the gateway. The audience pin
+  already makes the token useless against the API server.
 - **Source.** NVIDIA/OpenShell v0.1.5 (`bdb956f`): `openshell-core/src/grpc_client.rs` (token
-  exchange), `driver-kubernetes/src/sandbox_runtime.rs` (`supervisor_pod`, the `sa-token` volume),
-  `driver-kubernetes/src/driver.rs` (TokenReview and pod-bound checks), `config.rs`
+  exchange, and again after a refused refresh), `driver-kubernetes/src/sandbox_runtime.rs` (`supervisor_pod`, the `sa-token` volume),
+  `driver-kubernetes/src/driver.rs` (TokenReview, pod-bound and ServiceAccount name checks), `config.rs`
   (`OPENSHELL_K8S_SA_TOKEN_TTL_SECS`, default 3600, clamped to 600-86400).
 
 ## Links

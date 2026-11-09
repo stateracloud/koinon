@@ -251,6 +251,15 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-api-audience", func(p *corev1.Pod) {
 			p.Spec.Volumes = []corev1.Volume{supervisorToken("https://kubernetes.default.svc", 3600)}
 		})), supAud)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-mixed-sources", func(p *corev1.Pod) {
+			// The real gateway token next to an API-audience token in the same sources list.
+			v := supervisorToken("openshell-gateway", 3600)
+			exp := int64(3600)
+			v.Projected.Sources = append(v.Projected.Sources, corev1.VolumeProjection{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+				Audience: "https://kubernetes.default.svc", ExpirationSeconds: &exp, Path: "api-token",
+			}})
+			p.Spec.Volumes = []corev1.Volume{v}
+		})), supAud)
 		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-long-token", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{supervisorToken("openshell-gateway", 86400)} })), "must bound the ServiceAccount token to 3600 seconds")
 	})
 
