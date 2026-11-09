@@ -185,7 +185,7 @@ request-log assertion goes red.
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~15-25 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
+e2e (`test/e2e`, ~12-15 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
 (the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
 needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
 it. It also runs batched on main (each push that changed something
