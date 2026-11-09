@@ -29,7 +29,7 @@ stays "unknown" in the wait cause. Remove all of this once OpenShell surfaces po
 {{- $user := printf "system:serviceaccount:%s:%s" .Release.Namespace $sa }}
 {{- $gatewayID := .Values.openshell.gatewayId }}
 {{- /* The sandbox namespaces are the ones sandboxPolicy.namespaceSelector selects, as CEL over the namespace's labels. */}}
-{{- $sel := .Values.sandboxPolicy.namespaceSelector }}
+{{- $sel := include "koinon.sandboxNamespaceSelector" . | fromYaml }}
 {{- $conds := list }}
 {{- range $k, $v := ($sel.matchLabels | default dict) }}
 {{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}

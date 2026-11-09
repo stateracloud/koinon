@@ -961,3 +961,20 @@ exists; the chart knows nothing about providers), false is off, true is on.
 {{- $e := .Values.prices.refresh.enabled -}}
 {{- if not (kindIs "bool" $e) -}}auto{{- else if $e -}}on{{- else -}}off{{- end -}}
 {{- end }}
+
+{{/*
+koinon.sandboxNamespaceSelector is the namespace selector the sandbox admission policies bind to
+(YAML): sandboxPolicy.namespaceSelector plus openshell.ai/gateway-id=<openshell.gatewayId>, so a
+release's policies cover only its own gateway's workspace namespaces and not those of another
+Koinon release's gateway on the same cluster (old issue 460). sandboxPolicy.scopeToGateway=false
+keeps the selector as set (every OpenShell namespace).
+*/}}
+{{- define "koinon.sandboxNamespaceSelector" -}}
+{{- $sel := deepCopy .Values.sandboxPolicy.namespaceSelector -}}
+{{- if .Values.sandboxPolicy.scopeToGateway -}}
+{{- $labels := $sel.matchLabels | default dict -}}
+{{- $_ := set $labels "openshell.ai/gateway-id" .Values.openshell.gatewayId -}}
+{{- $_ := set $sel "matchLabels" $labels -}}
+{{- end -}}
+{{- toYaml $sel -}}
+{{- end }}

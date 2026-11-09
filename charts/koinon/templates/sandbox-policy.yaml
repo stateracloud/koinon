@@ -172,7 +172,7 @@ spec:
   validationActions: {{ toJson $p.validationActions }}
   matchResources:
     namespaceSelector:
-      {{- toYaml $p.namespaceSelector | nindent 6 }}
+      {{- include "koinon.sandboxNamespaceSelector" $ | nindent 6 }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -218,7 +218,7 @@ spec:
   validationActions: {{ toJson $p.validationActions }}
   matchResources:
     namespaceSelector:
-      {{- toYaml $p.namespaceSelector | nindent 6 }}
+      {{- include "koinon.sandboxNamespaceSelector" $ | nindent 6 }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -251,5 +251,5 @@ spec:
   # selector would match nothing. Sandbox pods are selected by their namespace.
   matchResources:
     namespaceSelector:
-      {{- toYaml $p.namespaceSelector | nindent 6 }}
+      {{- include "koinon.sandboxNamespaceSelector" $ | nindent 6 }}
 {{- end }}

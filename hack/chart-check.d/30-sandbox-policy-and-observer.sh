@@ -48,6 +48,12 @@ has "the observer policy covers RoleBinding create and update" 'operations: \[CR
 has "the observer policy binding denies" 'validationActions: \["Deny"\]' --show-only "$obs"
 has "the observer policy keys on the reconciler identity" 'system:serviceaccount:koinon:koinon-reconciler' --show-only "$obs"
 has "the observer policy limits bindings to the configured gateway ID" "openshell.ai/gateway-id'\] == \"prod\"" --set openshell.gatewayId=prod --show-only "$obs"
+# Old issue 460: the policy bindings cover the release's own gateway's namespaces only.
+bindings=$(render | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/')
+[[ $(grep -c -- 'openshell.ai/gateway-id: openshell$' <<<"$bindings") == 3 ]] || fail "all 3 sandbox policy bindings select openshell.ai/gateway-id=openshell by default"
+[[ $(render --set openshell.gatewayId=prod | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/' | grep -c -- 'openshell.ai/gateway-id: prod$') == 3 ]] || fail "the bindings follow openshell.gatewayId"
+[[ $(render --set sandboxPolicy.scopeToGateway=false | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/' | grep -c -- 'gateway-id') == 0 ]] || fail "sandboxPolicy.scopeToGateway=false keeps the old scope (no gateway-id label)"
+[[ $(grep -c -- 'openshell.ai/managed-by: openshell$' <<<"$bindings") == 3 ]] || fail "the bindings keep the managed-by label"
 has "the observer policy takes the sandbox namespaces from sandboxPolicy.namespaceSelector" 'variables.labels\[\\"openshell.ai/managed-by\\"\] == \\"openshell\\"' --show-only "$obs"
 has "a label added to sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"team\\"\] == \\"sandboxes\\"' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$obs"
 has "a matchExpression of sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"tier\\"\] in \[\\"a\\",\\"b\\"\]' \

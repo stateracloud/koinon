@@ -256,7 +256,9 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 	It("denies everyone else the observer's name, or its role under any name, in a sandbox namespace, cluster admins included", func(ctx SpecContext) {
 		for _, c := range []*kubernetes.Clientset{admin, ctrl, gw} {
 			denied(create(ctx, c, managed, binding(func(b *rbacv1.RoleBinding) { b.Name = role + "-dryrun" })), "only the Koinon reconciler may bind the sandbox observer role")
-			denied(create(ctx, c, foreign, binding(func(b *rbacv1.RoleBinding) { b.Name = "mine" })), "only the Koinon reconciler may bind the sandbox observer role")
+			// Another gateway's namespace is that gateway's release's to police, not this one's (old issue 460).
+			_, err := c.RbacV1().RoleBindings(foreign).Create(ctx, binding(func(b *rbacv1.RoleBinding) { b.Name = "mine" }), metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+			Expect(err).NotTo(HaveOccurred())
 			By("the fixed name with another role")
 			denied(create(ctx, c, managed, binding(func(b *rbacv1.RoleBinding) { b.RoleRef.Name = "view" })), "only the Koinon reconciler")
 			By("a Role of the observer's name, under another name")

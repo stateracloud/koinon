@@ -36,6 +36,9 @@ const (
 	gatewayUser    = "system:serviceaccount:openshell:openshell"
 	// Any other workload identity, for example Koinon's own reconciler.
 	otherUser = "system:serviceaccount:koinon:koinon-reconciler"
+	// The gateway of a second Koinon release on the same cluster (gateway ID "prod"): not an identity
+	// of the release under test (gateway ID "openshell"), whose policies must leave its namespaces alone.
+	gatewayBUser = "system:serviceaccount:openshell-b:openshell"
 )
 
 var sandboxGVR = schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
@@ -51,6 +54,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		as                      map[string]*kubernetes.Clientset
 		asDynamic               map[string]*dynamic.DynamicClient
 		ns                      = "kw-escape"
+		nsB                     = "kw-escape-b" // a workspace namespace of another gateway (ID prod)
 		plain                   = "koinon-escape-plain"
 		dryRun                  = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 		dryRunUpdate            = metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}}
@@ -101,7 +105,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 
 		as = map[string]*kubernetes.Clientset{"admin": admin}
 		asDynamic = map[string]*dynamic.DynamicClient{"admin": dynamic.NewForConfigOrDie(cfg)}
-		for _, user := range []string{controllerUser, gatewayUser, otherUser} {
+		for _, user := range []string{controllerUser, gatewayUser, otherUser, gatewayBUser} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-" + strings.ReplaceAll(user, ":", "-")},
@@ -121,7 +125,8 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(err).NotTo(HaveOccurred())
 		}
 		for name, labels := range map[string]map[string]string{
-			ns:    {"openshell.ai/managed-by": "openshell"}, // an OpenShell workspace namespace
+			ns:    {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"}, // a workspace namespace of this release's gateway
+			nsB:   {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod"},      // one of another release's gateway
 			plain: nil,
 		} {
 			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}, metav1.CreateOptions{})
@@ -161,6 +166,19 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(createPod(ctx, controllerUser, ns, workload("ok"))).To(Succeed())
 		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu") }))).To(Succeed())
 		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu-rs", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu-runtime-rs") }))).To(Succeed())
+	})
+
+	It("covers its own gateway's namespaces only: another gateway's creator is admitted in its namespace, denied in this one", func(ctx SpecContext) {
+		// Release B's gateway creates its supervisor pod and Secret in its own workspace namespace: release A's
+		// policies do not bind there (old issue 460).
+		Expect(createPod(ctx, gatewayBUser, nsB, supervisor("b-supervisor"))).To(Succeed())
+		Expect(createPod(ctx, gatewayBUser, nsB, workload("b-workload"))).To(Succeed())
+		_, err := as[gatewayBUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
+		Expect(err).NotTo(HaveOccurred())
+		// The same identity is still denied in a namespace of release A's gateway.
+		denied(createPod(ctx, gatewayBUser, ns, supervisor("b-in-a")), "may create pods in sandbox namespaces")
+		_, err = as[gatewayBUser].CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
+		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
 	})
 
 	It("applies only in sandbox namespaces (control)", func(ctx SpecContext) {
@@ -385,6 +403,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
+			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "openshell"), b.Name)
 			// An options object has no labels: an objectSelector would silently match nothing.
 			Expect(b.Spec.MatchResources.ObjectSelector).To(BeNil(), b.Name)
 		}
