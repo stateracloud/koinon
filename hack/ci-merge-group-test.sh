@@ -7,6 +7,9 @@
 # keeps the workflows that produce a required context (hack/ci-required.txt) subscribed, and keeps
 # the jobs that read pull request data from running on a queue build.
 
+# The check commands are single-quoted on purpose: bash -c expands $1 and $2 itself.
+# shellcheck disable=SC2016
+
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 set -uo pipefail
@@ -74,6 +77,7 @@ esac
 EOF
 chmod +x "$labgh"
 check "gate: merge_group + required=true without a looked-up head fails closed" bash -c '! DECIDE=success QUICKSTART=skipped REQUIRED=true SHA= GH_REPO=x/y GH="$2" "$1"' _ "$gate" "$labgh"
+# shellcheck disable=SC2016
 check "gate: merge_group + required=true with the shim's head and e2e-lab success passes" bash -c '
 	DECIDE=success QUICKSTART=skipped REQUIRED=true SHA=0123456789abcdef0123456789abcdef01234567 BRANCH=b GH_REPO=x/y GH="$2" "$1"' _ "$gate" "$labgh"
 unset GH
