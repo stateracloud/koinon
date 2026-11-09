@@ -431,6 +431,10 @@ in three ways, and the ADR says so rather than pretending otherwise:
   orgs' transactions are finished by then, so the lock order of decision 1.7 holds: the key events'
   lock, then the install head. `forget` does not change the key set, so the check only finds changes
   that others made.
+  The key set `Baseline` loads under the lock is checked once more: when it holds the KEK again (a
+  `keys add` between the command's first check and the lock), `forget` commits, so a `keys.observed`
+  it found is still written, and changes nothing. A failed row update or event is undone in a
+  savepoint, never the pending `keys.observed`.
 
 So a crash or a failed audit write after a Secret update must not leave the change unrecorded. On
 every start `koinon-api` writes `keys.observed` whenever the whole key-set state differs from the

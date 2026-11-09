@@ -126,7 +126,7 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 		return err
 	}
 	if _, ok := ks.Keys[id]; ok {
-		return fmt.Errorf("KEK %s is in the key set again, so it is not lost; nothing was changed", id)
+		return errKEKRestored(id)
 	}
 	ring, err := t.ring(ks)
 	if err != nil {
@@ -135,6 +135,11 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 	res, err := t.forget(ctx, ring, id)
 	t.reportForget(id, res)
 	return err
+}
+
+// errKEKRestored is the refusal when the KEK to forget is in the key set after all.
+func errKEKRestored(id string) error {
+	return fmt.Errorf("KEK %s is in the key set again, so it is not lost; nothing was changed", id)
 }
 
 // errForgetUnconfirmed refuses keys forget where nobody can be asked and --yes was not given.
@@ -204,6 +209,7 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
 	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
 	c, ks, _, err := t.begin(ctx, "forget")
+	_, restored := ks.Keys[id]
 	clearKeySet(ks)
 	if err != nil {
 		return err
@@ -211,22 +217,16 @@ func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult)
 	if c == nil {
 		return errors.New("keys forget needs the install audit chain")
 	}
-	tag, err := c.tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
-		platform.Table, lostRules[platform].set(platform), platform.Column), id)
-	if err != nil {
-		_ = c.Rollback(ctx)
-		return err
+	if restored {
+		// Restored (keys add) after Forget's check, which ran without the lock: the KEK is not lost.
+		// A keys.observed this command found is still written.
+		return errors.Join(errKEKRestored(id), c.Commit(ctx))
 	}
-	changed := tag.RowsAffected() > 0
-	if changed {
-		// The row change and its event stand or fall together: a refused event rolls the update back.
-		if err := c.Record(ctx, Event{
-			Command: "forget", Action: ForgetAction, TargetKind: "kek", TargetID: id,
-			After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
-		}); err != nil {
-			_ = c.Rollback(ctx)
-			return err
-		}
+	changed, err := t.markPlatformLost(ctx, c, platform, id)
+	if err != nil {
+		// Only the update and its event are undone, in their savepoint; the keys.observed this command
+		// found is still written by Commit.
+		return errors.Join(err, c.Commit(ctx))
 	}
 	if err := c.Commit(ctx); err != nil {
 		return err
@@ -236,6 +236,40 @@ func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult)
 		res.Lost["platformTraceDestination"]++
 	}
 	return nil
+}
+
+// markPlatformLost updates the platform row and records keys.forget in one savepoint of c's
+// transaction: the row change and its event stand or fall together. The pending keys.observed is
+// written before the savepoint opens, so a failure here leaves it alone.
+func (t *Tool) markPlatformLost(ctx context.Context, c *Change, platform Column, id string) (changed bool, err error) {
+	// The pending keys.observed goes in first, outside the savepoint, so undoing it cannot take it along.
+	if err := c.flush(ctx); err != nil {
+		return false, err
+	}
+	sp, err := c.tx.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if err != nil {
+			_ = sp.Rollback(ctx)
+		}
+	}()
+	tag, err := sp.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
+		platform.Table, lostRules[platform].set(platform), platform.Column), id)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return false, sp.Commit(ctx)
+	}
+	if err = c.Record(ctx, Event{
+		Command: "forget", Action: ForgetAction, TargetKind: "kek", TargetID: id,
+		After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
+	}); err != nil {
+		return false, err
+	}
+	return true, sp.Commit(ctx)
 }
 
 // orgsSealedWith lists the orgs with a value sealed with id.

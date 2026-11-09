@@ -133,6 +133,9 @@ restored meanwhile. Then:
   lost and the new repositories. The platform's own trace destination belongs to no org: it is one
   event in the install audit chain (actor `cli`, `keys forget`), written in the same transaction, and
   a platform admin enters the destination again. It needs no platform admin to exist.
+  If the key set changed without a recorded event (for example a KEK removed from the Secret by hand),
+  `keys forget` first records that as `keys.observed` with itself as the actor, then writes its own
+  `keys.forget` event.
 
 Running it again finds nothing left to forget. Then check that `keys status` no longer shows the KEK.
 

@@ -359,6 +359,55 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 
+	Describe("when the KEK is restored after the first check", func() {
+		BeforeEach(func(ctx SpecContext) {
+			r := ring(ctx)
+			e, err := r.Seal(tracedest.PlatformBinding(), []byte(`{"api_key":"koinon_test_not-a-real-token"}`))
+			Expect(err).NotTo(HaveOccurred())
+			raw, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url, credentials) VALUES ('datadog', 'https://otlp.example.com', $1)
+				ON CONFLICT (singleton) DO UPDATE SET credentials = EXCLUDED.credentials, credential_lost_at = NULL`, raw)
+			Expect(err).NotTo(HaveOccurred())
+			tool.Yes = true
+		})
+
+		It("is refused under the lock, changes nothing and writes no forget event", func(ctx SpecContext) {
+			rotateAndLose(ctx)
+			lock, err := pool.Begin(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = lock.Rollback(ctx) })
+			_, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('koinon.keys_observed'))`)
+			Expect(err).NotTo(HaveOccurred())
+			mark := auditMark(ctx)
+
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				done <- tool.Forget(ctx, lostKEK)
+			}()
+			Eventually(func() bool { return advisoryWaiting(ctx) }).Should(BeTrue(), "forget waits for the lock")
+
+			// keys add restores the KEK while forget waits: its first check has passed already.
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data[lostKEK] = secretstore.EncodeKey(lostKey)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(lock.Rollback(ctx)).To(Succeed())
+			Eventually(done).Should(Receive(MatchError(ContainSubstring("in the key set again, so it is not lost; nothing was changed"))))
+
+			var lostAt *time.Time
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at FROM platform_trace_destination`).Scan(&lostAt)).To(Succeed())
+			Expect(lostAt).To(BeNil(), "the platform row is not marked lost")
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+			var forgets int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE chain_seq > $1 AND action = $2`, mark, keyscli.ForgetAction).Scan(&forgets)).To(Succeed())
+			Expect(forgets).To(BeZero())
+		})
+	})
+
 	Describe("without a terminal", func() {
 		var org pgtype.UUID
 		BeforeEach(func(ctx SpecContext) {
