@@ -458,22 +458,23 @@ fixtures, and posts PR alerts without a separate dependency overview comment. It
 DeepSource: answer and resolve its inline comments before merge (#187). On 2026-12-05 check whether
 it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
-### The `claim` check and claims by comment (ADR 0094, #163, #164)
+### The `claim` check (ADR 0094, ADR 0104)
 
 `claim` (`.github/workflows/claims.yml`, `pull_request_target`, read-only, `hack/claim.sh check-pr`)
-is required and is a conflict check: it fails only when someone else's human holds a live claim on an
-issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
-issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
-keywords in any form, `owner/repo#N` and URLs included, and the sidebar) plus the body's `Closes #N`.
-A pull request that names no issue, an unclaimed issue, the author's own claim and a stale one pass;
-there is no exemption label, title or author any more (`unclaimed-ok` and the Dependabot exemption
-are retired). The failure and success texts are fixed and pinned in `hack/claim_test.sh`.
+is required and is a conflict check: it fails only when another human holds a claim on an issue the
+pull request closes, or a `claim/adr-NNNN` reservation for an ADR file it adds. A claim has no lease
+(ADR 0104): it is held until it is released. The issues it reads are GitHub's closing links of the
+pull request (`closingIssuesReferences`: closing keywords in any form, `owner/repo#N` and URLs
+included, and the sidebar) plus the body's `Closes #N`. A pull request that names no issue, an
+unclaimed issue, a released claim and the author's own claim pass; there is no exemption label,
+title or author (`unclaimed-ok` and the Dependabot exemption are retired). The failure texts are
+fixed and pinned in `hack/claim_test.sh`. A release does not re-run a failed check: push again or
+re-run it.
 
-`claim-comment` (`.github/workflows/claim-comment.yml`, `issue_comment`, `hack/claim.sh comment N`)
-handles `/claim` and `/release` on issues with `GITHUB_TOKEN`; it is no status check. The sweeper,
-release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run a failed `claim`
-check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
-fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
+The `release claims` job (same workflow, on `closed`) runs `hack/claim.sh release-pr` with
+`GITHUB_TOKEN`: it releases the held claims of the issues the pull request closes when the claim is
+its author's or points at it. There is no schedule, no sweeper and no comment claim; no GitHub App and
+no Environment are involved (`docs/dev/work-claims-setup.md`).
 
 ## Merging
 
@@ -556,9 +557,8 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
-  checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
-  sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
+  waited fails the entry. It fails closed when `<N>` cannot be read. `release` does not run. Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
   the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
@@ -584,7 +584,7 @@ slowest of the last 200 successful or failed `quickstart` jobs took 14.2 minutes
 so there are 45 minutes of headroom (measured 2026-11-09). A cold flavor build in the queue is not in that sample;
 if the queue starts timing out entries, raise `check_response_timeout_minutes` (to 90) then.
 
-The updater: `updater.yml` and `claim.sh update-oldest` stay until the queue is live. Meanwhile `update-oldest` skips
+The updater: `updater.yml` and `hack/pr-updater.sh update-oldest` (moved out of `claim.sh` by ADR 0104) stay until the queue is live. Meanwhile `update-oldest` skips
 a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
 a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
 and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.

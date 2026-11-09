@@ -1,6 +1,8 @@
 # 0082. Work claims and the ready queue: a claim branch is the lock, the board is the queue
 
-- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05)
+- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and
+  [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover
+  or board mirror; holder `<login>#<lane>`)
 - Date: 2026-10-30
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
