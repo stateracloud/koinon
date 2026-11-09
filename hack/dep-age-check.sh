@@ -330,6 +330,10 @@ expand_vars() {
 	while [[ $url =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
 		name=${BASH_REMATCH[1]}
 		val=$(sed -nE "s/^[[:space:]]*(ARG|ENV)?[[:space:]]*${name}=[\"']?([^\"' ]+)[\"']?.*/\\2/p; s/^[[:space:]]*(-[[:space:]]*)?${name}:[[:space:]]+[\"']?([^\"' #]+)[\"']?.*/\\2/p; s/.*\\\$\\{${name}:=([^}]+)\\}.*/\\1/p" "$file" 2>/dev/null | sort -u)
+		# A workflow keeps its tool versions in hack/versions.env (loaded as ${{ env.NAME }}).
+		if [[ -z $val && -f hack/versions.env ]]; then
+			val=$(sed -nE "s/^${name}=([A-Za-z0-9._+-]+)$/\\1/p" hack/versions.env | sort -u)
+		fi
 		# Not defined, or defined with different values in one file (ambiguous): leave it, so dating fails.
 		[[ -n $val && $val != *$'\n'* ]] || break
 		url=${url//"\${$name}"/$val}
@@ -340,12 +344,14 @@ expand_vars() {
 
 # 4. Release assets, raw tags and npm tarballs fetched by Dockerfiles and scripts.
 while IFS=$'\t' read -r file line; do
+	# A workflow's ${{ env.NAME }} reads like a shell ${NAME} (expand_vars finds it in hack/versions.env).
+	line=$(sed -E 's/\$\{\{ *env\.([A-Za-z_][A-Za-z0-9_]*) *\}\}/${\1}/g' <<<"$line")
 	# shellcheck disable=SC2013 # the matched urls contain no whitespace
 	for url in $(grep -Eo 'https://(github\.com/[^/ ]+/[^/ ]+/releases/download/[^ ]+|raw\.githubusercontent\.com/[^ ]+|registry\.npmjs\.org/[^ ]+\.tgz)' <<<"$line" | sed 's/[\\"]*$//'); do
 		url=$(expand_vars "$file" "$url")
 		once "url $url" && check_url "$url"
 	done
-done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml')
+done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml' ':!hack/pinned-download-lint.sh')
 
 # 4b. The tool versions of hack/versions.env (old issue 544): the release each <TOOL>_VERSION names. The file
 # is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
@@ -420,7 +426,7 @@ while IFS=$'\t' read -r file line; do
 			echo "WARN    $file: dep-age marker without a version on the line: $line"
 		fi
 	fi
-done < <(git diff -U0 --no-color --diff-filter=AMR "$mergebase" HEAD -- . ':!hack/dep-age-check.sh' ':!docs/' ':!*.md' |
+done < <(git diff -U0 --no-color --diff-filter=AMR "$mergebase" HEAD -- . ':!hack/dep-age-check.sh' ':!hack/pinned-download-lint.sh' ':!docs/' ':!*.md' |
 	awk '/^\+\+\+ b\// { f = substr($0, 7); next } /^\+\+\+ / { next } /^\+/ { print f "\t" substr($0, 2) }')
 
 # 6. Chart dependencies.

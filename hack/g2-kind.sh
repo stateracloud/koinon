@@ -39,8 +39,7 @@ kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
 kind create cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" --wait 120s
 
 manifest="$OUT/gateway-api.yaml"
-curl -fsSL -o "$manifest" "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_CRDS_VERSION}/standard-install.yaml"
-echo "${GATEWAY_CRDS_SHA256}  ${manifest}" | (sha256sum -c - 2>/dev/null || shasum -a 256 -c -)
+"$(dirname "$0")/fetch-pinned.sh" "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_CRDS_VERSION}/standard-install.yaml" "${GATEWAY_CRDS_SHA256}" "$manifest"
 kubectl apply --server-side -f "$manifest" >/dev/null
 
 helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds \

@@ -131,12 +131,13 @@ w=$(fresh)
 printf 'BASH_ENV=evil.sh\n' >>"$w/hack/versions.env"
 expect_fail "a name the workflow loader would pass to \$GITHUB_ENV as BASH_ENV" "$w" "not <TOOL>_VERSION"
 
+# the downloads go through hack/fetch-pinned.sh now, so the rule is fed a line of its own
 w=$(fresh)
-subst "$w/.github/workflows/ci.yml" 'echo "${SHELLCHECK_SHA256_AMD64}  $sc"' 'echo "${SHELLCHECK_SHA256_AMD64} $sc"'
+printf '      - run: echo "${X_SHA256_AMD64} f" | sha256sum -c -\n' >>"$w/.github/workflows/ci.yml"
 expect_fail "sha256sum -c line with one space" "$w" "two spaces"
 
 w=$(fresh)
-subst "$w/.github/workflows/g2-kind.yml" 'echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP' 'echo "${KIND_SHA256_AMD64}$RUNNER_TEMP'
+printf '      - run: echo "${X_SHA256_AMD64}f" | sha256sum -c -\n' >>"$w/.github/workflows/g2-kind.yml"
 expect_fail "sha256sum -c line with no space" "$w" "two spaces"
 
 w=$(fresh)
