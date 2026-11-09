@@ -269,6 +269,15 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 		Expect(out.String()).NotTo(ContainSubstring("not run here"))
 	})
 
+	It("keeps NOT RUN when specs skipped without a declared requirement, whatever plain tests passed", func() {
+		r := judgeWith("./internal/x", report(true,
+			spec(types.NodeTypeIt, types.SpecStateSkipped, "no docker here"),
+		), nil, 5, "", "")
+		Expect(r.verdict).To(Equal(notRun))
+		r = judgeWith("./internal/x", report(true), nil, 5, "", "")
+		Expect(r.verdict).To(Equal(notRun))
+	})
+
 	It("does not count a suite's own RunSpecs test as a passed plain test", func() {
 		pkgs := map[string]*plainPkg{}
 		Expect(loadGoTest(write(

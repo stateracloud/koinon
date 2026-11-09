@@ -328,7 +328,8 @@ func judge(dir string, reports []types.Report, required, expect string) result {
 // which a Ginkgo report never sees), counted like a spec's, and the number of plain tests that passed,
 // counted like passing specs.
 func judgeWith(dir string, reports []types.Report, plainReqs []string, plainPassed int, required, expect string) result {
-	res := result{dir: dir, passed: plainPassed}
+	res := result{dir: dir}
+	specPassed := 0
 	if len(reports) == 0 {
 		res.verdict, res.why = notRun, "no report (the suite never reached RunSpecs, or its processes exited before reporting)"
 		return res
@@ -347,7 +348,7 @@ func judgeWith(dir string, reports []types.Report, plainReqs []string, plainPass
 					failed = fmt.Sprintf("%s %q: %s", s.LeafNodeType, s.LeafNodeText, s.State)
 				}
 			case s.State == types.SpecStatePassed && s.LeafNodeType == types.NodeTypeIt:
-				res.passed++
+				specPassed++
 			case s.State == types.SpecStateSkipped && s.Failure.Message != "" && !propagated(s.Failure.Message):
 				if n, ok := requirement(s.Failure.Message); ok {
 					reqs[n] = true
@@ -364,12 +365,15 @@ func judgeWith(dir string, reports []types.Report, plainReqs []string, plainPass
 		res.requires = append(res.requires, n)
 	}
 	sort.Strings(res.requires)
+	// Plain tests only display and promote a skip for a declared requirement; they never stand in for
+	// specs that did not run (an undeclared skip or 0 specs stays NOT RUN).
+	res.passed = specPassed + plainPassed
 	switch {
 	case failed != "":
 		res.verdict, res.why = fail, failed
-	case res.passed > 0 && len(res.requires) == 0:
+	case specPassed > 0 && len(res.requires) == 0:
 		res.verdict = pass
-	case res.passed > 0:
+	case specPassed > 0 || (plainPassed > 0 && len(reqs) > 0 && undeclared == ""):
 		res.verdict = partial
 		res.why = "PASS (partly skipped: " + strings.Join(res.requires, ", ") + ")"
 	case len(reqs) > 0 && undeclared == "":
