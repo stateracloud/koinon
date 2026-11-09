@@ -13,7 +13,9 @@ Ginkgo `-p` (one shared Postgres server per run, a template-copied database per 
 it). A new suite joins the parallel list in that script once it shares no database, fixed port or
 fixed path between processes. `hack/testverdict` reports a skipped suite as SKIPPED (not PASS) and
 fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected requirement
-(docker, git, helm) was missing. One package: `go test ./internal/x` (serial) or
+(docker, git, helm) was missing. A plain `func TestX` that passes in a Ginkgo package counts as a run
+test, so the suite reads "partly run" when only that test ran. A plain test that calls `testenv.RequireT`
+in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`

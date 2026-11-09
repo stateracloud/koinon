@@ -171,12 +171,15 @@ fi
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
 suites=("${parallel[@]}" "${ginkgo_rest[@]}")
 events=()
+pflags=()
+# ginkgo -p emits no go test events: the verdict fails a plain RequireT test in these packages.
+for d in ${parallel[@]+"${parallel[@]}"}; do pflags+=(-parallel "$d"); done
 for f in "$report_dir"/*.gotest.jsonl; do [[ -f $f ]] && events+=(-gotest-json "$f"); done
 if ((${#suites[@]} + ${#events[@]})); then
 	# Built, not `go run`: go run reports any non-zero exit of the program as 1, hiding the 3.
 	go build -o "$report_dir/testverdict.bin" ./hack/testverdict || exit 1
 	vrc=0
-	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" ${events[@]+"${events[@]}"} ${suites[@]+"${suites[@]}"} || vrc=$?
+	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" ${events[@]+"${events[@]}"} ${pflags[@]+"${pflags[@]}"} ${suites[@]+"${suites[@]}"} || vrc=$?
 	rm -f "$report_dir/testverdict.bin"
 	if [[ $vrc == 3 && $rc == 0 ]]; then
 		rc=3
