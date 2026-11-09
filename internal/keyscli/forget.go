@@ -87,16 +87,20 @@ type ForgetResult struct {
 // next created, a new home generation (ADR 0051): its earlier checkpoints cannot be restored. The
 // old repositories are deleted after the org's home backup retention.
 //
-// Each org changes in one transaction, audited there as [ForgetAction] with the cli actor; the
-// platform's trace destination, which belongs to no org, is one event in the install audit log
-// (actor `cli keys forget`, ADR 0100 decision 3). A KEK still in the key set is not lost: Forget refuses it (rewrap, then retire it),
-// also when it is restored while the confirmation is open. Without a terminal it needs --yes.
-// Running Forget again finds nothing left to do.
+// The whole run holds the key events' advisory lock (Tool.begin), taken after the confirmation and
+// before the first change: the KEK is checked against the key set loaded under it, so a keys add that
+// restores it waits for Forget or makes Forget change nothing. Each org then changes in its own
+// transaction, audited there as [ForgetAction] with the cli actor; the platform's trace destination,
+// which belongs to no org, is one event in the install audit log (actor `cli keys forget`, ADR 0100
+// decision 3), written last, in the locked transaction. A KEK still in the key set is not lost:
+// Forget refuses it (rewrap, then retire it), also when it is restored while the confirmation is open.
+// Without a terminal it needs --yes. Running Forget again finds nothing left to do.
 func (t *Tool) Forget(ctx context.Context, id string) error {
 	ks, err := t.Store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	clearKeySet(ks) // only its IDs are read below
 	usage, err := t.Usage(ctx)
 	if err != nil {
 		return err
@@ -117,27 +121,51 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 		_, _ = fmt.Fprintf(t.Out, "No stored value is sealed with KEK %s; nothing to forget.\n", id)
 		return nil
 	}
+	if err := checkLostRules(); err != nil {
+		return err
+	}
 	if err := t.confirmForget(ctx, id, n); err != nil {
 		return err
 	}
-	// The question can stay open for minutes: the KEK may have been restored from escrow meanwhile,
-	// and the new repositories are sealed with the KEK active now.
-	if ks, err = t.Store.Load(ctx); err != nil {
-		return err
-	}
-	if _, ok := ks.Keys[id]; ok {
-		return errKEKRestored(id)
-	}
-	ring, err := t.ring(ks)
+	// The question can stay open for minutes, and the check above ran without the lock: the KEK may
+	// have been restored from escrow meanwhile. From here to the end the key events' lock is held, so
+	// the key set loaded under it is the one the whole run works with, and the new repositories are
+	// sealed with the KEK active under it.
+	c, ring, err := t.beginForget(ctx, id)
 	if err != nil {
 		return err
 	}
-	res, err := t.forget(ctx, ring, id)
+	res, err := t.forget(ctx, c, ring, id)
 	t.reportForget(id, res)
 	return err
 }
 
-// errKEKRestored is the refusal when the KEK to forget is in the key set after all.
+// beginForget takes the key events' lock for the whole of keys forget (Tool.begin) and checks the key
+// set loaded under it: a KEK that is in it again is refused before anything changes. It returns the
+// Change, which the caller ends, and the keyring of that key set.
+func (t *Tool) beginForget(ctx context.Context, id string) (*Change, *secretstore.Keyring, error) {
+	c, ks, _, err := t.begin(ctx, "forget")
+	defer clearKeySet(ks)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c == nil {
+		return nil, nil, errors.New("keys forget needs the install audit chain")
+	}
+	if _, ok := ks.Keys[id]; ok {
+		// Restored (keys add) after the check without the lock: the KEK is not lost. A keys.observed
+		// this command found is still written.
+		return nil, nil, errors.Join(errKEKRestored(id), c.Commit(ctx))
+	}
+	ring, err := t.ring(ks)
+	if err != nil {
+		return nil, nil, errors.Join(err, c.Commit(ctx))
+	}
+	return c, ring, nil
+}
+
+// errKEKRestored is the refusal when the KEK to forget is in the key set after all. It is returned
+// under the key events' lock, before any org or platform part ran.
 func errKEKRestored(id string) error {
 	return fmt.Errorf("KEK %s is in the key set again, so it is not lost; nothing was changed", id)
 }
@@ -172,16 +200,27 @@ func (t *Tool) confirmForget(ctx context.Context, id string, n int) error {
 	return nil
 }
 
-func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string) (ForgetResult, error) {
-	res := ForgetResult{Lost: map[string]int{}}
+// checkLostRules refuses a run when a column of Columns has no rule in lostRules.
+func checkLostRules() error {
 	for _, c := range Columns {
 		if _, ok := lostRules[c]; !ok {
-			return res, fmt.Errorf("keys forget has no rule for %s.%s", c.Table, c.Column)
+			return fmt.Errorf("keys forget has no rule for %s.%s", c.Table, c.Column)
 		}
 	}
+	return nil
+}
+
+// forget runs the org parts and then the platform part, all while c holds the key events' lock, and
+// ends c. The lock order is the one of ADR 0100 decision 1.7 across the whole run: c's transaction
+// holds only the advisory lock while the orgs change (it has written nothing yet, so it holds no
+// audit head), each org's transaction takes its rows and its org head and commits, and only then does
+// c take the platform row and the install head. A writer that waits for the key events' lock takes it
+// first in its transaction, so it holds nothing an org part needs.
+func (t *Tool) forget(ctx context.Context, c *Change, ring *secretstore.Keyring, id string) (ForgetResult, error) {
+	res := ForgetResult{Lost: map[string]int{}}
 	orgs, err := t.orgsSealedWith(ctx, id)
 	if err != nil {
-		return res, err
+		return res, errors.Join(err, c.Commit(ctx))
 	}
 	settings := orgsettings.NewService(t.Pool)
 	var errs []error
@@ -190,38 +229,22 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 			errs = append(errs, fmt.Errorf("org %s: %w", org.String(), err))
 		}
 	}
-	if err := t.forgetPlatform(ctx, id, &res); err != nil {
+	if err := t.forgetPlatform(ctx, c, id, &res); err != nil {
 		errs = append(errs, fmt.Errorf("platform trace destination: %w", err))
 	}
 	return res, errors.Join(errs...)
 }
 
-// forgetPlatform marks the platform's trace destination lost when id sealed it. It belongs to no
-// org, so it is one event in the install audit chain (ADR 0100 decision 3), and it follows the same
-// pattern as the other key commands (Tool.begin, Auditor.Baseline, Change.Record, Change.Commit): it
-// takes the key events' advisory lock first, writes keys.observed with the command's actor when the
-// live KEKs differ from the last recorded state (a change whose event was lost, as when the KEK was
-// removed from the Secret by hand), and then updates the row and writes its own event in that one
-// transaction. The orgs' parts have finished by now, each in its own org transaction, so the lock
-// order is the one of decision 1.7: the key events' lock, then the install head. It needs no platform
-// admin, because the install chain has none to name (decision 1.4). Each org's part is audited in
-// that org's own chain by forgetOrg.
-func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
+// forgetPlatform marks the platform's trace destination lost when id sealed it, and ends c. It belongs
+// to no org, so it is one event in the install audit chain (ADR 0100 decision 3), and it follows the
+// pattern of the other key commands (Tool.begin, Auditor.Baseline, Change.Record, Change.Commit): c
+// has held the key events' advisory lock since before the org parts; it writes keys.observed with the
+// command's actor when the live KEKs differed from the last recorded state (a change whose event was
+// lost, as when the KEK was removed from the Secret by hand), and then updates the row and writes its
+// own event. It needs no platform admin, because the install chain has none to name (decision 1.4).
+// Each org's part is audited in that org's own chain by forgetOrg.
+func (t *Tool) forgetPlatform(ctx context.Context, c *Change, id string, res *ForgetResult) error {
 	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
-	c, ks, _, err := t.begin(ctx, "forget")
-	_, restored := ks.Keys[id]
-	clearKeySet(ks)
-	if err != nil {
-		return err
-	}
-	if c == nil {
-		return errors.New("keys forget needs the install audit chain")
-	}
-	if restored {
-		// Restored (keys add) after Forget's check, which ran without the lock: the KEK is not lost.
-		// A keys.observed this command found is still written.
-		return errors.Join(errKEKRestored(id), c.Commit(ctx))
-	}
 	changed, err := t.markPlatformLost(ctx, c, platform, id)
 	if err != nil {
 		// Only the update and its event are undone, in their savepoint; the keys.observed this command
@@ -239,10 +262,23 @@ func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult)
 }
 
 // markPlatformLost updates the platform row and records keys.forget in one savepoint of c's
-// transaction: the row change and its event stand or fall together. The pending keys.observed is
-// written before the savepoint opens, so a failure here leaves it alone.
+// transaction: the row change and its event stand or fall together. The row is locked first, in c's
+// transaction, and the pending keys.observed written after it and before the savepoint opens: the
+// order of decision 1.7 (a row lock, then the install head, as SetPlatformDestination takes them), and
+// a failure in the savepoint leaves the keys.observed alone.
 func (t *Tool) markPlatformLost(ctx context.Context, c *Change, platform Column, id string) (changed bool, err error) {
-	// The pending keys.observed goes in first, outside the savepoint, so undoing it cannot take it along.
+	rows, err := c.tx.Query(ctx, fmt.Sprintf(`SELECT 1 FROM %s WHERE %s->>'kek_id' = $1 FOR UPDATE`, platform.Table, platform.Column), id)
+	if err != nil {
+		return false, err
+	}
+	locked, err := pgx.CollectRows(rows, pgx.RowTo[int32])
+	if err != nil {
+		return false, err
+	}
+	if len(locked) == 0 {
+		return false, nil // not sealed with id; Commit writes a pending keys.observed
+	}
+	// The pending keys.observed goes in before the savepoint, so undoing it cannot take it along.
 	if err := c.flush(ctx); err != nil {
 		return false, err
 	}
