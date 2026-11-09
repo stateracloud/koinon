@@ -59,29 +59,8 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		bindings                []*admissionv1.ValidatingAdmissionPolicyBinding
 	)
 
-	// supervisor is an OpenShell supervisor pod as the gateway creates it (chart default image):
-	// OpenShell 0.1.5 sets automount false and projects one openshell-gateway token (sa-token).
-	supervisorToken := func(aud string, exp int64) corev1.Volume {
-		return corev1.Volume{Name: "sa-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
-			Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: aud, ExpirationSeconds: &exp, Path: "token"}}},
-		}}}
-	}
-	supervisor := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"openshell.ai/boundary-role": "supervisor"}},
-			Spec: corev1.PodSpec{
-				SchedulingGates:              []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
-				ServiceAccountName:           "default",
-				AutomountServiceAccountToken: new(false),
-				Containers:                   []corev1.Container{{Name: "supervisor", Image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}},
-				Volumes:                      []corev1.Volume{supervisorToken("openshell-gateway", 3600)},
-			},
-		}
-		for _, m := range mutate {
-			m(p)
-		}
-		return p
-	}
+	supervisor := supervisorPod
+	supervisorToken := supervisorTokenVolume
 
 	// workload is a sandbox workload pod as the Agent Sandbox controller creates it.
 	workload := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
@@ -503,6 +482,33 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 })
+
+// supervisorTokenVolume is the projected volume OpenShell 0.1.5 gives a supervisor pod (sa-token).
+func supervisorTokenVolume(aud string, exp int64) corev1.Volume {
+	return corev1.Volume{Name: "sa-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+		Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: aud, ExpirationSeconds: &exp, Path: "token"}}},
+	}}}
+}
+
+// supervisorPod is an OpenShell supervisor pod as the gateway creates it (chart default image):
+// OpenShell 0.1.5 sets automount false and projects one openshell-gateway token (sa-token).
+// Shared by every admission spec so the fixture cannot drift from the real shape.
+func supervisorPod(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
+	p := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"openshell.ai/boundary-role": "supervisor"}},
+		Spec: corev1.PodSpec{
+			SchedulingGates:              []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
+			ServiceAccountName:           "default",
+			AutomountServiceAccountToken: new(false),
+			Containers:                   []corev1.Container{{Name: "supervisor", Image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}},
+			Volumes:                      []corev1.Volume{supervisorTokenVolume("openshell-gateway", 3600)},
+		},
+	}
+	for _, m := range mutate {
+		m(p)
+	}
+	return p
+}
 
 // renderSandboxPolicy renders charts/koinon's sandbox-policy template with default values, plus
 // any extra helm arguments.
