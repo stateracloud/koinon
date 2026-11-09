@@ -167,5 +167,28 @@ got=0
 printf '%s\n' cmd/koinon-api/main.go | "$cp_dir/needs-e2e.sh" --stdin >/dev/null 2>&1 || got=$?
 [[ $got -ge 2 ]] || { echo "FAIL: copied script without paths-lib.sh exited $got, want >= 2 (e2e-decide.sh runs the e2e)" >&2; fail=1; }
 
+# The decide step's copy loop, taken from the workflow text and run as the workflow runs it (bash -e),
+# against a base ref with and without paths-lib.sh and paths.rules.
+loop=$(awk '/for f in needs-e2e.sh e2e-decide.sh paths-lib.sh paths.rules; do/ {on=1} on {print} on && /^ +done$/ {exit}' .github/workflows/e2e-kind.yml)
+[[ -n $loop ]] || { echo "FAIL: copy loop not found in e2e-kind.yml" >&2; fail=1; }
+for withlib in yes no; do
+  r="$tmp/decide-$withlib"
+  mkdir -p "$r/hack" "$r/tmpdir"
+  printf '#!/bin/sh\n' >"$r/hack/needs-e2e.sh"; cp "$r/hack/needs-e2e.sh" "$r/hack/e2e-decide.sh"
+  if [[ $withlib == yes ]]; then echo '# lib' >"$r/hack/paths-lib.sh"; echo '# rules' >"$r/hack/paths.rules"; fi
+  git -C "$r" init -q -b main
+  git -C "$r" -c user.name=t -c user.email=t@example.invalid add -A
+  git -C "$r" -c user.name=t -c user.email=t@example.invalid commit -q -m base
+  git -C "$r" update-ref refs/remotes/origin/main HEAD
+  # the PR checkout carries both new files; the base may not
+  echo '# lib' >"$r/hack/paths-lib.sh"; echo '# rules' >"$r/hack/paths.rules"
+  got=0
+  (cd "$r" && ref=origin/main RUNNER_TEMP="$r/tmpdir" bash -e -c "$loop" >/dev/null 2>&1) || got=$?
+  copied=$(cd "$r/tmpdir" && printf '%s ' * | sed 's/ $//')
+  want="e2e-decide.sh needs-e2e.sh"; [[ $withlib == yes ]] && want="e2e-decide.sh needs-e2e.sh paths-lib.sh paths.rules"
+  [[ $got -eq 0 ]] || { echo "FAIL: decide copy loop (base with lib: $withlib) exited $got" >&2; fail=1; }
+  [[ $copied == "$want" ]] || { echo "FAIL: decide copy loop (base with lib: $withlib) copied [$copied], want [$want]" >&2; fail=1; }
+done
+
 [[ $fail -eq 0 ]] && echo "needs-e2e tests passed"
 exit "$fail"

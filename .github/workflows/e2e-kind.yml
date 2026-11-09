@@ -129,10 +129,13 @@ jobs:
             if [[ -n $ref ]] && git cat-file -e "$ref:hack/$f" 2>/dev/null; then
               git show "$ref:hack/$f" > "$RUNNER_TEMP/$f"
               echo "using hack/$f from $ref"
+              chmod +x "$RUNNER_TEMP/$f"
             elif [[ -z $ref || $f == needs-e2e.sh || $f == e2e-decide.sh ]]; then
               cp "hack/$f" "$RUNNER_TEMP/$f"
+              chmod +x "$RUNNER_TEMP/$f"
             fi
-            chmod +x "$RUNNER_TEMP/$f"
+            # No chmod after the if: a file the base legally lacks was not copied. Any other failure
+            # here stays an error on purpose (set -e): a broken step must turn the job red, not skip the e2e.
           done
           NEEDS_E2E="$RUNNER_TEMP/needs-e2e.sh" "$RUNNER_TEMP/e2e-decide.sh"
 
