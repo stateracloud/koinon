@@ -44,12 +44,14 @@ jobs:
         with:
           version: v4.3.1
 
+      - uses: ./.github/actions/fetch-pinned
+        with:
+          name: kind
+          url: https://github.com/kubernetes-sigs/kind/releases/download/${{ env.KIND_VERSION }}/kind-linux-amd64
+          sha256: ${{ env.KIND_SHA256_AMD64 }}
+          dest: ${{ runner.temp }}/bin/kind
       - name: Install kind
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/kind"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 

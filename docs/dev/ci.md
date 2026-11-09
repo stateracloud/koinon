@@ -370,6 +370,17 @@ settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call w
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, gitleaks, kind, ko, the
+gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
+`hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
+the sha256 check, and a file already there with the right sha256 is not fetched again (#431;
+`releases/download` answers 504 now and then). Workflows use the composite action
+`.github/actions/fetch-pinned` (`name`, `url`, `sha256`, `dest`), which puts `actions/cache` in
+front, keyed by OS, tool name and sha256, so a version bump is a new entry and most runs download
+nothing; a cache hit is still checked. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
+`curl` or `wget` of `releases/download` in a workflow, composite action, `hack/*.sh` or `test/**/*.sh`
+that bypasses the helper; `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
+
 The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
 `flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
