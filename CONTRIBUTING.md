@@ -43,7 +43,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
 | Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
 | Node | 24 | web UI |
-| pnpm | `web/package.json` `packageManager` (12.14.0) | web UI, docs site |
+| pnpm | `web/package.json` `packageManager` (12.18.0) | web UI, docs site |
 | buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
 | golangci-lint | v2.15.0 | `make lint-go` |
 | Helm | v4.3.1 | `make chart-check`, `make docs-check`, admission tests, Tilt |
