@@ -460,7 +460,7 @@ fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
 and fails a needs-e2e PR without a passing e2e on its head (old issue 562), so a plain auto-merge cannot
-skip it. With the merge queue, the hosted `quickstart` on the queue commit (main plus the PR) is the merge evidence (#444), so a
+skip it. With the merge queue, the hosted `quickstart` on the queue commit (main plus the PR) is the merge evidence (#444, ADR 0102), so a
 main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` is pre-merge confidence on the PR head. Still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
@@ -543,7 +543,7 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
   the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
-- `e2e result` and the quickstart (#444, amends ADR 0094 decision 4): when the entry's diff against `base_sha` is
+- `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
   e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That
   run is the merge evidence: `e2e result` is green when it passes, and a red one drops the entry from the
@@ -584,7 +584,7 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
 - `--admin` (CODEOWNERS paths): verified (ADR 0094, "Verification by probe", probe 5): `gh pr merge --admin
   --merge` merges directly and bypasses the queue and the review rule, so a sensitive-path PR needs no
-  enqueue. An admin merge lands without the queue-commit quickstart (#444), the merge evidence for an
+  enqueue. An admin merge lands without the queue-commit quickstart (#444, ADR 0102), the merge evidence for an
   e2e-relevant change: such a PR should be enqueued, and `pr-merge.sh --admin` warns when the queue is on and
   `needs-e2e.sh` says the e2e is required. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
   whether or not the PR is queued.

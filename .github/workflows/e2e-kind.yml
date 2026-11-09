@@ -16,7 +16,7 @@
 #     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
 #     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
 #     `gh workflow run e2e-kind.yml --ref <branch>`.
-#   - merge queue (#444): the quickstart runs on the queue commit (main plus the pull request) when the
+#   - merge queue (#444, ADR 0102): the quickstart runs on the queue commit (main plus the pull request) when the
 #     entry's own diff against merge_group.base_sha is e2e-relevant. A red run drops the entry from the
 #     queue. This is the merge evidence; the lab's e2e-lab stays pre-merge confidence on the PR head.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
@@ -39,7 +39,7 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-  # The merge queue (#225, #444): `e2e result` is required, so it reports on the queue's commit. When the
+  # The merge queue (#225, #444, ADR 0102): `e2e result` is required, so it reports on the queue's commit. When the
   # entry's own diff (against merge_group.base_sha) is e2e-relevant, decide starts the quickstart on the queue
   # commit (main plus the pull request): that run is the merge evidence and the e2e-lab status is not read.
   merge_group:

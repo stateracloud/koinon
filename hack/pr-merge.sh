@@ -21,7 +21,7 @@
 #      the output says `auto-merge enabled`.
 #   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
 #   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
-#   --admin still merges directly (bypass, and no queue-commit quickstart: #444, an e2e-relevant PR should be enqueued). Without the rule nothing changes. docs/dev/ci.md "Merging".
+#   --admin still merges directly (bypass, and no queue-commit quickstart: #444, ADR 0102, an e2e-relevant PR should be enqueued). Without the rule nothing changes. docs/dev/ci.md "Merging".
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
@@ -191,7 +191,7 @@ mode=--auto
 if [ "$admin" != 0 ]; then
   mode=--admin
   if [ "$queue" = 1 ] && [ "${#req[@]}" -gt 0 ]; then
-    echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
+    echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444, ADR 0102) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
   fi
 fi
 gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }

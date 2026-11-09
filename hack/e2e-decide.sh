@@ -15,7 +15,7 @@
 #                      then labels it (two events, old issue 468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
-#   merge_group        (the merge queue, #225, #444) needed when the entry's own diff against MG_BASE
+#   merge_group        (the merge queue, #225, #444, ADR 0102) needed when the entry's own diff against MG_BASE
 #                      (merge_group.base_sha) matches the full rule or touches the e2e's own files:
 #                      the quickstart runs on the queue commit (main plus the PR), and that run is the
 #                      merge evidence. `required` is always false (no PR-head lookup). A failing rule
@@ -107,7 +107,7 @@ pull_request)
   fi
   ;;
 merge_group)
-  # #444 (amends ADR 0094 decision 4): the queue commit is main plus the pull request, so the quickstart
+  # #444 (ADR 0102, amends ADR 0094 decision 4): the queue commit is main plus the pull request, so the quickstart
   # runs on it when the entry's own diff against MG_BASE is e2e-relevant, and that run is the merge
   # evidence. `required` stays false: the evidence is this run's own quickstart, not the PR head's (the
   # PR-head gate already ran before the entry could be queued). A queue entry is never cancelled.

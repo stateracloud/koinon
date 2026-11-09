@@ -40,7 +40,7 @@ Instructions for coding agents working on Koinon.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
   `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the head (`e2e result` is red without one).
-  The PR's own run runs the quickstart by itself; you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. The merge queue re-runs the quickstart on main plus the PR (#444). `hack/e2e-remote.sh --local` is not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
+  The PR's own run runs the quickstart by itself; you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. The merge queue re-runs the quickstart on main plus the PR (#444, ADR 0102). `hack/e2e-remote.sh --local` is not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
@@ -192,7 +192,7 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   on the head, then `claim.sh review`, `gh pr merge --merge` and a PR comment. Do not hand-write the
   wait or the merge. With the merge queue, enqueue (no `--admin`) a needs-e2e PR: the queue runs the
   hosted quickstart on main plus the PR, which is the merge evidence, so a main that moved during the
-  lab run costs no re-run. `--admin` skips the queue and that run (#444). Details: `docs/dev/ci.md#merging`.
+  lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.
