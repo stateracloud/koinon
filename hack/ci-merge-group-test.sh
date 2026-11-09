@@ -31,9 +31,14 @@ check "claims.yml: the claim job reports on merge_group" grep -Eq "if: github.ev
 check "claims.yml: on merge_group the claim job runs check-pr for the queued PR from the base sha" bash -c '
 	grep -q "ref: \${{ github.event.merge_group.base_sha }}" "$1" && grep -q "gh-readonly-queue/\*/pr-" "$1" &&
 	awk "/event_name == .merge_group.$/ { g = 1 } g && /claim.sh check-pr/ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/claims.yml"
+# #444: the queue commit runs the quickstart itself (decide answers needed); `e2e result` no longer reads the
+# queued PR's head. The lab's e2e-lab status cannot test the queue ref.
 # shellcheck disable=SC2016
-check "e2e-kind.yml: e2e result reads the queued PR head on merge_group" bash -c '
-	grep -q "gh-readonly-queue/\*/pr-" "$1" && grep -q "headRefOid" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: e2e result does not look up the queued PR head (the queue commit's own quickstart is the evidence)" bash -c '
+	! grep -q "headRefOid" "$1" && ! grep -q "gh-readonly-queue" "$1"' _ "$wfdir/e2e-kind.yml"
+# shellcheck disable=SC2016
+check "e2e-kind.yml: the quickstart job is not limited to pull requests and pushes" bash -c '
+	! awk "/^  quickstart:/ { j = 1 } /^  result:/ { j = 0 } j && /^    if:.*event_name/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/e2e-kind.yml"
 # shellcheck disable=SC2016
 check "e2e-kind.yml: a queue build is never cancelled" bash -c '
 	grep -q "cancel-in-progress: \${{ github.event_name == .pull_request. }}" "$1"' _ "$wfdir/e2e-kind.yml"

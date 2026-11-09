@@ -460,7 +460,8 @@ fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
 and fails a needs-e2e PR without a passing e2e on its head (old issue 562), so a plain auto-merge cannot
-skip it; still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
+skip it. With the merge queue, the hosted `quickstart` on the queue commit (main plus the PR) is the merge evidence (#444), so a
+main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` is pre-merge confidence on the PR head. Still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
@@ -542,12 +543,14 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
   the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
-- `e2e result`: the queue commit runs no kind e2e (`decide` always answers `needed=false`; 25 minutes per
-  entry would hold the queue). When the entry's diff against `base_sha` is e2e-relevant, `decide` answers
-  `required=true` and `e2e result` runs the base's `hack/e2e-gate.sh` against the head SHA of pull
-  request `<N>` (from the queue ref), so the same `quickstart` or `e2e-lab` evidence as on the pull request
-  is re-checked at queue time. Not relevant: green. Running the e2e in the queue instead is deferred (ADR
-  0094 decision 4, Alternatives); it needs a new ADR.
+- `e2e result` and the quickstart (#444, amends ADR 0094 decision 4): when the entry's diff against `base_sha` is
+  e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
+  `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That
+  run is the merge evidence: `e2e result` is green when it passes, and a red one drops the entry from the
+  queue. `required` stays false, so no PR-head lookup happens at queue time (the PR-head gate still runs
+  before the entry can be queued). `e2e-lab` cannot run on the read-only, short-lived queue ref, so it stays
+  pre-merge confidence on the PR head and is not read in the queue. Not relevant: the job is skipped and
+  `e2e result` is green. The queue's `quickstart` builds the flavor image itself when GHCR has none for the tree.
 
 Ruleset values (ADR 0094 decision 4), set by the maintainer's session: `strict_required_status_checks_policy`
 `false`, `merge_queue` with grouping strategy `ALLGREEN`, merge method `MERGE`, 1 entry merged per group (`min` and `max`
@@ -558,7 +561,12 @@ a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the qu
 a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
 and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.
 
-Cost: one full `ci` run per queue build, and no e2e; the ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
+Cost: one full `ci` run per queue build, plus a 15 to 25 minute `quickstart` for each e2e-relevant entry
+(75-minute job timeout, 60-minute queue check timeout: the queue gives up first). Entries build concurrently (up to 5), so
+the e2e adds latency per entry, not per queue; the throughput limit is the 1-entry-per-group merge. A red group drops
+only its entry and rebuilds the entries behind it. Raise the group size (`max_entries_to_merge`, `min_entries_to_merge`
+with `min_entries_to_merge_wait_minutes`) only after measuring: a batch of n entries costs one e2e, but a red batch
+costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
 only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
 tested once more (follow-up: accept the queue commit's own green check runs).
 

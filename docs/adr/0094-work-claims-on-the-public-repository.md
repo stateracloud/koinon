@@ -245,7 +245,14 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   `hack/ci-required-test.sh` learns to fail a required check whose workflow has no `merge_group`
   trigger, the same way it fails an unlisted job. This keeps the AGENTS.md rule that a required job
   must report everywhere.
-- **`e2e result` on the queue commit.** On `merge_group` the `decide` job never starts the kind e2e,
+- **Amended 2026-11-09 (#444, procoduck's decision): the queue commit runs the kind e2e.** Three pull
+  requests passed the lab e2e and then could not merge because main moved during the run; each needed a
+  full re-run on the synced head. The revisit condition below is replaced: for an e2e-relevant entry,
+  `decide` starts the hosted `quickstart` on the queue commit (main plus the pull request) and `e2e result`
+  is green when it passes. The PR-head evidence (`quickstart` or `e2e-lab`) still gates entry to the queue;
+  the lab stays pre-merge confidence, since it cannot test the queue ref. The bullets below are the
+  original decision, kept for the record.
+- **`e2e result` on the queue commit (original).** On `merge_group` the `decide` job never starts the kind e2e,
   and `e2e result` runs the base's `hack/e2e-gate.sh` against **the head SHA of pull request `<N>`**,
   not the queue commit.
   - A needs-e2e pull request still needs a green `quickstart` or `e2e-lab` on its own head before it

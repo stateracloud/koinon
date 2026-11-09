@@ -21,7 +21,7 @@
 #      the output says `auto-merge enabled`.
 #   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
 #   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
-#   --admin still merges directly (bypass). Without the rule nothing changes. docs/dev/ci.md "Merging".
+#   --admin still merges directly (bypass, and no queue-commit quickstart: #444, an e2e-relevant PR should be enqueued). Without the rule nothing changes. docs/dev/ci.md "Merging".
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.

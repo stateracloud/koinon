@@ -68,18 +68,19 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
-# #225, ADR 0094 decision 4: the queue never runs the e2e; `required` asks e2e result for evidence on the PR head.
+# #444: the queue commit (main plus the PR) runs the quickstart when the entry is e2e-relevant; the run is the
+# evidence, so `required` stays false (no PR-head lookup).
 MG=(EVENT=merge_group MG_BASE=abc123)
-want false "queue entry touching the e2e's files does not run" "${MG[@]}" STUB_FORCED=0
-want false "queue entry that is e2e-relevant does not run" "${MG[@]}" STUB_FULL=0
+want true "queue entry touching the e2e's files runs" "${MG[@]}" STUB_FORCED=0
+want true "queue entry that is e2e-relevant runs" "${MG[@]}" STUB_FULL=0
 want false "queue entry with nothing relevant does not run" "${MG[@]}"
-want false "queue entry without a base sha does not run" EVENT=merge_group
-req true "queue entry touching the e2e's files requires evidence" "${MG[@]}" STUB_FORCED=0
-req true "queue entry that is e2e-relevant requires evidence" "${MG[@]}" STUB_FULL=0
+want true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
+want true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
+want true "queue entry without a base sha runs" EVENT=merge_group
+req false "queue entry touching the e2e's files requires no PR-head evidence" "${MG[@]}" STUB_FORCED=0
+req false "queue entry that is e2e-relevant requires no PR-head evidence" "${MG[@]}" STUB_FULL=0
 req false "queue entry with nothing relevant requires none" "${MG[@]}"
-req true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
-req true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
-req true "queue entry without a base sha fails closed" EVENT=merge_group
+req false "queue entry without a base sha requires none" EVENT=merge_group
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
 # required: the pull request needs an e2e, whether or not it runs here.
