@@ -21,7 +21,9 @@
 #                      merge evidence. `required` is always false (no PR-head lookup). A failing rule
 #                      script other than "not needed" reads as needed.
 #   push               (main) needed when the full rule matches anything since the last green e2e
-#                      run on main (push or schedule), or when there is no such run.
+#                      run on main (push or schedule), or when there is no such run. Not needed when a
+#                      green merge_group quickstart ran on a commit with the pushed commit's tree
+#                      (PUSH_SHA): the queue already tested exactly this tree (#444, ADR 0102).
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
@@ -32,7 +34,7 @@
 # needed. Every other event: `required=false`.
 #
 # Environment: EVENT, BASE (pull request base branch), MG_BASE (merge group base sha), LABELS (JSON array of the PR's label names),
-# PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
+# PR (its number), PUSH_SHA (the pushed commit, push events), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
 # command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
 
@@ -142,6 +144,24 @@ schedule)
   emit true
   ;;
 push)
+  # #444 (ADR 0102): a queue merge puts on main the tree the queue's quickstart already tested. When a
+  # green merge_group quickstart ran on a commit with the pushed commit's tree, this push needs no second run.
+  if [[ -n ${PUSH_SHA:-} && -n ${GH_REPO:-} ]]; then
+    pushed_tree=$("$GH" api "repos/$GH_REPO/git/commits/$PUSH_SHA" --jq .tree.sha 2>/dev/null || true)
+    if [[ -n $pushed_tree ]]; then
+      while read -r id sha; do
+        [[ -n ${id:-} ]] || continue
+        [[ $("$GH" api "repos/$GH_REPO/git/commits/$sha" --jq .tree.sha 2>/dev/null || true) == "$pushed_tree" ]] || continue
+        if [[ -n $("$GH" api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
+          --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success") | .id' 2>/dev/null || true) ]]; then
+          summary "Does not run: the merge queue's e2e run $id passed on a commit with this commit's tree (${pushed_tree:0:12})."
+          emit false
+          exit 0
+        fi
+      done < <("$GH" run list --workflow e2e-kind.yml --event merge_group --status success --limit 20 \
+        --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
+    fi
+  fi
   covered=$("$GH" run list --workflow e2e-kind.yml --branch main --status success --limit 30 \
     --json headSha,event --jq '[.[] | select(.event == "push" or .event == "schedule")][0].headSha // empty' 2>/dev/null || true)
   if [[ -z $covered ]]; then

@@ -22,6 +22,11 @@ cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
 */issues/*/labels*) echo "${STUB_LABELS:-[]}" ;;
+# the merge-queue shortcut for a push (#444): tree of the pushed commit, queue runs, their quickstart job
+*git/commits/pushsha*) echo "${STUB_TREE_PUSH:-}" ;;
+*git/commits/*) echo "${STUB_TREE_MG:-}" ;;
+*"run list"*merge_group*) echo "${STUB_MG_RUNS:-}" ;;
+*actions/runs/*/jobs*) echo "${STUB_MG_JOB:-}" ;;
 *) echo "${STUB_COVERED:-}" ;;
 esac
 SH
@@ -68,6 +73,15 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
+# #444: a push whose tree a green merge_group quickstart already tested does not run again.
+PQ=(EVENT=push PUSH_SHA=pushsha GH_REPO=o/r STUB_COVERED=abc123 STUB_FULL=0 'STUB_MG_RUNS=77 mgsha' STUB_TREE_PUSH=tree1 STUB_TREE_MG=tree1 STUB_MG_JOB=9)
+want false "push: same tree as a green queue quickstart does not run" "${PQ[@]}"
+summary_has "merge queue"
+want true "push: a different tree runs" "${PQ[@]}" STUB_TREE_MG=tree2
+want true "push: the queue run's quickstart did not succeed (skipped) runs" "${PQ[@]}" STUB_MG_JOB=
+want true "push: no queue run runs" "${PQ[@]}" STUB_MG_RUNS=
+want true "push: unreadable pushed tree runs" "${PQ[@]}" STUB_TREE_PUSH=
+want true "push: without PUSH_SHA the queue is not consulted" EVENT=push GH_REPO=o/r STUB_COVERED=abc123 STUB_FULL=0 'STUB_MG_RUNS=77 mgsha' STUB_TREE_PUSH=tree1 STUB_TREE_MG=tree1 STUB_MG_JOB=9
 # #444: the queue commit (main plus the PR) runs the quickstart when the entry is e2e-relevant; the run is the
 # evidence, so `required` stays false (no PR-head lookup).
 MG=(EVENT=merge_group MG_BASE=abc123)

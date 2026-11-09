@@ -551,10 +551,19 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   before the entry can be queued). `e2e-lab` cannot run on the read-only, short-lived queue ref, so it stays
   pre-merge confidence on the PR head and is not read in the queue. Not relevant: the job is skipped and
   `e2e result` is green. The queue's `quickstart` builds the flavor image itself when GHCR has none for the tree.
+  The push to main after the queue merge does not run the quickstart again: `decide` (push) accepts a green
+  `merge_group` quickstart job whose head commit has the pushed commit's tree (`PUSH_SHA`).
+- Bootstrap shim (#444, follow-up: see PR #451): the entry that merges #444, and any entry built on a main older
+  than #444, runs the OLD `decide` from `base_sha`, which answers `needed=false, required=true`. Only then does
+  `e2e result` look up the queued PR head (`hack/e2e-queue-head.sh`, then the old PR-head gate). Removed when main's
+  `decide` is the new one and no older-base entry can remain.
 
 Ruleset values (ADR 0094 decision 4), set by the maintainer's session: `strict_required_status_checks_policy`
 `false`, `merge_queue` with grouping strategy `ALLGREEN`, merge method `MERGE`, 1 entry merged per group (`min` and `max`
-group size 1), at most 5 builds at once, check timeout 60 minutes.
+group size 1), at most 5 builds at once, check timeout 60 minutes. The 60 stays with the e2e in the queue: the
+slowest of the last 200 successful or failed `quickstart` jobs took 14.2 minutes (851 s; typical 12 to 13.5),
+so there are 45 minutes of headroom (measured 2026-11-09). A cold flavor build in the queue is not in that sample;
+if the queue starts timing out entries, raise `check_response_timeout_minutes` (to 90) then.
 
 The updater: `updater.yml` and `claim.sh update-oldest` stay until the queue is live. Meanwhile `update-oldest` skips
 a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
@@ -566,9 +575,9 @@ Cost: one full `ci` run per queue build, plus a 15 to 25 minute `quickstart` for
 the e2e adds latency per entry, not per queue; the throughput limit is the 1-entry-per-group merge. A red group drops
 only its entry and rebuilds the entries behind it. Raise the group size (`max_entries_to_merge`, `min_entries_to_merge`
 with `min_entries_to_merge_wait_minutes`) only after measuring: a batch of n entries costs one e2e, but a red batch
-costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push`, which skips the heavy jobs
-only when the merge tree equals a green PR head; after a queue build that is rarely true, so main is
-tested once more (follow-up: accept the queue commit's own green check runs).
+costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push` in `ci.yml`, which skips the heavy jobs
+only when the merge tree equals a green PR head; after a queue build that is rarely true, so those jobs run once
+more (follow-up: accept the queue commit's own green check runs). The kind e2e does not: see above.
 
 Scripts, with the rule detected at run time (no queue: nothing changes):
 

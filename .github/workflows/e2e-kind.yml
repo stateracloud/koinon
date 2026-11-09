@@ -111,6 +111,7 @@ jobs:
           MG_BASE: ${{ github.event.merge_group.base_sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           PR: ${{ github.event.pull_request.number }}
+          PUSH_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
@@ -315,6 +316,7 @@ jobs:
     permissions:
       contents: read
       actions: write # re-run the pull request run's failed `e2e result` after a passing dispatched run
+      pull-requests: read # bootstrap shim only (hack/e2e-queue-head.sh, follow-up: see PR #451): the queued pull request's head sha
       statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (old issue 588)
     env:
       GH_TOKEN: ${{ github.token }}
@@ -334,6 +336,19 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           BRANCH: ${{ github.head_ref }}
         run: |
+          # BOOTSTRAP SHIM (follow-up: see PR #451). On merge_group, decide runs from merge_group.base_sha. A
+          # main from before #444 has the old decide, which answers needed=false, required=true for an
+          # e2e-relevant entry (it never starts the quickstart): only that combination reaches this branch, and
+          # the evidence is then on the queued PR's head, as before ADR 0102. The new decide never answers
+          # required=true on merge_group. Exit condition: remove this block, hack/e2e-queue-head.sh and the
+          # pull-requests: read permission when main's decide is the new one, i.e. after #444 merged and no
+          # queue entry built on an older base can remain.
+          if [[ $EVENT == merge_group && $REQUIRED == true ]]; then
+            head=$(hack/e2e-queue-head.sh)
+            SHA=$(sed -n 's/^SHA=//p' <<<"$head")
+            BRANCH=$(sed -n 's/^BRANCH=//p' <<<"$head")
+            export SHA BRANCH
+          fi
           # The base branch's copy of the gate, like decide: a pull request must not be able to
           # change what decides whether its e2e is enough. This PR's own copy only when the base has none.
           if [[ $EVENT == pull_request ]]; then git fetch --no-tags --depth=1 origin "$BASE"; fi

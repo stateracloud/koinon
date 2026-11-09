@@ -28,9 +28,19 @@ could not merge because main moved during the run; each needed a full re-run on 
    queue and so the queue-commit run. `hack/pr-merge.sh --admin` warns in that case.
 4. **Cost.** Each e2e-relevant entry adds 15 to 25 minutes of queue latency. Entries build concurrently
    (up to 5), so this is latency per entry, not per queue. The queue check timeout (60 min) is below the
-   job timeout (75 min), so the queue gives up first. Group size stays 1: a red e2e costs one entry, not
-   a batch. Batching is a later, measured change. No ruleset change is needed: `e2e result` is already
-   required and already reports on `merge_group`.
+   job timeout (75 min), so the queue gives up first. Measured on 2026-11-09: the slowest `quickstart` job
+   of the last 200 finished runs took 14.2 minutes (typical 12 to 13.5), so the 60-minute check timeout keeps
+   45 minutes of headroom and stays. A cold flavor build in the queue is not in the sample; raise
+   `check_response_timeout_minutes` to 90 if entries start timing out. Group size stays 1: a red e2e costs one
+   entry, not a batch. Batching is a later, measured change. No ruleset change is needed: `e2e result` is
+   already required and already reports on `merge_group`.
+5. **The push to main does not repeat the e2e.** `decide` on a push also accepts a green `merge_group`
+   `quickstart` job whose head commit has the pushed commit's tree (compared through the git commits API).
+6. **Bootstrap shim.** The queue entry that merges this change runs the old `decide` (from `base_sha`), which
+   answers `needed=false, required=true`. `e2e result` therefore keeps the old queued-PR-head lookup, guarded
+   by `merge_group` with `required=true` (only an old base's `decide` produces that), in
+   `hack/e2e-queue-head.sh`. Exit condition: remove it when main's `decide` is the new one and no entry built
+   on an older base can remain (follow-up: see PR #451).
 
 ## Prior art
 
