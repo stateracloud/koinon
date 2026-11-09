@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 name: ci
 
-# The run says whether it ran for a draft, from the event payload (old issue 676). hack/ci-skip-heavy.sh decides
-# from the same flag (PR_DRAFT below), so a run's label and its behaviour always agree; a gate
-# can drop runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`
-# (the run `name` stays `ci`) without a time window. A re-run replays the event, so keeps its label.
-run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
+# A draft pull request runs nothing heavy (hack/ci-skip-heavy.sh, from PR_DRAFT below): its `go` and
+# `web` report success with "draft: not run". A draft cannot be enqueued or merged, `ready_for_review`
+# starts the full run, and the merge queue re-runs every required check, so no gate reads a draft's green.
 
 on:
   # ready_for_review is not a default type: it runs the full suite on the same head when a draft is
@@ -39,14 +37,13 @@ concurrency:
 jobs:
   # Which parts of the tree a pull request touches, so the slow jobs run only when they can be
   # affected (Actions minutes are capped). Pushes to main run everything, except when the merge
-  # commit is a pull request head that already passed. A job skipped by its `if:` reports success,
+  # commit's tree passed in the merge queue. A job skipped by its `if:` reports success,
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (old issue 593; `go` and `web` then FAIL on
-  # purpose, "not tested", so a draft never leaves a green `go` behind; marking it ready runs
-  # everything on the same head), and a push to main whose merge tree equals a pull request head whose required checks
-  # passed (old issue 595). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
+  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (`go` and `web` then report success with
+  # "draft: not run"; marking it ready runs everything on the same head), and a push to main whose
+  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
   # `lint-shell` run except on that push to main (old issue 594). Read the script's header before changing this.
   changes:
     name: changes
@@ -312,12 +309,12 @@ jobs:
           LAB_REASON: ${{ needs.changes.outputs.go_test_lab_reason }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
-          # `go` check run on a head must never be a vacuous success while the ready run is still
-          # going (old issue 593). Drafts cannot merge; marking ready runs everything on the same head.
+          # A draft runs nothing: report success with a visible note. A skipped required check is green
+          # anyway; no gate reads a draft's green (the queue re-runs every required check).
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
-            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the Go checks"
-            exit 1
+            echo "draft: not run ($REASON); mark it ready for review to run the Go checks"
+            echo "### go: draft: not run" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           # go-test skipped because an external run proved it (old issue 610): that one skip counts as success. Any other
@@ -557,12 +554,12 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
-          # A draft was not tested: red on purpose (neutral and skipped both count as passing). The newest
-          # `web` check run on a head must never be a vacuous success while the ready run is still
-          # going (old issue 593). Drafts cannot merge; marking ready runs everything on the same head.
+          # A draft runs nothing: report success with a visible note. A skipped required check is green
+          # anyway; no gate reads a draft's green (the queue re-runs every required check).
           if [[ $SKIP == true && $EVENT == pull_request ]]; then
-            echo "::error::draft pull request: not tested ($REASON); mark it ready for review to run the web checks"
-            exit 1
+            echo "draft: not run ($REASON); mark it ready for review to run the web checks"
+            echo "### web: draft: not run" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           [[ $WEB == true ]] || { echo "no web changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           for r in $RESULTS; do
@@ -1040,7 +1037,7 @@ jobs:
     name: flavor-publish
     needs: [changes, flavors]
     # Always runs on main when the flavors changed, also when the flavors job was switched off because
-    # the merge tree is a tested pull request head (old issue 595): publishing is not a test. A failed or
+    # the merge queue already ran this tree (ADR 0094 amendment): publishing is not a test. A failed or
     # cancelled flavors job still stops it. flavors_publish is the value before the switch.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
     runs-on: ubuntu-latest

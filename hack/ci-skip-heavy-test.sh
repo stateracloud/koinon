@@ -32,6 +32,8 @@ while (($#)); do
 done
 case $path in
 repos/o/r/pulls/*) f=$FAKE_DIR/pull.json ;;
+repos/o/r/actions/workflows/ci.yml/runs*) [[ ${FAKE_FAIL_RUNS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/mq-runs.json ;;
+repos/o/r/git/commits/*) f=$FAKE_DIR/commit-${path##*/}.json; [[ -f $f ]] || { echo "gh: HTTP 404" >&2; exit 1; } ;;
 repos/o/r/commits/*/check-runs*) f=$FAKE_DIR/checks.json ;;
 repos/o/r/commits/*/statuses*) [[ ${FAKE_FAIL_STATUSES:-0} == 0 ]] || { echo "gh: HTTP 403" >&2; exit 1; }; f=$FAKE_DIR/statuses.json ;;
 *) echo "fake gh: unknown $path" >&2; exit 1 ;;
@@ -41,16 +43,7 @@ EOF
 chmod +x "$tmp/bin/gh"
 export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp"
 
-# --- required list ---------------------------------------------------------------------------------
-cat >"$tmp/required.txt" <<'EOF'
-# comment
-aggregator go
-quick checks
-generated code   # trailing comment
-external dco
-advisory flavors
-EOF
-export CI_REQUIRED="$tmp/required.txt" REPO=o/r
+export REPO=o/r
 
 fails=0
 # expect NAME EXPECTED_SKIP REASON_SUBSTRING [env...]: runs `decide` with the given environment.
@@ -65,24 +58,6 @@ expect() {
 		printf '    %s\n' "${out//$'\n'/$'\n    '}"
 		fails=1
 	fi
-}
-
-checks() { # checks NAME:CONCLUSION[:ID] ... -> checks.json (status completed unless CONCLUSION is "running")
-	local first=1 n c i
-	printf '{"check_runs":[' >"$tmp/checks.json"
-	for spec in "$@"; do
-		IFS=: read -r n c i <<<"$spec"
-		[[ $first == 1 ]] || printf ',' >>"$tmp/checks.json"
-		first=0
-		if [[ $c == running ]]; then
-			printf '{"name":"%s","id":%s,"status":"in_progress","conclusion":null,"app":{"slug":"github-actions"}}' "$n" "${i:-1}" >>"$tmp/checks.json"
-		elif [[ $c == other-app ]]; then
-			printf '{"name":"%s","id":%s,"status":"completed","conclusion":"success","app":{"slug":"some-bot"}}' "$n" "${i:-1}" >>"$tmp/checks.json"
-		else
-			printf '{"name":"%s","id":%s,"status":"completed","conclusion":"%s","app":{"slug":"github-actions"}}' "$n" "${i:-1}" "$c" >>"$tmp/checks.json"
-		fi
-	done
-	printf ']}' >>"$tmp/checks.json"
 }
 
 # --- pull requests ---------------------------------------------------------------------------------
@@ -103,11 +78,11 @@ done
 expect "recorded ready_for_review payload" false "ready" EVENT_NAME=pull_request PR_DRAFT="$(echo '{"action":"ready_for_review","pull_request":{"draft":false}}' | jq -r .pull_request.draft)"
 # A re-run of a draft run after the PR became ready replays the draft payload: still a draft run.
 expect "re-run of a draft run after ready is a draft run again" true "draft" EVENT_NAME=pull_request PR_DRAFT=true
-# ci.yml labels the run from the same flag as it feeds the script.
-if grep -q "^run-name: .*github.event.pull_request.draft.*'ci (draft)'" "$(dirname "$script")/../.github/workflows/ci.yml"; then
-	echo "ok: ci.yml run-name labels draft runs"
+# The run name no longer carries a draft form (a draft runs nothing, so no gate filters on it).
+if grep -q '^run-name:' "$(dirname "$script")/../.github/workflows/ci.yml"; then
+	echo "FAIL: ci.yml still sets a run-name (the draft filter is gone)"; fails=1
 else
-	echo "FAIL: ci.yml run-name does not label draft runs"; fails=1
+	echo "ok: ci.yml has no draft run-name"
 fi
 # shellcheck disable=SC2016 # a literal workflow expression, not a shell one
 if grep -q 'PR_DRAFT: ${{ github.event.pull_request.draft }}' "$(dirname "$script")/../.github/workflows/ci.yml"; then
@@ -134,79 +109,92 @@ g checkout -q main; echo d >"$repo/d"; g add d; g commit -qm "main moved"
 g merge -q --no-ff feat2 -m "Merge feat2" # main moved after feat2 branched: tree differs from the head
 merge_diff=$(g rev-parse HEAD)
 plain=$(g rev-parse HEAD~1) # a one-parent commit
-# a merge whose tree equals the head's but whose head does not contain the first parent
-base=$(g rev-parse HEAD)
-g checkout -qb feat4 "$base"; echo e >"$repo/e"; g add e; g commit -qm feat4
-g checkout -q main; echo e >"$repo/e"; g add e; g commit -qm "main adds the same e"
-g merge -q --no-ff feat4 -m "Merge feat4"
-merge_noanc=$(g rev-parse HEAD)
 # a merge that brings a file the flavors suite builds from
 g checkout -qb feat3; mkdir -p "$repo/flavors"; echo f >"$repo/flavors/x"; g add flavors; g commit -qm feat3
 g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
-# a merge that brings documentation only: the go-* jobs have nothing to run for it
-g checkout -qb feat5; echo doc >"$repo/note.md"; g add note.md; g commit -qm feat5
-g checkout -q main; g merge -q --no-ff feat5 -m "Merge feat5"
-merge_doc=$(g rev-parse HEAD)
 export CI_CHANGES_FLAVORS_DIRS=test/flavors # the directories the flavors suite builds (no go list in the scratch repo)
 
-all_green=(go:success "quick checks:success" "generated code:skipped" dco:failure)
-checks "${all_green[@]}"
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }
+# The queue build: a successful merge_group `ci` run whose head commit has the pushed commit's tree.
+tree_of() { git -C "$repo" rev-parse "$1^{tree}"; }
+commit_json() { # commit_json SHA TREE
+	printf '{"sha":"%s","tree":{"sha":"%s"}}' "$1" "$2" >"$tmp/commit-$1.json"
+}
+mq_runs() { # mq_runs SHA... (newest first) -> mq-runs.json
+	local first=1 s
+	printf '{"workflow_runs":[' >"$tmp/mq-runs.json"
+	for s in "$@"; do
+		[[ $first == 1 ]] || printf ',' >>"$tmp/mq-runs.json"
+		first=0
+		printf '{"id":1,"head_sha":"%s","event":"merge_group","conclusion":"success"}' "$s" >>"$tmp/mq-runs.json"
+	done
+	printf ']}' >>"$tmp/mq-runs.json"
+}
+checks() { # checks NAME:CONCLUSION ... -> checks.json (the queue head's check runs)
+	local first=1 n c
+	printf '{"check_runs":[' >"$tmp/checks.json"
+	for spec in "$@"; do
+		IFS=: read -r n c <<<"$spec"
+		[[ $first == 1 ]] || printf ',' >>"$tmp/checks.json"
+		first=0
+		printf '{"name":"%s","id":1,"status":"completed","conclusion":"%s","app":{"slug":"github-actions"}}' "$n" "$c" >>"$tmp/checks.json"
+	done
+	printf ']}' >>"$tmp/checks.json"
+}
+qh_same=1111111111111111111111111111111111111111 # a queue commit with merge_same's tree
+qh_other=2222222222222222222222222222222222222222 # a queue commit with another tree
+commit_json "$qh_same" "$(tree_of "$merge_same")"
+commit_json "$qh_other" "$(tree_of "$merge_diff")"
+checks flavors:success
+
+mq_runs "$qh_same"
 # shellcheck disable=SC2046 # push prints separate KEY=VALUE words
-expect "merge tree equals a green head: skip" true "equals the tree" $(push "$merge_same")
-# dco is external and failing above: it must not matter. Now break a required one.
-checks go:success "quick checks:failure" "generated code:success"
+expect "a successful merge_group run on the pushed tree: skip" true "merge_group" $(push "$merge_same")
 # shellcheck disable=SC2046
-expect "a red required check runs everything" false "quick checks" $(push "$merge_same")
-checks go:success "generated code:success"
+expect "a queue run on another tree does not count" false "no successful merge_group" $(push "$merge_diff")
+mq_runs "$qh_other" "$qh_same"
 # shellcheck disable=SC2046
-expect "a missing required check runs everything" false "no run" $(push "$merge_same")
-checks go:success "quick checks:running" "generated code:success"
+expect "an older queue run on the same tree counts" true "merge_group" $(push "$merge_same")
+mq_runs
 # shellcheck disable=SC2046
-expect "a running required check runs everything" false "not completed" $(push "$merge_same")
-checks go:success "quick checks:other"-app "generated code:success"
+expect "no queue run (an admin merge) runs everything" false "no successful merge_group" $(push "$merge_same")
+# A draft-era or ready pull request head that is green never skips a push: its check runs are not read.
+checks go:success "quick checks:success" "generated code:success" flavors:success
 # shellcheck disable=SC2046
-expect "a check from another app does not count" false "no run" $(push "$merge_same")
-checks go:success "quick checks:failure:1" "quick checks:success:2" "generated code:success"
+expect "a green pull request head without a queue run runs everything" false "no successful merge_group" $(push "$merge_same")
+# A queue run whose head commit cannot be read is not trusted.
+mq_runs 3333333333333333333333333333333333333333
 # shellcheck disable=SC2046
-expect "a newer green run replaces an older red one" true "equals the tree" $(push "$merge_same")
-checks go:success "quick checks:success:1" "quick checks:cancelled:2" "generated code:success"
+expect "an unreadable queue commit runs everything" false "no successful merge_group" $(push "$merge_same")
+mq_runs "$qh_same"
 # shellcheck disable=SC2046
-expect "a newer red run replaces an older green one" false "quick checks" $(push "$merge_same")
-checks "${all_green[@]}"
+expect "an API error on the runs list runs everything" false "cannot list" $(push "$merge_same") FAKE_FAIL_RUNS=1
 # shellcheck disable=SC2046
-expect "a head that does not contain the first parent runs everything" false "not an ancestor" $(push "$merge_noanc")
-# flavors is advisory: failed on the head with nothing under its paths changed, the skip stands
-checks "${all_green[@]}" flavors:failure
+expect "an unknown commit runs everything" false "cannot read" $(push 0000000000000000000000000000000000000000)
+expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push REF=refs/tags/v1 SHA="$merge_same"
+expect "no repo runs everything" false "not a push to main" EVENT_NAME=push REF=refs/heads/main SHA="$merge_same" REPO=
+# flavors is advisory but flavor-publish ships what it tested: judged on the queue head.
+checks flavors:failure
 # shellcheck disable=SC2046
-expect "flavors red but not affected: skip" true "equals the tree" $(push "$merge_same")
+expect "flavors red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")
+commit_json "$qh_same" "$(tree_of "$merge_flav")"
 # shellcheck disable=SC2046
 expect "flavors red and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
-checks "${all_green[@]}" flavors:cancelled
+checks flavors:success
 # shellcheck disable=SC2046
-expect "flavors cancelled and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
-checks "${all_green[@]}"
+expect "flavors green and its files changed: skip" true "merge_group" $(push "$merge_flav")
+checks
 # shellcheck disable=SC2046
 expect "flavors never ran and its files changed runs everything" false "no completed run" $(push "$merge_flav")
-checks "${all_green[@]}" flavors:success
+# A one-parent commit (squash or rebase landing) is judged the same way, by tree.
+commit_json "$qh_same" "$(tree_of "$plain")"
+checks flavors:success
 # shellcheck disable=SC2046
-expect "flavors green and its files changed: skip" true "equals the tree" $(push "$merge_flav")
-# a draft run leaves a failed go and web (by design); the ready run is still going, or was cancelled
-checks "quick checks:success" "generated code:success" go:success:1 go:failure:2 flavors:success
-# shellcheck disable=SC2046
-expect "the newest go is a draft run's failure: run everything" false "'go'" $(push "$merge_same")
-checks "quick checks:success" "generated code:success" go:failure:1 go:running:2 flavors:success
-# shellcheck disable=SC2046
-expect "ready run still going after a draft failure: run everything" false "not completed" $(push "$merge_same")
-checks "quick checks:success" "generated code:success" go:failure:1 go:cancelled:2 flavors:success
-# shellcheck disable=SC2046
-expect "ready run cancelled: run everything" false "'go'" $(push "$merge_same")
-checks "quick checks:success" "generated code:success" go:success:1 go:failure:2 go:success:3 flavors:success
-# shellcheck disable=SC2046
-expect "ready, draft, push, ready again: the newest green go counts" true "equals the tree" $(push "$merge_same")
-# go-test-lab (old issue 610): a go-test skipped on the head must be a lab-satisfied one, or one with no Go in it
+expect "a one-parent commit with a queue run on its tree: skip" true "merge_group" $(push "$plain")
+: "$feat_head"
+
 statuses() { # statuses CONTEXT:STATE ... (newest first) -> statuses.json
 	local first=1 c st
 	printf '[' >"$tmp/statuses.json"
@@ -218,46 +206,6 @@ statuses() { # statuses CONTEXT:STATE ... (newest first) -> statuses.json
 	done
 	printf ']' >>"$tmp/statuses.json"
 }
-statuses
-checks "${all_green[@]}" go-test:skipped
-# shellcheck disable=SC2046
-expect "go-test skipped with no lab status and Go in the change runs everything" false "go-test was skipped" $(push "$merge_same")
-statuses go-test-lab:failure
-# shellcheck disable=SC2046
-expect "go-test skipped with a red lab status runs everything" false "go-test was skipped" $(push "$merge_same")
-statuses e2e-lab:success
-# shellcheck disable=SC2046
-expect "another context's status does not satisfy go-test" false "go-test was skipped" $(push "$merge_same")
-statuses go-test-lab:success
-# shellcheck disable=SC2046
-expect "go-test skipped with a green go-test-lab: skip" true "equals the tree" $(push "$merge_same")
-statuses go-test-lab:failure go-test-lab:success
-# shellcheck disable=SC2046
-expect "the newest go-test-lab status wins (red over an older green)" false "go-test was skipped" $(push "$merge_same")
-statuses go-test-lab:success go-test-lab:failure
-# shellcheck disable=SC2046
-expect "the newest go-test-lab status wins (green over an older red)" true "equals the tree" $(push "$merge_same")
-statuses
-# shellcheck disable=SC2046
-expect "go-test skipped, no status, and the change is documentation only: skip" true "equals the tree" $(push "$merge_doc")
-# shellcheck disable=SC2046
-expect "an unreadable status list does not excuse a skipped go-test" false "go-test was skipped" $(push "$merge_same") FAKE_FAIL_STATUSES=1
-checks "${all_green[@]}" go-test:success
-# shellcheck disable=SC2046
-expect "go-test succeeded on a hosted runner: skip" true "equals the tree" $(push "$merge_same")
-checks "${all_green[@]}"
-# shellcheck disable=SC2046
-expect "a different tree runs everything" false "differs" $(push "$merge_diff")
-# shellcheck disable=SC2046
-expect "a one-parent commit runs everything" false "not a merge commit" $(push "$plain")
-# shellcheck disable=SC2046
-expect "an unknown commit runs everything" false "cannot read" $(push 0000000000000000000000000000000000000000)
-# shellcheck disable=SC2046
-expect "an API error runs everything" false "cannot read the check runs" $(push "$merge_same") FAKE_FAIL=1
-expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push REF=refs/tags/v1 SHA="$merge_same"
-# shellcheck disable=SC2046
-expect "an unreadable required list runs everything" false "required checks" $(push "$merge_same") CI_REQUIRED="$tmp/missing.txt"
-: "$feat_head"
 
 # --- lab (old issue 610) -----------------------------------------------------------------------------------
 cd "$tmp"
