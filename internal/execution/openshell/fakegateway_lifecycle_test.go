@@ -17,14 +17,15 @@ import (
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
-// These specs call the fake gateway directly, not through the backend, whose settle step
-// would hide a fake that is stricter than the real gateway (issue 439). The expected
-// results are those of OpenShell v0.1.7 compute/mod.rs: QuiesceOperation::admit (stop) and
-// start_sandbox_with_intent (start).
+// wsScope selects the suite's workspace.
 func wsScope() *datamodelv1.WorkspaceSelector {
 	return &datamodelv1.WorkspaceSelector{Selection: &datamodelv1.WorkspaceSelector_Workspace{Workspace: ws}}
 }
 
+// These specs call the fake gateway directly, not through the backend, whose settle step
+// would hide a fake that is stricter than the real gateway (issue 439). The expected
+// results are those of OpenShell v0.1.7 compute/mod.rs: QuiesceOperation::admit (stop) and
+// start_sandbox_with_intent (start).
 var _ = Describe("fakegateway stop and start", func() {
 	var (
 		gw     *fakegateway.Gateway
