@@ -43,7 +43,7 @@ check "e2e-kind.yml: e2e result looks up the queued PR head only through the gua
 	[ "$(grep -c "e2e-queue-head.sh" "$1")" -ge 2 ] &&
 	grep -q "if \[\[ \$EVENT == merge_group && \$REQUIRED == true \]\]; then" "$1" &&
 	grep -A1 "if \[\[ \$EVENT == merge_group && \$REQUIRED == true \]\]; then" "$1" | grep -q "hack/e2e-queue-head.sh"' _ "$wfdir/e2e-kind.yml"
-check "e2e-kind.yml: the shim names its exit condition and the follow-up" grep -q "BOOTSTRAP SHIM (follow-up: see PR #451)" "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: the shim names its exit condition and the follow-up" grep -q "BOOTSTRAP SHIM (follow-up: #452)" "$wfdir/e2e-kind.yml"
 # The shim: merge_group + required=true (only an old base's decide produces it) -> the PR-head lookup runs,
 # and hack/e2e-gate.sh then judges that head. A fake gh answers `pr view`.
 fakebin=$(mktemp -d "${TMPDIR:-/tmp}/ci-mg-test.XXXXXX")

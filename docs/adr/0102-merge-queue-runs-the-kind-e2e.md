@@ -40,7 +40,7 @@ could not merge because main moved during the run; each needed a full re-run on 
    answers `needed=false, required=true`. `e2e result` therefore keeps the old queued-PR-head lookup, guarded
    by `merge_group` with `required=true` (only an old base's `decide` produces that), in
    `hack/e2e-queue-head.sh`. Exit condition: remove it when main's `decide` is the new one and no entry built
-   on an older base can remain (follow-up: see PR #451).
+   on an older base can remain (follow-up: #452).
 
 ## Prior art
 

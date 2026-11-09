@@ -316,7 +316,7 @@ jobs:
     permissions:
       contents: read
       actions: write # re-run the pull request run's failed `e2e result` after a passing dispatched run
-      pull-requests: read # bootstrap shim only (hack/e2e-queue-head.sh, follow-up: see PR #451): the queued pull request's head sha
+      pull-requests: read # bootstrap shim only (hack/e2e-queue-head.sh, follow-up: #452): the queued pull request's head sha
       statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (old issue 588)
     env:
       GH_TOKEN: ${{ github.token }}
@@ -336,7 +336,7 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           BRANCH: ${{ github.head_ref }}
         run: |
-          # BOOTSTRAP SHIM (follow-up: see PR #451). On merge_group, decide runs from merge_group.base_sha. A
+          # BOOTSTRAP SHIM (follow-up: #452). On merge_group, decide runs from merge_group.base_sha. A
           # main from before #444 has the old decide, which answers needed=false, required=true for an
           # e2e-relevant entry (it never starts the quickstart): only that combination reaches this branch, and
           # the evidence is then on the queued PR's head, as before ADR 0102. The new decide never answers

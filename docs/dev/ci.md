@@ -553,7 +553,7 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   `e2e result` is green. The queue's `quickstart` builds the flavor image itself when GHCR has none for the tree.
   The push to main after the queue merge does not run the quickstart again: `decide` (push) accepts a green
   `merge_group` quickstart job whose head commit has the pushed commit's tree (`PUSH_SHA`).
-- Bootstrap shim (#444, follow-up: see PR #451): the entry that merges #444, and any entry built on a main older
+- Bootstrap shim (#444, follow-up: #452): the entry that merges #444, and any entry built on a main older
   than #444, runs the OLD `decide` from `base_sha`, which answers `needed=false, required=true`. Only then does
   `e2e result` look up the queued PR head (`hack/e2e-queue-head.sh`, then the old PR-head gate). Removed when main's
   `decide` is the new one and no older-base entry can remain.
