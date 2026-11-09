@@ -95,8 +95,8 @@ agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per
 from the brief's "Which model" section. The parent ships (`hack/ship.sh`) and releases; agents never
 call `claim.sh`. `hack/claim.sh mine` lists your claims with their lanes. Two sessions in one lane
 are one holder; the lock does not separate them. Each session that runs at the same time as another
-one uses its own `--lane`. Each lane tests its own
-worktree: `hack/e2e-remote.sh` tests the checkout it is run from, so run it from the lane's worktree.
+one uses its own `--lane`. Each lane tests its own worktree: `hack/e2e-remote.sh` tests the
+checkout it is run from, so run it from the lane's worktree.
 
 ## Working alongside another human
 

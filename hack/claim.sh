@@ -433,17 +433,26 @@ cmd_take() {
 }
 
 # take_rollback: the EXIT trap of take. A pull request closing several issues needs all of them, so
-# on any exit before the end it releases and unassigns the claims this take wrote (TAKEN).
+# on any exit before the end it releases and unassigns the claims this take wrote (TAKEN). Each one
+# runs in a subshell, so a step that dies does not stop the next; the exit code stays the first one.
+# Only a claim still held by this take's holder is released.
 TAKEN=() TAKE_HOLDER='' TAKE_HUMAN='' TAKE_AT=''
 take_rollback() {
-  local rc=$? t
+  local rc=$? t r
   trap - EXIT
   for t in ${TAKEN[@]+"${TAKEN[@]}"}; do
-    if load_claim "$t"; then
-      write_claim "$t" released "$TAKE_HOLDER" "$TAKE_HUMAN" "" "rolled back: #$TAKE_AT was not available" "$(jq -r .sha <<<"$C")" "$TAKE_HOLDER" || true
+    r=0
+    (
+      load_claim "$t" || exit 5
+      [[ $(jq -r .state <<<"$C") == held ]] && same_holder "$(jq -r .holder <<<"$C")" "$TAKE_HOLDER" || exit 5
+      write_claim "$t" released "$TAKE_HOLDER" "$TAKE_HUMAN" "" "rolled back: #$TAKE_AT was not available" "$(jq -r .sha <<<"$C")" "$TAKE_HOLDER" || exit 5
       unassign "$t" "$TAKE_HUMAN"
-      echo "rolled back #$t" >&2
-    fi
+    ) || r=$?
+    case $r in
+      0) echo "rolled back #$t" >&2 ;;
+      5) warn "#$t is no longer held by $TAKE_HOLDER; left as it is" ;;
+      *) warn "rollback of #$t failed; release it by hand (release $t)" ;;
+    esac
   done
   exit "$rc"
 }

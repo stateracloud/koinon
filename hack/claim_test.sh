@@ -140,7 +140,7 @@ stub_github() {
     }
   fi
   assign() { echo "assign $1 $2" >>"$WRITES"; }
-  unassign() { echo "unassign $1 $2" >>"$WRITES"; }
+  unassign() { [[ ${UNASSIGN_ERR:-} != "$1" ]] || die "cannot unassign $2 from #$1"; echo "unassign $1 $2" >>"$WRITES"; }
   pr_meta() { echo "$PR_FIX"; }
   pr_added_adr_files() { echo "${ADR_FILES:-}"; }
   gh() { # with REAL_WRITE: the real write_claim; PATCH_ERR is what GitHub answers to the ref PATCH
@@ -217,6 +217,14 @@ r=$(API_ERR=11 run take 10 11)
 eq "take: an API error on a later issue is an error" "$(rc_of "$r")" 1
 eq "take: an API error rolls back and unassigns the taken ones" "$(paste -sd';' "$WRITES")" \
   "write 10 held holder=alice#main pr= by=;assign 10 alice;write 10 released holder=alice#main pr= by=alice#main;unassign 10 alice"
+FIX=$(cl 10 held alice#main alice | fix)
+r=$(API_ERR=11 run take 10 11)
+eq "take: a claim held before the call stays held and assigned on a later failure" "$(rc_of "$r"),$(wc -l <"$WRITES" | tr -d ' ')" "1,0"
+FIX=$(cl 12 held bob#main bob | fix)
+r=$(UNASSIGN_ERR=10 run take 10 11 12)
+eq "take: a failing rollback step keeps the first exit code" "$(rc_of "$r")" 2
+eq "take: a failing rollback step is reported" "$(grep -c 'rollback of #10 failed' <<<"$r")" 1
+eq "take: a failing rollback step does not stop the next" "$(grep -c '^unassign 11 alice' "$WRITES")" 1
 FIX=$(cl 10 released bob#main bob | fix)
 r=$(REAL_WRITE=1 PATCH_ERR='gh: Update is not a fast forward (HTTP 422)' run take 10)
 eq "take: a lost race on the PATCH of a released ref is exit 2" "$(rc_of "$r"),$(grep -c 'lost the race for #10' <<<"$r")" "2,1"

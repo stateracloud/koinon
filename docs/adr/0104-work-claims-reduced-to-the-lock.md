@@ -83,7 +83,10 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
 
 - The new script reads every old ref without error. An old holder reads as its login in its lane (no
   lane: `main`), and its login may release it from any lane. Old held claims stay held, with no lease,
-  until their pull request merges or closes or procoduck releases them.
+  until their pull request merges or closes or procoduck releases them. `mine` and `show` list them
+  as held, `release N` works for their login without `--force`, and `check-pr` passes a pull
+  request of that login. They count toward the cap of eight held claims per human, so procoduck
+  releases the ones with no pull request (`hack/claim.sh release N`).
 - The sweeper schedule ends at the merge (schedules run from the default branch), so no old sweeper
   releases a claim after it.
 - For some hours old scripts still run in open sessions and from old pull request bases
