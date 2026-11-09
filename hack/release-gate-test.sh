@@ -65,8 +65,11 @@ if [[ $f == mg-runs.json ]]; then
 	for p in "${kv[@]}"; do
 		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; head_sha=*) hs=${p#head_sha=} ;; esac
 	done
-	jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$FX/$f" |
-		jq '.total_count //= (.workflow_runs | length)' | jq -r "$expr"
+	for pg in "$FX/$f" "$FX/mg-runs-p2.json"; do
+		[[ -f $pg ]] || continue
+		jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$pg" |
+			jq '.total_count //= (.workflow_runs | length)' | jq -r "$expr"
+	done
 	exit
 fi
 exec jq -r "$expr" "$FX/$f"
@@ -398,13 +401,14 @@ check "quickstart: total_count 101 with 100 runs fails closed" "$(gate_rc)" 1
 check "...with a clear message" "$(grep -c 'read 100 of 101 e2e-kind runs on .*: cannot rule out a bisect run' "$tmp/err")" 1
 jq '.total_count = 100' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
 check "quickstart: total_count equal to the runs returned passes" "$(gate_rc)" 0
-# the bisect run is on the second page: it is found, so its green check run does not excuse a red head
+# the only bisect run is on the second page: it is found, so its newer red check run is dropped and the
+# older green one passes the gate (a lookup that reads only page 1 fails closed instead)
 qs_case
-run_on "$sha" quickstart failure 2026-01-03T00:00:00Z 10
-run_on "$sha" quickstart success 2026-01-03T01:00:00Z 1100
+run_on "$sha" quickstart success 2026-01-03T00:00:00Z 10
+run_on "$sha" quickstart failure 2026-01-03T01:00:00Z 1100
 jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
 jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [{id: 1100, head_sha: $h, event: "workflow_dispatch", conclusion: "success", display_title: "e2e-kind (bbbb222) bisect 7"}]' <<<'{}' >"$FX/mg-runs-p2.json"
-check "quickstart: a bisect run on the second page is found" "$(gate_rc)" 1
+check "quickstart: a bisect run on the second page is found and dropped" "$(gate_rc)" 0
 # GitHub's cap for a filtered run list (1000 results): fail closed
 jq '.total_count = 1000' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
 jq '.total_count = 1000' "$FX/mg-runs-p2.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs-p2.json"
