@@ -577,8 +577,9 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
   `release` (a `push` to main job) and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
-  only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
-  the `pull_request` entry check, which runs on the PR before it can be enqueued.
+  only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
+  guard is the required CODEOWNERS review on `.github/**`. The trade-off is in the ADR 0082 amendment; the
+  ruleset "required workflow" option would run main's file instead.
 - `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
   e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That

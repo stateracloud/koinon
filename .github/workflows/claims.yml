@@ -16,7 +16,7 @@
 # repositories (brownouts from 2026-11-09, permanent 2026-12-02). The `claim` check runs on
 # `pull_request` with a read-only token and no secret or Environment, and still checks out the BASE
 # commit to run hack/claim.sh, never the pull request's code. The `release` job runs on `push` to main,
-# where the workflow file is main's own. hack/pull-request-target-lint.sh keeps the trigger out.
+# where the workflow file is main's own. hack/workflow-trigger-lint.sh keeps the trigger out.
 #
 # Job count (old issue 596): every job here pays a fixed start-up cost (runner, checkout). The `claim` job runs
 # only for events that can change its answer (title, body, files, labels, state). A job skipped by
@@ -111,8 +111,9 @@ jobs:
       # gh-readonly-queue/<base>/pr-<N>-<base sha>; <N> is checked with the base's script, so a claim someone
       # else took (or the sweeper released) while the pull request waited fails here. Fails closed. Limit: a
       # merge_group run takes this workflow YAML from the queue commit (the pull request's own), so only the
-      # script is the base's; the guard against a PR that edits this file is the required review on .github/**
-      # plus the pull_request entry check (docs/dev/ci.md "The merge queue").
+      # script is the base's. On pull_request the PR head's workflow file runs too, so the only guard against
+      # a PR that edits this file is the required CODEOWNERS review on .github/** (trade-off: ADR 0082
+      # amendment; the ruleset "required workflow" option would run main's file; docs/dev/ci.md "The merge queue").
       - if: github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
