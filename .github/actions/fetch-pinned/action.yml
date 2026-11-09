@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Download one pinned file with a cache in front (#431). Prior art: the cache-by-version-and-hash
+# pattern of actions/setup-go and actions/cache; the retrying download and the sha256 check live in
+# hack/fetch-pinned.sh so scripts outside Actions use the same code. The key holds the sha256, so a
+# version bump (which changes the sha256) is a new cache entry. A cache hit is checked again.
+name: fetch-pinned
+description: Fetch a pinned release file, cached by name and sha256, retried, sha256 checked.
+inputs:
+  name:
+    description: Short tool name, part of the cache key.
+    required: true
+  url:
+    description: Download URL.
+    required: true
+  sha256:
+    description: Expected sha256 of the file.
+    required: true
+  dest:
+    description: Absolute path to write the file to.
+    required: true
+  save:
+    description: >-
+      Save the file to the cache after a miss. Callers that run code from a ref other than the
+      event's trusted one must pass 'false' (see docs/dev/ci.md, fetch-pinned).
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.dest }}
+        key: pinned-${{ runner.os }}-${{ inputs.name }}-${{ inputs.sha256 }}
+    - shell: bash
+      env:
+        FP_URL: ${{ inputs.url }}
+        FP_SHA256: ${{ inputs.sha256 }}
+        FP_DEST: ${{ inputs.dest }}
+      run: hack/fetch-pinned.sh "$FP_URL" "$FP_SHA256" "$FP_DEST"
+    # Only after the sha256 check above passed, so a bad file is never cached; only on a miss.
+    - if: inputs.save == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.dest }}
+        key: pinned-${{ runner.os }}-${{ inputs.name }}-${{ inputs.sha256 }}

@@ -201,16 +201,16 @@ jobs:
             exit 1
           fi
 
+      # No cache and no local action here: this job checks out inputs.commit (an arbitrary commit),
+      # so a local action would be that commit's code, and a cache entry it saved would sit in the
+      # default branch's cache scope (CodeQL: cache poisoning). The helper retries and checks the sha256.
+      - name: Download kind and ko (hack/fetch-pinned.sh)
+        run: |
+          hack/fetch-pinned.sh "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" "$KIND_SHA256_AMD64" "$RUNNER_TEMP/bin/kind"
+          hack/fetch-pinned.sh "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz" "$KO_SHA256_AMD64" "$RUNNER_TEMP/ko.tgz"
       - name: Install kind and ko
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/kind"
-          curl -fsSL -o "$RUNNER_TEMP/ko.tgz" \
-            "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz"
-          echo "${KO_SHA256_AMD64}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
