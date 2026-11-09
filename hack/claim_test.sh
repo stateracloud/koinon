@@ -330,6 +330,7 @@ stub_github() {
   }
   load_claim() { C=$(jq -c --arg n "$1" '.[] | select((.issue | tostring) == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
   find_pr() { :; }
+  find_closed_pr() { :; }
   open_pr_closers() { echo "${CLOSERS_FIX:-[]}"; }
   rerun_checks_for_issue() { :; }
   rerun_claim_check() { :; }
@@ -796,11 +797,11 @@ eq "live claims of: the person class ignores outsider claims" "$(live_claims_of 
 swp() {
   : >"$LOG"
   ( REPO=acme/koinon; GRACE=900; RELEASE_AFTER=7200; OUTSIDER_WARN=345600
-    claim_liveness() { LIVE=$(iso_to_epoch "$LV"); PR_STATE=none; PR_NUM=; }
+    claim_liveness() { LIVE=$(iso_to_epoch "$LV"); PR_STATE=${PRS:-none}; PR_NUM=${PRS:+77}; PR_MERGED=${PRM:-0}; }
     add_label() { echo "label $2" >>"$LOG"; }
     drop_label() { :; }
     upsert_comment() { echo "marker $2" >>"$LOG"; }
-    do_release_claim() { echo "release by=$4" >>"$LOG"; }
+    do_release_claim() { echo "release by=$4 merged=$3" >>"$LOG"; }
     gh() {
       if [[ $* == *"/comments --jq"* ]]; then printf '%s' "${SEEN:-}"; return 0; fi
       if [[ $* == *"/labels --jq"* ]]; then return 0; fi
@@ -816,7 +817,60 @@ eq "sweep: an agent claim gets no reminder" "$(swp carol/mac/s1 2026-10-30T17:00
 if [[ $(swp carol/github/outsider 2026-10-30T15:59:00Z) == "label claim:stale"*'comment `/claim`'* ]]; then ok "sweep: an outsider claim is stale when liveness runs out, with the comment hint"; else bad "outsider stale: $(swp carol/github/outsider 2026-10-30T15:59:00Z)"; fi
 eq "sweep: an agent claim keeps its 15-minute grace" "$(swp carol/mac/s1 2026-10-30T15:59:00Z)" ""
 if [[ $(swp carol/mac/human 2026-10-30T15:00:00Z) == "label claim:stale"*'--human'* ]]; then ok "sweep: a person claim's hint names /claim and beat --human"; else bad "person stale: $(swp carol/mac/human 2026-10-30T15:00:00Z)"; fi
-eq "sweep: released 2 h after liveness" "$(swp carol/github/outsider 2026-10-30T13:59:00Z)" "release by=sweeper"
+eq "sweep: released 2 h after liveness" "$(swp carol/github/outsider 2026-10-30T13:59:00Z)" "release by=sweeper merged=0"
+# A closed pull request frees the claim; closed unmerged passes merged=0 so the human is unassigned.
+eq "sweep: a pull request closed unmerged releases with merged=0 (unassign)" "$(PRS=closed PRM=0 swp carol/mac/s1 2026-10-30T17:00:00Z)" "release by=pr-close merged=0"
+eq "sweep: a merged pull request releases with merged=1" "$(PRS=closed PRM=1 swp carol/mac/s1 2026-10-30T17:00:00Z)" "release by=pr-close merged=1"
+# claim_liveness finds a closed pull request when the claim has no .pr and no open one exists.
+# The lease starts 2026-10-30T16:00Z - 15 min for an agent claim; closedAt must be after that.
+cl_liveness() { # [HOLDER] -> state of claim_liveness at CL_NOW (default 2026-10-30T17:00Z, 1 h after the lease start)
+  ( REPO=acme/koinon; CLOSED_GRACE=2700
+    KOINON_CLAIM_NOW_EPOCH=$(iso_to_epoch "${CL_NOW:-2026-10-30T17:00:00Z}"); export KOINON_CLAIM_NOW_EPOCH
+    gh() {
+      case $* in
+        *"--state open"*) echo '[]' ;;
+        *"--state closed"*) printf '%s' "$CLOSED_JSON" ;;
+      esac
+    }
+    claim_liveness "$(jq -nc --arg h "${1:-carol/mac/s1}" '{issue:40,sha:"abc",state:"held",holder:$h,human:"carol",lease_until:"2026-10-30T16:00:00Z",pr:""}')" || exit 9
+    echo "$PR_STATE $PR_NUM $PR_MERGED" )
+}
+# Agent lease 2 h: the lease starts 2026-10-30T14:00Z. Rule: closed unmerged frees only when closedAt >=
+# lease start and now >= closedAt + CLOSED_GRACE (45 min); merged is immediate; person claims skip it.
+CU='[{"number":81,"body":"Closes #40","author":{"login":"Carol"},"closedAt":"2026-10-30T16:30:00Z","mergedAt":null}]'
+eq "liveness: closed unmerged after the grace is found" "$(CLOSED_JSON=$CU CL_NOW=2026-10-30T17:15:00Z cl_liveness)" "closed 81 0"
+eq "liveness: closed unmerged inside the grace keeps the claim" "$(CLOSED_JSON=$CU CL_NOW=2026-10-30T17:00:00Z cl_liveness)" "none  0"
+eq "liveness: a closed merged pull request is immediate" "$(CLOSED_JSON='[{"number":82,"body":"Fixes #40","author":{"login":"carol"},"closedAt":"2026-10-30T16:59:00Z","mergedAt":"2026-10-30T16:59:00Z"}]' cl_liveness)" "closed 82 1"
+eq "liveness: a pull request closed before the lease start is ignored (a beat since)" "$(CLOSED_JSON='[{"number":83,"body":"Closes #40","author":{"login":"carol"},"closedAt":"2026-10-30T13:00:00Z","mergedAt":null}]' cl_liveness)" "none  0"
+eq "liveness: another author's closed pull request is ignored" "$(CLOSED_JSON='[{"number":84,"body":"Closes #40","author":{"login":"mallory"},"closedAt":"2026-10-30T14:30:00Z","mergedAt":null}]' cl_liveness)" "none  0"
+eq "liveness: a person claim ignores a closed unmerged pull request" "$(CLOSED_JSON=$CU CL_NOW=2026-10-30T20:00:00Z cl_liveness carol/mac/human)" "none  0"
+eq "liveness: a person claim still frees on a merged pull request" "$(CLOSED_JSON='[{"number":85,"body":"Closes #40","author":{"login":"carol"},"closedAt":"2026-10-30T16:59:00Z","mergedAt":"2026-10-30T16:59:00Z"}]' cl_liveness carol/mac/human)" "closed 85 1"
+# The recorded .pr path: claim_liveness reads repos/R/pulls/N through gh_try; an open replacement is found by find_pr.
+cr_liveness() { # PR_JSON OPEN_LIST_JSON [HOLDER] -> state of claim_liveness for a claim that records pr 90 (lease start 14:00Z)
+  ( REPO=acme/koinon; CLOSED_GRACE=2700; PRJ=$1; OPENJ=$2
+    KOINON_CLAIM_NOW_EPOCH=$(iso_to_epoch "${CL_NOW:-2026-10-30T17:15:00Z}"); export KOINON_CLAIM_NOW_EPOCH
+    gh() {
+      case $* in
+        "api repos/acme/koinon/pulls/90") printf '%s' "$PRJ" ;;
+        "api repos/acme/koinon/pulls/91") echo '{"state":"open","merged":false,"draft":false}' ;;
+        *"pr list"*"--state open"*) printf '%s' "$OPENJ" ;;
+        *"pr view"*) echo '{"commits":[],"comments":[]}' ;;
+        *) echo '[]' ;;
+      esac
+    }
+    claim_liveness "$(jq -nc --arg h "${3:-carol/mac/s1}" '{issue:40,sha:"abc",state:"held",holder:$h,human:"carol",lease_until:"2026-10-30T16:00:00Z",pr:"90"}')" || exit 9
+    echo "$PR_STATE $PR_NUM $PR_MERGED" )
+}
+NOOPEN='[]'
+eq "liveness .pr: closed unmerged before the lease start keeps the claim" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T13:00:00Z"}' "$NOOPEN")" "none 90 0"
+eq "liveness .pr: closed unmerged after the grace frees" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T16:30:00Z"}' "$NOOPEN")" "closed 90 0"
+eq "liveness .pr: closed unmerged inside the grace keeps the claim" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$NOOPEN")" "none 90 0"
+eq "liveness .pr: a merged recorded pull request frees at once" "$(cr_liveness '{"state":"closed","merged":true,"closed_at":"2026-10-30T17:14:00Z"}' "$NOOPEN")" "closed 90 1"
+REPL='[{"number":91,"body":"Closes #40","author":{"login":"Carol"}}]'
+eq "liveness .pr: a replacement open PR after a close inside the grace gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$REPL")" "ready 91 0"
+eq "liveness .pr: a replacement open PR after a close before the lease start gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T13:00:00Z"}' "$REPL")" "ready 91 0"
+eq "liveness .pr: a person claim with a closed recorded PR and a replacement gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$REPL" carol/mac/human)" "ready 91 0"
+eq "verdict: a claim kept inside the grace is not stale" "$(claim_verdict held bob alice 100000 99000 none)" conflict
 rm -f "$LOG"
 
 # ---- board skip in the token-limited jobs (ADR 0094 decision 3, #169) ----
@@ -909,6 +963,66 @@ rp_rc=0
 ) >/dev/null 2>&1 || rp_rc=$?
 if ((rp_rc != 0)); then ok "release-pr exits non-zero when a claim write dies"; else bad "release-pr exited 0 after a write died"; fi
 eq "release-pr still releases every closing issue after a failure" "$(grep -c released "$LOG")" 2
+rm -f "$LOG"
+
+# release-merged (the push-to-main release job, #463): releases the merged pull requests of the pushed
+# commits once each, ignores an open or closed-unmerged one, and ends red when a release fails.
+# The fake gh applies the --jq filter with real jq to canned API JSON, so the merged_at filter is tested.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_relmerged.XXXXXX")
+fake_gh_api() {
+  local f="" a body=""
+  for a in "$@"; do [[ $prev == --jq ]] && f=$a; prev=$a; done
+  case $* in
+    *compare/*) body='{"commits":[{"sha":"aaaaaaa"},{"sha":"bbbbbbb"}]}' ;;
+    *commits/aaaaaaa/pulls*) body='[{"number":50,"merged_at":"2026-11-09T10:00:00Z"},{"number":60,"merged_at":null}]' ;;
+    *commits/bbbbbbb/pulls*) body='[{"number":50,"merged_at":"2026-11-09T10:00:00Z"},{"number":51,"merged_at":"2026-11-09T10:00:00Z"},{"number":61,"merged_at":null}]' ;;
+    *commits/ccccccc/pulls*) body='[{"number":52,"merged_at":"2026-11-09T10:00:00Z"}]' ;;
+    *commits/ddddddd/pulls*) body='[{"number":53,"merged_at":"2026-11-09T10:00:00Z"}]' ;;
+    *commits/eeeeeee/pulls*) body='[{"number":62,"merged_at":null}]' ;;
+    *) return 0 ;;
+  esac
+  jq -r "$f" <<<"$body"
+}
+prev=
+(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 1111111 bbbbbbb
+) >/dev/null 2>&1
+eq "release-merged releases each merged pull request once, not an open or closed-unmerged one" "$(tr '\n' ' ' <"$LOG")" "pr 50 pr 51 "
+: >"$LOG"
+(
+  REPO=acme/koinon
+  gh() { case $* in *compare/*) echo "unexpected compare" >>"$LOG" ;; *) fake_gh_api "$@" ;; esac; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 0000000000000000000000000000000000000000 ccccccc
+) >/dev/null 2>&1
+eq "release-merged on a new branch reads the head commit only" "$(tr '\n' ' ' <"$LOG")" "pr 52 "
+# AFTER is read even when the compare list lacks it (a capped page), and the compare is paginated.
+: >"$LOG"
+(
+  REPO=acme/koinon
+  gh() { case $* in *compare/*) { [[ $* == *--paginate* ]] && echo "paginated" >>"$LOG"; echo aaaaaaa; } ;; *) fake_gh_api "$@" ;; esac; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 1111111 ddddddd
+) >/dev/null 2>&1
+eq "release-merged paginates the compare and always includes AFTER" "$(tr '\n' ' ' <"$LOG")" "paginated pr 50 pr 53 "
+rm_out=$(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged "" eeeeeee 2>&1
+)
+eq "release-merged says so when no merged pull request is found" "$rm_out" "release-merged: no merged pull request found for none..eeeeeee"
+rm_rc=0
+(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { return 1; }
+  cmd_release_merged "" ddddddd
+) >/dev/null 2>&1 || rm_rc=$?
+if ((rm_rc != 0)); then ok "release-merged exits non-zero when a release fails"; else bad "release-merged exited 0 after a release failed"; fi
 rm -f "$LOG"
 
 # The updater's needs-update label is informational (its App token has no issues: write): a failing label

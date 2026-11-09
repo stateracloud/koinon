@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runner lint (#58, ADR 0047): Koinon CI runs on GitHub-hosted runners only. A self-hosted or Blacksmith
+# Workflow policy lint (#58, #463), kept as runner-lint.sh. Runner rule (#58, ADR 0047): Koinon CI runs on GitHub-hosted runners only. A self-hosted or Blacksmith
 # runner on a public repository would run anyone's pull request on infrastructure we do not control, so
 # this is a fixed rule, not a case-by-case decision. The script fails when a workflow (or the actionlint
 # config) names the label `self-hosted` or a `blacksmith-*` label, or when a `runs-on:` value is an
@@ -16,6 +16,13 @@
 # On purpose, the bare words `blacksmith` and `self-hosted` are banned on any non-comment line of a workflow
 # (a step name, an env value, a string), not only in `runs-on`: no legitimate use exists, and a narrower
 # match would let a label slip through another key.
+#
+# The same script holds the trigger rule (#463): no workflow uses the `pull_request_target` trigger (or
+# names it anywhere on a non-comment line). GitHub blocks it by default for public repositories (brownouts
+# from 2026-11-09, permanent 2026-12-02), and it runs with the base branch's secrets and a write token next
+# to pull request content. Use `pull_request` with a read-only token where no secret is needed, `push` or
+# `schedule` for the write part. Adding it back needs an ADR that amends ADR 0082 and an admin Actions
+# event policy; then exempt the workflow here by name.
 #
 # Prior art: actionlint's `runner-label` rule accepts `self-hosted` as a known label and checks only
 # for unknown ones, so it does not cover this; GitHub's own advice is "never use self-hosted runners with
@@ -44,7 +51,9 @@ for f in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml "$root
 			if (line ~ /^[ \t]*#/) next
 			sub(/[ \t]+#.*$/, "", line) # trailing comment
 			l = tolower(line)
-			if (l ~ /^[ \t]*self-hosted-runner:/ || l ~ /(^|[^a-z0-9_-])self-hosted([^a-z0-9_-]|$)/ || l ~ /(^|[^a-z0-9_-])blacksmith(-[a-z0-9.-]*)?([^a-z0-9_-]|$)/)
+			if (l ~ /(^|[^a-z0-9_])pull_request_target([^a-z0-9_]|$)/)
+					printf "%s:%d: pull_request_target trigger (#463): %s\n", file, NR, $0
+				else if (l ~ /^[ \t]*self-hosted-runner:/ || l ~ /(^|[^a-z0-9_-])self-hosted([^a-z0-9_-]|$)/ || l ~ /(^|[^a-z0-9_-])blacksmith(-[a-z0-9.-]*)?([^a-z0-9_-]|$)/)
 				printf "%s:%d: self-hosted or Blacksmith runner: %s\n", file, NR, $0
 			else if (l ~ /^[ \t-]*runs-on:/ && dyn(l))
 				printf "%s:%d: runs-on label chosen at run time: %s\n", file, NR, $0
@@ -67,7 +76,7 @@ for f in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml "$root
 done
 
 if [[ $fail -ne 0 ]]; then
-	echo "runner-lint: Koinon CI uses GitHub-hosted runners only (ADR 0047, docs/dev/ci.md#workflow-security-review)" >&2
+	echo "runner-lint: Koinon CI uses GitHub-hosted runners only and no pull_request_target (ADR 0047, ADR 0082, docs/dev/ci.md#workflow-security-review)" >&2
 	exit 1
 fi
-echo "runner-lint: $n files, no self-hosted or Blacksmith runner"
+echo "runner-lint: $n files, no self-hosted or Blacksmith runner, no pull_request_target"
