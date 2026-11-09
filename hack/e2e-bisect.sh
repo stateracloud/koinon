@@ -89,7 +89,11 @@ else
   relevant=()
   while IFS= read -r c; do
     [[ -n $c ]] || continue
-    if git diff --name-only --no-renames "$c^1" "$c" 2>/dev/null | hack/needs-e2e.sh --stdin >/dev/null; then
+    # Exit 1 is "not needed"; 0 is needed and anything else (2: the rule could not be evaluated) is
+    # treated as needed too, as e2e-decide.sh does: a broken rule must not drop a candidate.
+    rc=0
+    git diff --name-only --no-renames "$c^1" "$c" 2>/dev/null | hack/needs-e2e.sh --stdin >/dev/null || rc=$?
+    if [[ $rc -ne 1 ]]; then
       relevant+=("$c")
     fi
   done <<<"$merges"
