@@ -145,6 +145,10 @@ admission policy allows exactly that image. If you pull it through a mirror, set
 `global.image.registry` to the mirror followed by `/nvidia` (its image paths are `openshell/...`, and its
 default is `ghcr.io/nvidia`) and Koinon's `global.imageRegistry` or `global.registryMirrors` to
 the same place, and the two agree; otherwise list your reference in `sandboxPolicy.supervisorImages`.
+The policy also lets a supervisor pod carry only the gateway's own ServiceAccount token, with a lifetime of
+at most `sandboxPolicy.supervisorTokenMaxSeconds` (default 3600, OpenShell's default). If you set
+`OPENSHELL_K8S_SA_TOKEN_TTL_SECS` on the gateway above 3600, raise `sandboxPolicy.supervisorTokenMaxSeconds`
+to match, or no sandbox can start.
 For a private registry, set `server.sandboxImagePullSecrets` on the OpenShell release. See
 [Private registries and mirrors](/guides/private-registries/).
 

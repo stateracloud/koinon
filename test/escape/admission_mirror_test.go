@@ -30,14 +30,8 @@ var _ = Describe("Sandbox admission policy with a registry mirror", Label("escap
 	)
 	var gateway *kubernetes.Clientset
 	dryRun := metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
-	supervisorPod := func(name, image string) *corev1.Pod {
-		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"openshell.ai/boundary-role": "supervisor"}},
-			Spec: corev1.PodSpec{
-				SchedulingGates: []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
-				Containers:      []corev1.Container{{Name: "supervisor", Image: image}},
-			},
-		}
+	mirrorSupervisor := func(name, image string) *corev1.Pod {
+		return supervisorPod(name, func(p *corev1.Pod) { p.Spec.Containers[0].Image = image })
 	}
 
 	BeforeAll(func(ctx SpecContext) {
@@ -77,16 +71,16 @@ var _ = Describe("Sandbox admission policy with a registry mirror", Label("escap
 		}
 		By("waiting until the policies are enforced")
 		Eventually(func() error {
-			_, err := gateway.CoreV1().Pods(ns).Create(ctx, supervisorPod("probe", "registry.invalid/koinon-escape/evil:1"), dryRun)
+			_, err := gateway.CoreV1().Pods(ns).Create(ctx, mirrorSupervisor("probe", "registry.invalid/koinon-escape/evil:1"), dryRun)
 			return err
 		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(MatchError(ContainSubstring("ValidatingAdmissionPolicy")))
 	}, NodeTimeout(3*time.Minute))
 
 	It("admits the supervisor image from the mirror and denies the upstream reference", func(ctx SpecContext) {
-		_, err := gateway.CoreV1().Pods(ns).Create(ctx, supervisorPod("sup-mirrored", mirrored), dryRun)
+		_, err := gateway.CoreV1().Pods(ns).Create(ctx, mirrorSupervisor("sup-mirrored", mirrored), dryRun)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = gateway.CoreV1().Pods(ns).Create(ctx, supervisorPod("sup-upstream", upstream), dryRun)
+		_, err = gateway.CoreV1().Pods(ns).Create(ctx, mirrorSupervisor("sup-upstream", upstream), dryRun)
 		Expect(err).To(MatchError(ContainSubstring("must use the pinned supervisor image (" + mirrored + ")")))
 	})
 })

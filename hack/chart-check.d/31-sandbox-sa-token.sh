@@ -6,8 +6,8 @@
 
 pol=templates/sandbox-policy.yaml
 
-# Workload pods carry no ServiceAccount token. Supervisor pods are not covered: the gateway creates
-# them and the supervisor's needs are unverified.
+# Workload pods carry no ServiceAccount token. Supervisor pods set automount false too and may project
+# only the openshell-gateway token OpenShell 0.1.5 exchanges at startup (ADR 0006, issue 220).
 has "workload pods must set automountServiceAccountToken false" 'object.spec.automountServiceAccountToken == false' --show-only $pol
 has "the automount denial message renders" 'sandbox workload pods must set automountServiceAccountToken to false' --show-only $pol
 has "projected serviceAccountToken sources are refused" 'has\(s.serviceAccountToken\)' --show-only $pol
@@ -20,5 +20,20 @@ for msg in \
   "sandbox workload pods must not project a ServiceAccount token"; do
   if ! grep -B4 -F -- "$msg" <<<"$pol_out" | grep -Fq -- '!variables.workload ||'; then
     fail "the workload guard (!variables.workload ||) must scope the validation: $msg"
+  fi
+done
+
+# Supervisor pods: automount false, only an openshell-gateway audience, a bounded expiry.
+has "supervisor pods must set automount false" 'sandbox supervisor pods must set automountServiceAccountToken to false' --show-only $pol
+has "supervisor tokens are pinned to the openshell-gateway audience" "audience == 'openshell-gateway'" --show-only $pol
+has "supervisor token expiry is required and bounded (default 3600)" 'expirationSeconds <= 3600' --show-only $pol
+has "the supervisor expiry message renders" 'must bound the ServiceAccount token to 3600 seconds' --show-only $pol
+has "supervisorTokenMaxSeconds overrides the bound" 'expirationSeconds <= 7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only $pol
+for msg in \
+  "sandbox supervisor pods must set automountServiceAccountToken to false" \
+  "sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway" \
+  "sandbox supervisor pods must bound the ServiceAccount token to 3600 seconds"; do
+  if ! grep -B4 -F -- "$msg" <<<"$pol_out" | grep -Fq -- '!variables.supervisor ||'; then
+    fail "the supervisor guard (!variables.supervisor ||) must scope the validation: $msg"
   fi
 done

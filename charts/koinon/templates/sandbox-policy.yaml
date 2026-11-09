@@ -23,7 +23,10 @@ Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPa
 containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
 sandbox workload pods run on an allowed runtime class, set automountServiceAccountToken=false and
 project no ServiceAccount token (ADR 0006); supervisor pods run only the pinned supervisor image
-(sandboxPolicy.supervisorImages).
+(sandboxPolicy.supervisorImages), set automountServiceAccountToken=false as well, and project
+exactly one kind of ServiceAccount token: the OpenShell 0.1.5 supervisor exchanges a token for the
+audience openshell-gateway at startup (ADR 0006 amendment 2026-11-09), so every projected token on
+a supervisor pod needs that audience and an expiry of at most sandboxPolicy.supervisorTokenMaxSeconds.
 A CEL error denies under failurePolicy Fail; test against real OpenShell pods before relying on it.
 */ -}}
 {{- if .Values.sandboxPolicy.enabled }}
@@ -107,7 +110,8 @@ spec:
     # Defence in depth for ADR 0006: Agent Sandbox templates default to no token, but nothing at
     # admission held a controller regression or compromise to it. The explicit false also keeps the
     # ServiceAccount admission plugin from injecting its kube-api-access projected volume. Supervisor
-    # pods are not covered: the gateway creates them and the supervisor's needs are unverified.
+    # pods follow the same automount rule but may project the one token OpenShell 0.1.5 needs (see
+    # the supervisor rules below).
     - expression: >-
         !variables.workload ||
         (has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false)
@@ -117,6 +121,26 @@ spec:
         object.spec.volumes.all(v, !has(v.projected) || !has(v.projected.sources) ||
           v.projected.sources.all(s, !has(s.serviceAccountToken)))
       message: sandbox workload pods must not project a ServiceAccount token
+    # Supervisor pods (OpenShell 0.1.5, driver-kubernetes sandbox_runtime.rs): automount false and
+    # one projected token, audience openshell-gateway, which the supervisor exchanges for a gateway
+    # JWT. The supervisor never calls the Kubernetes API, so a token for the API server audience
+    # (an empty or missing audience means that) is denied, as is a long-lived one.
+    - expression: >-
+        !variables.supervisor ||
+        (has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false)
+      message: sandbox supervisor pods must set automountServiceAccountToken to false
+    - expression: >-
+        !variables.supervisor || !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.projected) || !has(v.projected.sources) ||
+          v.projected.sources.all(s, !has(s.serviceAccountToken) ||
+            (has(s.serviceAccountToken.audience) && s.serviceAccountToken.audience == 'openshell-gateway')))
+      message: sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway
+    - expression: >-
+        !variables.supervisor || !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.projected) || !has(v.projected.sources) ||
+          v.projected.sources.all(s, !has(s.serviceAccountToken) ||
+            (has(s.serviceAccountToken.expirationSeconds) && s.serviceAccountToken.expirationSeconds <= {{ int $p.supervisorTokenMaxSeconds }})))
+      message: {{ printf "sandbox supervisor pods must bound the ServiceAccount token to %d seconds (expirationSeconds)" (int $p.supervisorTokenMaxSeconds) | quote }}
     - expression: >-
         !variables.supervisor ||
         (object.spec.containers.all(c, c.image in {{ include "koinon.supervisorImages" . }}) &&
