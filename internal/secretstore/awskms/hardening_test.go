@@ -27,6 +27,12 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore/awskms"
 )
 
+// refreshWait is how long a spec waits for a background credential refresh. The clock is the
+// test's, so the refresh is due at once; what the spec waits for is a goroutine and one HTTP round
+// trip, which a loaded ginkgo -p runner can delay past Gomega's 1 s default. It is a failure
+// ceiling: a spec returns as soon as the refresh is done.
+const refreshWait = 30 * time.Second
+
 const fakeKey = "arn:aws:kms:us-east-1:111122223333:key/0b1d2e3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5"
 
 // creds are obviously fake temporary credentials named n.
@@ -570,7 +576,7 @@ var _ = Describe("pod identity", func() {
 				mu.Lock()
 				defer mu.Unlock()
 				return slices.Clone(tokens)
-			}).Should(Equal([]string{"koinon_test_not-a-real-jwt-1", "koinon_test_not-a-real-jwt-2"}))
+			}).WithTimeout(refreshWait).Should(Equal([]string{"koinon_test_not-a-real-jwt-1", "koinon_test_not-a-real-jwt-2"}))
 			Expect(f.calls.Load()).To(BeEquivalentTo(4))
 		})
 
@@ -639,7 +645,7 @@ var _ = Describe("pod identity", func() {
 			Expect(os.WriteFile(p, []byte("koinon_test_not-a-real-jwt-2"), 0o600)).To(Succeed())
 			advance(clk, 5*time.Hour) // past 4/5 of six hours: refreshed in the background
 			Expect(w.Probe(ctx)).To(Succeed())
-			Eventually(seen.Load).Should(BeEquivalentTo(2))
+			Eventually(seen.Load).WithTimeout(refreshWait).Should(BeEquivalentTo(2))
 			Expect(w.Probe(ctx)).To(Succeed())
 
 			// The agent now refuses the token: the call after the 4/5 mark fails only once the
@@ -649,7 +655,7 @@ var _ = Describe("pod identity", func() {
 			want.Store("koinon_test_not-a-real-jwt-3")
 			advance(clk, 5*time.Hour) // 10 h: past 4/5 of the credentials of 5 h, which expire at 11 h
 			Expect(w.Probe(ctx)).To(Succeed(), "a failed refresh leaves the current credentials in use")
-			Eventually(logged.String).Should(ContainSubstring("credential refresh failed"))
+			Eventually(logged.String).WithTimeout(refreshWait).Should(ContainSubstring("credential refresh failed"))
 			Expect(logged.String()).To(ContainSubstring("InvalidTokenException"))
 			Expect(logged.String()).NotTo(ContainSubstring("not-a-real"))
 			Expect(w.Probe(ctx)).To(Succeed())
@@ -682,7 +688,7 @@ var _ = Describe("pod identity", func() {
 			failed := func() int { return strings.Count(logged.String(), "credential refresh failed") }
 			advance(clk, 5*time.Hour) // past 4/5 of six hours
 			Expect(w.Probe(ctx)).To(Succeed())
-			Eventually(failed).Should(Equal(1))
+			Eventually(failed).WithTimeout(refreshWait).Should(Equal(1))
 			for range 20 {
 				Expect(w.Probe(ctx)).To(Succeed())
 			}
@@ -693,7 +699,7 @@ var _ = Describe("pod identity", func() {
 
 			advance(clk, time.Second)
 			Expect(w.Probe(ctx)).To(Succeed())
-			Eventually(failed).Should(Equal(2))
+			Eventually(failed).WithTimeout(refreshWait).Should(Equal(2))
 			Expect(seen.Load()).To(BeEquivalentTo(3))
 			Expect(w.Probe(ctx)).To(Succeed())
 			Consistently(seen.Load, 200*time.Millisecond).Should(BeEquivalentTo(3))
