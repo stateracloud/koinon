@@ -378,7 +378,7 @@ new `audit_events` rows to it, without touching old ones, follows in #359 (see t
 | `platform_admin.bootstrap` (the first admin's creation, with the default org's ID as target) | not audited | `system koinon-api:bootstrap` |
 | `platform_admin.grant` by bootstrap (it re-grants the bootstrap admin on every start; an event whenever that grant inserts a row, so a removed grant coming back shows) | not audited | `system koinon-api:bootstrap` |
 | `trace.platform_destination.set`, `.delete`, `.test`; `trace.platform_ceiling.set` | the acting admin's personal org | user |
-| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (only `keys.rewrap` and `keys.reencrypt` have an optional `.started`), `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
+| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (only `keys.rewrap` and `keys.reencrypt` have an optional `.started`), `keys.retire`, `keys.forget` (its platform part, under the same advisory lock and `keys.observed` check as the others; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
 | `keys.generated` (a KEK or the saved-work key `koinon-api` makes) | not audited | `system koinon-api:keys` |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` from the key-admin Job | not audited | `system koinon-api:key-admin` |
 | `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` at a start (the first start too, even with an empty key set); `system koinon-api:keyring-watch` when the running `koinon-api` sees the key set change; the actor of the key command (`cli` or `system koinon-api:key-admin`) when that command finds the gap before its own change |
@@ -423,8 +423,14 @@ in three ways, and the ADR says so rather than pretending otherwise:
   does not parse, or names a format or algorithm the keyring does not know) or `database`. A column
   whose rows cannot be listed counts as one `database` failure and ends the run's loop, so the
   columns after it are not tried; the closing event records it and the run fails.
-- `keys forget` keeps its per-org events in each org's transaction and writes its platform part
-  (the platform trace destination) as one install event.
+- `keys forget` keeps its per-org events in each org's transaction. Its platform part (the platform
+  trace destination) follows the same pattern as the other key commands: it begins with `Baseline`
+  (the key events' advisory lock, then the check against the last recorded state), so a key-set
+  change whose event was lost is written as `keys.observed`, with `keys forget` as the actor, before
+  the forget event; the row update and the event are then one transaction, which `Commit` ends. The
+  orgs' transactions are finished by then, so the lock order of decision 1.7 holds: the key events'
+  lock, then the install head. `forget` does not change the key set, so the check only finds changes
+  that others made.
 
 So a crash or a failed audit write after a Secret update must not leave the change unrecorded. On
 every start `koinon-api` writes `keys.observed` whenever the whole key-set state differs from the

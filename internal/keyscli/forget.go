@@ -192,28 +192,43 @@ func (t *Tool) forget(ctx context.Context, ring *secretstore.Keyring, id string)
 }
 
 // forgetPlatform marks the platform's trace destination lost when id sealed it. It belongs to no
-// org, so it is one event in the install audit chain (ADR 0100 decision 3), written in the
-// transaction of the change; it needs no platform admin, because the install chain has none to name
-// (decision 1.4). Each org's part is audited in that org's own chain by forgetOrg.
+// org, so it is one event in the install audit chain (ADR 0100 decision 3), and it follows the same
+// pattern as the other key commands (Tool.begin, Auditor.Baseline, Change.Record, Change.Commit): it
+// takes the key events' advisory lock first, writes keys.observed with the command's actor when the
+// live KEKs differ from the last recorded state (a change whose event was lost, as when the KEK was
+// removed from the Secret by hand), and then updates the row and writes its own event in that one
+// transaction. The orgs' parts have finished by now, each in its own org transaction, so the lock
+// order is the one of decision 1.7: the key events' lock, then the install head. It needs no platform
+// admin, because the install chain has none to name (decision 1.4). Each org's part is audited in
+// that org's own chain by forgetOrg.
 func (t *Tool) forgetPlatform(ctx context.Context, id string, res *ForgetResult) error {
 	platform := Column{tracedest.PlatformTable, tracedest.CredentialsColumn}
-	changed := false
-	_, err := audit.InPgTx(ctx, t.Pool, func(tx pgx.Tx, b audit.Batch) error {
-		tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
-			platform.Table, lostRules[platform].set(platform), platform.Column), id)
-		if err != nil {
+	c, ks, _, err := t.begin(ctx, "forget")
+	clearKeySet(ks)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return errors.New("keys forget needs the install audit chain")
+	}
+	tag, err := c.tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s->>'kek_id' = $1`,
+		platform.Table, lostRules[platform].set(platform), platform.Column), id)
+	if err != nil {
+		_ = c.Rollback(ctx)
+		return err
+	}
+	changed := tag.RowsAffected() > 0
+	if changed {
+		// The row change and its event stand or fall together: a refused event rolls the update back.
+		if err := c.Record(ctx, Event{
+			Command: "forget", Action: ForgetAction, TargetKind: "kek", TargetID: id,
+			After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
+		}); err != nil {
+			_ = c.Rollback(ctx)
 			return err
 		}
-		if changed = tag.RowsAffected() > 0; !changed {
-			return nil
-		}
-		b.Install(audit.InstallEvent{
-			Actor: forgetActor, Action: ForgetAction, TargetKind: "kek", TargetID: id,
-			After: map[string]any{"lost": map[string][]string{"platformTraceDestination": {"platform"}}},
-		})
-		return nil
-	})
-	if err != nil {
+	}
+	if err := c.Commit(ctx); err != nil {
 		return err
 	}
 	if changed {

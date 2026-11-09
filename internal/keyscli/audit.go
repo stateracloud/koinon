@@ -639,3 +639,15 @@ func (c *Change) Commit(ctx context.Context) error {
 	}
 	return c.tx.Commit(ctx)
 }
+
+// Rollback abandons the change: nothing it wrote, the pending keys.observed included, is kept, and the
+// lock is released. A command whose own change lives in the Change's transaction (keys forget) uses it
+// when that change or its event failed. It runs once, after Commit it does nothing, and on a nil Change
+// it does nothing.
+func (c *Change) Rollback(ctx context.Context) error {
+	if c == nil || c.done {
+		return nil
+	}
+	c.done = true
+	return c.tx.Rollback(ctx)
+}

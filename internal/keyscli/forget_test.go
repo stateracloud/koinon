@@ -301,6 +301,64 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(out.String()).To(ContainSubstring("nothing to forget"))
 	})
 
+	Describe("the platform part, in the key audit pattern", func() {
+		BeforeEach(func(ctx SpecContext) {
+			r := ring(ctx)
+			e, err := r.Seal(tracedest.PlatformBinding(), []byte(`{"api_key":"koinon_test_not-a-real-token"}`))
+			Expect(err).NotTo(HaveOccurred())
+			raw, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url, credentials) VALUES ('datadog', 'https://otlp.example.com', $1)
+				ON CONFLICT (singleton) DO UPDATE SET credentials = EXCLUDED.credentials, credential_lost_at = NULL`, raw)
+			Expect(err).NotTo(HaveOccurred())
+			tool.Yes = true
+		})
+
+		It("writes keys.observed first when the key set changed without a recorded event", func(ctx SpecContext) {
+			rotateAndLose(ctx) // add and activate are recorded; the lost KEK's removal from the Secret is not
+			mark := auditMark(ctx)
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+
+			rows, err := pool.Query(ctx, `SELECT action, actor_id FROM install_audit_events WHERE chain_seq > $1 ORDER BY chain_seq`, mark)
+			Expect(err).NotTo(HaveOccurred())
+			defer rows.Close()
+			var got []string
+			for rows.Next() {
+				var action, actor string
+				Expect(rows.Scan(&action, &actor)).To(Succeed())
+				Expect(actor).To(Equal("keys forget"), "the command that found the gap writes both")
+				got = append(got, action)
+			}
+			Expect(rows.Err()).NotTo(HaveOccurred())
+			Expect(got).To(Equal([]string{keyscli.ActionObserved, keyscli.ForgetAction}))
+		})
+
+		It("holds the key events' advisory lock", func(ctx SpecContext) {
+			rotateAndLose(ctx)
+			lock, err := pool.Begin(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = lock.Rollback(ctx) })
+			_, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('koinon.keys_observed'))`)
+			Expect(err).NotTo(HaveOccurred())
+
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				done <- tool.Forget(ctx, lostKEK)
+			}()
+			Eventually(func() bool { return advisoryWaiting(ctx) }).Should(BeTrue(), "forget waits for the lock")
+			Consistently(done, 300*time.Millisecond).ShouldNot(Receive())
+			var lostAt *time.Time
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at FROM platform_trace_destination`).Scan(&lostAt)).To(Succeed())
+			Expect(lostAt).To(BeNil(), "nothing is changed before the lock is held")
+
+			Expect(lock.Rollback(ctx)).To(Succeed())
+			Eventually(done).Should(Receive(BeNil()))
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at FROM platform_trace_destination`).Scan(&lostAt)).To(Succeed())
+			Expect(lostAt).NotTo(BeNil())
+		})
+	})
+
 	Describe("without a terminal", func() {
 		var org pgtype.UUID
 		BeforeEach(func(ctx SpecContext) {
