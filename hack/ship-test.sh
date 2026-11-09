@@ -329,28 +329,23 @@ check "--e2e open PR: label step before the push" has '^label e2e$' "$tmp/o11d"
 unset FAKE_PR_URL
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 12. claim review, and a lost claim
+# 12. --review is gone (ADR 0104): a usage error before anything runs, and ship never calls claim.sh
 reset_state
 w=$(newwork); cd "$w"
 echo c >c.txt
 rc=$(run "$tmp/o12" -m "feat: c" --review 7,8)
-check "review: exit 0" eq "$rc" 0
-check "review lines" has '^review ok #8$' "$tmp/o12"
-check "claim.sh review called per issue" has '^claim review 7$' "$FAKE_LOG"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-echo 3 >"$FAKE_CLAIM_RC"
-w=$(newwork); cd "$w"
-echo c >c.txt
-rc=$(run "$tmp/o12b" -m "feat: c" --review 7)
-check "claim lost: exit 3" eq "$rc" 3
+check "--review: exit 2" eq "$rc" 2
+check "--review: calls nothing" eq "$(wc -l <"$FAKE_LOG" | tr -d ' ')" 0
+rc=$(run "$tmp/o12b" -m "feat: c")
+check "ship: exit 0" eq "$rc" 0
+check "ship calls no claim.sh" bash -c "! grep -q '^claim ' '$FAKE_LOG'"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 13. dry run does nothing
 reset_state
 w=$(newwork); cd "$w"
 echo d >d.txt
-rc=$(run "$tmp/o13" -m "feat: d" --pr-title t --pr-body "$tmp/body.md" --ready --auto-merge --review 5 --dry-run)
+rc=$(run "$tmp/o13" -m "feat: d" --pr-title t --pr-body "$tmp/body.md" --ready --auto-merge --dry-run)
 check "dry run: exit 0" eq "$rc" 0
 check "dry run prints steps" has '^dry-run: would' "$tmp/o13"
 check "dry run commits nothing" eq "$(git rev-list --count origin/main..HEAD)" 0

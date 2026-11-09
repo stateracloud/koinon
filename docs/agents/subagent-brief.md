@@ -39,7 +39,7 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   local Claude settings before starting lanes there. Keep the sandbox enabled.
 - The parent gives you a worktree. Run every command against it: `git -C <worktree> …`, or absolute
   paths. The shell's directory resets between calls.
-- Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0082).
+- Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0104).
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
 - Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
 - Call hack scripts by absolute path (`<worktree>/hack/x.sh`), never `cd X && hack/x.sh`.
