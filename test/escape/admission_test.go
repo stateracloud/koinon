@@ -304,6 +304,25 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("denies removing the boundary role label from trusted identities", func(ctx SpecContext) {
+		const key = "openshell.ai/boundary-role"
+		const role = "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		unlabel := func(user string) error {
+			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Labels).To(HaveKey(key))
+			delete(p.Labels, key)
+			_, err = as[user].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			return err
+		}
+		denied(unlabel(controllerUser), role)
+		denied(unlabel(gatewayUser), role)
+
+		By("other identities (kubelet, metadata writers) are not held to the role rule (control)")
+		Expect(unlabel(otherUser)).To(Succeed())
+		Expect(unlabel("admin")).To(Succeed())
+	})
+
 	// connect sends a CONNECT-class request (exec, attach, portforward, pods/proxy, services/proxy)
 	// as user and returns the error. Admission runs before the API server opens the connection, so
 	// this needs no kubelet: a denial is the VAP's, anything else (no node, no such Service) is what

@@ -27,6 +27,9 @@ project no ServiceAccount token (ADR 0006); supervisor pods run only the pinned 
 exactly one kind of ServiceAccount token: the OpenShell 0.1.7 supervisor exchanges a token for the
 audience openshell-gateway at startup (ADR 0006 amendment 2026-11-09), so every projected token on
 a supervisor pod needs that audience and an expiry of at most sandboxPolicy.supervisorTokenMaxSeconds.
+Every pod the controller or the gateway writes carries openshell.ai/boundary-role=workload or
+=supervisor (issue 418), so one of the two role rule sets always applies; both identities are denied
+a pod without a valid role, on CREATE and on UPDATE.
 A CEL error denies under failurePolicy Fail; test against real OpenShell pods before relying on it.
 */ -}}
 {{- if .Values.sandboxPolicy.enabled }}
