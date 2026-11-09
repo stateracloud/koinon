@@ -29,8 +29,11 @@ case "$*" in
 "api --paginate repos/o/r/pulls/"*"/files"*) err "$T/files.err"; ans "$T/files.json" ;;
 "api --paginate repos/o/r/commits/"*"/statuses"*)
   err "$T/statuses.err"
-  sha=${2#repos/o/r/commits/}; sha=${sha%%/*}
+  sha=${3#repos/o/r/commits/}; sha=${sha%%/*}
+  echo "statuses-of $sha" >>"$T/calls"
   if [[ -f $T/statuses.$sha.json ]]; then ans "$T/statuses.$sha.json"; else ans "$T/statuses.json"; fi
+  # --paginate prints one JSON array per page; statuses.page2.json is the second page.
+  [[ ! -f $T/statuses.page2.json ]] || ans "$T/statuses.page2.json"
   ;;
 "api repos/o/r/commits/"*) err "$T/commit.err"; ans "$T/commit.json" ;;
 "pr view"*) err "$T/pr.err"; ans "$T/pr.json" ;;
@@ -152,9 +155,20 @@ reset; files AGENTS.md; statuses review-verdict:success
 printf '# Sensitive paths\n/AGENTS.md @stateracloud/maintainers\n' >"$tmp/teams"
 gate 1 "no review-verdict posters" "CODEOWNERS with teams only: fail closed" CODEOWNERS="$tmp/teams"
 gate 1 "no review-verdict posters" "an unreadable CODEOWNERS fails closed" CODEOWNERS="$tmp/missing"
-reset; files AGENTS.md; STATUSES_FILE=statuses.$OTHER.json statuses review-verdict:success; echo '[]' >"$tmp/statuses.$SHA.json"
+# The previous head has a success, the new head none; any other sha answers success too (statuses.json), so
+# a gate that reads the wrong sha passes and this case fails.
+reset; files AGENTS.md; STATUSES_FILE=statuses.$OTHER.json statuses review-verdict:success; statuses review-verdict:success
+echo '[]' >"$tmp/statuses.$SHA.json"
 gate 1 "has no review-verdict status" "a success on the previous head does not pass the new head"
-grep -q "commits/$SHA/statuses" "$tmp/calls" || { echo "FAIL: gate: the statuses of the new head were not read"; fail=1; }
+grep -qx "statuses-of $SHA" "$tmp/calls" || { echo "FAIL: gate: the statuses of the new head were not read"; fail=1; }
+reset; files AGENTS.md; statuses review-verdict:failure:mallory review-verdict:success:github-actions[bot]
+STATUSES_FILE=statuses.page2.json statuses review-verdict:success:ovirandunu
+gate 0 "posted by ovirandunu" "the only listed status is on page 2 of the statuses"
+printf '# Sensitive paths\n/AGENTS.md @procoduck # was @mallory\n' >"$tmp/inline"
+reset; files AGENTS.md; statuses review-verdict:success:mallory
+gate 1 "has no review-verdict status" "an inline CODEOWNERS comment lists no poster" CODEOWNERS="$tmp/inline"
+reset; files AGENTS.md; statuses review-verdict:success:procoduck
+gate 0 "review-verdict is success" "the owner before an inline comment is a poster" CODEOWNERS="$tmp/inline"
 
 # Matching: the gate's own files, nested paths, an exact pattern that names a directory, a long list.
 reset; files .github/workflows/review.yml
@@ -165,6 +179,8 @@ reset; files .github/workflows/a/b.yml
 gate 1 "(.github/**)" "a nested path under dir/** is sensitive"
 reset; files hack/review-gate.sh hack/review-verdict.sh
 gate 1 "hack/review-verdict.sh (hack/review-verdict.sh)" "the gate and the verdict script are sensitive"
+reset; files hack/review-gate.sh
+gate 1 "hack/review-verdict.sh 7 ready <reviewer> $SHA" "a PR that changes only the gate needs a verdict"
 reset; printf '#!/usr/bin/env bash\necho hack/migrate-patch-line\n' >"$tmp/dirclaim"; chmod +x "$tmp/dirclaim"; files hack/migrate-patch-line/x
 gate 1 "hack/migrate-patch-line/x (hack/migrate-patch-line)" "an exact pattern also matches <pattern>/*" CLAIM="$tmp/dirclaim"
 reset; files hack/migrate-patch-line-old
@@ -181,6 +197,9 @@ reset; files AGENTS.md; queue "$BASE" "$SHA"
 gate 1 "has no review-verdict status" "merge_group: no verdict on the PR head fails" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 reset; files internal/x.go; queue "$BASE" "$SHA"
 gate 0 "touches no sensitive path" "merge_group: not sensitive passes" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
+# A stacked entry: entry 2's queue commit merges entry 1's queue commit (OTHER) and PR #7's head.
+reset; files AGENTS.md; queue "$OTHER" "$SHA"; statuses review-verdict:success
+gate 0 "review-verdict is success" "merge_group: a stacked entry (parent = the previous queue commit) passes" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 reset; files AGENTS.md; queue "$BASE" "$OTHER"; statuses review-verdict:success
 gate 1 "does not have the pull request head" "merge_group: the verdicted head is not a parent of the queue commit: fail" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 reset; files AGENTS.md; queue "$BASE" "$SHA"; statuses review-verdict:success

@@ -90,13 +90,30 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      `.github/workflows/review.yml` on `main`, so only that file's run counts. The docs place this rule
      at the organization or enterprise level, and the 2023 changelog puts it on GitHub Enterprise plans;
      the organization is on the Team plan, so (a) is probably not available (not verified).
-   - (b) the experiment, on a throwaway pull request, not run yet: a branch adds a second workflow
-     (trigger `pull_request`) with a job named `review` that always passes, while the real `review`
-     fails on the same head (the branch touches `.github/**` and has no verdict). With `review`
-     required in a test ruleset (or read from the merge box with `gh pr view --json mergeStateStatus`),
-     the step may go ahead only if the pull request stays BLOCKED. If it becomes mergeable, a pull
-     request can bypass the gate with its own YAML, and the step waits for (a) or an App pin
-     (`integration_id`; the GitHub Actions App does not help, both runs are Actions).
+   - (b) the experiment, not run yet. It runs in a scratch public repository in the organization, not
+     in this one: a test ruleset on `main` here blocks every pull request while the test runs, and
+     `mergeStateStatus` says nothing about `review` while the check is not required.
+     - Set-up: the scratch repository holds copies of `.github/workflows/review.yml`,
+       `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh` and `.github/CODEOWNERS`, and
+       a ruleset on its `main` that requires the context `review`.
+     - The pull request: it touches a sensitive path, has no `review-verdict`, and adds a second
+       workflow (trigger `pull_request`) whose job `review` always passes. The real `review` fails on
+       that head.
+     - Two orders: the stand-in job finishes before the real one, and after it (a `sleep 120` in the
+       stand-in), each on a new head.
+     - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives
+       `BLOCKED` in both orders, after both runs end.
+     - After the test, the owner deletes the scratch repository.
+
+   **If the precondition is not met**, the step does not go ahead with a context matched by name only.
+   Options for the owner to decide (this ADR does not choose):
+   - a required-workflow rule pinned to `review.yml`, if the plan has it (see (a));
+   - keep the `required_reviewers` approval for `.github/**` only and drop it for the other patterns,
+     so that a pull request cannot add a stand-in workflow without a human approval. Sensitive-path
+     pull requests outside `.github/**` then use the check; changes to workflows still need the second
+     owner or `--admin`;
+   - an App pin (`integration_id`) when an App posts the check; the GitHub Actions App does not help,
+     because both runs are Actions.
 
    **The owner's step** (after the precondition; by the owner's session through `gh api`, backup and
    diff, never from a pull request):
@@ -178,7 +195,7 @@ conditions docs, GitHub's ruleset docs.
   "If a check and a commit status have the same name, both must pass when that name is required." and
   "Required checks must pass on the latest commit SHA. Checks from earlier commits don't satisfy the
   requirement." It says nothing about two check runs with the same name: **not verified**, hence the
-  experiment of the precondition. A commit status named `review` posted by a writer does not pass the
+  experiment (b) of the precondition. A commit status named `review` posted by a writer does not pass the
   check alone, by the first sentence.
 - 2026-11-09, GitHub docs, "Require workflows to pass before merging": the rulesets page says
   "Ruleset workflows can be configured at the organization or enterprise level" and "The workflow file

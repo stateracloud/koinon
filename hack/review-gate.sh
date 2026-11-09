@@ -110,8 +110,9 @@ printf '  %s\n' "${hits[@]:0:20}"
 ((${#hits[@]} <= 20)) || echo "  ... and $((${#hits[@]} - 20)) more"
 
 # The listed posters: the user logins that own the sensitive lines of CODEOWNERS (the same section
-# `hack/claim.sh sensitive-paths` reads). Teams (`@org/team`) and bots are not posters.
-posters=$(awk '/^# Sensitive paths/ {on=1; next} on && /^\// {for (i = 2; i <= NF; i++) print $i}' "$CODEOWNERS" 2>/dev/null |
+# `hack/claim.sh sensitive-paths` reads), up to an inline `#` comment. Teams (`@org/team`) and bots are not
+# posters.
+posters=$(awk '/^# Sensitive paths/ {on=1; next} on && /^\// {for (i = 2; i <= NF; i++) {if ($i ~ /^#/) break; print $i}}' "$CODEOWNERS" 2>/dev/null |
   sed -n 's/^@\([A-Za-z0-9][A-Za-z0-9-]*\)$/\1/p' | grep -v '\[bot\]$' | sort -u) || posters=""
 [[ -n $posters ]] || fail "no review-verdict posters: no user login owns the sensitive lines of $CODEOWNERS"
 posters_json=$(jq -Rn '[inputs | select(length > 0) | ascii_downcase]' <<<"$posters")

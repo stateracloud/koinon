@@ -17,7 +17,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
 export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CLAIM="$tmp/bin/claim"
-export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
+export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -51,8 +51,23 @@ esac
 SH
 cat >"$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2
-printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3"
+# ls-remote answers from $FAKE_DIR/remote; the base's review gate (fetch, cat-file, show) from $FAKE_DIR/base-gate.
+case $1 in
+ls-remote)
+  [ -f "$FAKE_DIR/remote" ] || exit 2
+  printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3" ;;
+fetch) echo "git $*" >>"$FAKE_DIR/calls"; exit "${FETCH_RC:-0}" ;;
+cat-file) [ -f "$FAKE_DIR/base-gate" ] ;;
+show)
+  echo "git $*" >>"$FAKE_DIR/calls"
+  case $2 in
+  *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
+  *:hack/claim.sh) printf '#!/usr/bin/env bash\n' ;;
+  *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
+  *) exit 128 ;;
+  esac ;;
+*) exit 2 ;;
+esac
 SH
 cat >"$tmp/bin/wait" <<'SH'
 #!/usr/bin/env bash
@@ -415,5 +430,43 @@ setup false "$green"
 REVIEW_RC=1 run 7
 check "without --admin the ruleset judges the review check: the gate is not run here" 0 merge
 grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran without --admin" >&2; fail=1; }
+
+# The gate comes from the base (origin/main), not this checkout; PR_MERGE_REVIEW_GATE needs PR_MERGE_TEST=1.
+base_gate() { # the base's gate as `git show` prints it: records where it runs, checks its siblings, exits REVIEW_RC
+  cat >"$FAKE_DIR/base-gate" <<'SH'
+#!/usr/bin/env bash
+d=$(cd "$(dirname "$0")/.." && pwd)
+[ -x "$d/hack/claim.sh" ] && [ -f "$d/.github/CODEOWNERS" ] || { echo "base gate: siblings missing"; exit 3; }
+echo "basegate PR=$PR SHA=$SHA" >>"$FAKE_DIR/calls"
+[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::base gate: no review-verdict"
+exit "${REVIEW_RC:-0}"
+SH
+}
+setup false "$green"; base_gate
+REVIEW_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "--admin runs the base's gate (refuses)" 9 nomerge
+grep -q '^git fetch -q --no-tags origin main$' "$FAKE_DIR/calls" || { echo "FAIL: the base is fetched" >&2; fail=1; }
+grep -q '^git show refs/remotes/origin/main:hack/review-gate.sh$' "$FAKE_DIR/calls" || { echo "FAIL: the gate is read from origin/main" >&2; fail=1; }
+grep -q '^basegate PR=7 SHA=abc1234def$' "$FAKE_DIR/calls" || { echo "FAIL: the base's gate ran: $out" >&2; fail=1; }
+grep -q 'base gate: no review-verdict' <<<"$out" || { echo "FAIL: the base gate's reason is shown: $out" >&2; fail=1; }
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the hook gate ran instead of the base's" >&2; fail=1; }
+setup false "$green"; base_gate
+REVIEW_RC=0 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "--admin with the base's gate passing merges" 0 merge
+setup false "$green"; base_gate
+REVIEW_RC=0 PR_MERGE_TEST="" PR_MERGE_REVIEW_GATE=true run 7 --admin
+check "PR_MERGE_REVIEW_GATE without PR_MERGE_TEST=1 is ignored" 0 merge
+grep -q '^basegate ' "$FAKE_DIR/calls" || { echo "FAIL: the hook replaced the gate without PR_MERGE_TEST=1" >&2; fail=1; }
+setup false "$green"
+PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "no gate on the base: the local copy runs (and fails closed on the stub)" 9 nomerge
+grep -q 'origin/main has no hack/review-gate.sh yet.*using the local copy' <<<"$out" || { echo "FAIL: says it uses the local copy: $out" >&2; fail=1; }
+grep -q '::error::' <<<"$out" || { echo "FAIL: the local gate ran: $out" >&2; fail=1; }
+setup false "$green"; base_gate
+FETCH_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "a failed base fetch is a tool failure" 2 nomerge
+setup false "$green"
+GH_REPO="" run 7 --admin
+check "an unreadable repository name is a tool failure" 2 nomerge
 
 exit "$fail"
