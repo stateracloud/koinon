@@ -474,7 +474,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			lost, work := orgState(ctx, o)
 			Expect(lost).To(BeFalse())
 			Expect(work).NotTo(Equal("expired"))
-		})
+		}, SpecTimeout(10*time.Second))
 
 		It("finishes when the server ends idle transactions sooner than the run takes", func(ctx SpecContext) {
 			o := sealOrg(ctx)
@@ -496,7 +496,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			lost, work := orgState(ctx, o)
 			Expect(lost).To(BeTrue())
 			Expect(work).To(Equal("expired"))
-		})
+		}, SpecTimeout(30*time.Second))
 	})
 
 	Describe("when the KEK is restored after the first check", func() {
