@@ -223,6 +223,12 @@ func (c *Checker) gatewayIDResults(g gatewayImages) []Result {
 		r.Status = Warn
 		r.Message = fmt.Sprintf("the OpenShell gateway's gateway_id is %q but openshell.gatewayId is %q: the sandbox observer would look for "+
 			"sandbox pods in the wrong namespaces, and the sandbox policy would refuse its RoleBinding there", g.gatewayID, want)
+		if c.Config.SandboxPolicyScopedToGateway {
+			r.Status = Fail
+			r.Message = fmt.Sprintf("the OpenShell gateway's gateway_id is %q but openshell.gatewayId is %q: the sandbox admission policies bind only to "+
+				"namespaces labelled openshell.ai/gateway-id=%s, so they would apply to none of this gateway's sandboxes and the sandbox boundary would "+
+				"fail open (the sandbox observer would also look in the wrong namespaces)", g.gatewayID, want, want)
+		}
 		r.Fix = "set openshell.gatewayId=" + g.gatewayID + " on the Koinon release (or the OpenShell release's gatewayId to " + want + ")"
 	default:
 		r.Status = Pass

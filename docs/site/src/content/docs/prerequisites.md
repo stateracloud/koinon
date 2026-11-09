@@ -154,6 +154,9 @@ For a private registry, set `server.sandboxImagePullSecrets` on the OpenShell re
 
 Koinon needs OpenShell's `gatewayId` (its chart default is `openshell`) as `openshell.gatewayId`: workspace
 namespaces are named `openshell-<gatewayId>-<workspace>`, and the sandbox observer reads sandbox pods there.
+The sandbox admission policies are keyed on it too: they bind only to namespaces labelled
+`openshell.ai/gateway-id=<openshell.gatewayId>` (`sandboxPolicy.scopeToGateway`, default true). If the value differs
+from the gateway's real `gateway_id`, the policies would match no sandbox namespace, so the preflight fails.
 The observer is a small cluster-scoped grant, on by default: the reconciler may create one RoleBinding per
 workspace namespace and bind one ClusterRole (`get` on pods and Sandboxes), fenced by a ValidatingAdmissionPolicy.
 Platform teams that refuse it set `sandboxObserver.enabled: false`; see
@@ -168,12 +171,13 @@ any of these:
 - The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.7.
 - The RuntimeClass in `openshell.runtimeClassName` does not exist.
 - OpenShell's gateway ConfigMap (`preflight.openshell.namespace` and `.configMap`, default `openshell/openshell-config`) cannot be read or has no `gateway.toml` while a supervisor image is configured, which the chart always does (old issue 489).
+- `openshell.gatewayId` differs from the gateway's `gateway_id` while `sandboxPolicy.enabled` and `sandboxPolicy.scopeToGateway` are true: the admission policies would apply to no sandbox.
 - The CloudNativePG operator is missing (when `postgres.mode` is `cnpg`).
 - The agentgateway `GatewayClass`, its `agentgateway.dev` CRDs or a v1.7.x controller are missing (when `gateway.mode` is `kubernetes`; see [Gateway modes](/guides/gateway-modes/)).
 
 It warns, and does not fail, when Kata guest seccomp is off (ADR 0048), when your cluster does
-not enforce NetworkPolicy, when `openshell.gatewayId` differs from the gateway's `gateway_id`, or when
-`sandboxObserver.enabled` is false. Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`
+not enforce NetworkPolicy, or when
+`sandboxObserver.enabled` is false. (A `gatewayId` mismatch only warns when `sandboxPolicy.scopeToGateway` is false.) Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`
 on `runc`, where it does not apply.
 
 ## Koinon's images and chart

@@ -80,6 +80,8 @@ lacks "sandboxObserver.enabled=false names no ClusterRole to the reconciler" 'cl
 has "sandboxObserver.enabled=false keeps the sandbox policies" 'name: koinon-koinon-sandbox-pods' "${off[@]}"
 has "the preflight compares the gateway ID" '--openshell-gateway-id=prod' --set openshell.gatewayId=prod --show-only templates/preflight.yaml
 has "the preflight defaults the gateway ID to OpenShell's" '--openshell-gateway-id=openshell' --show-only templates/preflight.yaml
+has "the preflight fails a gateway ID mismatch while the policies are scoped to the gateway" '--sandbox-policy-scoped-to-gateway' --show-only templates/preflight.yaml
+lacks "the preflight does not fail a gateway ID mismatch when scopeToGateway is off" '--sandbox-policy-scoped-to-gateway' --set sandboxPolicy.scopeToGateway=false --show-only templates/preflight.yaml
 lacks "the preflight does not warn about the observer when it is on" 'sandbox-observer-disabled' --show-only templates/preflight.yaml
 has "the preflight warns when the observer is off" '--sandbox-observer-disabled' "${off[@]}" --show-only templates/preflight.yaml
 if render --set sandboxPolicy.enabled=false >/dev/null 2>"$out/obs.err"; then fail "the observer without sandboxPolicy must not render"; fi

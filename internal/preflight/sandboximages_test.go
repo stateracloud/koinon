@@ -157,6 +157,19 @@ kid_path = "/etc/openshell-jwt/kid"
 			Expect(r.Fix).To(ContainSubstring("openshell.gatewayId=prod"))
 		})
 
+		It("fails on a mismatch when the admission policies are scoped to the gateway", func(ctx SpecContext) {
+			cm := gatewayToml("prod", "prod", "managed")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "openshell"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("admission policies"))
+			Expect(r.Message).To(ContainSubstring("fail open"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		})
+
 		It("warns, without failing, when gateway_id is missing from the driver table", func(ctx SpecContext) {
 			cm := openshellConfig("")
 			cm.Data["gateway.toml"] += "[openshell.gateway.gateway_jwt]\ngateway_id = \"openshell\"\n"
