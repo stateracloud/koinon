@@ -119,17 +119,23 @@ func (k *keyAudit) ensureGenerated(ctx context.Context, kind, id string, create 
 		return created, err
 	}
 	created, err := create(ctx)
-	if err == nil && created {
-		if rerr := k.recordGenerated(ctx, c, kind, id); rerr != nil {
-			slog.Error("the generated key is not recorded in the install audit log; the start-up check records the key set as keys.observed",
-				"secret_name", id, "err", rerr)
-		}
+	if err != nil || !created {
+		// Nothing was generated: the Change must not write the lost change it found as keys.observed
+		// under this actor; the start-up check records it as koinon-api:startup.
+		c.Rollback(ctx)
+		return created, err
 	}
-	if cerr := c.Commit(ctx); cerr != nil && err == nil && created {
+	if rerr := k.recordGenerated(ctx, c, kind, id); rerr != nil {
+		slog.Error("the generated key is not recorded in the install audit log; the start-up check records the key set as keys.observed",
+			"secret_name", id, "err", rerr)
+		c.Rollback(ctx)
+		return created, nil
+	}
+	if cerr := c.Commit(ctx); cerr != nil {
 		slog.Error("the generated key's audit event did not commit; the start-up check records the key set as keys.observed",
 			"secret_name", id, "err", cerr)
 	}
-	return created, err
+	return created, nil
 }
 
 // beginChange takes the key-set lock for one change, or returns nil when it cannot do so at once.

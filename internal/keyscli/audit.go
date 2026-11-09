@@ -639,3 +639,16 @@ func (c *Change) Commit(ctx context.Context) error {
 	}
 	return c.tx.Commit(ctx)
 }
+
+// Rollback ends the Change without writing anything, not even the pending keys.observed of a lost
+// change, and releases the lock. A writer that made no change of its own uses it, so the start-up check
+// records the lost change under its own actor. It runs once; later calls, and calls after Commit or on
+// a nil Change, do nothing.
+func (c *Change) Rollback(ctx context.Context) {
+	if c == nil || c.done {
+		return
+	}
+	c.done = true
+	c.pending = nil
+	_ = c.tx.Rollback(ctx)
+}

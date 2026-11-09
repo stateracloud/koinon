@@ -198,6 +198,31 @@ var _ = Describe("koinon-api's key events", func() {
 		Expect(raw).To(And(ContainSubstring("uid-2"), Not(ContainSubstring("koinon_test_not-a-real"))))
 	})
 
+	It("leaves a lost KEK change to the start-up check when ensureGenerated creates nothing", func(ctx SpecContext) {
+		Expect(keyAud.observe(ctx)).To(Succeed()) // the recorded state
+		m := mark(ctx)
+		By("a KEK is added with no event")
+		sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		raw := make([]byte, secretstore.KeySize)
+		copy(raw, "koinon_test_not-a-real-kek-cccc")
+		sec.Data["kek-20261107-cccc"] = secretstore.EncodeKey(raw)
+		_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		created, err := keyAud.ensureGenerated(ctx, "secret", "koinon-kek", func(context.Context) (bool, error) { return false, nil })
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeFalse())
+		Expect(count(ctx, "keys.observed", m)).To(BeZero(), "the Change writes nothing when it created nothing")
+
+		Expect(keyAud.observe(ctx)).To(Succeed())
+		Expect(count(ctx, "keys.observed", m)).To(Equal(1))
+		Expect(count(ctx, "keys.generated", m)).To(BeZero())
+		var actorID string
+		Expect(keyAud.pool.QueryRow(ctx, `SELECT actor_id FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.observed'`, m).Scan(&actorID)).To(Succeed())
+		Expect(actorID).To(Equal("koinon-api:startup"))
+	})
+
 	Describe("two replicas starting together on an empty install", func() {
 		It("write one keys.generated for the new KEK and no keys.observed", func(ctx SpecContext) {
 			fresh := fake.NewClientset()
