@@ -124,6 +124,7 @@ gate migrate ^internal/db/migrations/
 gate adr ^(docs/adr/|hack/adr-)
 gate shell \.sh$
 gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
+gate runnerlint ^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$
 gate pinned \.sh$
 gate pinned ^\.github/workflows/[^/]*\.yml$
 gate pinned ^\.github/actions/
@@ -181,6 +182,8 @@ script-check - hack/ci-merge-group-test.sh
 script-check - hack/ci-cache-test.sh
 script-check - hack/chart-check-test.sh
 script-check - hack/paths-test.sh
+script-check - hack/runner-lint-test.sh
+script-check - hack/runner-lint.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh

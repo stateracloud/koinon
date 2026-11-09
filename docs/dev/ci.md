@@ -463,6 +463,39 @@ release tags are cut only from a commit whose `quickstart` job concluded success
 `skipped` `quickstart` check runs (the push run after a queue merge skips it) and also accepts a green `merge_group`
 `quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
+## Workflow security review
+
+Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
+(ADR 0047, amended 2026-11-09). `hack/runner-lint.sh` enforces it in the `scripts` job (required, so it
+reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` as the
+`runnerlint` gate. Redo this review when a workflow gains a trigger, a secret or a permission.
+
+| Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
+|---|---|---|---|
+| `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
+| `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
+| `claims.yml` | `pull_request_target` | `GITHUB_TOKEN`; the `claim` job has `contents: read, issues: read`; the `release` (`pull_request_target` closed) and `sweeper` (schedule, dispatch) jobs have `contents: write, issues: write` and run base-sha or default-branch `hack/claim.sh` only; no Environment, no App key | ok: the `claim` and `release` jobs check out `pull_request.base.sha` and run the base's `hack/claim.sh`; the PR's code never runs. The merge_group job takes its YAML from the queue commit; the guard is the required review on `.github/**` |
+| `updater.yml` | `pull_request_target` (`auto_merge_enabled`), `workflow_run` | App ID and key from the `claims-bot` Environment; token with `contents`, `pull-requests`, `workflows: write` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
+| `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
+| `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
+
+Checks behind the table:
+
+- The only `pull_request_target` workflows are `claims.yml` and `updater.yml`; neither checks out the head.
+- The only Environment is `claims-bot` (`updater.yml`). No other workflow reads a secret besides
+  `GITHUB_TOKEN`.
+- Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
+  fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
+- No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
+- Script injection: expressions spliced into `run:` are SHAs and numbers, except two: the base branch
+  name in the `migrations (lint)` and `dependency age` steps of `ci.yml`. Fixed in this change: both go
+  through `env: BASE` now, as the `buf breaking` step already did. No user-chosen text is spliced into a
+  `run:` script any more.
+
+Not fixed here: GitHub's repository setting "Require approval for all outside collaborators" for fork
+pull request workflows is a setting, not a file; it is tracked as
+[#459](https://github.com/stateracloud/koinon/issues/459). Exit condition: the setting is confirmed on.
+
 ## Required status checks
 
 `hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is the only advisory job

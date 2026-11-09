@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -136,6 +136,7 @@ reason() {
 	web) echo "web/ changed" ;;
 	shell | bash5) echo "$n shell scripts changed" ;;
 	actionlint) echo "workflows or the actionlint config changed" ;;
+	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
 	mktemp) echo "shell scripts, the Makefile or workflows changed" ;;
 	audit) echo "Go code, sqlc queries or the audit batch lint changed" ;;
@@ -274,7 +275,13 @@ g_shell() {
 	# shellcheck disable=SC2086
 	shellcheck $files
 }
-g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint can depend on its siblings
+g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
+	actionlint
+}
+g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
+	hack/runner-lint-test.sh
+	hack/runner-lint.sh
+}
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
