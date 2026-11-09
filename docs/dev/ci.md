@@ -426,14 +426,14 @@ release tags are cut only from a commit whose `quickstart` job concluded success
 
 Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
 (ADR 0047, amended 2026-11-09). `hack/runner-lint.sh` enforces it in the `scripts` job (required, so it
-reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` under the
-`actionlint` gate. Redo this review when a workflow gains a trigger, a secret or a permission.
+reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` as the
+`runnerlint` gate. Redo this review when a workflow gains a trigger, a secret or a permission.
 
 | Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
 |---|---|---|---|
 | `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read`; `packages: write` only in the push-to-main jobs (`flavor-publish`) | ok |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN` | ok; the nightly, push and dispatch triggers need write access |
-| `claims.yml` | `pull_request_target` | `GITHUB_TOKEN`, `contents: read` for the `claim` job; no Environment, no App key | ok: both jobs check out `pull_request.base.sha` and run the base's `hack/claim.sh`; the PR's code never runs. The merge_group job takes its YAML from the queue commit; the guard is the required review on `.github/**` |
+| `claims.yml` | `pull_request_target` | `GITHUB_TOKEN`; the `claim` job has `contents: read, issues: read`; the `release` (`pull_request_target` closed) and `sweeper` (schedule, dispatch) jobs have `contents: write, issues: write` and run base-sha or default-branch `hack/claim.sh` only; no Environment, no App key | ok: the `claim` and `release` jobs check out `pull_request.base.sha` and run the base's `hack/claim.sh`; the PR's code never runs. The merge_group job takes its YAML from the queue commit; the guard is the required review on `.github/**` |
 | `updater.yml` | `pull_request_target` (`auto_merge_enabled`), `workflow_run` | App ID and key from the `claims-bot` Environment; token with `contents`, `pull-requests`, `workflows: write` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `packages: write`; `id-token: write` in the signing job only | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | read-only; `scorecard` has `id-token: write` | ok |
@@ -452,7 +452,8 @@ Checks behind the table:
   `run:` script any more.
 
 Not fixed here: GitHub's repository setting "Require approval for all outside collaborators" for fork
-pull request workflows is a setting, not a file; it is on the maintainer's list to confirm.
+pull request workflows is a setting, not a file; it is tracked as
+[#459](https://github.com/stateracloud/koinon/issues/459). Exit condition: the setting is confirmed on.
 
 ## Required status checks
 

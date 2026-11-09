@@ -145,12 +145,23 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects runnerlint" has '^runnerlint:' "$tmp/l3"
+check "go change does not select runnerlint" hasnt '^runnerlint:' "$tmp/l1"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
 check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
 check "go change selects audit" has '^audit:' "$tmp/l1"
 
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 check "workflow change does not select bash5" hasnt '^bash5:' "$tmp/l3"
+
+# a change to the runner lint alone selects its gate, not actionlint
+reset_state
+w=$(fresh); cd "$w"
+printf '#!/bin/sh\n' >hack/runner-lint-test.sh
+commit_all
+pf "$tmp/l3b" --list >/dev/null
+check "runner-lint script change selects runnerlint" has '^runnerlint:' "$tmp/l3b"
+check "runner-lint script change does not select actionlint" hasnt '^actionlint:' "$tmp/l3b"
 
 # uncommitted and untracked changes count
 reset_state

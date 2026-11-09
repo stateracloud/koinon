@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp pinned bash5 audit versions e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions e2e gitleaks.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
 # expected requirement was missing, so some suites or specs skipped; old issue 507). Full logs are under
@@ -30,7 +30,7 @@
 
 set -uo pipefail
 
-ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp pinned bash5 audit versions e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -112,6 +112,7 @@ reason() {
 	shell) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
 	actionlint) match '^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$' && echo "workflows or the actionlint config changed" ;;
 	pinned) match '\.sh$|^\.github/workflows/[^/]*\.yml$|^\.github/actions/' && echo "shell scripts, workflows or composite actions changed" ;;
+	runnerlint) match '^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$' && echo "workflows, the actionlint config or the runner lint changed" ;;
 	mktemp) match '\.sh$|^Makefile$|^\.github/workflows/[^/]*\.yml$' && echo "shell scripts, the Makefile or workflows changed" ;;
 	bash5) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
 	audit) match '\.go$|^internal/db/queries/.*\.sql$|^hack/audit-batch-lint' && echo "Go code, sqlc queries or the audit batch lint changed" ;;
@@ -253,8 +254,10 @@ g_shell() {
 }
 g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
 	actionlint
+}
+g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
 	hack/runner-lint-test.sh
-	hack/runner-lint.sh # GitHub-hosted runners only (#58)
+	hack/runner-lint.sh
 }
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh
