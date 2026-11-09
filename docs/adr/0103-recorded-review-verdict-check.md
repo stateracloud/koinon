@@ -70,9 +70,13 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
 3. **Who controls the gate.** Pull request runs use `pull_request` with a read-only token and no
    secret; there is no `pull_request_target` (GitHub blocks it by default in public repositories from
    2026-12-02, and `hack/runner-lint.sh` refuses it, ADR 0082 amendment for #463). The job checks out
-   the pull request's **base** commit (`pull_request.base.sha`; `merge_group.base_sha` in the queue) and
-   runs that commit's gate, `claim.sh` and CODEOWNERS, so the paths and the listed posters are the
-   base's, and the pull request's code is never checked out or run. The gate's files are sensitive paths
+   **main's tip at run time** (`pull_request.base.ref`, the branch name; `branches: [main]` keeps it
+   main; `merge_group.base_sha` in the queue, the entry's base) and runs that commit's gate, `claim.sh`
+   and CODEOWNERS. Not `pull_request.base.sha`: it is the base recorded when the pull request was opened
+   or last pushed, so an old pull request would run an old gate and poster list, or none. When the
+   checkout has no gate, the job passes only if main's tip has none either (the pull request that adds
+   it) and fails otherwise. The paths and the listed posters are main's, and the pull request's code
+   is never checked out or run. The gate's files are sensitive paths
    themselves: `.github/workflows/review.yml` and `.github/CODEOWNERS` are under `.github/**`, and
    `/hack/review-gate.sh`, `/hack/review-verdict.sh` and `/hack/claim.sh` have their own CODEOWNERS
    lines (`hack/review-gate-test.sh` checks that `sensitive-paths` covers them), so a change to any of

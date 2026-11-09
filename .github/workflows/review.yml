@@ -7,9 +7,12 @@
 # hack/review-gate.sh.
 #
 # No pull_request_target (#463, as claims.yml): GitHub blocks it by default for public repositories.
-# The job runs on `pull_request` with a read-only token and no secret, and checks out the BASE commit
-# to run hack/review-gate.sh, hack/claim.sh and CODEOWNERS (the paths and the listed posters); the
-# pull request's code is never checked out or run. Those files are sensitive paths themselves, so a
+# The job runs on `pull_request` with a read-only token and no secret, and checks out main's tip at
+# run time (`pull_request.base.ref`, the branch name; `branches: [main]` keeps it main) to run
+# hack/review-gate.sh, hack/claim.sh and CODEOWNERS (the paths and the listed posters). Not
+# `pull_request.base.sha`: that is the base recorded when the PR was opened or last pushed, so an old
+# PR would run an old gate and an old poster list, or none. The pull request's code is never checked
+# out or run. Those files are sensitive paths themselves, so a
 # change to them needs a verdict too.
 #
 # Trade-off (ADR 0103 decision 3): on `pull_request` and `merge_group` this workflow file is the pull
@@ -53,10 +56,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      # The base commit's gate, claim.sh and CODEOWNERS; never the pull request's code. push: main itself.
+      # Main's tip at run time (pull requests), the queue entry's base (merge_group: the previous queue
+      # commit or main), main itself (push); never the pull request's code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          ref: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_sha || github.sha }}
 
       - name: Fail when sensitive paths changed and the head has no ready review verdict
         shell: bash # -eo pipefail
@@ -66,10 +70,19 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # The base before the gate existed (the pull request that adds it): nothing to run yet. The
-          # check is advisory until the ruleset requires it (ADR 0103 decision 4), which needs the gate on main.
+          # No gate in the checkout: pass only while main's tip has none either (the pull request that
+          # adds the gate). Once main has it, a checkout without it is wrong: fail.
           if [[ ! -f hack/review-gate.sh ]]; then
-            echo "review: the base has no hack/review-gate.sh yet; nothing to check"
+            tip=$(git ls-remote origin refs/heads/main | cut -f1)
+            if [[ ! $tip =~ ^[0-9a-f]{40}$ ]] || ! git fetch -q --no-tags --depth=1 origin "$tip"; then
+              echo "::error::the checkout has no hack/review-gate.sh and main's tip cannot be read ('$tip')"
+              exit 1
+            fi
+            if git cat-file -e "$tip:hack/review-gate.sh" 2>/dev/null; then
+              echo "::error::the checkout has no hack/review-gate.sh but main (${tip:0:12}) has it; the gate did not run"
+              exit 1
+            fi
+            echo "review: main (${tip:0:12}) has no hack/review-gate.sh yet (the pull request that adds it); nothing to check"
             exit 0
           fi
           hack/review-gate.sh

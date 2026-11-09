@@ -284,7 +284,11 @@ w '^  push:$'
 w "^    if: github.event_name != 'pull_request' \|\| !github.event.pull_request.draft$"
 w 'statuses: read'
 w 'MG_HEAD: \$\{\{ github.event.merge_group.head_sha \}\}'
-w 'ref: \$\{\{ github.event.pull_request.base.sha \|\| github.event.merge_group.base_sha \|\| github.sha \}\}'
+# Main's tip at run time (base.ref), never the base recorded at open or push (base.sha).
+w 'ref: \$\{\{ github.event.pull_request.base.ref \|\| github.event.merge_group.base_sha \|\| github.sha \}\}'
+grep -q 'pull_request.base.sha' <(grep -v '^ *#' "$wf") && { echo "FAIL: review.yml uses pull_request.base.sha (an old base)"; fail=1; }
+# shellcheck disable=SC2016 # a regex, not an expansion
+w 'git cat-file -e "\$tip:hack/review-gate.sh"'
 if grep -v '^ *#' "$wf" | grep -Eq 'pull_request_target|^    paths:|ref:.*pull_request.head|: write'; then
   echo "FAIL: review.yml uses pull_request_target, checks out the PR's code, has a paths filter or a write permission"; fail=1
 fi
