@@ -109,3 +109,64 @@ SELECT pg_advisory_xact_lock(hashtext('koinon.platform_settings'));
 SELECT * FROM install_audit_events
 WHERE action = 'platform.settings.observed'
 ORDER BY chain_seq;
+
+-- name: ListAuditChainHeads :many
+-- Every org's chain head, a plain read of committed rows (an in-flight org write holds its head row
+-- and is not seen): the heads an install audit anchor commits to (ADR 0100 decision 4.1).
+SELECT org_id, seq, hash FROM audit_chain_heads
+ORDER BY org_id;
+
+-- name: TryLockAuditAnchor :one
+-- The domain lock of the anchor job, taken before the install head (ADR 0100 decision 1.7): one
+-- anchor is written at a time across API replicas. Returns false when another transaction holds it.
+SELECT pg_try_advisory_xact_lock(hashtext('koinon.audit_anchor'))::boolean AS locked;
+
+-- name: LockAuditAnchor :exec
+-- TryLockAuditAnchor, waiting for the lock (an anchor made on demand).
+SELECT pg_advisory_xact_lock(hashtext('koinon.audit_anchor'));
+
+-- name: GetLastInstallAnchor :one
+-- The newest audit.anchor install event and its age by the database's clock.
+SELECT id::text AS id_text, chain_seq, extract(epoch FROM now() - created_at)::float8 AS age_seconds
+FROM install_audit_events
+WHERE action = 'audit.anchor'
+ORDER BY chain_seq DESC
+LIMIT 1;
+
+-- name: ListInstallAnchors :many
+-- A page of audit.anchor events in chain order, from after_seq (exclusive) to up_to_seq (inclusive),
+-- with the summary as Postgres prints it.
+SELECT id::text AS id_text, chain_seq, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.anchor' AND chain_seq > @after_seq AND chain_seq <= @up_to_seq
+ORDER BY chain_seq
+LIMIT @page_size;
+
+-- name: ListInstallAnchorHeadsInRange :many
+-- The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
+-- order then org order: the install export's header (ADR 0100 decision 5).
+SELECT h.anchor_event_id::text AS anchor_text, h.org_id::text AS org_text, h.chain_seq, h.hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+WHERE e.chain_seq >= @from_seq AND e.chain_seq <= @up_to_seq
+ORDER BY e.chain_seq, h.org_id;
+
+-- name: CheckAnchoredHeads :many
+-- One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
+-- gone): the verifier compares the two (ADR 0100 decision 4.1).
+SELECT h.org_id::text AS org_text, h.chain_seq, h.hash, e.hash AS org_hash
+FROM install_audit_anchor_heads h
+LEFT JOIN audit_events e ON e.org_id = h.org_id AND e.chain_seq = h.chain_seq
+WHERE h.anchor_event_id = @anchor_event_id
+ORDER BY h.org_id;
+
+-- name: CheckOrgAnchoredHeads :many
+-- One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+-- the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+-- instead of every anchor's heads (ADR 0100 decision 4.1).
+SELECT e.id::text AS anchor_text, e.chain_seq AS anchor_seq, h.chain_seq, h.hash, a.hash AS org_hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+LEFT JOIN audit_events a ON a.org_id = h.org_id AND a.chain_seq = h.chain_seq
+WHERE h.org_id = @org_id
+ORDER BY e.chain_seq;

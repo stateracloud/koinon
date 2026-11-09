@@ -56,7 +56,8 @@ Everyone else gets `PermissionDenied` (403). The automatic price changes are wri
 `system koinon-api:price-refresh`. Koinon records writes to both logs in
 `koinon_audit_writes_total{chain="org|install",result="ok|error"}`. `koinon_install_audit_writer_ok`
 is 1 while `koinon-api`'s database login may write the install log and 0 otherwise; when it is 0,
-`koinon-api`'s log names the `GRANT` to run.
+`koinon-api`'s log names the `GRANT` to run. `koinon_audit_anchor_age_seconds` grows while the hourly
+install anchors (see below) are not being written.
 
 ## Check that it was not changed
 
@@ -74,5 +75,19 @@ The command prints one line per chain and exits non-zero when a chain is broken.
 that someone with owner-level database access changed or removed events. The chain does not stop a
 database superuser who rewrites a whole chain from the start; keep database access tight and copy the
 log's last hash somewhere else if you need to prove more.
+
+`verify` also checks every org chain (or the one given with `--org`) against the install anchors, so an org
+chain rewritten behind an anchor fails even when the rewrite is self-consistent. A rewrite of the install
+chain itself is still not caught until signed checkpoints exist (issue 7). See
+[Anchors](/guides/audit-export/#anchors).
+
+Each anchor logs one line, `anchored the org audit chains`, with `heads_root` and `install_head` (the hash
+of the anchor event). Ship these log lines off the cluster, to a log store the database cannot write, to
+get a witness the database can't rewrite: a rewrite of the install chain that still passes `verify` no
+longer matches the logged hashes. Filter on the message. Before each anchor, koinon-api checks every org
+chain against the previous anchor. A mismatch is logged once per tick, naming the org, and counted in
+`koinon_audit_anchor_inconsistent_total{reason="hash_changed|seq_regressed"}` (no org label); the anchor is
+still written and `verify` reports the break. Alert on any increase of that counter. The interval is at
+least 5 minutes, because every anchor stores one row per org.
 
 To keep a copy that anyone can check without the database, see [Export and verify the audit log](/guides/audit-export/).

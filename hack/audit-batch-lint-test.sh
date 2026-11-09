@@ -49,6 +49,8 @@ case_ "raw DELETE FROM audit_chain_heads fails" 1 internal/foo/a_test.go 'packag
 var s = `DELETE FROM audit_chain_heads`'
 case_ "raw TRUNCATE install_audit_chain_head fails" 1 internal/foo/a_test.go 'package foo
 var s = `TRUNCATE TABLE install_audit_chain_head`'
+case_ "raw INSERT INTO install_audit_anchor_heads fails" 1 internal/foo/a.go 'package foo
+var s = `INSERT INTO install_audit_anchor_heads (anchor_id) VALUES ($1)`'
 case_ "a SELECT of an audit table passes" 0 internal/foo/a.go 'package foo
 var s = `SELECT count(*) FROM audit_events`'
 case_ "an insert into another table passes" 0 internal/foo/a.go 'package foo

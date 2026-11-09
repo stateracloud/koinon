@@ -11,6 +11,94 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const checkAnchoredHeads = `-- name: CheckAnchoredHeads :many
+SELECT h.org_id::text AS org_text, h.chain_seq, h.hash, e.hash AS org_hash
+FROM install_audit_anchor_heads h
+LEFT JOIN audit_events e ON e.org_id = h.org_id AND e.chain_seq = h.chain_seq
+WHERE h.anchor_event_id = $1
+ORDER BY h.org_id
+`
+
+type CheckAnchoredHeadsRow struct {
+	OrgText  string
+	ChainSeq int64
+	Hash     []byte
+	OrgHash  []byte
+}
+
+// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
+// gone): the verifier compares the two (ADR 0100 decision 4.1).
+func (q *Queries) CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.UUID) ([]CheckAnchoredHeadsRow, error) {
+	rows, err := q.db.Query(ctx, checkAnchoredHeads, anchorEventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CheckAnchoredHeadsRow
+	for rows.Next() {
+		var i CheckAnchoredHeadsRow
+		if err := rows.Scan(
+			&i.OrgText,
+			&i.ChainSeq,
+			&i.Hash,
+			&i.OrgHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const checkOrgAnchoredHeads = `-- name: CheckOrgAnchoredHeads :many
+SELECT e.id::text AS anchor_text, e.chain_seq AS anchor_seq, h.chain_seq, h.hash, a.hash AS org_hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+LEFT JOIN audit_events a ON a.org_id = h.org_id AND a.chain_seq = h.chain_seq
+WHERE h.org_id = $1
+ORDER BY e.chain_seq
+`
+
+type CheckOrgAnchoredHeadsRow struct {
+	AnchorText string
+	AnchorSeq  int64
+	ChainSeq   int64
+	Hash       []byte
+	OrgHash    []byte
+}
+
+// One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+// the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+// instead of every anchor's heads (ADR 0100 decision 4.1).
+func (q *Queries) CheckOrgAnchoredHeads(ctx context.Context, orgID pgtype.UUID) ([]CheckOrgAnchoredHeadsRow, error) {
+	rows, err := q.db.Query(ctx, checkOrgAnchoredHeads, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CheckOrgAnchoredHeadsRow
+	for rows.Next() {
+		var i CheckOrgAnchoredHeadsRow
+		if err := rows.Scan(
+			&i.AnchorText,
+			&i.AnchorSeq,
+			&i.ChainSeq,
+			&i.Hash,
+			&i.OrgHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAuditChainHead = `-- name: GetAuditChainHead :one
 SELECT org_id, seq, hash FROM audit_chain_heads WHERE org_id = $1
 `
@@ -30,6 +118,28 @@ func (q *Queries) GetInstallAuditChainHead(ctx context.Context) (InstallAuditCha
 	row := q.db.QueryRow(ctx, getInstallAuditChainHead)
 	var i InstallAuditChainHead
 	err := row.Scan(&i.Singleton, &i.Seq, &i.Hash)
+	return i, err
+}
+
+const getLastInstallAnchor = `-- name: GetLastInstallAnchor :one
+SELECT id::text AS id_text, chain_seq, extract(epoch FROM now() - created_at)::float8 AS age_seconds
+FROM install_audit_events
+WHERE action = 'audit.anchor'
+ORDER BY chain_seq DESC
+LIMIT 1
+`
+
+type GetLastInstallAnchorRow struct {
+	IDText     string
+	ChainSeq   int64
+	AgeSeconds float64
+}
+
+// The newest audit.anchor install event and its age by the database's clock.
+func (q *Queries) GetLastInstallAnchor(ctx context.Context) (GetLastInstallAnchorRow, error) {
+	row := q.db.QueryRow(ctx, getLastInstallAnchor)
+	var i GetLastInstallAnchorRow
+	err := row.Scan(&i.IDText, &i.ChainSeq, &i.AgeSeconds)
 	return i, err
 }
 
@@ -60,6 +170,33 @@ func (q *Queries) GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAuditChainHeads = `-- name: ListAuditChainHeads :many
+SELECT org_id, seq, hash FROM audit_chain_heads
+ORDER BY org_id
+`
+
+// Every org's chain head, a plain read of committed rows (an in-flight org write holds its head row
+// and is not seen): the heads an install audit anchor commits to (ADR 0100 decision 4.1).
+func (q *Queries) ListAuditChainHeads(ctx context.Context) ([]AuditChainHead, error) {
+	rows, err := q.db.Query(ctx, listAuditChainHeads)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditChainHead
+	for rows.Next() {
+		var i AuditChainHead
+		if err := rows.Scan(&i.OrgID, &i.Seq, &i.Hash); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAuditChainOrgs = `-- name: ListAuditChainOrgs :many
@@ -350,6 +487,95 @@ func (q *Queries) ListAuditEventsFiltered(ctx context.Context, arg ListAuditEven
 	return items, nil
 }
 
+const listInstallAnchorHeadsInRange = `-- name: ListInstallAnchorHeadsInRange :many
+SELECT h.anchor_event_id::text AS anchor_text, h.org_id::text AS org_text, h.chain_seq, h.hash
+FROM install_audit_anchor_heads h
+JOIN install_audit_events e ON e.id = h.anchor_event_id
+WHERE e.chain_seq >= $1 AND e.chain_seq <= $2
+ORDER BY e.chain_seq, h.org_id
+`
+
+type ListInstallAnchorHeadsInRangeParams struct {
+	FromSeq int64
+	UpToSeq int64
+}
+
+type ListInstallAnchorHeadsInRangeRow struct {
+	AnchorText string
+	OrgText    string
+	ChainSeq   int64
+	Hash       []byte
+}
+
+// The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
+// order then org order: the install export's header (ADR 0100 decision 5).
+func (q *Queries) ListInstallAnchorHeadsInRange(ctx context.Context, arg ListInstallAnchorHeadsInRangeParams) ([]ListInstallAnchorHeadsInRangeRow, error) {
+	rows, err := q.db.Query(ctx, listInstallAnchorHeadsInRange, arg.FromSeq, arg.UpToSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInstallAnchorHeadsInRangeRow
+	for rows.Next() {
+		var i ListInstallAnchorHeadsInRangeRow
+		if err := rows.Scan(
+			&i.AnchorText,
+			&i.OrgText,
+			&i.ChainSeq,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstallAnchors = `-- name: ListInstallAnchors :many
+SELECT id::text AS id_text, chain_seq, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.anchor' AND chain_seq > $1 AND chain_seq <= $2
+ORDER BY chain_seq
+LIMIT $3
+`
+
+type ListInstallAnchorsParams struct {
+	AfterSeq int64
+	UpToSeq  int64
+	PageSize int32
+}
+
+type ListInstallAnchorsRow struct {
+	IDText      string
+	ChainSeq    int64
+	SummaryText string
+}
+
+// A page of audit.anchor events in chain order, from after_seq (exclusive) to up_to_seq (inclusive),
+// with the summary as Postgres prints it.
+func (q *Queries) ListInstallAnchors(ctx context.Context, arg ListInstallAnchorsParams) ([]ListInstallAnchorsRow, error) {
+	rows, err := q.db.Query(ctx, listInstallAnchors, arg.AfterSeq, arg.UpToSeq, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInstallAnchorsRow
+	for rows.Next() {
+		var i ListInstallAnchorsRow
+		if err := rows.Scan(&i.IDText, &i.ChainSeq, &i.SummaryText); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInstallAuditChainRows = `-- name: ListInstallAuditChainRows :many
 SELECT (SELECT install_id::text FROM install_identity) AS scope_text, id::text AS id_text, chain_seq,
        actor_kind, actor_id, action, target_kind, target_id, summary::text AS summary_text, request_id,
@@ -524,6 +750,16 @@ func (q *Queries) ListInstallSettingsEvents(ctx context.Context) ([]InstallAudit
 	return items, nil
 }
 
+const lockAuditAnchor = `-- name: LockAuditAnchor :exec
+SELECT pg_advisory_xact_lock(hashtext('koinon.audit_anchor'))
+`
+
+// TryLockAuditAnchor, waiting for the lock (an anchor made on demand).
+func (q *Queries) LockAuditAnchor(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockAuditAnchor)
+	return err
+}
+
 const lockPlatformSettings = `-- name: LockPlatformSettings :exec
 SELECT pg_advisory_xact_lock(hashtext('koinon.platform_settings'))
 `
@@ -533,4 +769,17 @@ SELECT pg_advisory_xact_lock(hashtext('koinon.platform_settings'))
 func (q *Queries) LockPlatformSettings(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockPlatformSettings)
 	return err
+}
+
+const tryLockAuditAnchor = `-- name: TryLockAuditAnchor :one
+SELECT pg_try_advisory_xact_lock(hashtext('koinon.audit_anchor'))::boolean AS locked
+`
+
+// The domain lock of the anchor job, taken before the install head (ADR 0100 decision 1.7): one
+// anchor is written at a time across API replicas. Returns false when another transaction holds it.
+func (q *Queries) TryLockAuditAnchor(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, tryLockAuditAnchor)
+	var locked bool
+	err := row.Scan(&locked)
+	return locked, err
 }

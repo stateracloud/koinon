@@ -74,6 +74,13 @@ type Querier interface {
 	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
 	// from every API replica: a run canceled by one sweep no longer matches.
 	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
+	// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
+	// gone): the verifier compares the two (ADR 0100 decision 4.1).
+	CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.UUID) ([]CheckAnchoredHeadsRow, error)
+	// One org's head in every anchor that names it, oldest anchor first, with the hash the org chain has at
+	// the anchored chain_seq (null when the row is gone): the per-org verifier (verify --org) reads this
+	// instead of every anchor's heads (ADR 0100 decision 4.1).
+	CheckOrgAnchoredHeads(ctx context.Context, orgID pgtype.UUID) ([]CheckOrgAnchoredHeadsRow, error)
 	// Takes an approved request for execution for lease_seconds. No row: it is
 	// not approved, or another executor holds it.
 	ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error)
@@ -450,6 +457,8 @@ type Querier interface {
 	// The last good fetch the install made itself (the half-of-last-good floor). An import is left out:
 	// its time and model count are the uploader's word, so a file cannot move the floor.
 	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
+	// The newest audit.anchor install event and its age by the database's clock.
+	GetLastInstallAnchor(ctx context.Context) (GetLastInstallAnchorRow, error)
 	// The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
 	// checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
 	GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent, error)
@@ -692,6 +701,9 @@ type Querier interface {
 	ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error)
 	// Members who can answer questions (member or higher), highest role per user.
 	ListAskableMembers(ctx context.Context, orgID pgtype.UUID) ([]ListAskableMembersRow, error)
+	// Every org's chain head, a plain read of committed rows (an in-flight org write holds its head row
+	// and is not seen): the heads an install audit anchor commits to (ADR 0100 decision 4.1).
+	ListAuditChainHeads(ctx context.Context) ([]AuditChainHead, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
@@ -774,6 +786,12 @@ type Querier interface {
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
+	// The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
+	// order then org order: the install export's header (ADR 0100 decision 5).
+	ListInstallAnchorHeadsInRange(ctx context.Context, arg ListInstallAnchorHeadsInRangeParams) ([]ListInstallAnchorHeadsInRangeRow, error)
+	// A page of audit.anchor events in chain order, from after_seq (exclusive) to up_to_seq (inclusive),
+	// with the summary as Postgres prints it.
+	ListInstallAnchors(ctx context.Context, arg ListInstallAnchorsParams) ([]ListInstallAnchorsRow, error)
 	// One page of the install chain in chain order, with the fields the hash covers as text. The
 	// install ID is read from install_identity, which never changes.
 	ListInstallAuditChainRows(ctx context.Context, arg ListInstallAuditChainRowsParams) ([]ListInstallAuditChainRowsRow, error)
@@ -967,6 +985,8 @@ type Querier interface {
 	LockAPITokenTree(ctx context.Context, arg LockAPITokenTreeParams) ([]pgtype.UUID, error)
 	// Serialises decisions on one request.
 	LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error)
+	// TryLockAuditAnchor, waiting for the lock (an anchor made on demand).
+	LockAuditAnchor(ctx context.Context) error
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Authentication queries. Users, sessions and credentials are not org-owned;
@@ -1351,6 +1371,9 @@ type Querier interface {
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (Session, error)
+	// The domain lock of the anchor job, taken before the install head (ADR 0100 decision 1.7): one
+	// anchor is written at a time across API replicas. Returns false when another transaction holds it.
+	TryLockAuditAnchor(ctx context.Context) (bool, error)
 	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
 	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)

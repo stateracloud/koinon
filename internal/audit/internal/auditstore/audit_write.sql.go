@@ -68,6 +68,30 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 	return i, err
 }
 
+const insertInstallAnchorHead = `-- name: InsertInstallAnchorHead :exec
+INSERT INTO install_audit_anchor_heads (anchor_event_id, org_id, chain_seq, hash)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertInstallAnchorHeadParams struct {
+	AnchorEventID pgtype.UUID
+	OrgID         pgtype.UUID
+	ChainSeq      int64
+	Hash          []byte
+}
+
+// One org head an audit.anchor install event commits to (ADR 0100 decision 4.1). org_id is the
+// anchored org, not an owner: the table has no foreign key to orgs.
+func (q *Queries) InsertInstallAnchorHead(ctx context.Context, arg InsertInstallAnchorHeadParams) error {
+	_, err := q.db.Exec(ctx, insertInstallAnchorHead,
+		arg.AnchorEventID,
+		arg.OrgID,
+		arg.ChainSeq,
+		arg.Hash,
+	)
+	return err
+}
+
 const insertInstallAuditEvent = `-- name: InsertInstallAuditEvent :one
 INSERT INTO install_audit_events (actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

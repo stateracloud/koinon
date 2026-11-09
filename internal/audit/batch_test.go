@@ -323,7 +323,7 @@ var _ = Describe("the audit batch on Postgres", func() {
 				fmt.Sprintf(`GRANT ALL ON ALL TABLES IN SCHEMA public TO %s`, role),
 				fmt.Sprintf(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO %s`, role),
 				fmt.Sprintf(`REVOKE ALL ON install_audit_events FROM %s`, role),
-				fmt.Sprintf(`REVOKE ALL ON install_audit_chain_head FROM %s`, role),
+				fmt.Sprintf(`REVOKE ALL ON install_audit_chain_head, install_audit_anchor_heads FROM %s`, role),
 			} {
 				_, err := db.Exec(ctx, stmt)
 				Expect(err).NotTo(HaveOccurred(), stmt)

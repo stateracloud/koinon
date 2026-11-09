@@ -120,8 +120,8 @@ login and reports `koinon_install_audit_writer_ok 0`, and it keeps serving.
   also run this after the upgrade's migration, so that only `koinon-api` can write the chain:
 
   ```sql
-  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head FROM <reconciler login role>, <agentd login role>;
-  GRANT SELECT ON install_audit_events, install_audit_chain_head TO <reconciler login role>, <agentd login role>;
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads FROM <reconciler login role>, <agentd login role>;
+  GRANT SELECT ON install_audit_events, install_audit_chain_head, install_audit_anchor_heads TO <reconciler login role>, <agentd login role>;
   ```
 
   Without the role the migrate Job fails (`the role koinon_install_audit_writer does not exist`)

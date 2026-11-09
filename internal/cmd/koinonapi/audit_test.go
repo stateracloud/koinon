@@ -106,7 +106,7 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		out, err := run("verify", "--file", first)
 		Expect(err).NotTo(HaveOccurred(), out)
 		Expect(out).To(HavePrefix("ok      install chain (file): 3 events"))
-		Expect(out).To(ContainSubstring("note    a file verified alone proves internal consistency only, not authenticity; use --after (later anchors/checkpoints) to pin it\n"),
+		Expect(out).To(ContainSubstring("note    a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it\n"),
 			"a file checked alone says what that does not prove")
 
 		By("a partial export: unchecked alone, checked with --after")
@@ -178,6 +178,66 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		Expect(err).To(MatchError(ContainSubstring("--file")))
 		_, err = run("verify", "--after", first, "--database-url", "x")
 		Expect(err).To(MatchError(ContainSubstring("--after needs --file")))
+	}, SpecTimeout(3*time.Minute))
+
+	It("audit anchor writes an anchor, and verify --anchors pins an org export to an install export", func(ctx SpecContext) {
+		pool := pgtest.Start(ctx)
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		for range 3 {
+			_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+				b.Org(audit.Event{Org: org, Actor: audit.System("koinon-test:spec"), Action: "test.cli", TargetKind: "test", TargetID: "t"})
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		run := func(args ...string) (string, error) {
+			var out bytes.Buffer
+			cmd := newAuditCommand()
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetArgs(args)
+			err := cmd.ExecuteContext(ctx)
+			return out.String(), err
+		}
+		export := func(name string, scope audit.ExportScope) string {
+			path := filepath.Join(GinkgoT().TempDir(), name)
+			f, err := os.Create(path)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = f.Close() }()
+			Expect(audit.Export(ctx, store.New(pool), f, scope, 1)).To(Succeed())
+			return path
+		}
+
+		out, err := run("anchor", "--database-url", pool.Config().ConnString())
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).To(ContainSubstring("anchored 1 org chains at install chain_seq"))
+
+		out, err = run("verify", "--database-url", pool.Config().ConnString())
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).To(ContainSubstring("1 anchors checked against the org chains"))
+
+		out, err = run("verify", "--org", org.String(), "--database-url", pool.Config().ConnString())
+		Expect(err).NotTo(HaveOccurred(), out)
+
+		inst := export("install.jsonl", audit.ExportScope{Install: true})
+		orgFile := export("org.jsonl", audit.ExportScope{Org: org})
+		out, err = run("verify", "--file", orgFile, "--anchors", inst)
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(out).NotTo(ContainSubstring("proves internal consistency only"), "--anchors pins the file")
+
+		By("an org file that is not the anchored chain fails")
+		raw, err := os.ReadFile(orgFile)
+		Expect(err).NotTo(HaveOccurred())
+		bad := filepath.Join(GinkgoT().TempDir(), "bad.jsonl")
+		Expect(os.WriteFile(bad, bytes.Replace(raw, []byte("test.cli"), []byte("test.xxx"), 3), 0o600)).To(Succeed())
+		_, err = run("verify", "--file", bad, "--anchors", inst)
+		Expect(err).To(MatchError(audit.ErrBroken))
+
+		By("--anchors needs --file, and an install export")
+		_, err = run("verify", "--anchors", inst)
+		Expect(err).To(MatchError(ContainSubstring("--anchors needs --file")))
+		_, err = run("verify", "--file", inst, "--anchors", inst)
+		Expect(err).To(HaveOccurred())
 	}, SpecTimeout(3*time.Minute))
 
 	It("reads --scope and --org", func() {

@@ -48,6 +48,36 @@ type ExportHeader struct {
 	FromSeq int64 `json:"from_seq"`
 	// Head is the chain head when the export started. Events appended later are not in the file.
 	Head ExportHead `json:"head"`
+	// Anchors are the audit.anchor events of an install export with the org heads each commits to
+	// (ADR 0100 decision 4.1): those with a chain_seq in the file. The verifier recomputes each
+	// heads_root and refuses a file with an anchor event that has no entry here, or an entry that has no
+	// event. An org export is checked against them with ExportVerifyOptions.Anchors.
+	Anchors []ExportAnchor `json:"anchors,omitempty"`
+}
+
+// ExportAnchorHead is an org chain head an anchor commits to.
+type ExportAnchorHead struct {
+	OrgID    string `json:"org_id"`
+	ChainSeq int64  `json:"chain_seq"`
+	Hash     string `json:"hash"`
+}
+
+// ExportAnchor is one audit.anchor event with its heads, as the install export header carries it.
+type ExportAnchor struct {
+	// ChainSeq and EventID name the anchor event in the install chain.
+	ChainSeq int64  `json:"chain_seq"`
+	EventID  string `json:"event_id"`
+	// OrgCount and HeadsRoot are what the event's summary commits to; Heads must hash to HeadsRoot
+	// (HeadsRoot, hex).
+	OrgCount  int                `json:"org_count"`
+	HeadsRoot string             `json:"heads_root"`
+	Heads     []ExportAnchorHead `json:"heads"`
+}
+
+// ExportAnchorSet is the anchors of a verified install export, to check an org export against.
+type ExportAnchorSet struct {
+	InstallID string
+	Anchors   []ExportAnchor
 }
 
 // ExportEvent is one event line. Every field the hash covers is here exactly as hashed.
@@ -79,8 +109,7 @@ type ExportScope struct {
 // as it was when the export started. It streams: it pages through the chain by chain_seq, exportPage
 // rows per query, and writes each line before reading the next page.
 //
-// TODO(ADR 0100 issue 6, anchors): the install export should carry each anchor's heads in the header;
-// exportAnchors is where they come from once install_audit_anchor_heads exists.
+// The install export's header carries the heads of every anchor whose event is in the file (exportAnchors).
 func Export(ctx context.Context, q *store.Queries, w io.Writer, sc ExportScope, fromSeq int64) error {
 	if fromSeq < 0 {
 		return fmt.Errorf("audit export: from-seq %d is negative", fromSeq)
@@ -122,7 +151,7 @@ func Export(ctx context.Context, q *store.Queries, w io.Writer, sc ExportScope, 
 		// Nothing has been written yet: a caller that streams the output can still answer with an error.
 		return fmt.Errorf("%w: from-seq %d is beyond the chain, whose head is chain_seq %d", ErrBadFilter, fromSeq, hdr.Head.ChainSeq)
 	}
-	if err := exportAnchors(&hdr); err != nil {
+	if err := exportAnchors(ctx, q, &hdr); err != nil {
 		return err
 	}
 	bw := bufio.NewWriter(w)
@@ -164,10 +193,50 @@ func Export(ctx context.Context, q *store.Queries, w io.Writer, sc ExportScope, 
 	return nil
 }
 
-// exportAnchors is the hook for issue 6 (anchors, ADR 0100 decision 4): once the anchor tables exist
-// it adds each anchor's heads to the install export's header. Anchors do not exist yet, so it adds
-// nothing, and VerifyExport has the matching hook (checkAnchors).
-func exportAnchors(*ExportHeader) error { return nil }
+// exportAnchors adds each anchor's heads to the install export's header (ADR 0100 decisions 4.1 and 5):
+// the anchors whose event has a chain_seq from the header's from_seq to its head. An org export has
+// none. VerifyExport has the matching check (checkAnchors). The header is one line held in memory: an
+// install chain anchors hourly, so a long chain is exported in parts with --from-seq.
+func exportAnchors(ctx context.Context, q *store.Queries, hdr *ExportHeader) error {
+	if hdr.Chain != ChainInstall {
+		return nil
+	}
+	byID := map[string]int{}
+	for after := hdr.FromSeq - 1; ; {
+		page, err := q.ListInstallAnchors(ctx, store.ListInstallAnchorsParams{AfterSeq: after, UpToSeq: hdr.Head.ChainSeq, PageSize: verifyPage})
+		if err != nil {
+			return fmt.Errorf("audit export: read the anchors: %w", err)
+		}
+		for _, a := range page {
+			after = a.ChainSeq
+			ea := ExportAnchor{ChainSeq: a.ChainSeq, EventID: a.IDText, Heads: []ExportAnchorHead{}}
+			// A summary that cannot be read is exported as it is: the verifier reports it at this chain_seq.
+			if sum, err := parseAnchorSummary(a.SummaryText); err == nil {
+				ea.OrgCount, ea.HeadsRoot = sum.OrgCount, sum.HeadsRoot
+			}
+			byID[a.IDText] = len(hdr.Anchors)
+			hdr.Anchors = append(hdr.Anchors, ea)
+		}
+		if len(page) < verifyPage {
+			break
+		}
+	}
+	if len(hdr.Anchors) == 0 {
+		return nil
+	}
+	heads, err := q.ListInstallAnchorHeadsInRange(ctx, store.ListInstallAnchorHeadsInRangeParams{FromSeq: hdr.FromSeq, UpToSeq: hdr.Head.ChainSeq})
+	if err != nil {
+		return fmt.Errorf("audit export: read the anchored heads: %w", err)
+	}
+	for _, h := range heads {
+		i, ok := byID[h.AnchorText]
+		if !ok {
+			continue // appended between the two reads, past the head
+		}
+		hdr.Anchors[i].Heads = append(hdr.Anchors[i].Heads, ExportAnchorHead{OrgID: h.OrgText, ChainSeq: h.ChainSeq, Hash: hex.EncodeToString(h.Hash)})
+	}
+	return nil
+}
 
 // exportRows reads one page of events after afterSeq as export lines.
 func exportRows(ctx context.Context, q *store.Queries, sc ExportScope, afterSeq int64) ([]ExportEvent, error) {
@@ -214,6 +283,11 @@ type ExportVerifyOptions struct {
 	// After is the end of an earlier, verified export. A partial export (from_seq above 1) starts
 	// from its hash: its first prev_hash must equal it.
 	After *ExportEnd
+	// Anchors are the anchors of an install export that verified (VerifyExport of it, then its
+	// Header.Anchors). An org export is checked against them: at each anchored chain_seq of its org the
+	// file must hold the anchored hash, so a chain rewritten behind an anchor fails at the same
+	// chain_seq the database verifier names. Only for an org export of the same install.
+	Anchors *ExportAnchorSet
 }
 
 // ExportResult is the verdict on an export file.
@@ -228,6 +302,10 @@ type ExportResult struct {
 	Partial, PrevChecked bool
 	// End is the last event line checked (its hash is what a later export continues from).
 	End ExportEnd
+	// Anchors is the number of anchors checked: those of an install export against its events, or those
+	// of ExportVerifyOptions.Anchors that name this org chain, against the file. AnchorsUnchecked counts
+	// the anchored heads of this org below the file's first chain_seq, which a partial file cannot show.
+	Anchors, AnchorsUnchecked int
 }
 
 // OK reports whether the file holds.
@@ -260,9 +338,18 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 		if h.OrgID != "" {
 			return res, fmt.Errorf("%w: an install export has an org_id", ErrExportFormat)
 		}
+		if opt.Anchors != nil {
+			return res, errors.New("audit export: --anchors is for an org export; this one is the install chain")
+		}
 	case ChainOrg:
 		if h.OrgID == "" {
 			return res, fmt.Errorf("%w: an org export has no org_id", ErrExportFormat)
+		}
+		if len(h.Anchors) > 0 {
+			return res, fmt.Errorf("%w: an org export has anchors", ErrExportFormat)
+		}
+		if a := opt.Anchors; a != nil && a.InstallID != h.InstallID {
+			return res, errors.New("audit export: the anchors are of another install")
 		}
 	default:
 		return res, fmt.Errorf("%w: chain %q", ErrExportFormat, h.Chain)
@@ -302,6 +389,18 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 
 	next := h.FromSeq
 	var failed bool
+	anchorEvents := map[int64]anchorEvent{} // install export: the audit.anchor events of the file
+	wanted := map[int64]bool{}              // org export: the anchored chain_seqs of this org
+	if opt.Anchors != nil {
+		for _, a := range opt.Anchors.Anchors {
+			for _, ah := range a.Heads {
+				if ah.OrgID == h.OrgID {
+					wanted[ah.ChainSeq] = true
+				}
+			}
+		}
+	}
+	orgHashes := map[int64][]byte{} // org export: the hash of each wanted chain_seq in the file
 	rows, last, prev, brk, err := walkFrom(start, startPrev, func(int64) ([]link, error) {
 		var page []link
 		for len(page) < verifyPage && !failed {
@@ -320,6 +419,14 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 				break
 			}
 			l := exportLink(tag, scope, ev)
+			if l.bad == "" {
+				if tag == installHashTag && ev.Action == ActionAnchor {
+					anchorEvents[ev.ChainSeq] = anchorEvent{id: ev.ID, summary: ev.SummaryText}
+				}
+				if wanted[ev.ChainSeq] {
+					orgHashes[ev.ChainSeq] = l.hash
+				}
+			}
 			// encoding/json keeps the last of two keys and another reader may keep the first, so a
 			// line with a key twice says two things: refuse it, as a summary with a key twice is (a key
 			// twice inside the summary is already reported as such). With chain_seq itself twice its
@@ -349,15 +456,126 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 	}
 	res.Break = headBreak(true, true, h.Head.ChainSeq, headHash, last, prev)
 	if res.Break == nil {
-		res.Break = checkAnchors(h, opt)
+		res.Break = checkAnchors(&res, opt, anchorEvents, orgHashes)
 	}
 	return res, nil
 }
 
-// checkAnchors is the hook for issue 6 (anchors) and issue 7 (checkpoints): it checks the anchor heads
-// the header carries, and the signed checkpoint opt names, against the verified chain. Neither exists
-// yet, so it checks nothing.
-func checkAnchors(ExportHeader, ExportVerifyOptions) *Break { return nil }
+// anchorEvent is an audit.anchor event line of an install export.
+type anchorEvent struct{ id, summary string }
+
+// checkAnchors checks the anchors of a verified chain (ADR 0100 decision 4.1); issue 7 (checkpoints)
+// adds the signed checkpoint opt names here. For an install export, every anchor event of the file has an
+// entry in the header, every entry is an anchor event of the file, and each entry's heads hash to the
+// heads_root and org_count the event commits to; the break is at the lowest anchor chain_seq that fails.
+// For an org export with opt.Anchors, each anchored head of this org that the file covers must hold the
+// anchored hash; the break is at the lowest anchored chain_seq that fails, which is the chain_seq the
+// database verifier names for the same fault.
+func checkAnchors(res *ExportResult, opt ExportVerifyOptions, events map[int64]anchorEvent, orgHashes map[int64][]byte) *Break {
+	h := res.Header
+	if h.Chain == ChainOrg {
+		return checkOrgAnchors(res, opt, orgHashes)
+	}
+	entries := map[int64]ExportAnchor{}
+	var brk *Break
+	fail := func(seq int64, format string, args ...any) {
+		if brk == nil || seq < brk.Seq {
+			brk = &Break{Seq: seq, Reason: fmt.Sprintf(format, args...)}
+		}
+	}
+	for _, a := range h.Anchors {
+		if _, dup := entries[a.ChainSeq]; dup {
+			fail(a.ChainSeq, "the header holds the anchor at chain_seq %d twice", a.ChainSeq)
+			continue
+		}
+		entries[a.ChainSeq] = a
+	}
+	for seq, ev := range events {
+		a, ok := entries[seq]
+		if !ok {
+			fail(seq, "the anchor event %s has no entry in the header: its anchored heads were removed from the file", ev.id)
+			continue
+		}
+		res.Anchors++
+		if a.EventID != ev.id {
+			fail(seq, "the header names event %s for this anchor, the chain has %s", a.EventID, ev.id)
+			continue
+		}
+		want, err := parseAnchorSummary(ev.summary)
+		if err != nil {
+			fail(seq, "%v", err)
+			continue
+		}
+		if a.OrgCount != want.OrgCount || a.HeadsRoot != want.HeadsRoot {
+			fail(seq, "the header's org_count and heads_root are not the ones the anchor event commits to")
+			continue
+		}
+		if len(a.Heads) != want.OrgCount {
+			fail(seq, "the anchor commits to %d org chains and the header holds %d heads for it", want.OrgCount, len(a.Heads))
+			continue
+		}
+		heads, err := anchorHeads(a.Heads)
+		if err != nil {
+			fail(seq, "%v", err)
+			continue
+		}
+		if hex.EncodeToString(HeadsRoot(h.InstallID, heads)) != want.HeadsRoot {
+			fail(seq, "the anchored heads do not match the heads_root the anchor event commits to: a head was forged or removed")
+		}
+	}
+	for seq := range entries {
+		if _, ok := events[seq]; !ok {
+			fail(seq, "the header names an anchor at chain_seq %d that is not an audit.anchor event of the chain: it was forged", seq)
+		}
+	}
+	return brk
+}
+
+// anchorHeads decodes the heads of a header entry; it refuses a malformed or repeated head.
+func anchorHeads(in []ExportAnchorHead) ([]AnchorHead, error) {
+	out := make([]AnchorHead, len(in))
+	seen := map[string]bool{}
+	for i, h := range in {
+		hash, err := decodeHash(h.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("anchored head of org %s: hash: %w", h.OrgID, err)
+		}
+		if h.ChainSeq < 1 || h.OrgID == "" || seen[h.OrgID] {
+			return nil, fmt.Errorf("anchored head of org %q at chain_seq %d is malformed or repeated", h.OrgID, h.ChainSeq)
+		}
+		seen[h.OrgID] = true
+		out[i] = AnchorHead{OrgID: h.OrgID, ChainSeq: h.ChainSeq, Hash: hash}
+	}
+	return out, nil
+}
+
+// checkOrgAnchors checks an org export against the anchors of a verified install export.
+func checkOrgAnchors(res *ExportResult, opt ExportVerifyOptions, orgHashes map[int64][]byte) *Break {
+	if opt.Anchors == nil {
+		return nil
+	}
+	h := res.Header
+	for _, a := range opt.Anchors.Anchors { // in anchor order: the oldest failing anchor wins
+		for _, ah := range a.Heads {
+			if ah.OrgID != h.OrgID {
+				continue
+			}
+			switch {
+			case ah.ChainSeq < h.FromSeq:
+				res.AnchorsUnchecked++
+			case ah.ChainSeq > res.End.Seq:
+				return &Break{Seq: ah.ChainSeq, Reason: fmt.Sprintf("anchor at install chain_seq %d: the file ends at chain_seq %d, before the anchored chain_seq %d: rows were removed behind the anchor, or the file is older than the anchor (export the org after the install export)", a.ChainSeq, res.End.Seq, ah.ChainSeq)}
+			default:
+				res.Anchors++
+				want, err := decodeHash(ah.Hash)
+				if err != nil || !bytes.Equal(orgHashes[ah.ChainSeq], want) {
+					return &Break{Seq: ah.ChainSeq, Reason: fmt.Sprintf("anchor at install chain_seq %d names another hash at chain_seq %d than the file has: the chain was rewritten behind the anchor", a.ChainSeq, ah.ChainSeq)}
+				}
+			}
+		}
+	}
+	return nil
+}
 
 // exportLink turns a line into a walker link: the stored values and the hash recomputed from the
 // line's content. A line the verifier cannot read as an event carries bad.
@@ -471,6 +689,16 @@ func WriteExportReport(w io.Writer, r ExportResult) bool {
 		return false
 	}
 	_, _ = fmt.Fprintf(w, "ok      %s (file): %d events, chain_seq %d to %d\n", name, r.Rows, r.Header.FromSeq, r.End.Seq)
+	if r.Anchors > 0 {
+		what := "match their events and heads_root"
+		if r.Header.Chain == ChainOrg {
+			what = "hold in this chain"
+		}
+		_, _ = fmt.Fprintf(w, "ok      %d anchors %s\n", r.Anchors, what)
+	}
+	if r.AnchorsUnchecked > 0 {
+		_, _ = fmt.Fprintf(w, "note    %d anchored heads of this org are below the file's first chain_seq and were not checked\n", r.AnchorsUnchecked)
+	}
 	if r.Partial && !r.PrevChecked {
 		_, _ = fmt.Fprintf(w, "note    the file starts at chain_seq %d: its first prev_hash is not checked (give the earlier export with --after)\n", r.Header.FromSeq)
 	}

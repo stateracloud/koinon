@@ -146,7 +146,10 @@ type config struct {
 	sessionMax  time.Duration
 
 	sweepInterval time.Duration
-	watchPoll     time.Duration
+	// anchorInterval is how often the org audit chains are anchored in the install chain (ADR 0100
+	// decision 4.1).
+	anchorInterval time.Duration
+	watchPoll      time.Duration
 
 	otlpAddr     string
 	otlpTokenDir string
@@ -242,6 +245,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 
 	fs.DurationVar(&c.sweepInterval, "run-cap-sweep-interval", 30*time.Second,
 		"how often to cancel runs past their wall-clock cap")
+	fs.DurationVar(&c.anchorInterval, "audit-anchor-interval", time.Hour,
+		"how often koinon-api anchors every org audit chain in the install audit chain (one anchor per interval across replicas; at least "+minAnchorInterval.String()+"; every anchor stores one row per org, so a short interval grows the install database fast)")
 	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
 		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
 	fs.StringVar(&c.otlpAddr, "otlp-addr", ":4318",
@@ -715,6 +720,14 @@ func serve(ctx context.Context, cfg config) error {
 	// identity). A missing grant is logged with the GRANT to run and shows as
 	// koinon_install_audit_writer_ok 0; it never fails the start (ADR 0100 decision 1.1a).
 	audit.RegisterInstallWriterMetric(reg)
+	// The anchor job (ADR 0100 decision 4.1): every replica polls, the first to find an anchor due writes
+	// it. A refused write (the writer role not granted yet) is logged and retried at the next poll.
+	if err := validateAnchorInterval(cfg.anchorInterval); err != nil {
+		return err
+	}
+	audit.RegisterAnchorMetric(reg)
+	anchorJob := &audit.AnchorJob{DB: pool, Interval: cfg.anchorInterval, Log: slog.Default()}
+	safego.GoOrStop(bgCtx, slog.Default(), "audit-anchor", stop, func(ctx context.Context) { anchorJob.Run(ctx) })
 	writerCheck := &audit.InstallWriterCheck{DB: pool, Log: slog.Default()}
 	writerCheck.Check(ctx)
 	safego.GoOrStop(bgCtx, slog.Default(), "install-audit-writer-check", stop, func(ctx context.Context) {
@@ -1116,6 +1129,19 @@ func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespac
 	created := err == nil // not AlreadyExists: another replica made it
 	key, err = get()
 	return key, created && err == nil, err
+}
+
+// minAnchorInterval is the shortest --audit-anchor-interval: every anchor is an install chain event and
+// one row per org in install_audit_anchor_heads (100 orgs every 5 minutes is about 10 million rows a year),
+// and every anchor is also a line in the install export's header.
+const minAnchorInterval = 5 * time.Minute
+
+// validateAnchorInterval rejects an --audit-anchor-interval below minAnchorInterval.
+func validateAnchorInterval(d time.Duration) error {
+	if d < minAnchorInterval {
+		return fmt.Errorf("--audit-anchor-interval %s is below the minimum %s", d, minAnchorInterval)
+	}
+	return nil
 }
 
 // minPricesRefreshInterval keeps a misconfigured interval (0, negative, minutes) from polling the public

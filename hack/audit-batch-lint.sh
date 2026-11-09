@@ -10,7 +10,7 @@
 # This lint covers what the compiler cannot see. It fails when Go code, tests included, does any of
 # this outside internal/audit and internal/db/store:
 #   1. writes the audit tables with SQL (INSERT INTO, UPDATE, DELETE FROM, TRUNCATE, COPY, MERGE INTO
-#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, bare,
+#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, install_audit_anchor_heads, bare,
 #      schema-qualified or quoted), in a Go file or in a sqlc query file of internal/db/queries (the
 #      store's queries only read the audit tables);
 #   2. has a Go string literal whose whole value is one of those table names, bare, schema-qualified
@@ -73,7 +73,7 @@ prog='
 use strict; use warnings;
 my ($owner, $wit, $allow) = map { qr/$_/ } @ENV{qw(OWNER_RE WRITEINTX_RE SQL_ALLOW_RE)};
 my $q = qr/\\?"/;                                      # a double quote, escaped inside a Go "string"
-my $tbl = qr/(?:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head)/;
+my $tbl = qr/(?:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head|install_audit_anchor_heads)/;
 my $name = qr/(?:$q$tbl$q|\b$tbl\b)/;                  # bare or quoted table name
 my $schema = qr/(?:$q\w+$q|\b\w+)\s*\.\s*/;            # optional schema qualifier, bare or quoted
 my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?|copy|merge\s+into)\s+(?:only\s+)?/i;

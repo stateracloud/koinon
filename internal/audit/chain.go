@@ -207,14 +207,19 @@ type InstallResult struct {
 	Rows int64
 	// Break is nil when the chain holds.
 	Break *Break
+	// Anchors is the number of anchors checked against the org chains (VerifyAnchors), and
+	// AnchorBreaks the ones that do not hold. Anchors are checked only over an intact install chain.
+	Anchors      int64
+	AnchorBreaks []AnchorBreak
 }
 
-// OK reports whether the chain holds.
-func (r InstallResult) OK() bool { return r.Break == nil }
+// OK reports whether the chain and its anchors hold.
+func (r InstallResult) OK() bool { return r.Break == nil && len(r.AnchorBreaks) == 0 }
 
 // VerifyInstall walks the install chain as VerifyOrg walks an org's, with the hash of tag
 // koinon.install_audit.v1. The install head is seeded by the migration, so a missing head is a
-// break even before the first event.
+// break even before the first event. When the chain holds it also checks every anchor against the
+// org chains (VerifyAnchors, ADR 0100 decision 4.1).
 func VerifyInstall(ctx context.Context, q *store.Queries) (InstallResult, error) {
 	var res InstallResult
 	rows, last, prev, brk, err := walk(func(after int64) ([]link, error) {
@@ -237,7 +242,11 @@ func VerifyInstall(ctx context.Context, q *store.Queries) (InstallResult, error)
 		return res, fmt.Errorf("audit verify: read the install chain head: %w", err)
 	}
 	res.Break = headBreak(true, err == nil, head.Seq, head.Hash, last, prev)
-	return res, nil
+	if res.Break != nil {
+		return res, nil
+	}
+	res.Anchors, res.AnchorBreaks, err = VerifyAnchors(ctx, q)
+	return res, err
 }
 
 // Verify checks the chain of org, or of every org when org is not valid.
@@ -282,10 +291,21 @@ func WriteReport(w io.Writer, results []OrgResult) bool {
 
 // WriteInstallReport prints the verdict on the install chain and reports whether it holds.
 func WriteInstallReport(w io.Writer, r InstallResult) bool {
-	if r.OK() {
+	if r.Break != nil {
+		_, _ = fmt.Fprintf(w, "BROKEN  install chain: first broken link at chain_seq %d: %s\n", r.Break.Seq, r.Break.Reason)
+		return false
+	}
+	if len(r.AnchorBreaks) > 0 {
 		_, _ = fmt.Fprintf(w, "ok      install chain: %d events\n", r.Rows)
+		for _, b := range r.AnchorBreaks {
+			_, _ = fmt.Fprintf(w, "BROKEN  %s\n", b)
+		}
+		return false
+	}
+	if r.Anchors > 0 {
+		_, _ = fmt.Fprintf(w, "ok      install chain: %d events, %d anchors checked against the org chains\n", r.Rows, r.Anchors)
 		return true
 	}
-	_, _ = fmt.Fprintf(w, "BROKEN  install chain: first broken link at chain_seq %d: %s\n", r.Break.Seq, r.Break.Reason)
-	return false
+	_, _ = fmt.Fprintf(w, "ok      install chain: %d events\n", r.Rows)
+	return true
 }

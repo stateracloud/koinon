@@ -553,6 +553,90 @@ long as the install chain is intact. An org created after the last anchor is sim
 an org in an anchor whose chain is gone (its head row missing) fails verification, as a deleted
 chain would.
 
+**Amendment 2026-11-08: how anchors are built (issue 6, #333).**
+
+- **Encoding.** `heads_root` is sha256 over the fields `koinon.install_audit.anchor.v1` (a tag), the
+  install ID, the number of heads, then for each head in org ID (lower-case UUID text) order the
+  triple `(org_id, chain_seq in decimal, hash in lower-case hex)`. Every field is length-prefixed
+  with 8 bytes as in decision 1.3. The tag and the install ID bind the root to this install. The
+  event's actor is `system koinon-api:audit-anchor`, its summary `after` holds `org_count` and
+  `heads_root`, and the side rows are inserted in the same batch.
+- **One writer per tick.** The anchor takes a domain lock, `pg_try_advisory_xact_lock(hashtext(
+  'koinon.audit_anchor'))`, before the install head (decision 1.7 lock order), and under it checks
+  that the newest anchor is older than the interval. A replica that loses the try skips the tick; one
+  that wins after another has just anchored sees a recent anchor and skips. `audit anchor` waits for
+  the lock instead and always writes. The heads are read with a plain READ COMMITTED read, so a head
+  an org write has not committed yet is not named.
+- **Settings.** `--audit-anchor-interval` (default 1h, at least 5m, because every anchor stores one row per org; a Helm-set setting recorded by
+  decision 3). The job polls at the lesser of the interval and 30s, so a restarted pod catches up. The
+  `koinon_audit_anchor_age_seconds` gauge is the age of the newest anchor by the database's clock. The gauge keeps its last value when
+  the read fails, so a database-down alert sits next to it.
+- **Grants.** `install_audit_anchor_heads` has the install chain's three guards (UPDATE, DELETE and
+  TRUNCATE are refused). `koinon_app` gets SELECT only, and `koinon_install_audit_writer` gets INSERT
+  and SELECT from `GrantInstallAuditWriter`, like the install tables.
+- **Verify.** `audit verify` recomputes each anchor's root and checks `org_count`, then checks each
+  anchored head against its org chain at the anchored `chain_seq`. An org is reported once, at its
+  oldest failing anchor, naming the org and the anchor. An org absent from an anchor is not an error.
+  `audit verify --org` reads only that org's anchored heads (an org-filtered query).
+- **The success line is a witness.** The log line of a written anchor ("anchored the org audit chains")
+  carries `chain_seq`, `orgs`, `heads_root` and `install_head`, the hash of the `audit.anchor` event
+  just written, in the hex of decision 1.3. They are hashes of audit chain state, not secrets. Shipped
+  off the cluster, these lines are a witness the database cannot rewrite, the way CT gossip and
+  CloudTrail's digests in S3 are: a rewrite of the install chain that keeps `audit verify` passing
+  still disagrees with the logged `install_head` and `heads_root`.
+- **Consistency before each write.** Under the anchor lock, before the new anchor is written, the
+  org chains are checked against the newest earlier anchor: each org's chain must still hold the
+  anchored hash at the anchored `chain_seq`, and no org's head may be below the anchored `chain_seq`.
+  This is the rule of C2SP tlog-checkpoint that a signer never signs a checkpoint inconsistent with one
+  it signed before. Only the newest anchor is read, one row per org: each earlier anchor was checked
+  when its successor was written, and `audit verify` covers the full history. A mismatch is logged once
+  per tick, naming the org (logs may; metrics may not), and counted in
+  `koinon_audit_anchor_inconsistent_total{reason="hash_changed"|"seq_regressed"}` (no org label). The
+  anchor is still written, so the chain of anchors goes on and `audit verify` reports the break.
+- **Future purge path (follow-up, not built here).** Orgs are soft-deleted today, and `audit_events` and
+  `audit_chain_heads` reference `orgs(id)` with no cascade, so an anchor whose org chain is gone fails
+  verification. A future hard purge must write an install-chain `org.purge` event in the same
+  transaction as the purge, under the anchor lock, naming the `org_id`, the last `chain_seq` and the
+  head hash. Verify would then accept a missing chain only when such an event follows every anchor that
+  names the org.
+- **Header size.** `exportAnchors` carries only the anchors whose event is in the export's
+  `from_seq`..head range, so export by period with `--from-seq`. A full export from seq 1 still puts
+  every anchor in one header line, about 110 MB a year at 100 orgs anchored hourly. Moving each
+  anchor's heads into stream lines next to their `audit.anchor` event is a follow-up before v0.3.
+- **Export.** An install export's header carries `anchors`: for each anchor event in the exported
+  range its `chain_seq`, event ID, `org_count`, `heads_root` and heads. `VerifyExport` checks the
+  header against the events (a missing, forged or duplicated entry, a wrong root or count) with no
+  database. `audit verify --file <org export> --anchors <install export>` then checks an org
+  export's hashes at the anchored `chain_seq` values. The install export verifies on its own first.
+  An org export with no `--anchors` is internally consistent only, and says so.
+
+*Prior art (sources read 2026-11-08).*
+
+- **Certificate Transparency** (RFC 9162, read from its source draft `draft-ietf-trans-rfc6962-bis-43` in google/certificate-transparency-rfcs). A signed tree head (`TreeHeadDataV2`: timestamp, tree_size, root_hash, extensions) commits to the whole log at one size. A client checks two heads against each other with a consistency proof.
+- **Trillian** (`types/logroot.go`). Its `LogRootV1` (TreeSize, RootHash, TimestampNanos, Metadata) is the same idea in a storage system.
+- **What anchors borrow.** One small value, the `audit.anchor` event with `heads_root` and `org_count` at an install `chain_seq`, commits to the state of every chain. A verifier later compares that commitment with the chains as they are now. Publishing the commitment outside the log's own storage is the CT gossip idea (monitors compare the heads they saw): the anchor log line carries `heads_root` and `install_head` so an operator can do that with their log pipeline.
+- **Where anchors differ.** Koinon's chains are linear hash chains, not Merkle trees, so there are no consistency proofs. A verifier re-reads each org chain at the anchored `chain_seq` and compares the hash. That is linear in chain length, which is fine at audit-log sizes and needs no tree storage.
+- **C2SP tlog-checkpoint and signed-note** (C2SP/C2SP `tlog-checkpoint.md`, `signed-note.md`). A checkpoint is origin, tree size and root hash lines, then em-dash signature lines with a 4-byte key ID. A signer must not sign a checkpoint that is inconsistent with one it signed before. Anchoring follows that rule by checking the org chains against the newest earlier anchor before it writes (the consistency bullet above). Decision 4.2 (issue 7) borrows the note layout. Anchors do not use it because they are unsigned and live in the database.
+- **AWS CloudTrail log file integrity digests** (awsdocs/aws-cloudtrail-user-guide, `cloudtrail-log-file-validation-digest-file-structure.md`). An hourly digest lists each log file's `hashValue` and links to the previous digest through `previousDigestHashValue` and `previousDigestSignature`. A digest is delivered even for an hour with no activity, with `"logFiles": []`.
+  - Anchors borrow the cadence (hourly by default) and the rule that an anchor is written every interval whether or not any head moved, so a missing anchor is itself a signal. That is what the `koinon_audit_anchor_age_seconds` gauge alerts on.
+  - Anchors also borrow the shape: one record naming the hash of every covered unit (here, every org chain head).
+  - They differ in two ways. The link to the previous anchor is the install chain itself, not a field. The record is not signed; signing is issue 7, and it is what moves trust outside the database the way CloudTrail's signed digest in S3 does.
+  - Until then the success log line gives a cheaper off-database copy: shipped to a log store the database role cannot write, `heads_root` and `install_head` play the part of the digest delivered to S3.
+- **Postgres audit projects.** pgMemento (`src/SCHEMA.sql`, `src/LOG_UTIL.sql`) and supabase/supa_audit, now archived, record changes with triggers into a log table. Neither hashes rows; pgMemento's `row_log` has no hash column.
+  - Koinon's org chains already go further: hash-linked rows behind append-only triggers.
+  - No project we read commits several chains to one head. That is what an anchor adds.
+
+*Seams shared with issue 7 (signed checkpoints), not built here.* (1) Checkpoints sign the install
+head after an anchor, so the anchor event is what a checkpoint's one hash covers: `audit.checkpoint`
+follows `audit.anchor` and the anchor job is the natural place to call the signer. (2) The advisory
+lock and the interval check are reusable: a checkpoint is written under the same lock, so one replica
+signs per tick. (3) `audit verify --file ... --anchors` is where `--checkpoint` and `--public-key`
+join: the anchors in an install export header are the thing a checkpoint pins from outside the
+cluster. (4) The export header grows by an optional `checkpoints` list in the same way as `anchors`
+(`omitempty`, so v1 files stay valid). (5) `koinon_audit_checkpoint_age_seconds` sits beside
+`koinon_audit_anchor_age_seconds` in the same registration helper. None of these change the
+encoding above.
+
 **4.2 Signed checkpoints.** After each anchor, `koinon-api` signs the install head. The checkpoint is
 a signed note in Koinon's own format. It borrows the layout of a C2SP signed note (origin line, body,
 signature lines), but it is not a transparency-log checkpoint in the tlog sense: its body is a
@@ -624,7 +708,9 @@ Run-content retention (ADR 0023, 2026-10-31 amendment) still never touches audit
 - `koinon_install_audit_writer_ok` (gauge, no labels, koinon-api only): 1 while koinon-api's login
   inherits the writer role, 0 otherwise (decision 1.1a, maintainer decision 2026-11-07);
 - `koinon_audit_anchor_age_seconds` (gauge, no labels, from v0.1), so an alert can say anchoring
-  stopped, and, with checkpoints, `koinon_audit_checkpoint_age_seconds` (gauge, no labels).
+  stopped, and, with checkpoints, `koinon_audit_checkpoint_age_seconds` (gauge, no labels);
+- `koinon_audit_anchor_inconsistent_total{reason="hash_changed"|"seq_regressed"}` (counter, from
+  v0.1): orgs found inconsistent with the newest earlier anchor; alert on any increase.
 
 ## Alternatives considered
 
