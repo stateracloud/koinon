@@ -192,10 +192,11 @@ quickstart_conclusion() { # the newest check run named quickstart on SHA that is
 	# GitHub returns at most 1,000 results for a filtered workflow-run list: at that size a bisect run
 	# could hide beyond the cap, so the gate fails closed.
 	local bisect total n
-	# Per page, a first line `C total_count runs_in_page`, then one id per bisect run on that page.
+	# Per page, a first line `C total_count`, then `R id` per run and `B id` per bisect run.
 	bisect=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?head_sha=$SHA&per_page=100" \
-		--jq '"C \(.total_count // 0) \(.workflow_runs | length)", (.workflow_runs[] | select((.display_title // "") | test("^e2e-kind \\(.+\\) bisect ")) | .id)') || return 2
-	read -r total n < <(awk '$1 == "C" { if ($2 > t) t = $2; c += $3 } END { print t + 0, c + 0 }' <<<"$bisect")
+		--jq '"C \(.total_count // 0)", (.workflow_runs[] | "R \(.id)", (select((.display_title // "") | test("^e2e-kind \\(.+\\) bisect ")) | "B \(.id)"))') || return 2
+	# n counts distinct run ids: a run that moved between pages while paging is read twice, not two runs.
+	read -r total n < <(awk '$1 == "C" { if ($2 > t) t = $2 } $1 == "R" && !($2 in seen) { seen[$2] = 1; c++ } END { print t + 0, c + 0 }' <<<"$bisect")
 	if ((total >= 1000 || n >= 1000)); then
 		echo "release gate: $SHA has 1000 or more e2e-kind runs (GitHub's cap for a filtered run list): cannot rule out a bisect run" >&2
 		return 2
@@ -204,7 +205,7 @@ quickstart_conclusion() { # the newest check run named quickstart on SHA that is
 		echo "release gate: read $n of $total e2e-kind runs on $SHA: cannot rule out a bisect run" >&2
 		return 2
 	fi
-	bisect=$(grep -v '^C ' <<<"$bisect" || true)
+	bisect=$(awk '$1 == "B" { print $2 }' <<<"$bisect")
 	gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
 		--jq '.check_runs[] | [.name, .started_at, (.conclusion // "pending"), ((.details_url // "") | capture("/runs/(?<r>[0-9]+)") | .r) // ""] | @tsv' |
 		awk -F'\t' -v ids="$(tr '\n' ' ' <<<"$bisect")" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) skip[a[i]] = 1 }

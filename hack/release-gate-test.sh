@@ -31,10 +31,10 @@ EOF
 cat >"$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 shift # api
-path= expr=.
+path= expr=. pag=
 while (($#)); do
 	case $1 in
-	--paginate) ;;
+	--paginate) pag=1 ;;
 	--jq) expr=$2; shift ;;
 	*) path=$1 ;;
 	esac
@@ -56,7 +56,7 @@ repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.
 esac
 # the workflow runs of one commit: none unless a case adds some
 [[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
-# a second page (mg-runs-p2.json) follows the first when a case adds one, as --paginate would
+# a second page (mg-runs-p2.json) follows the first only when --paginate is given and a case adds one
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
 # the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
 if [[ $f == mg-runs.json ]]; then
@@ -67,6 +67,7 @@ if [[ $f == mg-runs.json ]]; then
 	done
 	for pg in "$FX/$f" "$FX/mg-runs-p2.json"; do
 		[[ -f $pg ]] || continue
+		[[ $pg == */mg-runs-p2.json && -z $pag ]] && continue
 		jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$pg" |
 			jq '.total_count //= (.workflow_runs | length)' | jq -r "$expr"
 	done
@@ -414,6 +415,19 @@ jq '.total_count = 1000' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-run
 jq '.total_count = 1000' "$FX/mg-runs-p2.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs-p2.json"
 check "quickstart: total_count at GitHub's 1000 cap fails closed" "$(gate_rc)" 1
 check "...with a clear message (cap)" "$(grep -c '1000 or more e2e-kind runs' "$tmp/err")" 1
+# the runs read equal total_count = 1000: only the cap check can stop it
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 1000 | .workflow_runs = [range(1000) as $i | {id: (2000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+check "quickstart: 1000 runs read, total_count 1000 fails closed" "$(gate_rc)" 1
+check "...with the cap message" "$(grep -c '1000 or more e2e-kind runs' "$tmp/err")" 1
+# a run inserted while paging repeats on page 2: the distinct ids read stay below total_count, so one run went unread
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 102 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+jq --arg h "$sha" '.total_count = 102 | .workflow_runs = [range(98; 100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs-p2.json"
+check "quickstart: a duplicate across pages does not count as a run read" "$(gate_rc)" 1
+check "...with the unread message" "$(grep -c 'read 100 of 102 e2e-kind runs' "$tmp/err")" 1
 
 new_case
 rm "$FX/rules.json"
