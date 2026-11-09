@@ -40,6 +40,8 @@ while (($#)); do
 	esac
 	shift
 done
+query=
+[[ $path == *\?* ]] && query=${path#*\?}
 path=${path%%\?*}
 case $path in
 repos/o/r) f=repo.json ;;
@@ -53,6 +55,17 @@ repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
+# the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
+if [[ $f == mg-runs.json ]]; then
+	ev= st=
+	IFS='&' read -ra kv <<<"$query"
+	for p in "${kv[@]}"; do
+		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; esac
+	done
+	jq --arg ev "$ev" --arg st "$st" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st)))' "$FX/$f" |
+		jq -r "$expr"
+	exit
+fi
 exec jq -r "$expr" "$FX/$f"
 EOF
 chmod +x "$tmp/bin/git" "$tmp/bin/gh"
@@ -249,10 +262,10 @@ qs_case() { # a fresh case whose tagged commit has the given quickstart runs onl
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	run_on "$sha" go success
 }
-mg_run() { # <run id> <head sha> <tree of that head> [quickstart conclusion]: a green merge_group run
+mg_run() { # <run id> <head sha> <tree of that head> [quickstart conclusion] [event] [run conclusion]: a merge_group run, green by default
 	local f=$FX/mg-runs.json
 	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
-	jq --argjson i "$1" --arg h "$2" '.workflow_runs += [{id: $i, head_sha: $h, event: "merge_group", conclusion: "success"}]' "$f" >"$f.new"
+	jq --argjson i "$1" --arg h "$2" --arg e "${5:-merge_group}" --arg c "${6:-success}" '.workflow_runs += [{id: $i, head_sha: $h, event: $e, conclusion: $c}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
 	echo "{\"sha\":\"$2\",\"tree\":{\"sha\":\"$3\"}}" >"$FX/commit-$2.json"
 	echo "{\"jobs\":[{\"id\":1,\"name\":\"decide\",\"conclusion\":\"success\"},{\"id\":2,\"name\":\"quickstart\",\"conclusion\":\"${4:-success}\"}]}" >"$FX/jobs-$1.json"
@@ -307,6 +320,37 @@ mg_run 77 mgsha tree1
 echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
 rm "$FX/jobs-77.json"
 check "quickstart: a queue run whose jobs cannot be read fails" "$(gate_rc)" 1
+
+# the query parameters are honoured: a failed run and a run of another event are not queue evidence
+qs_case
+mg_run 77 mgsha tree1 success merge_group failure
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a failed merge_group run on the same tree fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1 success workflow_dispatch
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a green run of another event on the same tree fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1 success workflow_dispatch
+mg_run 78 mgsha2 tree1 success merge_group failure
+mg_run 79 mgsha3 tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a good run among filtered-out ones passes" "$(gate_rc)" 0
+check "...and names the good run" "$(grep -c 'merge queue run 79' "$tmp/out")" 1
+# the bound: only the newest QUEUE_RUN_LIMIT runs are read
+qs_case
+mg_run 80 mgsha4 tree2
+mg_run 81 mgsha5 tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a queue run beyond the limit is not looked at" "$(QUEUE_RUN_LIMIT=1 gate_rc)" 1
+# #453: a bisect dispatch (inputs.commit) is named `quickstart (commit)` and is no evidence for the head
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z
+run_on "$sha" "quickstart (commit)" success 2026-01-03T01:00:00Z
+check "quickstart: a green bisect dispatch does not excuse a red main head" "$(gate_rc)" 1
+qs_case
+run_on "$sha" "quickstart (commit)" success
+check "quickstart: only a bisect dispatch is no evidence" "$(gate_rc)" 1
 
 new_case
 rm "$FX/rules.json"

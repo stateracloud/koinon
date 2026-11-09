@@ -419,7 +419,9 @@ naming the merge (or the suspects); it dispatches every candidate with `backup_r
 nightly that went red in the backup-restore step reproduces: fix forward within 2 hours, otherwise revert it. RC and
 release tags are cut only from a commit whose `quickstart` job concluded success
 (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it). The gate ignores
-`skipped` `quickstart` check runs (the push run after a queue merge skips it) and also accepts a green `merge_group`
+`skipped` `quickstart` check runs (the push run after a queue merge skips it), does not count a dispatch with
+`inputs.commit` (a bisect candidate: its job is named `quickstart (commit)`, #453), reads only the newest
+`QUEUE_RUN_LIMIT` (30) merge queue runs, and also accepts a green `merge_group`
 `quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
 ## Required status checks
