@@ -66,8 +66,10 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 	if [[ -z ${2:-} ]] && has_failure "$log"; then
 		return
 	fi
-	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|is the docker daemon running|docker is not available' "$log"; then
+	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
+	elif grep -qE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)' "$log"; then
+		echo "network denied"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
 	elif grep -qiE 'operation not permitted' "$log"; then

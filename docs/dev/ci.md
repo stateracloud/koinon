@@ -214,7 +214,7 @@ after the driver: it runs the commands of `docs/site/src/content/docs/guides/bac
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
+observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). If yes, the PR's own run already runs the quickstart on GitHub;
 a green `e2e-lab` commit status (an external e2e run that passed on this commit) is enough to merge
 once the PR's own quickstart has finished (a flaky red one does not hide a green external run). Without
 one, wait
@@ -244,8 +244,8 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 `hack/lane-gates.sh [<base>]` (base defaults to `origin/main`) runs the gates your change touches and
 blocks until it has a verdict: the gates of `hack/preflight.sh` that the diff selects, plus the heavy
-CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`; the e2e is not part
-of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
+CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`, each from its
+`lane` line in `hack/paths.rules`; the e2e is not part of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
 else: no lab, no external-run status. It prints one line per gate,
 
 ```
@@ -255,7 +255,10 @@ gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason="..."] log=<path
 and exits 1 when a gate failed, 3 when none failed but a gate could not run on this machine, 0 when
 all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
 requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
-requirement exists. It never says `ok` unless every selected gate passed and at least one ran: a
+requirement exists. A gate is `notrun` when its log shows the machine denied it and no failure
+marker (`--- FAIL`, `[FAIL]`, a compile error) is in it: Docker (daemon down, socket denied), the
+network (proxy refusal, no such host), or the sandbox (`deny(`, `operation not permitted`). A real
+test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
@@ -271,6 +274,44 @@ old issue 594: every job pays a fixed start-up cost) and the other workflows (`d
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
+
+### Path rules
+
+One source, `hack/paths.rules`. Which paths turn on which job or gate is data, in one file, `hack/paths.rules`, read through
+`hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
+e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
+`lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
+graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+that file and nowhere else.
+
+- **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
+  (Markdown, `docs/`, `web/`, `.github/`, top-level `hack/*.sh`, `hack/hooks/`,
+  `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
+  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
+  `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
+  the `scripts` job, which is always on, so a shell-only change runs them and not go-test.
+- **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
+  Makefile, `go.mod` and `go.sum` turn every job on.
+- **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
+  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
+  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
+  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
+  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
+  list cannot name, so it is not done.
+- **Preflight equals CI.** The gates `generate`, `chart`, `web` and `docs` use the CI job's rule. The
+  `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
+  checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
+  step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
+  `hack/paths-test.sh` fails when a `run: hack/...` step of `ci.yml` is in neither list.
+- **Tests.** `hack/paths-test.sh` (reader, jobs against `ci.yml`, example change sets through
+  `ci-changes.sh` and `needs-e2e.sh`), `hack/ci-changes-test.sh` (table and the inputs derived from
+  the Makefile and generator configs), `hack/needs-e2e-test.sh` (fixtures, the `ko build` line of
+  `run.sh`). There is no test that compares two copies of a pattern because there is one.
+
+Prior art: `dorny/paths-filter` keeps all filters in one YAML file that a job reads; Bazel and Nx
+derive "affected" from the build graph instead of lists; we take both: one data file for the rules,
+`go list` for the two Go suites whose imports change.
 
 ### go-test satisfied by an external run (old issue 610)
 
@@ -484,8 +525,9 @@ main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` 
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
-head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it
-with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
+head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs `hack/needs-e2e.sh`, which reads
+`hack/paths.rules`, and a change that rule does not select needs a dispatch:
+`gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 
 `hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a

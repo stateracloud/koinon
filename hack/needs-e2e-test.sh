@@ -90,6 +90,7 @@ expect 0 Makefile
 expect 0 go.work
 expect 1 hack/chart-check.sh
 expect 1 hack/needs-e2e.sh
+expect 1 hack/paths.rules                          # the rules themselves are not an e2e input (ci-changes runs everything for them)
 expect 1 .github/workflows/ci.yml
 expect 1 internal/zzz-new-package/x.go            # a package no binary imports
 expect 1 internal/auth/testdata/fixture.json
@@ -98,8 +99,8 @@ expect 1 # empty change
 
 # The binaries listed in the rule are the ones run.sh builds.
 want=$(grep -oE '\./cmd/koinon-[a-z]+' test/e2e/run.sh | sort -u | tr '\n' ' ')
-have=$(sed -n '/^BINARIES=(/,/^)/p' hack/needs-e2e.sh | grep -oE '\./cmd/koinon-[a-z]+' | sort -u | tr '\n' ' ')
-[[ $want == "$have" ]] || { echo "FAIL: BINARIES ($have) differ from run.sh's ko build ($want)" >&2; fail=1; }
+have=$(grep -E '^e2e-binary ' hack/paths.rules | grep -oE '\./cmd/koinon-[a-z]+' | sort -u | tr '\n' ' ')
+[[ $want == "$have" ]] || { echo "FAIL: BINARIES in hack/paths.rules ($have) differ from run.sh's ko build ($want)" >&2; fail=1; }
 
 # Every hack/ path run.sh calls must be matched.
 while IFS= read -r p; do
@@ -125,7 +126,7 @@ printf 'module example.invalid/m\n\ngo 1.21\n' >"$tmp/go.mod"
 while read -r b; do
   mkdir -p "$tmp/cmd/$b"
   printf 'package main\n\nfunc main() {}\n' >"$tmp/cmd/$b/main.go"
-done < <(sed -n '/^BINARIES=(/,/^)/p' hack/needs-e2e.sh | grep -oE 'koinon-[a-z]+')
+done < <(grep -E '^e2e-binary ' hack/paths.rules | grep -oE 'koinon-[a-z]+')
 mkdir -p "$tmp/test/e2e" "$tmp/charts/k/templates" "$tmp/docs"
 printf 'package e2e\n' >"$tmp/test/e2e/e2e.go"
 echo a >"$tmp/charts/k/templates/job.yaml"

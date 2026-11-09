@@ -54,6 +54,9 @@ ok) echo "made $1" ;;
 fail) echo "assertion failed in $1"; exit 1 ;;
 nodocker) echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"; exit 1 ;;
 sandbox) echo "open /x: operation not permitted"; exit 1 ;;
+dockerperm) echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"; exit 1 ;;
+network) echo "go: github.com/x/y@v1: Get \"https://proxy.golang.org/x\": proxyconnect tcp: CONNECT tunnel failed, response 403"; exit 1 ;;
+networkfail) printf -- '--- FAIL: TestX (0.1s)\ndial tcp: lookup proxy.golang.org: no such host\n'; exit 1 ;;
 esac
 EOF
 chmod +x "$tmp/preflight" "$tmp/changes" "$tmp/make"
@@ -122,6 +125,12 @@ run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=nodocker
 expect "job no docker" 3 '^gate=escape rc=1 .*verdict=notrun reason="docker unavailable"'
 run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=sandbox
 expect "job sandbox" 3 '^gate=escape rc=1 .*verdict=notrun reason="sandbox denial"'
+run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=dockerperm
+expect "job docker socket denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="docker unavailable"'
+run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=network
+expect "job network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
+expect "a real failure beats a network line" 1 '^gate=escape rc=1 .*verdict=fail'
 
 # A failing log that merely says "Sandbox admission policy" is a failure, not a machine problem.
 cat >"$tmp/make-sbx" <<'EOF2'
