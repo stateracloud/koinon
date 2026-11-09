@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # E1 prerequisites (ADR 0049: not on the quickstart clock): a single-node kind cluster with
-# kube-network-policies, Agent Sandbox v1.0.7, RuntimeClass `runc`, OpenShell 0.1.5 and the
+# kube-network-policies, Agent Sandbox v1.0.7, RuntimeClass `runc`, OpenShell 0.1.7 and the
 # CloudNativePG operator. Taken from spike S1 (docs/spikes/kind.md), plus CNPG.
 # Every kubectl/helm call names --context kind-$CLUSTER; nothing else is touched.
 
@@ -20,8 +20,8 @@ AS_VERSION=v1.0.7
 AS_SHA256=136c10c9347cb5a6740b351444cae82f404e883c3f520272257ba785f2af0da8
 AS_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AS_VERSION}/sandbox-with-extensions.yaml"
 
-OS_VERSION=0.1.5
-OS_DIGEST=sha256:e88977ce447fd31c6278697af22f8437b59eae42c9fae9c0e480498bf59d3129
+OS_VERSION=0.1.7
+OS_DIGEST=sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901
 
 # kind's kindnet does not enforce NetworkPolicy (spike S1); the chart's policies need an engine.
 KNP_VERSION=v1.1.2
@@ -42,7 +42,6 @@ trap 'rm -rf "$tmp"' EXIT
 t0=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
-sha256() { if command -v sha256sum >/dev/null; then sha256sum -c -; else shasum -a 256 -c -; fi; }
 
 step "kind create cluster $CLUSTER"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
@@ -53,23 +52,20 @@ fi
 done_step kind
 
 step "kube-network-policies $KNP_VERSION"
-curl -fsSL -o "$tmp/knp.yaml" "$KNP_URL"
-echo "${KNP_SHA256}  $tmp/knp.yaml" | sha256
+"$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"
 "${K[@]}" apply -f "$tmp/knp.yaml"
 "${K[@]}" -n kube-system rollout status ds/kube-network-policies --timeout=120s
 done_step network-policies
 
 step "CloudNativePG $CNPG_VERSION"
-curl -fsSL -o "$tmp/cnpg.yaml" "$CNPG_URL"
-echo "${CNPG_SHA256}  $tmp/cnpg.yaml" | sha256
+"$here/../../../hack/fetch-pinned.sh" "$CNPG_URL" "$CNPG_SHA256" "$tmp/cnpg.yaml"
 sed -i.bak "s#image: ghcr.io/cloudnative-pg/cloudnative-pg:${CNPG_VERSION}\$#image: ghcr.io/cloudnative-pg/cloudnative-pg:${CNPG_VERSION}@${CNPG_IMAGE_DIGEST}#" "$tmp/cnpg.yaml"
 grep -q "@${CNPG_IMAGE_DIGEST}" "$tmp/cnpg.yaml" || { echo "CNPG image pin not applied" >&2; exit 1; }
 "${K[@]}" apply --server-side -f "$tmp/cnpg.yaml"
 done_step cnpg-apply
 
 step "Agent Sandbox $AS_VERSION"
-curl -fsSL -o "$tmp/agent-sandbox.yaml" "$AS_URL"
-echo "${AS_SHA256}  $tmp/agent-sandbox.yaml" | sha256
+"$here/../../../hack/fetch-pinned.sh" "$AS_URL" "$AS_SHA256" "$tmp/agent-sandbox.yaml"
 "${K[@]}" apply --server-side -f "$tmp/agent-sandbox.yaml"
 "${K[@]}" -n agent-sandbox-system rollout status deploy/agent-sandbox-controller --timeout=180s
 done_step agent-sandbox

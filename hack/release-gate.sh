@@ -168,12 +168,58 @@ if [[ $got == skipped ]]; then
 fi
 # The kind e2e is not a required check (it is batched on main, and `e2e result` passes when it is
 # skipped), so a release asks for the `quickstart` job itself to have concluded success on this very
-# commit. If main's batched run skipped or never reached it, dispatch e2e-kind on the commit first.
-got=$(conclusion_of "$SHA" quickstart)
+# commit. Two things widen that, both fail-closed (#444, ADR 0102):
+#   - A `skipped` quickstart check run is no evidence either way: a queue merge fast-forwards main to the
+#     queue commit, whose merge_group run passed, and the push run then adds a skipped quickstart
+#     (hack/e2e-decide.sh, the push skip). The newest run that is not skipped decides; a failure or a
+#     cancellation there fails the gate.
+#   - With no such run on the commit, a green merge_group `quickstart` job whose head commit has the same
+#     tree as the tagged commit is the evidence (the tree is what the e2e tested).
+# If neither exists, dispatch e2e-kind on the commit first.
+quickstart_conclusion() { # the newest check run named quickstart on SHA that is not skipped, or empty
+	gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" 		--jq '.check_runs[] | [.name, .started_at, (.conclusion // "pending")] | @tsv' |
+		awk -F'\t' '$1 == "quickstart" && $3 != "skipped" && $2 >= t { t = $2; c = $3 } END { print c }'
+}
+# queue_quickstart_run: prints the id of a green merge_group e2e run whose quickstart job succeeded on a
+# commit with SHA's tree. Exit 0 found, 1 none, 2 an API call failed.
+queue_quickstart_run() {
+	local tree runs id head htree ok
+	tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha) || return 2
+	[[ -n $tree ]] || return 2
+	runs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?event=merge_group&status=success&per_page=30" \
+		--jq '.workflow_runs[] | [.id, .head_sha] | @tsv') || return 2
+	while IFS=$'\t' read -r id head; do
+		[[ -n ${id:-} ]] || continue
+		htree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq .tree.sha) || return 2
+		[[ $htree == "$tree" ]] || continue
+		ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
+			--jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success") | .id') || return 2
+		if [[ -n $ok ]]; then
+			echo "$id"
+			return 0
+		fi
+	done <<<"$runs"
+	return 1
+}
+got=$(quickstart_conclusion)
 if [[ $got == success ]]; then
 	echo "ok: kind e2e (quickstart)"
+elif [[ -z $got ]]; then
+	qrc=0
+	qrun=$(queue_quickstart_run) || qrc=$?
+	case $qrc in
+	0) echo "ok: kind e2e (quickstart passed in merge queue run $qrun on a commit with this commit's tree)" ;;
+	2)
+		echo "FAIL: kind e2e (quickstart job): no run on this commit, and the merge queue runs could not be read" >&2
+		failed=1
+		;;
+	*)
+		echo "FAIL: kind e2e (quickstart job): no run on this commit and no green merge queue run on its tree; run the e2e-kind workflow on $SHA" >&2
+		failed=1
+		;;
+	esac
 else
-	echo "FAIL: kind e2e (quickstart job): ${got:-no run on this commit}; run the e2e-kind workflow on $SHA" >&2
+	echo "FAIL: kind e2e (quickstart job): $got; run the e2e-kind workflow on $SHA" >&2
 	failed=1
 fi
 ((failed == 0)) || fail "required checks have not all succeeded on $SHA"

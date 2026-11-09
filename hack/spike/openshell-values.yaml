@@ -1,4 +1,4 @@
-# Spike values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.5).
+# Spike values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.7).
 # See docs/spikes/openshell.md, "OpenShell configuration".
 server:
   telemetryEnabled: false

@@ -37,7 +37,7 @@ import (
 //   - the same endpoints as the sandbox policy entry github_read, enforced, so the grant is
 //     visible in the sandbox policy and updated in place when the repositories change.
 //
-// What OpenShell 0.1.5 cannot express is listed in connectors/README.md.
+// What OpenShell 0.1.7 cannot express is listed in connectors/README.md.
 const (
 	githubRule       = "github_read"
 	githubCredential = "github_token"

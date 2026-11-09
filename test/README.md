@@ -28,7 +28,9 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
     Secret, so it needs no registry and no home lab (Docker, kind, kubectl, jq). kind runs
     sandboxes under runc: the Kata guest case and the cases that need extra fixtures (the model
     gateway stand-in, the live admission case) skip with their reasons. About 2.5 minutes; 20 cases
-    pass, 4 skip.
+    pass, 4 skip. The kind e2e runs the same cases (except the Gitea ones) against the chart
+    install, where the chart's sandbox admission policy is live and the live admission case runs
+    and must not skip (`test/e2e/escape-openshell.sh`, #109); about 4 to 8 minutes more.
   - `make test-escape` (label `openshell`): sandboxes on any real OpenShell gateway you point it at.
     An agent sandbox as the reconciler renders it (agentgateway key and GitHub read grant
     attached) has no direct egress, no DNS but the sandbox's own, no cloud metadata, no

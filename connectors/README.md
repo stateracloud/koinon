@@ -69,9 +69,10 @@ and `GET /repos/{owner}/{repo}` and `/repos/{owner}/{repo}/**` on `api.github.co
 explicitly: `git-receive-pack` (push, including its `info/refs` discovery) and `POST`, `PUT`,
 `PATCH`, `DELETE` on the REST API. Everything else is denied by default.
 
-### What OpenShell 0.1.5 cannot express
+### What OpenShell 0.1.7 cannot express
 
-Checked against the vendored protos and the policy schema reference at tag v0.1.5:
+Checked against the vendored protos and the policy schema reference at tag v0.1.7
+(`docs/how-it-works/policies/` is unchanged since v0.1.5):
 
 - **Case.** REST path globs are case-sensitive; GitHub owner and repository names are not. Only
   the spelling stored in the binding is allowed (other spellings are denied, which fails closed).
@@ -92,8 +93,9 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
   `service=git-receive-pack` keeps push denied either way.
 - **Responses.** OpenShell inspects requests, not responses; GitHub's own token scoping is what
   keeps a `GET` under `/repos/{owner}/{repo}/**` to data the token may read.
-- **Credential placement.** OpenShell 0.1.5 injects static credentials only by rewriting the
-  placeholder where the client puts it (headers, including Basic and Bearer). Every flavor image
+- **Credential placement.** OpenShell 0.1.7 injects static credentials only by rewriting the
+  placeholder where the client puts it (headers, including Basic and Bearer, and URL path and
+  query values; `crates/openshell-core/src/secrets.rs`, unchanged since 0.1.5). Every flavor image
   therefore ships `koinon-git-credential` (`flavors/common`), configured for
   `https://github.com` in the read-only `/etc/koinon/git/config` (included from
   `/etc/gitconfig`): it answers `x-access-token` and the placeholder from `$GITHUB_TOKEN`, git

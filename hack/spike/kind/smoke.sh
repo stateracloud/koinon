@@ -4,7 +4,7 @@
 # Spike S1: create one sandbox on the kind cluster from up.sh, run
 # `exec --no-tty -- echo ok`, and check a stdin round-trip through `cat`.
 #
-# Needs the OpenShell CLI 0.1.5 as $OPENSHELL (or on PATH). CLI state goes to a
+# Needs the OpenShell CLI 0.1.7 as $OPENSHELL (or on PATH). CLI state goes to a
 # temporary XDG_CONFIG_HOME, never to the user's own config.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.

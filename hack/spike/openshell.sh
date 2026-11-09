@@ -8,8 +8,8 @@
 
 set -euo pipefail
 
-VERSION=0.1.5
-DIGEST=sha256:e88977ce447fd31c6278697af22f8437b59eae42c9fae9c0e480498bf59d3129
+VERSION=0.1.7
+DIGEST=sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901
 cd "$(dirname "$0")"
 
 helm --kube-context "${SPIKE_CONTEXT:?set SPIKE_CONTEXT}" upgrade --install openshell \

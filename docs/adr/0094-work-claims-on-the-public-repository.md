@@ -5,7 +5,7 @@
   - outsiders claim only on `good first issue` or `help wanted` issues;
   - leases of 3 days for people and 14 days for outsiders, with a day-10 reminder and a cap of 2;
   - the conflict-only check;
-  - no kind e2e in the queue (PR-head evidence plus the main backstop);
+  - no kind e2e in the queue (PR-head evidence plus the main backstop); amended by [0102](0102-merge-queue-runs-the-kind-e2e.md);
   - `/release` by the holder or any person;
   - `next` and `take` skip issues assigned to another person;
   - the App retired, with no fallback unless procoduck asks later;
@@ -13,6 +13,7 @@
 
   Probe 3 is skipped; decision 1 has a built-in fallback instead.
 - Date: 2026-11-05
+- Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e)
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
@@ -245,7 +246,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   `hack/ci-required-test.sh` learns to fail a required check whose workflow has no `merge_group`
   trigger, the same way it fails an unlisted job. This keeps the AGENTS.md rule that a required job
   must report everywhere.
-- **`e2e result` on the queue commit.** On `merge_group` the `decide` job never starts the kind e2e,
+- **`e2e result` on the queue commit.** (Amended by [0102](0102-merge-queue-runs-the-kind-e2e.md): the queue
+  now runs the kind e2e. The text below is the original decision.) On `merge_group` the `decide` job never starts the kind e2e,
   and `e2e result` runs the base's `hack/e2e-gate.sh` against **the head SHA of pull request `<N>`**,
   not the queue commit.
   - A needs-e2e pull request still needs a green `quickstart` or `e2e-lab` on its own head before it
@@ -395,7 +397,7 @@ No result changes a decision.
 - **Auto-claim when a pull request opens.** Another writer with a write token on
   `pull_request_target`, for no gain: `next` and `take` already skip issues with an open pull request.
 - **Run the kind e2e in the merge queue.** It is exact, but costs 15-25 minutes per needs-e2e entry
-  and holds the queue. Deferred, with the exit condition in decision 4.
+  and holds the queue. Deferred here; adopted later by [0102](0102-merge-queue-runs-the-kind-e2e.md).
 - **Keep the App only for board Status.** It is a second identity for a mirror that ADR 0082 already
   calls best effort. Rejected; procoduck may ask for it later (decision 3).
 - **Tide or bors as the queue.** They are services with their own state; the native queue needs no

@@ -70,7 +70,7 @@ same test also exercises usage parsing and the spend ledger (ADR
 Checked 2026-10-21:
 - controller-runtime v0.25.2; envtest runs etcd and API server only (no GC).
   https://book.kubebuilder.io/reference/envtest.html
-- Ginkgo v2.33.1, Gomega v1.44.0 (MIT).
+- Ginkgo v2.34.0, Gomega v1.44.0 (MIT).
 - testcontainers-go v0.44.0, `modules/postgres` with Snapshot/Restore; set a wait strategy.
   https://golang.testcontainers.org/modules/postgres/
 - ACP methods and optional `session/load`: https://agentclientprotocol.com/protocol/session-setup
@@ -145,6 +145,7 @@ the workflows now run on GitHub-hosted runners, which cost nothing on a public r
 decisions stand; only the cost reasoning changed. What runs where: CI runs the admission half of the
 escape suite (`escape (admission)`, only the admission-labelled cases, path-gated by `hack/ci-changes.sh`); the OpenShell cases run on kind (`make test-escape-kind`) and
 on the maintainers' lab, where the Kata tier can be tested. The leak guard exfiltration case (label `leakguard`) runs from a sandbox inside the kind e2e (`e2e-kind`, #348).
+Update (2026-11-09, #109): the OpenShell cases also run in the kind e2e (`test/e2e/escape-openshell.sh`, after the Go driver) against the chart's real sandbox admission policy, and a skip there is a failure; `make test-escape-kind` and the lab remain.
 
 ## Links
 

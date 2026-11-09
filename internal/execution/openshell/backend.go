@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package openshell implements execution.Backend on the OpenShell gateway's gRPC API
-// (openshell.v1.OpenShell, v0.1.5), through the client generated from the vendored protos
+// (openshell.v1.OpenShell, v0.1.7), through the client generated from the vendored protos
 // in third_party/openshell (ADR 0048: generated client, not sdk/go).
 package openshell
 
@@ -147,6 +147,13 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, name string, labels map[s
 		// Created concurrently: read it on the next pass.
 	}
 	return execution.Workspace{}, &execution.Error{Op: op, Kind: execution.ErrConflict, Err: errors.New("workspace keeps changing")}
+}
+
+// DeleteWorkspace removes a workspace record; a workspace that is already gone is not an error.
+// It is not part of execution.Backend: the escape suite uses it to leave no record behind.
+func (b *Backend) DeleteWorkspace(ctx context.Context, name string) error {
+	_, err := b.c.DeleteWorkspace(ctx, &openshellv1.DeleteWorkspaceRequest{Name: name, AllowMissing: true})
+	return wrap("DeleteWorkspace", err)
 }
 
 func workspaceFromProto(w *datamodelv1.Workspace) execution.Workspace {

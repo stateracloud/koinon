@@ -15,13 +15,15 @@
 #                      then labels it (two events, old issue 468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow; adding `e2e` later
 #                      dispatches it (hack/e2e-label.sh).
-#   merge_group        (the merge queue, #225, ADR 0094 decision 4) never needed: the
-#                      queue commit runs no kind e2e. `required=true` when the entry's own diff against
-#                      MG_BASE (merge_group.base_sha) matches the full rule or touches the e2e's own
-#                      files; `e2e result` then checks the queued PR's head for evidence. A failing
-#                      rule script other than "not needed" reads as required.
+#   merge_group        (the merge queue, #225, #444, ADR 0102) needed when the entry's own diff against MG_BASE
+#                      (merge_group.base_sha) matches the full rule or touches the e2e's own files:
+#                      the quickstart runs on the queue commit (main plus the PR), and that run is the
+#                      merge evidence. `required` is always false (no PR-head lookup). A failing rule
+#                      script other than "not needed" reads as needed.
 #   push               (main) needed when the full rule matches anything since the last green e2e
-#                      run on main (push or schedule), or when there is no such run.
+#                      run on main (push or schedule), or when there is no such run. Not needed when a
+#                      green merge_group quickstart ran on a commit with the pushed commit's tree
+#                      (PUSH_SHA): the queue already tested exactly this tree (#444, ADR 0102).
 #   schedule           (nightly) always: drift no commit explains (upstream images, the runner
 #                      image, downloads) is what it is for.
 #   workflow_dispatch  always needed.
@@ -32,7 +34,7 @@
 # needed. Every other event: `required=false`.
 #
 # Environment: EVENT, BASE (pull request base branch), MG_BASE (merge group base sha), LABELS (JSON array of the PR's label names),
-# PR (its number), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
+# PR (its number), PUSH_SHA (the pushed commit, push events), NEEDS_E2E (path of the rule script, default hack/needs-e2e.sh), GH (the gh
 # command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
 
@@ -107,29 +109,30 @@ pull_request)
   fi
   ;;
 merge_group)
-  # ADR 0094 decision 4: the queue commit gets no kind e2e (25 minutes per entry would hold the queue),
-  # so needed is always false. `required` says whether the entry's own diff needs evidence; `e2e result`
-  # then runs hack/e2e-gate.sh against the head SHA of the queued pull request.
+  # #444 (ADR 0102, amends ADR 0094 decision 4): the queue commit is main plus the pull request, so the quickstart
+  # runs on it when the entry's own diff against MG_BASE is e2e-relevant, and that run is the merge
+  # evidence. `required` stays false: the evidence is this run's own quickstart, not the PR head's (the
+  # PR-head gate already ran before the entry could be queued). A queue entry is never cancelled.
   mg=${MG_BASE:-}
   if [[ -z $mg ]]; then
-    echo "::warning::no merge group base sha; requiring e2e evidence to be safe"
-    emit false true
+    echo "::warning::no merge group base sha; running the e2e to be safe"
+    emit true
     exit 0
   fi
   rule --forced-only "$mg"
   forced=$rc
   if [[ $forced -eq 0 ]]; then
-    summary "Evidence required: this merge queue entry changes the e2e's own files; the pull request head must have a green e2e."$'\n\n'"$text"
-    emit false true
+    summary "Runs: this merge queue entry changes the e2e's own files."$'\n\n'"$text"
+    emit true
   elif [[ $forced -ge 2 ]]; then
-    echo "::warning::needs-e2e.sh exited $forced; requiring e2e evidence to be safe"
-    emit false true
+    echo "::warning::needs-e2e.sh exited $forced; running the e2e to be safe"
+    emit true
   else
     rule "$mg"
     case $rc in
-    1) summary "Not required: nothing in this merge queue entry needs the kind e2e."; emit false false ;;
-    0) summary "Evidence required: this merge queue entry is e2e-relevant per hack/needs-e2e.sh; the pull request head must have a green e2e:"$'\n\n'"$text"; emit false true ;;
-    *) echo "::warning::needs-e2e.sh exited $rc; requiring e2e evidence to be safe"; emit false true ;;
+    1) summary "Does not run: nothing in this merge queue entry needs the kind e2e."; emit false ;;
+    0) summary "Runs: this merge queue entry is e2e-relevant per hack/needs-e2e.sh:"$'\n\n'"$text"; emit true ;;
+    *) echo "::warning::needs-e2e.sh exited $rc; running the e2e to be safe"; emit true ;;
     esac
   fi
   ;;
@@ -141,6 +144,24 @@ schedule)
   emit true
   ;;
 push)
+  # #444 (ADR 0102): a queue merge puts on main the tree the queue's quickstart already tested. When a
+  # green merge_group quickstart ran on a commit with the pushed commit's tree, this push needs no second run.
+  if [[ -n ${PUSH_SHA:-} && -n ${GH_REPO:-} ]]; then
+    pushed_tree=$("$GH" api "repos/$GH_REPO/git/commits/$PUSH_SHA" --jq .tree.sha 2>/dev/null || true)
+    if [[ -n $pushed_tree ]]; then
+      while read -r id sha; do
+        [[ -n ${id:-} ]] || continue
+        [[ $("$GH" api "repos/$GH_REPO/git/commits/$sha" --jq .tree.sha 2>/dev/null || true) == "$pushed_tree" ]] || continue
+        if [[ -n $("$GH" api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
+          --jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success") | .id' 2>/dev/null || true) ]]; then
+          summary "Does not run: the merge queue's e2e run $id passed on a commit with this commit's tree (${pushed_tree:0:12})."
+          emit false
+          exit 0
+        fi
+      done < <("$GH" run list --workflow e2e-kind.yml --event merge_group --status success --limit 20 \
+        --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
+    fi
+  fi
   covered=$("$GH" run list --workflow e2e-kind.yml --branch main --status success --limit 30 \
     --json headSha,event --jq '[.[] | select(.event == "push" or .event == "schedule")][0].headSha // empty' 2>/dev/null || true)
   if [[ -z $covered ]]; then

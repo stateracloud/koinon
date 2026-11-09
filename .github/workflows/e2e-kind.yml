@@ -16,6 +16,9 @@
 #     once on the head (e2e-label.yml, hack/e2e-label.sh), unless a run there is live or passed the
 #     e2e. To retry a red e2e: "Re-run failed jobs", remove and add the label, or
 #     `gh workflow run e2e-kind.yml --ref <branch>`.
+#   - merge queue (#444, ADR 0102): the quickstart runs on the queue commit (main plus the pull request) when the
+#     entry's own diff against merge_group.base_sha is e2e-relevant. A red run drops the entry from the
+#     queue. This is the merge evidence; the lab's e2e-lab stays pre-merge confidence on the PR head.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
@@ -36,10 +39,9 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-  # The merge queue (#225): `e2e result` is required, so it reports on the queue's commit.
-  # ADR 0094 decision 4: decide never starts the quickstart on a queue commit; `e2e result` checks the
-  # queued pull request's head (number parsed from the queue ref) for evidence when the entry's own
-  # diff (against merge_group.base_sha) is e2e-relevant.
+  # The merge queue (#225, #444, ADR 0102): `e2e result` is required, so it reports on the queue's commit. When the
+  # entry's own diff (against merge_group.base_sha) is e2e-relevant, decide starts the quickstart on the queue
+  # commit (main plus the pull request): that run is the merge evidence and the e2e-lab status is not read.
   merge_group:
     types: [checks_requested]
   push:
@@ -109,6 +111,7 @@ jobs:
           MG_BASE: ${{ github.event.merge_group.base_sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           PR: ${{ github.event.pull_request.number }}
+          PUSH_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
@@ -201,16 +204,16 @@ jobs:
             exit 1
           fi
 
+      # No cache and no local action here: this job checks out inputs.commit (an arbitrary commit),
+      # so a local action would be that commit's code, and a cache entry it saved would sit in the
+      # default branch's cache scope (CodeQL: cache poisoning). The helper retries and checks the sha256.
+      - name: Download kind and ko (hack/fetch-pinned.sh)
+        run: |
+          hack/fetch-pinned.sh "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" "$KIND_SHA256_AMD64" "$RUNNER_TEMP/bin/kind"
+          hack/fetch-pinned.sh "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz" "$KO_SHA256_AMD64" "$RUNNER_TEMP/ko.tgz"
       - name: Install kind and ko
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256_AMD64}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/kind"
-          curl -fsSL -o "$RUNNER_TEMP/ko.tgz" \
-            "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz"
-          echo "${KO_SHA256_AMD64}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
@@ -313,7 +316,7 @@ jobs:
     permissions:
       contents: read
       actions: write # re-run the pull request run's failed `e2e result` after a passing dispatched run
-      pull-requests: read # the queued pull request's head sha (merge_group)
+      pull-requests: read # bootstrap shim only (hack/e2e-queue-head.sh, follow-up: #452): the queued pull request's head sha
       statuses: read # hack/e2e-gate.sh reads the e2e-lab commit status; without it the API answers 403 (old issue 588)
     env:
       GH_TOKEN: ${{ github.token }}
@@ -333,17 +336,18 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           BRANCH: ${{ github.head_ref }}
         run: |
-          # Merge queue (ADR 0094 decision 4): the queue commit has no e2e of its own. The evidence must be on
-          # the head of the queued pull request, <N> from gh-readonly-queue/<base>/pr-<N>-<sha>. Fail closed.
-          if [[ $EVENT == merge_group ]]; then
-            n=${GITHUB_REF#refs/heads/gh-readonly-queue/*/pr-}
-            n=${n%%-*}
-            if [[ ! $n =~ ^[0-9]+$ ]]; then echo "::error::cannot read the pull request number from $GITHUB_REF"; exit 1; fi
-            SHA=$(gh pr view "$n" --json headRefOid --jq .headRefOid)
-            if [[ -z $SHA ]]; then echo "::error::cannot read the head of pull request $n"; exit 1; fi
-            BRANCH=$(gh pr view "$n" --json headRefName --jq .headRefName)
+          # BOOTSTRAP SHIM (follow-up: #452). On merge_group, decide runs from merge_group.base_sha. A
+          # main from before #444 has the old decide, which answers needed=false, required=true for an
+          # e2e-relevant entry (it never starts the quickstart): only that combination reaches this branch, and
+          # the evidence is then on the queued PR's head, as before ADR 0102. The new decide never answers
+          # required=true on merge_group. Exit condition: remove this block, hack/e2e-queue-head.sh and the
+          # pull-requests: read permission when main's decide is the new one, i.e. after #444 merged and no
+          # queue entry built on an older base can remain.
+          if [[ $EVENT == merge_group && $REQUIRED == true ]]; then
+            head=$(hack/e2e-queue-head.sh)
+            SHA=$(sed -n 's/^SHA=//p' <<<"$head")
+            BRANCH=$(sed -n 's/^BRANCH=//p' <<<"$head")
             export SHA BRANCH
-            echo "merge queue entry for pull request $n, head $SHA"
           fi
           # The base branch's copy of the gate, like decide: a pull request must not be able to
           # change what decides whether its e2e is enough. This PR's own copy only when the base has none.

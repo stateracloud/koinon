@@ -475,6 +475,8 @@ Unused from step 2 on by default (Koinon's gateway), kept only for the v0.2 fall
 | agentgateway's agent header, trusted by the GitHub tools server | `charts/koinon/templates/deployments.yaml:265` | step 2 (Koinon's MCP path sets a Koinon-named header); step 3 |
 | The agentgateway image, chart values, RBAC for its CRDs, metrics port, spikes | chart, `hack/spike/agentgateway*`, `hack/chart-check.d` | step 3 |
 
+Note (maintainer decision 2026-11-08, #374): the agentgateway config helpers duplicated in `internal/gateway/standalone/render.go` and `internal/gateway/kubernetes/render.go`, and the Kubernetes driver importing the standalone package's types, are accepted until step 3 deletes that code. Do not propose refactoring them in a review.
+
 ### 8. Effect on open issues
 
 - **#254** (guard misses MCP errors and server messages): step 1, closed on Koinon's side by the

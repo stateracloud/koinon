@@ -21,13 +21,14 @@
 #      the output says `auto-merge enabled`.
 #   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
 #   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
-#   --admin still merges directly (bypass). Without the rule nothing changes. docs/dev/ci.md "Merging".
+#   --admin still merges directly (bypass, and no queue-commit quickstart: #444, ADR 0102, an e2e-relevant PR should be enqueued). Without the rule nothing changes. docs/dev/ci.md "Merging".
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
 #   The e2e decision reads the PR's whole file list (`gh api pulls/<PR>/files --paginate`); when that read
 #   fails or is empty, e2e is required (fail closed).
-#   --admin        merge now with admin rights (main merges ready PRs this way, AGENTS.md "Merging")
+#   --admin        merge now with admin rights: the exception (a CODEOWNERS or sensitive path, AGENTS.md "Merging"), not the
+#                  default. With a merge queue and a change that needs the e2e it warns: the queue-commit quickstart is skipped.
 #   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
@@ -187,7 +188,12 @@ fi
 # above) and GitHub merges it after the queue build is green: no manual sync. --admin is GitHub's "merge
 # without waiting for requirements" (a bypass actor merges directly, skipping the queue and the review rule).
 mode=--auto
-[ "$admin" = 0 ] || mode=--admin
+if [ "$admin" != 0 ]; then
+  mode=--admin
+  if [ "$queue" = 1 ] && [ "${#req[@]}" -gt 0 ]; then
+    echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444, ADR 0102) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
+  fi
+fi
 gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }
 
 # The claim moves to review only now. A lane claim (`holder#lane`) is reviewable only under its lane.

@@ -325,6 +325,16 @@ func (a *Auditor) Snapshot(ctx context.Context, ks KeySet) (KeyState, error) {
 	return stateOf(ks, prev, gen, a.Authoritative), nil
 }
 
+// Base is the key-set state the chain holds once the Change's first event is written: the pending
+// keys.observed's After when a lost change was found, else the last recorded state (empty with none).
+// An event that changes only some of the state builds the rest from it.
+func (c *Change) Base() KeyState {
+	if c == nil {
+		return KeyState{}
+	}
+	return c.base
+}
+
 // After describes ks, as loaded again after a change, relative to before.
 func (a *Auditor) After(ctx context.Context, ks KeySet, before KeyState) (KeyState, error) {
 	gen, err := a.generated(ctx)
@@ -512,6 +522,9 @@ type Change struct {
 	command string
 	// Before is the key-set state the change starts from.
 	Before KeyState
+	// base is the state as recorded when the change starts: the pending keys.observed's, else the last
+	// recorded (empty with none).
+	base KeyState
 	// pending is the keys.observed of a change whose event was lost, written before the command's own.
 	pending *audit.InstallEvent
 	done    bool
@@ -546,7 +559,13 @@ func (a *Auditor) Baseline(ctx context.Context, load KeyLoader, command string) 
 			_ = tx.Rollback(ctx)
 			return begun{}, err
 		}
-		return begun{c: &Change{a: a, tx: tx, command: command, Before: res.After, pending: ev}, ks: ks}, nil
+		var base KeyState
+		if ev != nil {
+			base = res.After
+		} else if res.Before != nil {
+			base = *res.Before
+		}
+		return begun{c: &Change{a: a, tx: tx, command: command, Before: res.After, base: base, pending: ev}, ks: ks}, nil
 	})
 	if err != nil {
 		return nil, KeySet{}, err
@@ -638,4 +657,17 @@ func (c *Change) Commit(ctx context.Context) error {
 		return err
 	}
 	return c.tx.Commit(ctx)
+}
+
+// Rollback ends the Change without writing anything, not even the pending keys.observed of a lost
+// change, and releases the lock. A writer that made no change of its own uses it, so the start-up check
+// records the lost change under its own actor. It runs once; later calls, and calls after Commit or on
+// a nil Change, do nothing.
+func (c *Change) Rollback(ctx context.Context) {
+	if c == nil || c.done {
+		return
+	}
+	c.done = true
+	c.pending = nil
+	_ = c.tx.Rollback(ctx)
 }

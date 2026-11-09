@@ -57,7 +57,7 @@ NEEDED=(
 )
 FORCED=(
   '^test/e2e/'              # the driver, run.sh, kind/ (up.sh, fakes, values)
-  '^test/escape/'           # run.sh calls test/escape/kind.sh through test/e2e/escape-mcp.sh when ESCAPE_MCP=1
+  '^test/escape/'           # run.sh calls test/escape/kind.sh through test/e2e/escape-openshell.sh and escape-mcp.sh
   '^\.github/workflows/e2e-kind\.yml$'
   '^flavors/.*\.md$'        # agent prompts and instructions may be Markdown
   '^hack/docs-e1\.sh$'      # run.sh runs the quickstart blocks through it
@@ -65,6 +65,7 @@ FORCED=(
   '^hack/flavor-base\.sh$'   # run.sh sets the flavor's base image with it (FLAVOR_BASE, #200)
   '^hack/versions\.env$'    # the kind, ko and helm versions e2e-kind.yml installs (old issue 565)
   '^hack/versions-env\.sh$' # the filter that loads them into the workflow's environment
+  '^hack/fetch-pinned\.sh$' # e2e-kind.yml downloads kind and ko with it (#431)
   '^hack/e2e-toolchain/'    # the web toolchain image run.sh uses (Chromium for the browser suite)
   '^docs/site/src/content/docs/quickstart\.md$'
   '^docs/site/src/content/docs/guides/backup-restore\.md$' # test/e2e/backup-restore.sh runs its blocks (#90)

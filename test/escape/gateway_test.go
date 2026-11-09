@@ -169,3 +169,24 @@ func (g *gateway) curlGatewayHeaders(ctx context.Context, sandbox, method, url s
 
 // headerMark separates the body from the headers in curlGatewayHeaders' output.
 const headerMark = "--koinon-headers--"
+
+// deleteWorkspace removes the run's workspace record through the gateway, for
+// KOINON_ESCAPE_DELETE_WORKSPACE=1 (the kind e2e, test/e2e/escape-openshell.sh): deleting only the
+// namespace leaves the record, and a rerun then finds a workspace without a namespace. Run it after
+// the last spec, which needs the namespace.
+func deleteWorkspace(ctx context.Context) {
+	GinkgoHelper()
+	if os.Getenv("KOINON_ESCAPE_DELETE_WORKSPACE") != "1" || os.Getenv("KOINON_OPENSHELL_ENDPOINT") == "" {
+		return
+	}
+	dir := os.Getenv("KOINON_OPENSHELL_MTLS_DIR")
+	b, err := openshell.Dial(openshell.Config{
+		Endpoint: os.Getenv("KOINON_OPENSHELL_ENDPOINT"),
+		CertFile: filepath.Join(dir, "tls.crt"),
+		KeyFile:  filepath.Join(dir, "tls.key"),
+		CAFile:   filepath.Join(dir, "ca.crt"),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = b.Close() }()
+	Expect(b.DeleteWorkspace(ctx, envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape"))).To(Succeed())
+}

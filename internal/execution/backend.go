@@ -21,7 +21,8 @@ import (
 // missing, update what differs and do nothing when the record already matches.
 type Backend interface {
 	// EnsureWorkspace makes sure the org's workspace exists (one per org, ADR 0002). Labels
-	// apply only on creation; OpenShell 0.1.5 has no workspace update.
+	// apply only on creation; OpenShell 0.1.7 has no workspace update (its UpdateSandbox, off by
+	// default, changes a stopped sandbox, not a workspace).
 	EnsureWorkspace(ctx context.Context, name string, labels map[string]string) (Workspace, error)
 
 	// EnsureProvider makes sure the provider's workspace-scoped profile and the provider
@@ -190,7 +191,7 @@ type L7Rule struct {
 	Path   string
 	// Query maps a query parameter name to a glob. In an allow rule every value of the
 	// parameter must match; in a deny rule the parameter must be present and one matching
-	// value is enough (OpenShell 0.1.5 policy schema).
+	// value is enough (OpenShell policy schema, unchanged from 0.1.5 to 0.1.7).
 	Query map[string]string
 }
 
