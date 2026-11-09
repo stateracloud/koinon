@@ -10,6 +10,8 @@ import (
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
@@ -35,6 +37,8 @@ import (
 //	KOINON_ESCAPE_POLICY_REQUIRED  1: the policy must be bound (the spec fails instead of skipping)
 //	                            and the namespace must exist. The kind e2e sets it (test/e2e/escape-openshell.sh,
 //	                            #109): there the chart is installed with sandboxPolicy enabled.
+//	KOINON_ESCAPE_RUNTIME_CLASS  the runtime class the install's policy admits for workload pods
+//	                            (default kata; the kind e2e install uses runc, and kind.sh sets it)
 //	KOINON_ESCAPE_SUPERVISOR_IMAGE  the supervisor image the install's policy admits (default
 //	                            ghcr.io/nvidia/openshell/supervisor:0.1.5)
 //
@@ -63,11 +67,24 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 		impersonated.Impersonate = rest.ImpersonationConfig{UserName: controllerUser, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
 		controller := kubernetes.NewForConfigOrDie(impersonated)
 
+		runtimeClass := envOr("KOINON_ESCAPE_RUNTIME_CLASS", "kata")
+		// The RuntimeClass admission plugin runs before the policy and refuses a class that does not exist,
+		// so the wrong class must be a real object: a throwaway one, removed at the end (dry runs create nothing).
+		const wrongClass = "koinon-escape-wrong"
+		_, err := cs.NodeV1().RuntimeClasses().Create(ctx, &nodev1.RuntimeClass{
+			ObjectMeta: metav1.ObjectMeta{Name: wrongClass}, Handler: "runc"}, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			Fail("cannot create the throwaway RuntimeClass " + wrongClass + " for the wrong-runtime-class case: " + err.Error())
+		}
+		DeferCleanup(func(ctx SpecContext) {
+			_ = cs.NodeV1().RuntimeClasses().Delete(ctx, wrongClass, metav1.DeleteOptions{})
+		})
+
 		pod := func(mutate func(*corev1.Pod)) *corev1.Pod {
 			p := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{GenerateName: "koinon-escape-", Labels: map[string]string{"openshell.ai/boundary-role": "workload"}},
 				Spec: corev1.PodSpec{
-					RuntimeClassName:             new("kata"),
+					RuntimeClassName:             &runtimeClass,
 					AutomountServiceAccountToken: new(false),
 					Containers:                   []corev1.Container{{Name: "agent", Image: "registry.invalid/koinon-escape/agent:1"}},
 				},
@@ -77,14 +94,15 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 		}
 		dry := metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 
-		_, err := controller.CoreV1().Pods(ns).Create(ctx, pod(func(*corev1.Pod) {}), dry)
+		_, err = controller.CoreV1().Pods(ns).Create(ctx, pod(func(*corev1.Pod) {}), dry)
 		Expect(err).NotTo(HaveOccurred(), "control: a compliant workload pod is admitted")
 
 		for name, c := range map[string]struct {
 			mutate  func(*corev1.Pod)
 			message string
 		}{
-			"no runtime class": {func(p *corev1.Pod) { p.Spec.RuntimeClassName = nil }, "must use runtimeClassName"},
+			"no runtime class":    {func(p *corev1.Pod) { p.Spec.RuntimeClassName = nil }, "must use runtimeClassName"},
+			"wrong runtime class": {func(p *corev1.Pod) { p.Spec.RuntimeClassName = new(wrongClass) }, "must use runtimeClassName"},
 			"kata annotation": {func(p *corev1.Pod) {
 				p.Annotations = map[string]string{"io.katacontainers.config.runtime.disable_guest_seccomp": "true"}
 			}, "io.katacontainers.* annotations"},

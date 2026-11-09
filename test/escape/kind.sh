@@ -62,6 +62,10 @@ if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
   export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
   export KOINON_ESCAPE_POLICY_REQUIRED=1
+  # The class the install's policy admits for workload pods: openshell.runtimeClassName of
+  # test/e2e/kind/koinon-values.yaml (runc on kind), which sandboxPolicy.runtimeClasses lists.
+  KOINON_ESCAPE_RUNTIME_CLASS=${KOINON_ESCAPE_RUNTIME_CLASS:-$(sed -n 's/^  runtimeClassName: *//p' "$root/test/e2e/kind/koinon-values.yaml" | head -1)}
+  export KOINON_ESCAPE_RUNTIME_CLASS=${KOINON_ESCAPE_RUNTIME_CLASS:-runc}
   export KOINON_ESCAPE_SERVICES=${KOINON_ESCAPE_SERVICES:-openshell/openshell:8080,${KOINON_ESCAPE_CHART_NAMESPACE}/koinon-gateway:8080,${KOINON_ESCAPE_CHART_NAMESPACE}/koinon-api:8080}
   KOINON_ESCAPE_SUPERVISOR_IMAGE="ghcr.io/nvidia/openshell/supervisor:$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")"
   export KOINON_ESCAPE_SUPERVISOR_IMAGE
