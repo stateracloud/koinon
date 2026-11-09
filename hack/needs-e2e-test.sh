@@ -116,7 +116,7 @@ while IFS= read -r p; do
 done < <(awk '/^  quickstart:/ {on=1; next} /^  [a-z][a-z-]*:/ {on=0} on' .github/workflows/e2e-kind.yml |
   grep -v '^ *#' | grep -oE 'hack/[A-Za-z0-9_.-]+\.(sh|env)' | sort -u)
 for p in hack/versions.env hack/e2e-toolchain/*; do expect 0 "$p"; done
-expect 0 test/escape/kind.sh test/escape/exfil_test.go   # run.sh runs them through test/e2e/escape-mcp.sh
+expect 0 test/escape/kind.sh test/escape/exfil_test.go   # run.sh runs them through test/e2e/escape-openshell.sh and escape-mcp.sh
 
 # Against git, in a scratch module shaped like the repository: the six binaries and the driver.
 g() { git -C "$tmp" -c user.name=t -c user.email=t@example.invalid "$@"; }

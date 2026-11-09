@@ -693,7 +693,7 @@ jobs:
       - run: make docs
 
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
-  # envtest's API server. The OpenShell cases need a gateway and run on kind (make test-escape-kind).
+  # envtest's API server. The OpenShell cases need a gateway and run on kind (make test-escape-kind, and in the kind e2e).
   escape-admission:
     needs: changes
     if: needs.changes.outputs.escape == 'true'
