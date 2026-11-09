@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -75,6 +76,78 @@ var _ = Describe("koinon-api keys forget", func() {
 		delete(sec.Data, lostKEK)
 		_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
+	}
+
+	// saveWork stores a saved work of agent in org, sealed with r, that expires in 14 days.
+	saveWork := func(ctx SpecContext, r *secretstore.Keyring, org, user, agent pgtype.UUID) pgtype.UUID {
+		GinkgoHelper()
+		var version, task, run, work pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agent_versions (org_id, agent_id, version, config) VALUES ($1, $2, 1, '{}') RETURNING id`, org, agent).Scan(&version)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id) VALUES ($1, 't', $2, 'user', $3) RETURNING id`, org, agent, user).Scan(&task)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at, max_tokens) VALUES ($1, $2, $3, $4, now(), 1000) RETURNING id`, org, agent, version, task).Scan(&run)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT uuidv7()`).Scan(&work)).To(Succeed())
+		sealedWork, err := savedwork.SealPacked(r, org.String(), work.String(), []byte("packed"))
+		Expect(err).NotTo(HaveOccurred())
+		rawWork, err := json.Marshal(sealedWork)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
+			VALUES ($1, $2, $3, $4, $5, 'acme/widgets', $6, 'koinon/wip/abc-1', '{}', 6, $7, now() + interval '14 days')`,
+			org, work, task, run, agent, strings.Repeat("a", 40), rawWork)
+		Expect(err).NotTo(HaveOccurred())
+		return work
+	}
+	// sealPlatform stores the platform's trace destination, its credentials sealed with the active KEK.
+	sealPlatform := func(ctx SpecContext) {
+		GinkgoHelper()
+		e, err := ring(ctx).Seal(tracedest.PlatformBinding(), []byte(`{"api_key":"koinon_test_not-a-real-token"}`))
+		Expect(err).NotTo(HaveOccurred())
+		raw, err := json.Marshal(e)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url, credentials) VALUES ('datadog', 'https://otlp.example.com', $1)
+			ON CONFLICT (singleton) DO UPDATE SET credentials = EXCLUDED.credentials, credential_lost_at = NULL`, raw)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	// holdKeyLock takes the key events' advisory lock in a transaction of its own; the caller rolls it back.
+	holdKeyLock := func(ctx SpecContext) pgx.Tx {
+		GinkgoHelper()
+		lock, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = lock.Rollback(ctx) })
+		_, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('koinon.keys_observed'))`)
+		Expect(err).NotTo(HaveOccurred())
+		return lock
+	}
+	// orgRows are the values of one org sealed with the lost KEK: a provider key and a saved work.
+	type orgRows struct {
+		org, work pgtype.UUID
+		provider  string
+	}
+	sealOrg := func(ctx SpecContext) orgRows {
+		GinkgoHelper()
+		org, user, _ := pgtest.NewOrg(ctx, pool)
+		r := ring(ctx)
+		p, err := catalog.New(pool, r, nil).CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
+			Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-a",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var agent pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
+		return orgRows{org: org, provider: p.ID, work: saveWork(ctx, r, org, user, agent)}
+	}
+	// orgState is whether the org's provider key is lost and its saved work's status.
+	orgState := func(ctx SpecContext, o orgRows) (bool, string) {
+		GinkgoHelper()
+		var lost bool
+		var status string
+		Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM providers WHERE id = $1`, o.provider).Scan(&lost)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT status FROM saved_work WHERE org_id = $1 AND id = $2`, o.org, o.work).Scan(&status)).To(Succeed())
+		return lost, status
+	}
+	platformLost := func(ctx SpecContext) bool {
+		GinkgoHelper()
+		var lost bool
+		Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM platform_trace_destination`).Scan(&lost)).To(Succeed())
+		return lost
 	}
 
 	BeforeEach(func(ctx SpecContext) {
@@ -164,20 +237,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			return a
 		}
 		agent1, agent2, agent3 := newAgent(), newAgent(), newAgent()
-		var version, task, run pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agent_versions (org_id, agent_id, version, config) VALUES ($1, $2, 1, '{}') RETURNING id`, org, agent1).Scan(&version)).To(Succeed())
-		Expect(pool.QueryRow(ctx, `INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id) VALUES ($1, 't', $2, 'user', $3) RETURNING id`, org, agent1, user).Scan(&task)).To(Succeed())
-		Expect(pool.QueryRow(ctx, `INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at, max_tokens) VALUES ($1, $2, $3, $4, now(), 1000) RETURNING id`, org, agent1, version, task).Scan(&run)).To(Succeed())
-		var work pgtype.UUID
-		Expect(pool.QueryRow(ctx, `SELECT uuidv7()`).Scan(&work)).To(Succeed())
-		sealedWork, err := savedwork.SealPacked(r, org.String(), work.String(), []byte("packed"))
-		Expect(err).NotTo(HaveOccurred())
-		rawWork, err := json.Marshal(sealedWork)
-		Expect(err).NotTo(HaveOccurred())
-		_, err = pool.Exec(ctx, `INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
-			VALUES ($1, $2, $3, $4, $5, 'acme/widgets', $6, 'koinon/wip/abc-1', '{}', 6, $7, now() + interval '14 days')`,
-			org, work, task, run, agent1, strings.Repeat("a", 40), rawWork)
-		Expect(err).NotTo(HaveOccurred())
+		work := saveWork(ctx, r, org, user, agent1)
 
 		pw := checkpoint.Passwords{Q: q, Keys: r, Begin: pool.Begin}
 		_, err = pw.Current(ctx, org, agent1) // epoch 0 only
@@ -299,6 +359,159 @@ var _ = Describe("koinon-api keys forget", func() {
 		out.Reset()
 		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("nothing to forget"))
+	})
+
+	Describe("the platform part, in the key audit pattern", func() {
+		BeforeEach(func(ctx SpecContext) {
+			sealPlatform(ctx)
+			tool.Yes = true
+		})
+
+		It("writes keys.observed first when the key set changed without a recorded event", func(ctx SpecContext) {
+			rotateAndLose(ctx) // add and activate are recorded; the lost KEK's removal from the Secret is not
+			mark := auditMark(ctx)
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+
+			rows, err := pool.Query(ctx, `SELECT action, actor_id FROM install_audit_events WHERE chain_seq > $1 ORDER BY chain_seq`, mark)
+			Expect(err).NotTo(HaveOccurred())
+			defer rows.Close()
+			var got []string
+			for rows.Next() {
+				var action, actor string
+				Expect(rows.Scan(&action, &actor)).To(Succeed())
+				Expect(actor).To(Equal("keys forget"), "the command that found the gap writes both")
+				got = append(got, action)
+			}
+			Expect(rows.Err()).NotTo(HaveOccurred())
+			Expect(got).To(Equal([]string{keyscli.ActionObserved, keyscli.ForgetAction}))
+		})
+
+		It("holds the key events' advisory lock from before the first change, the orgs' included", func(ctx SpecContext) {
+			o := sealOrg(ctx)
+			rotateAndLose(ctx)
+			_, workBefore := orgState(ctx, o)
+			lock := holdKeyLock(ctx)
+
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				done <- tool.Forget(ctx, lostKEK)
+			}()
+			Eventually(func() bool { return advisoryWaiting(ctx) }).Should(BeTrue(), "forget waits for the lock")
+			Consistently(done, 300*time.Millisecond).ShouldNot(Receive())
+			Expect(platformLost(ctx)).To(BeFalse(), "nothing is changed before the lock is held")
+			lost, work := orgState(ctx, o)
+			Expect(lost).To(BeFalse(), "the org part waits for the lock too")
+			Expect(work).To(Equal(workBefore))
+
+			Expect(lock.Rollback(ctx)).To(Succeed())
+			Eventually(done).Should(Receive(BeNil()))
+			Expect(platformLost(ctx)).To(BeTrue())
+			lost, work = orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+			Expect(work).To(Equal("expired"))
+		})
+
+		It("keeps keys.observed and changes nothing of the platform when its update fails", func(ctx SpecContext) {
+			rotateAndLose(ctx) // a removal without an event: forget finds it and writes keys.observed
+			var before []byte
+			Expect(pool.QueryRow(ctx, `SELECT credentials FROM platform_trace_destination`).Scan(&before)).To(Succeed())
+			// The fault is in the database: every update of the platform row fails, inside the savepoint.
+			_, err := pool.Exec(ctx, `CREATE FUNCTION koinon_test_refuse_update() RETURNS trigger LANGUAGE plpgsql AS $$
+				BEGIN RAISE EXCEPTION 'koinon test: platform update refused'; END $$;
+				CREATE TRIGGER koinon_test_refuse_update BEFORE UPDATE ON platform_trace_destination
+				FOR EACH ROW EXECUTE FUNCTION koinon_test_refuse_update()`)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := pool.Exec(ctx, `DROP TRIGGER koinon_test_refuse_update ON platform_trace_destination; DROP FUNCTION koinon_test_refuse_update()`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			mark := auditMark(ctx)
+
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("platform trace destination"), ContainSubstring("platform update refused"))))
+
+			Expect(keyEventsSince(ctx, mark)).To(ConsistOf(HaveField("Action", keyscli.ActionObserved)), "the keys.observed it found is kept")
+			var forgets int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE chain_seq > $1 AND action = $2`, mark, keyscli.ForgetAction).Scan(&forgets)).To(Succeed())
+			Expect(forgets).To(BeZero(), "no keys.forget without its change")
+			var after []byte
+			var lostAt *time.Time
+			Expect(pool.QueryRow(ctx, `SELECT credentials, credential_lost_at FROM platform_trace_destination`).Scan(&after, &lostAt)).To(Succeed())
+			Expect(after).To(MatchJSON(before), "the platform row is unchanged")
+			Expect(lostAt).To(BeNil())
+		})
+	})
+
+	Describe("when the KEK is restored after the first check", func() {
+		BeforeEach(func(ctx SpecContext) {
+			sealPlatform(ctx)
+			tool.Yes = true
+		})
+
+		// restoreWhileWaiting runs Forget while the key events' lock is held elsewhere, restores the KEK
+		// (keys add from escrow) while it waits, after its first check, and then releases the lock.
+		restoreWhileWaiting := func(ctx SpecContext) error {
+			GinkgoHelper()
+			lock := holdKeyLock(ctx)
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				done <- tool.Forget(ctx, lostKEK)
+			}()
+			Eventually(func() bool { return advisoryWaiting(ctx) }).Should(BeTrue(), "forget waits for the lock")
+
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data[lostKEK] = secretstore.EncodeKey(lostKey)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(lock.Rollback(ctx)).To(Succeed())
+			var got error
+			Eventually(done).Should(Receive(&got))
+			return got
+		}
+		// forgetEvents counts the keys.forget events written after mark: in the install chain, and in the
+		// chains of orgs.
+		forgetEvents := func(ctx SpecContext, mark int64, orgs ...pgtype.UUID) (install, org int) {
+			GinkgoHelper()
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE chain_seq > $1 AND action = $2`, mark, keyscli.ForgetAction).Scan(&install)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = $1 AND org_id = ANY($2)`, keyscli.ForgetAction, orgs).Scan(&org)).To(Succeed())
+			return install, org
+		}
+
+		It("is refused under the lock, changes nothing and writes no forget event", func(ctx SpecContext) {
+			rotateAndLose(ctx)
+			mark := auditMark(ctx)
+			Expect(restoreWhileWaiting(ctx)).To(MatchError(ContainSubstring("in the key set again, so it is not lost; nothing was changed")))
+
+			Expect(platformLost(ctx)).To(BeFalse(), "the platform row is not marked lost")
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 1}), "nothing changed")
+			install, _ := forgetEvents(ctx, mark)
+			Expect(install).To(BeZero())
+		})
+
+		It("is refused before any org part: no credential is lost, no saved work expires, no org event", func(ctx SpecContext) {
+			a, b := sealOrg(ctx), sealOrg(ctx)
+			rotateAndLose(ctx)
+			_, workBefore := orgState(ctx, a)
+			Expect(workBefore).NotTo(Equal("expired"))
+			mark := auditMark(ctx)
+			Expect(restoreWhileWaiting(ctx)).To(MatchError(ContainSubstring("in the key set again, so it is not lost; nothing was changed")))
+
+			for _, o := range []orgRows{a, b} {
+				lost, work := orgState(ctx, o)
+				Expect(lost).To(BeFalse(), "the org's provider key is not marked lost")
+				Expect(work).To(Equal(workBefore), "the org's saved work did not expire")
+			}
+			Expect(platformLost(ctx)).To(BeFalse())
+			Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 5}), "two providers, two saved works and the platform: nothing changed")
+			install, org := forgetEvents(ctx, mark, a.org, b.org)
+			Expect(install).To(BeZero(), "no install keys.forget")
+			Expect(org).To(BeZero(), "no org keys.forget")
+			Expect(out.String()).NotTo(ContainSubstring("Forgot KEK"))
+		})
 	})
 
 	Describe("without a terminal", func() {
