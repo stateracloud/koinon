@@ -233,6 +233,7 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 			`{"Action":"run","Package":"`+pkg+`","Test":"TestChartContract"}`,
 			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartContract","Output":"    contract_test.go:46: koinon:requires=helm: helm is not on PATH\n"}`,
 			`{"Action":"skip","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartsmoke","Output":"Running Suite: chartsmoke\n"}`,
 			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartsmoke"}`,
 			`{"Action":"pass","Package":"`+pkg+`"}`,
 		), pkgs)).To(Succeed())
@@ -241,10 +242,43 @@ var _ = Describe("go test events (testenv.RequireT in a plain test)", func() {
 		// The suite itself skipped for the opt-in envtest; the plain test's helm makes it incomplete.
 		r := judgeWith("./test/chartsmoke", report(true,
 			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
-		), pkgs["test/chartsmoke"].requires(), "", "docker,git,helm")
+		), pkgs["test/chartsmoke"].requires(), pkgs["test/chartsmoke"].passed, "", "docker,git,helm")
 		Expect(r.verdict).To(Equal(skipped))
 		Expect(r.incomplete).To(BeTrue())
 		Expect(r.expected).To(Equal([]string{"helm"}))
+	})
+
+	It("reads partly run, not not run, when a plain test passed and the suite skipped (chartsmoke with helm, no envtest)", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartContract"}`,
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestChartSmoke","Output":"Running Suite: Chart startup smoke suite\n"}`,
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestChartSmoke"}`,
+		), pkgs)).To(Succeed())
+		// The RunSpecs test passes whatever the specs did; only TestChartContract counts.
+		Expect(pkgs["test/chartsmoke"].passed).To(Equal(1))
+
+		r := judgeWith("./test/chartsmoke", report(true,
+			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: KUBEBUILDER_ASSETS is not set"),
+		), nil, pkgs["test/chartsmoke"].passed, "", "docker,git,helm")
+		Expect(r.verdict).To(Equal(partial))
+		Expect(r.incomplete).To(BeFalse())
+		var out bytes.Buffer
+		Expect(summarize(&out, "go-test", []result{r})).To(Equal(0))
+		Expect(out.String()).To(ContainSubstring("opt-in suites partly run here"))
+		Expect(out.String()).NotTo(ContainSubstring("not run here"))
+	})
+
+	It("does not count a suite's own RunSpecs test as a passed plain test", func() {
+		pkgs := map[string]*plainPkg{}
+		Expect(loadGoTest(write(
+			`{"Action":"output","Package":"`+pkg+`","Test":"TestSuite","Output":"Running Suite: x\n"}`,
+			`{"Action":"pass","Package":"`+pkg+`","Test":"TestSuite"}`,
+		), pkgs)).To(Succeed())
+		r := judgeWith("./test/chartsmoke", report(true,
+			spec(types.NodeTypeBeforeSuite, types.SpecStateSkipped, "koinon:requires=envtest: x"),
+		), nil, pkgs["test/chartsmoke"].passed, "", "docker,git,helm")
+		Expect(r.verdict).To(Equal(skipped))
 	})
 
 	It("ignores a skip that names no requirement", func() {
@@ -279,5 +313,45 @@ var _ = Describe("loadGoTest", func() {
 		Expect(pkgs["internal/x"].failed).To(Equal([]string{"TestBad", "(package)"}))
 		Expect(pkgs["internal/y"].failed).To(BeEmpty())
 		Expect(pkgs["internal/y"].passed).To(Equal(1))
+	})
+})
+
+var _ = Describe("plainRequireTests (parallel suites emit no go test events)", func() {
+	dirWith := func(src string) string {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o600)).To(Succeed())
+		return dir
+	}
+
+	It("finds a plain test that calls RequireT", func() {
+		dir := dirWith(`package x
+import "testing"
+func TestSuite(t *testing.T) { RunSpecs(t, "x") }
+func TestNeedsHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestPlain(t *testing.T) {}
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestNeedsHelm"}))
+	})
+
+	It("ignores the RunSpecs test and Ginkgo specs", func() {
+		dir := dirWith(`package x
+import "testing"
+func TestSuite(t *testing.T) { testenv.RequireT(t, testenv.Docker); RunSpecs(t, "x") }
+`)
+		Expect(plainRequireTests(dir)).To(BeEmpty())
+	})
+
+	It("names the offending tests in the failure", func() {
+		Expect(parallelPlainWhy([]string{"TestA"})).To(And(ContainSubstring("ginkgo -p"), ContainSubstring("TestA")))
+	})
+
+	It("has none in the real parallel suites", func() {
+		files, err := os.ReadFile("../go-test.sh")
+		Expect(err).NotTo(HaveOccurred())
+		for _, line := range strings.Split(string(files), "\n") {
+			if d, ok := strings.CutPrefix(strings.TrimSpace(line), "./internal/"); ok && !strings.Contains(d, " ") {
+				Expect(plainRequireTests("../../internal/"+d)).To(BeEmpty(), d)
+			}
+		}
 	})
 })

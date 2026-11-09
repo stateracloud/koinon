@@ -26,13 +26,22 @@
 // -gotest-json reads the `go test -json` events (gotestsum --jsonfile) and counts its requirement
 // for its package like a spec's.
 //
-// Usage: go run ./hack/testverdict -reports DIR [-name LABEL] [-expect LIST] [-gotest-json FILE]... PKGDIR...
+// A plain test that passes counts like a passing spec for its package, so a suite whose specs all
+// skipped but whose plain tests ran reads "partly run", not "not run". The test that calls RunSpecs
+// is not counted (it passes whatever the specs did). Suites run by `ginkgo -p` (-parallel) give no
+// go test events at all; a plain test calling testenv.RequireT in one of them is a FAIL, found by
+// parsing the package's test files.
+//
+// Usage: go run ./hack/testverdict -reports DIR [-name LABEL] [-expect LIST] [-gotest-json FILE]... [-parallel DIR]... PKGDIR...
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,9 +82,15 @@ func main() {
 	expect := flag.String("expect", "all", "requirements this run is meant to have (comma list or \"all\"); skips for others are opt-in")
 	var gotest stringList
 	flag.Var(&gotest, "gotest-json", "a `go test -json` event file (repeatable): plain tests skipped through testenv.RequireT")
+	var parallel stringList
+	flag.Var(&parallel, "parallel", "a suite directory run by `ginkgo -p` (repeatable): it emits no go test events, so a plain RequireT test there is an error")
 	flag.Parse()
+	parallelDirs := map[string]bool{}
+	for _, d := range parallel {
+		parallelDirs[filepath.Clean(d)] = true
+	}
 	if *reports == "" || (flag.NArg() == 0 && len(gotest) == 0) {
-		fmt.Fprintln(os.Stderr, "usage: testverdict -reports DIR [-name LABEL] [-expect LIST] [-gotest-json FILE]... PKGDIR...")
+		fmt.Fprintln(os.Stderr, "usage: testverdict -reports DIR [-name LABEL] [-expect LIST] [-gotest-json FILE]... [-parallel DIR]... PKGDIR...")
 		os.Exit(2)
 	}
 	byPath, err := load(*reports)
@@ -101,10 +116,22 @@ func main() {
 		}
 		suites[filepath.Clean(dir)] = true
 		var extra []string
+		plainPassed := 0
 		if p := plain[filepath.Clean(dir)]; p != nil {
-			extra = p.requires()
+			extra, plainPassed = p.requires(), p.passed
 		}
-		results = append(results, judgeWith(dir, byPath[abs], extra, required, *expect))
+		res := judgeWith(dir, byPath[abs], extra, plainPassed, required, *expect)
+		if parallelDirs[filepath.Clean(dir)] {
+			bad, err := plainRequireTests(dir)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "testverdict:", err)
+				os.Exit(2)
+			}
+			if len(bad) > 0 {
+				res = result{dir: dir, verdict: fail, passed: res.passed, why: parallelPlainWhy(bad)}
+			}
+		}
+		results = append(results, res)
 	}
 	// A package without a Ginkgo suite gets a verdict only when one of its tests skipped through
 	// testenv.RequireT; its other outcomes are go test's own exit code.
@@ -164,6 +191,7 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 	defer func() { _ = f.Close() }()
 	type event struct{ Action, Package, Test, Output string }
 	pending := map[[2]string]string{} // (package, test) -> requirement named in its output
+	runSpecs := map[[2]string]bool{}  // tests that ran a Ginkgo suite: their pass says nothing on their own
 	dec := json.NewDecoder(f)
 	for {
 		var e event
@@ -188,6 +216,9 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 		key := [2]string{e.Package, e.Test}
 		switch e.Action {
 		case "output":
+			if strings.Contains(e.Output, "Running Suite:") {
+				runSpecs[key] = true
+			}
 			if i := strings.Index(e.Output, testenv.Prefix); i >= 0 {
 				if n, ok := requirement(strings.TrimSpace(e.Output[i:])); ok {
 					pending[key] = n
@@ -202,11 +233,58 @@ func loadGoTest(file string, pkgs map[string]*plainPkg) error {
 				p.failed = append(p.failed, e.Test)
 			}
 		case "pass":
-			if !strings.Contains(e.Test, "/") {
+			if !strings.Contains(e.Test, "/") && !runSpecs[key] {
 				p.passed++
 			}
 		}
 	}
+}
+
+func parallelPlainWhy(tests []string) string {
+	return "plain test(s) calling testenv.RequireT in a suite run by ginkgo -p, which emits no go test events, so their skips and passes are not counted: " +
+		strings.Join(tests, ", ") + " (make them Ginkgo specs, or take the package off PARALLEL_SUITES in hack/go-test.sh)"
+}
+
+// plainRequireTests returns the plain tests (func TestX(t *testing.T) that do not call RunSpecs) of the
+// package in dir whose bodies call RequireT. A directory without Go files gives none.
+func plainRequireTests(dir string) ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	fset := token.NewFileSet()
+	for _, f := range files {
+		af, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range af.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			var requires, specs bool
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if c, ok := n.(*ast.CallExpr); ok {
+					switch fun := c.Fun.(type) {
+					case *ast.SelectorExpr:
+						requires = requires || fun.Sel.Name == "RequireT"
+						specs = specs || fun.Sel.Name == "RunSpecs"
+					case *ast.Ident:
+						requires = requires || fun.Name == "RequireT"
+						specs = specs || fun.Name == "RunSpecs"
+					}
+				}
+				return true
+			})
+			if requires && !specs {
+				out = append(out, fn.Name.Name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // pkgDir maps an import path to its directory relative to the module root.
@@ -243,13 +321,14 @@ func load(dir string) (map[string][]types.Report, error) {
 
 // judge gives one suite its verdict from its reports (none when it never reported).
 func judge(dir string, reports []types.Report, required, expect string) result {
-	return judgeWith(dir, reports, nil, required, expect)
+	return judgeWith(dir, reports, nil, 0, required, expect)
 }
 
 // judgeWith is judge with the requirements the package's plain tests skipped for (testenv.RequireT,
-// which a Ginkgo report never sees), counted like a spec's.
-func judgeWith(dir string, reports []types.Report, plainReqs []string, required, expect string) result {
-	res := result{dir: dir}
+// which a Ginkgo report never sees), counted like a spec's, and the number of plain tests that passed,
+// counted like passing specs.
+func judgeWith(dir string, reports []types.Report, plainReqs []string, plainPassed int, required, expect string) result {
+	res := result{dir: dir, passed: plainPassed}
 	if len(reports) == 0 {
 		res.verdict, res.why = notRun, "no report (the suite never reached RunSpecs, or its processes exited before reporting)"
 		return res
