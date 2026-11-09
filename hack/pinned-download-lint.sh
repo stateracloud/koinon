@@ -18,12 +18,27 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # check FILE: one line per violation.
 check() {
 	awk '
-		function flush() {
-			if (cmd ~ /(^|[^A-Za-z0-9_.\/-])(curl|wget)[ \t]/ && cmd ~ /releases\/download/)
-				printf "%s:%d: curl/wget of releases/download; use hack/fetch-pinned.sh or .github/actions/fetch-pinned\n", FILENAME, start
+		function flush(   n, hit) {
+			if (cmd ~ /(^|[^A-Za-z0-9_.\/-])(curl|wget)[ \t]/) {
+				hit = (cmd ~ /releases\/download/)
+				# A URL held in a variable (X_URL="https://.../releases/download/...") counts too.
+				for (n in vars)
+					if (cmd ~ ("\\$\\{?" n "([^A-Za-z0-9_]|$)")) hit = 1
+				if (hit)
+					printf "%s:%d: curl/wget of releases/download; use hack/fetch-pinned.sh or .github/actions/fetch-pinned\n", FILENAME, start
+			}
 			cmd = ""
 		}
 		/^[ \t]*#/ { next }
+		# First pass: names of variables assigned a releases/download URL.
+		FNR == NR {
+			if (match($0, /[A-Za-z_][A-Za-z0-9_]*=[^ ]*releases\/download/)) {
+				v = substr($0, RSTART, RLENGTH)
+				sub(/=.*/, "", v)
+				vars[v] = 1
+			}
+			next
+		}
 		{
 			if (cmd == "") start = FNR
 			line = $0
@@ -33,7 +48,7 @@ check() {
 			if (!cont) flush()
 		}
 		END { flush() }
-	' "$1"
+	' "$1" "$1"
 }
 
 self_test() {
@@ -45,10 +60,13 @@ self_test() {
 	printf 'run: |\n  wget https://github.com/a/b/releases/download/v1/x\n' >"$tmp/wget"
 	# shellcheck disable=SC2016
 	printf 'AS_URL="https://github.com/a/b/releases/download/v1/x"\nhack/fetch-pinned.sh "$AS_URL" abc out\n' >"$tmp/good"
+	# shellcheck disable=SC2016
+	printf 'X_URL="https://github.com/a/b/releases/download/v1/x"\ncurl -fsSLo out "$X_URL"\n' >"$tmp/var"
 	printf '# curl https://github.com/a/b/releases/download/v1/x\ncurl -fsSL https://example.com/x\n' >"$tmp/comment"
 	[ "$(check "$tmp/bare" | wc -l)" -eq 1 ] || { echo "self-test: bare curl not flagged" >&2; exit 1; }
 	[ "$(check "$tmp/cont" | wc -l)" -eq 1 ] || { echo "self-test: curl with continuation not flagged" >&2; exit 1; }
 	[ "$(check "$tmp/wget" | wc -l)" -eq 1 ] || { echo "self-test: wget not flagged" >&2; exit 1; }
+	[ "$(check "$tmp/var" | wc -l)" -eq 1 ] || { echo "self-test: curl of a URL variable not flagged" >&2; exit 1; }
 	[ -z "$(check "$tmp/good")" ] || { echo "self-test: helper use flagged" >&2; exit 1; }
 	[ -z "$(check "$tmp/comment")" ] || { echo "self-test: comment flagged" >&2; exit 1; }
 	echo "pinned-download-lint self-test: ok"
