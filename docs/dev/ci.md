@@ -401,7 +401,9 @@ When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e
 naming the merge (or the suspects); it dispatches every candidate with `backup_restore=true`, so a
 nightly that went red in the backup-restore step reproduces: fix forward within 2 hours, otherwise revert it. RC and
 release tags are cut only from a commit whose `quickstart` job concluded success
-(`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it).
+(`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it). The gate ignores
+`skipped` `quickstart` check runs (the push run after a queue merge skips it) and also accepts a green `merge_group`
+`quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
 ## Required status checks
 
@@ -570,7 +572,7 @@ a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the qu
 a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
 and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.
 
-Cost: one full `ci` run per queue build, plus a 15 to 25 minute `quickstart` for each e2e-relevant entry
+Cost: one full `ci` run per queue build, plus a `quickstart` of about 12 to 15 minutes (more for a cold flavor build) for each e2e-relevant entry
 (75-minute job timeout, 60-minute queue check timeout: the queue gives up first). Entries build concurrently (up to 5), so
 the e2e adds latency per entry, not per queue; the throughput limit is the 1-entry-per-group merge. A red group drops
 only its entry and rebuilds the entries behind it. Raise the group size (`max_entries_to_merge`, `min_entries_to_merge`

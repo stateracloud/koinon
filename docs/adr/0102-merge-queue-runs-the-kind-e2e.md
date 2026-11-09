@@ -26,7 +26,7 @@ could not merge because main moved during the run; each needed a full re-run on 
    does not read it again.
 3. **Flow.** An e2e-relevant PR is enqueued, not merged with `--admin`: an admin merge bypasses the
    queue and so the queue-commit run. `hack/pr-merge.sh --admin` warns in that case.
-4. **Cost.** Each e2e-relevant entry adds 15 to 25 minutes of queue latency. Entries build concurrently
+4. **Cost.** Each e2e-relevant entry adds about 12 to 15 minutes of queue latency (more for a cold flavor build). Entries build concurrently
    (up to 5), so this is latency per entry, not per queue. The queue check timeout (60 min) is below the
    job timeout (75 min), so the queue gives up first. Measured on 2026-11-09: the slowest `quickstart` job
    of the last 200 finished runs took 14.2 minutes (typical 12 to 13.5), so the 60-minute check timeout keeps
@@ -36,6 +36,9 @@ could not merge because main moved during the run; each needed a full re-run on 
    already required and already reports on `merge_group`.
 5. **The push to main does not repeat the e2e.** `decide` on a push also accepts a green `merge_group`
    `quickstart` job whose head commit has the pushed commit's tree (compared through the git commits API).
+   `hack/release-gate.sh` follows the same logic: a `skipped` `quickstart` check run (the push run's) is ignored,
+   the newest run that is not skipped decides, and with none a green `merge_group` `quickstart` on the tagged
+   commit's tree counts. A failure or cancellation, or an API error, fails the gate.
 6. **Bootstrap shim.** The queue entry that merges this change runs the old `decide` (from `base_sha`), which
    answers `needed=false, required=true`. `e2e result` therefore keeps the old queued-PR-head lookup, guarded
    by `merge_group` with `required=true` (only an old base's `decide` produces that), in
