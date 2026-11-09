@@ -201,18 +201,13 @@ jobs:
             exit 1
           fi
 
-      - uses: ./.github/actions/fetch-pinned
-        with:
-          name: kind
-          url: https://github.com/kubernetes-sigs/kind/releases/download/${{ env.KIND_VERSION }}/kind-linux-amd64
-          sha256: ${{ env.KIND_SHA256_AMD64 }}
-          dest: ${{ runner.temp }}/bin/kind
-      - uses: ./.github/actions/fetch-pinned
-        with:
-          name: ko
-          url: https://github.com/ko-build/ko/releases/download/v${{ env.KO_VERSION }}/ko_${{ env.KO_VERSION }}_Linux_x86_64.tar.gz
-          sha256: ${{ env.KO_SHA256_AMD64 }}
-          dest: ${{ runner.temp }}/ko.tgz
+      # No cache and no local action here: this job checks out inputs.commit (an arbitrary commit),
+      # so a local action would be that commit's code, and a cache entry it saved would sit in the
+      # default branch's cache scope (CodeQL: cache poisoning). The helper retries and checks the sha256.
+      - name: Download kind and ko (hack/fetch-pinned.sh)
+        run: |
+          hack/fetch-pinned.sh "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64" "$KIND_SHA256_AMD64" "$RUNNER_TEMP/bin/kind"
+          hack/fetch-pinned.sh "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz" "$KO_SHA256_AMD64" "$RUNNER_TEMP/ko.tgz"
       - name: Install kind and ko
         run: |
           chmod +x "$RUNNER_TEMP/bin/kind"

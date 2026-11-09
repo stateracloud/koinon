@@ -377,7 +377,16 @@ the sha256 check, and a file already there with the right sha256 is not fetched 
 `releases/download` answers 504 now and then). Workflows use the composite action
 `.github/actions/fetch-pinned` (`name`, `url`, `sha256`, `dest`), which puts `actions/cache` in
 front, keyed by OS, tool name and sha256, so a version bump is a new entry and most runs download
-nothing; a cache hit is still checked. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
+nothing. A restored cache file is never trusted: `hack/fetch-pinned.sh` checks the sha256 of a file
+it finds present and downloads again on a mismatch. The action restores, runs the helper, then saves
+(only after the check passed, only on a miss, and only with `save: true`, the default). Cache
+safety: a job that checks out a ref other than the event's trusted one (`inputs.commit` in
+`e2e-kind`, a `pull_request_target` head) must not run a local action or save: its cache scope is
+the default branch's, so a save would let that ref's code write what main restores (CodeQL "cache
+poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without the cache. `ci.yml`
+(`pull_request` has its own cache scope; pushes and queue builds are trusted refs), `secrets.yml` and
+`g2-kind.yml` (the dispatched ref's own scope) keep the action and save. Any new caller on an
+untrusted ref passes `save: 'false'` and takes the action from a trusted checkout. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
 `curl` or `wget` of `releases/download` in a workflow, composite action, `hack/*.sh` or `test/**/*.sh`
 that bypasses the helper; `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
