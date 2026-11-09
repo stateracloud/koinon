@@ -30,7 +30,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@bufbuild/protoc-gen-es": "^2.16.0",
-    "@playwright/test": "1.64.1",
+    "@playwright/test": "1.65.0",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
