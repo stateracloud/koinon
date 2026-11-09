@@ -19,7 +19,7 @@ echo "full stub $*"; exit "${STUB_FULL:-1}"
 SH
 # Stub gh: answers from fixture JSON and applies the script's own --jq with the real jq, so a typo in a
 # filter fails a test. `run list` also honours --event and --status the way gh does. Fixtures come from
-# env: STUB_LABELS (the PR's labels), STUB_COVERED (head sha of the last green push run on main),
+# env: STUB_LABELS (the PR's label names; served as the API's label objects), STUB_COVERED (head sha of the last green push run on main),
 # STUB_MG_RUNS ("<run id> <sha>": a green merge_group run), STUB_MG_FAILED_RUN (a merge_group run that
 # failed overall although its quickstart job passed), STUB_MG_JOB (conclusion of run <id>'s quickstart job;
 # empty: that job does not exist), STUB_TREE_PUSH / STUB_TREE_MG (tree sha of the pushed / any other commit).
@@ -35,7 +35,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   esac
 done
 case "$*" in
-*/issues/*/labels*) printf '%s\n' "${STUB_LABELS:-[]}" | jq -r "$expr" ;;
+*/issues/*/labels*) printf '%s\n' "${STUB_LABELS:-[]}" | jq -c '[.[] | {id: 1, name: .}]' | jq -c "$expr" ;;
 *git/commits/pushsha*) [[ -n ${STUB_TREE_PUSH:-} ]] && jq -n --arg t "$STUB_TREE_PUSH" '{sha: "pushsha", tree: {sha: $t}}' | jq -r "$expr" ;;
 *git/commits/*) [[ -n ${STUB_TREE_MG:-} ]] && jq -n --arg t "$STUB_TREE_MG" '{sha: "x", tree: {sha: $t}}' | jq -r "$expr" ;;
 *"run list"*)
