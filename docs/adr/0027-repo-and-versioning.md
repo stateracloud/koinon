@@ -85,7 +85,7 @@ Checked 2026-10-21:
 - cosign v3.1.4 keyless in Actions (`permissions: id-token: write`).
   https://docs.sigstore.dev/quickstart/quickstart-ci/
 - Helm v4.3.1; OCI push to ghcr.io: https://helm.sh/docs/topics/registries/
-- buf v1.74.0, buf.yaml v2, breaking default `FILE`, BSR not required.
+- buf v1.75.0, buf.yaml v2, breaking default `FILE`, BSR not required.
   https://buf.build/docs/configuration/v2/buf-yaml/
 - goose forward-only migrations (Down optional): https://github.com/pressly/goose
 
