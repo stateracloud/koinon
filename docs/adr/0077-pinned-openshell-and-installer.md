@@ -214,35 +214,71 @@ The decisions above are unchanged. The text and the verification below describe 
   2026-10-27), read as source, from `bdb956f` (the 0.1.5 commit) to `v0.1.7`:
   - Release notes ([v0.1.6](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.6),
     [v0.1.7](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.7); the tags carry no
-    `CHANGELOG.md`). Security fixes, all in OpenShell's own dependencies:
+    `CHANGELOG.md`). Security fixes, mostly in OpenShell's own dependencies:
     - v0.1.6: webpki stops trusting the emSign CAs (CVE-2026-111943); russh 0.64.1
-      (GHSA-4wc5-f2rc-q74m); Tokio and crypto-bigint (RUSTSEC-2026-0386, -0387); ctutils
-      (RUSTSEC-2026-0385).
+      (GHSA-4wc5-f2rc-q74m, CVE-2026-111061; NVIDIA/OpenShell#4742); Tokio and crypto-bigint
+      (RUSTSEC-2026-0386, -0387); ctutils (RUSTSEC-2026-0385).
     - v0.1.7: `zip` (GHSA-m665-v7pm-7grj), russh, pageant and pulldown-cmark updated, and the
       unmaintained `rustls-pemfile` replaced.
+    - v0.1.7 (NVIDIA/OpenShell#5004): an egress-policy enforcement fix, not a dependency update.
+      Address selection from policy DNS now goes through the same destination checks as endpoint
+      decisions.
+  - New in these releases and not used by Koinon yet (the code is read at v0.1.7; each follow-up
+    is tracked separately and none is part of this pin):
+    - v0.1.6 (NVIDIA/OpenShell#4728): the gateway writes OCSF audit events for authorization
+      denials and raises a High-severity Detection Finding when a sandbox credential is refused for
+      a method it may not call, another sandbox or another workspace (suspected credential misuse).
+    - v0.1.6 (NVIDIA/OpenShell#4678): `binding_policy` (`allowlist` or `exact`) on a supervisor
+      middleware registration, so the operator decides which bindings may run. A supervisor older
+      than the gateway does not enforce it (`proto/sandbox.proto`).
+    - v0.1.7 (NVIDIA/OpenShell#4873): in-place update of a stopped Kubernetes sandbox's image,
+      command, environment overrides, labels and annotations (`SandboxUpdates/UpdateSandbox`). It
+      is off by default: the operator sets `enable_sandbox_updates` after the rollout checklist in
+      OpenShell's `docs/kubernetes/high-availability.mdx`.
+    - v0.1.7 (NVIDIA/OpenShell#4936): an opt-in supervisor application TLS listener for declared
+      sandbox HTTP and WebSocket services, disabled by default
+      (`[openshell.supervisor.app_listener]`).
   - Breaking changes and what each one means for Koinon:
-    - v0.1.6 (#4821): a gateway refuses to start without an auth method. Koinon dials the gateway
-      with mTLS (`openshell.clientTLSSecret`), and the upstream chart's PKI init Job issues the
-      certificates, so the install should be unchanged _(inferred; the lab e2e on the head checks it)_.
-    - v0.1.6 (#4656): new sandboxes open the control connection from the sandbox side, and the
-      supervisor and sandbox runtime must be the same version. Koinon pins both from 0.1.7
-      (`sandboxPolicy.supervisorImages` is derived from the chart version).
-    - v0.1.6 (#4765): `ResumeBoundaryRequest` field 3 is renamed `restart_if_restore_fails`, for
+    - v0.1.6 (NVIDIA/OpenShell#4821): a gateway refuses to start without a user authentication
+      method. The upstream chart always renders `[openshell.gateway.gateway_jwt]`
+      ([`_toml.tpl:125-132`](https://github.com/NVIDIA/OpenShell/blob/5d25211b/deploy/helm/openshell/templates/_toml.tpl#L125-L132)),
+      and the new startup check
+      ([`validate_user_auth`, `crates/openshell-server/src/cli.rs:742-760`](https://github.com/NVIDIA/OpenShell/blob/5d25211b/crates/openshell-server/src/cli.rs#L742-L760))
+      accepts a configured `gateway_jwt`, so it passes for every install of that chart, with TLS
+      disabled too. 0.1.5 already refused a request without credentials when an authentication chain
+      exists
+      ([`multiplex.rs:1158-1206`](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-server/src/multiplex.rs#L1158-L1206)).
+      `openshell.insecure: true` in Koinon's chart works as before. The lab e2e on the head still
+      checks the install.
+    - v0.1.6 (NVIDIA/OpenShell#4656): the workload pod of a new sandbox opens the control
+      connection to its own supervisor pod in the same namespace, through a per-sandbox
+      `os-supervisor-*` Service and an `os-control-*` NetworkPolicy that the gateway creates
+      ([`sandbox_runtime.rs:147-148`](https://github.com/NVIDIA/OpenShell/blob/5d25211b/crates/openshell-driver-kubernetes/src/sandbox_runtime.rs#L147-L148),
+      [`isolation.rs:244-286`](https://github.com/NVIDIA/OpenShell/blob/5d25211b/crates/openshell-driver-kubernetes/src/isolation.rs#L244-L286)).
+      It is not a sandbox-to-gateway connection. The gateway ClusterRole already allowed creating
+      Services and NetworkPolicies in 0.1.5 (`deploy/helm/openshell/templates/clusterrole.yaml`), Koinon
+      puts no NetworkPolicy in sandbox namespaces, and its ValidatingAdmissionPolicies
+      (`charts/koinon/templates/sandbox-policy.yaml`) match pods, sandboxes, secrets and the
+      `pods/*` and `services/proxy` connect subresources, never Services or NetworkPolicies. The supervisor and sandbox runtime must be the same version. Koinon pins both
+      from 0.1.7 (`sandboxPolicy.supervisorImages` is derived from the chart version).
+    - v0.1.6 (NVIDIA/OpenShell#4765): `ResumeBoundaryRequest` field 3 is renamed `restart_if_restore_fails`, for
       external isolation backends. Koinon does not use it; the regenerated client carries the new name.
-    - v0.1.7 (#5036): OCSF output is 1.8.0 only, and `server.ocsfLog.schemaVersion` is ignored.
+    - v0.1.7 (NVIDIA/OpenShell#5036): OCSF output is 1.8.0 only, and `server.ocsfLog.schemaVersion` is ignored.
       Koinon sets no schema version and parses no OCSF records yet (the ingestion of
       [0023](0023-observability-and-audit.md) is open), so nothing changes.
-    - v0.1.7 (#5155): the Podman-only `additional_ca_bundle` is deprecated. Koinon does not use Podman.
+    - v0.1.7 (NVIDIA/OpenShell#5155): the Podman-only `additional_ca_bundle` is deprecated. Koinon does not use Podman.
   - Everything below is read from the code.
   - Supervisor pod: `crates/openshell-driver-kubernetes/src/sandbox_runtime.rs` (the `sa-token`
     projected volume: audience `openshell-gateway`, `expirationSeconds` from the TTL, automount off),
     `driver.rs` (TokenReview audience; no projected token on a workload pod), `config.rs` (TTL clamp
     600 to 86400) and `main.rs` (default 3600) are unchanged, so the admission policy of
     [0006](0006-identity-layers.md) needed no change.
-  - New and not denied by the chart policy: an optional `openshell-additional-ca` ConfigMap volume on
-    the supervisor pod (only with destination trust configured), a runtime-initiated control
-    connection mode, a per-sandbox boundary Service selected by role, and a `sandbox-control-egress`
-    NetworkPolicy. Not run against a cluster here; the lab e2e on the head is the check.
+  - New, and not matched by the chart policy: an optional `openshell-additional-ca` ConfigMap volume
+    on the supervisor pod (only with destination trust configured), and the runtime-initiated control
+    connection with its per-sandbox `os-supervisor-*` Service (selected by role) and `os-control-*`
+    NetworkPolicy, both in the sandbox's own namespace and between the workload pod and its
+    supervisor pod. The chart's ValidatingAdmissionPolicies match none of these kinds (see the
+    NVIDIA/OpenShell#4656 item above). Not run against a cluster here; the lab e2e on the head is the check.
   - Protos (`third_party/openshell`, additions only): the `SuspendSandbox` and `ResumeSandbox` RPCs,
     the `SandboxUpdates` service, the phases `SANDBOX_PHASE_SUSPENDING` and `SANDBOX_PHASE_SUSPENDED`,
     `service_routes` on the sandbox spec and status, and operator authority over middleware bindings

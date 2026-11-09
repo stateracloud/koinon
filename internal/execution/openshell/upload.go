@@ -9,7 +9,8 @@ package openshell
 // an SSH client cannot slow down, because russh grants receive credit before it hands the data to
 // the application. The upload subsystem returns its own credit instead.
 //
-// References are to NVIDIA/OpenShell v0.1.5:
+// References are to NVIDIA/OpenShell v0.1.7 (the three upload.rs files and the supervisor's
+// input.rs are unchanged since v0.1.5):
 //
 //   - crates/openshell-core/src/upload.rs: the protocol constants and the plan line;
 //   - crates/openshell-supervisor-process/src/ssh/upload.rs: the supervisor side;

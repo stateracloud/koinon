@@ -15,11 +15,11 @@
 # The Gitea read-grant specs need a TLS server behind the host their grant names, because the proxy
 # dials an allowed host before it judges the request (old issue 371). Unless KOINON_ESCAPE_GITEA_URL is set,
 # or KOINON_ESCAPE_STANDIN=0, a stand-in (koinon-fakemodel -standin over TLS, in koinon-fixtures)
-# gets a certificate from a throwaway CA. OpenShell 0.1.5's supervisor (its own container and image,
+# gets a certificate from a throwaway CA. OpenShell 0.1.7's supervisor (its own container and image,
 # not the sandbox image) verifies upstream TLS against webpki roots plus the supervisor image's
 # /etc/ssl/certs/ca-certificates.crt, so the gateway is re-pointed at a supervisor image derived
-# with that CA appended. Interim until OpenShell >= 0.1.7 (supervisor.network.additionalCaConfigMapName),
-# #80. Nothing leaves the cluster.
+# with that CA appended. Interim: OpenShell 0.1.7 can take an extra CA
+# (supervisor.network.additionalCaConfigMapName), so #80 replaces this. Nothing leaves the cluster.
 #
 # The leak guard exfiltration case (exfil_test.go, #293) needs a guarded gateway this script does not
 # start: it runs when KOINON_ESCAPE_MCP_HOST, KOINON_ESCAPE_MCP_KEY and KOINON_ESCAPE_MCP_RECEIVER_URL are
@@ -135,11 +135,11 @@ if (( need_gitea )); then
     "${K[@]}" -n koinon-fixtures apply -f - >/dev/null
   "${K[@]}" -n koinon-fixtures rollout status deploy/escape-gitea-standin --timeout=180s
 
-  # OpenShell 0.1.5's supervisor verifies the upstream certificate against webpki roots plus
+  # OpenShell 0.1.7's supervisor verifies the upstream certificate against webpki roots plus
   # /etc/ssl/certs/ca-certificates.crt in the SUPERVISOR image (distroless, no shell), not in the
   # sandbox image. Derive a supervisor image from the exact one the install runs, with the throwaway
-  # CA appended, and point the gateway at it. Interim, until OpenShell >= 0.1.7 can take an extra CA
-  # (supervisor.network.additionalCaConfigMapName): #80 removes this block. The chart ref is the one
+  # CA appended, and point the gateway at it. Interim: OpenShell 0.1.7 can take an extra CA
+  # (supervisor.network.additionalCaConfigMapName), so #80 removes this block. The chart ref is the one
   # test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")

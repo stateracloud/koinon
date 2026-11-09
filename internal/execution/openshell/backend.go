@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package openshell implements execution.Backend on the OpenShell gateway's gRPC API
-// (openshell.v1.OpenShell, v0.1.5), through the client generated from the vendored protos
+// (openshell.v1.OpenShell, v0.1.7), through the client generated from the vendored protos
 // in third_party/openshell (ADR 0048: generated client, not sdk/go).
 package openshell
 
