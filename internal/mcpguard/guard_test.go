@@ -744,13 +744,13 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeFalse())
 		})
 
-		It("leaves the legs alone for such a reply from one of Koinon's own targets", func(ctx SpecContext) {
+		It("takes both legs from such a reply from one of Koinon's own targets too", func(ctx SpecContext) {
 			res, err := srv.CheckResponse(ctx, &extmcp.McpResponse{
-				ServiceNames: []string{"github"}, Method: "tools/list", MetadataContext: meta(me(), ""), McpResponse: []byte(`{}`),
+				ServiceNames: []string{"github"}, Method: "resources/read", MetadataContext: meta(me(), ""), McpResponse: []byte(`{}`),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.GetPass()).NotTo(BeNil())
-			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{}))
+			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
 		})
 
 		It("withholds such a reply when it comes from no single server or no known agent", func(ctx SpecContext) {

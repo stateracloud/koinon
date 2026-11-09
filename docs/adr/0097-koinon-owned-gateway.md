@@ -226,8 +226,9 @@ Scope:
   against it; a changed expected-failure list is reviewed like code.
 - **Close #254 on Koinon's side, fail closed.** An MCP call whose reply the guard never saw counts as
   untrusted: it sets both session legs (untrusted input and private data). The same holds for any MCP
-  message kind the guard cannot see. The upstream fix is drafted for a human to post (AGENTS.md,
-  OpenShell and upstream rules apply to agentgateway too).
+  message kind the guard cannot see. The upstream fix is drafted for a human to post, in
+  [`docs/dev/upstream-agentgateway-4245.md`](../dev/upstream-agentgateway-4245.md) (AGENTS.md, OpenShell
+  and upstream rules apply to agentgateway too).
   Built (#254): the open-call ledger in `internal/mcpguard` covers a `tools/call` that ends in an error
   reply or is cut short (both legs, a person decides); a reply of any other method the gateway might
   hand the guard (`CheckResponse`, `Guard.CheckUnseen`) takes both legs on the session. What the guard

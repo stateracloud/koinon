@@ -74,7 +74,7 @@ func (g *Guard) CheckResult(ctx context.Context, r Result) error {
 // widened what it hooks). The guard cannot tell what the reply brings into the agent's session, so it
 // takes both legs, untrusted input and private data, on the session (#254, ADR 0097 step 1: fail
 // closed for any MCP message kind the guard cannot see). An error withholds the reply, as in
-// CheckResult. Koinon's own targets and its executor are exempt, as everywhere else.
+// CheckResult. Only the executor and the prober are exempt; Koinon's own targets take both legs like an undeclared own tool.
 func (g *Guard) CheckUnseen(ctx context.Context, agent, target string) error {
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
@@ -85,8 +85,21 @@ func (g *Guard) CheckUnseen(ctx context.Context, agent, target string) error {
 	if refused != nil {
 		return refusedError{text: refused.Text}
 	}
-	if c.exempt || c.own {
+	if c.exempt {
 		return nil
+	}
+	if c.own {
+		// An own target is not trusted for a kind nobody declared either: as for an undeclared own
+		// tool in CheckResult, both legs go on the agent's session (a github resources/read or
+		// prompts/get can carry issue text that is untrusted and private).
+		org, ag, o, err := g.agentOf(ctx, c.ref)
+		if err != nil {
+			return err
+		}
+		if o != nil {
+			return refusedError{text: o.Text}
+		}
+		c.org, c.agent = org, ag
 	}
 	both := Legs{UntrustedInput: true, PrivateData: true}
 	if _, err := g.record(ctx, c, both, nil); err != nil {
