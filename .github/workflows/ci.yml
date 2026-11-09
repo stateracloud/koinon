@@ -382,7 +382,10 @@ jobs:
         run: hack/migrate-lint-test.sh
       - name: migrations (lint)
         if: ${{ !cancelled() }}
-        run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
+        env:
+          # Through env, not spliced into the script: the base branch name is user-chosen text (#58 review).
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
+        run: hack/migrate-lint.sh ${BASE:+"$BASE"}
       # ADR numbers unique and contiguous, README index in sync (hack/adr-lint.sh, ADR 0082).
       - name: adr-lint (tests)
         if: ${{ !cancelled() }}
@@ -444,7 +447,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
-        run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
+          BASE: origin/${{ github.base_ref }}
+        run: hack/dep-age-check.sh "$BASE"
 
   # The web checks run as parallel jobs (old issue 218), each its own check; `web` below aggregates them and
   # keeps the required check name stable.
@@ -811,10 +815,10 @@ jobs:
       - run: hack/tmp-safety-test.sh
       - run: hack/wt-install-test.sh
       - run: hack/notes-expiry-test.sh
-      - run: hack/workflow-trigger-lint-test.sh
-      - run: hack/workflow-trigger-lint.sh
       - run: hack/mktemp-lint-test.sh
       - run: hack/mktemp-lint.sh
+      - run: hack/runner-lint-test.sh
+      - run: hack/runner-lint.sh
       - run: hack/old-issue-refs-lint-test.sh
       - run: hack/old-issue-refs-lint.sh
       - run: hack/audit-batch-lint-test.sh

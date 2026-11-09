@@ -16,7 +16,7 @@
 # repositories (brownouts from 2026-11-09, permanent 2026-12-02). The `claim` check runs on
 # `pull_request` with a read-only token and no secret or Environment, and still checks out the BASE
 # commit to run hack/claim.sh, never the pull request's code. The `release` job runs on `push` to main,
-# where the workflow file is main's own. hack/workflow-trigger-lint.sh keeps the trigger out.
+# where the workflow file is main's own. hack/runner-lint.sh keeps the trigger out.
 #
 # Job count (old issue 596): every job here pays a fixed start-up cost (runner, checkout). The `claim` job runs
 # only for events that can change its answer (title, body, files, labels, state). A job skipped by

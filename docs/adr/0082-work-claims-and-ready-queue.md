@@ -251,7 +251,7 @@ sentence of ADR 0094.
   `pull_request_target` and an Environment secret. The `push`, `workflow_run` and `schedule` triggers
   remain, so a new auto-merge pull request waits up to one schedule period (30 minutes) at most. The
   merge queue (ADR 0094 decision 8) replaces the updater anyway.
-- **Lint**: `hack/workflow-trigger-lint.sh` (CI `scripts` job and preflight's `actionlint` gate) fails
+- **Lint**: `hack/runner-lint.sh` (CI `scripts` job and preflight's `runnerlint` gate) fails
   on `pull_request_target` in any workflow. Bringing it back needs an ADR.
 
 Trade-off, stated: with `pull_request` the workflow file comes from the pull request's head, so a pull
