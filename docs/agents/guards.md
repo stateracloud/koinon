@@ -42,7 +42,7 @@ Owner: "repo" means a pull request changes it. "Owner" means only the human owne
 | Write only where the sandbox allows | Claude Code sandbox (`.claude/settings.json` `sandbox` entries); worktrees under `/tmp/kw` | `Operation not permitted` | `hack/wt.sh new`; `$TMPDIR`. `hack/lane-gates.sh` reports a sandbox denial as `notrun` | owner |
 | No cluster by default | rule in AGENTS.md "Working rules" (explicit `KUBECONFIG`); no hook | text only | `KUBECONFIG=/dev/null`, or an explicit file | repo |
 
-Guards in the table: 23.
+Guards in the table: 22.
 
 ## 2. Guards with no legal route today
 
