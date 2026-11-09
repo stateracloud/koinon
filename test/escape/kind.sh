@@ -156,7 +156,7 @@ if (( need_gitea )); then
   printf 'FROM %s\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n' "$sup_src" >"$tmp/sup/Dockerfile"
   docker build -q -t "$sup_ref" "$tmp/sup" >/dev/null
   kind load docker-image --name "$CLUSTER" "$sup_ref"
-  # supervisor.image.{registry,repository,tag,pullPolicy} are the 0.1.5 chart's keys (values.yaml);
+  # supervisor.image.{registry,repository,tag,pullPolicy} are the 0.1.7 chart's keys (values.yaml);
   # the registry is set so the image is kind.local/..., never pulled from anywhere.
   helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
     --version "$os_version" --namespace openshell --reuse-values \

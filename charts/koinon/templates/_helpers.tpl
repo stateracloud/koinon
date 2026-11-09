@@ -152,14 +152,14 @@ imagePullSecrets:
 
 {{/*
 The images OpenShell's supervisor pods may run, as JSON (the sandbox admission policy's pin):
-sandboxPolicy.supervisorImages, or when that is empty OpenShell 0.1.5's own default, rewritten by
+sandboxPolicy.supervisorImages, or when that is empty OpenShell 0.1.7's own default, rewritten by
 koinon.imageRef so that a mirror needs no extra setting. An explicit list is used as written.
 */}}
 {{- define "koinon.supervisorImages" -}}
 {{- if .Values.sandboxPolicy.supervisorImages -}}
 {{- .Values.sandboxPolicy.supervisorImages | toJson -}}
 {{- else -}}
-{{- list (include "koinon.imageRef" (list . "ghcr.io/nvidia/openshell/supervisor:0.1.5")) | toJson -}}
+{{- list (include "koinon.imageRef" (list . "ghcr.io/nvidia/openshell/supervisor:0.1.7")) | toJson -}}
 {{- end -}}
 {{- end }}
 

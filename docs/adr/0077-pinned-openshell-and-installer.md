@@ -198,6 +198,16 @@ documented order. Koinon offers both paths too.
 - **Apply Agent Sandbox's manifest instead of vendoring its chart.** Simpler, and this is what
   `up.sh` does, but it gives no Helm release to upgrade, roll back or render for GitOps. Rejected.
 
+## Amendment (2026-11-09): OpenShell 0.1.7
+
+The pin moves from 0.1.5 to 0.1.7 (issue 421; the release is older than the 3 days of
+[0079](0079-dependency-cooldown.md)). `SupportedOpenShellVersions` is `[]string{"0.1.7"}`, the kind e2e
+and the spike installer pin the chart by the digest of the 0.1.7 tag
+(`sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901`, read from the ghcr.io
+manifest), and the vendored protos in `third_party/openshell` are the v0.1.7 files (additions only).
+The decisions above are unchanged. The text and the verification below describe the 0.1.5 pin of
+2026-10-28.
+
 ## Upstream verification
 
 - 2026-10-28, OpenShell `v0.1.5`:
