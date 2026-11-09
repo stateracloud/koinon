@@ -36,6 +36,10 @@
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
 #   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it.
+#   ESCAPE_OPENSHELL=1 (default; SUITE=go) runs the escape suite's OpenShell cases against the install after the
+#   Go driver (test/e2e/escape-openshell.sh; #109): the chart's sandbox admission policy is live, so the
+#   real supervisor and workload pods are admitted by it and the escape cases are refused. 0 leaves it out
+#   (about 4 to 8 minutes of wall clock).
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -303,6 +307,12 @@ web)
   echo "Browser e2e (Playwright, web/e2e-real) passed in $(( $(date +%s) - ts )) s; details in web.log." >"$OUT/quickstart-timings.md"
   ;;
 esac
+
+if [[ $SUITE == go && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
+  step "escape suite, OpenShell cases (test/escape, chart policy live)"
+  CLUSTER="$CLUSTER" "$here/escape-openshell.sh" 2>&1 | tee "$OUT/escape-openshell.log"
+  done_step "Escape suite (OpenShell cases)"
+fi
 
 if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }

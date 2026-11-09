@@ -32,15 +32,31 @@ import (
 //	KOINON_ESCAPE_POLICY        the chart's pods policy (default koinon-koinon-sandbox-pods, that
 //	                            is <release namespace>-<fullname>-sandbox-pods); it must also
 //	                            carry the chart's app.kubernetes.io/part-of=koinon label
-var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "openshell"), func() {
+//	KOINON_ESCAPE_POLICY_REQUIRED  1: the policy must be bound (the spec fails instead of skipping)
+//	                            and the namespace must exist. The kind e2e sets it (test/e2e/escape-openshell.sh,
+//	                            #109): there the chart is installed with sandboxPolicy enabled.
+//	KOINON_ESCAPE_SUPERVISOR_IMAGE  the supervisor image the install's policy admits (default
+//	                            ghcr.io/nvidia/openshell/supervisor:0.1.5)
+//
+// The container has the lowest priority: the namespace of a workspace exists once a sandbox was created in it,
+// and the other specs of the label do that.
+var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "openshell"), SpecPriority(-10), func() {
 	It("denies Kata annotations and other runtimes for the controller, and admits a compliant pod", func(ctx SpecContext) {
 		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE"))
 		ns := os.Getenv("KOINON_ESCAPE_NAMESPACE")
+		required := os.Getenv("KOINON_ESCAPE_POLICY_REQUIRED") == "1"
 		cfg := kubeConfig()
 		cs := kubernetes.NewForConfigOrDie(cfg)
 		policy := envOr("KOINON_ESCAPE_POLICY", "koinon-koinon-sandbox-pods")
+		if _, err := cs.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{}); err != nil && required {
+			Fail("the workspace namespace " + ns + " does not exist, so no sandbox of this run was created in it: " + err.Error())
+		}
 		if !policyBound(ctx, cs, policy, ns) {
-			Skip("the chart's policy " + policy + " is not installed with a Deny binding that selects namespace " + ns)
+			msg := "the chart's policy " + policy + " is not installed with a Deny binding that selects namespace " + ns
+			if required {
+				Fail(msg + " (KOINON_ESCAPE_POLICY_REQUIRED=1: is sandboxPolicy.enabled and the release namespace right?)")
+			}
+			Skip(msg)
 		}
 
 		impersonated := rest.CopyConfig(cfg)
@@ -75,6 +91,43 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 		} {
 			_, err := controller.CoreV1().Pods(ns).Create(ctx, pod(c.mutate), dry)
 			Expect(err).To(HaveOccurred(), "%s: a dry-run pod was admitted", name)
+			Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy '"+policy+"'"), name)
+			Expect(err.Error()).To(ContainSubstring(c.message), name)
+		}
+
+		// The supervisor rules (ADR 0006 amendment 2026-11-09, #220), as the OpenShell gateway: the
+		// real supervisor pod shape is admitted, and a token for the API server or a long-lived one
+		// is not. The same pod the gateway creates in this run was admitted, or no sandbox would be up.
+		gateway := rest.CopyConfig(cfg)
+		gateway.Impersonate = rest.ImpersonationConfig{UserName: gatewayUser, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+		gw := kubernetes.NewForConfigOrDie(gateway)
+		image := envOr("KOINON_ESCAPE_SUPERVISOR_IMAGE", "ghcr.io/nvidia/openshell/supervisor:0.1.5")
+		supervisor := func(mutate func(*corev1.Pod)) *corev1.Pod {
+			p := supervisorPod("koinon-escape-sup", mutate)
+			p.Name = ""
+			p.GenerateName = "koinon-escape-sup-"
+			p.Spec.Containers[0].Image = image
+			return p
+		}
+		_, err = gw.CoreV1().Pods(ns).Create(ctx, supervisor(func(*corev1.Pod) {}), dry)
+		Expect(err).NotTo(HaveOccurred(), "control: a supervisor pod in the shape OpenShell creates is admitted for the gateway")
+		const supAud = "may project only a ServiceAccount token for the audience openshell-gateway"
+		for name, c := range map[string]struct {
+			mutate  func(*corev1.Pod)
+			message string
+		}{
+			"api server audience": {func(p *corev1.Pod) {
+				p.Spec.Volumes = []corev1.Volume{supervisorTokenVolume("https://kubernetes.default.svc", 3600)}
+			}, supAud},
+			"no audience": {func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{supervisorTokenVolume("", 3600)} }, supAud},
+			"long token": {func(p *corev1.Pod) {
+				p.Spec.Volumes = []corev1.Volume{supervisorTokenVolume("openshell-gateway", 86400)}
+			}, "must bound the ServiceAccount token"},
+			"token mounted by default": {func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil }, "must set automountServiceAccountToken to false"},
+			"other image":              {func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/supervisor:1" }, "must use the pinned supervisor image"},
+		} {
+			_, err := gw.CoreV1().Pods(ns).Create(ctx, supervisor(c.mutate), dry)
+			Expect(err).To(HaveOccurred(), "%s: a dry-run supervisor pod was admitted", name)
 			Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy '"+policy+"'"), name)
 			Expect(err.Error()).To(ContainSubstring(c.message), name)
 		}

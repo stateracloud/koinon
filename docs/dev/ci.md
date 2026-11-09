@@ -141,8 +141,25 @@ not see what the chart really passes (old issue 284).
 
 The sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`) is tested by the
 escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`
-(`make test-admission`). Its OpenShell cases run on kind: `make dev-kind-up`, then
-`make test-escape-kind`.
+(`make test-admission`). Its OpenShell cases run in two places on kind:
+
+- **In the kind e2e** (#109), against the chart install, where `sandboxPolicy` is enabled
+  (`test/e2e/kind/koinon-values.yaml`): `run.sh` calls `test/e2e/escape-openshell.sh` after the Go driver
+  (`SUITE=go`; `ESCAPE_OPENSHELL=0` leaves it out). The script checks that the chart's policy
+  and its binding exist, then runs `test/escape/kind.sh` with `KOINON_ESCAPE_CHART_NAMESPACE`, which points
+  the live admission case at the workspace namespace and the chart's policy. So the real policy admits the
+  real supervisor pods (the `openshell-gateway` token rules of #220) and workload pods that OpenShell and
+  the Agent Sandbox controller create for every sandbox of the run, and the live case, which fails here
+  instead of skipping (`KOINON_ESCAPE_POLICY_REQUIRED=1`), dry-runs refused pods as the controller and as
+  the gateway (Kata annotations, wrong runtime class, an API-audience or long-lived supervisor token, a
+  foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image build, one ko stand-in
+  image, a dozen sandboxes); the step's `Escape suite (OpenShell cases)` row in the run's table is the
+  real number. A skip of a case it needs is a failure (`KOINON_REQUIRE=openshell,cluster,escape-gateway`).
+  The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
+  image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
+- **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
+  Koinon policy: the quicker loop when you change `test/escape` or the sandbox profile (no Koinon
+  images or install), and the only place the Gitea cases run.
 
 ## Leak guard exfiltration cases
 
