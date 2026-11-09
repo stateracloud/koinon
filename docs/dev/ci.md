@@ -460,7 +460,7 @@ it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
 ### The `claim` check and claims by comment (ADR 0094, #163, #164)
 
-`claim` (`.github/workflows/claims.yml`, `pull_request_target`, read-only, `hack/claim.sh check-pr`)
+`claim` (`.github/workflows/claims.yml`, `pull_request`, read-only, `hack/claim.sh check-pr`)
 is required and is a conflict check: it fails only when someone else's human holds a live claim on an
 issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
 issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
@@ -474,6 +474,23 @@ handles `/claim` and `/release` on issues with `GITHUB_TOKEN`; it is no status c
 release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run a failed `claim`
 check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
 fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
+
+#### Workflow triggers: no `pull_request_target` (#463)
+
+GitHub blocks `pull_request_target` by default for public repositories (brownouts from 2026-11-09,
+permanent 2026-12-02). We keep the block and use no exception: `hack/workflow-trigger-lint.sh` fails
+any workflow that names the trigger, and bringing it back needs an ADR (amendment of ADR 0082).
+
+| Workflow job | Trigger | Token and secrets | Code it runs |
+| --- | --- | --- | --- |
+| `claims.yml` `claim` | `pull_request`, `merge_group` | read-only `GITHUB_TOKEN`; no secret, no Environment | base commit's `hack/claim.sh`; never the PR's code |
+| `claims.yml` `release` | `push` to `main` | `contents`, `issues` write; no secret | main's own file and script |
+| `claims.yml` `sweeper` | `schedule` | same as `release`; frees PRs closed without a merge | main |
+| `updater.yml` | `push`, `workflow_run`, `schedule` (no `auto_merge_enabled`) | `claims-bot` Environment, branch policy `main` | main |
+
+Limit: on `pull_request` the workflow file is the PR head's, so a PR could edit `claims.yml` to pass
+its own `claim`. `.github/**` needs a CODEOWNERS review and the token is read-only without a secret; a
+ruleset "required workflow" could pin the file, and is a settings change (ADR 0082 amendment).
 
 ## Merging
 
@@ -558,10 +575,10 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
   sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  `release` (a `push` to main job) and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
-  the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
+  the `pull_request` entry check, which runs on the PR before it can be enqueued.
 - `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
   e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That

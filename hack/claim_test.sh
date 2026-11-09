@@ -911,6 +911,40 @@ if ((rp_rc != 0)); then ok "release-pr exits non-zero when a claim write dies"; 
 eq "release-pr still releases every closing issue after a failure" "$(grep -c released "$LOG")" 2
 rm -f "$LOG"
 
+# release-merged (the push-to-main release job, #463): releases the merged pull requests of the pushed
+# commits once each, ignores an open or closed-unmerged one, and ends red when a release fails.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_relmerged.XXXXXX")
+(
+  REPO=acme/koinon
+  gh() {
+    case $* in
+      *compare/*) printf 'aaaaaaa\nbbbbbbb\n' ;;
+      *commits/aaaaaaa/pulls*) printf '50\n' ;;
+      *commits/bbbbbbb/pulls*) printf '50\n51\n' ;;
+    esac
+  }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 1111111 bbbbbbb
+) >/dev/null 2>&1
+eq "release-merged releases each merged pull request once" "$(tr '\n' ' ' <"$LOG")" "pr 50 pr 51 "
+: >"$LOG"
+(
+  REPO=acme/koinon
+  gh() { case $* in *compare/*) echo "unexpected compare" >>"$LOG" ;; *commits/ccccccc/pulls*) echo 52 ;; esac; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 0000000000000000000000000000000000000000 ccccccc
+) >/dev/null 2>&1
+eq "release-merged on a new branch reads the head commit only" "$(tr '\n' ' ' <"$LOG")" "pr 52 "
+rm_rc=0
+(
+  REPO=acme/koinon
+  gh() { case $* in *commits/*/pulls*) echo 53 ;; esac; }
+  cmd_release_pr() { return 1; }
+  cmd_release_merged "" ddddddd
+) >/dev/null 2>&1 || rm_rc=$?
+if ((rm_rc != 0)); then ok "release-merged exits non-zero when a release fails"; else bad "release-merged exited 0 after a release failed"; fi
+rm -f "$LOG"
+
 # The updater's needs-update label is informational (its App token has no issues: write): a failing label
 # write in Actions mode must still reach update-branch for the target.
 LOG=$(mktemp "${TMPDIR:-/tmp}/claim_upd.XXXXXX")

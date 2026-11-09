@@ -61,7 +61,7 @@
 #                                     counts docs/adr files, claim/adr-* refs and ADR files that open
 #                                     pull requests add
 #   claim.sh sensitive-paths          the ruleset patterns for CODEOWNERS' sensitive section
-#   claim.sh sweep | check-pr <PR> | release-pr <PR> | update-oldest     (used by claims.yml, updater.yml)
+#   claim.sh sweep | check-pr <PR> | release-pr <PR> | release-merged <BEFORE> <AFTER> | update-oldest     (used by claims.yml, updater.yml)
 #                                     check-pr fails only on a conflict: someone else's human holds a
 #                                     live claim on an issue the PR closes, or reserved an ADR number
 #                                     the PR adds a file under (ADR 0094 decision 2)
@@ -1365,6 +1365,32 @@ cmd_release_pr() {
   ((failed == 0)) || { echo "claim: $failed claim(s) failed to release" >&2; return 1; }
 }
 
+# release-merged BEFORE AFTER: release the claims of the pull requests merged by a push to main (the
+# `release` job of claims.yml; it replaces the pull_request_target `closed` trigger, #463). The commits
+# are BEFORE..AFTER (AFTER alone when BEFORE is empty or all zeros, a new branch); GitHub links each
+# commit to its pull requests, and only merged ones count. A pull request closed without a merge is
+# freed by the sweeper (sweep_one, state closed).
+cmd_release_merged() {
+  local before=${1:-} after=${2:-} shas sha prs p failed=0
+  [[ $after =~ ^[0-9a-f]{7,64}$ ]] || die "usage: release-merged <BEFORE> <AFTER>"
+  if [[ $before =~ ^[0-9a-f]{7,64}$ && ! $before =~ ^0+$ ]]; then
+    shas=$(gh api "repos/$REPO/compare/$before...$after" --jq '.commits[].sha') ||
+      die "cannot list the commits $before..$after (API error); re-run the job"
+    [[ -n $shas ]] || shas=$after
+  else
+    shas=$after
+  fi
+  prs=$(for sha in $shas; do
+    gh api "repos/$REPO/commits/$sha/pulls" --jq '.[] | select(.merged_at != null) | .number' ||
+      die "cannot list the pull requests of $sha (API error); re-run the job"
+  done | sort -un)
+  for p in $prs; do
+    echo "release-merged: pull request #$p"
+    ( cmd_release_pr "$p" ) || failed=$((failed + 1))
+  done
+  ((failed == 0)) || { echo "claim: $failed pull request(s) failed to release" >&2; return 1; }
+}
+
 # pr_meta P -> {author, body} of pull request P (REST: the check runs on GITHUB_TOKEN).
 # pr_meta P -> {author, body, closers}: closers are the issues of this repository GitHub links pull
 # request P to as closed by it (closingIssuesReferences: a closing keyword in the body in any form,
@@ -1776,6 +1802,7 @@ main() {
     sweep) cmd_sweep ;;
     check-pr) cmd_check_pr "$@" ;;
     release-pr) cmd_release_pr "$@" ;;
+    release-merged) cmd_release_merged "$@" ;;
     comment) cmd_comment "$@" ;;
     update-oldest) cmd_update_oldest ;;
     adr) cmd_adr ;;

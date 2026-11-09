@@ -10,7 +10,8 @@
 #   workflow_run (ci, e2e-kind)  a pull request's checks finished: the next one may go. Not for a ci run
 #                           of a push to main (the push trigger already ran) and not for a cancelled
 #                           run (a new run of the same pull request follows)
-#   auto_merge_enabled      a pull request joined the queue
+#   (no auto_merge_enabled: it needs pull_request_target, which GitHub blocks by default, #463; the
+#   workflow_run and schedule triggers pick a new auto-merge pull request up within 30 minutes)
 #   schedule                a missed event or an UNKNOWN merge state self-heals
 # One at a time. The App ID and key are secrets of the `claims-bot` Environment (see docs/dev/work-claims-setup.md);
 # without them the job skips with a notice.
@@ -20,8 +21,6 @@ on:
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:
-  pull_request_target:
-    types: [auto_merge_enabled]
   push:
     branches: [main]
   workflow_run:
@@ -35,7 +34,6 @@ jobs:
   updater:
     if: >-
       github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request_target' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.conclusion != 'cancelled')
     name: updater

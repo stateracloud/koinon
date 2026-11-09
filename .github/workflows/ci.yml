@@ -811,6 +811,8 @@ jobs:
       - run: hack/tmp-safety-test.sh
       - run: hack/wt-install-test.sh
       - run: hack/notes-expiry-test.sh
+      - run: hack/workflow-trigger-lint-test.sh
+      - run: hack/workflow-trigger-lint.sh
       - run: hack/mktemp-lint-test.sh
       - run: hack/mktemp-lint.sh
       - run: hack/old-issue-refs-lint-test.sh

@@ -251,7 +251,11 @@ g_shell() {
 	# shellcheck disable=SC2086
 	shellcheck $files
 }
-g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint can depend on its siblings
+g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
+	actionlint
+	hack/workflow-trigger-lint-test.sh
+	hack/workflow-trigger-lint.sh # no pull_request_target (#463)
+}
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
