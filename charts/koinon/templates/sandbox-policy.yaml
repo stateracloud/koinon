@@ -92,6 +92,13 @@ spec:
         request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec ||
         (variables.supervisorCreator && variables.onlyUngates)
       messageExpression: "'only the Agent Sandbox controller may change sandbox pod specs (the OpenShell gateway only by removing scheduling gates), not ' + request.userInfo.username"
+    # Every pod a trusted identity writes carries a boundary role, so one of the two rule sets below
+    # always applies: an unlabelled pod would escape both (no token rules, no image rules). Other
+    # identities (the kubelet writing status) are not held to it on UPDATE; they cannot create pods.
+    - expression: >-
+        (request.operation != 'CREATE' && !variables.trusted && !variables.supervisorCreator) ||
+        variables.workload || variables.supervisor
+      message: sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
       message: hostNetwork is not allowed
     - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"

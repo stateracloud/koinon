@@ -241,6 +241,17 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			p.Spec.Volumes = []corev1.Volume{*v}
 		}))).To(Succeed())
 
+		By("pods from trusted identities must carry a boundary role")
+		role := "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
+		denied(createPod(ctx, controllerUser, ns, workload("role-other", func(p *corev1.Pod) { p.Labels = map[string]string{"openshell.ai/boundary-role": "admin"} })), role)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
+		// The gap this closes: an unlabelled pod with an API-audience token escaped both rule sets.
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing-token", func(p *corev1.Pod) {
+			p.Labels = nil
+			p.Spec.AutomountServiceAccountToken = new(true)
+		})), role)
+
 		By("supervisor pods: automount false and only a bounded openshell-gateway token")
 		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-real-shape"))).To(Succeed())
 		supMount := "sandbox supervisor pods must set automountServiceAccountToken to false"

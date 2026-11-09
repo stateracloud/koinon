@@ -37,3 +37,8 @@ for msg in \
     fail "the supervisor guard (!variables.supervisor ||) must scope the validation: $msg"
   fi
 done
+
+# Pods from trusted identities must carry boundary-role workload or supervisor (issue 418), so one of
+# the two rule sets always applies.
+has "pods must carry a boundary role" 'variables.workload \|\| variables.supervisor' --show-only $pol
+has "the boundary role message renders" 'sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor' --show-only $pol
