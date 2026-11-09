@@ -245,7 +245,8 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		role := "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
 		denied(createPod(ctx, controllerUser, ns, workload("role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
 		denied(createPod(ctx, controllerUser, ns, workload("role-other", func(p *corev1.Pod) { p.Labels = map[string]string{"openshell.ai/boundary-role": "admin"} })), role)
-		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
+		// The creator rule catches an unlabelled gateway pod first: the API server reports only the first denial.
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-role-missing", func(p *corev1.Pod) { p.Labels = nil })), "may create pods in sandbox namespaces")
 		// The gap this closes: an unlabelled pod with an API-audience token escaped both rule sets.
 		denied(createPod(ctx, controllerUser, ns, workload("role-missing-token", func(p *corev1.Pod) {
 			p.Labels = nil
