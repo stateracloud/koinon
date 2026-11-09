@@ -63,6 +63,7 @@ func changedFields(a, b Entry) []string {
 		}
 	}
 	add("provider", a.Provider == b.Provider)
+	add("not_hosts", slices.Equal(a.NotHosts, b.NotHosts))
 	add("match", a.Match == b.Match)
 	add("prices", a.Prices == b.Prices)
 	add("tiers", reflect.DeepEqual(a.Tiers, b.Tiers) || (len(a.Tiers) == 0 && len(b.Tiers) == 0))
