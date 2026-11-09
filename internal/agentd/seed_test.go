@@ -23,17 +23,20 @@ import (
 )
 
 // gatedStore holds the first backup of checkpoint id until release is closed: a backup that is
-// running while the agent's repository epoch changes. done is closed when that held try has
-// verified its copy, which is the last store call before the seed records its outcome and frees
-// the slot. With one seed slot the next try is claimed only then, so a spec waits on done first
-// and each later Eventually budgets one try instead of two (#409).
+// running while the agent's repository epoch changes. done is closed after the held try's last
+// store call: Verify of its snapshot, or the Backup itself when no Verify follows (the backup or
+// the source read failed, or there is no snapshot). The try records its outcome and frees the one
+// seed slot a little after that, so a spec waits on done first and each later Eventually budgets
+// one try instead of two (#409).
 type gatedStore struct {
 	agentd.HomeStore
 	id                     string
 	started, release, done chan struct{}
-	once                   *sync.Once
-	snap                   *atomic.Value // the snapshot ID the held Backup wrote
+	once, doneOnce         *sync.Once
+	snap                   *atomic.Value // the snapshot ID the held Backup wrote, when a Verify follows
 }
+
+func (g gatedStore) finish() { g.doneOnce.Do(func() { close(g.done) }) }
 
 func (g gatedStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
 	if m.CheckpointID != g.id {
@@ -45,13 +48,23 @@ func (g gatedStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, 
 		close(g.started)
 		<-g.release
 	})
-	res, err := g.HomeStore.Backup(ctx, prefix, pw, r, m)
-	if held {
-		if err != nil {
-			close(g.done)
-		} else {
-			g.snap.Store(res.SnapshotID)
+	if !held {
+		return g.HomeStore.Backup(ctx, prefix, pw, r, m)
+	}
+	// The seed verifies the copy only when the source was read whole, which Ready reports.
+	readWhole := false
+	if ready := m.Ready; ready != nil {
+		m.Ready = func() error {
+			err := ready()
+			readWhole = err == nil
+			return err
 		}
+	}
+	res, err := g.HomeStore.Backup(ctx, prefix, pw, r, m)
+	if err != nil || !readWhole || res.SnapshotID == "" {
+		g.finish()
+	} else {
+		g.snap.Store(res.SnapshotID)
 	}
 	return res, err
 }
@@ -59,8 +72,7 @@ func (g gatedStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, 
 func (g gatedStore) Verify(ctx context.Context, prefix, pw, snapshotID string) error {
 	err := g.HomeStore.Verify(ctx, prefix, pw, snapshotID)
 	if id, _ := g.snap.Load().(string); id != "" && id == snapshotID {
-		g.snap.Store("")
-		close(g.done)
+		g.finish()
 	}
 	return err
 }
@@ -415,7 +427,7 @@ var _ = Describe("home repository seeds", func() {
 	It("drops a seed superseded by a later new-repositories run and seeds the later epoch", func(ctx SpecContext) {
 		src := backup(ctx, map[string]string{"notes/v.md": "the home"}, 2*time.Minute)
 		newRepositories(ctx)
-		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, snap: &atomic.Value{}}
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, doneOnce: &sync.Once{}, snap: &atomic.Value{}}
 		DeferCleanup(func() {
 			select {
 			case <-gate.release:
@@ -429,7 +441,7 @@ var _ = Describe("home repository seeds", func() {
 		By("keys new-repositories runs again while epoch 1's seed copies")
 		newRepositoriesOf(ctx, e.agent.ID, 1)
 		close(gate.release)
-		By("the superseded try ends, recording nothing, and frees the slot before the next claim can start")
+		By("the superseded try makes its last store call; it records nothing and the slot frees shortly after")
 		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
 		Eventually(func() bool { return seedRowOf(ctx, e.agent.ID, 2)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
 		Expect(seedRow(ctx)().SeededAt.Valid).To(BeFalse(), "epoch 1 was superseded")
@@ -448,7 +460,7 @@ var _ = Describe("home repository seeds", func() {
 	It("records nothing for a try that outlived its claim, and the later claim seeds", func(ctx SpecContext) {
 		src := backup(ctx, map[string]string{"notes/v.md": "the home"}, 2*time.Minute)
 		newRepositories(ctx)
-		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, snap: &atomic.Value{}}
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, doneOnce: &sync.Once{}, snap: &atomic.Value{}}
 		DeferCleanup(func() {
 			select {
 			case <-gate.release:
@@ -464,7 +476,7 @@ var _ = Describe("home repository seeds", func() {
 			WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
 		close(gate.release)
-		By("the stale try ends, then nothing is recorded for it")
+		By("the stale try makes its last store call, then nothing is recorded for it")
 		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
 		Consistently(seeded(ctx)).WithTimeout(2 * time.Second).Should(BeFalse())
 		Expect(inEpoch1(ctx)).To(BeEmpty(), "the stale try's copy is not recorded")
@@ -490,7 +502,7 @@ var _ = Describe("home repository seeds", func() {
 		// b's seed is due later, so the first seed claimed is the gated one.
 		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seed_after = now() + interval '1 second' WHERE org_id = $1 AND agent_id = $2`, e.org, b)
 		Expect(err).NotTo(HaveOccurred())
-		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, snap: &atomic.Value{}}
+		gate := gatedStore{HomeStore: writer, id: src.ID.String(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}), once: &sync.Once{}, doneOnce: &sync.Once{}, snap: &atomic.Value{}}
 		DeferCleanup(func() {
 			select {
 			case <-gate.release:
@@ -517,7 +529,7 @@ var _ = Describe("home repository seeds", func() {
 		}).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
 
 		close(gate.release)
-		By("the gated try ends and frees the one seed slot before b's seed can start")
+		By("the gated try makes its last store call; the one seed slot frees shortly after for b's seed")
 		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
 		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
 	})
