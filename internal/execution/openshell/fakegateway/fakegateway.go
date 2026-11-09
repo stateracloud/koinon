@@ -10,10 +10,13 @@
 //   - profile updates check the expected resource version (Aborted on a mismatch);
 //   - a sandbox-scoped policy update may change network rules only, and an update equal
 //     to the latest revision keeps its version;
-//   - starting a sandbox that is not stopped and stopping one that is not ready fail with
-//     FailedPrecondition (the real gateway is wider: it also starts a Completed or Suspended
-//     sandbox, accepts a stop in more phases and treats a stop of a Stopped sandbox as settled,
-//     none of which this fake models);
+//   - stopping a sandbox settles from Ready, Completed, Stopping, Error, Suspending and
+//     Suspended and treats a stop of a Stopped sandbox as settled; other phases fail with
+//     FailedPrecondition (compute/mod.rs QuiesceOperation::admit);
+//   - starting a sandbox settles from Stopped, Completed, Starting and Suspended and treats a
+//     start of a Ready sandbox as settled; other phases fail with FailedPrecondition
+//     (start_sandbox_with_intent). The fake does not model the real gateway's further cases
+//     (a failed main-process Error, a provisioning timeout, an automatic restart);
 //   - ExecSandboxInteractive validates the start message, sends headers once the command
 //     runs, streams stdin until the client half-closes and ends with an exit event.
 //
@@ -601,8 +604,17 @@ func (g *Gateway) StopSandbox(_ context.Context, req *openshellv1.StopSandboxReq
 	if err != nil {
 		return nil, err
 	}
-	if sb.GetStatus().GetPhase() != openshellv1.SandboxPhase_SANDBOX_PHASE_READY {
-		return nil, status.Errorf(codes.FailedPrecondition, "sandbox is %s, not ready", sb.GetStatus().GetPhase())
+	switch sb.GetStatus().GetPhase() {
+	case openshellv1.SandboxPhase_SANDBOX_PHASE_READY,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_COMPLETED,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPING,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_SUSPENDING,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_SUSPENDED:
+	default:
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"sandbox must be Ready, Completed, Suspended, Error, or in an automatic restart to stop (current phase: %s)", sb.GetStatus().GetPhase())
 	}
 	sb.Status.Phase = openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED
 	return &openshellv1.SandboxResponse{Sandbox: clone(sb)}, nil
@@ -619,8 +631,15 @@ func (g *Gateway) StartSandbox(_ context.Context, req *openshellv1.StartSandboxR
 	if err != nil {
 		return nil, err
 	}
-	if sb.GetStatus().GetPhase() != openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED {
-		return nil, status.Errorf(codes.FailedPrecondition, "sandbox is %s, not stopped", sb.GetStatus().GetPhase())
+	switch sb.GetStatus().GetPhase() {
+	case openshellv1.SandboxPhase_SANDBOX_PHASE_READY,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_COMPLETED,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_STARTING,
+		openshellv1.SandboxPhase_SANDBOX_PHASE_SUSPENDED:
+	default:
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"sandbox must be Stopped, Suspended, Completed, or a failed main-process Error to start (current phase: %s)", sb.GetStatus().GetPhase())
 	}
 	sb.Status.Phase = openshellv1.SandboxPhase_SANDBOX_PHASE_READY
 	return &openshellv1.SandboxResponse{Sandbox: clone(sb)}, nil
