@@ -241,6 +241,18 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			p.Spec.Volumes = []corev1.Volume{*v}
 		}))).To(Succeed())
 
+		By("pods from trusted identities must carry a boundary role")
+		role := "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
+		denied(createPod(ctx, controllerUser, ns, workload("role-other", func(p *corev1.Pod) { p.Labels = map[string]string{"openshell.ai/boundary-role": "admin"} })), role)
+		// The creator rule catches an unlabelled gateway pod first: the API server reports only the first denial.
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-role-missing", func(p *corev1.Pod) { p.Labels = nil })), "may create pods in sandbox namespaces")
+		// The gap this closes: an unlabelled pod with an API-audience token escaped both rule sets.
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing-token", func(p *corev1.Pod) {
+			p.Labels = nil
+			p.Spec.AutomountServiceAccountToken = new(true)
+		})), role)
+
 		By("supervisor pods: automount false and only a bounded openshell-gateway token")
 		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-real-shape"))).To(Succeed())
 		supMount := "sandbox supervisor pods must set automountServiceAccountToken to false"
@@ -290,6 +302,25 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		p.Labels["koinon-escape"] = "label"
 		_, err = admin.CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("denies removing the boundary role label from trusted identities", func(ctx SpecContext) {
+		const key = "openshell.ai/boundary-role"
+		const role = "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		unlabel := func(user string) error {
+			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Labels).To(HaveKey(key))
+			delete(p.Labels, key)
+			_, err = as[user].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			return err
+		}
+		denied(unlabel(controllerUser), role)
+		denied(unlabel(gatewayUser), role)
+
+		By("other identities (kubelet, metadata writers) are not held to the role rule (control)")
+		Expect(unlabel(otherUser)).To(Succeed())
+		Expect(unlabel("admin")).To(Succeed())
 	})
 
 	// connect sends a CONNECT-class request (exec, attach, portforward, pods/proxy, services/proxy)
