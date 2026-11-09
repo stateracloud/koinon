@@ -42,6 +42,9 @@ base=${1:-origin/main}
 cd "$(git rev-parse --show-toplevel)" || exit 2
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "lane-gates: unknown base $base (git fetch origin?)" >&2; exit 2; }
 
+# shellcheck source=/dev/null
+. "$(dirname "$0")/paths-lib.sh"
+paths_load || exit 2 # the `lane` lines of hack/paths.rules say which local gate stands for a CI job
 preflight=${LANE_GATES_PREFLIGHT:-hack/preflight.sh}
 changes=${LANE_GATES_CHANGES:-hack/ci-changes.sh}
 make_cmd=${LANE_GATES_MAKE:-make}
@@ -137,7 +140,7 @@ fi
 jobs=$(sed -n 's/^\(.*\)=true$/\1/p' <<<"$changes_out")
 jobgates=""
 for j in $jobs; do
-	case $j in go | web | generate | chart | docs) jobgates="$jobgates $j" ;; esac
+	[[ $(paths_raw lane "$j") == "- preflight" ]] && jobgates="$jobgates $j"
 done
 list_out=$("$preflight" --base "$base" --list 2>"$logdir/list.err")
 list_rc=$?
@@ -177,12 +180,14 @@ done
 
 # 2. The heavy CI jobs the preflight does not run, picked by ci-changes.sh.
 for j in $jobs; do
-	case $j in
-	chartsmoke) run_cmd chartsmoke "docker helm go" "$make_cmd" test-chart-smoke ;;
-	flavors) run_cmd flavors "docker go" "$make_cmd" test-flavors ;;
-	escape) run_cmd escape "helm go" "$make_cmd" test-admission ;;
-	go | web | generate | chart | docs) ;; # preflight gates, run above
-	*) report "$j" 0 0 notrun "no local gate for CI job $j" "$logdir/$j.log" ;;
+	lane=$(paths_raw lane "$j")
+	case $lane in
+	"- preflight") ;; # a preflight gate, run above
+	"") report "$j" 0 0 notrun "no local gate for CI job $j" "$logdir/$j.log" ;;
+	*)
+		needs=${lane%% *} target=${lane#* }
+		run_cmd "$j" "${needs//,/ }" "$make_cmd" "$target"
+		;;
 	esac
 done
 

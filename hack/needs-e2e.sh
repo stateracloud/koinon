@@ -28,7 +28,7 @@ set -euo pipefail
 # e2e-needed and no e2e-ignored; failing both, when its directory (or an ancestor, for embedded
 # files) is a package directory in the build graph of a binary (`go list -deps`, this module only).
 # hack/needs-e2e-test.sh checks the binaries against run.sh's `ko build` line.
-# shellcheck source=hack/paths-lib.sh
+# shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/paths-lib.sh"
 paths_load || exit 2
 mapfile -t BINARIES < <(paths_raw e2e-binary -)

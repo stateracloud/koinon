@@ -32,7 +32,7 @@
 
 set -uo pipefail
 
-# shellcheck source=hack/paths-lib.sh
+# shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh"
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
 ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp pinned bash5 audit versions scripts e2e gitleaks"

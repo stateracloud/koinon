@@ -38,7 +38,7 @@ if [[ ${1:-} == --flavors-dirs ]]; then
 	exit
 fi
 
-# shellcheck source=hack/paths-lib.sh
+# shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh"
 paths_load || exit 2 # the rules (hack/paths.rules) are the only source; an unreadable file is not "no job"
 mapfile -t jobs < <(paths_jobs)

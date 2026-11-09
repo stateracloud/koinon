@@ -24,7 +24,7 @@ fails=0 total=0
 ok() { total=$((total + 1)); }
 bad() { total=$((total + 1)); fails=$((fails + 1)); echo "FAIL: $*"; }
 
-# shellcheck source=hack/paths-lib.sh
+# shellcheck source=/dev/null
 . hack/paths-lib.sh
 paths_load || { echo "FAIL: hack/paths.rules does not load"; exit 1; }
 
