@@ -25,8 +25,8 @@ import (
 var _ = Describe("Sandbox admission policy with a registry mirror", Label("escape", "admission"), Ordered, func() {
 	const (
 		ns       = "kw-mirror"
-		upstream = "ghcr.io/nvidia/openshell/supervisor:0.1.5"
-		mirrored = "art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.5"
+		upstream = "ghcr.io/nvidia/openshell/supervisor:0.1.7"
+		mirrored = "art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.7"
 	)
 	var gateway *kubernetes.Clientset
 	dryRun := metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}

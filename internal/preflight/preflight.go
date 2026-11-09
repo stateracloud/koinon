@@ -72,7 +72,7 @@ var agentSandboxVersion = regexp.MustCompile(`^v1\.0\.[0-9]+$`)
 
 // SupportedOpenShellVersions are the OpenShell gateway versions Koinon v0.1 is built against
 // (the vendored protos in third_party/openshell).
-var SupportedOpenShellVersions = []string{"0.1.5"}
+var SupportedOpenShellVersions = []string{"0.1.7"}
 
 var (
 	crdGVR          = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
@@ -309,7 +309,7 @@ func imageTag(ref string) string {
 	return ""
 }
 
-// normalizeVersion strips a leading "v" and build metadata: "v0.1.5+abc" is "0.1.5".
+// normalizeVersion strips a leading "v" and build metadata: "v0.1.7+abc" is "0.1.7".
 func normalizeVersion(v string) string {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	v, _, _ = strings.Cut(v, "+")

@@ -153,7 +153,7 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
 ## Upstream verification
 
 Checked 2026-10-21: Go 1.27.3, golangci-lint 2.15.0, buf 1.74.0, connect-go v2.0.1,
-protobuf-go 1.36.12, ginkgo 2.33.1, gomega 1.44.0, testcontainers-go 0.44.0, Tilt 0.37.8, Vite 8,
+protobuf-go 1.36.12, ginkgo 2.34.0, gomega 1.44.0, testcontainers-go 0.44.0, Tilt 0.37.8, Vite 8,
 React 19, Helm 4.3.1. The migration suite passes against
 `postgres:18-alpine` (10 specs). `tilt ci` passes on the maintainer's context: ko pushes both images
 (with SBOMs) to the registry, the pods pull them through a registry pull secret, and `koinon-pg` reaches

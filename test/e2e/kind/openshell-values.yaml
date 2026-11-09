@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# OpenShell gateway chart values (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.5) for the E1
+# OpenShell gateway chart values (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.7) for the E1
 # quickstart e2e on a single-node kind cluster. Same as spike S1 (docs/spikes/kind.md).
 server:
   telemetryEnabled: false

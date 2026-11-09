@@ -32,7 +32,7 @@ immutable copies owned by the Sandbox, and puts them in `imagePullSecrets` of bo
 3. **`global.imagePullSecrets`** (names or `{name}` maps; the old top-level `imagePullSecrets` is a
    deprecated alias, merged and de-duplicated) goes on every pod the chart renders, including standalone
    agentgateway and the CNPG Cluster (`spec.imagePullSecrets`), and into the preflight probe pods.
-4. **The default `sandboxPolicy.supervisorImages` is derived**: empty means OpenShell 0.1.5's supervisor
+4. **The default `sandboxPolicy.supervisorImages` is derived**: empty means OpenShell 0.1.7's supervisor
    image run through the same rewrite, so a mirror cannot make the admission policy deny every supervisor
    pod. A list set explicitly is used as written. The preflight compares the list with the gateway's
    `supervisor_image` and warns on a mismatch.

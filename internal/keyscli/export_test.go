@@ -21,3 +21,6 @@ func (t *Tool) RewrapWith(ctx context.Context, seal func(env secretstore.Envelop
 		return nil, seal(env)
 	})
 }
+
+// FailureKind is failureKind.
+func FailureKind(err error) string { return failureKind(err) }

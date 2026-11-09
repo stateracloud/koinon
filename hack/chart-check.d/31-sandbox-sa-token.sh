@@ -7,7 +7,7 @@
 pol=templates/sandbox-policy.yaml
 
 # Workload pods carry no ServiceAccount token. Supervisor pods set automount false too and may project
-# only the openshell-gateway token OpenShell 0.1.5 exchanges at startup (ADR 0006, issue 220).
+# only the openshell-gateway token OpenShell 0.1.7 exchanges at startup (ADR 0006, issue 220).
 has "workload pods must set automountServiceAccountToken false" 'object.spec.automountServiceAccountToken == false' --show-only $pol
 has "the automount denial message renders" 'sandbox workload pods must set automountServiceAccountToken to false' --show-only $pol
 has "projected serviceAccountToken sources are refused" 'has\(s.serviceAccountToken\)' --show-only $pol

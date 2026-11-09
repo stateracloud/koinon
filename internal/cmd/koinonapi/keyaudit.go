@@ -5,8 +5,10 @@ package koinonapi
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -28,10 +30,13 @@ type keyAudit struct {
 
 	kube      kubernetes.Interface
 	namespace string
+	// firstAttempt bounds how long ensureGenerated waits for the key-set lock before it creates the
+	// Secret without it; installWriteFirstAttempt unless a test shortens it.
+	firstAttempt time.Duration
 }
 
 func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace, kekSecret string, secretNames ...string) *keyAudit {
-	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret}
+	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret, firstAttempt: installWriteFirstAttempt}
 	if kube != nil {
 		k.generated = keyscli.GeneratedReader{Client: kube, Namespace: namespace, ListLabelled: true, Names: append([]string{kekSecret}, secretNames...)}.Read
 	}
@@ -96,6 +101,92 @@ func (k *keyAudit) generatedEvent(ctx context.Context, kind, id string) {
 		slog.Error("the generated key is not recorded in the install audit log; the start-up check records the key set as keys.observed",
 			"secret_name", id, "err", err)
 	}
+}
+
+// ensureGenerated runs create, which makes a key Secret koinon-api generates (the first KEK, the
+// saved-work key) and reports whether it did, and records keys.generated for it as actor koinon-api:keys.
+// It does so in a key Change: the key-set advisory lock is taken before create and held through the
+// Secret creation and the event, so another replica's start-up check waits and then finds the key
+// recorded, instead of writing it as keys.observed first (ADR 0100 decision 3, issue #377).
+//
+// Start never blocks on the database for this: when the Change cannot begin (the chain is not ready, the
+// lock is not free within installWriteFirstAttempt, the key set does not load), create runs without the
+// lock and the event is written after it by generatedEvent, as before; the start-up check then catches
+// anything that was lost.
+func (k *keyAudit) ensureGenerated(ctx context.Context, kind, id string, create func(context.Context) (bool, error)) (bool, error) {
+	c := k.beginChange(ctx, id)
+	if c == nil {
+		created, err := create(ctx)
+		if err == nil && created {
+			k.generatedEvent(ctx, kind, id)
+		}
+		return created, err
+	}
+	created, err := create(ctx)
+	if err != nil || !created {
+		// Nothing was generated: the Change must not write the lost change it found as keys.observed
+		// under this actor; the start-up check records it as koinon-api:startup.
+		c.Rollback(ctx)
+		return created, err
+	}
+	if rerr := k.recordGenerated(ctx, c, kind, id); rerr != nil {
+		slog.Error("the generated key is not recorded in the install audit log; the start-up check records the key set as keys.observed",
+			"secret_name", id, "err", rerr)
+		c.Rollback(ctx)
+		return created, nil
+	}
+	if cerr := c.Commit(ctx); cerr != nil {
+		slog.Error("the generated key's audit event did not commit; the start-up check records the key set as keys.observed",
+			"secret_name", id, "err", cerr)
+	}
+	return created, nil
+}
+
+// beginChange takes the key-set lock for one change, or returns nil when it cannot do so at once.
+func (k *keyAudit) beginChange(ctx context.Context, id string) *keyscli.Change {
+	bctx, cancel := context.WithTimeout(ctx, k.firstAttempt)
+	defer cancel()
+	// A KEK Secret that does not exist yet is the empty key set: this change makes it.
+	load := func(ctx context.Context) (keyscli.KeySet, error) {
+		ks, err := k.load(ctx)
+		if apierrors.IsNotFound(err) {
+			return keyscli.KeySet{}, nil
+		}
+		return ks, err
+	}
+	a := &keyscli.Auditor{Pool: k.pool, Actor: keyscli.ActorKeys}
+	if k.kube != nil {
+		// Only the Secret this change makes is listed; the rest is merged from the last recorded state.
+		a.Generated = keyscli.GeneratedReader{Client: k.kube, Namespace: k.namespace, Names: []string{id}}.Read
+	}
+	c, ks, err := a.Baseline(bctx, load, "")
+	clearKeys(ks)
+	if err != nil {
+		slog.Warn("the key-set lock is not taken for the generated key; its event is written after it", "err", err)
+		return nil
+	}
+	return c
+}
+
+// recordGenerated writes keys.generated for the Secret id in c: the state of the key set after the
+// creation, on top of the last recorded one (see generatedEvent for what "after" holds).
+func (k *keyAudit) recordGenerated(ctx context.Context, c *keyscli.Change, kind, id string) error {
+	ks, err := k.load(ctx)
+	if err != nil {
+		return err
+	}
+	defer clearKeys(ks)
+	after, err := c.After(ctx, ks)
+	if err != nil {
+		return err
+	}
+	if id != k.kekSecret {
+		// Not the KEK Secret: the KEK part is the Change's base, what the chain holds when this event is
+		// written (the pending keys.observed's, else the last recorded; empty on a first start).
+		p := c.Base()
+		after.KEKs, after.Active, after.Retired = p.KEKs, p.Active, p.Retired
+	}
+	return c.Record(ctx, keyscli.Event{Action: keyscli.ActionGenerated, TargetKind: kind, TargetID: id, After: after.Normalized()})
 }
 
 // observe is the start-up check: keys.observed when the key-set state differs from the last recorded.

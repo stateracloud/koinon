@@ -837,7 +837,7 @@ var errWrap = errors.New("wrap or seal the value")
 // row, the org or the error text.
 func failureKind(err error) string {
 	switch {
-	case errors.Is(err, errUnreadable):
+	case errors.Is(err, errUnreadable), errors.Is(err, secretstore.ErrUnsupportedFormat):
 		return "envelope"
 	case errors.Is(err, secretstore.ErrOpen):
 		return "open"
@@ -984,7 +984,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 			return errUnreadable
 		}
 		// A format the keyring does not know is an unreadable envelope too, not a failed wrap.
-		if env.Format != secretstore.FormatV1 || env.Alg != secretstore.AlgAES256GCM {
+		if secretstore.UnsupportedFormat(env) {
 			return errUnreadable
 		}
 		out, err := fn(ring, secretstore.Binding{OrgID: r.org, Table: c.Table, RowID: r.id, Column: c.Column}, env, active)

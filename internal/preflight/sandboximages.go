@@ -13,7 +13,7 @@ import (
 )
 
 // gatewayConfigKey is the key of OpenShell's gateway configuration (TOML) in its ConfigMap
-// "<fullname>-config" (OpenShell chart 0.1.5, templates/gateway-config.yaml).
+// "<fullname>-config" (OpenShell chart 0.1.7, templates/gateway-config.yaml).
 const gatewayConfigKey = "gateway.toml"
 
 const (

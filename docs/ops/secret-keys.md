@@ -117,8 +117,12 @@ kubectl -n koinon exec -it deploy/koinon-api -- koinon-api keys forget <kek-id>
 It refuses a KEK that is still in the Secret (that one is not lost: `keys rewrap`, then `keys retire`).
 On a terminal it asks you to type the KEK ID, because it cannot be undone; without an ID it offers the
 KEKs that seal values but are missing from the Secret. Without a terminal it does nothing unless you
-pass `--yes`. It reads the Secret again after you answer, and changes nothing if the KEK was
-restored meanwhile. Then:
+pass `--yes`. After you answer it takes the key events' lock and reads the Secret again under it;
+if the KEK was restored meanwhile it changes nothing, in no org. It holds that lock until it has
+finished, so `keys add`, `keys activate`, `keys retire`, the key-admin Job and the start-up check of
+a starting `koinon-api` wait for the whole run (one transaction per org that holds a value sealed with
+the KEK). The keys `koinon-api` creates itself do not wait: after 10 s it creates them without the
+lock and records them afterwards. Then:
 
 - Provider keys and cost keys, connection secrets, MCP server and trace destination credentials sealed
   with it are marked lost. Their pages say "credential lost" and ask for the value again (an MCP
@@ -133,6 +137,9 @@ restored meanwhile. Then:
   lost and the new repositories. The platform's own trace destination belongs to no org: it is one
   event in the install audit chain (actor `cli`, `keys forget`), written in the same transaction, and
   a platform admin enters the destination again. It needs no platform admin to exist.
+  If the key set changed without a recorded event (for example a KEK removed from the Secret by hand),
+  `keys forget` first records that as `keys.observed` with itself as the actor, then writes its own
+  `keys.forget` event.
 
 Running it again finds nothing left to forget. Then check that `keys status` no longer shows the KEK.
 
@@ -456,7 +463,10 @@ it was not recorded) and the next `koinon-api` start records the key set as `key
 A key command (`add`, `activate`, `retire`, and every change the key-admin Job makes) takes the key-set
 lock in the database before it reads the key set, and holds it through the Secret update and its
 event. A `koinon-api` start or keyring check in that window waits for the lock and then sees the
-change recorded, so a key change shows once, never also as `keys.observed`. `activate` and `retire`
+change recorded, so a key change shows once, never also as `keys.observed`. The keys `koinon-api`
+generates itself (the KEK when `kekCreate` is on, and `koinon-saved-work`) are made the same way: it
+takes the lock before it creates the Secret and writes `keys.generated` before it releases it. If the
+lock is not free within 10 s, it creates the Secret anyway and writes the event afterwards. `activate` and `retire`
 check the chosen KEK again on the key set read under the lock: on a terminal you pick and confirm
 first, and a KEK that changed meanwhile is refused then.
 

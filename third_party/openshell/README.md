@@ -4,8 +4,8 @@ The OpenShell gateway API, used to generate Koinon's gRPC client in `internal/ge
 (ADR 0048: generated client, not `sdk/go`).
 
 - Upstream: https://github.com/NVIDIA/OpenShell
-- Tag: `v0.1.5`, commit `bdb956f2cd65a635f1294fccf1d138d263bf650f` (2026-10-20), the same
-  commit the spike's SDK pin used
+- Tag: `v0.1.7`, commit `5d25211b25a8fc887e8d5c606d57d6ab22f1d76c` (2026-11-03); v0.1.5 was
+  `bdb956f2cd65` (2026-10-20), the commit the spike's SDK pin used
 - Licence: Apache-2.0, copyright NVIDIA CORPORATION & AFFILIATES; see [LICENSE](LICENSE). The
   files keep their upstream SPDX headers.
 - Files: `proto/openshell.proto`, `proto/datamodel.proto`, `proto/sandbox.proto` and

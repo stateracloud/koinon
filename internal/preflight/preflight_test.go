@@ -191,7 +191,7 @@ func healthyCluster() *cluster {
 			gatewayClass("agentgateway", "True", "Accepted"),
 		},
 		gateway: fakeGateway{resp: &openshellv1.HealthResponse{
-			Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "0.1.5",
+			Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "0.1.7",
 		}},
 		prober: fakeProber{res: preflight.ProbeResult{Seccomp: 2, Filters: 1, Keyctl: "EPERM"}},
 		netpol: fakeNetPol{res: preflight.NetPolResult{ControlReached: true}},
@@ -295,7 +295,7 @@ var _ = Describe("Checker", func() {
 			Expect(r.Status).To(Equal(preflight.Pass), "%s: %s", r.Check, r.Message)
 		}
 		Expect(find(results, "Agent Sandbox").Message).To(ContainSubstring("controller v1.0.7"))
-		Expect(find(results, "OpenShell").Message).To(ContainSubstring("version 0.1.5"))
+		Expect(find(results, "OpenShell").Message).To(ContainSubstring("version 0.1.7"))
 		Expect(find(results, "CloudNativePG").Message).To(ContainSubstring("operator webhook cnpg-system/cnpg-webhook-service ready"))
 
 		var out strings.Builder
@@ -354,10 +354,10 @@ var _ = Describe("Checker", func() {
 			c.gateway = fakeGateway{resp: &openshellv1.HealthResponse{
 				Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "0.2.0",
 			}}
-		}, "OpenShell gateway", `version "0.2.0" is not supported; Koinon v0.1 supports 0.1.5`, "install OpenShell 0.1.5"),
+		}, "OpenShell gateway", `version "0.2.0" is not supported; Koinon v0.1 supports 0.1.7`, "install OpenShell 0.1.7"),
 		Entry("OpenShell unhealthy", func(c *cluster) {
 			c.gateway = fakeGateway{resp: &openshellv1.HealthResponse{
-				Status: openshellv1.ServiceStatus_SERVICE_STATUS_UNHEALTHY, Version: "0.1.5",
+				Status: openshellv1.ServiceStatus_SERVICE_STATUS_UNHEALTHY, Version: "0.1.7",
 			}}
 		}, "OpenShell gateway", "SERVICE_STATUS_UNHEALTHY", "logs"),
 		Entry("RuntimeClass", func(c *cluster) { c.without("kata") },
@@ -402,7 +402,7 @@ var _ = Describe("Checker", func() {
 	It("accepts a v-prefixed OpenShell version with build metadata", func(ctx SpecContext) {
 		c := healthyCluster()
 		c.gateway = fakeGateway{resp: &openshellv1.HealthResponse{
-			Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "v0.1.5+bdb956f",
+			Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "v0.1.7+5d25211",
 		}}
 		Expect(find(c.run(ctx), "OpenShell").Status).To(Equal(preflight.Pass))
 	})
@@ -447,7 +447,7 @@ var _ = Describe("Checker", func() {
 		}, "Agent Sandbox", "has no tag", "v1.0.x"),
 		Entry("degraded OpenShell gateway", func(c *cluster) {
 			c.gateway = fakeGateway{resp: &openshellv1.HealthResponse{
-				Status: openshellv1.ServiceStatus_SERVICE_STATUS_DEGRADED, Version: "0.1.5",
+				Status: openshellv1.ServiceStatus_SERVICE_STATUS_DEGRADED, Version: "0.1.7",
 			}}
 		}, "OpenShell gateway", "reports degraded", "logs"),
 		Entry("plaintext OpenShell connection", func(c *cluster) { c.config.OpenShellPlaintext = true },

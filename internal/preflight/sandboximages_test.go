@@ -26,8 +26,8 @@ namespace = "openshell-sandboxes"
 }
 
 const (
-	supervisor = "ghcr.io/nvidia/openshell/supervisor:0.1.5"
-	mirrored   = "art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.5"
+	supervisor = "ghcr.io/nvidia/openshell/supervisor:0.1.7"
+	mirrored   = "art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.7"
 )
 
 var _ = Describe("Sandbox image checks", func() {

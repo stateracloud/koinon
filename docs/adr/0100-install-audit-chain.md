@@ -378,7 +378,7 @@ new `audit_events` rows to it, without touching old ones, follows in #359 (see t
 | `platform_admin.bootstrap` (the first admin's creation, with the default org's ID as target) | not audited | `system koinon-api:bootstrap` |
 | `platform_admin.grant` by bootstrap (it re-grants the bootstrap admin on every start; an event whenever that grant inserts a row, so a removed grant coming back shows) | not audited | `system koinon-api:bootstrap` |
 | `trace.platform_destination.set`, `.delete`, `.test`; `trace.platform_ceiling.set` | the acting admin's personal org | user |
-| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (only `keys.rewrap` and `keys.reencrypt` have an optional `.started`), `keys.retire`, `keys.forget` (its platform part; each org's part stays per org) | `keys.forget` copies per admin; the rest not audited | `cli` |
+| `keys.add`, `keys.activate`, `keys.rewrap`, `keys.reencrypt` (only `keys.rewrap` and `keys.reencrypt` have an optional `.started`), `keys.retire`, `keys.forget` (its platform part, with the same `keys.observed` check as the others; the advisory lock covers the whole run, each org's part included, which stays per org: amended 2026-11-09) | `keys.forget` copies per admin; the rest not audited | `cli` |
 | `keys.generated` (a KEK or the saved-work key `koinon-api` makes) | not audited | `system koinon-api:keys` |
 | `keys.secret_created`, `keys.add`, `keys.activate`, `keys.bound` from the key-admin Job | not audited | `system koinon-api:key-admin` |
 | `keys.observed` (the key set or a generated Secret differs from the last recorded state) | not audited | `system koinon-api:startup` at a start (the first start too, even with an empty key set); `system koinon-api:keyring-watch` when the running `koinon-api` sees the key set change; the actor of the key command (`cli` or `system koinon-api:key-admin`) when that command finds the gap before its own change |
@@ -423,8 +423,38 @@ in three ways, and the ADR says so rather than pretending otherwise:
   does not parse, or names a format or algorithm the keyring does not know) or `database`. A column
   whose rows cannot be listed counts as one `database` failure and ends the run's loop, so the
   columns after it are not tried; the closing event records it and the run fails.
-- `keys forget` keeps its per-org events in each org's transaction and writes its platform part
-  (the platform trace destination) as one install event.
+- `keys forget` keeps its per-org events in each org's transaction. Its platform part (the platform
+  trace destination) follows the same pattern as the other key commands (the lock's scope is amended
+  2026-11-09, below): it begins with `Baseline`
+  (the key events' advisory lock, then the check against the last recorded state), so a key-set
+  change whose event was lost is written as `keys.observed`, with `keys forget` as the actor, before
+  the forget event; the row update and the event are then one transaction, which `Commit` ends. The
+  orgs' transactions are finished by then, so the lock order of decision 1.7 holds: the key events'
+  lock, then the install head. `forget` does not change the key set, so the check only finds changes
+  that others made.
+  The key set `Baseline` loads under the lock is checked once more: when it holds the KEK again (a
+  `keys add` between the command's first check and the lock), `forget` commits, so a `keys.observed`
+  it found is still written, and changes nothing. A failed row update or event is undone in a
+  savepoint, never the pending `keys.observed`.
+
+  **Amendment (2026-11-09): the lock covers the whole run.** Taking the lock only for the platform
+  part left the orgs' parts outside it: a `keys add` that restored the KEK after the first check
+  still let every org's credentials be marked lost and its saved work expire, which cannot be undone,
+  and the platform part's refusal then said that nothing was changed. So `forget` now calls `Baseline`
+  after the confirmation and before the first change, checks the KEK against the key set loaded
+  under the lock, and builds the keyring for the new repositories from that key set. It holds the
+  `Change`, and so the lock, through every org part until the platform part commits; a `keys add`,
+  `activate` or `retire`, the key-admin Job and the start-up and keyring-watch checks wait for the
+  whole run. A KEK found again under the lock is refused before any org part runs, so the refusal's
+  "nothing was changed" is true (a `keys.observed` it found is still written). The lock order of 1.7
+  holds across the run: while the orgs change, the `Change`'s transaction holds the advisory lock and
+  nothing else (`Baseline` reads the last key event and writes nothing; the install head is taken by
+  the first insert, which comes after the org parts), and each org's own transaction takes its rows,
+  then its org head, and commits. The platform part then locks the platform row, writes the pending
+  `keys.observed` (the install head) and, in a savepoint, updates the row and writes its
+  `keys.forget`: a row lock before the install head, as `SetPlatformDestination` takes them. Every
+  other taker of the key events' lock (`Observe`, `Baseline`) takes it first in a new transaction, so
+  no transaction holds an org head or a row an org part needs while it waits for the lock.
 
 So a crash or a failed audit write after a Secret update must not leave the change unrecorded. On
 every start `koinon-api` writes `keys.observed` whenever the whole key-set state differs from the
@@ -479,8 +509,12 @@ observed state as its `before`. With no earlier key event there is nothing to co
 generated Secrets are left to the start-up check. The start-up check itself loads the key set and the
 generated Secrets inside the locked transaction, so a change recorded while it waited for the lock is
 not mistaken for a missing event. `koinon-api`'s own `keys.generated` (the first KEK, the saved-work
-key) is still written right after the Secret is made, not under the lock from before it; a second
-replica's start-up check in that gap can record the new key as `keys.observed` first.
+key) is written the same way (issue #377): at start-up the creation runs inside a key Change with actor
+`koinon-api:keys`, so the lock is taken before the Secret is made and held through the Secret and the
+event, and a second replica's start-up check waits and finds the key recorded. While the chain cannot
+be read or the lock is not free within the first-attempt budget, the Secret is made without the lock
+and the event follows it (start never blocks on the database); the start-up check then records
+anything lost as `keys.observed`.
 
 `koinon-api` does not know its Helm release name (no flag or environment variable carries it), so its
 label-selected list of generated Secrets (`koinon.dev/generated`) is not scoped by the chart's

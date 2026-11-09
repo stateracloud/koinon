@@ -70,7 +70,7 @@ same test also exercises usage parsing and the spend ledger (ADR
 Checked 2026-10-21:
 - controller-runtime v0.25.2; envtest runs etcd and API server only (no GC).
   https://book.kubebuilder.io/reference/envtest.html
-- Ginkgo v2.33.1, Gomega v1.44.0 (MIT).
+- Ginkgo v2.34.0, Gomega v1.44.0 (MIT).
 - testcontainers-go v0.44.0, `modules/postgres` with Snapshot/Restore; set a wait strategy.
   https://golang.testcontainers.org/modules/postgres/
 - ACP methods and optional `session/load`: https://agentclientprotocol.com/protocol/session-setup
