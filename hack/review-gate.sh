@@ -28,8 +28,8 @@
 # Trust limit (ADR 0103): a listed owner posts `review-verdict`, so the status records that a review
 # took place; it is not a separation of duties (the owner who posts may be the author).
 #
-# Environment: EVENT (github.event_name), PR (the pull request number, pull_request[_target]), SHA (its
-# head, pull_request[_target]), GITHUB_REF and MG_HEAD (merge_group: the queue ref and the queue commit), GH (the
+# Environment: EVENT (github.event_name), PR (the pull request number, pull_request), SHA (its
+# head, pull_request), GITHUB_REF and MG_HEAD (merge_group: the queue ref and the queue commit), GH (the
 # gh command), GH_REPO, CLAIM (the claim.sh to ask, default the one next to this script), CODEOWNERS (the file
 # the posters come from, default ../.github/CODEOWNERS next to this script, which the workflow checks out from
 # the base), GITHUB_STEP_SUMMARY. Exit 0 pass, 1 fail.
@@ -56,7 +56,7 @@ $2}"
 }
 
 case $EVENT in
-pull_request | pull_request_target) ;;
+pull_request) ;;
 merge_group)
   ref=${GITHUB_REF:-}
   n=${ref#refs/heads/gh-readonly-queue/*/pr-}

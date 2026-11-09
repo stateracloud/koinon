@@ -1,4 +1,4 @@
-# 0103. A recorded review verdict, checked by `review`, replaces the second-owner approval
+# 0103. A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`
 
 - Status: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane)
 - Date: 2026-11-09
@@ -67,60 +67,72 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      job of the pull request's newest finished run on that SHA when its result disagrees with the
      verdict (the `hack/e2e-rerun-result.sh` pattern). Not while that run is still in progress: the
      script says so, and "Re-run all jobs" is the manual path.
-3. **Who controls the gate.** Pull request runs use `pull_request_target`: the YAML, the gate,
-   `claim.sh` and CODEOWNERS are the base branch's and the pull request's code is never checked out,
-   so a pull request's own edits to them take effect only after it merges (the `claim` check's model,
-   ADR 0094). That alone does not stop a pull request from weakening the gate for the next one, so the
-   gate's files are sensitive paths themselves: `.github/workflows/review.yml` and `.github/CODEOWNERS`
-   are under `.github/**`, and `/hack/review-gate.sh`, `/hack/review-verdict.sh` and `/hack/claim.sh`
-   have their own CODEOWNERS lines. A change to any of them needs a verdict from a listed poster on its
-   head (`hack/review-gate-test.sh` checks that `sensitive-paths` covers them). What remains is the
-   precondition below: a second workflow that reports a check named `review`. This deviates
-   from `e2e result`, which runs the pull request's own YAML: that YAML was guarded by the approval rule
-   this ADR removes. On `merge_group` the YAML is the queue commit's (GitHub's rule); the gate, `claim.sh`
-   and CODEOWNERS are taken from `merge_group.base_sha`. A pull request that edits `review.yml` touches
-   `.github/**`, so the base's gate requires a verdict on it before it can be queued.
+3. **Who controls the gate.** Pull request runs use `pull_request` with a read-only token and no
+   secret; there is no `pull_request_target` (GitHub blocks it by default in public repositories from
+   2026-12-02, and `hack/runner-lint.sh` refuses it, ADR 0082 amendment for #463). The job checks out
+   the pull request's **base** commit (`pull_request.base.sha`; `merge_group.base_sha` in the queue) and
+   runs that commit's gate, `claim.sh` and CODEOWNERS, so the paths and the listed posters are the
+   base's, and the pull request's code is never checked out or run. The gate's files are sensitive paths
+   themselves: `.github/workflows/review.yml` and `.github/CODEOWNERS` are under `.github/**`, and
+   `/hack/review-gate.sh`, `/hack/review-verdict.sh` and `/hack/claim.sh` have their own CODEOWNERS
+   lines (`hack/review-gate-test.sh` checks that `sensitive-paths` covers them), so a change to any of
+   them needs a verdict from a listed poster under the old rules.
+
+   **The trade-off.** On `pull_request` (and on `merge_group`) the workflow file itself comes from the
+   pull request's head, so a pull request can edit `review.yml` (or add a second workflow with a job
+   named `review`) to make `review` pass. The guard is the CODEOWNERS approval rule, **kept for
+   `.github/**` only**. `.github/**` and not `.github/workflows/**`: every file a workflow can be made
+   to run from the head (local actions under `.github/actions/`, workflow files, and configuration
+   that workflows read) is under `.github/`, it is the pattern the ruleset already has, and the
+   `claim` check relies on the same pattern since #463. The cost: a pull request that changes
+   anything under `.github/` still needs the second human's approval (or an admin merge); every other
+   sensitive path moves to the `review` check and the merge queue. The ruleset "Require workflows to
+   pass before merging" rule (which runs main's `review.yml`) is the way to remove that last pattern
+   when the plan has it (see the precondition). `hack/pr-merge.sh --admin` runs the base's gate
+   itself, so the admin route is covered either way.
 4. **Rollout.** The check lands advisory: it is listed in `hack/ci-required.txt` as an advisory check of
    another workflow (a comment line, so `hack/ci-merge-group-test.sh` still checks its `merge_group`
    trigger) and the ruleset is unchanged. Then sensitive-path pull requests can use `hack/pr-merge.sh`
    without `--admin`, and so the merge queue, once the owner's step is done.
 
-   **Precondition (before the owner's step), one of:**
-   - (a) a ruleset "Require workflows to pass before merging" rule pinned to
-     `.github/workflows/review.yml` on `main`, so only that file's run counts. The docs place this rule
-     at the organization or enterprise level, and the 2023 changelog puts it on GitHub Enterprise plans;
-     the organization is on the Team plan, so (a) is probably not available (not verified).
-   - (b) the experiment, not run yet. It runs in a scratch public repository in the organization, not
-     in this one: a test ruleset on `main` here blocks every pull request while the test runs, and
-     `mergeStateStatus` says nothing about `review` while the check is not required.
-     - Set-up: the scratch repository holds copies of `.github/workflows/review.yml`,
-       `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh` and `.github/CODEOWNERS`, and
-       a ruleset on its `main` that requires the context `review`, with an empty bypass list.
-     - The pull request: it touches a sensitive path, has no `review-verdict`, and adds a second
-       workflow whose job `review` always passes. The real `review` fails on that head.
-     - The stand-in: a second workflow file (trigger `pull_request`) with its own `name:` (not
-       `review`), and in it a job with `name: review`, which matches the check name exactly.
-     - Three orders, 1 and 2 each on a new head: order 1, the stand-in job finishes before the real
-       one; order 2, it finishes after it (a `sleep 120` in the stand-in); order 3, after both runs of
-       a head have finished (real red, stand-in green), "Re-run job" on the stand-in only, so the
-       newest check run named `review` on that head is green. Order 3 is how a "newest run wins" rule would show.
-     - Viewer: the person who reads the result has no bypass right on the scratch ruleset (or first
-       confirms that `mergeStateStatus` does not depend on the viewer's bypass right). An admin's own
-       view can hide the block.
-     - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives
-       `BLOCKED` in all three orders, after the runs end.
-     - Record: the scratch repository's name, the pull request number and the three
-       `mergeStateStatus` results go under "Upstream verification" in this ADR before the owner's
-       ruleset step.
-     - After the test, the owner deletes the scratch repository.
+   **Precondition (before the owner's step): the experiment**, not run yet. It runs in a scratch
+   public repository in the organization, not in this one: a test ruleset on `main` here blocks every
+   pull request while the test runs, and `mergeStateStatus` says nothing about `review` while the
+   check is not required.
+   - Set-up: the scratch repository holds copies of `.github/workflows/review.yml`,
+     `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh` and `.github/CODEOWNERS`, and a
+     ruleset on its `main` with an empty bypass list that requires the context `review` and, as the
+     owner's step will, a `required_reviewers` entry for `.github/**` only (1 approval).
+   - Viewer: the person who reads the result has no bypass right on the scratch ruleset (or first
+     confirms that `mergeStateStatus` does not depend on the viewer's bypass right). An admin's own
+     view can hide the block.
+   - Case A, a stand-in `review`: a pull request touches a sensitive path outside `.github/`, has no
+     `review-verdict`, and adds a second workflow whose job `review` always passes. The stand-in is a
+     second workflow file (trigger `pull_request`) with its own `name:` (not `review`), and in it a job
+     with `name: review`, which matches the check name exactly. The real `review` fails on that head.
+     Three orders, 1 and 2 each on a new head: order 1, the stand-in job finishes before the real one;
+     order 2, it finishes after it (a `sleep 120` in the stand-in); order 3, after both runs of a head
+     have finished (real red, stand-in green), "Re-run job" on the stand-in only, so the newest check
+     run named `review` on that head is green. Order 3 is how a "newest run wins" rule would show. Run
+     A once with the approval rule and once without it.
+   - Case B, an edited `review.yml`: a pull request touches a sensitive path, has no verdict and no
+     approval, and edits `review.yml` so that its job always passes.
+   - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives `BLOCKED`
+     for case B and for all three orders of case A with the approval rule, after the runs end. Case A
+     without the approval rule is recorded, not required: it shows whether a name-only context can be
+     met by a stand-in, which decides whether `.github/**` could ever be dropped without the
+     required-workflows rule (it cannot be dropped for case B in any event).
+   - Record: the scratch repository's name, the pull request numbers and each `mergeStateStatus`
+     result go under "Upstream verification" in this ADR before the owner's ruleset step.
+   - After the test, the owner deletes the scratch repository.
 
-   **If the precondition is not met**, the step does not go ahead with a context matched by name only.
-   Options for the owner to decide (this ADR does not choose):
-   - a required-workflow rule pinned to `review.yml`, if the plan has it (see (a));
-   - keep the `required_reviewers` approval for `.github/**` only and drop it for the other patterns,
-     so that a pull request cannot add a stand-in workflow without a human approval. Sensitive-path
-     pull requests outside `.github/**` then use the check; changes to workflows still need the second
-     owner or `--admin`;
+   **If the precondition is not met**, the step does not go ahead. Options for the owner to decide
+   (this ADR does not choose):
+   - the ruleset "Require workflows to pass before merging" rule pinned to `.github/workflows/review.yml`
+     on `main`, if the plan has it. The docs place this rule at the organization or enterprise level,
+     and the 2023 changelog puts it on GitHub Enterprise plans; the organization is on the Team plan,
+     so it is probably not available (not verified);
+   - keep the full `required_reviewers` rule as it is today and use `review` as a record only;
    - an App pin (`integration_id`) when an App posts the check; the GitHub Actions App does not help,
      because both runs are Actions.
 
@@ -129,11 +141,12 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
    - Before it: every open pull request needs a `review` run on its head (a push, or "Re-run" of the
      review workflow), or the merge box shows `review` as "Expected" and blocks it.
    - One `PUT repos/stateracloud/koinon/rulesets/26610739` that, in the same body, adds the context
-     `review` (the name stays `review`) to `required_status_checks` and sets the `pull_request` rule's
-     `required_reviewers` to `[]`. One PUT, so there is no window with both rules or with neither.
+     `review` (the name stays `review`) to `required_status_checks` and changes the `pull_request`
+     rule's `required_reviewers` entry to the one pattern `.github/**` (same reviewer team, 1 approval).
+     One PUT, so there is no window with both rules in full or with neither.
    - Move the `review` line of `hack/ci-required.txt` to `external review`.
    - `require_extra_approval_for_unattributed_changes` stays as it is (see Open questions; not verified).
-   - Drift to know about, and the list for a rollback that restores `required_reviewers`: the live
+   - Drift to know about, and the list for a rollback that restores the full `required_reviewers`: the live
      entry has 15 patterns; `hack/claim.sh sensitive-paths` now prints 18. Missing from the live rule:
      `hack/migrate-patch-line` (already in CODEOWNERS before this ADR), `hack/review-gate.sh` and
      `hack/review-verdict.sh` (added here). A rollback uses the full `sensitive-paths` output.
@@ -155,7 +168,7 @@ conditions docs, GitHub's ruleset docs.
 - **GitHub "expected source":** a required check can be pinned to an App (`integration_id`), so a status
   from anyone else does not count. Not taken now: there is no App for this; the gate's own poster list
   does the same job for the status. It is the path to separation of duties and to closing the
-  second-workflow gap of the precondition (old issue 568 tracks the same for `e2e result`).
+  head-workflow gap of decision 3 (old issue 568 tracks the same for `e2e result`).
 
 ## Consequences
 
@@ -173,6 +186,10 @@ conditions docs, GitHub's ruleset docs.
   `gh pr merge --admin` do not. The bypass list of the ruleset is the limit.
 - Negative: a merge of `main` into the branch makes the verdict stale and needs a new review, even
   when the merge is clean.
+- Negative: **a pull request that changes anything under `.github/` still needs the second human's
+  approval** (or an admin merge), because on `pull_request` its own workflow files run (decision 3).
+  Every other sensitive path moves to the `review` check and the merge queue. The required-workflows
+  rule removes this last pattern when the plan has it.
 - Negative _(inferred)_: one more workflow and one more required context.
 - **Exit condition:** the human approval comes back (`required_reviewers`, or the check requires an
   approving review next to the verdict) when a second owner reviews every week.
@@ -186,7 +203,7 @@ conditions docs, GitHub's ruleset docs.
   behaviour through code on `main`, and the rule needs history in the gate. Revisit when stale verdicts
   after main merges are measured as a real cost.
 - **`require_extra_approval_for_unattributed_changes: true`** stays in the `pull_request` rule. Whether
-  it asks for an approval once `required_reviewers` is gone (for example on a commit GitHub cannot
+  it asks for an approval outside `.github/**` once `required_reviewers` is cut to that pattern (for example on a commit GitHub cannot
   attribute) is not verified; check it on the first queued sensitive-path pull request after the step.
 - Pin `review` to an App (`integration_id`) together with old issue 568.
 
@@ -196,10 +213,10 @@ conditions docs, GitHub's ruleset docs.
   `required_approving_review_count: 0`, one `required_reviewers` entry (15 patterns, a team reviewer,
   1 approval), `dismiss_stale_reviews_on_push: true`; `merge_queue` is live (ALLGREEN, group size 1,
   60 minutes); `required_status_checks` has 14 contexts, none pinned.
-- 2026-11-09, `gh run list -w claims.yml --event pull_request_target`: a `pull_request_target` run's
-  `headSha` is the pull request head, so `review-verdict.sh` finds the run with `--commit <sha>`.
-- Not verified: a `pull_request_target` check run satisfying a required context on the pull request
-  head is assumed from the live `claim` check, which is required and runs the same way.
+- 2026-11-09, `gh run list -w claims.yml --event pull_request` (after #465 moved `claim` off
+  `pull_request_target`): run 42695412077's `headSha` is PR 465's head (7b8e1d714), not a test merge
+  commit, so `review-verdict.sh` finds the run with `--commit <sha> --event pull_request`. The
+  required `claim` check runs the same way (`pull_request`, base checkout) and satisfies its context.
 - 2026-11-09, GitHub docs, two check runs with the same name on one SHA: the troubleshooting page says
   "If a check and a commit status have the same name, both must pass when that name is required." and
   "Required checks must pass on the latest commit SHA. Checks from earlier commits don't satisfy the

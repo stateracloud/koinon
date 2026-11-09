@@ -62,7 +62,7 @@ echo "review-verdict: posted review-verdict=$state on ${sha:0:12} (#$pr): $desc"
 
 # Re-run the pull request's `review` job when its result disagrees with the verdict (best effort).
 want=$([[ $state == success ]] && echo failure || echo success)
-run=$("$GH" run list --workflow review.yml --commit "$sha" --event pull_request_target --limit 1 \
+run=$("$GH" run list --workflow review.yml --commit "$sha" --event pull_request --limit 1 \
   --json databaseId,status,conclusion --jq '.[] | [.databaseId, .status, .conclusion] | @tsv' 2>/dev/null || true)
 id="" rstatus="" rconcl=""
 [[ -z $run ]] || IFS=$'\t' read -r id rstatus rconcl <<<"$run"

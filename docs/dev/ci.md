@@ -633,19 +633,25 @@ that run is still going, use "Re-run all jobs" when it ends.
   `.github/CODEOWNERS` (no team, never a `*[bot]` login). The newest such status counts; a status from any
   other login neither passes nor blocks.
 - Drafts skip the job, which counts as passed for a required check; `ready_for_review` starts a new run.
-- Pull request runs use `pull_request_target` (the base's YAML and scripts, as `claim`). The gate's own
-  files (`review.yml`, CODEOWNERS, `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh`) are
+- Pull request runs use `pull_request` (no `pull_request_target`, #463) with a read-only token, and check
+  out the base commit to run its gate, `claim.sh` and CODEOWNERS, as `claim` does. The gate's own files
+  (`review.yml`, CODEOWNERS, `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh`) are
   sensitive paths, so a change to them needs a verdict too.
+- Trade-off: the workflow file is the pull request's own, so a pull request could edit `review.yml` to
+  make `review` pass. The guard is the CODEOWNERS approval rule, kept for `.github/**` only: a pull
+  request that changes anything under `.github/` still needs the second human (or an admin merge), and
+  everything else moves to `review` and the merge queue. The ruleset "required workflows" rule would
+  remove that last pattern when the plan has it.
 - A `merge_group` build judges the queued pull request's head and files, with the gate from
   `merge_group.base_sha`, and fails unless that head is a parent of the queue commit.
 - An exact pattern also matches `<pattern>/*`. Every read error fails the check.
 - `hack/pr-merge.sh --admin` runs the gate on the head itself and refuses with exit 9 (naming
-  `hack/review-verdict.sh`); an admin merge in the web UI skips it.
+  `hack/review-verdict.sh`), with the base's gate; an admin merge in the web UI skips it.
 - A listed owner posts the status, so it records a review; it is no separation of duties.
 
 The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
-PUT adds the context `review` and empties `required_reviewers`, and `review` moves to `external review`
-in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
+PUT adds the context `review` and cuts `required_reviewers` to `.github/**`, and `review` moves to
+`external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
 
 ### Review threads (#187)
 

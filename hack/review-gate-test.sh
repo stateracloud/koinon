@@ -88,7 +88,7 @@ statuses() {
 gate() {
   local want=$1 text=$2 desc=$3 rc=0 out
   shift 3
-  out=$(env EVENT=pull_request_target PR=7 SHA=$SHA "$@" bash hack/review-gate.sh 2>&1) || rc=$?
+  out=$(env EVENT=pull_request PR=7 SHA=$SHA "$@" bash hack/review-gate.sh 2>&1) || rc=$?
   if [[ $rc != "$want" ]]; then echo "FAIL: gate: $desc: exit $rc, want $want"; show "$out"; fail=1; return; fi
   if [[ -n $text ]] && ! grep -qF -- "$text" <<<"$out"; then echo "FAIL: gate: $desc: no '$text' in:"; show "$out"; fail=1; return; fi
   echo "ok: gate: $desc"
@@ -250,7 +250,7 @@ verdict 1 "cannot read pull request #7" "an unreadable PR: exit 1" 7 ready opus 
 reset; pr OPEN "$SHA"; run completed failure
 verdict 0 "re-running review (job 9) of run 55" "ready: post success and re-run the red job" 7 ready opus-review "$SHA" "lane review, 0 findings"
 grep -qF -- "-X POST repos/o/r/statuses/$SHA -f state=success -f context=review-verdict -f description=ready: reviewed by opus-review: lane review, 0 findings" "$tmp/calls" || { echo "FAIL: verdict: the posted status is wrong:"; cat "$tmp/calls"; fail=1; }
-grep -qF -- "run list --workflow review.yml --commit $SHA --event pull_request_target" "$tmp/calls" || { echo "FAIL: verdict: the run lookup is wrong"; fail=1; }
+grep -qF -- "run list --workflow review.yml --commit $SHA --event pull_request" "$tmp/calls" || { echo "FAIL: verdict: the run lookup is wrong"; fail=1; }
 reset; pr OPEN "$SHA"; run completed success
 verdict 0 "already success" "ready on a green job: no re-run" 7 ready opus "$SHA"
 grep -q "run rerun" "$tmp/calls" && { echo "FAIL: verdict: re-ran a job that agrees"; fail=1; }
@@ -272,20 +272,22 @@ d=$(sed -n 's/.*-f description=//p' "$tmp/calls" | head -1)
 d=${d% --silent}
 ((${#d} == 140)) || { echo "FAIL: verdict: description is ${#d} characters, want 140"; fail=1; }
 
-# The workflow: the check name, the triggers, the base's YAML for pull requests, drafts skipped.
+# The workflow: the check name, the triggers (no pull_request_target, #463), the base's scripts, drafts skipped.
 wf=.github/workflows/review.yml
 w() { grep -Eq -- "$1" "$wf" || { echo "FAIL: review.yml: no /$1/"; fail=1; }; }
 w '^    name: review$'
-w '^  pull_request_target:$'
+w '^  pull_request:$'
+w '^    types: \[opened, synchronize, reopened, ready_for_review\]$'
 w '^  merge_group:$'
 w '^    types: \[checks_requested\]$'
 w '^  push:$'
-w "^    if: github.event_name != 'pull_request_target' \|\| !github.event.pull_request.draft$"
+w "^    if: github.event_name != 'pull_request' \|\| !github.event.pull_request.draft$"
 w 'statuses: read'
 w 'MG_HEAD: \$\{\{ github.event.merge_group.head_sha \}\}'
-# shellcheck disable=SC2016 # a regex, not an expansion
-w 'git cat-file -e "\$MG_BASE:hack/review-gate.sh"'
-if grep -Eq '^  pull_request:|^    paths:|ref: \$\{\{ github.event.pull_request.head' "$wf"; then echo "FAIL: review.yml runs the PR's YAML or code, or has a paths filter"; fail=1; fi
+w 'ref: \$\{\{ github.event.pull_request.base.sha \|\| github.event.merge_group.base_sha \|\| github.sha \}\}'
+if grep -v '^ *#' "$wf" | grep -Eq 'pull_request_target|^    paths:|ref:.*pull_request.head|: write'; then
+  echo "FAIL: review.yml uses pull_request_target, checks out the PR's code, has a paths filter or a write permission"; fail=1
+fi
 echo "ok: review.yml shape"
 
 if ((fail)); then echo "review-gate-test: FAILED"; exit 1; fi
