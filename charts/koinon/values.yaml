@@ -766,6 +766,11 @@ sandboxPolicy:
   # used exactly as written, by tag or digest). The preflight compares it with the gateway's
   # supervisor_image.
   supervisorImages: []
+  # Longest lifetime (expirationSeconds) of the one ServiceAccount token a supervisor pod may
+  # project (audience openshell-gateway; ADR 0006 amendment 2026-11-09). OpenShell 0.1.5 defaults
+  # to 3600 and clamps its own setting (OPENSHELL_K8S_SA_TOKEN_TTL_SECS) to 600-86400: raise this
+  # to match when the gateway is configured for a longer TTL.
+  supervisorTokenMaxSeconds: 3600
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
   # sandbox namespaces. Everyone else is denied, cluster admins included. CONNECT (pods/exec, attach,
