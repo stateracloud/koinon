@@ -304,6 +304,9 @@ func (r *Refresher) ReportUnpriced(ctx context.Context) (map[string]int, error) 
 	q := store.New(r.svc.pool)
 	now := r.now()
 	out := map[string]int{}
+	// ListModelsOfProviderType does not return the provider URL, so Resolve here sees no host and a
+	// `not_hosts` exclusion never applies. That is fine for the types counted (the ones a source
+	// prices): none has a not_hosts entry, and the count is by type, not per endpoint.
 	for _, pt := range pricefetch.PricedProviderTypes() {
 		rows, err := q.ListModelsOfProviderType(ctx, pt)
 		if err != nil {

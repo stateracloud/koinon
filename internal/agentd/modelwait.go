@@ -75,7 +75,7 @@ func (r *runner) waitModel(ctx context.Context, model string) error {
 		}
 		if !recorded {
 			// A model without a usable price is never served (ADR 0041): fail now, not after the wait.
-			pm := prices.Model{ID: m.ModelID.String(), Name: model, ProviderType: m.ProviderType}
+			pm := prices.Model{ID: m.ModelID.String(), Name: model, ProviderType: m.ProviderType, ProviderURL: m.ProviderUrl}
 			var bad *prices.BadPriceError
 			switch _, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, pm, now()); {
 			case errors.Is(err, prices.ErrUnpriced):
