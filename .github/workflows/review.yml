@@ -7,11 +7,13 @@
 #
 # When it runs:
 #   - pull requests, through pull_request_target: this file, hack/review-gate.sh, hack/claim.sh and
-#     CODEOWNERS are the base branch's, and the pull request's code is never checked out or run, so a
-#     pull request cannot weaken its own check (as the `claim` check in claims.yml). Drafts: the job is
-#     skipped, which is not red; `ready_for_review` runs it.
+#     CODEOWNERS (the paths and the listed verdict posters) are the base branch's, and the pull
+#     request's code is never checked out or run, so a pull request's own changes to them take effect
+#     only after it merges (as the `claim` check in claims.yml). Those files are sensitive paths
+#     themselves, so such a pull request needs a verdict too. Drafts: the job is skipped, which counts
+#     as passed for a required check; `ready_for_review` starts a new run.
 #   - the merge queue: the queued pull request's head and files are judged; its number comes from the
-#     queue ref. The gate, claim.sh and CODEOWNERS come from merge_group.base_sha. Limit: a merge_group
+#     queue ref, and its head must be a parent of the queue commit. The gate, claim.sh and CODEOWNERS come from merge_group.base_sha. Limit: a merge_group
 #     run takes this YAML from the queue commit (the pull request's own); a pull request that edits it
 #     touches `.github/**`, so it needs a verdict from the base's gate before it can be queued.
 #   - pushes to main: passes (a required job reports on every pull request, push and merge_group build;
@@ -54,6 +56,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |

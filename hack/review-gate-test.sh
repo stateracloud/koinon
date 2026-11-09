@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/review-gate.sh (the `review` check, ADR 0103) and hack/review-verdict.sh with a stub gh.
-# The stub answers from JSON files in $T (files, statuses, pr, runs, jobs) through the caller's --jq
+# The stub answers from JSON files in $T (files, statuses, commit, pr, runs, jobs) through the caller's --jq
 # filter, so the filters are exercised; calls are recorded in $T/calls. The sensitive paths come from
 # the real hack/claim.sh (its `sensitive-paths` output is the contract), except where a case stubs it.
 # Also pins the workflow's shape (.github/workflows/review.yml).
@@ -27,7 +27,12 @@ ans() { [[ -f $1 ]] || exit 0; if [[ -n $jqf ]]; then jq -r "$jqf" "$1"; else ca
 err() { [[ ! -f $1 ]] || { cat "$1" >&2; exit 1; }; }
 case "$*" in
 "api --paginate repos/o/r/pulls/"*"/files"*) err "$T/files.err"; ans "$T/files.json" ;;
-"api repos/o/r/commits/"*"/statuses"*) err "$T/statuses.err"; ans "$T/statuses.json" ;;
+"api --paginate repos/o/r/commits/"*"/statuses"*)
+  err "$T/statuses.err"
+  sha=${2#repos/o/r/commits/}; sha=${sha%%/*}
+  if [[ -f $T/statuses.$sha.json ]]; then ans "$T/statuses.$sha.json"; else ans "$T/statuses.json"; fi
+  ;;
+"api repos/o/r/commits/"*) err "$T/commit.err"; ans "$T/commit.json" ;;
 "pr view"*) err "$T/pr.err"; ans "$T/pr.json" ;;
 "api -X POST repos/o/r/statuses/"*) [[ -z ${T_POST_FAILS:-} ]] || { echo "HTTP 422" >&2; exit 1; } ;;
 "run list"*) ans "$T/runs.json" ;;
@@ -45,6 +50,16 @@ OTHER=89abcdef0123456789abcdef0123456789abcdef
 fail=0
 show() { printf '%s\n' "$1" | sed 's/^/    /'; }
 reset() { rm -f "$tmp"/*.json "$tmp"/*.err "$tmp"/calls; }
+BASE=fedcba9876543210fedcba9876543210fedcba98
+MG=0011223344556677889900112233445566778899
+# queue <parent>...: the queue commit MG and its parents; the queued PR #7's head is $SHA.
+queue() {
+  echo "{\"headRefOid\":\"$SHA\"}" >"$tmp/pr.json"
+  local j="[" sep="" c
+  for c in "$@"; do j+="$sep{\"sha\":\"$c\"}"; sep=","; done
+  echo "{\"sha\":\"$MG\",\"parents\":$j]}" >"$tmp/commit.json"
+}
+QREF=refs/heads/gh-readonly-queue/main/pr-7-$MG
 # files <name>...: the pull request's files (a name `old=>new` is a rename).
 files() {
   local j="[" sep="" f
@@ -54,11 +69,17 @@ files() {
   done
   echo "$j]" >"$tmp/files.json"
 }
-# statuses <context>:<state>...: newest first, as the API lists them.
+# statuses <context>:<state>[:<login>]...: newest first, as the API lists them (login default procoduck).
+# STATUSES_FILE picks another file (statuses.<sha>.json answers for that sha only).
 statuses() {
-  local j="[" sep="" s
-  for s in "$@"; do j+="$sep{\"context\":\"${s%%:*}\",\"state\":\"${s#*:}\",\"creator\":{\"login\":\"procoduck\"},\"description\":\"ready: reviewed by opus-review\"}"; sep=","; done
-  echo "$j]" >"$tmp/statuses.json"
+  local j="[" sep="" s ctx state login i=0
+  for s in "$@"; do
+    IFS=: read -r ctx state login <<<"$s"
+    i=$((i + 1))
+    j+="$sep{\"id\":$((1000 - i)),\"context\":\"$ctx\",\"state\":\"$state\",\"creator\":{\"login\":\"${login:-procoduck}\"},\"description\":\"ready: reviewed by opus-review\"}"
+    sep=","
+  done
+  echo "$j]" >"$tmp/${STATUSES_FILE:-statuses.json}"
 }
 # gate <want rc> <want text> <description> [VAR=value...]
 gate() {
@@ -72,7 +93,7 @@ gate() {
 
 # The contract with claim.sh: its sensitive-paths output, as ruleset patterns.
 pats=$(KOINON_CLAIM_REPO=o/r bash hack/claim.sh sensitive-paths)
-for p in '.github/**' 'AGENTS.md' 'docs/adr/**' 'hack/claim.sh'; do
+for p in '.github/**' 'AGENTS.md' 'docs/adr/**' 'hack/claim.sh' 'hack/review-gate.sh' 'hack/review-verdict.sh'; do
   grep -qxF -- "$p" <<<"$pats" || { echo "FAIL: hack/claim.sh sensitive-paths has no '$p'"; fail=1; }
 done
 echo "ok: hack/claim.sh sensitive-paths prints ruleset patterns ($(wc -l <<<"$pats" | tr -d ' '))"
@@ -112,19 +133,64 @@ gate 1 "cannot read the head commit" "no head sha fails closed" SHA=
 gate 1 "no pull request number" "no PR number fails closed" PR=
 gate 0 "nothing to review" "push: pass" EVENT=push PR= SHA=
 
-# merge_group: the queued PR from the ref, its head from the API.
-reset; files AGENTS.md; echo "{\"headRefOid\":\"$SHA\"}" >"$tmp/pr.json"; statuses review-verdict:success
-gate 0 "review-verdict is success" "merge_group: the queued PR's head verdict" EVENT=merge_group PR= SHA= GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-7-$OTHER
+# Who may post: the user logins on the sensitive CODEOWNERS lines (procoduck, ovirandunu), never a bot.
+reset; files AGENTS.md; statuses review-verdict:success:github-actions[bot]
+gate 1 "ignored 1 review-verdict status" "a bot's success is ignored"
+reset; files AGENTS.md; statuses review-verdict:success:mallory
+gate 1 "has no review-verdict status" "a success from a login outside the list is ignored"
+reset; files AGENTS.md; statuses review-verdict:success:procoduck[bot]
+gate 1 "has no review-verdict status" "a listed name with [bot] is a bot: ignored"
+reset; files AGENTS.md; statuses review-verdict:success:github-actions[bot] review-verdict:failure:ovirandunu
+gate 1 "is failure (posted by ovirandunu" "the newest listed status wins over a newer bot success"
+reset; files AGENTS.md; statuses review-verdict:failure:mallory review-verdict:success:ovirandunu
+gate 0 "posted by ovirandunu" "a newer failure from a login outside the list does not block"
+reset; files AGENTS.md; statuses review-verdict:failure:ovirandunu review-verdict:success:procoduck
+gate 1 "is failure (posted by ovirandunu" "a newer listed failure wins over an older listed success"
+reset; files AGENTS.md; statuses review-verdict:success:ProcoDuck
+gate 0 "review-verdict is success" "logins compare without case"
+reset; files AGENTS.md; statuses review-verdict:success
+printf '# Sensitive paths\n/AGENTS.md @stateracloud/maintainers\n' >"$tmp/teams"
+gate 1 "no review-verdict posters" "CODEOWNERS with teams only: fail closed" CODEOWNERS="$tmp/teams"
+gate 1 "no review-verdict posters" "an unreadable CODEOWNERS fails closed" CODEOWNERS="$tmp/missing"
+reset; files AGENTS.md; STATUSES_FILE=statuses.$OTHER.json statuses review-verdict:success; echo '[]' >"$tmp/statuses.$SHA.json"
+gate 1 "has no review-verdict status" "a success on the previous head does not pass the new head"
+grep -q "commits/$SHA/statuses" "$tmp/calls" || { echo "FAIL: gate: the statuses of the new head were not read"; fail=1; }
+
+# Matching: the gate's own files, nested paths, an exact pattern that names a directory, a long list.
+reset; files .github/workflows/review.yml
+gate 1 "(.github/**)" "the review workflow is sensitive"
+reset; files .github/CODEOWNERS
+gate 1 "(.github/**)" "CODEOWNERS is sensitive"
+reset; files .github/workflows/a/b.yml
+gate 1 "(.github/**)" "a nested path under dir/** is sensitive"
+reset; files hack/review-gate.sh hack/review-verdict.sh
+gate 1 "hack/review-verdict.sh (hack/review-verdict.sh)" "the gate and the verdict script are sensitive"
+reset; printf '#!/usr/bin/env bash\necho hack/migrate-patch-line\n' >"$tmp/dirclaim"; chmod +x "$tmp/dirclaim"; files hack/migrate-patch-line/x
+gate 1 "hack/migrate-patch-line/x (hack/migrate-patch-line)" "an exact pattern also matches <pattern>/*" CLAIM="$tmp/dirclaim"
+reset; files hack/migrate-patch-line-old
+gate 0 "touches no sensitive path" "an exact pattern does not match a longer name" CLAIM="$tmp/dirclaim"
+reset; jq -n '[range(3000) | {filename: "internal/api/f\(.).go"}]' >"$tmp/files.json"
+gate 1 "3000 or more files" "3000 or more files fail closed"
+
+# merge_group: the queued PR from the ref, its head from the API, and that head a parent of the queue commit.
+reset; files AGENTS.md; queue "$BASE" "$SHA"; statuses review-verdict:success
+gate 0 "review-verdict is success" "merge_group: the queued PR's head verdict" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 grep -q "pulls/7/files" "$tmp/calls" || { echo "FAIL: merge_group: the files of #7 were not read"; fail=1; }
 grep -q "commits/$SHA/statuses" "$tmp/calls" || { echo "FAIL: merge_group: the statuses of the PR head were not read"; fail=1; }
-reset; files AGENTS.md; echo "{\"headRefOid\":\"$SHA\"}" >"$tmp/pr.json"
-gate 1 "has no review-verdict status" "merge_group: no verdict on the PR head fails" EVENT=merge_group PR= SHA= GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-7-$OTHER
-reset; files internal/x.go; echo "{\"headRefOid\":\"$SHA\"}" >"$tmp/pr.json"
-gate 0 "touches no sensitive path" "merge_group: not sensitive passes" EVENT=merge_group PR= SHA= GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-7-$OTHER
+reset; files AGENTS.md; queue "$BASE" "$SHA"
+gate 1 "has no review-verdict status" "merge_group: no verdict on the PR head fails" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
+reset; files internal/x.go; queue "$BASE" "$SHA"
+gate 0 "touches no sensitive path" "merge_group: not sensitive passes" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
+reset; files AGENTS.md; queue "$BASE" "$OTHER"; statuses review-verdict:success
+gate 1 "does not have the pull request head" "merge_group: the verdicted head is not a parent of the queue commit: fail" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
+reset; files AGENTS.md; queue "$BASE" "$SHA"; statuses review-verdict:success
+gate 1 "without the queue commit" "merge_group: no MG_HEAD fails closed" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=
+reset; files AGENTS.md; queue "$BASE" "$SHA"; echo "HTTP 404" >"$tmp/commit.err"; statuses review-verdict:success
+gate 1 "cannot read the parents" "merge_group: unreadable parents fail closed" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 reset
 gate 1 "cannot read the pull request number" "merge_group: a bad ref fails closed" EVENT=merge_group PR= SHA= GITHUB_REF=refs/heads/main
 reset; echo "HTTP 404" >"$tmp/pr.err"
-gate 1 "cannot read the head commit" "merge_group: no head fails closed" EVENT=merge_group PR= SHA= GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-7-$OTHER
+gate 1 "cannot read the head commit" "merge_group: no head fails closed" EVENT=merge_group PR= SHA= GITHUB_REF="$QREF" MG_HEAD=$MG
 
 # The step summary.
 reset; files AGENTS.md
@@ -197,6 +263,7 @@ w '^    types: \[checks_requested\]$'
 w '^  push:$'
 w "^    if: github.event_name != 'pull_request_target' \|\| !github.event.pull_request.draft$"
 w 'statuses: read'
+w 'MG_HEAD: \$\{\{ github.event.merge_group.head_sha \}\}'
 # shellcheck disable=SC2016 # a regex, not an expansion
 w 'git cat-file -e "\$MG_BASE:hack/review-gate.sh"'
 if grep -Eq '^  pull_request:|^    paths:|ref: \$\{\{ github.event.pull_request.head' "$wf"; then echo "FAIL: review.yml runs the PR's YAML or code, or has a paths filter"; fail=1; fi

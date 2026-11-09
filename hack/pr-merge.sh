@@ -29,14 +29,18 @@
 #   fails or is empty, e2e is required (fail closed).
 #   --admin        merge now with admin rights: the exception (a CODEOWNERS or sensitive path, AGENTS.md "Merging"), not the
 #                  default. With a merge queue and a change that needs the e2e it warns: the queue-commit quickstart is skipped.
+#                  It runs hack/review-gate.sh on the head first (the `review` check it bypasses, ADR 0103) and
+#                  refuses with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
 #   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 64 usage
+#       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 9 --admin without
+#       a review verdict (ADR 0103), 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS, PR_MERGE_REVIEW_GATE replace the
+# helper scripts.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -50,6 +54,7 @@ needs_sh=${PR_MERGE_NEEDS_E2E:-$here/needs-e2e.sh}
 claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
+review_gate=${PR_MERGE_REVIEW_GATE:-$here/review-gate.sh}
 # shellcheck source=/dev/null
 . "$here/lib/pr-verdict.sh"
 
@@ -190,6 +195,17 @@ fi
 mode=--auto
 if [ "$admin" != 0 ]; then
   mode=--admin
+  # --admin bypasses the ruleset, so the `review` check too (ADR 0103): run the gate on the head here. A
+  # sensitive-path PR without a success review-verdict from a listed owner is refused (exit 9).
+  repo=${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}
+  [ -n "$repo" ] || { echo "pr-merge: cannot read the repository name for the review gate; not merging" >&2; exit 1; }
+  grc=0
+  gate_out=$(EVENT=pull_request PR="$pr" SHA="$sha" GH_REPO="$repo" "$review_gate" 2>&1) || grc=$?
+  if [ "$grc" != 0 ]; then
+    printf '%s\n' "$gate_out" >&2
+    echo "pr-merge: --admin: the review gate (hack/review-gate.sh) fails on ${sha:0:7}; record the independent review with hack/review-verdict.sh $pr ready <reviewer> $sha, then run this again; not merging" >&2
+    exit 9
+  fi
   if [ "$queue" = 1 ] && [ "${#req[@]}" -gt 0 ]; then
     echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444, ADR 0102) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
   fi

@@ -31,31 +31,86 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      sensitive-paths`, which reads the CODEOWNERS section: one source for the gate and, until the
      ruleset step, for `required_reviewers`. Files are the API's file list of the pull request; a
      rename counts by both names; an empty or truncated (3000 files) list is treated as sensitive.
-   - Otherwise the newest `review-verdict` status on the head must be `success`. A failure or none fails
-     with the command to run. Every read error fails the gate.
+   - Otherwise the newest `review-verdict` status on the head **from a listed poster** must be
+     `success`. A failure or none fails with the command to run. Every read error fails the gate.
+   - **Listed posters.** Only a status whose `creator.login` is one of the user logins that own the
+     sensitive lines of the base branch's `.github/CODEOWNERS` counts (today `procoduck` and
+     `ovirandunu`). A team owner (`@org/team`) is not a poster, a `*[bot]` login never is, and an
+     empty list fails closed. The source is CODEOWNERS and not a separate file because those lines
+     already name who answers for the sensitive paths, they are user logins (no team lookup, which
+     the job's token could not do), and CODEOWNERS is itself under `.github/**`, so a change to the
+     list is a sensitive change that needs a verdict from the old list. Any account with write access
+     (and any workflow with `statuses: write`) can post a commit status, so without this list a
+     pull request's own workflow, or a contributor, could post `success`.
+   - **Statuses from other logins count in neither direction.** A newer status from a login outside
+     the list does not pass, and it does not block either: otherwise any writer (or a bot) could
+     veto a reviewed pull request by posting `failure` after the owner's `success`. The gate names
+     how many it ignored. The statuses are read with pagination, so many statuses from other logins
+     cannot push the listed one off the first page.
    - **Exact SHA only.** A push makes the verdict stale, as `dismiss_stale_reviews_on_push` does for
      approvals today.
-   - **Drafts:** the job is skipped (not red); `ready_for_review` runs it. Push to main: passes.
+   - **Drafts:** the job is skipped, which counts as passed for a required check; `ready_for_review`
+     starts a new run. A draft cannot be queued or merged, so the skip opens nothing. Push to main:
+     passes.
    - **`merge_group`:** the queued pull request's number comes from the queue ref
      (`gh-readonly-queue/<base>/pr-<N>-<sha>`, as the `claim` check does); its head and file list are
-     read from the API and judged as above. It fails closed when the number or the head cannot be read.
+     read from the API and judged as above, and that head must be a parent of the queue commit
+     (`merge_group.head_sha`, read through the commits API), so the verdict is for the commit the queue
+     merges. It fails closed when the number, the head or the parents cannot be read.
+   - **Matching:** patterns are ruleset patterns (`dir/**` or an exact path); an exact path also
+     matches `<path>/*`, so a path that becomes a directory stays covered.
+   - **`hack/pr-merge.sh --admin`** runs the same gate on the pull request head before it merges and
+     refuses (exit 9, naming `hack/review-verdict.sh`) when a sensitive-path pull request has no
+     `success` verdict from a listed poster: `--admin` bypasses the ruleset, so the check would not
+     hold there otherwise.
    - **Late evidence:** a status event starts no workflow, so `review-verdict.sh` re-runs the `review`
      job of the pull request's newest finished run on that SHA when its result disagrees with the
      verdict (the `hack/e2e-rerun-result.sh` pattern). Not while that run is still in progress: the
      script says so, and "Re-run all jobs" is the manual path.
 3. **Who controls the gate.** Pull request runs use `pull_request_target`: the YAML, the gate,
    `claim.sh` and CODEOWNERS are the base branch's and the pull request's code is never checked out,
-   so a pull request cannot weaken its own check (the `claim` check's model, ADR 0094). This deviates
+   so a pull request's own edits to them take effect only after it merges (the `claim` check's model,
+   ADR 0094). That alone does not stop a pull request from weakening the gate for the next one, so the
+   gate's files are sensitive paths themselves: `.github/workflows/review.yml` and `.github/CODEOWNERS`
+   are under `.github/**`, and `/hack/review-gate.sh`, `/hack/review-verdict.sh` and `/hack/claim.sh`
+   have their own CODEOWNERS lines. A change to any of them needs a verdict from a listed poster on its
+   head (`hack/review-gate-test.sh` checks that `sensitive-paths` covers them). What remains is the
+   precondition below: a second workflow that reports a check named `review`. This deviates
    from `e2e result`, which runs the pull request's own YAML: that YAML was guarded by the approval rule
    this ADR removes. On `merge_group` the YAML is the queue commit's (GitHub's rule); the gate, `claim.sh`
    and CODEOWNERS are taken from `merge_group.base_sha`. A pull request that edits `review.yml` touches
    `.github/**`, so the base's gate requires a verdict on it before it can be queued.
 4. **Rollout.** The check lands advisory: it is listed in `hack/ci-required.txt` as an advisory check of
    another workflow (a comment line, so `hack/ci-merge-group-test.sh` still checks its `merge_group`
-   trigger) and the ruleset is unchanged. The owner's step: move it to `external review`, add the
-   context `review` to the ruleset's `required_status_checks`, and remove the `required_reviewers`
-   entry of the `pull_request` rule. Then sensitive-path pull requests can use `hack/pr-merge.sh`
-   without `--admin`, and so the merge queue.
+   trigger) and the ruleset is unchanged. Then sensitive-path pull requests can use `hack/pr-merge.sh`
+   without `--admin`, and so the merge queue, once the owner's step is done.
+
+   **Precondition (before the owner's step), one of:**
+   - (a) a ruleset "Require workflows to pass before merging" rule pinned to
+     `.github/workflows/review.yml` on `main`, so only that file's run counts. The docs place this rule
+     at the organization or enterprise level, and the 2023 changelog puts it on GitHub Enterprise plans;
+     the organization is on the Team plan, so (a) is probably not available (not verified).
+   - (b) the experiment, on a throwaway pull request, not run yet: a branch adds a second workflow
+     (trigger `pull_request`) with a job named `review` that always passes, while the real `review`
+     fails on the same head (the branch touches `.github/**` and has no verdict). With `review`
+     required in a test ruleset (or read from the merge box with `gh pr view --json mergeStateStatus`),
+     the step may go ahead only if the pull request stays BLOCKED. If it becomes mergeable, a pull
+     request can bypass the gate with its own YAML, and the step waits for (a) or an App pin
+     (`integration_id`; the GitHub Actions App does not help, both runs are Actions).
+
+   **The owner's step** (after the precondition; by the owner's session through `gh api`, backup and
+   diff, never from a pull request):
+   - Before it: every open pull request needs a `review` run on its head (a push, or "Re-run" of the
+     review workflow), or the merge box shows `review` as "Expected" and blocks it.
+   - One `PUT repos/stateracloud/koinon/rulesets/26610739` that, in the same body, adds the context
+     `review` (the name stays `review`) to `required_status_checks` and sets the `pull_request` rule's
+     `required_reviewers` to `[]`. One PUT, so there is no window with both rules or with neither.
+   - Move the `review` line of `hack/ci-required.txt` to `external review`.
+   - `require_extra_approval_for_unattributed_changes` stays as it is (see Open questions; not verified).
+   - Drift to know about, and the list for a rollback that restores `required_reviewers`: the live
+     entry has 15 patterns; `hack/claim.sh sensitive-paths` now prints 18. Missing from the live rule:
+     `hack/migrate-patch-line` (already in CODEOWNERS before this ADR), `hack/review-gate.sh` and
+     `hack/review-verdict.sh` (added here). A rollback uses the full `sensitive-paths` output.
 
 ## Prior art
 
@@ -72,20 +127,24 @@ conditions docs, GitHub's ruleset docs.
 - **Mergify:** queue conditions combine `#approved-reviews-by>=1` with `check-success=` entries; a review
   is one more condition next to the checks. We did not take a third-party service.
 - **GitHub "expected source":** a required check can be pinned to an App (`integration_id`), so a status
-  from anyone else does not count. Not taken now: there is no App for this, and the poster is the
-  maintainer anyway (see Consequences). It is the path to separation of duties (old issue 568 tracks the
-  same for `e2e result`).
+  from anyone else does not count. Not taken now: there is no App for this; the gate's own poster list
+  does the same job for the status. It is the path to separation of duties and to closing the
+  second-workflow gap of the precondition (old issue 568 tracks the same for `e2e result`).
 
 ## Consequences
 
 - Positive: sensitive-path merges can go through the queue and its e2e; the admin bypass becomes the
   exception it was meant to be. The review becomes visible on the pull request and auditable per SHA.
-- Positive _(inferred)_: the 16th CODEOWNERS pattern, `hack/migrate-patch-line`, which the live ruleset
-  lacks (it has 15), is covered by the gate, because the gate reads the list at run time.
-- Negative: **this is a record of a review, not a separation of duties.** The same account that writes
-  the code posts the status; nothing technical stops it from posting `ready` without a review. The
-  review's independence rests on the process (a separate agent reviews the head) and on the description
-  naming the reviewer.
+- Positive _(inferred)_: the CODEOWNERS patterns the live ruleset lacks (`hack/migrate-patch-line`, and
+  the two added here) are covered by the gate, because the gate reads the list at run time.
+- Negative: **this is a record of a review, not a separation of duties.** A listed owner posts the
+  status, and that owner may be the author of the pull request; nothing technical stops a listed owner
+  from posting `ready` without a review. The review's independence rests on the process (a separate
+  agent reviews the head) and on the description naming the reviewer. The poster list only stops
+  everyone else (contributors, bots, workflows) from posting or vetoing.
+- Negative: **an admin who merges in the web UI** ("merge without waiting for requirements") skips
+  the check, as today. `hack/pr-merge.sh --admin` runs the gate itself; the web UI and a hand-written
+  `gh pr merge --admin` do not. The bypass list of the ruleset is the limit.
 - Negative: a merge of `main` into the branch makes the verdict stale and needs a new review, even
   when the merge is clean.
 - Negative _(inferred)_: one more workflow and one more required context.
@@ -115,6 +174,24 @@ conditions docs, GitHub's ruleset docs.
   `headSha` is the pull request head, so `review-verdict.sh` finds the run with `--commit <sha>`.
 - Not verified: a `pull_request_target` check run satisfying a required context on the pull request
   head is assumed from the live `claim` check, which is required and runs the same way.
+- 2026-11-09, GitHub docs, two check runs with the same name on one SHA: the troubleshooting page says
+  "If a check and a commit status have the same name, both must pass when that name is required." and
+  "Required checks must pass on the latest commit SHA. Checks from earlier commits don't satisfy the
+  requirement." It says nothing about two check runs with the same name: **not verified**, hence the
+  experiment of the precondition. A commit status named `review` posted by a writer does not pass the
+  check alone, by the first sentence.
+- 2026-11-09, GitHub docs, "Require workflows to pass before merging": the rulesets page says
+  "Ruleset workflows can be configured at the organization or enterprise level" and "The workflow file
+  needs to be in a repository that matches the visibility of the repositories you want to run it in."
+  The GitHub Enterprise Server troubleshooting page for rules lists the `pull_request`,
+  `pull_request_target` and `merge_group` events for such workflows and says a workflow needs a
+  `merge_group` trigger to run in the queue. The changelog of 2023-08-02 says required workflows "will
+  only be available on GitHub Enterprise plans via Repository Rules". The page does not name the plans
+  for the rule itself, and merge-queue support is stated only on the Enterprise Server page: **not
+  verified** for github.com on the Team plan.
+- 2026-11-09, the expected-source text: "When you add a required status check rule, you can select an
+  app as the expected source of status updates." and "If the status is set by any other person or
+  integration, merging won't be allowed."
 
 ## Links
 
@@ -123,4 +200,7 @@ conditions docs, GitHub's ruleset docs.
 - Prow Tide: https://docs.prow.k8s.io/docs/components/core/tide/config
 - bors-ng reference: https://github.com/bors-ng/bors-ng.github.io/blob/e87e702fff1a5fd338dfd449d3f64845db4252b3/reference.md
 - Mergify conditions: https://docs.mergify.com/configuration/conditions.md
-- GitHub rulesets, required status checks and expected source: https://docs.github.com/en/enterprise-cloud@latest/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks
+- GitHub, troubleshooting required status checks: https://docs.github.com/en/enterprise-cloud@latest/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks
+- GitHub, available rules for rulesets: https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
+- GitHub Enterprise Server, troubleshooting rules: https://docs.github.com/en/enterprise-server@3.19/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules
+- GitHub changelog, required workflows move to rulesets: https://github.blog/changelog/2023-08-02-github-actions-required-workflows-will-move-to-repository-rules/

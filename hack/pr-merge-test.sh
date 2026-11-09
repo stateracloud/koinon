@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/pr-merge.sh offline: `gh` is a stub on PATH answering from files in $FAKE_DIR, and the
-# helper scripts (pr-wait, needs-e2e, claim, threads) are stubs that record their calls. The stub answers `gh api`
+# helper scripts (pr-wait, needs-e2e, claim, threads, review-gate) are stubs that record their calls. The stub answers `gh api`
 # with API-shaped JSON (what GitHub prints; a recorded real answer lives in hack/testdata/pr-verdict/) and applies the
 # call's own `--jq` filter to it, so the script's parsing is tested, not a pre-chewed list.
 
@@ -17,7 +17,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
 export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CLAIM="$tmp/bin/claim"
-export PR_MERGE_THREADS="$tmp/bin/threads"
+export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -76,6 +76,12 @@ cat >"$tmp/bin/threads" <<'SH'
 echo "threads $*" >>"$FAKE_DIR/calls"
 [ "${THREADS_RC:-0}" != 7 ] || echo "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
 exit "${THREADS_RC:-0}"
+SH
+cat >"$tmp/bin/review" <<'SH'
+#!/usr/bin/env bash
+echo "review EVENT=$EVENT PR=$PR SHA=$SHA GH_REPO=$GH_REPO" >>"$FAKE_DIR/calls"
+[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::pull request #$PR touches sensitive paths and its head has no review-verdict status"
+exit "${REVIEW_RC:-0}"
 SH
 chmod +x "$tmp/bin"/*
 
@@ -393,5 +399,21 @@ sed -i.bak 's/"reviewDecision":""/"reviewDecision":"REVIEW_REQUIRED"/;s/"autoMer
 run 7
 grep -q 'armed but' <<<"$out" && { echo "FAIL: no auto-merge request, must not say armed: $out" >&2; fail=1; }
 grep -q 'auto-merge is NOT armed.*review is required' <<<"$out" || { echo "FAIL: says not armed, review required: $out" >&2; fail=1; }
+
+# ADR 0103: --admin bypasses the ruleset's `review` check, so pr-merge runs the gate on the head itself.
+setup false "$green"
+REVIEW_RC=1 run 7 --admin
+check "--admin on a sensitive PR without a review verdict is refused" 9 nomerge
+grep -q 'hack/review-verdict.sh 7 ready <reviewer> abc1234def' <<<"$out" || { echo "FAIL: the refusal names hack/review-verdict.sh: $out" >&2; fail=1; }
+grep -q 'has no review-verdict status' <<<"$out" || { echo "FAIL: the gate's reason is shown: $out" >&2; fail=1; }
+grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review when the review gate refuses" >&2; fail=1; }
+grep -q '^review EVENT=pull_request PR=7 SHA=abc1234def GH_REPO=o/r$' "$FAKE_DIR/calls" || { echo "FAIL: the gate runs on the PR head" >&2; fail=1; }
+setup false "$green"
+REVIEW_RC=0 run 7 --admin
+check "--admin with a review verdict (or no sensitive path) merges" 0 merge
+setup false "$green"
+REVIEW_RC=1 run 7
+check "without --admin the ruleset judges the review check: the gate is not run here" 0 merge
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran without --admin" >&2; fail=1; }
 
 exit "$fail"

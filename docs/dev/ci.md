@@ -627,14 +627,25 @@ the review of exactly that commit:
 
 The script refuses when the head is no longer the reviewed SHA (exit 4, `STALE`): a push, a merge of `main`
 included, needs a new review. It re-runs a `review` job whose result disagrees with the new verdict; while
-that run is still going, use "Re-run all jobs" when it ends. Drafts skip the job (not red). Pull request runs
-use `pull_request_target` (the base's YAML and scripts, as `claim`); a `merge_group` build judges the queued
-pull request's head and files, with the gate from `merge_group.base_sha`. Every read error fails the check.
-The status is posted by the maintainer's account, so it records a review; it is no separation of duties.
+that run is still going, use "Re-run all jobs" when it ends.
 
-The check is advisory until the owner's step: `review` moves to `external review` in `hack/ci-required.txt`,
-the ruleset requires the context `review`, and its `required_reviewers` entry goes. Until then a
-sensitive-path pull request still needs the approval or `--admin`.
+- Only a status from a listed poster counts: the user logins on the sensitive lines of the base's
+  `.github/CODEOWNERS` (no team, never a `*[bot]` login). The newest such status counts; a status from any
+  other login neither passes nor blocks.
+- Drafts skip the job, which counts as passed for a required check; `ready_for_review` starts a new run.
+- Pull request runs use `pull_request_target` (the base's YAML and scripts, as `claim`). The gate's own
+  files (`review.yml`, CODEOWNERS, `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh`) are
+  sensitive paths, so a change to them needs a verdict too.
+- A `merge_group` build judges the queued pull request's head and files, with the gate from
+  `merge_group.base_sha`, and fails unless that head is a parent of the queue commit.
+- An exact pattern also matches `<pattern>/*`. Every read error fails the check.
+- `hack/pr-merge.sh --admin` runs the gate on the head itself and refuses with exit 9 (naming
+  `hack/review-verdict.sh`); an admin merge in the web UI skips it.
+- A listed owner posts the status, so it records a review; it is no separation of duties.
+
+The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
+PUT adds the context `review` and empties `required_reviewers`, and `review` moves to `external review`
+in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
 
 ### Review threads (#187)
 
