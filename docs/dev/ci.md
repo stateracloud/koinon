@@ -538,9 +538,8 @@ loop (a pipe after `pr-wait.sh` hides its exit code, old issue 626).
 Strict "up to date with main" made every merge put every other open PR behind. The merge queue
 builds main plus the queued PRs on a `gh-readonly-queue/main/...` branch, runs the required checks
 there and merges in order, so the ruleset drops strict (ADR 0094 decision 4) and nothing syncs a branch by
-hand. The repository half is in place and inert until the ruleset has a
-`merge_queue` rule; the ruleset change itself is made by the maintainer's session through
-`gh api` (backup, diff), never from a pull request.
+hand. The ruleset's `merge_queue` rule is live since 2026-11-09; ruleset changes are made by the
+maintainer's session through `gh api` (backup, diff), never from a pull request.
 
 What a `merge_group` build runs (event `checks_requested`, no pull request in the payload):
 
@@ -616,6 +615,26 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   e2e-relevant change: such a PR should be enqueued, and `pr-merge.sh --admin` warns when the queue is on and
   `needs-e2e.sh` says the e2e is required. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
   whether or not the PR is queued.
+
+### The `review` check (ADR 0103)
+
+`review` (`.github/workflows/review.yml`, `hack/review-gate.sh`) records the independent review of a
+sensitive-path pull request as a check. A pull request that touches none of the patterns of `hack/claim.sh
+sensitive-paths` passes. Otherwise its head needs the commit status `review-verdict` = success, posted after
+the review of exactly that commit:
+
+    hack/review-verdict.sh <PR> ready <reviewer> <reviewed sha> ['<note>']   # or not-ready
+
+The script refuses when the head is no longer the reviewed SHA (exit 4, `STALE`): a push, a merge of `main`
+included, needs a new review. It re-runs a `review` job whose result disagrees with the new verdict; while
+that run is still going, use "Re-run all jobs" when it ends. Drafts skip the job (not red). Pull request runs
+use `pull_request_target` (the base's YAML and scripts, as `claim`); a `merge_group` build judges the queued
+pull request's head and files, with the gate from `merge_group.base_sha`. Every read error fails the check.
+The status is posted by the maintainer's account, so it records a review; it is no separation of duties.
+
+The check is advisory until the owner's step: `review` moves to `external review` in `hack/ci-required.txt`,
+the ruleset requires the context `review`, and its `required_reviewers` entry goes. Until then a
+sensitive-path pull request still needs the approval or `--admin`.
 
 ### Review threads (#187)
 

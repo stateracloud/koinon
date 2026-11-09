@@ -841,6 +841,7 @@ jobs:
       - run: hack/e2e-rerun-result-test.sh
       - run: hack/ci-concurrency-test.sh
       - run: hack/ci-merge-group-test.sh
+      - run: hack/review-gate-test.sh
       - run: hack/ci-cache-test.sh
       - run: hack/chart-check-test.sh
 

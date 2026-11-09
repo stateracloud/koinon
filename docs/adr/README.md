@@ -121,3 +121,4 @@ are in [0046](0046-adr-conventions.md).
 | [0100](0100-install-audit-chain.md) | An install-level audit chain for platform actions | Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1) |
 | [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Accepted (maintainer decision 2026-11-04) |
 | [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09) |
+| [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval | Accepted (direction by procoduck, 2026-11-09; details by the implementing lane) |

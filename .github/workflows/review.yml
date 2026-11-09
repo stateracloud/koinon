@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The `review` check (ADR 0103): a pull request that touches the sensitive paths (the `# Sensitive
+# paths` section of .github/CODEOWNERS, `hack/claim.sh sensitive-paths`) needs the commit status
+# `review-verdict` = success on its head, posted by hack/review-verdict.sh after an independent review
+# of exactly that commit. Any other pull request passes. The logic is hack/review-gate.sh.
+#
+# When it runs:
+#   - pull requests, through pull_request_target: this file, hack/review-gate.sh, hack/claim.sh and
+#     CODEOWNERS are the base branch's, and the pull request's code is never checked out or run, so a
+#     pull request cannot weaken its own check (as the `claim` check in claims.yml). Drafts: the job is
+#     skipped, which is not red; `ready_for_review` runs it.
+#   - the merge queue: the queued pull request's head and files are judged; its number comes from the
+#     queue ref. The gate, claim.sh and CODEOWNERS come from merge_group.base_sha. Limit: a merge_group
+#     run takes this YAML from the queue commit (the pull request's own); a pull request that edits it
+#     touches `.github/**`, so it needs a verdict from the base's gate before it can be queued.
+#   - pushes to main: passes (a required job reports on every pull request, push and merge_group build;
+#     no workflow-level `paths:`).
+# A status event starts no workflow, so hack/review-verdict.sh re-runs this job after it posts.
+name: review
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: review
+    if: github.event_name != 'pull_request_target' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # the pull request's files, and the queued pull request's head
+      statuses: read # the review-verdict commit status; without it the API answers 403 (old issue 588)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # pull_request_target and push: the base branch (the default ref). merge_group: the queue commit;
+      # the step below switches to the base's gate when the base has one.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fail when sensitive paths changed and the head has no ready review verdict
+        shell: bash # -eo pipefail
+        env:
+          EVENT: ${{ github.event_name }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gate=hack/review-gate.sh
+          if [[ $EVENT == merge_group ]]; then
+            git fetch --no-tags --depth=1 origin "$MG_BASE"
+            # The queue commit's own copy only when the base has no gate (the entry that introduces it).
+            if git cat-file -e "$MG_BASE:hack/review-gate.sh" 2>/dev/null; then
+              git worktree add --detach "$RUNNER_TEMP/base" "$MG_BASE"
+              gate="$RUNNER_TEMP/base/hack/review-gate.sh"
+              echo "using hack/review-gate.sh, hack/claim.sh and .github/CODEOWNERS from $MG_BASE"
+            fi
+          fi
+          "$gate"
