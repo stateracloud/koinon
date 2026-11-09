@@ -23,6 +23,10 @@ entries keep citing the price version they used (`default@<version>#<id>`). Add 
 way. Review the list against the pages at least once a month; the date in each entry's `source` says
 how old it is.
 
+`not_hosts` (optional) lists hosts an entry does not apply to: a provider whose URL host is one of them, or a
+subdomain, is not priced by the entry. `ollama-local` uses it for `ollama.com`, where Ollama cloud bills per
+token, so a model on a cloud-pointed `ollama` provider is unpriced (refused) until an admin sets an org price.
+
 `max_output` is required for every entry with a non-zero price (the price-list test and the org price API enforce it). It is the model's largest output in tokens (an aborted response without usage settles at the
 request's `max_tokens`, or at this when the request's limit was not logged); `hidden_thinking` marks
 models that bill reasoning the response may not show. A monthly workflow (`review-prices`) opens a
