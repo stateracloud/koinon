@@ -27,13 +27,18 @@ while IFS= read -r wf; do
 done < <({ echo ci.yml; sed -n -E 's@^#[[:space:]]+[^[:space:]].*[[:space:]]\.github/workflows/([A-Za-z0-9_.-]+\.yml)[[:space:]]*$@\1@p' "$repo/hack/ci-required.txt"; } | sort -u)
 # The jobs that are not part of a queue build stay off it: they read a pull request or push to main.
 # shellcheck disable=SC2016
-check "claims.yml: release and sweeper do not run on merge_group" bash -c '
-	! awk "/^  (release|sweeper):/ { j = 1 } /^  claim:/ { j = 0 } j && /merge_group/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/claims.yml"
+check "claims.yml: release does not run on merge_group" bash -c '
+	! awk "/^  release:/ { j = 1 } /^  claim:/ { j = 0 } j && /merge_group/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/claims.yml"
 check "claims.yml: the claim job reports on merge_group" grep -Eq "if: github.event_name == 'merge_group' \|\|" "$wfdir/claims.yml"
 # shellcheck disable=SC2016
 check "claims.yml: on merge_group the claim job runs check-pr for the queued PR from the base sha" bash -c '
 	grep -q "ref: \${{ github.event.merge_group.base_sha }}" "$1" && grep -q "gh-readonly-queue/\*/pr-" "$1" &&
 	awk "/event_name == .merge_group.$/ { g = 1 } g && /claim.sh check-pr/ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/claims.yml"
+# On pull_request the claim job runs the base branch tip (base.ref), never the base sha recorded at the
+# PR's last push, which can be many commits behind main.
+# shellcheck disable=SC2016
+check "claims.yml: on pull_request the claim job checks out the base branch tip" bash -c '
+	grep -q "ref: \${{ github.event.pull_request.base.ref }}" "$1" && ! grep -q "pull_request.base.sha }}" "$1"' _ "$wfdir/claims.yml"
 # #444: the queue commit runs the quickstart itself (decide answers needed); `e2e result` reads the
 # queued PR's head only in the bootstrap shim (hack/e2e-queue-head.sh), and only when an OLD base's decide
 # answered required=true on merge_group. The lab's e2e-lab status cannot test the queue ref.

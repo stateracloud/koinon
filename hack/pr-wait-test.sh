@@ -610,6 +610,15 @@ printf 'go\n' >"$FAKE_DIR/rules"
 wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z 1 completed startup_failure)"
 run 7 --checks --timeout 1s --interval 1
 expect "#133: a completed newest run with no jobs fails, naming the run" 1 "FAILED ci: run 72 ended (startup_failure) with no jobs"
+# a successful run of another workflow with no check run in the rollup (a workflow_dispatch on the head)
+# is not part of the verdict: no FAILED line
+seq_set "$(rdh "$o_go")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 73 mirror.yml mirror 2026-11-01T10:04:00Z 1 completed success)"
+run 7 --checks --timeout 1s --interval 1
+if [ "$rc" != 0 ] || grep -q 'FAILED' <<<"$out"; then
+  echo "FAIL: a successful run with no check runs is ignored: rc=$rc $out" >&2; fail=1
+else echo "ok: a successful run with no check runs is not part of the verdict"; fi
 # the e2e workflow is judged per run too: the dispatched run's green quickstart still counts (old issue 547)
 qs_old=$(cr_at quickstart SUCCESS 81 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
 qs_new=$(cr_at quickstart SKIPPED 82 2026-11-01T10:05:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')

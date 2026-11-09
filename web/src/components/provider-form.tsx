@@ -65,9 +65,12 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   // Likewise for the cost API key, which only types whose cost API Koinon reads take.
   const takesCostKey = Boolean(typeInfo.data?.takesCostKey)
   // A cost scope names which workspace or project the cost key reads, so it has no meaning alone.
-  // On an edit a stored (or lost) key counts, unless its removal is asked for.
-  const costKeyHeld = Boolean(costKey) || (editing && !removeCostKey && (provider.hasCostKey || Boolean(provider.costKeyLostAt)))
-  const costScopeError = takesCostKey && !removeCostKey && costScope.trim() && !costKeyHeld ? 'A cost scope needs a cost API key. Type the key, or clear the scope.' : undefined
+  // On an edit a stored key counts, unless its removal is asked for. A lost key does not: the server
+  // cannot read it, so it refuses a changed scope until the key is typed again.
+  const costKeyHeld = Boolean(costKey) || (editing && !removeCostKey && provider.hasCostKey)
+  // An unchanged scope of a lost key is not a new request, so it does not block other edits.
+  const costScopeChanged = !editing || costScope.trim() !== provider.costScope
+  const costScopeError = takesCostKey && !removeCostKey && costScope.trim() && costScopeChanged && !costKeyHeld ? 'A cost scope needs a cost API key. Type the key, or clear the scope.' : undefined
   const invalid = Object.values(errors).some(Boolean) || Boolean(costScopeError)
 
   function pickType(v: string) {
@@ -105,7 +108,9 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
             if (provider.hasCostKey || provider.costKeyLostAt) change.costApiKey = ''
           } else {
             if (costKeyValue) change.costApiKey = costKeyValue
-            if (scope !== provider.costScope && (costKeyValue || provider.hasCostKey || provider.costKeyLostAt)) change.costScope = scope
+            if (scope !== provider.costScope && (costKeyValue || provider.hasCostKey)) change.costScope = scope
+            // Clearing the scope of a lost key drops the lost marker with it.
+            else if (!scope && provider.costKeyLostAt && !costKeyValue) change.costApiKey = ''
           }
         }
         await onUpdate(provider.id, change)
