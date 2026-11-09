@@ -1,4 +1,4 @@
-# Spike S1 values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.5)
+# Spike S1 values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.7)
 # on a single-node kind cluster. See docs/spikes/kind.md.
 server:
   telemetryEnabled: false

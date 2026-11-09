@@ -199,3 +199,13 @@ var _ = Describe("KEK directory", func() {
 		Expect(secretstore.ValidKEKID("2026-10")).To(BeTrue())
 	})
 })
+
+var _ = Describe("UnsupportedFormat", func() {
+	It("accepts the one known format and algorithm and refuses any other", func() {
+		ok := secretstore.Envelope{Format: secretstore.FormatV1, Alg: secretstore.AlgAES256GCM}
+		Expect(secretstore.UnsupportedFormat(ok)).To(BeFalse())
+		Expect(secretstore.UnsupportedFormat(secretstore.Envelope{Format: 2, Alg: secretstore.AlgAES256GCM})).To(BeTrue())
+		Expect(secretstore.UnsupportedFormat(secretstore.Envelope{Format: secretstore.FormatV1, Alg: "ROT13"})).To(BeTrue())
+		Expect(secretstore.UnsupportedFormat(secretstore.Envelope{})).To(BeTrue())
+	})
+})

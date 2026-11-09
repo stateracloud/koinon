@@ -582,18 +582,19 @@ func serve(ctx context.Context, cfg config) error {
 		keyAudits.keySet = kekStore
 		if cfg.kekCreate {
 			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
-			created, err := kekStore.EnsureWith(ctx, time.Now(),
-				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) },
-				func(ctx context.Context) error {
-					_, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyFirstInstall)
-					return err
-				})
+			created, err := keyAudits.ensureGenerated(ctx, "secret", cfg.kekSecret, func(ctx context.Context) (bool, error) {
+				return kekStore.EnsureWith(ctx, time.Now(),
+					func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) },
+					func(ctx context.Context) error {
+						_, err := installid.SetBoundOnly(ctx, pool, secretstore.BoundOnlyFirstInstall)
+						return err
+					})
+			})
 			if err != nil {
 				return err
 			}
 			if created {
 				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
-				keyAudits.generatedEvent(ctx, "secret", cfg.kekSecret)
 			}
 		}
 		if keyring, err = loadKeyring(ctx, kekStore, kekMonitor.Observer()); err != nil {
@@ -873,12 +874,12 @@ func serve(ctx context.Context, cfg config) error {
 		keyFn := func(ctx context.Context) ([]byte, error) {
 			return savedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
 		}
-		_, created, err := ensureSavedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
+		_, err := keyAudits.ensureGenerated(ctx, "secret", secretName, func(ctx context.Context) (bool, error) {
+			_, created, err := ensureSavedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
+			return created, err
+		})
 		if err != nil {
 			return fmt.Errorf("saved-work upload key: %w", err)
-		}
-		if created {
-			keyAudits.generatedEvent(ctx, "secret", secretName)
 		}
 		mux := http.NewServeMux()
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))

@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -143,6 +144,25 @@ func advisoryWaiting(ctx context.Context) bool {
 // on the returned channel.
 func observeAfterSave(ctx context.Context, kube *fake.Clientset, load func(kubernetes.Interface) keyscli.KeyLoader) <-chan observed {
 	GinkgoHelper()
+	return observeAfter(ctx, kube, "update", load)
+}
+
+// observeAfter is observeAfterSave for the first Secret write of verb ("update", or "create" for the
+// Job's creation of the KEK Secret).
+func observeAfter(ctx context.Context, kube *fake.Clientset, verb string, load func(kubernetes.Interface) keyscli.KeyLoader) <-chan observed {
+	GinkgoHelper()
+	write := func(t k8stesting.ObjectTracker, action k8stesting.Action, obj runtime.Object) error {
+		if verb == "create" {
+			return t.Create(action.GetResource(), obj, action.GetNamespace())
+		}
+		return t.Update(action.GetResource(), obj, action.GetNamespace())
+	}
+	objOf := func(action k8stesting.Action) runtime.Object {
+		if verb == "create" {
+			return action.(k8stesting.CreateAction).GetObject()
+		}
+		return action.(k8stesting.UpdateAction).GetObject()
+	}
 	mirror := fake.NewClientset()
 	list, err := kube.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred())
@@ -152,17 +172,17 @@ func observeAfterSave(ctx context.Context, kube *fake.Clientset, load func(kuber
 	}
 	checked := make(chan observed, 1)
 	var once sync.Once
-	kube.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+	kube.PrependReactor(verb, "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		handled := false
 		var obj runtime.Object
 		var err error
 		once.Do(func() {
 			handled = true
-			obj = action.(k8stesting.UpdateAction).GetObject()
-			if err = kube.Tracker().Update(action.GetResource(), obj, action.GetNamespace()); err != nil {
+			obj = objOf(action)
+			if err = write(kube.Tracker(), action, obj); err != nil {
 				return
 			}
-			if err = mirror.Tracker().Update(action.GetResource(), obj.DeepCopyObject(), action.GetNamespace()); err != nil {
+			if err = write(mirror.Tracker(), action, obj.DeepCopyObject()); err != nil {
 				return
 			}
 			go func() {
@@ -792,6 +812,55 @@ var _ = Describe("key-admin Job events", func() {
 		Expect(keyEventsSince(ctx, mark)).To(BeEmpty())
 	})
 
+	It("holds the lock from the Secret's creation to its event, so a start-up check in between records nothing", func(ctx SpecContext) {
+		mark := auditMark(ctx)
+		checked := observeAfter(ctx, kube, "create", func(c kubernetes.Interface) keyscli.KeyLoader {
+			m := jobStore()
+			m.Client = c
+			return func(ctx context.Context) (keyscli.KeySet, error) {
+				ks, err := m.Load(ctx)
+				if apierrors.IsNotFound(err) {
+					return keyscli.KeySet{}, nil
+				}
+				return ks, err
+			}
+		})
+		Expect(job(true, "").Run(ctx)).To(Succeed())
+		var o observed
+		Eventually(checked).Should(Receive(&o))
+		Expect(o.err).NotTo(HaveOccurred())
+		Expect(o.res.Wrote).To(BeFalse(), "the check found the creation recorded")
+		Expect(actions(keyEventsSince(ctx, mark))).To(Equal([]string{keyscli.ActionSecretCreated}))
+	})
+
+	It("holds the lock from the added KEK's Secret update to its event", func(ctx SpecContext) {
+		Expect(job(true, "").Run(ctx)).To(Succeed())
+		mark := auditMark(ctx)
+		checked := observeAfterSave(ctx, kube, func(c kubernetes.Interface) keyscli.KeyLoader {
+			m := jobStore()
+			m.Client = c
+			return m.Load
+		})
+		Expect(job(true, "kek-20261103-bbbb").Run(ctx)).To(Succeed())
+		var o observed
+		Eventually(checked).Should(Receive(&o))
+		Expect(o.err).NotTo(HaveOccurred())
+		Expect(o.res.Wrote).To(BeFalse(), "the check found the add recorded")
+		Expect(actions(keyEventsSince(ctx, mark))).To(Equal([]string{keyscli.ActionAdd}))
+	})
+
+	It("warns when the Secret exists but does not load, and creates nothing", func(ctx SpecContext) {
+		_, err := kube.CoreV1().Secrets(jobNS).Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: secret, Namespace: jobNS},
+			Data:       map[string][]byte{secretstore.ActiveFile: []byte("kek-20261001-prim"), "kek-20261001-prim": []byte("koinon_test_not-a-kek")},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		mark := auditMark(ctx)
+		Expect(job(true, "").Run(ctx)).To(Succeed())
+		Expect(out.String()).To(And(ContainSubstring("WARNING"), ContainSubstring("exists but does not load")))
+		Expect(keyEventsSince(ctx, mark)).To(BeEmpty())
+	})
+
 	It("records the binding of the KEKs as keys.bound, and the start-up check then writes nothing", func(ctx SpecContext) {
 		prim := bytes.Repeat([]byte("p"), secretstore.KeySize) // obviously fake
 		wrapped, err := kms.Wrap(ctx, prim, secretstoretest.LegacyKEKAAD("kek-20261001-prim"))
@@ -808,7 +877,17 @@ var _ = Describe("key-admin Job events", func() {
 		a := job(false, "")
 		a.RewrapUnbound = true
 		mark := auditMark(ctx)
+		// A start-up check between the rewrap's Secret update and its event waits for the event.
+		checked := observeAfterSave(ctx, kube, func(c kubernetes.Interface) keyscli.KeyLoader {
+			m := jobStore()
+			m.Client = c
+			return m.Load
+		})
 		Expect(a.Run(ctx)).To(Succeed())
+		var o observed
+		Eventually(checked).Should(Receive(&o))
+		Expect(o.err).NotTo(HaveOccurred())
+		Expect(o.res.Wrote).To(BeFalse(), "the check found the binding recorded")
 		es := keyEventsSince(ctx, mark)
 		Expect(actions(es)).To(Equal([]string{keyscli.ActionBound}))
 		Expect(es[0].ActorID).To(Equal("koinon-api:key-admin"))

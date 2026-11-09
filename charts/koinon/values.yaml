@@ -716,7 +716,7 @@ sandboxObserver:
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
-# clamped). The supervisor pod of OpenShell 0.1.5 stays unsized (BestEffort): see the ADR. Changing
+# clamped). The supervisor pod of OpenShell 0.1.7 stays unsized (BestEffort): see the ADR. Changing
 # a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
 # Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
 # start on a bad quantity, a minimum above its maximum, or a default request above its limit.
@@ -759,7 +759,7 @@ sandboxPolicy:
   runtimeClasses: [kata, kata-qemu, kata-qemu-runtime-rs]
   # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
   # for every container and init container (ADR 0045: a pinned supervisor image). Empty uses
-  # OpenShell 0.1.5's own, ghcr.io/nvidia/openshell/supervisor:0.1.5, rewritten by
+  # OpenShell 0.1.7's own, ghcr.io/nvidia/openshell/supervisor:0.1.7, rewritten by
   # global.imageRegistry and global.registryMirrors like every other image: set the mirror on the
   # OpenShell release to the same place and the two agree. Change the list with the OpenShell
   # version, or when the gateway pulls the image from somewhere the rewrite does not produce (it is
@@ -767,7 +767,7 @@ sandboxPolicy:
   # supervisor_image.
   supervisorImages: []
   # Longest lifetime (expirationSeconds) of the one ServiceAccount token a supervisor pod may
-  # project (audience openshell-gateway; ADR 0006 amendment 2026-11-09). OpenShell 0.1.5 defaults
+  # project (audience openshell-gateway; ADR 0006 amendment 2026-11-09). OpenShell 0.1.7 defaults
   # to 3600 and clamps its own setting (OPENSHELL_K8S_SA_TOKEN_TTL_SECS) to 600-86400: raise this
   # to match when the gateway is configured for a longer TTL.
   supervisorTokenMaxSeconds: 3600
@@ -780,7 +780,7 @@ sandboxPolicy:
     # Pods: the Agent Sandbox controller.
     pods:
       - system:serviceaccount:agent-sandbox-system:agent-sandbox-controller
-    # Supervisor pods: OpenShell 0.1.5's gateway creates each sandbox's supervisor pod itself
+    # Supervisor pods: OpenShell 0.1.7's gateway creates each sandbox's supervisor pod itself
     # (os-supervisor-*, label openshell.ai/boundary-role=supervisor) and starts both pods by
     # removing their openshell.ai/bootstrap scheduling gate. These identities may create pods
     # with that label only, never workload pods, and change pod specs only by removing
