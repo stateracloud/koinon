@@ -37,8 +37,10 @@ bindings=$("${kc[@]}" get validatingadmissionpolicybindings -o json |
   { echo "escape suite: no ValidatingAdmissionPolicyBinding for $ns-koinon-sandbox-pods in kind-$CLUSTER" >&2; exit 1; }
 
 # The probe sandboxes are deleted by the Go suite; the workspace they ran in (KOINON_OPENSHELL_WORKSPACE, default
-# koinon-escape-openshell) and its namespace stay, because the live admission case needs the namespace. Remove
-# them when the script ends, success or failure, and wait until the namespace is gone, so no later step finds
+# koinon-escape-openshell) and its namespace stay while the live admission case runs, because it needs the
+# namespace. The suite then deletes the workspace record through the gateway (KOINON_ESCAPE_DELETE_WORKSPACE=1),
+# so a rerun with KEEP=1 SKIP_UP=1 finds no record without a namespace. Remove the namespace
+# when the script ends (a fallback if the suite did not get that far), success or failure, and wait until the namespace is gone, so no later step finds
 # them. The workspace is this script's own: escape-mcp.sh (step 6b) deletes the namespace of its workspace, and
 # a shared workspace would leave the OpenShell record without a namespace here.
 ws="${KOINON_OPENSHELL_WORKSPACE:-koinon-escape-openshell}"
@@ -54,6 +56,7 @@ echo "escape suite (OpenShell cases) against the chart install in kind-$CLUSTER:
 CLUSTER="$CLUSTER" \
 KOINON_OPENSHELL_WORKSPACE="$ws" \
 KOINON_ESCAPE_CHART_NAMESPACE="$ns" \
+KOINON_ESCAPE_DELETE_WORKSPACE=1 \
 KOINON_ESCAPE_GITEA_STANDIN=0 \
 KOINON_ESCAPE_LABEL="openshell && !gitea && !leakguard" \
 KOINON_REQUIRE=openshell,cluster,escape-gateway \

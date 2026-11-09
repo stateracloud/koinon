@@ -5,6 +5,8 @@ package escape_test
 import (
 	"context"
 	"os"
+	"slices"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -116,9 +118,11 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 			Expect(err.Error()).To(ContainSubstring(c.message), name)
 		}
 
-		// The supervisor rules (ADR 0006 amendment 2026-11-09, #220), as the OpenShell gateway: the
-		// real supervisor pod shape is admitted, and a token for the API server or a long-lived one
-		// is not. The same pod the gateway creates in this run was admitted, or no sandbox would be up.
+		// The supervisor rules (ADR 0006 amendment 2026-11-09, #220), as the OpenShell gateway: a
+		// copy of the supervisor pod shape (supervisorPod) is admitted, and a token for the API server
+		// or a long-lived one is not. This is a dry run of a copy; that the pods the gateway really
+		// made carry the labels and the shape these rules select is checked by realPods below, in the
+		// "Agent sandbox" container's "pods OpenShell made" spec, while a sandbox is up.
 		gateway := rest.CopyConfig(cfg)
 		gateway.Impersonate = rest.ImpersonationConfig{UserName: gatewayUser, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
 		gw := kubernetes.NewForConfigOrDie(gateway)
@@ -144,7 +148,7 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 			"long token": {func(p *corev1.Pod) {
 				p.Spec.Volumes = []corev1.Volume{supervisorTokenVolume("openshell-gateway", 86400)}
 			}, "must bound the ServiceAccount token"},
-			"token mounted by default": {func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil }, "must set automountServiceAccountToken to false"},
+			"token mounted by default": {func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil }, "sandbox supervisor pods must set automountServiceAccountToken to false"},
 			"other image":              {func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/supervisor:1" }, "must use the pinned supervisor image"},
 		} {
 			_, err := gw.CoreV1().Pods(ns).Create(ctx, supervisor(c.mutate), dry)
@@ -207,4 +211,73 @@ func policyBound(ctx context.Context, cs kubernetes.Interface, policy, ns string
 		}
 	}
 	return false
+}
+
+// realPods checks the pods OpenShell and the Agent Sandbox controller made in the workspace
+// namespace against what the chart's policy selects and expects (#109): the policy's supervisor
+// rules only apply to a pod labelled openshell.ai/boundary-role=supervisor, so a real supervisor
+// pod without that label, or in another shape, would pass every dry run of a copy. Call it while a
+// sandbox runs. A missing pod fails when KOINON_ESCAPE_POLICY_REQUIRED=1 and skips otherwise.
+//
+//	KOINON_ESCAPE_SUPERVISOR_TOKEN_MAX  the chart's sandboxPolicy.supervisorTokenMaxSeconds (default 3600)
+func realPods(ctx context.Context, cs kubernetes.Interface, ns string) {
+	GinkgoHelper()
+	required := os.Getenv("KOINON_ESCAPE_POLICY_REQUIRED") == "1"
+	missing := func(msg string) {
+		GinkgoHelper()
+		if required {
+			Fail(msg + " (KOINON_ESCAPE_POLICY_REQUIRED=1)")
+		}
+		Skip(msg)
+	}
+	maxSeconds := int64(3600)
+	if v := os.Getenv("KOINON_ESCAPE_SUPERVISOR_TOKEN_MAX"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		Expect(err).NotTo(HaveOccurred(), "KOINON_ESCAPE_SUPERVISOR_TOKEN_MAX")
+		maxSeconds = n
+	}
+	image := envOr("KOINON_ESCAPE_SUPERVISOR_IMAGE", "ghcr.io/nvidia/openshell/supervisor:0.1.5")
+
+	running := func(role string) []corev1.Pod {
+		GinkgoHelper()
+		list, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "openshell.ai/boundary-role=" + role})
+		Expect(err).NotTo(HaveOccurred())
+		var out []corev1.Pod
+		for _, p := range list.Items {
+			if p.Status.Phase == corev1.PodRunning {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	supervisors, workloads := running("supervisor"), running("workload")
+	if len(supervisors) == 0 {
+		missing("no Running pod with openshell.ai/boundary-role=supervisor in namespace " + ns + ": the policy's supervisor rules would not apply to the pods OpenShell makes")
+	}
+	if len(workloads) == 0 {
+		missing("no Running pod with openshell.ai/boundary-role=workload in namespace " + ns + ": the policy's workload rules would not apply to the pods the controller makes")
+	}
+	for _, p := range supervisors {
+		spec := p.Spec
+		Expect(spec.AutomountServiceAccountToken).NotTo(BeNil(), p.Name)
+		Expect(*spec.AutomountServiceAccountToken).To(BeFalse(), p.Name+": automountServiceAccountToken")
+		var tokens []corev1.ServiceAccountTokenProjection
+		for _, v := range spec.Volumes {
+			if v.Projected == nil {
+				continue
+			}
+			for _, s := range v.Projected.Sources {
+				if s.ServiceAccountToken != nil {
+					tokens = append(tokens, *s.ServiceAccountToken)
+				}
+			}
+		}
+		Expect(tokens).To(HaveLen(1), p.Name+": projected ServiceAccount tokens")
+		Expect(tokens[0].Audience).To(Equal("openshell-gateway"), p.Name)
+		Expect(tokens[0].ExpirationSeconds).NotTo(BeNil(), p.Name)
+		Expect(*tokens[0].ExpirationSeconds).To(BeNumerically("<=", maxSeconds), p.Name+": expirationSeconds")
+		for _, c := range append(slices.Clone(spec.InitContainers), spec.Containers...) {
+			Expect(c.Image).To(Equal(image), p.Name+"/"+c.Name+": the pinned supervisor image")
+		}
+	}
 }

@@ -149,6 +149,13 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, name string, labels map[s
 	return execution.Workspace{}, &execution.Error{Op: op, Kind: execution.ErrConflict, Err: errors.New("workspace keeps changing")}
 }
 
+// DeleteWorkspace removes a workspace record; a workspace that is already gone is not an error.
+// It is not part of execution.Backend: the escape suite uses it to leave no record behind.
+func (b *Backend) DeleteWorkspace(ctx context.Context, name string) error {
+	_, err := b.c.DeleteWorkspace(ctx, &openshellv1.DeleteWorkspaceRequest{Name: name, AllowMissing: true})
+	return wrap("DeleteWorkspace", err)
+}
+
 func workspaceFromProto(w *datamodelv1.Workspace) execution.Workspace {
 	return execution.Workspace{
 		Name:   w.GetMetadata().GetName(),

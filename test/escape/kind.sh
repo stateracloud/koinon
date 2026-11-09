@@ -87,6 +87,11 @@ diagnostics() {
       echo "-- admission refusals and the chart's policies (the install enforces sandboxPolicy)" >&2
       "${K[@]}" get events -A 2>&1 | grep -i 'ValidatingAdmissionPolicy' | tail -20 >&2 || true
       "${K[@]}" get validatingadmissionpolicies,validatingadmissionpolicybindings -l app.kubernetes.io/part-of=koinon >&2 || true
+      # A policy refusal is mostly not an Event: the OpenShell gateway and the Agent Sandbox controller log it.
+      echo "-- 'denied request' in the OpenShell gateway and Agent Sandbox controller logs" >&2
+      for d in openshell/statefulset/openshell openshell/deploy/openshell agent-sandbox-system/deploy/agent-sandbox-controller; do
+        "${K[@]}" -n "${d%%/*}" logs "${d#*/}" --tail=500 2>&1 | grep -i 'denied request' | tail -20 >&2 || true
+      done
     fi
     echo "-- pods not Running in openshell/sandbox namespaces" >&2
     "${K[@]}" get pods -A -o wide 2>&1 | awk 'NR==1 || (($1 ~ /openshell|sandbox/) && $4 != "Running")' >&2 || true
