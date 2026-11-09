@@ -584,7 +584,9 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
 - `--admin` (CODEOWNERS paths): verified (ADR 0094, "Verification by probe", probe 5): `gh pr merge --admin
   --merge` merges directly and bypasses the queue and the review rule, so a sensitive-path PR needs no
-  enqueue. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
+  enqueue. An admin merge lands without the queue-commit quickstart (#444), the merge evidence for an
+  e2e-relevant change: such a PR should be enqueued, and `pr-merge.sh --admin` warns when the queue is on and
+  `needs-e2e.sh` says the e2e is required. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
   whether or not the PR is queued.
 
 ### Review threads (#187)
