@@ -56,6 +56,7 @@ repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.
 esac
 # the workflow runs of one commit: none unless a case adds some
 [[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
+# a second page (mg-runs-p2.json) follows the first when a case adds one, as --paginate would
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
 # the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
 if [[ $f == mg-runs.json ]]; then
@@ -394,9 +395,21 @@ qs_case
 run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
 jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
 check "quickstart: total_count 101 with 100 runs fails closed" "$(gate_rc)" 1
-check "...with a clear message" "$(grep -c 'more than 100 e2e-kind runs on .*: cannot rule out a bisect run' "$tmp/err")" 1
+check "...with a clear message" "$(grep -c 'read 100 of 101 e2e-kind runs on .*: cannot rule out a bisect run' "$tmp/err")" 1
 jq '.total_count = 100' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
 check "quickstart: total_count equal to the runs returned passes" "$(gate_rc)" 0
+# the bisect run is on the second page: it is found, so its green check run does not excuse a red head
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z 10
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 1100
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [{id: 1100, head_sha: $h, event: "workflow_dispatch", conclusion: "success", display_title: "e2e-kind (bbbb222) bisect 7"}]' <<<'{}' >"$FX/mg-runs-p2.json"
+check "quickstart: a bisect run on the second page is found" "$(gate_rc)" 1
+# GitHub's cap for a filtered run list (1000 results): fail closed
+jq '.total_count = 1000' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
+jq '.total_count = 1000' "$FX/mg-runs-p2.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs-p2.json"
+check "quickstart: total_count at GitHub's 1000 cap fails closed" "$(gate_rc)" 1
+check "...with a clear message (cap)" "$(grep -c '1000 or more e2e-kind runs' "$tmp/err")" 1
 
 new_case
 rm "$FX/rules.json"
