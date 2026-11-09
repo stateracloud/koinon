@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
-	--review) echo "ship: --review is gone (ADR 0104): a claim ends when its pull request merges or closes" >&2; exit 2 ;;
+	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
 	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;

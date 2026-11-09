@@ -190,8 +190,8 @@ if [ "$admin" != 0 ]; then
 fi
 gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc)" >&2; exit "$rc"; }
 
-# No claim step: the merge (or the close) releases the claims of the issues the PR closes, through
-# claims.yml's release job (ADR 0104).
+# No claim step: the merge releases the claims of the issues the PR closes, through claims.yml's
+# release job (ADR 0104). A close without a merge releases nothing: `claim.sh release-pr <PR>` or `release <N>`.
 
 # What did `gh pr merge` achieve? It succeeds when GitHub accepted the request, not when the PR is queued or mergeable:
 # a PR blocked by a required review (required_reviewers) has auto-merge armed and is not in the queue (2026-11-07
