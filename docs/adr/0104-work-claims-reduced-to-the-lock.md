@@ -41,17 +41,21 @@ used twice. The compare-and-set on the ref does that alone.
    holder already holds exits 0 and warns on stderr with the claim's commit date, so a second
    session sees it.
 3. **No lease, no heartbeat, no sweeper, no takeover, no adopt.** A held claim stays held until a pull
-   request that closes the issue merges or closes (`claims.yml` runs `release-pr`) or its human runs
-   `release`. A stuck claim is released by its human: `release <N> --force` releases a claim of
-   another lane of the same human. Another human's claim is released only by that human (ask them).
+   request that closes the issue merges (the `release` job of `claims.yml` runs `release-merged` on
+   the push to main, ADR 0082 amendment #463) or its human releases it. Since `pull_request_target`
+   is gone, a close without a merge runs nothing: its human runs `release-pr <PR>` (it unassigns) or
+   `release <N>`. That is also the backstop when `release-merged` misses a merge; ADR 0082's sweeper
+   and grace rule do not apply. A stuck claim is released by its human: `release <N> --force`
+   releases a claim of another lane of the same human. Another human's claim is released only by
+   that human (ask them).
 4. **Limits, best effort:** one claim per lane (one `take` of several issues for one pull request
    counts once) and eight held claims per human. They are read, then written, so two concurrent takes
    can pass a limit; the lock on each issue still holds.
-5. **The assignee is the only mirror.** `take` assigns the human, `release` (and a close without a
-   merge) unassigns. No board Status writes, no issue comments, no `claim:stale` label. Board Status
+5. **The assignee is the only mirror.** `take` assigns the human; `release`, and `release-pr` for a
+   pull request closed without a merge, unassign. No board Status writes, no issue comments, no `claim:stale` label. Board Status
    comes from the project's built-in workflows (below).
 6. **Commands:** `next`, `take`, `release`, `block`, `show`, `mine`, `adr`, `sensitive-paths` (output
-   unchanged), `check-pr`, `release-pr`, `help`. Removed: `beat`, `adopt`, `review`, `sweep`,
+   unchanged), `check-pr`, `release-pr`, `release-merged`, `help`. Removed: `beat`, `adopt`, `review`, `sweep`,
    `comment`, `wait-release`, `limits`, `--human`, `--takeover` and the outsider classes.
    `update-oldest` (the branch updater, not a claim) moves to `hack/pr-updater.sh`.
 7. **The `claim` check** (`check-pr`, required) fails only when another human holds a claim on an
@@ -83,14 +87,14 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
 
 - The new script reads every old ref without error. An old holder reads as its login in its lane (no
   lane: `main`), and its login may release it from any lane. Old held claims stay held, with no lease,
-  until their pull request merges or closes or procoduck releases them. `mine` and `show` list them
+  until their pull request merges or procoduck releases them. `mine` and `show` list them
   as held, `release N` works for their login without `--force`, and `check-pr` passes a pull
   request of that login. They count toward the cap of eight held claims per human, so procoduck
   releases the ones with no pull request (`hack/claim.sh release N`).
 - The sweeper schedule ends at the merge (schedules run from the default branch), so no old sweeper
   releases a claim after it.
-- For some hours old scripts still run in open sessions and from old pull request bases
-  (`pull_request_target` checks out the base commit):
+- For some hours old scripts still run in open sessions and from old pull request bases (the
+  `claim` job checks out the base commit):
   - an old `take` reads a new claim's missing lease as "cannot judge liveness" and refuses (safe);
   - an old `check-pr` reads a new claim with no lease as free, which lets only another human's pull
     request through (there is none);
@@ -100,11 +104,11 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
     (`released_by` without `/`) makes it report "lost" and exit 3. Stop those loops after the merge;
   - an old `mine` hides new claims, so an old `pr-merge.sh` warns on its `review` call and still merges;
   - an old `wt.sh rm` calls a new claim's state unknown and refuses without `--force` (safe).
-- A `pull_request_target` run of `claims.yml` checks out the PR's base SHA
+- The `claim` job of `claims.yml` (on `pull_request` since #463) checks out the PR's base SHA
   (`pull_request.base.sha`), so a PR opened before this merge and not updated since can still run
-  the old script for its `edited` or `closed` events. This is harmless
-  with one human: the old script reads a new-format claim as free (no lease) and releases by PR
-  author, which is the same human.
+  the old `check-pr` for its `edited` events. This is harmless with one human: the old script reads
+  a new-format claim as free (no lease). The `release` job runs on the push to main with main's own
+  script, so it always runs the new `release-merged`.
 - New reservations (`state: reserved`) pass an old `check-pr`, which treats any state but `held` as
   released; only another human could collide, and there is none.
 
@@ -114,7 +118,7 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
   background loop. Rejected: liveness is the expensive part, and one human can release by hand.
 - **Expire claims on a crash (a TTL on the lock).** The common advice for agent swarms (Authora,
   below). It protects a team from an abandoned claim; with one human the abandoned claim is that
-  human's, and the PR close releases it anyway.
+  human's, and that human releases it.
 - **Use the assignee as the lock** (Prow `/assign`, rustbot `@rustbot claim`). Last-write-wins, so two
   agents can both "win". Rejected: the ref's compare-and-set is the reason the claim exists.
 - **Drop claims and rely on worktrees.** Worktrees isolate files, not intent: two lanes can still start
@@ -140,8 +144,9 @@ About 15 minutes, 2026-11-09:
 - Positive: `hack/claim.sh` goes from 1787 to about 650 lines and its test from 1078 to about 330, all
   offline. No background loop, no session id, no board token. A restart keeps the claims.
 - Positive: `hack/ship.sh` and `hack/pr-merge.sh` no longer call `claim.sh` (`--review` and `--lane`
-  are gone); the merge or close releases the claim.
-- Negative: a claim whose human forgets it stays held. `mine` shows it; `release` or a PR close ends it.
+  are gone); the merge releases the claim.
+- Negative: a claim whose human forgets it stays held, also after its pull request closes without a
+  merge. `mine` shows it; `release` or `release-pr` ends it.
 - Negative: In Review is no longer set on the board (see Board Status).
 - Negative: the limits are best effort.
 - Follow-ups: release the old held claims or merge their pull requests; stop running `beat` loops.

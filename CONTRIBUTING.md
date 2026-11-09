@@ -103,7 +103,7 @@ including how to point Tilt at a remote cluster of your own.
   paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
 - A pull request names the issue it closes with `Closes #N`. A maintainer's agent claims the issue
   first with `hack/claim.sh take N`, so no other lane starts on it; the claim ends when the pull
-  request merges or closes, or with `hack/claim.sh release N`
+  request merges, or with `hack/claim.sh release N` (or `release-pr <PR>` after a close without a merge)
   ([ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md),
   [ADR 0104](docs/adr/0104-work-claims-reduced-to-the-lock.md)). Outside contributors do not claim:
   say on the issue that you are working on it. The `claim` check fails only when another person

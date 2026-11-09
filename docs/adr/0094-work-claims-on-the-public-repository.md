@@ -437,3 +437,7 @@ No result changes a decision.
 - [Merge queue GA (2023-07-12)](https://github.blog/changelog/2023-07-12-pull-request-merge-queue-is-now-generally-available/)
 - [Assigning issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/assigning-issues-and-pull-requests-to-other-github-users)
 - Prow `pkg/plugins/assign/assign.go` at `kubernetes-sigs/prow@a23969f4`; triagebot `src/handlers/assign.rs` at `rust-lang/triagebot@d34363e9`; bors `src/bors/merge_queue.rs` at `rust-lang/bors@1fbe59b4`; [triagebot #2532](https://github.com/rust-lang/triagebot/pull/2532)
+
+## Amendment: trigger (2026-11-09, procoduck, #463)
+
+The `claim` check no longer runs from `pull_request_target`; see the amendment in ADR 0082. Decision 8 (the merge queue) is unchanged.

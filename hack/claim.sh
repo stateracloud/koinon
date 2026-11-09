@@ -7,7 +7,8 @@
 # fails when it exists; a non-forced update must fast-forward). It is the only truth: an empty-tree
 # commit whose message records holder, human, pr, note and state. A release appends a commit; refs are
 # never deleted. The one mirror is the issue's assignee. No lease, no heartbeat: a claim ends when a
-# pull request that closes the issue merges or closes (claims.yml runs release-pr), or on `release`.
+# pull request that closes the issue merges (claims.yml runs release-merged on the push to main), or
+# when its human runs `release` (or `release-pr` for a pull request closed without a merge).
 #
 # Holder: <login>#<lane>; --lane L (^[a-z0-9][a-z0-9-]{0,15}$), default `main`. Same login and lane =
 # same holder, so a restarted session keeps its claims. A claim from before ADR 0104
@@ -28,9 +29,11 @@
 #   claim.sh sensitive-paths        the ruleset patterns of CODEOWNERS' sensitive section
 #   claim.sh check-pr <PR>          (claims.yml, the `claim` check) fails only when another human holds a
 #                                   claim on an issue the PR closes or reserved an ADR number it adds
-#   claim.sh release-pr <PR>        (claims.yml) release the held claims of the issues a closed PR closes
-#                                   (its author's or pointing at it; unmerged: unless another open PR
-#                                   closes the issue)
+#   claim.sh release-pr <PR>        release the held claims of the issues a closed PR closes (its
+#                                   author's or pointing at it; unmerged: unless another open PR closes
+#                                   the issue, and unassign)
+#   claim.sh release-merged <BEFORE> <AFTER>
+#                                   (claims.yml, push to main) release-pr for each PR merged in BEFORE..AFTER
 #   claim.sh help
 #
 # Exit codes: 0 success; 1 error (usage, API failure: retry, check failed); 2 refused (someone holds
@@ -618,6 +621,35 @@ cmd_release_pr() {
   ((failed == 0)) || { echo "claim: $failed claim(s) failed to release" >&2; return 1; }
 }
 
+# release-merged BEFORE AFTER: release the claims of the pull requests merged by a push to main (the
+# `release` job of claims.yml, #463). The commits are BEFORE..AFTER (AFTER alone when BEFORE is empty
+# or all zeros, a new branch); GitHub links each commit to its pull requests, and only merged ones
+# count. Nothing runs on a close without a merge: its human runs `release-pr <PR>` or `release <N>`.
+cmd_release_merged() {
+  local before=${1:-} after=${2:-} shas sha prs p failed=0
+  [[ $after =~ ^[0-9a-f]{7,64}$ ]] || die "usage: release-merged <BEFORE> <AFTER>"
+  if [[ $before =~ ^[0-9a-f]{7,64}$ && ! $before =~ ^0+$ ]]; then
+    shas=$(gh api --paginate "repos/$REPO/compare/$before...$after" --jq '.commits[].sha') ||
+      die "cannot list the commits $before..$after (API error); re-run the job"
+    # AFTER is always in the list: a compare page is capped and may omit the newest commit.
+    shas=$(printf '%s\n%s\n' "$shas" "$after" | grep . | sort -u)
+  else
+    shas=$after
+  fi
+  prs=$(for sha in $shas; do
+    gh api "repos/$REPO/commits/$sha/pulls" --jq '.[] | select(.merged_at != null) | .number' ||
+      die "cannot list the pull requests of $sha (API error); re-run the job"
+  done | sort -un)
+  # A lagging API (the commit not yet linked to its pull request) shows here. No sweeper backs it up
+  # (ADR 0104): the human releases the claim (`release-pr <PR>` or `release <N>`).
+  [[ -n $prs ]] || echo "release-merged: no merged pull request found for ${before:-none}..$after"
+  for p in $prs; do
+    echo "release-merged: pull request #$p"
+    (cmd_release_pr "$p") || failed=$((failed + 1))
+  done
+  ((failed == 0)) || { echo "claim: $failed pull request(s) failed to release" >&2; return 1; }
+}
+
 usage() { sed -n '4,/^# Needs bash 5/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
 # parse_lane ARGS...: takes --lane L out of the arguments into LANE (and LANE_FILTER, for mine); the
@@ -650,7 +682,7 @@ main() {
   if ((${#REST[@]})); then set -- "${REST[@]}"; else set --; fi
   case $cmd in
     sensitive-paths) sensitive_paths "${KOINON_CLAIM_CODEOWNERS:-$(cd "$(dirname "$0")/.." && pwd)/.github/CODEOWNERS}"; return ;;
-    next | take | release | block | show | mine | adr | check-pr | release-pr) ;;
+    next | take | release | block | show | mine | adr | check-pr | release-pr | release-merged) ;;
     *) usage >&2; exit 1 ;;
   esac
   init_repo
@@ -664,6 +696,7 @@ main() {
     adr) cmd_adr ;;
     check-pr) cmd_check_pr "$@" ;;
     release-pr) cmd_release_pr "$@" ;;
+    release-merged) cmd_release_merged "$@" ;;
   esac
 }
 

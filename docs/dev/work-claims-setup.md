@@ -98,9 +98,11 @@ an organization owner retires it: uninstall and delete the `koinon-bot` App, del
    as repository secrets. (`actions/create-github-app-token` v3 deprecates `app-id` for `client-id`;
    the workflow passes `app-id`, so keep the numeric ID, and switch both when the input is removed.)
 9. Store the `.pem` in the secret store you use for such keys and delete the download.
-10. Verify: on a throwaway branch open a pull request and enable auto-merge; the `updater` job must run and
-    report "no auto-merge pull request is behind main" or update the branch, and its merge commit
-    must show `koinon-bot` as the author.
+10. Verify: on a throwaway branch open a pull request and enable auto-merge (`claims` has no sweeper
+    to run by hand since ADR 0104). The updater no longer starts on `auto_merge_enabled`: run the
+    `updater` workflow by hand (workflow_dispatch) or wait for the next scheduled run (up to 30
+    minutes). Then its log must report "no auto-merge pull request is behind main" or update the
+    branch, and its merge commit must show `koinon-bot` as the author.
 
 ## Verify the tooling
 

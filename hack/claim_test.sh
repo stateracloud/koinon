@@ -300,4 +300,66 @@ eq "release-pr: an unmerged close keeps a claim another open PR closes" "$(grep 
 r=$(PR_FIX='{"author":"alice","body":"Closes #7","merged":false,"closers":[]}' run release-pr 5)
 eq "release-pr: an unmerged close releases and unassigns" "$(paste -sd';' "$WRITES")" "write 7 released holder=alice#l7 pr= by=pr-close;unassign 7 alice"
 
+# release-merged (the push-to-main release job, #463): releases the merged pull requests of the pushed
+# commits once each, ignores an open or closed-unmerged one, and ends red when a release fails.
+# The fake gh applies the --jq filter with real jq to canned API JSON, so the merged_at filter is tested.
+LOG=$(mktemp "${TMPDIR:-/tmp}/claim_relmerged.XXXXXX")
+fake_gh_api() {
+  local f="" a body=""
+  for a in "$@"; do [[ $prev == --jq ]] && f=$a; prev=$a; done
+  case $* in
+    *compare/*) body='{"commits":[{"sha":"aaaaaaa"},{"sha":"bbbbbbb"}]}' ;;
+    *commits/aaaaaaa/pulls*) body='[{"number":50,"merged_at":"2026-11-09T10:00:00Z"},{"number":60,"merged_at":null}]' ;;
+    *commits/bbbbbbb/pulls*) body='[{"number":50,"merged_at":"2026-11-09T10:00:00Z"},{"number":51,"merged_at":"2026-11-09T10:00:00Z"},{"number":61,"merged_at":null}]' ;;
+    *commits/ccccccc/pulls*) body='[{"number":52,"merged_at":"2026-11-09T10:00:00Z"}]' ;;
+    *commits/ddddddd/pulls*) body='[{"number":53,"merged_at":"2026-11-09T10:00:00Z"}]' ;;
+    *commits/eeeeeee/pulls*) body='[{"number":62,"merged_at":null}]' ;;
+    *) return 0 ;;
+  esac
+  jq -r "$f" <<<"$body"
+}
+prev=
+(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 1111111 bbbbbbb
+) >/dev/null 2>&1
+eq "release-merged releases each merged pull request once, not an open or closed-unmerged one" "$(tr '\n' ' ' <"$LOG")" "pr 50 pr 51 "
+: >"$LOG"
+(
+  REPO=acme/koinon
+  gh() { case $* in *compare/*) echo "unexpected compare" >>"$LOG" ;; *) fake_gh_api "$@" ;; esac; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 0000000000000000000000000000000000000000 ccccccc
+) >/dev/null 2>&1
+eq "release-merged on a new branch reads the head commit only" "$(tr '\n' ' ' <"$LOG")" "pr 52 "
+# AFTER is read even when the compare list lacks it (a capped page), and the compare is paginated.
+: >"$LOG"
+(
+  REPO=acme/koinon
+  gh() { case $* in *compare/*) { [[ $* == *--paginate* ]] && echo "paginated" >>"$LOG"; echo aaaaaaa; } ;; *) fake_gh_api "$@" ;; esac; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged 1111111 ddddddd
+) >/dev/null 2>&1
+eq "release-merged paginates the compare and always includes AFTER" "$(tr '\n' ' ' <"$LOG")" "paginated pr 50 pr 53 "
+rm_out=$(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { echo "pr $1" >>"$LOG"; }
+  cmd_release_merged "" eeeeeee 2>&1
+)
+eq "release-merged says so when no merged pull request is found" "$rm_out" "release-merged: no merged pull request found for none..eeeeeee"
+rm_rc=0
+(
+  REPO=acme/koinon
+  gh() { fake_gh_api "$@"; }
+  cmd_release_pr() { return 1; }
+  cmd_release_merged "" ddddddd
+) >/dev/null 2>&1 || rm_rc=$?
+if ((rm_rc != 0)); then ok "release-merged exits non-zero when a release fails"; else bad "release-merged exited 0 after a release failed"; fi
+rm -f "$LOG"
+r=$(run release-merged 1111111 nothex)
+eq "release-merged: needs a commit sha" "$(rc_of "$r")" 1
+
 exit "$fail"

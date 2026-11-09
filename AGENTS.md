@@ -55,8 +55,7 @@ Instructions for coding agents working on Koinon.
 
 Claim an issue before you work on it. The lock is the ref `claim/<N>` (ADR 0082, reduced by ADR
 0104): creating it is a compare-and-set, so two lanes cannot hold one issue. A claim has no lease and
-no heartbeat; it is held until a pull request that closes the issue merges or closes, or you release
-it. Use `hack/claim.sh` (gh and jq only). The holder is `<login>#<lane>`, so a restarted session keeps
+no heartbeat; it is held until a pull request that closes the issue merges, or you release it. Use `hack/claim.sh` (gh and jq only). The holder is `<login>#<lane>`, so a restarted session keeps
 its claims; the default lane is `main`.
 
 1. `hack/claim.sh next` (or `next --label start-here`): Ready, `agent-ok`, current-milestone,
@@ -67,8 +66,9 @@ its claims; the default lane is `main`.
    human.
 3. Push `<type>/<N>-<slug>` and open a draft PR with `Closes #N` (the board's built-in workflow moves
    the issue to In Progress). New work you discover becomes a Backlog issue; do not start it.
-4. Finish: mark the PR ready and merge it (see "Merging"). The merge or close releases the claim
-   (`claims.yml`). Never delete a claim branch.
+4. Finish: mark the PR ready and merge it (see "Merging"). The merge releases the claim
+   (`claims.yml`); a PR closed without a merge needs `hack/claim.sh release-pr <PR>`. Never delete a
+   claim branch.
 5. Stop early: `hack/claim.sh release <N> --note "<state, branch, next step>"` (keep the branch and
    draft PR), or `hack/claim.sh block <N> <M>` when another issue blocks it. Exit 3 means the claim
    is not yours (another lane: `--lane L`, or `--force` for your own other lane; another human: ask
