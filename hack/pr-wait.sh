@@ -34,13 +34,11 @@
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, old issue 562).
 #              A draft PR is never green (old issue 647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
-#              almost nothing, and `go`/`web` are red on purpose). A PR that is not a draft ignores the check
-#              runs of its draft-era `ci` runs (#218, #133), in every mode: a run whose display title is `ci (draft)`
-#              (the run-name of ci.yml when the event payload says draft), matched by run id. There is no time
-#              window, and a by-hand re-run of a draft run is ignored too. A non-draft run is never dropped: red
-#              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
-#              exist. dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
-#              the runs, nothing is dropped.
+#              nothing heavy: its `go` and `web` report success with "draft: not run"). There is no draft filter:
+#              the ready run is the newest run of `ci` and decides; the rows of older runs are dropped, and
+#              until the ready run's checks exist the required contexts are missing, so this waits for them.
+#              A red or cancelled newest run is never dropped. dco, gitleaks, claim and commit statuses (e2e-lab)
+#              keep their result. When gh cannot list the runs, nothing is dropped.
 #              A stale PR head (old issue 661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
 #              lags a push by a few seconds), it exits 6 with `STALE-HEAD` instead of judging the old head.
@@ -55,7 +53,7 @@
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
-# `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
+# `conflict: merge origin/main`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
@@ -259,7 +257,6 @@ while :; do
       fi
       ;;
     esac
-    ready_dropped=0
     if [ "$mode" = checks ]; then
       if [ "$(jq -r '.isDraft // false' <<<"$json")" = true ]; then
         echo "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
@@ -299,18 +296,16 @@ while :; do
         '.statusCheckRollup = ((.statusCheckRollup // []) + [$x[]? | select(.name | IN($names[]))])' <<<"$json")
     fi
     # One verdict per workflow run (#133, hack/lib/pr-verdict.sh): only the newest counting run of each workflow
-    # on the head is read, by created_at then run_attempt. A run titled `ci (draft)` does not count once the PR is
-    # ready (#218), whatever its age: no time window, and a by-hand re-run of it replays draft=true. A red or
+    # on the head is read, by created_at then run_attempt. A red or
     # cancelled newest run is never dropped, so it still fails; when the newest run has no checks yet the missing
-    # required contexts make this wait for it. When gh cannot list the runs nothing is dropped (a draft run's red
+    # required contexts make this wait for it. When gh cannot list the runs nothing is dropped (an old run's red
     # then shows as FAILED, never as green).
-    ready_dropped=0 superseded=0
+    superseded=0
     if [ -n "$head" ]; then
       wfruns=$(prv_runs "$head")
       if [ -n "$wfruns" ]; then
-        is_draft=$(jq -r '.isDraft // false' <<<"$json")
         # A completed newest run with no jobs at all (startup_failure) never gets checks: a failure, not a wait.
-        empty=$(jq -r --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'(.statusCheckRollup // []) | prv_empty($runs; $draft)[] | "\(.name)\t\(.id)\t\(.conclusion)"' <<<"$json")
+        empty=$(jq -r --argjson runs "$wfruns" "$PRV_JQ"'(.statusCheckRollup // []) | prv_empty($runs)[] | "\(.name)\t\(.id)\t\(.conclusion)"' <<<"$json")
         if [ -n "$empty" ]; then
           while IFS=$'\t' read -r ename eid econ; do
             echo "FAILED $ename: run $eid ended ($econ) with no jobs"
@@ -318,9 +313,9 @@ while :; do
           exit 1
         fi
         before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
-        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; ["quickstart"])' <<<"$json")
+        json=$(jq --argjson runs "$wfruns" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; ["quickstart"])' <<<"$json")
         if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then
-          if jq -e 'any(.[]; .display_title == "ci (draft)")' <<<"$wfruns" >/dev/null; then ready_dropped=1; else superseded=1; fi
+          superseded=1
         fi
       fi
     fi
@@ -391,7 +386,7 @@ while :; do
       exit 1
     fi
     if [ "$mstate" = DIRTY ]; then
-      echo "needs-update"
+      echo "conflict: merge origin/main into the branch, resolve it and push"
       exit 4
     fi
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
@@ -414,9 +409,6 @@ while :; do
       [ -z "$head" ] || live=$(live_e2e "$head")
       if [ -n "$live" ]; then
         emit "waiting for e2e-kind run $live on ${head:0:7}"
-      elif [ -n "$missing_ctx" ] && [ "$ready_dropped" = 1 ]; then
-        emit "waiting for the ready run"
-        live=$missing_ctx
       elif [ -n "$missing_ctx" ] && [ "$superseded" = 1 ]; then
         emit "waiting for the newest run of each workflow (checks missing: $missing_ctx)"
         live=$missing_ctx
@@ -468,8 +460,6 @@ while :; do
       [ -n "$live" ] || emit "checks $total/$total green"
     elif [ -n "$pending" ]; then
       emit "checks $ndone/$total pending: $pending"
-    elif [ "$ready_dropped" = 1 ]; then
-      emit "waiting for the ready run"
     elif [ "$superseded" = 1 ]; then
       emit "waiting for the newest run of each workflow"
     else

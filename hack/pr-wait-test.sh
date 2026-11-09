@@ -167,7 +167,7 @@ CLOSED"
 # 6. merge conflict
 seq_set "$(pr OPEN DIRTY "" "$go_p")"
 run 7 --interval 0
-expect "conflict" 4 "needs-update"
+expect "conflict" 4 "conflict: merge origin/main into the branch, resolve it and push"
 
 # 7. timeout (still pending)
 seq_set "$(pr OPEN BLOCKED "" "$go_p")"
@@ -449,7 +449,7 @@ advisory go pending
 checks 0/0
 CLOSED"
 
-# 7c. (old issue 647) a draft is never green; after ready_for_review the draft's runs are ignored
+# 7c. (old issue 647) a draft is never green; after ready_for_review the ready run decides
 seq_set '{"state":"OPEN","isDraft":true,"mergeStateStatus":"BLOCKED","mergeCommit":null,"statusCheckRollup":[{"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:00:00Z"}]}'
 run 7 --checks --interval 0
 expect "--checks on a draft: DRAFT, exit 5" 5 "DRAFT: not tested, mark ready for review (hack/ship.sh --ready, gh pr ready)"
@@ -470,88 +470,77 @@ ciruns() {
   for r in "$@"; do i=$((i + 1)); objs+=("$(wfrun "${r%%:*}" ci.yml "${r#*:}" "2026-11-01T10:0$i:00Z")"); done
   wfruns "${objs[@]}"
 }
-# (#218, #133) a ready PR drops the check runs of the runs titled `ci (draft)`, by run id, never by time.
+# A draft runs nothing: its `ci` run is green by skipping ("draft: not run"). There is no draft filter; the ready run
+# is the newest run of `ci` and decides, and the draft run's rows are dropped as an older run's.
 # Cases of 2026-11-06: #233 (draft run 96 s before ready), #229 (13 s before), #231 (the same shape, no --checks).
-d_go=$(cr_ci go FAILURE 61 2026-11-01T10:00:00Z)
-d_web=$(cr_ci web FAILURE 61 2026-11-01T10:00:01Z)
+d_go=$(cr_ci go SUCCESS 61 2026-11-01T10:00:00Z)
+d_web=$(cr_ci web SUCCESS 61 2026-11-01T10:00:01Z)
 r_go=$(cr_ci go SUCCESS 62 2026-11-01T10:01:36Z)
 r_web=$(cr_ci web SUCCESS 62 2026-11-01T10:01:37Z)
 seq_set "$(rdh "$d_go,$d_web,$r_go,$r_web")"
 printf 'go\nweb\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --interval 0
-expect "#233: a draft run 96 s before the ready run is dropped by its title" 0 "checks 2/2 green"
-d13_go=$(cr_ci go FAILURE 61 2026-11-01T10:00:00Z)
+expect "#233: a draft run 96 s before the ready run is an older run, the ready run decides" 0 "checks 2/2 green"
+d13_go=$(cr_ci go SUCCESS 61 2026-11-01T10:00:00Z)
 r13_go=$(cr_ci go SUCCESS 62 2026-11-01T10:00:13Z)
 seq_set "$(rdh "$d13_go,$r13_go")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --interval 0
-expect "#229: a draft run 13 s before the ready run is dropped by its title" 0 "checks 1/1 green"
-# #231: pr-merge calls pr-wait without --checks; the draft run's red must not print FAILED
+expect "#229: a draft run 13 s before the ready run is an older run" 0 "checks 1/1 green"
+# #231: pr-merge calls pr-wait without --checks
 seq_set "$(rdh "$d_go,$d_web,$r_go,$r_web")" '{"state":"MERGED","mergeCommit":{"oid":"abcdef0123"},"statusCheckRollup":[]}'
 printf 'go\nweb\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --interval 0
-expect "#231: without --checks the draft run is not reported FAILED" 0 "checks 2/2 green
+expect "#231: without --checks the older run is not read" 0 "checks 2/2 green
 MERGED abcdef0"
-# the ready run is not there yet: wait, never pass
+# the ready run is queued with no checks yet: the draft run's green is not read; wait for the ready run
 seq_set "$(rdh "$d_go")" "$(rdh "$d_go")" "$(rdh "$d_go,$r_go")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)"
+wfruns "$(wfrun 61 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 62 ci.yml ci 2026-11-01T10:01:00Z 1 queued "")"
 run 7 --checks --interval 0
-expect "ready run missing: waits for the ready run" 0 "waiting for the ready run
+expect "a skipped-green draft run older than the queued ready run never decides" 0 "waiting for the newest run of each workflow
 checks 1/1 green"
 seq_set "$(rdh "$d_go")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)"
+wfruns "$(wfrun 61 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 62 ci.yml ci 2026-11-01T10:01:00Z 1 queued "")"
 run 7 --checks --timeout 1s --interval 1
-expect "ready run missing for good: times out, never passes" 2 "waiting for the ready run
+expect "ready run queued for good: times out, never passes" 2 "waiting for the newest run of each workflow
 TIMEOUT"
 # the ready run is red or cancelled: not green
 r_bad=$(cr_ci go FAILURE 62 2026-11-01T10:01:36Z)
 seq_set "$(rdh "$d_go,$r_bad")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --interval 0
 expect "ready run red: FAILED on the ready run, not the draft run" 1 "FAILED go (run 62)"
 r_cx=$(cr_ci go CANCELLED 62 2026-11-01T10:01:36Z)
 seq_set "$(rdh "$d_go,$r_cx")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --interval 0
 expect "ready run cancelled: FAILED, never green" 1 "FAILED go (run 62)"
-# a draft run that is green and a ready run that is red: the red one decides
-d_ok=$(cr_ci go SUCCESS 61 2026-11-01T10:00:00Z)
-seq_set "$(rdh "$d_ok,$r_bad")"
+# gh cannot list the runs: nothing is dropped, so an older run's red is never read as green
+old_go=$(cr_ci go FAILURE 61 2026-11-01T10:00:00Z)
+seq_set "$(rdh "$old_go,$r_go")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+rm -f "$FAKE_DIR/wfruns"
 run 7 --checks --interval 0
-expect "draft green, ready red: red" 1 "FAILED go (run 62)"
-# a by-hand re-run of a draft run (#676) replays draft=true and keeps the draft title: ignored
-rr_go=$(cr_ci go FAILURE 61 2026-11-01T10:10:00Z)
-seq_set "$(rdh "$rr_go,$r_go")"
-printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
-run 7 --checks --interval 0
-expect "a re-run draft run is ignored, not reported FAILED" 0 "checks 1/1 green"
-# gh cannot list the runs: nothing is dropped, so the draft run's red is never read as green
-seq_set "$(rdh "$d_go,$r_go")"
-printf 'go\n' >"$FAKE_DIR/rules"
-run 7 --checks --interval 0
-expect "runs unreadable: the draft run is not dropped (red, not green)" 1 "FAILED go (run 61)"
+expect "runs unreadable: the older run is not dropped (red, not green)" 1 "FAILED go (run 61)"
 # dco has no ready run: its draft-era verdict stands
 dco_old=$(cr_at dco SUCCESS 63 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"dco",/')
 seq_set "$(rdh "$d_go,$r_go,$dco_old")"
 printf 'go\ndco\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --interval 0
 expect "a draft-era dco run still counts" 0 "checks 2/2 green"
 # a draft-era e2e-lab status still satisfies --require e2e
 lab_old='{"context":"e2e-lab","state":"SUCCESS","startedAt":"2026-11-01T10:00:00Z","targetUrl":"https://argo.example.invalid/workflows/x/y"}'
 seq_set "$(rdh "$d_go,$r_go,$lab_old")"
 printf 'go\n' >"$FAKE_DIR/rules"
-ciruns "61:ci (draft)" "62:ci"
+ciruns "61:ci" "62:ci"
 run 7 --checks --require e2e --interval 0
 expect "a draft-era e2e-lab status satisfies --require e2e" 0 "checks 2/2 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
