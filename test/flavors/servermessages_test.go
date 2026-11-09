@@ -412,6 +412,7 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 			"the guard saw the call's result, so it was asked about this stream")
 		for _, c := range append(guard.Requests(), guard.Responses()...) {
 			Expect(c.Body).NotTo(Or(ContainSubstring("KOINON-SAMPLING-MARKER"), ContainSubstring("KOINON-ELICITATION-MARKER"),
+				ContainSubstring("KOINON-ELICITATION-URL-MARKER"), ContainSubstring(elicitationURL),
 				ContainSubstring("KOINON-NOTIFICATION-MARKER")))
 		}
 		AddReportEntry("initialize capabilities the server saw", srv.initializes())
@@ -450,7 +451,12 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		}
 	})
 
-	It("never accepts a URL-mode elicitation", func() {
+	It("never accepts a URL-mode elicitation or brings it to the model", func() {
+		Expect(gw.modelBodies()).NotTo(BeEmpty())
+		for _, body := range gw.modelBodies() {
+			Expect(body).NotTo(ContainSubstring("KOINON-ELICITATION-URL-MARKER"))
+			Expect(body).NotTo(ContainSubstring(elicitationURL))
+		}
 		a, ok := srv.answer(messageIDs[elicitationURLKey])
 		if !ok {
 			AddReportEntry("elicitation/create (url)", fmt.Sprintf("no answer within %s (the client left it pending)", messagesWait))
