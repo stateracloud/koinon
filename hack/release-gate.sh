@@ -187,11 +187,21 @@ fi
 # If neither exists, dispatch e2e-kind on the commit first.
 quickstart_conclusion() { # the newest check run named quickstart on SHA that is not skipped, or empty
 	# Check runs from before #453 (bisect dispatches on older heads) are still named `quickstart`, so the
-	# workflow runs on SHA are read once (one call) and a check run whose run is titled like a bisect
+	# workflow runs on SHA are read once (one page of 100; a `total_count` above the runs returned fails closed) and a check run whose run is titled like a bisect
 	# dispatch (`e2e-kind (<commit>) bisect <id>`, the run-name of e2e-kind.yml) is dropped as well.
-	local bisect
+	local bisect counts total n
+	# The first line is `total_count runs_returned`, then one id per bisect run. One page is read (no
+	# paging): if more runs attach to SHA than the page holds, a bisect run could hide beyond it, so stop.
 	bisect=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?head_sha=$SHA&per_page=100" \
-		--jq '.workflow_runs[] | select((.display_title // "") | test("^e2e-kind \\(.+\\) bisect ")) | .id') || return 2
+		--jq '"\(.total_count // 0) \(.workflow_runs | length)", (.workflow_runs[] | select((.display_title // "") | test("^e2e-kind \\(.+\\) bisect ")) | .id)') || return 2
+	counts=$(head -n1 <<<"$bisect")
+	read -r total n <<<"$counts"
+	[[ $total =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] || return 2
+	if ((total > n)); then
+		echo "release gate: more than 100 e2e-kind runs on $SHA: cannot rule out a bisect run" >&2
+		return 2
+	fi
+	bisect=$(tail -n +2 <<<"$bisect")
 	gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
 		--jq '.check_runs[] | [.name, .started_at, (.conclusion // "pending"), ((.details_url // "") | capture("/runs/(?<r>[0-9]+)") | .r) // ""] | @tsv' |
 		awk -F'\t' -v ids="$(tr '\n' ' ' <<<"$bisect")" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) skip[a[i]] = 1 }

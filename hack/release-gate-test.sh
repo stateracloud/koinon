@@ -65,7 +65,7 @@ if [[ $f == mg-runs.json ]]; then
 		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; head_sha=*) hs=${p#head_sha=} ;; esac
 	done
 	jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$FX/$f" |
-		jq -r "$expr"
+		jq '.total_count //= (.workflow_runs | length)' | jq -r "$expr"
 	exit
 fi
 exec jq -r "$expr" "$FX/$f"
@@ -389,6 +389,14 @@ qs_case
 run_on "$sha" quickstart success 2026-01-03T01:00:00Z 12
 bisect_run 12 "$sha" "e2e-kind"
 check "quickstart: a plainly titled run still counts" "$(gate_rc)" 0
+# more runs on the commit than one page holds: a bisect run could hide beyond it, so fail closed
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+check "quickstart: total_count 101 with 100 runs fails closed" "$(gate_rc)" 1
+check "...with a clear message" "$(grep -c 'more than 100 e2e-kind runs on .*: cannot rule out a bisect run' "$tmp/err")" 1
+jq '.total_count = 100' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
+check "quickstart: total_count equal to the runs returned passes" "$(gate_rc)" 0
 
 new_case
 rm "$FX/rules.json"
