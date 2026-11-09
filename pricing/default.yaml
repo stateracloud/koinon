@@ -15,17 +15,18 @@
 # tokenizer/ratio estimate usage a provider did not report: ratio is UTF-8 bytes per token
 # (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3; others 3.0; see
 # docs/research/claude-token-estimation.md).
-version: "2026-10-29.1"
+version: "2026-11-09.1"
 entries:
   - id: ollama-local
     provider: ollama
+    not_hosts: [ollama.com]
     match: {glob: "*"}
     valid_from: 2026-10-24
     prices: {input: "0", output: "0"}
     tokenizer: bytes
     ratio: "3.0"
     source: {url: "https://ollama.com/", accessed: 2026-10-24}
-    note: "Runs on the org's own hardware; no provider bills tokens, so the price is zero."
+    note: "Runs on the org's own hardware; no provider bills tokens, so the price is zero. Not for ollama.com or its subdomains: Ollama cloud bills per token (ollama.com/pricing, read 2026-11-07), so a model there is unpriced until an admin sets an org price."
   - id: openrouter-deepseek-v4-1-flash
     provider: openrouter
     match: {glob: "deepseek/deepseek-v4.1-flash"}

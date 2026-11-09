@@ -204,3 +204,25 @@ var _ = Describe("the org default model", Ordered, func() {
 		Expect(got).To(BeEmpty())
 	})
 })
+
+// A model on an ollama-type provider at ollama.com is billed per token by Ollama, so the default
+// list does not price it at zero (issue 310): Check refuses it as unpriced until an org price exists.
+var _ = Describe("a model on an ollama-type provider at ollama.com", func() {
+	It("is unpriced, so Check refuses it and ListServed leaves it out", func(ctx SpecContext) {
+		pool := pgtest.Start(ctx) // skips without Docker (testenv)
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		var pid pgtype.UUID
+		Expect(pool.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, 'cloud', 'ollama', 'https://ollama.com') RETURNING id`, org).Scan(&pid)).To(Succeed())
+		_, err := pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, 'gpt-oss:120b')`, org, pid)
+		Expect(err).NotTo(HaveOccurred())
+		rv := prices.NewResolver(pricing.Embedded())
+
+		err = agentmodel.Check(ctx, rv, store.New(pool), org, "gpt-oss:120b", time.Now())
+		var unusable *agentmodel.UnusableError
+		Expect(errors.As(err, &unusable)).To(BeTrue())
+		Expect(unusable.Reason).To(Equal("unpriced"))
+		served, err := agentmodel.ListServed(ctx, rv, store.New(pool), org, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(served).To(BeEmpty())
+	}, SpecTimeout(3*time.Minute))
+})
