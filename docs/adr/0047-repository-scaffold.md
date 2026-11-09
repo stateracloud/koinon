@@ -105,6 +105,14 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
   are free and every workflow runs on them: `ubuntu-latest` (4 vCPU, 16 GB) replaces both Blacksmith
   labels, and Blacksmith is no longer used anywhere. `e2e-kind.yml` stays on `ubuntu-24.04`
   (Landlock). The `.github/actionlint.yaml` custom-label list is gone.
+- _Amended (2026-11-09, fixed rule, #58):_ Koinon CI never uses self-hosted runners or Blacksmith. The
+  repository is open source and GitHub-hosted runners are free for it, so there is nothing to gain and a
+  pull request from anyone would run on infrastructure we do not control. This replaces the 2026-10-30
+  wording "only after a security review": no review path exists, and a proposal to change the rule
+  amends this ADR first. `hack/runner-lint.sh` (CI job `scripts`, required) fails when a workflow or the
+  actionlint config names `self-hosted` or a `blacksmith-*` label, or when a `runs-on` value is chosen at
+  run time from `vars.`, `inputs.`, `secrets.` or the event. The review of every workflow for a public
+  repository is in `docs/dev/ci.md#workflow-security-review`.
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
   `flavors`, `test/e2e`, `test/fakemodel` or the workflow itself. Dispatching it only per release

@@ -422,6 +422,37 @@ release tags are cut only from a commit whose `quickstart` job concluded success
 `skipped` `quickstart` check runs (the push run after a queue merge skips it) and also accepts a green `merge_group`
 `quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
+## Workflow security review
+
+Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
+(ADR 0047, amended 2026-11-09). `hack/runner-lint.sh` enforces it in the `scripts` job (required, so it
+reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` under the
+`actionlint` gate. Redo this review when a workflow gains a trigger, a secret or a permission.
+
+| Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
+|---|---|---|---|
+| `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read`; `packages: write` only in the push-to-main jobs (`flavor-publish`) | ok |
+| `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN` | ok; the nightly, push and dispatch triggers need write access |
+| `claims.yml` | `pull_request_target` | `GITHUB_TOKEN`, `contents: read` for the `claim` job; no Environment, no App key | ok: both jobs check out `pull_request.base.sha` and run the base's `hack/claim.sh`; the PR's code never runs. The merge_group job takes its YAML from the queue commit; the guard is the required review on `.github/**` |
+| `updater.yml` | `pull_request_target` (`auto_merge_enabled`), `workflow_run` | App ID and key from the `claims-bot` Environment; token with `contents`, `pull-requests`, `workflows: write` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
+| `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `packages: write`; `id-token: write` in the signing job only | ok: not reachable from a fork |
+| `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | read-only; `scorecard` has `id-token: write` | ok |
+
+Checks behind the table:
+
+- The only `pull_request_target` workflows are `claims.yml` and `updater.yml`; neither checks out the head.
+- The only Environment is `claims-bot` (`updater.yml`). No other workflow reads a secret besides
+  `GITHUB_TOKEN`.
+- Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
+  fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
+- No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
+- Script injection: expressions spliced into `run:` are SHAs and numbers, except one: the base branch
+  name in the `migrations (lint)` step of `ci.yml`. Fixed in this change: it goes through `env: BASE` now,
+  as the `buf breaking` step already did.
+
+Not fixed here: GitHub's repository setting "Require approval for all outside collaborators" for fork
+pull request workflows is a setting, not a file; it is on the maintainer's list to confirm.
+
 ## Required status checks
 
 `hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is the only advisory job
