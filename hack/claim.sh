@@ -102,6 +102,7 @@
 #                               worktree's git dir. Claude subagents share the parent's id: only the
 #                               parent takes claims. Other agents must export KOINON_AGENT_SESSION.
 #   KOINON_CLAIM_LEASE_SECONDS (7200), _HUMAN_LEASE_SECONDS (259200), _GRACE_SECONDS (900),
+#   _CLOSED_GRACE_SECONDS (2700: a pull request closed unmerged frees its claim this long after it closed),
 #   _HUMAN_CAP (8), _SESSION_CAP (1: per session and lane),
 #   KOINON_CLAIM_LANE           the lane (same as --lane)
 #   KOINON_CLAIM_WAIT_INTERVAL  poll interval of wait-release in seconds (30)
@@ -118,6 +119,11 @@ LEASE=${KOINON_CLAIM_LEASE_SECONDS:-7200}
 HUMAN_LEASE=${KOINON_CLAIM_HUMAN_LEASE_SECONDS:-259200}
 HUMAN_MODE=0
 GRACE=${KOINON_CLAIM_GRACE_SECONDS:-900}
+# A pull request closed without a merge frees its claim only CLOSED_GRACE after it closed: the agent
+# beat period (`beat --mine --every 30m`, the 30 minutes of "Picking up work" in AGENTS.md; the sweeper
+# also runs every 30 minutes) plus GRACE of slack, 45 minutes. A holder that closes PR X and opens PR Y
+# beats in that time and keeps the claim, because a beat moves the lease start past the close.
+CLOSED_GRACE=${KOINON_CLAIM_CLOSED_GRACE_SECONDS:-2700}
 HUMAN_CAP=${KOINON_CLAIM_HUMAN_CAP:-8}
 SESSION_CAP=${KOINON_CLAIM_SESSION_CAP:-1}
 RELEASE_AFTER=${KOINON_CLAIM_STALE_RELEASE_SECONDS:-7200}
@@ -545,16 +551,17 @@ find_pr() {
       | select($a == "" or ((.author.login // "") | ascii_downcase) == $a) | .number' | head -1
 }
 
-# find_closed_pr N AUTHOR SINCE_EPOCH -> "NUMBER MERGED" (MERGED 0|1) of the latest closed PR by AUTHOR
+# find_closed_pr N AUTHOR SINCE_EPOCH -> "NUMBER MERGED CLOSED_EPOCH" (MERGED 0|1) of the latest closed PR by AUTHOR
 # whose body closes issue N and that closed at or after SINCE_EPOCH (empty if none). The time bound
-# keeps a pull request of an earlier claim cycle from freeing a new claim.
+# keeps a pull request of an earlier claim cycle from freeing a new claim. The list is capped at the
+# newest 50 closed pull requests: a miss only delays the release to the lease, so the cap is safe.
 find_closed_pr() {
   gh pr list -R "$REPO" --state closed --limit 50 --json number,body,author,closedAt,mergedAt |
     jq -r --arg n "$1" --arg a "$(lower "${2:-}")" --argjson s "${3:-0}" '
       [.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b"))
         | select(((.author.login // "") | ascii_downcase) == $a)
         | select((.closedAt | fromdateiso8601) >= $s)]
-      | sort_by(.closedAt) | last // empty | "\(.number) \(if .mergedAt then 1 else 0 end)"'
+      | sort_by(.closedAt) | last // empty | "\(.number) \(if .mergedAt then 1 else 0 end) \(.closedAt | fromdateiso8601)"'
 }
 
 # open_pr_closers -> the open pull requests as JSON [{number, author, issues}] (JQ_PR_CLOSERS). An API
@@ -595,12 +602,21 @@ open_prs_closing() {
     jq -r --arg n "$1" '.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b")) | .number'
 }
 
+# closed_frees HOLDER MERGED CLOSED_EPOCH: does a closed pull request free the claim now? Merged: yes.
+# Closed unmerged: not for a person claim, and for an agent claim only once server_now >= close +
+# CLOSED_GRACE. The caller has already checked that the close is not older than the lease start.
+closed_frees() {
+  [[ $2 == 1 ]] && return 0
+  [[ $(holder_class "$1") == person ]] && return 1
+  (($(server_now) >= $3 + CLOSED_GRACE))
+}
+
 # claim_liveness CLAIM_JSON: the one liveness rule, shared by take --takeover and the sweeper.
 # Sets LIVE (epoch: the later of the lease and the last human PR commit or comment plus one lease),
 # PR_NUM and PR_STATE (none | draft | ready | closed). Bot comments and commits are not liveness.
 # Returns 1 for an unparsable lease, 4 for an API error.
 claim_liveness() {
-  local c=$1 lease_s n holder pr j last act
+  local c=$1 lease_s n holder pr j last act cat
   lease_s=$(parse_lease "$(jq -r .lease_until <<<"$c")") || return 1
   n=$(jq -r .issue <<<"$c"); holder=$(jq -r .holder <<<"$c")
   LIVE=$lease_s; PR_STATE=none; PR_NUM=; PR_MERGED=0
@@ -609,9 +625,14 @@ claim_liveness() {
   if [[ -z $pr ]]; then pr=$(find_pr "$n" "$(jq -r .human <<<"$c")") || return 4; fi
   if [[ -z $pr ]]; then
     # No open pull request: one closed since the claim was last renewed (lease start) frees the claim.
-    local closed
+    # Merged frees at once (the issue closes anyway). Closed unmerged frees an agent claim only
+    # CLOSED_GRACE after the close (a holder that beat since keeps it); a person claim waits for its lease.
+    local closed cnum cmerged
     closed=$(find_closed_pr "$n" "$(jq -r .human <<<"$c")" $((lease_s - $(lease_for_holder "$holder")))) || return 4
-    if [[ -n $closed ]]; then PR_NUM=${closed% *}; PR_MERGED=${closed#* }; PR_STATE=closed; fi
+    if [[ -n $closed ]]; then
+      read -r cnum cmerged cat <<<"$closed"
+      if closed_frees "$holder" "$cmerged" "$cat"; then PR_NUM=$cnum; PR_MERGED=$cmerged; PR_STATE=closed; fi
+    fi
     return 0
   fi
   PR_NUM=$pr
@@ -621,7 +642,13 @@ claim_liveness() {
     return 4
   fi
   case $(jq -r 'if .merged then "closed" elif .state == "closed" then "closed" elif .draft then "draft" else "ready" end' <<<"$TRY_OUT") in
-    closed) PR_STATE=closed; [[ $(jq -r '.merged // false' <<<"$TRY_OUT") != true ]] || PR_MERGED=1; return 0 ;;
+    closed)
+      [[ $(jq -r '.merged // false' <<<"$TRY_OUT") != true ]] || PR_MERGED=1
+      cat=$(jq -r '.closed_at // empty' <<<"$TRY_OUT"); [[ -z $cat ]] || cat=$(iso_to_epoch "$cat")
+      # A closed pull request older than the lease start was closed before the last beat: not a signal.
+      if [[ -n $cat ]] && ((PR_MERGED == 0)) && ((cat < lease_s - $(lease_for_holder "$holder"))); then return 0; fi
+      closed_frees "$holder" "$PR_MERGED" "${cat:-0}" && PR_STATE=closed
+      return 0 ;;
     draft) PR_STATE=draft ;;
     *) PR_STATE=ready ;;
   esac

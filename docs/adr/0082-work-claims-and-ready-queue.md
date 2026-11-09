@@ -247,7 +247,14 @@ sentence of ADR 0094.
   requests, and the claims of each merged one are released as `release-pr` did. Pull requests closed
   without a merge are freed by the sweeper (30 minutes): `claim_liveness` finds the claim's open or
   linked pull request, or else a pull request of the claim's human that closes the issue and closed
-  since the claim was last renewed, and `sweep_one` releases it. A closed-unmerged pull request
+  since the claim was last renewed, and `sweep_one` releases it. A merged pull request frees the
+  claim at once. A pull request closed without a merge frees an agent claim only when it closed at or
+  after the lease start (a beat moves the lease start) and the server time is at least
+  `CLOSED_GRACE` (45 minutes: the 30-minute agent beat period plus 15 minutes of slack) after the
+  close, so a holder that closes PR X and opens PR Y keeps the claim; the `claim` check and the
+  merge queue use the same rule. A person claim (`--human`) ignores a closed-unmerged pull request and
+  waits for its lease. The closed-pull-request search reads the newest 50; a miss only delays the
+  release. A released closed-unmerged pull request
   unassigns the human and returns the issue to Ready, as `release-pr` did. If `release-merged` finds
   no merged pull request (the API lags behind the push), it prints one line and the sweeper or the
   lease frees the claim later.
