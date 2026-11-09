@@ -178,6 +178,15 @@ contexts() {
   done <"$1" | sort -u
 }
 
+# no_e2e_lab LIST: `e2e-lab` is the lab's status for the dev loop and real-model runs; it is information only and
+# never a required name (the merge queue's e2e is the proof). Print the problem and return 1 when it is listed.
+no_e2e_lab() {
+  if contexts "$1" | grep -qx 'e2e-lab'; then
+    echo "FAIL: e2e-lab is a required name in $(basename "$1"): it is information only and must never be required"
+    return 1
+  fi
+}
+
 ruleset() {
   command -v gh >/dev/null 2>&1 || { echo "SKIPPED (auth): gh is not installed; the list was not compared with the ruleset"; return 0; }
   local probe
@@ -201,6 +210,10 @@ ruleset() {
     found=1
     live=$(jq -r '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | .[]' <<<"$rule" | sort -u)
     want=$(contexts "$list")
+    if grep -qx 'e2e-lab' <<<"$live"; then
+      echo "FAIL: the ruleset 'main' of $repo requires e2e-lab: it is information only and must never be required"
+      return 1
+    fi
     if [[ $live == "$want" ]]; then
       echo "ok: the ruleset 'main' of $repo requires exactly the $(wc -l <<<"$want" | tr -d ' ') checks of $(basename "$list")"
       return 0
@@ -223,6 +236,9 @@ echo "ok: every job of $(basename "$yml") is required, advisory or a part of an 
 
 merge_group_problems "$list" "${CI_WORKFLOWS:-$root/.github/workflows}"
 echo "ok: every workflow that produces a required check listens to merge_group"
+
+no_e2e_lab "$list"
+echo "ok: e2e-lab is not a required name"
 
 # Negative cases, on small fixtures: the check has to fail where it should.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-required-test.XXXXXX")
@@ -305,4 +321,9 @@ merge_group_problems "$tmp/mg.txt" "$tmp/wf" >/dev/null || { echo "FAIL: the mer
 printf 'on:\n  pull_request:\n' >"$tmp/wf/ext.yml"
 if out=$(merge_group_problems "$tmp/mg.txt" "$tmp/wf" 2>&1); then echo "FAIL: a required workflow without merge_group passed"; exit 1; fi
 grep -qF "workflow ext.yml produces a required check but has no merge_group" <<<"$out" || { echo "FAIL: merge_group: wrong message: $out"; exit 1; }
+printf 'dco\nexternal e2e-lab\n' >"$tmp/lab.txt"
+if out=$(no_e2e_lab "$tmp/lab.txt" 2>&1); then echo "FAIL: e2e-lab as a required name passed"; exit 1; fi
+grep -qF "e2e-lab is a required name" <<<"$out" || { echo "FAIL: e2e-lab: wrong message: $out"; exit 1; }
+printf 'dco\nadvisory e2e-lab lab status, information only\n' >"$tmp/lab2.txt"
+no_e2e_lab "$tmp/lab2.txt" || { echo "FAIL: an advisory e2e-lab entry failed"; exit 1; }
 echo "ok: the negative cases fail as they should"
