@@ -160,6 +160,11 @@ sequenceDiagram
   exchange, and again after a refused refresh), `driver-kubernetes/src/sandbox_runtime.rs` (`supervisor_pod`, the `sa-token` volume),
   `driver-kubernetes/src/driver.rs` (TokenReview, pod-bound and ServiceAccount name checks), `config.rs`
   (`OPENSHELL_K8S_SA_TOKEN_TTL_SECS`, default 3600, clamped to 600-86400).
+- **Re-verified at v0.1.7 (`5d25211`, 2026-11-09).** The supervisor pod shape is unchanged from
+  v0.1.5: `sa-token` projected volume, audience `openshell-gateway`, `expirationSeconds` from
+  `sa_token_ttl_secs` (default 3600, clamped to 600-86400), `automountServiceAccountToken: false`,
+  and the workload-pod rule (automount false, no projected token). The admission rules and
+  `supervisorTokenMaxSeconds` stay as they are.
 
 ## Links
 

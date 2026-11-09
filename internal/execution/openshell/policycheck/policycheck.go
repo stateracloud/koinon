@@ -2,7 +2,8 @@
 
 // Package policycheck evaluates rendered OpenShell network policy against HTTP requests, for
 // tests that assert what a sandbox can and cannot reach without a real gateway. It follows the
-// OpenShell 0.1.5 policy schema reference (docs/how-it-works/policies/schema.mdx at tag v0.1.5):
+// OpenShell policy schema reference (docs/how-it-works/policies/schema.mdx, identical at tags v0.1.5
+// and v0.1.7):
 //
 //   - A sandbox's effective policy is its network_policies plus one entry per attached provider
 //     profile, made of the profile's endpoints and binaries.

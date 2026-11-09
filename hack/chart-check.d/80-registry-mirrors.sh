@@ -14,13 +14,13 @@ image_refs() {
 agw=ghcr.io/agentgateway/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
 pg=ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
 # (a) nothing set: every reference is the upstream one, unchanged.
-want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.5 ghcr.io/stateracloud/koinon/flavors/opencode:0.0.0 \
+want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.7 ghcr.io/stateracloud/koinon/flavors/opencode:0.0.0 \
 	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs) == "$want" ]] || fail "default image references changed: $(image_refs | tr '\n' ' ')"
 # The public repository's packages (#167): none of the old private-repository names may come back.
 image_refs | grep -Eq -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
 # (b) imageRegistry replaces every host and keeps path, tag and digest.
-want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.5 \
+want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.7 \
 	art.example.com/proxy/stateracloud/koinon/flavors/opencode:0.0.0 art.example.com/proxy/stateracloud/koinon/agentd:0.0.0 \
 	art.example.com/proxy/stateracloud/koinon/api:0.0.0 art.example.com/proxy/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs --set global.imageRegistry=art.example.com/proxy) == "$want" ]] ||
@@ -61,11 +61,11 @@ has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/a
 	--set image.registry=quay.io/mine --set 'global.registryMirrors.quay\.io=art.example.com/ghcr-remote'
 has "an explicit image.registry stands without a mirror" 'image: quay.io/mine/api:0.0.0$' --set image.registry=quay.io/mine
 # (e) the default supervisor pin follows the mirror, so the admission policy admits the rewritten image; an explicit list is used as written.
-has "supervisor pin is rewritten" 'c.image in \["art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.5"\]' \
+has "supervisor pin is rewritten" 'c.image in \["art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.7"\]' \
 	--set 'global.registryMirrors.ghcr\.io=art.example.com/ghcr-remote'
 has "explicit supervisorImages are not rewritten" 'c.image in \["ghcr.io/nvidia/openshell/supervisor:0.1.6"\]' \
 	--set global.imageRegistry=art.example.com/proxy --set 'sandboxPolicy.supervisorImages={ghcr.io/nvidia/openshell/supervisor:0.1.6}'
-has "preflight is told the supervisor pin" '--supervisor-images=art.example.com/proxy/nvidia/openshell/supervisor:0.1.5' --set global.imageRegistry=art.example.com/proxy
+has "preflight is told the supervisor pin" '--supervisor-images=art.example.com/proxy/nvidia/openshell/supervisor:0.1.7' --set global.imageRegistry=art.example.com/proxy
 lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
 # (d) pull secrets: strings and {name} maps, merged with the deprecated top-level list, on every pod-bearing object.
 pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSecrets[1].name=other' --set 'imagePullSecrets[0].name=regcred')
