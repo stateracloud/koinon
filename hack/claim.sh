@@ -129,7 +129,7 @@ claim_verdict() { if [[ $1 != held ]]; then echo free; elif [[ $(lower "$2") == 
 
 # The fixed failure texts of the `claim` check; hack/claim_test.sh pins them.
 conflict_issue_text() { # N HUMAN AUTHOR
-  printf '::error::#%s is claimed by @%s; this pull request is by @%s. Ask @%s to release the claim (hack/claim.sh release %s) or to close their pull request, then re-run this check.\n' \
+  printf '::error::#%s is claimed by @%s; this pull request is by @%s. Ask @%s to release the claim (hack/claim.sh release %s or release-pr), then re-run this check.\n' \
     "$1" "$2" "$3" "$2" "$1"
 }
 conflict_adr_text() { # PATH NNNN HUMAN
@@ -286,16 +286,16 @@ other_assignees() {
   jq -r --arg h "$(lower "$2")" '[(.assignees // [])[] | select(ascii_downcase != $h) | "@" + .] | join(" ")' <<<"$1"
 }
 
-# pr_meta P -> {author, body, merged, closers}: closers are the issues of this repository GitHub links
+# pr_meta P -> {author, body, state, merged, closers}: closers are the issues of this repository GitHub links
 # pull request P to as closed by it (closingIssuesReferences: keywords in any form and the sidebar).
 pr_meta() {
   local out
   # shellcheck disable=SC2016
   out=$(gh api graphql -f o="$OWNER" -f n="$NAME" -F p="$1" -f query='
     query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){
-      author{login} body merged closingIssuesReferences(first:100){nodes{number repository{nameWithOwner}}}}}}') || return 1
+      author{login} body state merged closingIssuesReferences(first:100){nodes{number repository{nameWithOwner}}}}}}') || return 1
   jq -ce --arg repo "$REPO" '.data.repository.pullRequest | select(. != null)
-    | {author: (.author.login // ""), body: (.body // ""), merged: (.merged // false),
+    | {author: (.author.login // ""), body: (.body // ""), state: (.state // ""), merged: (.merged // false),
        closers: [(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]}' <<<"$out"
 }
 
@@ -600,6 +600,8 @@ cmd_release_pr() {
   local p=${1:-} pr author merged n rc others closers="[]" failed=0
   [[ $p =~ ^[0-9]+$ ]] || die "usage: release-pr <PR>"
   pr=$(pr_meta "$p") || die "cannot read pull request #$p (API error)"
+  # An open PR would release claims around release's "only its human" rule.
+  [[ $(jq -r .state <<<"$pr") =~ ^(CLOSED|MERGED)$ ]] || die "pull request #$p is not closed or merged; use release <N>"
   author=$(jq -r .author <<<"$pr")
   merged=0; [[ $(jq -r .merged <<<"$pr") != true ]] || merged=1
   ((merged)) || closers=$(open_pr_closers) || die "cannot list the open pull requests (API error)"

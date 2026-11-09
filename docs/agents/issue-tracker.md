@@ -54,5 +54,5 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Claim**: `hack/claim.sh take <n>`, the session's first write. Never claim by assignee alone: the
   claim branch is the lock (ADR 0082, ADR 0104).
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>` and
-  `hack/claim.sh release <n>` (only a closing pull request releases a claim by itself), then append a
+  `hack/claim.sh release <n>` (only a merged pull request releases a claim by itself), then append a
   context pointer (gist + link) to the map's Decisions-so-far.

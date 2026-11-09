@@ -45,7 +45,9 @@ used twice. The compare-and-set on the ref does that alone.
    the push to main, ADR 0082 amendment #463) or its human releases it. Since `pull_request_target`
    is gone, a close without a merge runs nothing: its human runs `release-pr <PR>` (it unassigns) or
    `release <N>`. That is also the backstop when `release-merged` misses a merge; ADR 0082's sweeper
-   and grace rule do not apply. A stuck claim is released by its human: `release <N> --force`
+   and grace rule do not apply. `release-merged` also releases the claims of a stacked pull request
+   that was merged into another pull request's branch (`commits/{sha}/pulls` returns it as merged);
+   that is harmless, since its commits reach main only with the outer merge. A stuck claim is released by its human: `release <N> --force`
    releases a claim of another lane of the same human. Another human's claim is released only by
    that human (ask them).
 4. **Limits, best effort:** one claim per lane (one `take` of several issues for one pull request

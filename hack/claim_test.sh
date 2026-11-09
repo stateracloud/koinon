@@ -77,7 +77,7 @@ eq "open pull requests: ADDED and RENAMED docs/adr files count" "$(jq -r "$ADR_P
 
 # The fixed failure texts of the claim check, pinned.
 eq "conflict text: issue" "$(conflict_issue_text 159 procoduck outsider1)" \
-  "::error::#159 is claimed by @procoduck; this pull request is by @outsider1. Ask @procoduck to release the claim (hack/claim.sh release 159) or to close their pull request, then re-run this check."
+  "::error::#159 is claimed by @procoduck; this pull request is by @outsider1. Ask @procoduck to release the claim (hack/claim.sh release 159 or release-pr), then re-run this check."
 eq "conflict text: ADR number" "$(conflict_adr_text docs/adr/0095-x.md 0095 procoduck)" \
   "::error::docs/adr/0095-x.md uses ADR number 0095, which @procoduck reserved (claim/adr-0095). Take a free number with hack/claim.sh adr and rename the file."
 
@@ -291,13 +291,15 @@ eq "check-pr: an unreserved number passes" "$(rc_of "$r")" 0
 
 # release-pr: the author's claims (or those pointing at the PR) are released; another human's are kept.
 FIX=$({ cl 7 held alice#l7 alice; cl 8 held bob#main bob; cl 9 held bob#main bob 5; } | fix)
-r=$(PR_FIX='{"author":"alice","body":"Closes #7, closes #8","merged":true,"closers":[9]}' run release-pr 5)
+r=$(PR_FIX='{"author":"alice","body":"Closes #7, closes #8","state":"OPEN","merged":false,"closers":[9]}' run release-pr 5)
+eq "release-pr: an open PR is refused" "$(rc_of "$r"):$(grep -c '^write' "$WRITES")" "1:0"
+r=$(PR_FIX='{"author":"alice","body":"Closes #7, closes #8","state":"MERGED","merged":true,"closers":[9]}' run release-pr 5)
 eq "release-pr: author's and pointing claims released" "$(grep '^write' "$WRITES" | awk '{print $2}' | paste -sd, -)" "7,9"
 eq "release-pr: a merge does not unassign" "$(grep -c unassign "$WRITES")" 0
 eq "release-pr: the note old beat loops recognise" "$(grep -c 'by=pr-close' "$WRITES")" 2
-r=$(CLOSERS_FIX='[{"number":6,"author":"alice","issues":[7]}]' PR_FIX='{"author":"alice","body":"Closes #7","merged":false,"closers":[]}' run release-pr 5)
+r=$(CLOSERS_FIX='[{"number":6,"author":"alice","issues":[7]}]' PR_FIX='{"author":"alice","body":"Closes #7","state":"CLOSED","merged":false,"closers":[]}' run release-pr 5)
 eq "release-pr: an unmerged close keeps a claim another open PR closes" "$(grep -c '^write' "$WRITES")" 0
-r=$(PR_FIX='{"author":"alice","body":"Closes #7","merged":false,"closers":[]}' run release-pr 5)
+r=$(PR_FIX='{"author":"alice","body":"Closes #7","state":"CLOSED","merged":false,"closers":[]}' run release-pr 5)
 eq "release-pr: an unmerged close releases and unassigns" "$(paste -sd';' "$WRITES")" "write 7 released holder=alice#l7 pr= by=pr-close;unassign 7 alice"
 
 # release-merged (the push-to-main release job, #463): releases the merged pull requests of the pushed
