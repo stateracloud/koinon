@@ -75,6 +75,10 @@ case_ "word in a for list"      0 hack/a.sh 'for t in git rm mktemp tr; do :; do
 case_ "stub file path"          0 hack/a.sh 'chmod +x "$tmp/failbin/mktemp"'
 case_ "mktemp_fail_rc var"      0 hack/a.sh 'mktemp_fail_rc=0'
 case_ "not a script"            0 docs/x.md 'x=$(mktemp -d)'
+case_ "bare in internal sh"        1 internal/agentd/x.sh 'tmp=$(mktemp -d)'
+case_ "bare in a Go raw string"    1 internal/agentd/x.go 'const s = `t=$(mktemp)`'
+case_ "templated in Go"            0 internal/agentd/x.go 'const s = `t=$(mktemp "$1/.git.XXXXXX")`'
+case_ "Go file without mktemp"     0 internal/x/y.go 'package y'
 
 # A mixed file reports the bad line and its number.
 r=$tmp/mixed
