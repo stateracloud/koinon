@@ -49,7 +49,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -145,12 +145,23 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects runnerlint" has '^runnerlint:' "$tmp/l3"
+check "go change does not select runnerlint" hasnt '^runnerlint:' "$tmp/l1"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
 check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
 check "go change selects audit" has '^audit:' "$tmp/l1"
 
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 check "workflow change does not select bash5" hasnt '^bash5:' "$tmp/l3"
+
+# a change to the runner lint alone selects its gate, not actionlint
+reset_state
+w=$(fresh); cd "$w"
+printf '#!/bin/sh\n' >hack/runner-lint-test.sh
+commit_all
+pf "$tmp/l3b" --list >/dev/null
+check "runner-lint script change selects runnerlint" has '^runnerlint:' "$tmp/l3b"
+check "runner-lint script change does not select actionlint" hasnt '^actionlint:' "$tmp/l3b"
 
 # uncommitted and untracked changes count
 reset_state
