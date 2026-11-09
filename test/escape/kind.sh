@@ -82,7 +82,10 @@ diagnostics() {
   local rc=$?
   (( rc == 0 )) || {
     echo "== diagnostics (failed run)" >&2
-    "${K[@]}" -n koinon-fixtures logs deploy/escape-gitea-standin --tail=50 >&2 || true
+    # The stand-in namespace exists only when this run made stand-ins; say nothing when it is not there.
+    if "${K[@]}" get namespace koinon-fixtures >/dev/null 2>&1; then
+      "${K[@]}" -n koinon-fixtures logs deploy/escape-gitea-standin --tail=50 >&2 || true
+    fi
     if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
       echo "-- admission refusals and the chart's policies (the install enforces sandboxPolicy)" >&2
       "${K[@]}" get events -A 2>&1 | grep -i 'ValidatingAdmissionPolicy' | tail -20 >&2 || true
@@ -123,7 +126,11 @@ else
     [[ $IMAGE != *@* ]] || IMAGE=koinon/spike-probe:1
   fi
   echo "== probe image $IMAGE (built from hack/spike/probe)"
-  docker build -q -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
+  # KOINON_PROBE_BASE=<local image> builds on an image already on this machine (the e2e passes its flavor image);
+  # unset, the Dockerfile's pinned default base is pulled.
+  probe_args=()
+  [[ -z ${KOINON_PROBE_BASE:-} ]] || probe_args=(--build-arg "BASE=$KOINON_PROBE_BASE")
+  docker build -q "${probe_args[@]}" -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi
 kind load docker-image --name "$CLUSTER" "$IMAGE"
 
