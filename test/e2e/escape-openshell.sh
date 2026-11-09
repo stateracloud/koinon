@@ -37,13 +37,14 @@ bindings=$("${kc[@]}" get validatingadmissionpolicybindings -o json |
   { echo "escape suite: no ValidatingAdmissionPolicyBinding for $ns-koinon-sandbox-pods in kind-$CLUSTER" >&2; exit 1; }
 
 # The probe sandboxes are deleted by the Go suite; the workspace they ran in (KOINON_OPENSHELL_WORKSPACE, default
-# koinon-escape-openshell) and its namespace stay while the live admission case runs, because it needs the
+# escape-openshell) and its namespace stay while the live admission case runs, because it needs the
 # namespace. The suite then deletes the workspace record through the gateway (KOINON_ESCAPE_DELETE_WORKSPACE=1),
 # so a rerun with KEEP=1 SKIP_UP=1 finds no record without a namespace. Remove the namespace
 # when the script ends (a fallback if the suite did not get that far), success or failure, and wait until the namespace is gone, so no later step finds
 # them. The workspace is this script's own: escape-mcp.sh (step 6b) deletes the namespace of its workspace, and
 # a shared workspace would leave the OpenShell record without a namespace here.
-ws="${KOINON_OPENSHELL_WORKSPACE:-koinon-escape-openshell}"
+# OpenShell caps a workspace name at 19 characters (the e2e run 5f2f02359 failed on a 23-character name).
+ws="${KOINON_OPENSHELL_WORKSPACE:-escape-openshell}"
 cleanup() {
   local rc=$?
   "${kc[@]}" delete ns -l "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace=$ws" \
