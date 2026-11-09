@@ -150,5 +150,22 @@ rc=0
 (cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" HEAD~1 >/dev/null 2>&1) || rc=$?
 [[ $rc -eq 2 ]] || { echo "FAIL: broken go list exited $rc, want 2" >&2; fail=1; }
 
+# Run as e2e-kind.yml's decide job does: the scripts copied alone into a temp dir. With paths-lib.sh and
+# paths.rules the answers are right; without them the exit code must be one e2e-decide.sh turns into "run
+# the e2e" (>= 2), never 1 ("not needed").
+cp_dir="$tmp/copy"
+mkdir "$cp_dir"
+cp hack/needs-e2e.sh hack/paths-lib.sh hack/paths.rules "$cp_dir/"
+got=0
+printf '%s\n' cmd/koinon-api/main.go | "$cp_dir/needs-e2e.sh" --stdin >/dev/null || got=$?
+[[ $got -eq 0 ]] || { echo "FAIL: copied script with its files: want 0 for a binary change, got $got" >&2; fail=1; }
+got=0
+printf '%s\n' docs/dev/ci.md | "$cp_dir/needs-e2e.sh" --stdin >/dev/null 2>&1 || got=$?
+[[ $got -eq 1 ]] || { echo "FAIL: copied script with its files: want 1 for a docs change, got $got" >&2; fail=1; }
+rm "$cp_dir/paths-lib.sh" "$cp_dir/paths.rules"
+got=0
+printf '%s\n' cmd/koinon-api/main.go | "$cp_dir/needs-e2e.sh" --stdin >/dev/null 2>&1 || got=$?
+[[ $got -ge 2 ]] || { echo "FAIL: copied script without paths-lib.sh exited $got, want >= 2 (e2e-decide.sh runs the e2e)" >&2; fail=1; }
+
 [[ $fail -eq 0 ]] && echo "needs-e2e tests passed"
 exit "$fail"

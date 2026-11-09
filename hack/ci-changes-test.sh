@@ -16,6 +16,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# First, and on its own line so set -e stops the script when mktemp fails (old issue 476).
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-changes-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
 fails=0 total=0
 script=hack/ci-changes.sh
 
@@ -281,6 +285,33 @@ done <<<"$real_dirs"
 total=$((total + 1))
 if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' bash $script --stdin | grep -qx 'flavors=true'; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
+	fails=$((fails + 1))
+fi
+
+# An empty change list is not "nothing changed": it runs everything (fail closed).
+total=$((total + 1))
+all=$(bash $script | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ')
+[[ -n $all ]] || { echo "FAIL: no-argument run printed no jobs"; exit 1; }
+if [[ $(printf '' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
+	echo "FAIL: an empty change list must turn every job on"
+	fails=$((fails + 1))
+fi
+
+# A rename lists the old path too (--no-renames): moving a chart file to docs/ still turns the chart jobs on.
+total=$((total + 1))
+(
+	cd "$tmp"
+	git init -q -b main .
+	git config user.email t@example.invalid && git config user.name t
+	mkdir charts docs hack # the script cds to its own checkout: give the scratch repo a copy
+	cp "$OLDPWD/hack/ci-changes.sh" "$OLDPWD/hack/paths-lib.sh" "$OLDPWD/hack/paths.rules" hack/
+	echo a >charts/a.yaml && echo b >docs/b.md
+	git add -A && git commit -q -m base
+	git mv charts/a.yaml docs/a.yaml && git commit -q -m rename
+	CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash hack/ci-changes.sh HEAD~1
+) >"$tmp/rename.out" 2>&1 || true
+if ! grep -qx 'chart=true' "$tmp/rename.out"; then
+	echo "FAIL: renaming charts/a.yaml to docs/ must turn chart on: $(tr '\n' ' ' <"$tmp/rename.out")"
 	fails=$((fails + 1))
 fi
 

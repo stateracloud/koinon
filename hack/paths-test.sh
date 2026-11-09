@@ -55,7 +55,7 @@ done
 # --- 3. preflight's `scripts` gate covers the script steps of ci.yml. ---------------------------------
 listed=$( { paths_raw script-check -; paths_raw script-skip -; } | awk '{print $1}' | sort -u)
 steps=$( { sed -n '/^  quick-checks:/,/^  web-lint:/p' .github/workflows/ci.yml; sed -n '/^  scripts:/,/^  warm-caches:/p' .github/workflows/ci.yml; } |
-	sed -n -E 's/^ +(- )?run: (hack\/[A-Za-z0-9_.\/-]+)( [^$"]*)?$/\2/p' | sort -u)
+	sed -n -E -e 's/^ +(- )?run: (hack\/[A-Za-z0-9_.\/-]+)( [^$"]*)?$/\2/p' -e 's/^ {10,}(hack\/[A-Za-z0-9_.\/-]+\.sh)( .*)?$/\1/p' | sort -u) # also the lines of a `run: |` block
 [[ $(grep -c . <<<"$steps") -ge 30 ]] || bad "parsed only $(grep -c . <<<"$steps") script steps from ci.yml (the parser is stale)"
 while IFS= read -r st; do
 	[[ -n $st ]] || continue

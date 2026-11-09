@@ -39,7 +39,7 @@ if [[ ${1:-} == --flavors-dirs ]]; then
 fi
 
 # shellcheck source=/dev/null
-. "$(dirname "$0")/paths-lib.sh"
+. "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the rules (hack/paths.rules) are the only source; an unreadable file is not "no job"
 mapfile -t jobs < <(paths_jobs)
 base=${1:-}
@@ -51,11 +51,14 @@ fi
 if [[ $base == --stdin ]]; then
 	files=$(cat) # the changed paths, one per line (hack/ci-changes-test.sh)
 else
-	files=$(git diff --name-only "$(git merge-base "$base" HEAD)" HEAD)
+	files=$(git diff --name-only --no-renames "$(git merge-base "$base" HEAD)" HEAD)
 fi
 
 # A change to CI itself, the Makefile, the Go module or the rules runs everything.
 everything=false
+# An empty change list is not "nothing changed": a diff that failed or an empty file list runs
+# everything (fail closed); the callers that can have no change (ci-skip-heavy.sh) check before.
+[[ -n ${files//[$' \t\n']/} ]] || everything=true
 while IFS= read -r f; do
 	if [[ -n $f ]] && paths_match everything - "$f"; then everything=true; fi
 done <<<"$files"

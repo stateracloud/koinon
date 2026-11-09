@@ -29,7 +29,7 @@ set -euo pipefail
 # files) is a package directory in the build graph of a binary (`go list -deps`, this module only).
 # hack/needs-e2e-test.sh checks the binaries against run.sh's `ko build` line.
 # shellcheck source=/dev/null
-. "$(dirname "${BASH_SOURCE[0]}")/paths-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/paths-lib.sh" || exit 2
 paths_load || exit 2
 mapfile -t BINARIES < <(paths_raw e2e-binary -)
 # --------------------------------------------------------------------------------------------------

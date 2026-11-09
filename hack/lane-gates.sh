@@ -43,7 +43,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "lane-gates: unknown base $base (git fetch origin?)" >&2; exit 2; }
 
 # shellcheck source=/dev/null
-. "$(dirname "$0")/paths-lib.sh"
+. "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the `lane` lines of hack/paths.rules say which local gate stands for a CI job
 preflight=${LANE_GATES_PREFLIGHT:-hack/preflight.sh}
 changes=${LANE_GATES_CHANGES:-hack/ci-changes.sh}

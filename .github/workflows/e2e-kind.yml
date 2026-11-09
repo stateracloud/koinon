@@ -121,13 +121,18 @@ jobs:
           # the entry was built (merge_group.base_sha), for the same reason.
           ref=""
           if [[ $EVENT == pull_request ]]; then ref="origin/$BASE"; elif [[ $EVENT == merge_group ]]; then ref="$MG_BASE"; fi
-          for f in needs-e2e e2e-decide; do
-            if [[ -n $ref ]] && git show "$ref:hack/$f.sh" > "$RUNNER_TEMP/$f.sh" 2>/dev/null; then
-              echo "using hack/$f.sh from $ref"
-            else
-              cp "hack/$f.sh" "$RUNNER_TEMP/$f.sh"
+          # The whole set comes from ONE ref, never a mix of base and PR files. paths-lib.sh and
+          # paths.rules are sourced by needs-e2e.sh from its own directory. A base that predates
+          # them (the commit that introduces them) has neither, and then needs-e2e.sh is the
+          # standalone one: a missing file at the base is legal, so copy those two only if the ref has them.
+          for f in needs-e2e.sh e2e-decide.sh paths-lib.sh paths.rules; do
+            if [[ -n $ref ]] && git cat-file -e "$ref:hack/$f" 2>/dev/null; then
+              git show "$ref:hack/$f" > "$RUNNER_TEMP/$f"
+              echo "using hack/$f from $ref"
+            elif [[ -z $ref || $f == needs-e2e.sh || $f == e2e-decide.sh ]]; then
+              cp "hack/$f" "$RUNNER_TEMP/$f"
             fi
-            chmod +x "$RUNNER_TEMP/$f.sh"
+            chmod +x "$RUNNER_TEMP/$f"
           done
           NEEDS_E2E="$RUNNER_TEMP/needs-e2e.sh" "$RUNNER_TEMP/e2e-decide.sh"
 

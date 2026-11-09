@@ -525,8 +525,8 @@ main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` 
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
-head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs `hack/needs-e2e.sh`, which reads
-`hack/paths.rules`, and a change that rule does not select needs a dispatch:
+head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs the base branch's copy of `hack/needs-e2e.sh` with the base branch's
+`hack/paths.rules` (and `paths-lib.sh`, all from one ref; a base without them uses the standalone script), and a change that rule does not select needs a dispatch:
 `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 

@@ -84,7 +84,7 @@ job chartsmoke ^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web
 # api/proto/: the Go code generated from it is committed under internal/gen, where a change
 # matches; a proto edit without regenerating fails the `generate` job. api/admin/v1/openapi.yaml
 # is embedded by api/admin/v1/spec.go and stays a trigger.
-except chartsmoke ^api/proto/
+except chartsmoke ^api/proto/.*\.proto$
 # Test files of other packages are not compiled into a binary or into the suite's imports; the
 # suite's own _test.go files are under test/chartsmoke/ and stay.
 except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
@@ -181,7 +181,7 @@ script-check - hack/ci-merge-group-test.sh
 script-check - hack/ci-cache-test.sh
 script-check - hack/chart-check-test.sh
 script-check - hack/paths-test.sh
-# Slow (23 to 85 s; `hack/lane-gates.sh` and CI run them): the decision rule's own tests need
+# Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh
 script-skip - hack/ci-changes-test.sh
@@ -195,6 +195,8 @@ script-skip - hack/release-gate-test.sh
 script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
 script-skip - hack/migrate-lint.sh
+# Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
+script-skip - hack/flavor-tag-test.sh
 # Fail on a Mac with the sandbox's /private/tmp paths or its git setup; they run on Linux in CI.
 script-skip - hack/wt-test.sh
 script-skip - hack/wt-install-test.sh
