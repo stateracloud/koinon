@@ -31,7 +31,8 @@ has "the supervisor expiry message renders" 'must bound the ServiceAccount token
 has "supervisorTokenMaxSeconds overrides the bound" 'expirationSeconds <= 7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only $pol
 for msg in \
   "sandbox supervisor pods must set automountServiceAccountToken to false" \
-  "sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway"; do
+  "sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway" \
+  "sandbox supervisor pods must bound the ServiceAccount token to 3600 seconds"; do
   if ! grep -B4 -F -- "$msg" <<<"$pol_out" | grep -Fq -- '!variables.supervisor ||'; then
     fail "the supervisor guard (!variables.supervisor ||) must scope the validation: $msg"
   fi
