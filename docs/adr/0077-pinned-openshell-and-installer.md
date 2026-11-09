@@ -212,10 +212,28 @@ The decisions above are unchanged. The text and the verification below describe 
 
 - 2026-11-09, OpenShell `v0.1.7` (tag commit `5d25211b`, 2026-11-03; `v0.1.6` is `ac7f615c`,
   2026-10-27), read as source, from `bdb956f` (the 0.1.5 commit) to `v0.1.7`:
-  - The GitHub release notes of v0.1.6 and v0.1.7 could not be read from the issue session (the
-    repository was outside its allowed set and the API answered 403), and the tags carry no
-    `CHANGELOG.md`. So the release's security fixes and breaking changes are not recorded here; the
-    pull request lists them once someone with access has read them. Everything below is from code.
+  - Release notes ([v0.1.6](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.6),
+    [v0.1.7](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.7); the tags carry no
+    `CHANGELOG.md`). Security fixes, all in OpenShell's own dependencies:
+    - v0.1.6: webpki stops trusting the emSign CAs (CVE-2026-111943); russh 0.64.1
+      (GHSA-4wc5-f2rc-q74m); Tokio and crypto-bigint (RUSTSEC-2026-0386, -0387); ctutils
+      (RUSTSEC-2026-0385).
+    - v0.1.7: `zip` (GHSA-m665-v7pm-7grj), russh, pageant and pulldown-cmark updated, and the
+      unmaintained `rustls-pemfile` replaced.
+  - Breaking changes and what each one means for Koinon:
+    - v0.1.6 (#4821): a gateway refuses to start without an auth method. Koinon dials the gateway
+      with mTLS (`openshell.clientTLSSecret`), and the upstream chart's PKI init Job issues the
+      certificates, so the install should be unchanged _(inferred; the lab e2e on the head checks it)_.
+    - v0.1.6 (#4656): new sandboxes open the control connection from the sandbox side, and the
+      supervisor and sandbox runtime must be the same version. Koinon pins both from 0.1.7
+      (`sandboxPolicy.supervisorImages` is derived from the chart version).
+    - v0.1.6 (#4765): `ResumeBoundaryRequest` field 3 is renamed `restart_if_restore_fails`, for
+      external isolation backends. Koinon does not use it; the regenerated client carries the new name.
+    - v0.1.7 (#5036): OCSF output is 1.8.0 only, and `server.ocsfLog.schemaVersion` is ignored.
+      Koinon sets no schema version and parses no OCSF records yet (the ingestion of
+      [0023](0023-observability-and-audit.md) is open), so nothing changes.
+    - v0.1.7 (#5155): the Podman-only `additional_ca_bundle` is deprecated. Koinon does not use Podman.
+  - Everything below is read from the code.
   - Supervisor pod: `crates/openshell-driver-kubernetes/src/sandbox_runtime.rs` (the `sa-token`
     projected volume: audience `openshell-gateway`, `expirationSeconds` from the TTL, automount off),
     `driver.rs` (TokenReview audience; no projected token on a workload pod), `config.rs` (TTL clamp
