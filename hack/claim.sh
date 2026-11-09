@@ -602,21 +602,21 @@ open_prs_closing() {
     jq -r --arg n "$1" '.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b")) | .number'
 }
 
-# closed_frees HOLDER MERGED CLOSED_EPOCH: does a closed pull request free the claim now? Merged: yes.
-# Closed unmerged: not for a person claim, and for an agent claim only once server_now >= close +
+# closed_frees HOLDER MERGED CLOSED_EPOCH NOW: does a closed pull request free the claim now? Merged: yes.
+# Closed unmerged: not for a person claim, and for an agent claim only once NOW >= close +
 # CLOSED_GRACE. The caller has already checked that the close is not older than the lease start.
 closed_frees() {
   [[ $2 == 1 ]] && return 0
   [[ $(holder_class "$1") == person ]] && return 1
-  (($(server_now) >= $3 + CLOSED_GRACE))
+  (($4 >= $3 + CLOSED_GRACE))
 }
 
-# claim_liveness CLAIM_JSON: the one liveness rule, shared by take --takeover and the sweeper.
+# claim_liveness CLAIM_JSON [NOW]: the one liveness rule, shared by take --takeover and the sweeper.
 # Sets LIVE (epoch: the later of the lease and the last human PR commit or comment plus one lease),
 # PR_NUM and PR_STATE (none | draft | ready | closed). Bot comments and commits are not liveness.
 # Returns 1 for an unparsable lease, 4 for an API error.
 claim_liveness() {
-  local c=$1 lease_s n holder pr j last act cat
+  local c=$1 now=${2:-} lease_s n holder pr j last act cat rep
   lease_s=$(parse_lease "$(jq -r .lease_until <<<"$c")") || return 1
   n=$(jq -r .issue <<<"$c"); holder=$(jq -r .holder <<<"$c")
   LIVE=$lease_s; PR_STATE=none; PR_NUM=; PR_MERGED=0
@@ -630,8 +630,9 @@ claim_liveness() {
     local closed cnum cmerged
     closed=$(find_closed_pr "$n" "$(jq -r .human <<<"$c")" $((lease_s - $(lease_for_holder "$holder")))) || return 4
     if [[ -n $closed ]]; then
+      [[ -n $now ]] || now=$(server_now)
       read -r cnum cmerged cat <<<"$closed"
-      if closed_frees "$holder" "$cmerged" "$cat"; then PR_NUM=$cnum; PR_MERGED=$cmerged; PR_STATE=closed; fi
+      if closed_frees "$holder" "$cmerged" "$cat" "$now"; then PR_NUM=$cnum; PR_MERGED=$cmerged; PR_STATE=closed; fi
     fi
     return 0
   fi
@@ -646,8 +647,13 @@ claim_liveness() {
       [[ $(jq -r '.merged // false' <<<"$TRY_OUT") != true ]] || PR_MERGED=1
       cat=$(jq -r '.closed_at // empty' <<<"$TRY_OUT"); [[ -z $cat ]] || cat=$(iso_to_epoch "$cat")
       # A closed pull request older than the lease start was closed before the last beat: not a signal.
-      if [[ -n $cat ]] && ((PR_MERGED == 0)) && ((cat < lease_s - $(lease_for_holder "$holder"))); then return 0; fi
-      closed_frees "$holder" "$PR_MERGED" "${cat:-0}" && PR_STATE=closed
+      [[ -n $now ]] || now=$(server_now)
+      if [[ -n $cat ]] && ((PR_MERGED == 0)) && ((cat < lease_s - $(lease_for_holder "$holder"))); then :
+      elif closed_frees "$holder" "$PR_MERGED" "${cat:-0}" "$now"; then PR_STATE=closed; return 0; fi
+      # The recorded pull request does not free the claim: a replacement open one by the same human
+      # (closing the issue) is the claim's activity and gets the ready protection.
+      rep=$(find_pr "$n" "$(jq -r .human <<<"$c")") || return 4
+      if [[ -n $rep && $rep != "$pr" ]]; then claim_liveness "$(jq -c --arg p "$rep" '.pr = $p' <<<"$c")" "$now"; return; fi
       return 0 ;;
     draft) PR_STATE=draft ;;
     *) PR_STATE=ready ;;
@@ -879,7 +885,7 @@ holder_desc() {
 dead_holder_check() {
   local n=$1 existing=$2 now=$3 who
   who=$(holder_desc "$existing" "${4:-}")
-  if ! claim_liveness "$existing"; then
+  if ! claim_liveness "$existing" "$now"; then
     echo "claim: #$n: cannot judge liveness of $who (unparsable lease or API error); not taking it" >&2; return 2
   fi
   case $(claim_status held "$LIVE" "$now") in
@@ -1325,7 +1331,7 @@ cmd_block() {
 sweep_one() {
   local c=$1 now=$2 n holder human labels rc=0
   n=$(jq -r .issue <<<"$c"); holder=$(jq -r .holder <<<"$c"); human=$(jq -r .human <<<"$c")
-  claim_liveness "$c" || rc=$?
+  claim_liveness "$c" "$now" || rc=$?
   if ((rc == 1)); then warn "#$n: unparsable lease_until; skipping"; return 0; fi
   if ((rc != 0)); then warn "#$n: API error judging liveness; skipping"; return 0; fi
   case $PR_STATE in
@@ -1490,7 +1496,7 @@ cmd_check_pr() {
     if [[ $(jq -r .state <<<"$c") != held ]]; then echo "claim check: #$n is free (the claim was released)"; continue; fi
     if [[ $(lower "$human") == "$(lower "$author")" ]]; then echo "claim check: #$n is claimed by @$human (the author)"; continue; fi
     rc=0
-    claim_liveness "$c" || rc=$?
+    claim_liveness "$c" "$now" || rc=$?
     # The sweeper skips a claim with an unparsable lease, so it would block for ever: not a conflict.
     if ((rc == 1)); then echo "claim check: #$n is free (the claim of @$human has an unparsable lease)"; continue; fi
     ((rc == 0)) || die "cannot judge the liveness of the claim on #$n (API error); re-run the check"

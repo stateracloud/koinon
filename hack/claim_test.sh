@@ -845,6 +845,31 @@ eq "liveness: a pull request closed before the lease start is ignored (a beat si
 eq "liveness: another author's closed pull request is ignored" "$(CLOSED_JSON='[{"number":84,"body":"Closes #40","author":{"login":"mallory"},"closedAt":"2026-10-30T14:30:00Z","mergedAt":null}]' cl_liveness)" "none  0"
 eq "liveness: a person claim ignores a closed unmerged pull request" "$(CLOSED_JSON=$CU CL_NOW=2026-10-30T20:00:00Z cl_liveness carol/mac/human)" "none  0"
 eq "liveness: a person claim still frees on a merged pull request" "$(CLOSED_JSON='[{"number":85,"body":"Closes #40","author":{"login":"carol"},"closedAt":"2026-10-30T16:59:00Z","mergedAt":"2026-10-30T16:59:00Z"}]' cl_liveness carol/mac/human)" "closed 85 1"
+# The recorded .pr path: claim_liveness reads repos/R/pulls/N through gh_try; an open replacement is found by find_pr.
+cr_liveness() { # PR_JSON OPEN_LIST_JSON [HOLDER] -> state of claim_liveness for a claim that records pr 90 (lease start 14:00Z)
+  ( REPO=acme/koinon; CLOSED_GRACE=2700; PRJ=$1; OPENJ=$2
+    KOINON_CLAIM_NOW_EPOCH=$(iso_to_epoch "${CL_NOW:-2026-10-30T17:15:00Z}"); export KOINON_CLAIM_NOW_EPOCH
+    gh() {
+      case $* in
+        "api repos/acme/koinon/pulls/90") printf '%s' "$PRJ" ;;
+        "api repos/acme/koinon/pulls/91") echo '{"state":"open","merged":false,"draft":false}' ;;
+        *"pr list"*"--state open"*) printf '%s' "$OPENJ" ;;
+        *"pr view"*) echo '{"commits":[],"comments":[]}' ;;
+        *) echo '[]' ;;
+      esac
+    }
+    claim_liveness "$(jq -nc --arg h "${3:-carol/mac/s1}" '{issue:40,sha:"abc",state:"held",holder:$h,human:"carol",lease_until:"2026-10-30T16:00:00Z",pr:"90"}')" || exit 9
+    echo "$PR_STATE $PR_NUM $PR_MERGED" )
+}
+NOOPEN='[]'
+eq "liveness .pr: closed unmerged before the lease start keeps the claim" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T13:00:00Z"}' "$NOOPEN")" "none 90 0"
+eq "liveness .pr: closed unmerged after the grace frees" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T16:30:00Z"}' "$NOOPEN")" "closed 90 0"
+eq "liveness .pr: closed unmerged inside the grace keeps the claim" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$NOOPEN")" "none 90 0"
+eq "liveness .pr: a merged recorded pull request frees at once" "$(cr_liveness '{"state":"closed","merged":true,"closed_at":"2026-10-30T17:14:00Z"}' "$NOOPEN")" "closed 90 1"
+REPL='[{"number":91,"body":"Closes #40","author":{"login":"Carol"}}]'
+eq "liveness .pr: a replacement open PR after a close inside the grace gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$REPL")" "ready 91 0"
+eq "liveness .pr: a replacement open PR after a close before the lease start gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T13:00:00Z"}' "$REPL")" "ready 91 0"
+eq "liveness .pr: a person claim with a closed recorded PR and a replacement gives ready" "$(cr_liveness '{"state":"closed","merged":false,"closed_at":"2026-10-30T17:10:00Z"}' "$REPL" carol/mac/human)" "ready 91 0"
 eq "verdict: a claim kept inside the grace is not stale" "$(claim_verdict held bob alice 100000 99000 none)" conflict
 rm -f "$LOG"
 
