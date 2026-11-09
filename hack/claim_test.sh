@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests for hack/claim.sh (ADR 0082, ADR 0104) and hack/pr-updater.sh. Nothing here talks to
-# GitHub: the GitHub-facing functions are stubbed. CI runs this file in the `quick checks` job.
+# Offline tests for hack/claim.sh (ADR 0082, ADR 0104); hack/pr-updater-test.sh tests the updater.
+# Nothing here talks to GitHub: the GitHub-facing functions are stubbed. CI runs this file in the
+# `quick checks` job.
 # shellcheck disable=SC2016,SC2329,SC2030,SC2031,SC2034
 # (SC2016 jq and bash -c in single quotes, SC2329 stubs are called indirectly, SC2030/SC2031 subshell
 # assignments are intended, SC2034 variables are read by the sourced script.)
@@ -20,67 +21,6 @@ bad() { echo "FAIL: $1"; fail=1; }
 eq() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
 yn() { if "$@"; then echo y; else echo n; fi; }
 unset KOINON_CLAIM_HUMAN KOINON_CLAIM_REPO GITHUB_ACTIONS
-
-# ---- hack/pr-updater.sh: the updater only touches a ready, green pull request behind main (old issue 596) ----
-export PR_UPDATER_LIB_ONLY=1
-# shellcheck source=/dev/null
-source "$here/pr-updater.sh"
-unset PR_UPDATER_LIB_ONLY
-ut_ok='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"SKIPPED"},{"__typename":"StatusContext","context":"c","state":"SUCCESS"}]'
-ut_red='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE"}]'
-ut_run='[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS","conclusion":null}]'
-ut_pr() { # NUMBER CREATED DRAFT MERGESTATE AUTOMERGE ROLLUP
-  jq -n --argjson n "$1" --arg c "$2" --argjson d "$3" --arg m "$4" --argjson a "$5" --argjson r "$6" \
-    '{number: $n, createdAt: $c, isDraft: $d, mergeStateStatus: $m, autoMergeRequest: (if $a then {enabledAt: $c} else null end), statusCheckRollup: $r}'
-}
-ut_pr_q() { ut_pr "$@" | jq '. + {isInMergeQueue: true}'; }
-ut_req='["a","b","c"]'
-ut() { jq -s . | update_target "$ut_req"; }
-cr() { # NAME STATUS CONCLUSION STARTED -> a CheckRun
-  jq -nc --arg n "$1" --arg s "$2" --arg c "$3" --arg t "$4" '{__typename:"CheckRun",name:$n,status:$s,conclusion:(if $c=="" then null else $c end),startedAt:(if $t=="" then null else $t end)}'; }
-rollup() { jq -sc . ; }
-req_all="$(cr a COMPLETED SUCCESS 2026-01-01T10:00:00Z; cr b COMPLETED SUCCESS 2026-01-01T10:00:00Z; jq -nc '{__typename:"StatusContext",context:"c",state:"SUCCESS",createdAt:"2026-01-01T10:00:00Z"}')"
-r_oldfail_newok="$({ cr a COMPLETED FAILURE 2026-01-01T09:00:00Z; echo "$req_all"; } | rollup)"
-r_newfail="$({ cr a COMPLETED FAILURE 2026-01-01T11:00:00Z; echo "$req_all"; } | rollup)"
-r_cancel_then_ok="$({ cr b COMPLETED CANCELLED 2026-01-01T08:00:00Z; echo "$req_all"; } | rollup)"
-r_noise="$({ echo "$req_all"; cr flavors COMPLETED FAILURE 2026-01-01T12:00:00Z; cr updater IN_PROGRESS "" 2026-01-01T12:00:00Z; cr codecov COMPLETED FAILURE 2026-01-01T12:00:00Z; } | rollup)"
-r_pending_req="$({ echo "$req_all"; cr a IN_PROGRESS "" 2026-01-01T11:00:00Z; } | rollup)"
-r_queued_req="$({ echo "$req_all"; cr a QUEUED "" ""; } | rollup)"
-r_missing_req="$(cr a COMPLETED SUCCESS 2026-01-01T10:00:00Z | rollup)"
-eq "updater: an older failure of a name with a newer success is eligible" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_oldfail_newok" | ut)" 5
-eq "updater: an older cancelled run with a newer success is eligible" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_cancel_then_ok" | ut)" 5
-eq "updater: a newer failure is not eligible" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_newfail" | ut)" ""
-eq "updater: red advisory, third-party and the updater's own run do not block" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_noise" | ut)" 5
-eq "updater: a pending required check blocks" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_pending_req" | ut)" ""
-eq "updater: a queued required rerun blocks" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_queued_req" | ut)" ""
-eq "updater: a required check that has not reported blocks" "$(ut_pr 5 2026-01-02 false BEHIND true "$r_missing_req" | ut)" ""
-eq "updater: ready green behind pull request is updated" "$(ut_pr 5 2026-01-02 false BEHIND true "$ut_ok" | ut)" 5
-eq "updater: a draft is left alone" "$(ut_pr 5 2026-01-02 true BEHIND true "$ut_ok" | ut)" ""
-eq "updater: a red head is left alone" "$(ut_pr 5 2026-01-02 false BEHIND true "$ut_red" | ut)" ""
-eq "updater: a running head is left alone" "$(ut_pr 5 2026-01-02 false BEHIND true "$ut_run" | ut)" ""
-eq "updater: no checks at all is not green" "$(ut_pr 5 2026-01-02 false BEHIND true '[]' | ut)" ""
-eq "updater: up to date is left alone" "$(ut_pr 5 2026-01-02 false CLEAN true "$ut_ok" | ut)" ""
-eq "updater: a conflict is left to the needs-update label" "$(ut_pr 5 2026-01-02 false DIRTY true "$ut_ok" | ut)" ""
-eq "updater: a pull request in the merge queue is left alone" "$(ut_pr_q 5 2026-01-02 false BEHIND true "$ut_ok" | ut)" ""
-eq "updater: a pull request outside the queue is still updated" "$(ut_pr 5 2026-01-02 false BEHIND true "$ut_ok" | jq '. + {isInMergeQueue: false}' | ut)" 5
-eq "updater: without auto-merge is left alone" "$(ut_pr 5 2026-01-02 false BEHIND false "$ut_ok" | ut)" ""
-eq "updater: the oldest eligible one wins, skipping a red older one" \
-  "$({ ut_pr 3 2026-01-01 false BEHIND true "$ut_red"; ut_pr 9 2026-01-03 false BEHIND true "$ut_ok"; ut_pr 7 2026-01-02 false BEHIND true "$ut_ok"; } | ut)" 7
-rq=$(required_contexts "$here/ci-required.txt")
-eq "required_contexts: reads required names, not advisory" "$(jq -r 'IN(.[]; "claim") and IN(.[]; "go") and (IN(.[]; "flavors") | not) and IN(.[]; "e2e result")' <<<"$rq")" true
-LOG=$(mktemp "${TMPDIR:-/tmp}/claim_upd.XXXXXX")
-up_rc=0
-(
-  GITHUB_ACTIONS=true; REPO=acme/koinon
-  gh() { case $* in *rules/branches*) echo false ;; *"/labels"*) return 1 ;; *update-branch*) echo "update-branch" >>"$LOG" ;; esac; }
-  server_now() { echo 1000; }; required_contexts() { echo '[]'; }
-  open_prs() { echo '[{"number":5,"autoMergeRequest":{},"mergeStateStatus":"DIRTY","labels":[]},{"number":6,"autoMergeRequest":{},"mergeStateStatus":"BEHIND","labels":[]}]'; }
-  update_target() { echo 6; }
-  cmd_update_oldest
-) >/dev/null 2>&1 || up_rc=$?
-eq "updater: a failing needs-update label does not fail the job" "$up_rc" 0
-eq "updater: a failing needs-update label still reaches update-branch" "$(grep -c update-branch "$LOG")" 1
-rm -f "$LOG"
 
 # ---- hack/claim.sh: pure functions ----
 export CLAIM_LIB_ONLY=1
@@ -148,26 +88,26 @@ closers_page='[{"data":{"repository":{"pullRequests":{"nodes":[
  {"number":202,"body":"see #8","author":null,"closingIssuesReferences":{"nodes":[]}}]}}}}]'
 CL=$(jq -c --arg repo acme/koinon "$JQ_PR_CLOSERS" <<<"$closers_page")
 eq "closers: references and body keywords, this repository only" "$(jq -c '[.[] | [.number, .author, .issues]]' <<<"$CL")" '[[200,"Carol",[5,6]],[201,"alice",[7]],[202,"",[]]]'
-eq "pr conflicts: another author" "$(pr_conflicts "$CL" 5 alice)" "#200 by @Carol"
-eq "pr conflicts: the caller's own pull request is none" "$(pr_conflicts "$CL" 7 Alice)" ""
-eq "own pr: linked" "$(own_pr "$CL" 7 alice)" 201
-eq "own pr: never another author's" "$(own_pr "$CL" 5 alice)" ""
+eq "prs closing: another author" "$(prs_closing "$CL" 5 alice)" '{"own":"","others":"#200 by @Carol"}'
+eq "prs closing: the caller's own pull request (any case)" "$(prs_closing "$CL" 7 Alice)" '{"own":"201","others":""}'
+eq "prs closing: none" "$(prs_closing "$CL" 8 alice)" '{"own":"","others":""}'
 eq "assignees: others" "$(other_assignees '{"assignees":["bob","Alice"]}' alice)" "@bob"
 eq "assignees: none" "$(other_assignees '{}' alice)" ""
 
 # JQ_NEXT: skip held claims, open closing pull requests and other assignees; In Progress / In Review
 # with nothing holding the issue count as Ready.
-item() { # N STATUS ASSIGNEES_JSON [LABELS_JSON]
-  jq -nc --argjson n "$1" --arg s "$2" --argjson a "$3" --argjson l "${4:-[\"agent-ok\"]}" \
-    '{status:{name:$s},priority:{name:"P1"},component:null,content:{number:$n,title:"t\($n)",state:"OPEN",createdAt:"2026-01-0\($n % 9 + 1)T00:00:00Z",repository:{nameWithOwner:"acme/koinon"},milestone:{title:"m1"},labels:{nodes:($l|map({name:.}))},assignees:{nodes:($a|map({login:.}))}}}'
+item() { # N STATUS ASSIGNEES_JSON [LABELS_JSON] [PRIORITY]
+  jq -nc --argjson n "$1" --arg s "$2" --argjson a "$3" --argjson l "${4:-[\"agent-ok\"]}" --arg p "${5-P1}" \
+    '{status:{name:$s},priority:{name:$p},component:null,content:{number:$n,title:"t\($n)",state:"OPEN",createdAt:"2026-01-0\($n % 9 + 1)T00:00:00Z",repository:{nameWithOwner:"acme/koinon"},milestone:{title:"m1"},labels:{nodes:($l|map({name:.}))},assignees:{nodes:($a|map({login:.}))}}}'
 }
 board=$(jq -sc '[{data:{organization:{projectV2:{items:{nodes:.}}}}}]' < <(
   item 1 Ready '[]'; item 2 Ready '[]'; item 3 Ready '[]'; item 4 Ready '["bob"]'; item 5 Ready '["Alice"]'
   item 6 "In Progress" '[]'; item 7 "In Review" '[]'; item 8 Backlog '[]'; item 9 Ready '[]' '[]'))
-nx() { jq -r --arg repo acme/koinon --arg ms m1 --arg label "" --argjson held '[2]' --argjson prs '[3]' --arg human alice "$JQ_RANK$JQ_NEXT"' | map(.n) | join(",")' <<<"$board"; }
+nx() { jq -r --arg repo acme/koinon --arg ms m1 --arg label "" --argjson held '[2]' --argjson prs '[3]' --arg human alice "$JQ_NEXT"' | map(.n) | join(",")' <<<"$board"; }
 eq "next: skips held, PR-closed, other-assigned, Backlog and non-agent-ok issues" "$(nx)" "1,5,6,7"
-ranked=$(jq -nc "$JQ_RANK"' [{p:"P2",at:"1"},{p:"",at:"0"},{p:"P0",at:"9"},{p:"P2",at:"0"}] | sort_by([(.p|rank),.at]) | map(.p+.at) | join(",")')
-eq "priority then age" "$ranked" '"P09,P20,P21,0"'
+board=$(jq -sc '[{data:{organization:{projectV2:{items:{nodes:.}}}}}]' < <(
+  item 6 Ready '[]' '["agent-ok"]' P2; item 5 Ready '[]' '["agent-ok"]' ""; item 4 Ready '[]' '["agent-ok"]' P0; item 1 Ready '[]' '["agent-ok"]' P2))
+eq "next: priority (none last), then age" "$(nx)" "4,1,6,5"
 
 # ---- the surface: the header lists exactly the commands main dispatches ----
 header=$(bash "$claim" help | grep -oE '^  claim\.sh [a-z-]+' | awk '{print $2}'; bash "$claim" help | grep -oE '\| mine' | sed 's/| //')
@@ -186,19 +126,31 @@ stub_github() {
   REPO=acme/koinon; OWNER=acme; NAME=koinon
   human_login() { echo "${ME:-alice}"; }
   list_claims() { echo "$FIX"; }
-  load_claim() { C=$(jq -c --arg n "$1" '.[] | select((.issue | tostring) == $n)' <<<"$FIX"); [[ -n $C ]] || return 1; }
+  load_claim() { # API_ERR names a claim whose read fails like the API does
+    [[ ${API_ERR:-} != "$1" ]] || die "cannot read the claim on #$1 (API error); retry"
+    C=$(jq -c --arg n "$1" '.[] | select((.issue | tostring) == $n)' <<<"$FIX"); [[ -n $C ]] || return 1
+  }
   issue_json() { echo "${ISSUE_FIX:-{\"state\":\"open\",\"pull\":false,\"labels\":[\"agent-ok\"],\"assignees\":[]\}}"; }
   open_pr_closers() { echo "${CLOSERS_FIX:-[]}"; }
-  write_claim() { # logs the write and, unless LOSE names the ref, stores it in FIX
-    echo "write $1 $2 holder=$3 pr=$5 by=${8:-}" >>"$WRITES"
-    [[ ${LOSE:-} != "$1" ]] || return 1
-    FIX=$(jq -c --arg n "$1" --argjson c "$(cl "${1#adr-}" "$2" "$3" "$4" "$5")" '[.[] | select((.issue | tostring) != $n)] + [$c]' <<<"$FIX")
-  }
+  if [[ -z ${REAL_WRITE:-} ]]; then
+    write_claim() { # logs the write and, unless LOSE names the ref, stores it in FIX
+      echo "write $1 $2 holder=$3 pr=$5 by=${8:-}" >>"$WRITES"
+      [[ ${LOSE:-} != "$1" ]] || return 1
+      FIX=$(jq -c --arg n "$1" --argjson c "$(cl "${1#adr-}" "$2" "$3" "$4" "$5")" '[.[] | select((.issue | tostring) != $n)] + [$c]' <<<"$FIX")
+    }
+  fi
   assign() { echo "assign $1 $2" >>"$WRITES"; }
   unassign() { echo "unassign $1 $2" >>"$WRITES"; }
   pr_meta() { echo "$PR_FIX"; }
   pr_added_adr_files() { echo "${ADR_FILES:-}"; }
-  gh() { case $* in *issues/*--jq\ .state*) echo open ;; *) echo 1 ;; esac; }
+  gh() { # with REAL_WRITE: the real write_claim; PATCH_ERR is what GitHub answers to the ref PATCH
+    case $* in
+      *issues/*--jq\ .state*) echo open ;;
+      *git/commits*) echo newsha ;;
+      *"-X PATCH"*) if [[ -n ${PATCH_ERR:-} ]]; then echo "$PATCH_ERR"; return 1; fi ;;
+      *) echo 1 ;;
+    esac
+  }
 }
 WRITES=$tmp.writes
 # run ARGS...: main's argument parsing and dispatch, offline; prints output, then rc=N.
@@ -209,7 +161,7 @@ run() {
   printf '%s\nrc=%s\n' "$out" "$rc"
 }
 rc_of() { sed -n 's/^rc=//p' <<<"$1"; }
-cl() { jq -nc --argjson n "$1" --arg s "$2" --arg h "$3" --arg u "$4" --arg p "${5:-}" '{issue:$n,state:$s,holder:$h,human:$u,pr:$p,note:"",released_by:"",sha:"sha\($n)"}'; }
+cl() { jq -nc --argjson n "$1" --arg s "$2" --arg h "$3" --arg u "$4" --arg p "${5:-}" '{issue:$n,state:$s,holder:$h,human:$u,pr:$p,note:"",released_by:"",sha:"sha\($n)",at:"2026-11-09T10:00:00Z"}'; }
 fix() { jq -sc . ; }
 
 FIX=$(fix </dev/null)
@@ -222,6 +174,8 @@ FIX=$(cl 10 held alice#l10 alice | fix)
 r=$(run take 10 --lane l10)
 eq "take: already yours in this lane is exit 0" "$(rc_of "$r")" 0
 eq "take: already yours writes nothing" "$(wc -l <"$WRITES" | tr -d ' ')" 0
+eq "take: already yours warns a second session in the lane" \
+  "$(grep -c '^claim: warning: #10 is already held by alice#l10 since 2026-11-09T10:00:00Z; if another session took it, stop and use your own --lane$' <<<"$r")" 1
 FIX=$(cl 10 held alice/MacBookPro/s1#l10 alice | fix)
 r=$(run take 10 --lane l10)
 eq "take: an old-format claim of the same login and lane is yours" "$(rc_of "$r")" 0
@@ -258,6 +212,16 @@ FIX=$(cl 12 held bob#main bob | fix)
 r=$(run take 10 11 12)
 eq "take: several issues are all or nothing" "$(rc_of "$r")" 2
 eq "take: the taken ones are rolled back" "$(grep -c '^write 1[01] released' "$WRITES")" 2
+FIX=$(fix </dev/null)
+r=$(API_ERR=11 run take 10 11)
+eq "take: an API error on a later issue is an error" "$(rc_of "$r")" 1
+eq "take: an API error rolls back and unassigns the taken ones" "$(paste -sd';' "$WRITES")" \
+  "write 10 held holder=alice#main pr= by=;assign 10 alice;write 10 released holder=alice#main pr= by=alice#main;unassign 10 alice"
+FIX=$(cl 10 released bob#main bob | fix)
+r=$(REAL_WRITE=1 PATCH_ERR='gh: Update is not a fast forward (HTTP 422)' run take 10)
+eq "take: a lost race on the PATCH of a released ref is exit 2" "$(rc_of "$r"),$(grep -c 'lost the race for #10' <<<"$r")" "2,1"
+r=$(REAL_WRITE=1 PATCH_ERR='gh: Repository rule violations found (HTTP 422)' run take 10)
+eq "take: another 422 on the PATCH is an error, not a race" "$(rc_of "$r")" 1
 r=$(run take x)
 eq "take: needs numbers" "$(rc_of "$r")" 1
 r=$(run take 10 --lane BAD)

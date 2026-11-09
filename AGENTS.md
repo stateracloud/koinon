@@ -62,15 +62,17 @@ its claims; the default lane is `main`.
 1. `hack/claim.sh next` (or `next --label start-here`): Ready, `agent-ok`, current-milestone,
    unblocked issues that nobody holds, by Priority then age. Only humans move issues to Ready; never
    start an issue that is not listed unless your human names it. Then the overlap check (below).
-2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane, eight per human; a PR
-   that closes several issues takes them together, `take N M` (all or nothing). It assigns your human.
+2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane, eight per human; a
+   PR that closes several issues takes them together, `take N M` (all or nothing). It assigns your
+   human.
 3. Push `<type>/<N>-<slug>` and open a draft PR with `Closes #N` (the board's built-in workflow moves
    the issue to In Progress). New work you discover becomes a Backlog issue; do not start it.
 4. Finish: mark the PR ready and merge it (see "Merging"). The merge or close releases the claim
    (`claims.yml`). Never delete a claim branch.
 5. Stop early: `hack/claim.sh release <N> --note "<state, branch, next step>"` (keep the branch and
-   draft PR), or `hack/claim.sh block <N> <M>` when another issue blocks it. Exit 3 means the claim is
-   not yours (another lane: `--lane L`, or `--force` for your own other lane; another human: ask them).
+   draft PR), or `hack/claim.sh block <N> <M>` when another issue blocks it. Exit 3 means the claim
+   is not yours (another lane: `--lane L`, or `--force` for your own other lane; another human: ask
+   them).
 
 Other rules:
 
@@ -81,7 +83,8 @@ Other rules:
   third-party checks do not count) and is behind `main`; a draft, a red or a running PR is left
   alone, so sync a draft or red branch yourself when you need it.
 - Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
-  procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
+  procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc
+  (`docs/dev/releasing.md`).
 - Copilot coding agent pull requests are opened or adopted by a human.
 
 ### Several agents in one session (lanes)
@@ -90,7 +93,9 @@ A session that runs agents in parallel gives each one a lane: the parent takes t
 `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands the
 agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane. Pick the model
 from the brief's "Which model" section. The parent ships (`hack/ship.sh`) and releases; agents never
-call `claim.sh`. `hack/claim.sh mine` lists your claims with their lanes. Each lane tests its own
+call `claim.sh`. `hack/claim.sh mine` lists your claims with their lanes. Two sessions in one lane
+are one holder; the lock does not separate them. Each session that runs at the same time as another
+one uses its own `--lane`. Each lane tests its own
 worktree: `hack/e2e-remote.sh` tests the checkout it is run from, so run it from the lane's worktree.
 
 ## Working alongside another human
@@ -99,8 +104,9 @@ One human works on the repository today (ADR 0104); these rules hold when a seco
 you start, after `take`:
 
 - **Overlap check.** `gh pr list --state open --json number,author,headRefName,files` and the claim
-  refs (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`; one claim: `hack/claim.sh show <N>`). If an open PR or another human's claim touches the same
-  files with the same behaviour, run `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
+  refs (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`; one claim: `hack/claim.sh show
+  <N>`). If an open PR or another human's claim touches the same files with the same behaviour, run
+  `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
   sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
 - **Merge `main`, never rebase** a pushed branch. Sync points: session start, before a push after an
   hour on the branch, before marking ready, and when `needs-update` appears.

@@ -36,7 +36,10 @@ used twice. The compare-and-set on the ref does that alone.
 2. **Holder = `<login>#<lane>`.** No host and no session. `--lane L` (`^[a-z0-9][a-z0-9-]{0,15}$`) on
    every command; the default lane is `main`, the lane of a session that runs no parallel agents. Same
    login and lane is the same holder, so a restarted session keeps its claims with no environment
-   variable.
+   variable. Two sessions in one lane are one holder; the lock does not separate them. Each session
+   that runs at the same time as another one uses its own `--lane`. `take` of an issue the same
+   holder already holds exits 0 and warns on stderr with the claim's commit date, so a second
+   session sees it.
 3. **No lease, no heartbeat, no sweeper, no takeover, no adopt.** A held claim stays held until a pull
    request that closes the issue merges or closes (`claims.yml` runs `release-pr`) or its human runs
    `release`. A stuck claim is released by its human: `release <N> --force` releases a claim of
@@ -53,7 +56,10 @@ used twice. The compare-and-set on the ref does that alone.
    `update-oldest` (the branch updater, not a claim) moves to `hack/pr-updater.sh`.
 7. **The `claim` check** (`check-pr`, required) fails only when another human holds a claim on an
    issue the pull request closes, or reserved an ADR number the pull request adds. A pull request
-   without `Closes #N` passes. The merge-queue fence of ADR 0094 decision 4 stays.
+   without `Closes #N` passes. The merge-queue fence of ADR 0094 decision 4 stays. Known limit: the
+   check reads the pull request's body and its closing references when it runs. A `Closes #N` in a
+   commit message, or a link made in the sidebar after the last event that ran the check, closes
+   the issue at the merge although the check did not see it.
 8. **ADR reservations are permanent.** `adr` writes `state: reserved` and never expires; a reservation
    from before this ADR (`state: held` with a lease) counts as reserved and its lease is ignored.
 9. **`hack/wt.sh rm`** refuses a worktree whose branch issue has a held claim, whatever lease line an
@@ -91,6 +97,11 @@ lease), about 140 are released and 12 are `claim/adr-*` reservations.
     (`released_by` without `/`) makes it report "lost" and exit 3. Stop those loops after the merge;
   - an old `mine` hides new claims, so an old `pr-merge.sh` warns on its `review` call and still merges;
   - an old `wt.sh rm` calls a new claim's state unknown and refuses without `--force` (safe).
+- A `pull_request_target` run of `claims.yml` checks out the PR's base SHA
+  (`pull_request.base.sha`), so a PR opened before this merge and not updated since can still run
+  the old script for its `edited` or `closed` events. This is harmless
+  with one human: the old script reads a new-format claim as free (no lease) and releases by PR
+  author, which is the same human.
 - New reservations (`state: reserved`) pass an old `check-pr`, which treats any state but `held` as
   released; only another human could collide, and there is none.
 

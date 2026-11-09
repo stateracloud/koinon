@@ -395,6 +395,9 @@ jobs:
       - name: claim-tests
         if: ${{ !cancelled() }}
         run: hack/claim_test.sh
+      - name: claim-tests (pr-updater)
+        if: ${{ !cancelled() }}
+        run: hack/pr-updater-test.sh
       - name: claim-tests (migrate-renumber)
         if: ${{ !cancelled() }}
         run: hack/migrate-renumber-test.sh

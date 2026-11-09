@@ -144,15 +144,13 @@ JQ_PR_CLOSERS='[.[].data.repository.pullRequests.nodes[]
               + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[: ]+#([0-9]+)\\b") | .[0] | tonumber]
               | unique)}]'
 
-# JQ_RANK: sort key for `next`: P0..P3, anything else last.
+# JQ_NEXT: the pickable items of the board pages (slurped), by priority (P0..P3, anything else last),
+# then age. Args: $repo, $ms, $label, $held (issue numbers with a held claim), $prs (issue numbers an
+# open pull request closes), $human. In Progress and In Review count as Ready when nothing holds the
+# issue: no script moves the board back on a release.
 # shellcheck disable=SC2016
-JQ_RANK='def rank: ({"P0":0,"P1":1,"P2":2,"P3":3}[.] // 9);'
-
-# JQ_NEXT: the pickable items of the board pages (slurped). Args: $repo, $ms, $label, $held (issue
-# numbers with a held claim), $prs (issue numbers an open pull request closes), $human. In Progress and
-# In Review count as Ready when nothing holds the issue: no script moves the board back on a release.
-# shellcheck disable=SC2016
-JQ_NEXT='[.[].data.organization.projectV2.items.nodes[]
+JQ_NEXT='def rank: ({"P0":0,"P1":1,"P2":2,"P3":3}[.] // 9);
+  [.[].data.organization.projectV2.items.nodes[]
   | select(.content.number != null and .content.state == "OPEN" and .content.repository.nameWithOwner == $repo)
   | select(.status.name // "" | IN("Ready", "In Progress", "In Review"))
   | select([.content.labels.nodes[].name] | index("agent-ok"))
@@ -198,17 +196,18 @@ gh_try() { TRY_RC=0; TRY_OUT=$(gh api "$@" 2>&1) || TRY_RC=$?; }
 
 human_login() { if [[ -n ${KOINON_CLAIM_HUMAN:-} ]]; then echo "$KOINON_CLAIM_HUMAN"; else gh api user --jq .login; fi; }
 
-# read_claim N -> JSON {issue,sha,state,holder,human,pr,note,released_by}. Returns 0 found, 1 no claim
-# ref, 4 API error. N is an issue number, or adr-NNNN for an ADR number reservation.
+# read_claim N -> JSON {issue,sha,at,state,holder,human,pr,note,released_by} (at: the claim commit's
+# date). Returns 0 found, 1 no claim ref, 4 API error. N is an issue number, or adr-NNNN for an ADR
+# number reservation.
 read_claim() {
   local out
   # shellcheck disable=SC2016
   out=$(gh api graphql -f o="$OWNER" -f n="$NAME" -f q="refs/heads/claim/$1" -f query='
-    query($o:String!,$n:String!,$q:String!){repository(owner:$o,name:$n){ref(qualifiedName:$q){target{... on Commit{oid message}}}}}' \
-    --jq '.data.repository.ref.target // empty | [.oid, .message] | @json') || { echo "claim: cannot read claim/$1" >&2; return 4; }
+    query($o:String!,$n:String!,$q:String!){repository(owner:$o,name:$n){ref(qualifiedName:$q){target{... on Commit{oid message committedDate}}}}}' \
+    --jq '.data.repository.ref.target // empty | [.oid, .message, .committedDate] | @json') || { echo "claim: cannot read claim/$1" >&2; return 4; }
   [[ -n $out ]] || return 1
   jq -c --arg n "$1" "$JQ_PARSE"'
-    . as [$sha, $msg] | ($msg | claim_parse) + {issue: ($n | tonumber? // $n), sha: $sha}' <<<"$out" || return 4
+    . as [$sha, $msg, $at] | ($msg | claim_parse) + {issue: ($n | tonumber? // $n), sha: $sha, at: ($at // "")}' <<<"$out" || return 4
 }
 
 # load_claim N: sets C and returns read_claim's code; an API error dies (exit 1).
@@ -271,15 +270,12 @@ open_pr_closers() {
   jq -c --arg repo "$REPO" "$JQ_PR_CLOSERS" <<<"$pages"
 }
 
-# pr_conflicts CLOSERS N HUMAN -> "#P by @author" for each open pull request that closes N and is not
-# by HUMAN, one per line. own_pr CLOSERS N HUMAN -> the first one that is (empty if none).
-pr_conflicts() {
-  jq -r --argjson n "$2" --arg h "$(lower "$3")" '
-    .[] | select((.issues | index($n)) and (.author | ascii_downcase) != $h) | "#\(.number) by @\(.author)"' <<<"$1"
-}
-own_pr() {
-  jq -r --argjson n "$2" --arg h "$(lower "$3")" '
-    [.[] | select((.issues | index($n)) and (.author | ascii_downcase) == $h) | .number] | first // empty' <<<"$1"
+# prs_closing CLOSERS N HUMAN -> the open pull requests that close N, as JSON {own: the first one by
+# HUMAN (or ""), others: "#P by @author, ..." for the rest (or "")}.
+prs_closing() {
+  jq -c --argjson n "$2" --arg h "$(lower "$3")" '[.[] | select(.issues | index($n))]
+    | {own: ([.[] | select((.author | ascii_downcase) == $h) | .number] | first // "" | tostring),
+       others: ([.[] | select((.author | ascii_downcase) != $h) | "#\(.number) by @\(.author)"] | join(", "))}' <<<"$1"
 }
 
 # other_assignees ISSUE_JSON HUMAN -> the assignees other than HUMAN, space separated.
@@ -356,7 +352,7 @@ cmd_next() {
         content{... on Issue{number title state createdAt repository{nameWithOwner} milestone{title}
           labels(first:50){nodes{name}} assignees(first:10){nodes{login}}}}}}}}}' |
     jq -s --arg repo "$REPO" --arg ms "$ms" --arg label "$label" --argjson held "$held" --argjson prs "$prs" \
-      --arg human "$human" "$JQ_RANK$JQ_NEXT")
+      --arg human "$human" "$JQ_NEXT")
   while IFS=$'\037' read -r n p c t; do
     [[ -n $n ]] || continue
     blockers=$(gh api "repos/$REPO/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo 0)
@@ -369,7 +365,7 @@ cmd_next() {
 # Reads CLOSERS (open_pr_closers of this take).
 CLOSERS="[]"
 take_one() {
-  local n=$1 holder=$2 human=$3 issue parent="" rc=0 held_by conflicts others pr
+  local n=$1 holder=$2 human=$3 issue parent="" rc=0 held_by prs others
   issue=$(issue_json "$n") || { echo "claim: cannot read issue #$n" >&2; return 1; }
   if [[ $(jq -r .state <<<"$issue") != open ]]; then echo "claim: #$n is closed" >&2; return 2; fi
   if [[ $(jq -r .pull <<<"$issue") != false ]]; then echo "claim: #$n is a pull request" >&2; return 2; fi
@@ -378,7 +374,11 @@ take_one() {
     parent=$(jq -r .sha <<<"$C")
     if [[ $(jq -r .state <<<"$C") == held ]]; then
       held_by=$(jq -r .holder <<<"$C")
-      if same_holder "$held_by" "$holder"; then echo "#$n is already yours (lane $LANE)"; TAKE_NEW=0; return 0; fi
+      if same_holder "$held_by" "$holder"; then
+        # A restart in the same lane keeps its claim (exit 0); a second session in the lane must see it.
+        warn "#$n is already held by $held_by since $(jq -r '.at // "" | if . == "" then "an unknown date" else . end' <<<"$C"); if another session took it, stop and use your own --lane"
+        echo "#$n is already yours (lane $LANE)"; TAKE_NEW=0; return 0
+      fi
       if [[ $(lower "$(jq -r .human <<<"$C")") == "$(lower "$human")" ]]; then
         echo "claim: #$n is held by your lane $(holder_lane "$held_by") ($held_by): use --lane $(holder_lane "$held_by"), or release it first (release $n --force)" >&2
       else
@@ -387,12 +387,13 @@ take_one() {
       return 2
     fi
   fi
-  conflicts=$(pr_conflicts "$CLOSERS" "$n" "$human" | paste -sd, - | sed 's/,/, /g')
-  if [[ -n $conflicts ]]; then echo "claim: #$n has an open pull request by someone else: $conflicts. Pick another issue." >&2; return 2; fi
+  prs=$(prs_closing "$CLOSERS" "$n" "$human")
+  if [[ -n $(jq -r .others <<<"$prs") ]]; then
+    echo "claim: #$n has an open pull request by someone else: $(jq -r .others <<<"$prs"). Pick another issue." >&2; return 2
+  fi
   others=$(other_assignees "$issue" "$human")
   if [[ -n $others ]]; then echo "claim: #$n is assigned to $others. Pick another issue." >&2; return 2; fi
-  pr=$(own_pr "$CLOSERS" "$n" "$human")
-  if ! write_claim "$n" held "$holder" "$human" "$pr" "" "$parent"; then
+  if ! write_claim "$n" held "$holder" "$human" "$(jq -r .own <<<"$prs")" "" "$parent"; then
     echo "claim: lost the race for #$n: someone claimed it first. Pick another issue." >&2; return 2
   fi
   TAKE_NEW=1
@@ -402,7 +403,7 @@ take_one() {
 }
 
 cmd_take() {
-  local issues=() a human holder claims want lane_held human_held taken=() n rc t
+  local issues=() a human holder claims want lane_held human_held n rc
   for a in "$@"; do
     [[ $a =~ ^[0-9]+$ ]] || die "usage: take <N>... [--lane L]"
     issues+=("$a")
@@ -420,19 +421,31 @@ cmd_take() {
     CLAIM_EXIT=2 die "$human holds $human_held claims; ${#issues[@]} more would pass the cap of $HUMAN_CAP."
   fi
   CLOSERS=$(open_pr_closers) || die "cannot list the open pull requests (API error); retry, nothing was claimed"
+  TAKE_HOLDER=$holder TAKE_HUMAN=$human
+  trap take_rollback EXIT # all or nothing, also when a read or a write dies
   for n in "${issues[@]}"; do
-    rc=0; TAKE_NEW=0
+    rc=0; TAKE_NEW=0; TAKE_AT=$n
     take_one "$n" "$holder" "$human" || rc=$?
-    if ((rc == 0)); then ((TAKE_NEW == 0)) || taken+=("$n"); continue; fi
-    # All or nothing: a pull request closing several issues needs all of them.
-    for t in ${taken[@]+"${taken[@]}"}; do
-      if load_claim "$t"; then
-        write_claim "$t" released "$holder" "$human" "" "rolled back: #$n was not available" "$(jq -r .sha <<<"$C")" "$holder" || true
-        echo "rolled back #$t" >&2
-      fi
-    done
+    if ((rc == 0)); then ((TAKE_NEW == 0)) || TAKEN+=("$n"); continue; fi
     exit "$rc"
   done
+  trap - EXIT
+}
+
+# take_rollback: the EXIT trap of take. A pull request closing several issues needs all of them, so
+# on any exit before the end it releases and unassigns the claims this take wrote (TAKEN).
+TAKEN=() TAKE_HOLDER='' TAKE_HUMAN='' TAKE_AT=''
+take_rollback() {
+  local rc=$? t
+  trap - EXIT
+  for t in ${TAKEN[@]+"${TAKEN[@]}"}; do
+    if load_claim "$t"; then
+      write_claim "$t" released "$TAKE_HOLDER" "$TAKE_HUMAN" "" "rolled back: #$TAKE_AT was not available" "$(jq -r .sha <<<"$C")" "$TAKE_HOLDER" || true
+      unassign "$t" "$TAKE_HUMAN"
+      echo "rolled back #$t" >&2
+    fi
+  done
+  exit "$rc"
 }
 
 # release_check N FORCE: sets C, HUMAN; exit 3 unless the held claim on N is this login's in this lane

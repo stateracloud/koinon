@@ -56,8 +56,9 @@ current milestone a due date, and put Ready issues in it.
 - Review on sensitive paths only: in the `pull_request` rule add **Require reviewers**
   (`required_reviewers`): one approval, from a team holding `@procoduck` and `@ovirandunu`, for the
   file patterns printed by `hack/claim.sh sensitive-paths` (the `# Sensitive paths` section of
-  `.github/CODEOWNERS` is the single source; re-run the command whenever it changes). Leave the
-  general "required approvals" at 0 and "Require review from Code Owners" off. GitHub does not count
+  `.github/CODEOWNERS` is the single source; re-run the command whenever it changes). ADR 0104 adds
+  `/hack/pr-updater.sh` to that section (the updater runs with the App token): after it merges, set
+  the ruleset's path list again from `hack/claim.sh sensitive-paths`. Leave the general "required approvals" at 0 and "Require review from Code Owners" off. GitHub does not count
   the pull request author, so the other human approves.
 - Keep `require_extra_approval_for_unattributed_changes: true`? It makes a commit that is not
   attributed to the pull request's author need an extra approval, and the updater's merge commit
