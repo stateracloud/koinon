@@ -32,7 +32,9 @@ import (
 //
 // Not covered: that server; notifications on a call's stream; anything else on a stream that ends
 // in a guarded result. The guard cannot tell they happened; the gateway of ADR 0097 step 2 (v0.2)
-// hands it every message. Server-initiated requests are covered by the client meanwhile (#269).
+// hands it every message. Server-initiated requests are covered by the client meanwhile (#269, whose
+// exit condition is "the step 2 gateway refuses these itself"). A reply of a method the guard has no
+// reading for is not a gap of this kind: CheckUnseen takes both legs for it.
 
 // DefaultUnseenAfter is how long a passed call may wait for its guarded result before its reply
 // counts as unseen for good. Tool calls can take minutes; a call still open after this did not end

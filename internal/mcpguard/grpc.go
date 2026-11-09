@@ -53,6 +53,7 @@ func denied(text string) *extmcp.AuthorizationError {
 // gRPC error is reserved for a guard that cannot answer, which the gateway fails closed on.
 func (s *Server) CheckRequest(ctx context.Context, req *extmcp.McpRequest) (*extmcp.McpRequestResult, error) {
 	if req.GetMethod() != MethodToolsCall {
+		// Rule: a request not yet sent is refused; CheckResponse passes the reply the server already made (#254).
 		// The processor is configured for tools/call only; anything else is a configuration
 		// error, and the cautious answer is no.
 		return &extmcp.McpRequestResult{Result: &extmcp.McpRequestResult_Error{Error: denied("refused by the leak guard: unexpected method " + req.GetMethod())}}, nil
@@ -81,6 +82,20 @@ func (s *Server) CheckRequest(ctx context.Context, req *extmcp.McpRequest) (*ext
 // withheld: an unrecorded private result could leave the org unseen later.
 func (s *Server) CheckResponse(ctx context.Context, resp *extmcp.McpResponse) (*extmcp.McpResponseResult, error) {
 	if resp.GetMethod() != MethodToolsCall {
+		// Rule: a reply the server already made is passed so the agent is not left hanging, and its session takes both legs; CheckRequest refuses instead, as nothing is sent yet (#254).
+		// A reply the guard has no reading for: it passes, but the session takes both legs (#254).
+		// The gateway is configured for tools/call only, so this is the fail-closed rule for drift.
+		if len(resp.GetServiceNames()) != 1 {
+			return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Error{Error: denied("withheld by the leak guard: a reply must come from exactly one server")}}, nil
+		}
+		if err := s.g.CheckUnseen(ctx, metaString(resp.GetMetadataContext(), MetaAgent), resp.GetServiceNames()[0], resp.GetMcpResponse()); err != nil {
+			text, ok := RefusalText(err)
+			if !ok {
+				s.log.Error("mcp guard: recording an unclassified reply failed", "method", resp.GetMethod(), "err", err)
+				text = "withheld by the leak guard: it could not record this reply (an internal error); try again later"
+			}
+			return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Error{Error: denied(text)}}, nil
+		}
 		return &extmcp.McpResponseResult{Result: &extmcp.McpResponseResult_Pass{Pass: &extmcp.Pass{}}}, nil
 	}
 	if len(resp.GetServiceNames()) != 1 {
