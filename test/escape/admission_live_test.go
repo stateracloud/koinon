@@ -72,13 +72,16 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 		// so the wrong class must be a real object: a throwaway one, removed at the end (dry runs create nothing).
 		const wrongClass = "koinon-escape-wrong"
 		_, err := cs.NodeV1().RuntimeClasses().Create(ctx, &nodev1.RuntimeClass{
-			ObjectMeta: metav1.ObjectMeta{Name: wrongClass}, Handler: "runc"}, metav1.CreateOptions{})
+			ObjectMeta: metav1.ObjectMeta{Name: wrongClass}, Handler: "runc",
+		}, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			Fail("cannot create the throwaway RuntimeClass " + wrongClass + " for the wrong-runtime-class case: " + err.Error())
 		}
-		DeferCleanup(func(ctx SpecContext) {
-			_ = cs.NodeV1().RuntimeClasses().Delete(ctx, wrongClass, metav1.DeleteOptions{})
-		})
+		if err == nil { // remove it only when this run created it
+			DeferCleanup(func(ctx SpecContext) {
+				_ = cs.NodeV1().RuntimeClasses().Delete(ctx, wrongClass, metav1.DeleteOptions{})
+			})
+		}
 
 		pod := func(mutate func(*corev1.Pod)) *corev1.Pod {
 			p := &corev1.Pod{
@@ -121,10 +124,10 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 		gw := kubernetes.NewForConfigOrDie(gateway)
 		image := envOr("KOINON_ESCAPE_SUPERVISOR_IMAGE", "ghcr.io/nvidia/openshell/supervisor:0.1.5")
 		supervisor := func(mutate func(*corev1.Pod)) *corev1.Pod {
-			p := supervisorPod("koinon-escape-sup", mutate)
+			// The default image comes first, so a mutation can override it.
+			p := supervisorPod("koinon-escape-sup", func(p *corev1.Pod) { p.Spec.Containers[0].Image = image }, mutate)
 			p.Name = ""
 			p.GenerateName = "koinon-escape-sup-"
-			p.Spec.Containers[0].Image = image
 			return p
 		}
 		_, err = gw.CoreV1().Pods(ns).Create(ctx, supervisor(func(*corev1.Pod) {}), dry)

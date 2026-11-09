@@ -310,7 +310,7 @@ esac
 
 if [[ $SUITE == go && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
   step "escape suite, OpenShell cases (test/escape, chart policy live)"
-  CLUSTER="$CLUSTER" "$here/escape-openshell.sh" 2>&1 | tee "$OUT/escape-openshell.log"
+  CLUSTER="$CLUSTER" KOINON_NAMESPACE="$NS" "$here/escape-openshell.sh" 2>&1 | tee "$OUT/escape-openshell.log"
   done_step "Escape suite (OpenShell cases)"
 fi
 

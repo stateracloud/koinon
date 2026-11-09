@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The escape suite's OpenShell cases (test/escape, label openshell, without the Gitea read grant cases) against
+# The escape suite's OpenShell cases (test/escape, label openshell, without the Gitea read grant cases and the leak guard exfil spec, which escape-mcp.sh runs) against
 # the quickstart install that test/e2e/run.sh made, so the e2e proves that the chart's real sandbox admission
 # policy (charts/koinon/templates/sandbox-policy.yaml, the supervisor ServiceAccount token rules of #220
 # included) admits the pods OpenShell and the Agent Sandbox controller create, and that the cases the suite
@@ -55,6 +55,6 @@ CLUSTER="$CLUSTER" \
 KOINON_OPENSHELL_WORKSPACE="$ws" \
 KOINON_ESCAPE_CHART_NAMESPACE="$ns" \
 KOINON_ESCAPE_GITEA_STANDIN=0 \
-KOINON_ESCAPE_LABEL="openshell && !gitea" \
+KOINON_ESCAPE_LABEL="openshell && !gitea && !leakguard" \
 KOINON_REQUIRE=openshell,cluster,escape-gateway \
   "$root/test/escape/kind.sh"

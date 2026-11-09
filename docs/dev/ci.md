@@ -151,8 +151,8 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   real supervisor pods (the `openshell-gateway` token rules of #220) and workload pods that OpenShell and
   the Agent Sandbox controller create for every sandbox of the run, and the live case, which fails here
   instead of skipping (`KOINON_ESCAPE_POLICY_REQUIRED=1`), dry-runs refused pods as the controller and as
-  the gateway (Kata annotations, wrong runtime class, an API-audience or long-lived supervisor token, a
-  foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image build, one ko stand-in
+  the gateway (Kata annotations, no runtime class, a wrong runtime class; for the supervisor: an API-audience, a
+  missing-audience or a long-lived token, a token mounted by default, a foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image build, one ko stand-in
   image, a dozen sandboxes); the step's `Escape suite (OpenShell cases)` row in the run's table is the
   real number. A skip of a case it needs is a failure (`KOINON_REQUIRE=openshell,cluster,escape-gateway`).
   The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
