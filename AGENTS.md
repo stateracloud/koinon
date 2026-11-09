@@ -178,7 +178,8 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **Merging.** The only merge method is a merge commit, and `hack/pr-merge.sh <PR> [--admin]` does
   it: it refuses a draft, runs `hack/pr-wait.sh --checks` (with `--require e2e` when the change needs
   the e2e: startup flags, chart Jobs or hooks, anything the e2e expects), reads every required context
-  on the head, then `claim.sh review`, `gh pr merge --merge` and a PR comment. Do not hand-write the
+  on the head, then `gh pr merge --merge` and a PR comment. It does not call `claim.sh`: the push to
+  main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the
   wait or the merge. With the merge queue, enqueue (no `--admin`) a needs-e2e PR: the queue runs the
   hosted quickstart on main plus the PR, which is the merge evidence, so a main that moved during the
   lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). Details: `docs/dev/ci.md#merging`.

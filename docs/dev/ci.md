@@ -530,17 +530,17 @@ e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --requi
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
 head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it
-with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
-`hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
+with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge. There is no claim step:
+the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104).
 
-`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
+`hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
 reads every required context of `hack/ci-required.txt` on the head SHA with the shared verdict (below; success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
-succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
-head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
+succeeded a PR comment with the head SHA and the number of contexts it read. It does not call
+`claim.sh`, and `--lane` is a usage error (ADR 0104). `pr-wait.sh --checks` exits 5 on a draft. After
 `ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
 `--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
 re-run of a draft run is ignored too). A red or cancelled run of the ready `ci` is never dropped, and
