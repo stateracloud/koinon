@@ -280,7 +280,7 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 }
 
 const getModelServing = `-- name: GetModelServing :one
-SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url AS provider_url,
        (s.model_id IS NOT NULL)::boolean AS served, (p.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
@@ -300,6 +300,7 @@ type GetModelServingRow struct {
 	ProviderID     pgtype.UUID
 	ProviderName   string
 	ProviderType   string
+	ProviderUrl    string
 	Served         bool
 	CredentialLost bool
 }
@@ -316,6 +317,7 @@ func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams
 		&i.ProviderID,
 		&i.ProviderName,
 		&i.ProviderType,
+		&i.ProviderUrl,
 		&i.Served,
 		&i.CredentialLost,
 	)
