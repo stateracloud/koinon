@@ -14,7 +14,7 @@ installs all of them on a kind cluster. A check in CI keeps this page and that s
 | --- | --- | --- |
 | Kubernetes | 1.30 or newer; tested on 1.37 | Everything. The chart requires 1.30 (`kubeVersion`), where ValidatingAdmissionPolicy v1 is GA. The end-to-end test runs `kindest/node:v1.37.0`. |
 | Agent Sandbox | v1.0.7 | The sandbox objects. The preflight needs a controller image tagged `v1.0.x`. |
-| OpenShell gateway | 0.1.5 | Creating and running sandboxes. |
+| OpenShell gateway | 0.1.7 | Creating and running sandboxes. |
 | A sandbox RuntimeClass | `kata`, or `runc` on kind | Isolation. The default is `kata` (ADR 0045). |
 | CloudNativePG | 1.30.1 | The database, when `postgres.mode` is `cnpg` (the default). |
 | Postgres | 18 or newer | The database, when `postgres.mode` is `external`. |
@@ -132,15 +132,15 @@ Set `server.defaultRuntimeClassName` in it to your RuntimeClass.
 
 ```sh
 helm upgrade --install openshell \
-  "oci://ghcr.io/nvidia/openshell/helm-chart@sha256:e88977ce447fd31c6278697af22f8437b59eae42c9fae9c0e480498bf59d3129" \
-  --version 0.1.5 --namespace openshell --create-namespace \
+  "oci://ghcr.io/nvidia/openshell/helm-chart@sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901" \
+  --version 0.1.7 --namespace openshell --create-namespace \
   -f openshell-values.yaml --wait --timeout 5m
 ```
 
 The chart generates a client certificate Secret, `openshell-client-tls`, in the `openshell`
 namespace. The [quickstart](/quickstart/) copies it into Koinon's namespace.
 
-OpenShell 0.1.5 pulls its supervisor image from `ghcr.io/nvidia/openshell/supervisor:0.1.5`. Koinon's
+OpenShell 0.1.7 pulls its supervisor image from `ghcr.io/nvidia/openshell/supervisor:0.1.7`. Koinon's
 admission policy allows exactly that image. If you pull it through a mirror, set the OpenShell chart's
 `global.image.registry` to the mirror followed by `/nvidia` (its image paths are `openshell/...`, and its
 default is `ghcr.io/nvidia`) and Koinon's `global.imageRegistry` or `global.registryMirrors` to
@@ -165,7 +165,7 @@ Platform teams that refuse it set `sandboxObserver.enabled: false`; see
 any of these:
 
 - Agent Sandbox is missing, or its controller image is not `v1.0.x`.
-- The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.5.
+- The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.7.
 - The RuntimeClass in `openshell.runtimeClassName` does not exist.
 - OpenShell's gateway ConfigMap (`preflight.openshell.namespace` and `.configMap`, default `openshell/openshell-config`) cannot be read or has no `gateway.toml` while a supervisor image is configured, which the chart always does (old issue 489).
 - The CloudNativePG operator is missing (when `postgres.mode` is `cnpg`).

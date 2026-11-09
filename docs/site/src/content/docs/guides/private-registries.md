@@ -114,7 +114,7 @@ reading the sandbox's pod ([How Koinon finds the cause](../agent-health/#how-koi
 
 OpenShell starts a supervisor pod for every sandbox, and Koinon's admission policy admits exactly one
 supervisor image (`sandboxPolicy.supervisorImages`). With the list empty, which is the default, the
-policy admits OpenShell 0.1.5's own image, `ghcr.io/nvidia/openshell/supervisor:0.1.5`, rewritten by the
+policy admits OpenShell 0.1.7's own image, `ghcr.io/nvidia/openshell/supervisor:0.1.7`, rewritten by the
 same rule as every other image. So when you point OpenShell at the same mirror, the two agree. To pin
 something else, list it: an explicit list is used exactly as written. The preflight compares the list with
 the `supervisor_image` in OpenShell's gateway ConfigMap and warns when they differ, because every
