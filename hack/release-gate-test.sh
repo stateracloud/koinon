@@ -4,7 +4,9 @@
 # Tests hack/release-gate.sh with a stubbed gh and git (fixture JSON files, filtered by the real
 # jq, as gh --jq would): the required list is read from the ruleset, a missing or red required
 # check fails, the pull-request-only contexts are read from the merged pull request's head, a
-# push-triggered context is not excused by a PR run, and an unreadable ruleset fails closed.
+# push-triggered context is not excused by a PR run, and an unreadable ruleset fails closed. The
+# quickstart rule (#444) is tested the same way: skipped runs are ignored, and a green merge queue
+# run on the same tree stands in for a missing run.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -44,6 +46,9 @@ repos/o/r) f=repo.json ;;
 repos/o/r/rules/branches/main) f=rules.json ;;
 repos/o/r/commits/*/check-runs) c=${path#repos/o/r/commits/}; f=checks-${c%%/*}.json ;;
 repos/o/r/commits/*/pulls) f=pulls.json ;;
+repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
+repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
+repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*}.json ;;
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
@@ -237,6 +242,71 @@ go_test_case failure
 check "go-test red on the PR head fails" "$(gate_rc)" 1
 go_test_case ""
 check "go-test skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+
+# #444 (ADR 0102): the quickstart on a queue-merged commit.
+qs_case() { # a fresh case whose tagged commit has the given quickstart runs only (set by the caller after)
+	new_case
+	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+	run_on "$sha" go success
+}
+mg_run() { # <run id> <head sha> <tree of that head> [quickstart conclusion]: a green merge_group run
+	local f=$FX/mg-runs.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --argjson i "$1" --arg h "$2" '.workflow_runs += [{id: $i, head_sha: $h, event: "merge_group", conclusion: "success"}]' "$f" >"$f.new"
+	mv "$f.new" "$f"
+	echo "{\"sha\":\"$2\",\"tree\":{\"sha\":\"$3\"}}" >"$FX/commit-$2.json"
+	echo "{\"jobs\":[{\"id\":1,\"name\":\"decide\",\"conclusion\":\"success\"},{\"id\":2,\"name\":\"quickstart\",\"conclusion\":\"${4:-success}\"}]}" >"$FX/jobs-$1.json"
+}
+qs_case
+run_on "$sha" quickstart success 2026-01-03T00:00:00Z
+run_on "$sha" quickstart skipped 2026-01-03T00:30:00Z
+check "quickstart: queue run green, then the push run skipped: passes" "$(gate_rc)" 0
+check "...and reports the quickstart" "$(grep -c 'ok: kind e2e (quickstart)' "$tmp/out")" 1
+qs_case
+run_on "$sha" quickstart skipped
+check "quickstart: only skipped runs fails" "$(gate_rc)" 1
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z
+run_on "$sha" quickstart skipped 2026-01-03T00:30:00Z
+check "quickstart: newest non-skipped run is a failure fails" "$(gate_rc)" 1
+check "...and names the conclusion" "$(grep -c 'quickstart job): failure' "$tmp/err")" 1
+qs_case
+run_on "$sha" quickstart cancelled 2026-01-03T00:00:00Z
+mg_run 77 mgsha tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a cancelled run is not excused by a queue run" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: no run on the commit, green queue run on the same tree passes" "$(gate_rc)" 0
+check "...and names the queue run" "$(grep -c 'merge queue run 77' "$tmp/out")" 1
+qs_case
+run_on "$sha" quickstart skipped
+mg_run 77 mgsha tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: only skipped on the commit plus a queue run on the same tree passes" "$(gate_rc)" 0
+qs_case
+mg_run 77 mgsha tree2
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a queue run on a different tree fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1 skipped
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a queue run whose quickstart job was skipped fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1
+check "quickstart: the tagged commit's tree cannot be read fails" "$(gate_rc)" 1
+check "...and says the queue runs could not be read" "$(grep -c 'could not be read' "$tmp/err")" 1
+qs_case
+mg_run 77 mgsha tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+rm "$FX/commit-mgsha.json"
+check "quickstart: a queue run head whose tree cannot be read fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+rm "$FX/jobs-77.json"
+check "quickstart: a queue run whose jobs cannot be read fails" "$(gate_rc)" 1
 
 new_case
 rm "$FX/rules.json"

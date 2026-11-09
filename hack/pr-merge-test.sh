@@ -167,6 +167,16 @@ run 7 --admin
 check "with a merge queue --admin still merges directly" 0 merge
 grep -q -- '--merge --admin --match-head-commit' "$FAKE_DIR/calls" || { echo "FAIL: queue: admin bypass" >&2; fail=1; }
 grep -q 'added to the merge queue' <<<"$out" && { echo "FAIL: queue: admin is not queued" >&2; fail=1; }
+grep -q 'skips the merge queue' <<<"$out" && { echo "FAIL: queue: no admin warning when e2e is not needed" >&2; fail=1; }
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+NEEDS_RC=0 run 7 --admin
+check "--admin on a queue with an e2e-relevant change still merges" 0 merge
+grep -q 'WARNING: --admin skips the merge queue' <<<"$out" || { echo "FAIL: queue: admin warning for e2e-relevant change: $out" >&2; fail=1; }
+setup false "$green"
+echo false >"$FAKE_DIR/rules"
+NEEDS_RC=0 run 7 --admin
+grep -q 'skips the merge queue' <<<"$out" && { echo "FAIL: no queue: no admin warning" >&2; fail=1; }
 setup false "$green"
 echo false >"$FAKE_DIR/rules"
 run 7

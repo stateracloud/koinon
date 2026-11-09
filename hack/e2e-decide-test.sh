@@ -17,12 +17,40 @@ cat >"$tmp/needs" <<'SH'
 if [[ $1 == --forced-only ]]; then echo "forced stub"; exit "${STUB_FORCED:-1}"; fi
 echo "full stub $*"; exit "${STUB_FULL:-1}"
 SH
-# Stub gh: STUB_LABELS answers the PR's current labels; anything else STUB_COVERED.
+# Stub gh: answers from fixture JSON and applies the script's own --jq with the real jq, so a typo in a
+# filter fails a test. `run list` also honours --event and --status the way gh does. Fixtures come from
+# env: STUB_LABELS (the PR's label names; served as the API's label objects), STUB_COVERED (head sha of the last green push run on main),
+# STUB_MG_RUNS ("<run id> <sha>": a green merge_group run), STUB_MG_FAILED_RUN (a merge_group run that
+# failed overall although its quickstart job passed), STUB_MG_JOB (conclusion of run <id>'s quickstart job;
+# empty: that job does not exist), STUB_TREE_PUSH / STUB_TREE_MG (tree sha of the pushed / any other commit).
 cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
+args=("$@")
+expr=. event= status=
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case ${args[i]} in
+  --jq) expr=${args[i + 1]} ;;
+  --event) event=${args[i + 1]} ;;
+  --status) status=${args[i + 1]} ;;
+  esac
+done
 case "$*" in
-*/issues/*/labels*) echo "${STUB_LABELS:-[]}" ;;
-*) echo "${STUB_COVERED:-}" ;;
+*/issues/*/labels*) printf '%s\n' "${STUB_LABELS:-[]}" | jq -c '[.[] | {id: 1, name: .}]' | jq -c "$expr" ;;
+*git/commits/pushsha*) [[ -n ${STUB_TREE_PUSH:-} ]] && jq -n --arg t "$STUB_TREE_PUSH" '{sha: "pushsha", tree: {sha: $t}}' | jq -r "$expr" ;;
+*git/commits/*) [[ -n ${STUB_TREE_MG:-} ]] && jq -n --arg t "$STUB_TREE_MG" '{sha: "x", tree: {sha: $t}}' | jq -r "$expr" ;;
+*"run list"*)
+  jq -n --arg cov "${STUB_COVERED:-}" --arg mg "${STUB_MG_RUNS:-}" --arg bad "${STUB_MG_FAILED_RUN:-}" '
+    [ {databaseId: 90, headSha: "prsha", event: "pull_request", status: "success"},
+      {databaseId: 91, headSha: "oldsha", event: "workflow_dispatch", status: "success"} ]
+    + (if $bad != "" then [{databaseId: ($bad | tonumber), headSha: "mgbad", event: "merge_group", status: "failure"}] else [] end)
+    + (if $cov != "" then [{databaseId: 78, headSha: $cov, event: "push", status: "success"}] else [] end)
+    + (if $mg != "" then [{databaseId: ($mg | split(" ")[0] | tonumber), headSha: ($mg | split(" ")[1]), event: "merge_group", status: "success"}] else [] end)' |
+    jq --arg e "$event" --arg s "$status" '[.[] | select(($e == "" or .event == $e) and ($s == "" or .status == $s))]' | jq -r "$expr"
+  ;;
+*actions/runs/*/jobs*)
+  jq -n --arg j "${STUB_MG_JOB:-}" '{jobs: ([{id: 1, name: "decide", conclusion: "success"}, {id: 2, name: "e2e result", conclusion: "success"}]
+    + (if $j != "" then [{id: 9, name: "quickstart", conclusion: $j}] else [] end))}' | jq -r "$expr" ;;
+*) echo "gh stub: unexpected $*" >&2; exit 1 ;;
 esac
 SH
 chmod +x "$tmp/needs" "$tmp/gh"
@@ -68,18 +96,32 @@ want true "push with no green run to compare with runs" EVENT=push
 want true "push with e2e-relevant changes since the last green run" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
 want false "push without them does not" EVENT=push STUB_COVERED=abc123 STUB_FULL=1
 want true "push: a rule failure fails closed" EVENT=push STUB_COVERED=abc123 STUB_FULL=2
-# #225, ADR 0094 decision 4: the queue never runs the e2e; `required` asks e2e result for evidence on the PR head.
+# #444: a push whose tree a green merge_group quickstart already tested does not run again.
+PQ=(EVENT=push PUSH_SHA=pushsha GH_REPO=o/r STUB_COVERED=abc123 STUB_FULL=0 'STUB_MG_RUNS=77 mgsha' STUB_TREE_PUSH=tree1 STUB_TREE_MG=tree1 STUB_MG_JOB=success)
+want false "push: same tree as a green queue quickstart does not run" "${PQ[@]}"
+summary_has "merge queue"
+want true "push: a different tree runs" "${PQ[@]}" STUB_TREE_MG=tree2
+want true "push: the queue run's quickstart was skipped runs" "${PQ[@]}" STUB_MG_JOB=skipped
+want true "push: the queue run's quickstart was cancelled runs" "${PQ[@]}" STUB_MG_JOB=cancelled
+want true "push: the queue run has no quickstart job runs" "${PQ[@]}" STUB_MG_JOB=
+want true "push: only a failed queue run (its quickstart passed) runs" "${PQ[@]}" STUB_MG_RUNS= STUB_MG_FAILED_RUN=70
+want false "push: a failed queue run next to a green one still skips on the green one" "${PQ[@]}" STUB_MG_FAILED_RUN=70
+want true "push: no queue run runs" "${PQ[@]}" STUB_MG_RUNS=
+want true "push: unreadable pushed tree runs" "${PQ[@]}" STUB_TREE_PUSH=
+want true "push: without PUSH_SHA the queue is not consulted" EVENT=push GH_REPO=o/r STUB_COVERED=abc123 STUB_FULL=0 'STUB_MG_RUNS=77 mgsha' STUB_TREE_PUSH=tree1 STUB_TREE_MG=tree1 STUB_MG_JOB=success
+# #444: the queue commit (main plus the PR) runs the quickstart when the entry is e2e-relevant; the run is the
+# evidence, so `required` stays false (no PR-head lookup).
 MG=(EVENT=merge_group MG_BASE=abc123)
-want false "queue entry touching the e2e's files does not run" "${MG[@]}" STUB_FORCED=0
-want false "queue entry that is e2e-relevant does not run" "${MG[@]}" STUB_FULL=0
+want true "queue entry touching the e2e's files runs" "${MG[@]}" STUB_FORCED=0
+want true "queue entry that is e2e-relevant runs" "${MG[@]}" STUB_FULL=0
 want false "queue entry with nothing relevant does not run" "${MG[@]}"
-want false "queue entry without a base sha does not run" EVENT=merge_group
-req true "queue entry touching the e2e's files requires evidence" "${MG[@]}" STUB_FORCED=0
-req true "queue entry that is e2e-relevant requires evidence" "${MG[@]}" STUB_FULL=0
+want true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
+want true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
+want true "queue entry without a base sha runs" EVENT=merge_group
+req false "queue entry touching the e2e's files requires no PR-head evidence" "${MG[@]}" STUB_FORCED=0
+req false "queue entry that is e2e-relevant requires no PR-head evidence" "${MG[@]}" STUB_FULL=0
 req false "queue entry with nothing relevant requires none" "${MG[@]}"
-req true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
-req true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
-req true "queue entry without a base sha fails closed" EVENT=merge_group
+req false "queue entry without a base sha requires none" EVENT=merge_group
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
 # required: the pull request needs an e2e, whether or not it runs here.
