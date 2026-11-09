@@ -17,8 +17,10 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   callers and what depends on them. Do not start with `grep -rn` or `cat` on whole files.
 - When you must read a file, read the part you need: `sed -n 'A,Bp'` (at most about 120 lines) or the
   Read tool with an offset and limit. Never `cat` a large file or a log whole; filter it first.
-- One file and one range per call: no `cat a b c`, no several `sed -n` in one command, no loop
-  that prints files. Bundled reads were 20% of all subagent output (docs/research/2026-11-token-tiers.md).
+- Keep each read small: no `cat a b c`, no loop that prints files, and at most 210 lines in total
+  from the `sed -n` line ranges of one command (two or three small ranges in one call are fine; a
+  pattern range such as `/^func X/,/^}/p` goes alone). Bundled reads were 20% of all subagent output
+  (docs/research/2026-11-token-tiers.md).
 - Output too large and saved to a file: grep that file or Read it with offset and limit, never whole.
 - `git diff --stat` before `git diff`; then one path at a time, `| head -150` when it is long.
 - Edit with the Edit tool (exact string replacement), not with Python or sed heredocs. Before an
@@ -82,6 +84,6 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 ## For parents
 - Every spawn prompt names this brief, a model, the worktree and the scope.
 - Spawns are checked by `hack/hooks/agent-spawn-check.sh` (a PreToolUse hook in `.claude/settings.json`): a model and this brief are required (old issue 397).
-- Reads are checked too (old issue 534): `hack/hooks/read-result-check.sh` refuses a Read of `tool-results/` without `limit`; `hack/hooks/bash-read-check.sh` refuses a Bash call that prints several files, loops over files or cats a whole source file.
+- Reads are checked too (old issue 534): `hack/hooks/read-result-check.sh` refuses a Read of `tool-results/` without `limit`; `hack/hooks/bash-read-check.sh` refuses a Bash call that cats several files or a whole source file, loops over files, or asks `sed -n` for more than 210 lines in total (or for several reads when one has no line range).
 - No third fix round when round 2 still turns up a new class of finding: stop and ask the human through the question tool, with research as the recommended option.
 - One fix round = one fresh agent, given the worktree, the findings and the head SHA. Never resume an agent past one compaction or about 120k context.

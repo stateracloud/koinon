@@ -76,16 +76,44 @@ bash_case allow 'sed -n 1p a.go | head -1; git status'
 bash_case allow 'echo "for f in *; do cat $f; done"'
 bash_case allow 'go test ./internal/x 2>&1 | tail -20'
 bash_case allow 'jq . <<<"$(cat a.yaml b.yaml)"'
+# Several sed -n line ranges in one command, 210 lines or less in total (the cost is the lines).
+bash_case allow 'sed -n 1,20p a.go; sed -n 5,9p b.go'
+bash_case allow "sed -n '1,20p' a.go && sed -n '30,40p' a.go"
+bash_case allow 'sed -n 1p a.go b.go'
+bash_case allow 'sed -n 1,5p a.go
+sed -n 1,5p b.go'
+bash_case allow 'cd /tmp/wt && sed -n 40,80p hack/a.sh; sed -n 100,140p hack/b.sh; git diff --stat | tail -15'
+bash_case allow 'sed -n 1,100p a.go; sed -n 1,100p b.go'
+bash_case allow 'sed -n 1,200p a.go'
+bash_case allow 'sed -n 60,260p a.go'
+bash_case allow 'sed -n 1,150p a.go; sed -n 1,60p b.go'
+bash_case allow 'sed -n "10,+5p;40p;41q" a.go b.go'
+bash_case allow 'sed -n -e 1,20p -e 40,60p a.go'
+bash_case allow 'sed -n -e1,20p --expression=40,60p a.go'
+bash_case allow "sed -n '1,20 p' a.go; sed -n 5,9p b.go"
+bash_case allow "sed -n '/^func Register/,/^}/p' internal/api/handler.go"
+bash_case allow 'sed -n 1,900p a.go | grep -n Register; sed -n 1,20p b.go'
 
 # Refused.
 bash_case deny 'cat a.go b.go'
 bash_case deny 'cat internal/api/handler.go'
 bash_case deny 'cat -n hack/preflight.sh'
-bash_case deny 'sed -n 1,20p a.go; sed -n 5,9p b.go'
-bash_case deny "sed -n '1,20p' a.go && sed -n '30,40p' a.go"
-bash_case deny 'sed -n 1p a.go b.go'
-bash_case deny 'sed -n 1,5p a.go
-sed -n 1,5p b.go'
+# sed -n: more than 210 lines in total, or several reads when the size of one is unknown.
+bash_case deny 'sed -n 1,150p a.go; sed -n 1,61p b.go'
+bash_case deny 'sed -n 1,211p a.go'
+bash_case deny 'sed -n 1,150p a.go b.go'
+bash_case deny 'sed -n -e 1,100p -e 200,320p a.go'
+bash_case deny 'sed -n -e1,9999p a.go'
+bash_case deny 'sed -n --expression=1,9999p a.go'
+bash_case deny "sed -n '1,500 p' a.go"
+bash_case deny 'sed -n --file=print.sed a.go b.go'
+bash_case deny 'sed -n 1,71p a.go
+sed -n 1,71p b.go
+sed -n 1,71p c.go'
+bash_case deny "sed -n '/^func A/,/^}/p' a.go; sed -n 1,5p b.go"
+bash_case deny 'sed -n "${a},${b}p" a.go; sed -n 1,5p b.go'
+bash_case deny "sed -n '100,\$p' a.go && sed -n 1p b.go"
+bash_case deny 'sed -n -f print.sed a.go b.go'
 bash_case deny 'for f in a.go b.go; do cat "$f"; done'
 bash_case deny 'for f in *.go
 do
@@ -105,10 +133,16 @@ bash_case deny 'cat a.go 2>/dev/null'
 out=$("$here/bash-read-check.sh" <<<'{"tool_input":{"command":"cat a.go b.go"}}')
 reason=$(jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out")
 if [ "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$out")" = PreToolUse ] && [ "$(printf '%s\n' "$reason" | wc -l)" -eq 1 ] \
-  && [[ $reason == *"Read with offset and limit"* ]]; then
-  ok "deny output shape (one-line reason naming the alternative)"
+  && [[ $reason == *"Read with offset and limit"* ]] && [[ $reason == *"Edit"* ]]; then
+  ok "deny output shape (one-line reason naming the alternative and the Edit rule)"
 else
   bad "deny output shape ($out)"
+fi
+out=$("$here/bash-read-check.sh" <<<'{"tool_input":{"command":"sed -n 1,150p a.go; sed -n 1,61p b.go"}}')
+if [[ $(jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out") == *"211 lines"*"limit is 210"* ]]; then
+  ok "the sed -n reason gives the total and the limit"
+else
+  bad "sed -n reason ($out)"
 fi
 if [ -z "$("$here/bash-read-check.sh" <<<'{"tool_input":{}}')" ]; then ok "no command: allow"; else bad "no command"; fi
 
