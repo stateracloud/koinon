@@ -545,6 +545,18 @@ find_pr() {
       | select($a == "" or ((.author.login // "") | ascii_downcase) == $a) | .number' | head -1
 }
 
+# find_closed_pr N AUTHOR SINCE_EPOCH -> "NUMBER MERGED" (MERGED 0|1) of the latest closed PR by AUTHOR
+# whose body closes issue N and that closed at or after SINCE_EPOCH (empty if none). The time bound
+# keeps a pull request of an earlier claim cycle from freeing a new claim.
+find_closed_pr() {
+  gh pr list -R "$REPO" --state closed --limit 50 --json number,body,author,closedAt,mergedAt |
+    jq -r --arg n "$1" --arg a "$(lower "${2:-}")" --argjson s "${3:-0}" '
+      [.[] | select(.body // "" | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#" + $n + "\\b"))
+        | select(((.author.login // "") | ascii_downcase) == $a)
+        | select((.closedAt | fromdateiso8601) >= $s)]
+      | sort_by(.closedAt) | last // empty | "\(.number) \(if .mergedAt then 1 else 0 end)"'
+}
+
 # open_pr_closers -> the open pull requests as JSON [{number, author, issues}] (JQ_PR_CLOSERS). An API
 # error fails: `next` and `take` must not hand out an issue from a partial view.
 open_pr_closers() {
@@ -591,11 +603,17 @@ claim_liveness() {
   local c=$1 lease_s n holder pr j last act
   lease_s=$(parse_lease "$(jq -r .lease_until <<<"$c")") || return 1
   n=$(jq -r .issue <<<"$c"); holder=$(jq -r .holder <<<"$c")
-  LIVE=$lease_s; PR_STATE=none; PR_NUM=
+  LIVE=$lease_s; PR_STATE=none; PR_NUM=; PR_MERGED=0
   pr=$(jq -r .pr <<<"$c")
   # Only a pull request of the claim's own human is the claim's activity.
   if [[ -z $pr ]]; then pr=$(find_pr "$n" "$(jq -r .human <<<"$c")") || return 4; fi
-  [[ -n $pr ]] || return 0
+  if [[ -z $pr ]]; then
+    # No open pull request: one closed since the claim was last renewed (lease start) frees the claim.
+    local closed
+    closed=$(find_closed_pr "$n" "$(jq -r .human <<<"$c")" $((lease_s - $(lease_for_holder "$holder")))) || return 4
+    if [[ -n $closed ]]; then PR_NUM=${closed% *}; PR_MERGED=${closed#* }; PR_STATE=closed; fi
+    return 0
+  fi
   PR_NUM=$pr
   gh_try "repos/$REPO/pulls/$pr"
   if ((TRY_RC != 0)); then
@@ -603,7 +621,7 @@ claim_liveness() {
     return 4
   fi
   case $(jq -r 'if .merged then "closed" elif .state == "closed" then "closed" elif .draft then "draft" else "ready" end' <<<"$TRY_OUT") in
-    closed) PR_STATE=closed; return 0 ;;
+    closed) PR_STATE=closed; [[ $(jq -r '.merged // false' <<<"$TRY_OUT") != true ]] || PR_MERGED=1; return 0 ;;
     draft) PR_STATE=draft ;;
     *) PR_STATE=ready ;;
   esac
@@ -1285,7 +1303,8 @@ sweep_one() {
   if ((rc != 0)); then warn "#$n: API error judging liveness; skipping"; return 0; fi
   case $PR_STATE in
     closed) echo "#$n: pull request #$PR_NUM is closed; releasing"
-      do_release_claim "$c" "pull request #$PR_NUM closed" 1 pr-close || true; return 0 ;;
+      # MERGED=0 (closed unmerged) unassigns the human and returns the issue to Ready, as release-pr did.
+      do_release_claim "$c" "pull request #$PR_NUM closed" "$PR_MERGED" pr-close || true; return 0 ;;
     ready) echo "#$n: pull request #$PR_NUM is in review; skipping"; return 0 ;;
   esac
   labels=$(gh api "repos/$REPO/issues/$n/labels" --jq '.[].name' 2>/dev/null || true)
@@ -1374,9 +1393,10 @@ cmd_release_merged() {
   local before=${1:-} after=${2:-} shas sha prs p failed=0
   [[ $after =~ ^[0-9a-f]{7,64}$ ]] || die "usage: release-merged <BEFORE> <AFTER>"
   if [[ $before =~ ^[0-9a-f]{7,64}$ && ! $before =~ ^0+$ ]]; then
-    shas=$(gh api "repos/$REPO/compare/$before...$after" --jq '.commits[].sha') ||
+    shas=$(gh api --paginate "repos/$REPO/compare/$before...$after" --jq '.commits[].sha') ||
       die "cannot list the commits $before..$after (API error); re-run the job"
-    [[ -n $shas ]] || shas=$after
+    # AFTER is always in the list: a compare page is capped and may omit the newest commit.
+    shas=$(printf '%s\n%s\n' "$shas" "$after" | grep . | sort -u)
   else
     shas=$after
   fi
@@ -1384,6 +1404,9 @@ cmd_release_merged() {
     gh api "repos/$REPO/commits/$sha/pulls" --jq '.[] | select(.merged_at != null) | .number' ||
       die "cannot list the pull requests of $sha (API error); re-run the job"
   done | sort -un)
+  # A lagging API (the commit not yet linked to its pull request) shows here; the sweeper and the
+  # lease are the backstop that frees the claim later.
+  [[ -n $prs ]] || echo "release-merged: no merged pull request found for ${before:-none}..$after"
   for p in $prs; do
     echo "release-merged: pull request #$p"
     ( cmd_release_pr "$p" ) || failed=$((failed + 1))

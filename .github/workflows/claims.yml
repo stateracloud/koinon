@@ -39,7 +39,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    # Not auto_merge_enabled: the claim does not depend on auto-merge (it starts updater.yml).
+    # Not auto_merge_enabled: the claim does not depend on auto-merge.
     # ready_for_review stays: a draft whose claim was swept or taken over must re-check when marked
     # ready. labeled/unlabeled stay: unclaimed-ok
     # decides the check and `types:` cannot filter by label name.

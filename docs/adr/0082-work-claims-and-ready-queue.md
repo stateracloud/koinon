@@ -245,8 +245,14 @@ sentence of ADR 0094.
 - **Release on merge** (`release` job): runs on `push` to `main` from main's own workflow file. It runs
   `hack/claim.sh release-merged <before> <after>`: GitHub links every pushed commit to its pull
   requests, and the claims of each merged one are released as `release-pr` did. Pull requests closed
-  without a merge are freed by the sweeper (30 minutes; `sweep_one` already releases a claim whose
-  pull request is closed).
+  without a merge are freed by the sweeper (30 minutes): `claim_liveness` finds the claim's open or
+  linked pull request, or else a pull request of the claim's human that closes the issue and closed
+  since the claim was last renewed, and `sweep_one` releases it. A closed-unmerged pull request
+  unassigns the human and returns the issue to Ready, as `release-pr` did. If `release-merged` finds
+  no merged pull request (the API lags behind the push), it prints one line and the sweeper or the
+  lease frees the claim later.
+- **Fork pull requests:** on `pull_request` a first-time contributor's fork pull request gets no
+  `claim` run until a maintainer approves its workflows (`pull_request_target` ran without approval).
 - **Updater** (`updater.yml`): the `auto_merge_enabled` trigger is dropped, because it needs
   `pull_request_target` and an Environment secret. The `push`, `workflow_run` and `schedule` triggers
   remain, so a new auto-merge pull request waits up to one schedule period (30 minutes) at most. The
