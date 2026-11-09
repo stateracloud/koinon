@@ -64,10 +64,20 @@ chmod +x "$tmp/preflight" "$tmp/changes" "$tmp/make"
 
 fails=0 total=0
 # A base with a committed difference to HEAD (the root commit); HEAD itself is the empty-diff case.
-nonempty_base=$(git rev-list --max-parents=0 HEAD | tail -1)
+# The script works on the git repository it is started in, so the cases run in a scratch repo with
+# two commits: the real checkout may be shallow or a detached merge commit (CI), where "the committed
+# diff" is whatever that checkout happens to hold.
+repo="$tmp/repo"
+mkdir "$repo"
+git -C "$repo" init -q -b main
+git -C "$repo" config user.name t
+git -C "$repo" config user.email t@example.invalid
+echo a >"$repo/f" && git -C "$repo" add f && git -C "$repo" commit -q -m one
+nonempty_base=$(git -C "$repo" rev-parse HEAD)
+echo b >"$repo/f" && git -C "$repo" commit -q -am two
 # run <env assignments...>: sets out and rc.
 run() {
-	out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" "$@" bash "$script" "$nonempty_base" 2>&1)
+	out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" "$@" bash "$script" "$nonempty_base" 2>&1)
 	rc=$?
 }
 indent() { while IFS= read -r l; do echo "  | $l"; done <<<"$out"; }
@@ -86,7 +96,7 @@ expect() { # <name> <want rc> <pattern>...
 }
 
 # No committed change: the path gates are notrun and ci-changes.sh is not asked (it would say everything).
-out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes-bad" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash "$script" HEAD 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes-bad" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash "$script" HEAD 2>&1); rc=$?
 expect "empty committed diff" 3 '^gate=paths rc=0 .*verdict=notrun reason="no committed change"' '^gate=go .*verdict=pass'
 
 # Every gate passes; e2e is not run; the Docker-free machine path is not taken.
@@ -150,7 +160,7 @@ echo "FAIL	github.com/stateracloud/koinon/internal/sandbox"
 exit 1
 EOF2
 chmod +x "$tmp/make-sbx"
-out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-sbx" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-sbx" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "sandbox word is a failure" 1 '^gate=escape rc=1 .*verdict=fail'
 
 # ci-changes turns on go while preflight does not select it: the go gate still runs.
@@ -167,7 +177,7 @@ echo "--- FAIL: TestReal (0.1s)"
 exit 1
 EOF2
 chmod +x "$tmp/make-mixed"
-out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-mixed" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-mixed" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "failure beats docker text" 1 '^gate=escape rc=1 .*verdict=fail'
 
 # ci-changes failing: the command fails loudly, never passes.
@@ -177,7 +187,7 @@ echo "fatal: no merge base" >&2
 exit 128
 EOF2
 chmod +x "$tmp/changes-bad"
-out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes-bad" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes-bad" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "ci-changes fails" 1 'ci-changes.*failed|changes-bad failed' 'no merge base'
 
 # A missing tool for a heavy job is notrun with the tool named.
@@ -205,16 +215,16 @@ echo " Test Files  1 failed (1)"
 exit 1
 EOF2
 chmod +x "$tmp/make-vitest"
-out=$(env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-vitest" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-vitest" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "vitest failure beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
 # Hooks print a warning.
 run STUB_GATES="go"
 expect "hook warning" 0 'warning: test hook LANE_GATES_PREFLIGHT is set'
 
 # Usage errors.
-out=$(bash "$script" --nope 2>&1); rc=$?
+out=$(cd "$repo" && bash "$script" --nope 2>&1); rc=$?
 expect "unknown flag" 2 'unknown argument'
-out=$(bash "$script" no-such-ref-xyz 2>&1); rc=$?
+out=$(cd "$repo" && bash "$script" no-such-ref-xyz 2>&1); rc=$?
 expect "unknown base" 2 'unknown base'
 
 if [[ $fails -gt 0 ]]; then
