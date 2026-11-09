@@ -5,6 +5,7 @@ package koinonapi
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,10 +30,13 @@ type keyAudit struct {
 
 	kube      kubernetes.Interface
 	namespace string
+	// firstAttempt bounds how long ensureGenerated waits for the key-set lock before it creates the
+	// Secret without it; installWriteFirstAttempt unless a test shortens it.
+	firstAttempt time.Duration
 }
 
 func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace, kekSecret string, secretNames ...string) *keyAudit {
-	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret}
+	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret, firstAttempt: installWriteFirstAttempt}
 	if kube != nil {
 		k.generated = keyscli.GeneratedReader{Client: kube, Namespace: namespace, ListLabelled: true, Names: append([]string{kekSecret}, secretNames...)}.Read
 	}
@@ -140,7 +144,7 @@ func (k *keyAudit) ensureGenerated(ctx context.Context, kind, id string, create 
 
 // beginChange takes the key-set lock for one change, or returns nil when it cannot do so at once.
 func (k *keyAudit) beginChange(ctx context.Context, id string) *keyscli.Change {
-	bctx, cancel := context.WithTimeout(ctx, installWriteFirstAttempt)
+	bctx, cancel := context.WithTimeout(ctx, k.firstAttempt)
 	defer cancel()
 	// A KEK Secret that does not exist yet is the empty key set: this change makes it.
 	load := func(ctx context.Context) (keyscli.KeySet, error) {

@@ -984,7 +984,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 			return errUnreadable
 		}
 		// A format the keyring does not know is an unreadable envelope too, not a failed wrap.
-		if env.Format != secretstore.FormatV1 || env.Alg != secretstore.AlgAES256GCM {
+		if secretstore.UnsupportedFormat(env) {
 			return errUnreadable
 		}
 		out, err := fn(ring, secretstore.Binding{OrgID: r.org, Table: c.Table, RowID: r.id, Column: c.Column}, env, active)

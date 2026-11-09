@@ -223,6 +223,33 @@ var _ = Describe("koinon-api's key events", func() {
 		Expect(actorID).To(Equal("koinon-api:startup"))
 	})
 
+	It("creates the Secret without the lock and still writes one keys.generated when the lock is held elsewhere", func(ctx SpecContext) {
+		keyAud.firstAttempt = 300 * time.Millisecond
+		lock, err := keyAud.pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = lock.Rollback(ctx) })
+		_, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('koinon.keys_observed'))`)
+		Expect(err).NotTo(HaveOccurred())
+		m := mark(ctx)
+
+		made := false
+		done := make(chan struct{})
+		go func() {
+			defer GinkgoRecover()
+			defer close(done)
+			created, err := keyAud.ensureGenerated(ctx, "secret", "koinon-kek", func(context.Context) (bool, error) {
+				made = true
+				return true, nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(created).To(BeTrue())
+		}()
+		Eventually(done, 5*time.Second).Should(BeClosed(), "start does not wait for the lock")
+		Expect(made).To(BeTrue())
+		Expect(lock.Rollback(ctx)).To(Succeed())
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+	})
+
 	Describe("two replicas starting together on an empty install", func() {
 		It("write one keys.generated for the new KEK and no keys.observed", func(ctx SpecContext) {
 			fresh := fake.NewClientset()
