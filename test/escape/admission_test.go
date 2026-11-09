@@ -268,6 +268,34 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 
+	It("denies the SPIRE agent socket in every sandbox pod: the SPIFFE CSI driver and the socket's hostPath (ADR 0097 decision 11)", func(ctx SpecContext) {
+		const csiMessage = "SPIFFE CSI volumes (csi.spiffe.io) are not allowed in sandbox pods"
+		const socketMessage = "the SPIRE agent socket must not be mounted in sandbox pods"
+		spiffeCSI := corev1.Volume{Name: "spiffe", VolumeSource: corev1.VolumeSource{CSI: &corev1.CSIVolumeSource{Driver: "csi.spiffe.io", ReadOnly: new(true)}}}
+		socketHostPath := func(path string) corev1.Volume {
+			return corev1.Volume{Name: "spire", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: path}}}
+		}
+		for _, c := range []struct {
+			message string
+			volume  corev1.Volume
+		}{
+			{csiMessage, spiffeCSI},
+			{socketMessage, socketHostPath("/run/spire/agent-sockets")},
+			{socketMessage, socketHostPath("/var/run/spire")},
+			{socketMessage, socketHostPath("/tmp/spire-agent/public")},
+		} {
+			volumes := []corev1.Volume{c.volume}
+			denied(createPod(ctx, controllerUser, ns, workload("spire-workload", func(p *corev1.Pod) { p.Spec.Volumes = volumes })), c.message)
+			denied(createPod(ctx, gatewayUser, ns, supervisor("spire-supervisor", func(p *corev1.Pod) {
+				p.Spec.Volumes = append(p.Spec.Volumes, volumes...)
+			})), c.message)
+		}
+
+		By("a CSI volume of another driver is not this rule's business (control)")
+		other := corev1.Volume{Name: "other", VolumeSource: corev1.VolumeSource{CSI: &corev1.CSIVolumeSource{Driver: "csi.example.invalid"}}}
+		Expect(createPod(ctx, controllerUser, ns, workload("other-csi", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{other} }))).To(Succeed())
+	})
+
 	It("denies a ServiceAccount token on workload pods, the controller's included", func(ctx SpecContext) {
 		const mount = "sandbox workload pods must set automountServiceAccountToken to false"
 		const project = "sandbox workload pods must not project a ServiceAccount token"

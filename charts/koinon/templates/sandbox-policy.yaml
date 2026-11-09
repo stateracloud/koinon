@@ -106,6 +106,16 @@ spec:
       message: hostNetwork is not allowed
     - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
       message: host PID and IPC namespaces are not allowed
+    # The SPIRE Workload API socket never reaches a sandbox (ADR 0097 decision 11.2, issue 282): an agent
+    # that could read it would fetch a usable identity. hostPath is refused outright just below; the
+    # socket rule says why when a hostPath names the socket's usual directories, and the CSI rule
+    # refuses the SPIFFE CSI driver, which mounts the same socket without a hostPath in the pod.
+    - expression: >-
+        !has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath) ||
+          !(v.hostPath.path.contains('spire') || v.hostPath.path.contains('spiffe')))
+      message: the SPIRE agent socket must not be mounted in sandbox pods
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.csi) || v.csi.driver != 'csi.spiffe.io')"
+      message: SPIFFE CSI volumes (csi.spiffe.io) are not allowed in sandbox pods
     - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
       message: hostPath volumes are not allowed
     - expression: >-

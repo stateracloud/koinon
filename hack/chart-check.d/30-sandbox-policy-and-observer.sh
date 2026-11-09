@@ -91,3 +91,10 @@ if render --set 'sandboxPolicy.validationActions={Warn}' >/dev/null 2>&1; then f
 render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" >/dev/null 2>&1 || fail "validation actions without Deny and the observer off must render"
 if render --set openshell.gatewayId=Not_Valid >/dev/null 2>&1; then fail "an invalid openshell.gatewayId must not render"; fi
 
+
+# The SPIRE agent socket never reaches a sandbox (ADR 0097 decision 11.2, old issue 282): the pods policy
+# refuses the SPIFFE CSI driver and a hostPath naming the socket, with its own messages.
+has "the pods policy refuses SPIFFE CSI volumes" "SPIFFE CSI volumes \(csi.spiffe.io\) are not allowed in sandbox pods"
+has "the pods policy refuses the SPIRE agent socket hostPath" "the SPIRE agent socket must not be mounted in sandbox pods"
+has "the pods policy matches the csi.spiffe.io driver" "v.csi.driver != 'csi.spiffe.io'"
+lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
