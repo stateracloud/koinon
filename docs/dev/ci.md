@@ -214,7 +214,7 @@ after the driver: it runs the commands of `docs/site/src/content/docs/guides/bac
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule lives only there). If yes, the PR's own run already runs the quickstart on GitHub;
+observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). If yes, the PR's own run already runs the quickstart on GitHub;
 a green `e2e-lab` commit status (an external e2e run that passed on this commit) is enough to merge
 once the PR's own quickstart has finished (a flaky red one does not hide a green external run). Without
 one, wait
@@ -244,8 +244,8 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 `hack/lane-gates.sh [<base>]` (base defaults to `origin/main`) runs the gates your change touches and
 blocks until it has a verdict: the gates of `hack/preflight.sh` that the diff selects, plus the heavy
-CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`; the e2e is not part
-of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
+CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`, each from its
+`lane` line in `hack/paths.rules`; the e2e is not part of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
 else: no lab, no external-run status. It prints one line per gate,
 
 ```
@@ -255,7 +255,10 @@ gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason="..."] log=<path
 and exits 1 when a gate failed, 3 when none failed but a gate could not run on this machine, 0 when
 all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
 requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
-requirement exists. It never says `ok` unless every selected gate passed and at least one ran: a
+requirement exists. A gate is `notrun` when its log shows the machine denied it and no failure
+marker (`--- FAIL`, `[FAIL]`, a compile error) is in it: Docker (daemon down, socket denied), the
+network (proxy refusal, no such host), or the sandbox (`deny(`, `operation not permitted`). A real
+test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
@@ -271,6 +274,44 @@ old issue 594: every job pays a fixed start-up cost) and the other workflows (`d
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
 are skipped only on a push to main whose heavy jobs are skipped. A skipped heavy job reports
 success, so every required check still reports.
+
+### Path rules
+
+One source, `hack/paths.rules`. Which paths turn on which job or gate is data, in one file, `hack/paths.rules`, read through
+`hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
+e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
+`lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
+graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+that file and nowhere else.
+
+- **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
+  (Markdown, `docs/`, `web/`, `.github/`, top-level `hack/*.sh`, `hack/hooks/`,
+  `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
+  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
+  `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
+  the `scripts` job, which is always on, so a shell-only change runs them and not go-test.
+- **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
+  Makefile, `go.mod` and `go.sum` turn every job on.
+- **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
+  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
+  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
+  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
+  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
+  list cannot name, so it is not done.
+- **Preflight equals CI.** The gates `generate`, `chart`, `web` and `docs` use the CI job's rule. The
+  `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
+  checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
+  step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
+  `hack/paths-test.sh` fails when a `run: hack/...` step of `ci.yml` is in neither list.
+- **Tests.** `hack/paths-test.sh` (reader, jobs against `ci.yml`, example change sets through
+  `ci-changes.sh` and `needs-e2e.sh`), `hack/ci-changes-test.sh` (table and the inputs derived from
+  the Makefile and generator configs), `hack/needs-e2e-test.sh` (fixtures, the `ko build` line of
+  `run.sh`). There is no test that compares two copies of a pattern because there is one.
+
+Prior art: `dorny/paths-filter` keeps all filters in one YAML file that a job reads; Bazel and Nx
+derive "affected" from the build graph instead of lists; we take both: one data file for the rules,
+`go list` for the two Go suites whose imports change.
 
 ### go-test satisfied by an external run (old issue 610)
 
@@ -426,6 +467,39 @@ release tags are cut only from a commit whose `quickstart` job concluded success
 call with no paging; anything else fails the gate), and also accepts a green `merge_group`
 `quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
+## Workflow security review
+
+Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
+(ADR 0047, amended 2026-11-09). `hack/runner-lint.sh` enforces it in the `scripts` job (required, so it
+reports on every pull request, push and merge group build); it also runs in `hack/preflight.sh` as the
+`runnerlint` gate (it also holds the trigger rule below). Redo this review when a workflow gains a trigger, a secret or a permission.
+
+| Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
+|---|---|---|---|
+| `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
+| `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
+| `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); `schedule`, dispatch (`sweeper`) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` (push to `main`) and `sweeper` (schedule, dispatch; frees PRs closed without a merge) jobs have `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out `pull_request.base.sha` (or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` and `sweeper` run main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `updater.yml` | `push` to `main`, `workflow_run`, `schedule`, dispatch (no `auto_merge_enabled`) | App ID and key from the `claims-bot` Environment (branch policy `main`); token with `contents`, `pull-requests`, `workflows: write` and `checks`, `statuses: read` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
+| `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
+| `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
+
+Checks behind the table:
+
+- No workflow uses `pull_request_target` (#463). GitHub blocks it by default for public repositories (brownouts from 2026-11-09, permanent 2026-12-02); it runs with the base branch's secrets and a write token next to pull request content. `hack/runner-lint.sh` fails any workflow that names it, and bringing it back needs an ADR that amends ADR 0082 plus an admin Actions event policy.
+- The only Environment is `claims-bot` (`updater.yml`). No other workflow reads a secret besides
+  `GITHUB_TOKEN`.
+- Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
+  fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
+- No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
+- Script injection: expressions spliced into `run:` are SHAs and numbers, except two: the base branch
+  name in the `migrations (lint)` and `dependency age` steps of `ci.yml`. Fixed in this change: both go
+  through `env: BASE` now, as the `buf breaking` step already did. No user-chosen text is spliced into a
+  `run:` script any more.
+
+Not fixed here: GitHub's repository setting "Require approval for all outside collaborators" for fork
+pull request workflows is a setting, not a file; it is tracked as
+[#459](https://github.com/stateracloud/koinon/issues/459). Exit condition: the setting is confirmed on.
+
 ## Required status checks
 
 `hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is the only advisory job
@@ -464,7 +538,7 @@ it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
 ### The `claim` check and claims by comment (ADR 0094, #163, #164)
 
-`claim` (`.github/workflows/claims.yml`, `pull_request_target`, read-only, `hack/claim.sh check-pr`)
+`claim` (`.github/workflows/claims.yml`, `pull_request`, read-only, `hack/claim.sh check-pr`)
 is required and is a conflict check: it fails only when someone else's human holds a live claim on an
 issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
 issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
@@ -479,6 +553,15 @@ release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run 
 check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
 fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
 
+#### Workflow triggers: no `pull_request_target` (#463)
+
+No workflow uses `pull_request_target`; the per-workflow triggers, tokens and checkouts are in the
+[Workflow security review](#workflow-security-review) table, and `hack/runner-lint.sh` enforces the rule.
+
+Limit: on `pull_request` the workflow file is the PR head's, so a PR could edit `claims.yml` to pass
+its own `claim`. `.github/**` needs a CODEOWNERS review and the token is read-only without a secret; a
+ruleset "required workflow" could pin the file, and is a settings change (ADR 0082 amendment).
+
 ## Merging
 
 The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
@@ -488,8 +571,9 @@ main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` 
 e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
 (`--checks` also waits for every required context of the ruleset to exist on the head, so a
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
-head (it runs on its own for the paths in `.github/workflows/e2e-kind.yml`; otherwise dispatch it
-with `gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
+head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs the base branch's copy of `hack/needs-e2e.sh` with the base branch's
+`hack/paths.rules` (and `paths-lib.sh`, all from one ref; a base without them uses the standalone script), and a change that rule does not select needs a dispatch:
+`gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
 `hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
 
 `hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
@@ -562,10 +646,11 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
   sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  `release` (a `push` to main job) and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
-  only the script is the base's. The guard for that is the required review on `.github/**` (CODEOWNERS) plus
-  the `pull_request_target` entry gate, which runs the base's workflow on the PR before it can be enqueued.
+  only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
+  guard is the required CODEOWNERS review on `.github/**`. The trade-off is in the ADR 0082 amendment; the
+  ruleset "required workflow" option would run main's file instead.
 - `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
   e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That

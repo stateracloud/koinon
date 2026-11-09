@@ -18,6 +18,7 @@ package pricing
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -311,6 +312,7 @@ const (
 var (
 	idRE       = regexp.MustCompile(idPattern)
 	providerRE = regexp.MustCompile(providerTypePattern)
+	hostRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 )
 
 // Source says where a price comes from.
@@ -324,9 +326,14 @@ type Entry struct {
 	ID string `json:"id" yaml:"id"`
 	// Provider is the provider type the price applies to (openai, openrouter, ollama, ...);
 	// "*" means any.
-	Provider  string `json:"provider" yaml:"provider"`
-	Match     Match  `json:"match" yaml:"match"`
-	ValidFrom string `json:"validFrom" yaml:"valid_from"` // yyyy-mm-dd, UTC
+	Provider string `json:"provider" yaml:"provider"`
+	// NotHosts are hosts the entry does not apply to: a provider whose URL host is one of them, or a
+	// subdomain of one, is not priced by this entry. A provider's price follows where it connects,
+	// not only its type, so a paid endpoint of a type that is free on the org's own hardware is
+	// never priced as free (issue 310). Lowercase DNS names, no scheme, port or path.
+	NotHosts  []string `json:"notHosts,omitempty" yaml:"not_hosts,omitempty"`
+	Match     Match    `json:"match" yaml:"match"`
+	ValidFrom string   `json:"validFrom" yaml:"valid_from"` // yyyy-mm-dd, UTC
 	Spec      `yaml:",inline"`
 	// Tokenizer and Ratio estimate usage a provider did not report (package estimate). Ratio
 	// is UTF-8 bytes per token and is also the fallback when the tokenizer cannot be used.
@@ -364,6 +371,11 @@ func (e Entry) Resolve(orgEntry bool) (Resolved, error) {
 	}
 	if !providerRE.MatchString(e.Provider) {
 		bad("provider %q must be a provider type or *", e.Provider)
+	}
+	for _, h := range e.NotHosts {
+		if !hostRE.MatchString(h) {
+			bad("not_hosts %q must be a lowercase DNS name without scheme, port or path", h)
+		}
 	}
 	re, spec, err := e.Match.Compile()
 	if err != nil {
@@ -423,10 +435,41 @@ func ParseRatio(s string) (float64, error) {
 // among entries whose pattern matches and whose valid_from is not after at, an entry for the
 // exact provider beats "*", then the more specific pattern, then the later valid_from, then
 // the earlier position in rs.
+//
+// Select does not know where the provider connects, so it applies no NotHosts exclusion: use it for
+// views by provider type. Pricing a request uses SelectHost.
 func Select(rs []Resolved, provider, model string, at time.Time) (Resolved, bool) {
+	return SelectHost(rs, provider, "", model, at)
+}
+
+// HostOf returns the lowercase host of a provider URL, or "" when it has none.
+func HostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+}
+
+// excludes reports whether host is one of the entry's NotHosts or a subdomain of one.
+func (e Entry) excludes(host string) bool {
+	if host == "" {
+		return false
+	}
+	for _, h := range e.NotHosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
+		}
+	}
+	return false
+}
+
+// SelectHost is Select for a provider that connects to host (see HostOf): an entry whose NotHosts
+// name host or a parent domain of it is skipped.
+func SelectHost(rs []Resolved, provider, host, model string, at time.Time) (Resolved, bool) {
 	best, found := -1, false
 	for i, r := range rs {
-		if r.ValidFrom.After(at) || !r.Matcher.MatchString(model) {
+		if r.ValidFrom.After(at) || !r.Matcher.MatchString(model) || r.Entry.excludes(host) {
 			continue
 		}
 		if r.Entry.Provider != providerWildcard && r.Entry.Provider != provider {

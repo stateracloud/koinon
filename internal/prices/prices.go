@@ -126,6 +126,7 @@ func (rv Resolver) resolveEntries(ctx context.Context, q *store.Queries, org pgt
 	if err != nil {
 		return Resolution{}, err
 	}
+	host := pricing.HostOf(m.ProviderURL)
 	now := time.Now()
 	for _, fallback := range []bool{false, true} {
 		t := at
@@ -149,7 +150,7 @@ func (rv Resolver) resolveEntries(ctx context.Context, q *store.Queries, org pgt
 			r.ValidFrom = row.ValidFrom.Time
 			rs = append(rs, r)
 		}
-		if r, ok := pricing.Select(rs, m.ProviderType, m.Name, t); ok {
+		if r, ok := pricing.SelectHost(rs, m.ProviderType, host, m.Name, t); ok {
 			return Resolution{Ref: "org#" + r.Entry.ID, Source: SourceOrg, Entry: r.Entry, Price: r.Price, Fallback: fallback}, nil
 		}
 		// The platform list is a step of its own, after the org's entries and before the default
@@ -159,14 +160,14 @@ func (rv Resolver) resolveEntries(ctx context.Context, q *store.Queries, org pgt
 		if err != nil {
 			return Resolution{}, err
 		}
-		if r, ok := pricing.Select(plat, m.ProviderType, m.Name, t); ok {
+		if r, ok := pricing.SelectHost(plat, m.ProviderType, host, m.Name, t); ok {
 			return Resolution{
 				Ref: PlatformRef(version, r.Entry.ID), Source: SourcePlatform, PlatformVersion: version,
 				Entry: r.Entry, Price: r.Price, Fallback: fallback,
 			}, nil
 		}
 		list, defs := rv.src.Current()
-		if r, ok := pricing.Select(defs, m.ProviderType, m.Name, t); ok {
+		if r, ok := pricing.SelectHost(defs, m.ProviderType, host, m.Name, t); ok {
 			return Resolution{
 				Ref: pricing.Ref(list.Version, r.Entry.ID), Source: SourceDefault, ListVersion: list.Version,
 				Entry: r.Entry, Price: r.Price, Fallback: fallback,
