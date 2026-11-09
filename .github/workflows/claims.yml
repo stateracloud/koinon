@@ -72,7 +72,7 @@ jobs:
         run: hack/claim.sh sweep
 
   # Merged pull requests: the push to main carries the merge commit, which GitHub links to its pull
-  # request. Runs from main's own workflow file and script. One group: a release must not be cancelled.
+  # request. Runs from main's own workflow file and script. One group per push: GitHub keeps one pending run per group, so a shared group would cancel the middle of three quick merges.
   release:
     if: github.event_name == 'push'
     name: release claims
@@ -82,7 +82,7 @@ jobs:
       issues: write
       pull-requests: read
     concurrency:
-      group: claims-release
+      group: claims-release-${{ github.sha }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
