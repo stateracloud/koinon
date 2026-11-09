@@ -276,9 +276,19 @@ func randomNonce(a cipher.AEAD) ([]byte, error) {
 	return n, nil
 }
 
+// ErrUnsupportedFormat means the envelope has a format or algorithm this build does not know. It is the
+// one predicate for that case: [UnsupportedFormat] tests an envelope, and keyscli files the error under
+// its "envelope" failure kind.
+var ErrUnsupportedFormat = errors.New("secretstore: unsupported envelope format")
+
+// UnsupportedFormat reports whether env has a format or algorithm this build does not know.
+func UnsupportedFormat(env Envelope) bool {
+	return env.Format != FormatV1 || env.Alg != AlgAES256GCM
+}
+
 func checkFormat(env Envelope) error {
-	if env.Format != FormatV1 || env.Alg != AlgAES256GCM {
-		return fmt.Errorf("secretstore: unsupported envelope format %d / %q", env.Format, env.Alg)
+	if UnsupportedFormat(env) {
+		return fmt.Errorf("%w %d / %q", ErrUnsupportedFormat, env.Format, env.Alg)
 	}
 	return nil
 }

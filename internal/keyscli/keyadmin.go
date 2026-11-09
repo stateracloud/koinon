@@ -171,8 +171,12 @@ func (a KeyAdmin) create(ctx context.Context, now func() time.Time, wrappedBy st
 	// The Secret does not exist yet, or the Job is a rerun: the state to compare is the last recorded one.
 	// A Secret that does not load leaves the creation to EnsureWith, which then finds it and creates
 	// nothing, as before the chain existed.
-	c, ks, _ := a.baseline(ctx, a.loadOrEmpty)
+	c, ks, err := a.baseline(ctx, a.loadOrEmpty)
 	clearKeySet(ks)
+	if err != nil {
+		// Not fatal: EnsureWith finds the Secret and creates nothing, or fails with its own error.
+		_, _ = fmt.Fprintf(a.Out, "WARNING: the KEK Secret %s exists but does not load: %v\n", a.Store.Name, err)
+	}
 	defer func() { _ = c.Commit(ctx) }()
 	// The first KEK of an install is bound, so the install is bound-only from the start: the
 	// marker is set before the Secret exists, and a failure leaves no Secret, so a rerun sets it.
