@@ -520,6 +520,29 @@ describe('Providers page', () => {
       expect(calls.providerUpdates[0].costApiKey).toBe('')
     })
 
+    it('asks for the cost key again when only the scope of a lost cost key changes', async () => {
+      const calls = setup({ withAnthropic: true, withLostCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      const scope = await within(form).findByLabelText('Cost scope')
+      await userEvent.clear(scope)
+      await userEvent.type(scope, 'wrkspc_01Other')
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      expect(await within(form).findByText('A cost scope needs a cost API key. Type the key, or clear the scope.')).toBeInTheDocument()
+      expect(calls.providerUpdates).toHaveLength(0)
+    })
+
+    it('clears the lost marker when the scope of a lost cost key is cleared', async () => {
+      const calls = setup({ withAnthropic: true, withLostCostKey: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      await userEvent.clear(await within(form).findByLabelText('Cost scope'))
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].costApiKey).toBe('')
+      expect(calls.providerUpdates[0].costScope).toBeUndefined()
+    })
+
     it('removes a cost key that was lost with its key-encryption key', async () => {
       const calls = setup({ withAnthropic: true, withLostCostKey: true })
       await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))

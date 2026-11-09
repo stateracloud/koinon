@@ -7,12 +7,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -441,6 +443,60 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(after).To(MatchJSON(before), "the platform row is unchanged")
 			Expect(lostAt).To(BeNil())
 		})
+	})
+
+	Describe("with a database that limits the run", func() {
+		// poolWith opens a pool on the test database with the connection limit and the server's
+		// idle-in-transaction timeout (0 for none) given.
+		poolWith := func(ctx SpecContext, maxConns int32, idle time.Duration) *pgxpool.Pool {
+			GinkgoHelper()
+			cfg := pool.Config().Copy()
+			cfg.MaxConns = maxConns
+			if idle > 0 {
+				cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprint(idle.Milliseconds())
+			}
+			p, err := pgxpool.NewWithConfig(ctx, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			return p
+		}
+
+		It("refuses a pool of one connection before asking and before the lock, and changes nothing", func(ctx SpecContext) {
+			o := sealOrg(ctx)
+			rotateAndLose(ctx)
+			tool.Pool = poolWith(ctx, 1, 0)
+			tool.Yes = true
+			lock := holdKeyLock(ctx) // a run that got past the check would wait here, not fail
+			defer func() { _ = lock.Rollback(ctx) }()
+
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("at least 2 connections"), ContainSubstring("pool_max_conns=1"))))
+			lost, work := orgState(ctx, o)
+			Expect(lost).To(BeFalse())
+			Expect(work).NotTo(Equal("expired"))
+		}, SpecTimeout(10*time.Second))
+
+		It("finishes when the server ends idle transactions sooner than the run takes", func(ctx SpecContext) {
+			o := sealOrg(ctx)
+			rotateAndLose(ctx)
+			tool.Pool = poolWith(ctx, 4, 300*time.Millisecond)
+			tool.Yes = true
+			// Each provider update takes longer than the timeout, so the lock's transaction idles past it.
+			_, err := pool.Exec(ctx, `CREATE FUNCTION koinon_test_slow_update() RETURNS trigger LANGUAGE plpgsql AS $$
+				BEGIN PERFORM pg_sleep(0.8); RETURN NEW; END $$;
+				CREATE TRIGGER koinon_test_slow_update BEFORE UPDATE ON providers
+				FOR EACH ROW EXECUTE FUNCTION koinon_test_slow_update()`)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := pool.Exec(ctx, `DROP TRIGGER koinon_test_slow_update ON providers; DROP FUNCTION koinon_test_slow_update()`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			lost, work := orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+			Expect(work).To(Equal("expired"))
+		}, SpecTimeout(30*time.Second))
 	})
 
 	Describe("when the KEK is restored after the first check", func() {
