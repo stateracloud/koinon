@@ -731,10 +731,12 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		// ADR 0097 step 1: any MCP message kind the guard has no reading for sets both legs. The gateway
 		// is configured to hook tools/call only, so this is the rule for drift (a gateway that hooks more).
 		It("takes both legs from a reply of a method it has no reading for, and counts it", func(ctx SpecContext) {
+			body, err := json.Marshal(map[string]string{"text": secretPage})
+			Expect(err).NotTo(HaveOccurred())
 			for _, method := range []string{"tools/list", "resources/read", "prompts/get", "sampling/createMessage"} {
 				res, err := srv.CheckResponse(ctx, &extmcp.McpResponse{
 					ServiceNames: []string{mcpservers.TargetName(slug, "wiki")}, Method: method,
-					MetadataContext: meta(me(), ""), McpResponse: []byte(`{"canary":"koinon_test_not-a-real-token"}`),
+					MetadataContext: meta(me(), ""), McpResponse: body,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(res.GetPass()).NotTo(BeNil(), method+" still reaches the agent")
@@ -742,6 +744,26 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(legsOf(ctx)).To(Equal(mcpguard.Legs{UntrustedInput: true, PrivateData: true}))
 			Expect(testutil.ToFloat64(metrics.Unseen)).To(Equal(4.0))
 			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeFalse())
+		})
+
+		// The fingerprints of an unseen reply are recorded too: a later call carrying its text is held for the text match.
+		It("records the fingerprints of a reply of a method it has no reading for, so its text is caught later", func(ctx SpecContext) {
+			body, err := json.Marshal(map[string]string{"text": secretPage})
+			Expect(err).NotTo(HaveOccurred())
+			res, err := srv.CheckResponse(ctx, &extmcp.McpResponse{
+				ServiceNames: []string{mcpservers.TargetName(slug, "wiki")}, Method: "resources/read",
+				MetadataContext: meta(me(), ""), McpResponse: body,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetPass()).NotTo(BeNil())
+			var fps int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_fingerprints WHERE org_id = $1`, org).Scan(&fps)).To(Succeed())
+			Expect(fps).To(BeNumerically(">", 0), "the reply's fingerprints were recorded")
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"match"`), "held for the text match, not only for the legs")
 		})
 
 		It("takes both legs from such a reply from one of Koinon's own targets too", func(ctx SpecContext) {

@@ -75,7 +75,8 @@ func (g *Guard) CheckResult(ctx context.Context, r Result) error {
 // takes both legs, untrusted input and private data, on the session (#254, ADR 0097 step 1: fail
 // closed for any MCP message kind the guard cannot see). An error withholds the reply, as in
 // CheckResult. Only the executor and the prober are exempt; Koinon's own targets take both legs like an undeclared own tool.
-func (g *Guard) CheckUnseen(ctx context.Context, agent, target string) error {
+// reply is the body of the reply: its canary fingerprints are recorded, so a later exact-string leak is caught.
+func (g *Guard) CheckUnseen(ctx context.Context, agent, target string, reply json.RawMessage) error {
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	c, refused, err := g.identify(ctx, agent, target)
@@ -102,7 +103,7 @@ func (g *Guard) CheckUnseen(ctx context.Context, agent, target string) error {
 		c.org, c.agent = org, ag
 	}
 	both := Legs{UntrustedInput: true, PrivateData: true}
-	if _, err := g.record(ctx, c, both, nil); err != nil {
+	if _, err := g.record(ctx, c, both, reply); err != nil {
 		return err
 	}
 	g.metrics.unseen(1)

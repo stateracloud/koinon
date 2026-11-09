@@ -16,7 +16,7 @@
   [0073](0073-agent-passport.md) (decision 6 delivery and the decision 12 delivery spike, in step 2),
   [0084](0084-leak-guard.md) (decision 1, in step 2: the guard is called from Koinon's MCP path, not
   through ExtMcp), [0091](0091-leak-guard-by-destination.md) (decision 4, in step 1: a reply the guard
-  never saw sets both legs)
+  never saw sets both legs, for a call whose declared result would set a leg)
 - Relates to: [0068](0068-prompt-caching-always-on.md) (caching stays on through every driver),
   [0069](0069-native-model-formats.md) (native formats, so no format translation),
   [0074](0074-run-traces-trace-router.md) (gateway spans), [0085](0085-upgrade-compatibility-and-recovery-policy.md)
@@ -224,12 +224,15 @@ Scope:
   one flips it and an upgrade that breaks a passing case fails.
 - **A gateway bump is "suite green".** An agentgateway version enters Koinon only when the suite passes
   against it; a changed expected-failure list is reviewed like code.
-- **Close #254 on Koinon's side, fail closed.** An MCP call whose reply the guard never saw counts as
-  untrusted: it sets both session legs (untrusted input and private data). The same holds for any MCP
-  message kind the guard cannot see. The upstream fix (agentgateway#4245) is drafted in the #254 pull
+- **Close #254 on Koinon's side, fail closed.** A call opens in the open-call ledger only when the
+  server's declared result would set a leg (ADR 0091 trusts the declaration). When such a call's reply
+  never reaches the guard (an error reply, or a cut stream), the call counts as untrusted and sets both
+  session legs (untrusted input and private data). A call to a server declared with neither leg opens
+  nothing, so an error reply from it sets nothing: this is weaker than "every unseen reply sets both
+  legs". A reply of a method other than `tools/call` that the gateway hands the guard does set both legs. The upstream fix (agentgateway#4245) is drafted in the #254 pull
   request for a human to post in their own words (the AGENTS.md upstream rules apply to agentgateway too).
   Built (#254): the open-call ledger in `internal/mcpguard` covers a `tools/call` that ends in an error
-  reply or is cut short (both legs, a person decides); a reply of any other method the gateway might
+  reply or is cut short, when the server's declared result would set a leg (both legs, a person decides); a reply of any other method the gateway might
   hand the guard (`CheckResponse`, `Guard.CheckUnseen`) takes both legs on the session. What the guard
   is never handed at all (tools/list descriptions, log notifications and server-initiated requests on a
   call's stream) is not visible to any Koinon-side rule on this gateway; it stays the expected failure
@@ -289,6 +292,10 @@ does today, no more (model path at parity, below).
   raw JSON-RPC message (result, error, notification, server-initiated request) passes the guard before
   the SDK dispatches it. Method middleware handles grants, the ask tier and request-side checks. The
   guard runs inside the gateway process (placement, below).
+- The step 1 drift rule ("a non-`tools/call` reply sets both legs") is not carried over as is. Once
+  Koinon's gateway sees every message, it taints only what it cannot read, and it scans the kinds it
+  reads (`tools/list` descriptions, `initialize` instructions, `resources/read`) by content and declared
+  legs. An unknown kind still sets both legs.
 - Only methods on an allowlist are forwarded; any other method is refused.
 - **Placement** (maintainer decision 2026-11-06). The gateway is a separate `koinon-gateway`
   Deployment from the same image, with its own ServiceAccount, 2+ replicas, a PodDisruptionBudget and
