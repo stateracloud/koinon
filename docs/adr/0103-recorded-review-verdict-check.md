@@ -95,14 +95,23 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      `mergeStateStatus` says nothing about `review` while the check is not required.
      - Set-up: the scratch repository holds copies of `.github/workflows/review.yml`,
        `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh` and `.github/CODEOWNERS`, and
-       a ruleset on its `main` that requires the context `review`.
+       a ruleset on its `main` that requires the context `review`, with an empty bypass list.
      - The pull request: it touches a sensitive path, has no `review-verdict`, and adds a second
-       workflow (trigger `pull_request`) whose job `review` always passes. The real `review` fails on
-       that head.
-     - Two orders: the stand-in job finishes before the real one, and after it (a `sleep 120` in the
-       stand-in), each on a new head.
+       workflow whose job `review` always passes. The real `review` fails on that head.
+     - The stand-in: a second workflow file (trigger `pull_request`) with its own `name:` (not
+       `review`), and in it a job with `name: review`, which matches the check name exactly.
+     - Three orders, 1 and 2 each on a new head: order 1, the stand-in job finishes before the real
+       one; order 2, it finishes after it (a `sleep 120` in the stand-in); order 3, after both runs of
+       a head have finished (real red, stand-in green), "Re-run job" on the stand-in only, so the
+       newest check run named `review` on that head is green. Order 3 is how a "newest run wins" rule would show.
+     - Viewer: the person who reads the result has no bypass right on the scratch ruleset (or first
+       confirms that `mergeStateStatus` does not depend on the viewer's bypass right). An admin's own
+       view can hide the block.
      - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives
-       `BLOCKED` in both orders, after both runs end.
+       `BLOCKED` in all three orders, after the runs end.
+     - Record: the scratch repository's name, the pull request number and the three
+       `mergeStateStatus` results go under "Upstream verification" in this ADR before the owner's
+       ruleset step.
      - After the test, the owner deletes the scratch repository.
 
    **If the precondition is not met**, the step does not go ahead with a context matched by name only.

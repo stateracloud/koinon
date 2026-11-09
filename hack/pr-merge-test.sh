@@ -62,7 +62,7 @@ show)
   echo "git $*" >>"$FAKE_DIR/calls"
   case $2 in
   *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
-  *:hack/claim.sh) printf '#!/usr/bin/env bash\n' ;;
+  *:hack/claim.sh) [ -z "${SHOW_FAILS_CLAIM:-}" ] || exit 128; printf '#!/usr/bin/env bash\n' ;;
   *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
   *) exit 128 ;;
   esac ;;
@@ -465,6 +465,11 @@ grep -q '::error::' <<<"$out" || { echo "FAIL: the local gate ran: $out" >&2; fa
 setup false "$green"; base_gate
 FETCH_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
 check "a failed base fetch is a tool failure" 2 nomerge
+setup false "$green"; base_gate
+SHOW_FAILS_CLAIM=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "a base file that git show cannot read is a tool failure" 2 nomerge
+grep -q 'cannot read hack/claim.sh from origin/main' <<<"$out" || { echo "FAIL: names the unreadable base file: $out" >&2; fail=1; }
+grep -q '^basegate ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran with a missing base file" >&2; fail=1; }
 setup false "$green"
 GH_REPO="" run 7 --admin
 check "an unreadable repository name is a tool failure" 2 nomerge

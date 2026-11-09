@@ -33,17 +33,21 @@
 #                  refuses with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
 #                  The gate, claim.sh and CODEOWNERS are the base branch's (origin/<base>, fetched), not this
 #                  checkout's; only when the base has no gate yet does it use the local copy, and says so.
+#                  That fallback also runs for a PR whose base branch has no gate (a base other than main), and
+#                  the local copy can then be the PR's own; harmless while the ruleset protects only main.
 #   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed (also: the repository name, the base fetch or the gate copy for --admin), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 9 --admin without
-#       a review verdict (ADR 0103), 64 usage
+#       a tool failed (also: the repository name, the base fetch or the gate copy for --admin), 3 closed,
+#       4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 9 --admin without a review verdict
+#       (ADR 0103), 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
-# PR_MERGE_REVIEW_GATE replaces the review gate only when PR_MERGE_TEST=1 is set too (a test hook: it must not
-# turn the --admin gate off by accident, for example with PR_MERGE_REVIEW_GATE=true).
+# PR_MERGE_REVIEW_GATE replaces the review gate only when PR_MERGE_TEST=1 is set too (a test hook). Not a
+# security boundary: whoever runs this script can set both variables or edit it. The boundary is the required
+# `review` check in the `main` ruleset; `--admin` and the web UI bypass it (ADR 0103).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
