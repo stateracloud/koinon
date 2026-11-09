@@ -29,7 +29,7 @@ Instructions for coding agents working on Koinon.
   `gate=… verdict=pass|fail|notrun` line each, `docs/dev/ci.md#the-local-gate-command`) or
   `hack/preflight.sh` (the lint-level subset).
   Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
-  push, PR, board, optional auto-merge and `claim.sh review`). Wait on a PR with `hack/pr-wait.sh`
+  push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`
   (in the background) and merge it with `hack/pr-merge.sh <PR> [--admin]` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous;
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
@@ -53,70 +53,59 @@ Instructions for coding agents working on Koinon.
 
 ## Picking up work
 
-Several humans' agents share the backlog. Claim an issue before you work on it; the lock is a claim
-branch (ADR 0082), so two agents cannot hold one issue. Use `hack/claim.sh` (gh and jq only; `gh auth
-refresh -s project` once, for the board).
+Claim an issue before you work on it. The lock is the ref `claim/<N>` (ADR 0082, reduced by ADR
+0104): creating it is a compare-and-set, so two lanes cannot hold one issue. A claim has no lease and
+no heartbeat; it is held until a pull request that closes the issue merges, or you release it. Use `hack/claim.sh` (gh and jq only). The holder is `<login>#<lane>`, so a restarted session keeps
+its claims; the default lane is `main`.
 
-Session identity: the claim holder is `<login>/<host>/<session>`. Claude Code sessions use
-`CLAUDE_CODE_SESSION_ID`; any other agent must `export KOINON_AGENT_SESSION=<unique id>` before it
-calls the script (otherwise one holder is generated per worktree). **Claude subagents share their
-parent's id: only the parent takes claims; a subagent never takes its own or sets its own id.**
-Copilot coding agent pull requests cannot pass the `claim` check (the author is the bot): a human
-opens or adopts them.
+1. `hack/claim.sh next` (or `next --label start-here`): Ready, `agent-ok`, current-milestone,
+   unblocked issues that nobody holds, by Priority then age. Only humans move issues to Ready; never
+   start an issue that is not listed unless your human names it. Then the overlap check (below).
+2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane, eight per human; a
+   PR that closes several issues takes them together, `take N M` (all or nothing). It assigns your
+   human.
+3. Push `<type>/<N>-<slug>` and open a draft PR with `Closes #N` (the board's built-in workflow moves
+   the issue to In Progress). New work you discover becomes a Backlog issue; do not start it.
+4. Finish: mark the PR ready and merge it (see "Merging"). The merge releases the claim
+   (`claims.yml`); a PR closed without a merge needs `hack/claim.sh release-pr <PR>`. Never delete a
+   claim branch.
+5. Stop early: `hack/claim.sh release <N> --note "<state, branch, next step>"` (keep the branch and
+   draft PR), or `hack/claim.sh block <N> <M>` when another issue blocks it. Exit 3 means the claim
+   is not yours (another lane: `--lane L`, or `--force` for your own other lane; another human: ask
+   them).
 
-1. `hack/claim.sh next` (or `next --label start-here` for the issues procoduck marked for the contributor):
-   Ready, `agent-ok`, current-milestone, unblocked, unclaimed issues, by Priority then age. Only
-   humans move issues to Ready; never start an issue that is not listed unless your human names it.
-2. Overlap check, see "Working alongside another human".
-3. `hack/claim.sh take <N>`: one claim per session, eight per human, 2 h lease. A PR that closes
-   several issues takes them together, `take N M` (all or nothing). Exit 2: pick another issue. It
-   assigns your human and sets In Progress. A person's own claim is `take <N> --human` (3 days,
-   `beat <N> --human` daily).
-4. Within 30 minutes: push `<type>/<N>-<slug>` and open a draft PR with `Closes #N`. The `claim`
-   check needs the claim first; after `take` the script re-runs the failed check.
-5. `hack/claim.sh beat <N>` every 30 minutes and before long steps. **Pushes alone are not
-   liveness: you must `beat`.** In the background, `beat --mine --every 30m --while-pid $PPID`
-   renews all your claims, lanes included, and ends with the agent that started it (`$PPID`, not
-   `$$`, which dies with that one call); `--for` (default 12h) is the backstop.
-6. Exit code 3 from any claim command means the claim is lost (taken over or released): stop work
-   on that issue and tell your human. Exit 1 is an error (for example the network): retry.
-7. Blocked by another issue: `hack/claim.sh block <N> <M>` (adds "blocked by", releases). New work
-   you discover becomes a Backlog issue; do not start it.
-8. Finish: mark the PR ready, enable auto-merge (unless it needs `e2e-kind` first, see "Merging"),
-   then `hack/claim.sh review <N>`. The claim is released when the PR merges or closes. Never
-   delete a claim branch: claims are only released.
-9. Hand off: `hack/claim.sh release <N> --note "<state, branch, next step>"`; keep the branch and
-   draft PR.
-10. Takeover only after the holder is dead (lease and PR activity out, plus 15 minutes) and never
-    while its PR is ready for review: `hack/claim.sh take <N> --takeover`, then continue the
-    existing branch. Your own dead session's claims, lanes kept: `hack/claim.sh adopt --from
-    <session> [N...]` (same dead rule). A different human's agent opens a new PR from that branch:
-    the `claim` check wants the claim's human to be the PR author.
-11. A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
-    `origin/main` yourself (the updater bot never pushes code to your branch). The bot merges
-    `main` into a branch only when the PR has auto-merge on, is not a draft, is green on its
-    current head (every required check of `hack/ci-required.txt` passed, newest run per name;
-    advisory and third-party checks do not count) and is behind `main`; a draft, a red or a running
-    PR is left alone, so sync a draft or red branch yourself when you need it.
-12. Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
-    procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc (`docs/dev/releasing.md`).
+Other rules:
+
+- A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
+  `origin/main` yourself (the updater bot never pushes code to your branch). The bot merges `main`
+  into a branch only when the PR has auto-merge on, is not a draft, is green on its current head
+  (every required check of `hack/ci-required.txt` passed, newest run per name; advisory and
+  third-party checks do not count) and is behind `main`; a draft, a red or a running PR is left
+  alone, so sync a draft or red branch yourself when you need it.
+- Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
+  procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc
+  (`docs/dev/releasing.md`).
+- Copilot coding agent pull requests are opened or adopted by a human.
 
 ### Several agents in one session (lanes)
 
-A session that runs agents in parallel gives each one a lane (ADR 0082): the parent takes the claim
-with `hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands
-the agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane, at most
-eight claims per human. Pick the model from the brief's "Which model" section. The parent beats,
-ships (`hack/ship.sh`) and releases; agents never call `claim.sh`. Each lane tests its own
-worktree: `hack/e2e-remote.sh` tests the checkout it is run from, so run it from the lane's worktree.
+A session that runs agents in parallel gives each one a lane: the parent takes the claim with
+`hack/claim.sh take N --lane L`, creates the lane's worktree with `hack/wt.sh new`, and hands the
+agent the issue, the worktree and `docs/agents/subagent-brief.md`. One issue per lane. Pick the model
+from the brief's "Which model" section. The parent ships (`hack/ship.sh`) and releases; agents never
+call `claim.sh`. `hack/claim.sh mine` lists your claims with their lanes. Two sessions in one lane
+are one holder; the lock does not separate them. Each session that runs at the same time as another
+one uses its own `--lane`. Each lane tests its own worktree: `hack/e2e-remote.sh` tests the
+checkout it is run from, so run it from the lane's worktree.
 
 ## Working alongside another human
 
-Two humans' agents change the same tree. Before you start, after `take`:
+One human works on the repository today (ADR 0104); these rules hold when a second one joins. Before
+you start, after `take`:
 
-- **Overlap check.** `gh pr list --state open --json number,author,headRefName,files` and
-  `hack/claim.sh` live claims (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`). If an
-  open PR or a claim by the other human touches the same files with the same behaviour, run
+- **Overlap check.** `gh pr list --state open --json number,author,headRefName,files` and the claim
+  refs (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`; one claim: `hack/claim.sh show
+  <N>`). If an open PR or another human's claim touches the same files with the same behaviour, run
   `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
   sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
 - **Merge `main`, never rebase** a pushed branch. Sync points: session start, before a push after an
@@ -189,7 +178,8 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **Merging.** The only merge method is a merge commit, and `hack/pr-merge.sh <PR> [--admin]` does
   it: it refuses a draft, runs `hack/pr-wait.sh --checks` (with `--require e2e` when the change needs
   the e2e: startup flags, chart Jobs or hooks, anything the e2e expects), reads every required context
-  on the head, then `claim.sh review`, `gh pr merge --merge` and a PR comment. Do not hand-write the
+  on the head, then `gh pr merge --merge` and a PR comment. It does not call `claim.sh`: the push to
+  main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the
   wait or the merge. With the merge queue, enqueue (no `--admin`) a needs-e2e PR: the queue runs the
   hosted quickstart on main plus the PR, which is the merge evidence, so a main that moved during the
   lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). Details: `docs/dev/ci.md#merging`.

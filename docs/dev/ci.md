@@ -474,7 +474,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 |---|---|---|---|
 | `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
-| `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); `schedule`, dispatch (`sweeper`) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` (push to `main`) and `sweeper` (schedule, dispatch; frees PRs closed without a merge) jobs have `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out `pull_request.base.sha` (or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` and `sweeper` run main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `updater.yml` | `push` to `main`, `workflow_run`, `schedule`, dispatch (no `auto_merge_enabled`) | App ID and key from the `claims-bot` Environment (branch policy `main`); token with `contents`, `pull-requests`, `workflows: write` and `checks`, `statuses: read` | ok: checks out the default branch only, never PR code; `workflow_run` runs the default branch's file. Residual risk: the key can push to any PR branch, so the job must never check out or run PR content |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
@@ -532,22 +532,25 @@ fixtures, and posts PR alerts without a separate dependency overview comment. It
 DeepSource: answer and resolve its inline comments before merge (#187). On 2026-12-05 check whether
 it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 
-### The `claim` check and claims by comment (ADR 0094, #163, #164)
+### The `claim` check (ADR 0094, ADR 0104)
 
 `claim` (`.github/workflows/claims.yml`, `pull_request`, read-only, `hack/claim.sh check-pr`)
-is required and is a conflict check: it fails only when someone else's human holds a live claim on an
-issue the pull request closes, or a live `claim/adr-NNNN` reservation for an ADR file it adds. The
-issues it reads are GitHub's closing links of the pull request (`closingIssuesReferences`: closing
-keywords in any form, `owner/repo#N` and URLs included, and the sidebar) plus the body's `Closes #N`.
-A pull request that names no issue, an unclaimed issue, the author's own claim and a stale one pass;
-there is no exemption label, title or author any more (`unclaimed-ok` and the Dependabot exemption
-are retired). The failure and success texts are fixed and pinned in `hack/claim_test.sh`.
+is required and is a conflict check: it fails only when another human holds a claim on an issue the
+pull request closes, or a `claim/adr-NNNN` reservation for an ADR file it adds. A claim has no lease
+(ADR 0104): it is held until it is released. The issues it reads are GitHub's closing links of the
+pull request (`closingIssuesReferences`: closing keywords in any form, `owner/repo#N` and URLs
+included, and the sidebar) plus the body's `Closes #N`. A pull request that names no issue, an
+unclaimed issue, a released claim and the author's own claim pass; there is no exemption label,
+title or author (`unclaimed-ok` and the Dependabot exemption are retired). The failure texts are
+fixed and pinned in `hack/claim_test.sh`. A release does not re-run a failed check: push again or
+re-run it.
 
-`claim-comment` (`.github/workflows/claim-comment.yml`, `issue_comment`, `hack/claim.sh comment N`)
-handles `/claim` and `/release` on issues with `GITHUB_TOKEN`; it is no status check. The sweeper,
-release and comment jobs run on `GITHUB_TOKEN` with `actions: write` (to re-run a failed `claim`
-check when a claim changes); no GitHub App and no Environment are involved. Leases, classes and the
-fallback when GitHub refuses the token's write: `docs/dev/work-claims-setup.md`.
+The `release claims` job (same workflow, on `push` to main, #463) runs `hack/claim.sh release-merged
+<before> <after>` with `GITHUB_TOKEN`: it finds the pull requests merged by the push and releases the
+held claims of the issues each one closes when the claim is its author's or points at it. A pull
+request closed without a merge runs nothing: its human runs `hack/claim.sh release-pr <PR>` (it
+unassigns) or `release <N>`. There is no schedule, no sweeper and no comment claim (ADR 0104); no
+GitHub App and no Environment are involved (`docs/dev/work-claims-setup.md`).
 
 #### Workflow triggers: no `pull_request_target` (#463)
 
@@ -569,17 +572,17 @@ e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --requi
 queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
 head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs the base branch's copy of `hack/needs-e2e.sh` with the base branch's
 `hack/paths.rules` (and `paths-lib.sh`, all from one ref; a base without them uses the standalone script), and a change that rule does not select needs a dispatch:
-`gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge and
-`hack/claim.sh review <N>` (step 8 of "Picking up work" in `AGENTS.md`).
+`gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge. There is no claim step:
+the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104).
 
-`hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
+`hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
 draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
 file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
 reads every required context of `hack/ci-required.txt` on the head SHA with the shared verdict (below; success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
-succeeded `claim.sh review` in the claim's lane (from `claim.sh mine`, or `--lane`) and a PR comment with the
-head SHA and the number of contexts it read. `pr-wait.sh --checks` exits 5 on a draft. After
+succeeded a PR comment with the head SHA and the number of contexts it read. It does not call
+`claim.sh`, and `--lane` is a usage error (ADR 0104). `pr-wait.sh --checks` exits 5 on a draft. After
 `ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
 `--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
 re-run of a draft run is ignored too). A red or cancelled run of the ready `ci` is never dropped, and
@@ -640,9 +643,9 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
-  checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim someone else took (or the
-  sweeper released) while the PR waited fails the entry. It fails closed when `<N>` cannot be read.
-  `release` (a `push` to main job) and `sweeper` do not run. Limit: a `merge_group` run takes its workflow YAML from the queue
+  checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
+  waited fails the entry. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)
+  does not run; there is no sweeper (ADR 0104). Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
   guard is the required CODEOWNERS review on `.github/**`. The trade-off is in the ADR 0082 amendment; the
@@ -669,7 +672,7 @@ slowest of the last 200 successful or failed `quickstart` jobs took 14.2 minutes
 so there are 45 minutes of headroom (measured 2026-11-09). A cold flavor build in the queue is not in that sample;
 if the queue starts timing out entries, raise `check_response_timeout_minutes` (to 90) then.
 
-The updater: `updater.yml` and `claim.sh update-oldest` stay until the queue is live. Meanwhile `update-oldest` skips
+The updater: `updater.yml` and `hack/pr-updater.sh update-oldest` (moved out of `claim.sh` by ADR 0104) stay until the queue is live. Meanwhile `update-oldest` skips
 a PR with `isInMergeQueue` (pushing to a queued PR's branch drops it from the queue) and is a no-op once the ruleset has
 a `merge_queue` rule (read at run time, as `pr-merge.sh` does). Retiring `updater.yml`, `update-oldest`, `update_target`
 and the `needs-update` label is follow-up work in #227: exit condition is the first week of green queue merges with strict off.

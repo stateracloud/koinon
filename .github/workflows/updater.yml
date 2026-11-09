@@ -2,8 +2,8 @@
 #
 # Branch updater (ADR 0082, item 8): bring the oldest auto-merge pull request that is behind main up
 # to date (strict required checks, no merge queue). The logic is
-# hack/claim.sh update-oldest. Split from claims.yml (old issue 596): the split keeps the updater's
-# triggers and Environment apart from the claim check.
+# hack/pr-updater.sh update-oldest (moved out of hack/claim.sh by ADR 0104). Split from claims.yml
+# (old issue 596): the split keeps the updater's triggers and Environment apart from the claim check.
 #
 # Triggers, each for a reason the others cannot cover:
 #   push to main            main moved: pull requests fall behind
@@ -74,4 +74,4 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           KOINON_CLAIM_REPO: ${{ github.repository }}
-        run: hack/claim.sh update-oldest
+        run: hack/pr-updater.sh update-oldest

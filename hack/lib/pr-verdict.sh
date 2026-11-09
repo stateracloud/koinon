@@ -88,6 +88,8 @@ def prv_drop($runs; $draft; $anyok):
   end;
 # The newest run of a workflow (e2e-kind has several by design and is left out) that completed and has no check run at all
 # (startup_failure, a workflow file that failed to parse): nothing would ever arrive, so it is a failure, not a wait.
+# A run that ended success or skipped is not such a case: its jobs ran but are not in the PR's rollup (for
+# example a workflow_dispatch on the head), so it is no part of the verdict and is ignored.
 # Applies to the raw rows (before prv_drop). Prints {id, name, conclusion} objects; none when the runs are unreadable.
 def prv_empty($runs; $draft):
   if $runs == null then [] else
@@ -95,7 +97,7 @@ def prv_empty($runs; $draft):
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
     | [$live[] | select((.id | tostring) as $i | ($cur | index($i)) != null and (.path | startswith(".github/workflows/")) and (.path | endswith("/e2e-kind.yml") | not)
-        and .status == "completed" and ($have | index($i)) == null)
+        and .status == "completed" and ((.conclusion // "") | IN("success", "skipped") | not) and ($have | index($i)) == null)
       | {id: (.id | tostring), name: (.name // "workflow"), conclusion: (.conclusion // "unknown")}]
   end;
 def prv_word: if .done | not then "pending" elif .skipped then "skipped" elif .cancelled then "cancelled" elif .bad then "failure" else "success" end;
