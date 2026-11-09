@@ -210,6 +210,27 @@ The decisions above are unchanged. The text and the verification below describe 
 
 ## Upstream verification
 
+- 2026-11-09, OpenShell `v0.1.7` (tag commit `5d25211b`, 2026-11-03; `v0.1.6` is `ac7f615c`,
+  2026-10-27), read as source, from `bdb956f` (the 0.1.5 commit) to `v0.1.7`:
+  - The GitHub release notes of v0.1.6 and v0.1.7 could not be read from the issue session (the
+    repository was outside its allowed set and the API answered 403), and the tags carry no
+    `CHANGELOG.md`. So the release's security fixes and breaking changes are not recorded here; the
+    pull request lists them once someone with access has read them. Everything below is from code.
+  - Supervisor pod: `crates/openshell-driver-kubernetes/src/sandbox_runtime.rs` (the `sa-token`
+    projected volume: audience `openshell-gateway`, `expirationSeconds` from the TTL, automount off),
+    `driver.rs` (TokenReview audience; no projected token on a workload pod), `config.rs` (TTL clamp
+    600 to 86400) and `main.rs` (default 3600) are unchanged, so the admission policy of
+    [0006](0006-identity-layers.md) needed no change.
+  - New and not denied by the chart policy: an optional `openshell-additional-ca` ConfigMap volume on
+    the supervisor pod (only with destination trust configured), a runtime-initiated control
+    connection mode, a per-sandbox boundary Service selected by role, and a `sandbox-control-egress`
+    NetworkPolicy. Not run against a cluster here; the lab e2e on the head is the check.
+  - Protos (`third_party/openshell`, additions only): the `SuspendSandbox` and `ResumeSandbox` RPCs,
+    the `SandboxUpdates` service, the phases `SANDBOX_PHASE_SUSPENDING` and `SANDBOX_PHASE_SUSPENDED`,
+    `service_routes` on the sandbox spec and status, and operator authority over middleware bindings
+    in a supervisor manifest. Koinon calls none of them; its phase map (`internal/execution/openshell/
+    render.go`) turns the two new phases into `PhaseUnknown`. Using suspend and resume is separate
+    work, not part of this pin.
 - 2026-10-28, OpenShell `v0.1.5`:
   - `docs/about/support-matrix.mdx:29-43` (cadence, N-1 support);
   - `docs/kubernetes/setup.mdx:35-87` (Agent Sandbox first, CRDs not installed by the chart, restart
