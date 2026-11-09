@@ -837,7 +837,7 @@ var errWrap = errors.New("wrap or seal the value")
 // row, the org or the error text.
 func failureKind(err error) string {
 	switch {
-	case errors.Is(err, errUnreadable):
+	case errors.Is(err, errUnreadable), errors.Is(err, secretstore.ErrUnsupportedFormat):
 		return "envelope"
 	case errors.Is(err, secretstore.ErrOpen):
 		return "open"

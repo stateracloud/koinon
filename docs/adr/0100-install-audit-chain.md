@@ -479,8 +479,12 @@ observed state as its `before`. With no earlier key event there is nothing to co
 generated Secrets are left to the start-up check. The start-up check itself loads the key set and the
 generated Secrets inside the locked transaction, so a change recorded while it waited for the lock is
 not mistaken for a missing event. `koinon-api`'s own `keys.generated` (the first KEK, the saved-work
-key) is still written right after the Secret is made, not under the lock from before it; a second
-replica's start-up check in that gap can record the new key as `keys.observed` first.
+key) is written the same way (issue #377): at start-up the creation runs inside a key Change with actor
+`koinon-api:keys`, so the lock is taken before the Secret is made and held through the Secret and the
+event, and a second replica's start-up check waits and finds the key recorded. While the chain cannot
+be read or the lock is not free within the first-attempt budget, the Secret is made without the lock
+and the event follows it (start never blocks on the database); the start-up check then records
+anything lost as `keys.observed`.
 
 `koinon-api` does not know its Helm release name (no flag or environment variable carries it), so its
 label-selected list of generated Secrets (`koinon.dev/generated`) is not scoped by the chart's

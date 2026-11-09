@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -195,5 +196,48 @@ var _ = Describe("koinon-api's key events", func() {
 		var raw string
 		Expect(keyAud.pool.QueryRow(ctx, `SELECT summary::text FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.observed'`, m).Scan(&raw)).To(Succeed())
 		Expect(raw).To(And(ContainSubstring("uid-2"), Not(ContainSubstring("koinon_test_not-a-real"))))
+	})
+
+	Describe("two replicas starting together on an empty install", func() {
+		It("write one keys.generated for the new KEK and no keys.observed", func(ctx SpecContext) {
+			fresh := fake.NewClientset()
+			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
+			replica := func() *keyAudit {
+				a := newKeyAudit(keyAud.pool, fresh, ns, "koinon-kek", "koinon-saved-work")
+				a.keySet = store
+				return a
+			}
+			m := mark(ctx)
+			var wg sync.WaitGroup
+			created := make(chan bool, 2)
+			for range 2 {
+				wg.Add(1)
+				a := replica()
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					ok, err := a.ensureGenerated(ctx, "secret", "koinon-kek", func(ctx context.Context) (bool, error) {
+						return store.EnsureWith(ctx, time.Now(), nil, nil)
+					})
+					Expect(err).NotTo(HaveOccurred())
+					created <- ok
+					Expect(a.observe(ctx)).To(Succeed())
+				}()
+			}
+			wg.Wait()
+			close(created)
+			n := 0
+			for ok := range created {
+				if ok {
+					n++
+				}
+			}
+			Expect(n).To(Equal(1), "one replica made the Secret")
+			Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+			Expect(count(ctx, "keys.observed", m)).To(BeZero())
+			var actorID string
+			Expect(keyAud.pool.QueryRow(ctx, `SELECT actor_id FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.generated'`, m).Scan(&actorID)).To(Succeed())
+			Expect(actorID).To(Equal("koinon-api:keys"))
+		})
 	})
 })
