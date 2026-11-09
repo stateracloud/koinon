@@ -176,20 +176,14 @@ func (k *keyAudit) recordGenerated(ctx context.Context, c *keyscli.Change, kind,
 		return err
 	}
 	defer clearKeys(ks)
-	prev, err := (&keyscli.Auditor{Pool: k.pool}).LastState(ctx)
-	if err != nil {
-		return err
-	}
 	after, err := c.After(ctx, ks)
 	if err != nil {
 		return err
 	}
 	if id != k.kekSecret {
-		// Not the KEK Secret: the KEK part is the last recorded one (empty on a first start).
-		var p keyscli.KeyState
-		if prev != nil {
-			p = *prev
-		}
+		// Not the KEK Secret: the KEK part is the Change's base, what the chain holds when this event is
+		// written (the pending keys.observed's, else the last recorded; empty on a first start).
+		p := c.Base()
 		after.KEKs, after.Active, after.Retired = p.KEKs, p.Active, p.Retired
 	}
 	return c.Record(ctx, keyscli.Event{Action: keyscli.ActionGenerated, TargetKind: kind, TargetID: id, After: after.Normalized()})

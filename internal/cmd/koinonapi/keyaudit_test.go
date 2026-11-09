@@ -13,8 +13,10 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -250,43 +252,80 @@ var _ = Describe("koinon-api's key events", func() {
 		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
 	})
 
+	It("bases keys.generated for the saved-work key on the live KEKs when a lost KEK edit is found on the same start", func(ctx SpecContext) {
+		Expect(keyAud.observe(ctx)).To(Succeed()) // the recorded state: one KEK
+		m := mark(ctx)
+		By("a KEK is added with no event")
+		sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		raw := make([]byte, secretstore.KeySize)
+		copy(raw, "koinon_test_not-a-real-kek-eeee")
+		sec.Data["kek-20261107-eeee"] = secretstore.EncodeKey(raw)
+		_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		created, err := keyAud.ensureGenerated(ctx, "secret", "koinon-saved-work", func(ctx context.Context) (bool, error) {
+			_, err := kube.CoreV1().Secrets(ns).Create(ctx, secretOf("koinon-saved-work", "uid-1", false), metav1.CreateOptions{})
+			return err == nil, err
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(count(ctx, "keys.observed", m)).To(Equal(1))
+		Expect(count(ctx, "keys.generated", m)).To(Equal(1))
+		Expect(keksOf(ctx, m, "keys.observed", "after")).To(ContainSubstring("kek-20261107-eeee"))
+		Expect(keksOf(ctx, m, "keys.generated", "after")).To(ContainSubstring("kek-20261107-eeee"), "the event starts from the observed KEKs")
+		Expect(keyAud.observe(ctx)).To(Succeed())
+		Expect(count(ctx, "keys.observed", m)).To(Equal(1), "the start-up check finds nothing new")
+	})
+
 	Describe("two replicas starting together on an empty install", func() {
 		It("write one keys.generated for the new KEK and no keys.observed", func(ctx SpecContext) {
 			fresh := fake.NewClientset()
+			mirror := fake.NewClientset()
 			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
-			replica := func() *keyAudit {
-				a := newKeyAudit(keyAud.pool, fresh, ns, "koinon-kek", "koinon-saved-work")
-				a.keySet = store
-				return a
-			}
-			m := mark(ctx)
-			var wg sync.WaitGroup
-			created := make(chan bool, 2)
-			for range 2 {
-				wg.Add(1)
-				a := replica()
-				go func() {
-					defer GinkgoRecover()
-					defer wg.Done()
-					ok, err := a.ensureGenerated(ctx, "secret", "koinon-kek", func(ctx context.Context) (bool, error) {
-						return store.EnsureWith(ctx, time.Now(), nil, nil)
-					})
-					Expect(err).NotTo(HaveOccurred())
-					created <- ok
-					Expect(a.observe(ctx)).To(Succeed())
-				}()
-			}
-			wg.Wait()
-			close(created)
-			n := 0
-			for ok := range created {
-				if ok {
-					n++
+			a := newKeyAudit(keyAud.pool, fresh, ns, "koinon-kek", "koinon-saved-work")
+			a.keySet = store
+			// The second replica's start-up check reads the mirror: the fake clientset holds its lock
+			// while a reactor runs.
+			b := newKeyAudit(keyAud.pool, mirror, ns, "koinon-kek", "koinon-saved-work")
+			b.keySet = keyscli.KubeStore{Client: mirror, Namespace: ns, Name: "koinon-kek"}
+
+			observed := make(chan error, 1)
+			var once sync.Once
+			fresh.PrependReactor("create", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				obj := action.(k8stesting.CreateAction).GetObject()
+				if err := fresh.Tracker().Create(action.GetResource(), obj, action.GetNamespace()); err != nil {
+					return true, nil, err
 				}
-			}
-			Expect(n).To(Equal(1), "one replica made the Secret")
+				once.Do(func() {
+					Expect(mirror.Tracker().Create(action.GetResource(), obj.DeepCopyObject(), action.GetNamespace())).To(Succeed())
+					// The Secret exists and its event does not: the second replica's check starts now.
+					go func() {
+						defer GinkgoRecover()
+						observed <- b.observe(ctx)
+					}()
+					Eventually(func() bool {
+						if len(observed) > 0 {
+							return true
+						}
+						var waiting bool
+						Expect(keyAud.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+							AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting)).To(Succeed())
+						return waiting
+					}).Should(BeTrue())
+				})
+				return true, obj, nil
+			})
+
+			m := mark(ctx)
+			created, err := a.ensureGenerated(ctx, "secret", "koinon-kek", func(ctx context.Context) (bool, error) {
+				return store.EnsureWith(ctx, time.Now(), nil, nil)
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(created).To(BeTrue())
+			Eventually(observed).Should(Receive(Succeed()))
 			Expect(count(ctx, "keys.generated", m)).To(Equal(1))
-			Expect(count(ctx, "keys.observed", m)).To(BeZero())
+			Expect(count(ctx, "keys.observed", m)).To(BeZero(), "the check waited for the event")
 			var actorID string
 			Expect(keyAud.pool.QueryRow(ctx, `SELECT actor_id FROM install_audit_events WHERE chain_seq > $1 AND action = 'keys.generated'`, m).Scan(&actorID)).To(Succeed())
 			Expect(actorID).To(Equal("koinon-api:keys"))
