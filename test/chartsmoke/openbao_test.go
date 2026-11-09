@@ -35,7 +35,7 @@ import (
 
 // openBaoImage is the OpenBao the KMS mode runs against (the version internal/secretstore/openbao
 // is tested with).
-const openBaoImage = "docker.io/openbao/openbao:2.4.1"
+const openBaoImage = "docker.io/openbao/openbao:2.7.2"
 
 // openBaoRootToken is the dev server's root token: obviously fake, and only the test container's.
 const openBaoRootToken = "koinon_test_not-a-real-token"
