@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Ships the current feature branch: commit (signed off, checked identity), blob check, merge
-# origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
+# origin/main, gitleaks, push, pull request, board, ready, auto-merge. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--no-issue] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
@@ -26,8 +26,8 @@
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
 #
 # Steps: commit ok <sha> | blobs ok | merged origin/main | gitleaks ok (N commits) | pushed <branch> |
-#        PR #N <url> | board ok | ready | auto-merge on | review ok #N
-# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 3 claim lost, 4 merge conflict.
+#        PR #N <url> | board ok | ready | auto-merge on
+# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 4 merge conflict.
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -35,7 +35,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
-	--review) need "$@"; review=$2; shift 2 ;;
+	--review) echo "ship: --review is gone (ADR 0104): a claim ends when its pull request merges or closes" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
 	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -61,7 +61,6 @@ done
 [[ -z $pr_body || -r $pr_body ]] || { echo "ship: cannot read $pr_body" >&2; exit 2; }
 [[ $draft == 0 || $ready == 0 ]] || { echo "ship: --draft and --ready contradict" >&2; exit 2; }
 [[ $draft == 0 || -n $pr_title ]] || { echo "ship: --draft needs --pr-title/--pr-body" >&2; exit 2; }
-[[ -z $review || $review =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "ship: --review wants N or N,M" >&2; exit 2; }
 
 fail() { echo "ship: FAIL $*" >&2; exit 1; }
 say() { echo "$*"; }
@@ -291,18 +290,4 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "auto-merge on"
 		fi
 	fi
-fi
-
-# claims
-if [[ -n $review ]]; then
-	for n in ${review//,/ }; do
-		if [[ $dry == 1 ]]; then say "dry-run: would run hack/claim.sh review $n"; continue; fi
-		rc=0
-		hack/claim.sh review "$n" >/dev/null || rc=$?
-		case $rc in
-		0) say "review ok #$n" ;;
-		3) echo "ship: claim for #$n is lost" >&2; exit 3 ;;
-		*) fail "claim.sh review $n exited $rc" ;;
-		esac
-	done
 fi

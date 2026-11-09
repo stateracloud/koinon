@@ -166,24 +166,28 @@ check "rm --branch deletes the branch of a merged PR" wt rm baz --branch
 check "rm --branch deleted it" refuses git show-ref --verify -q refs/heads/feat/baz
 
 # rm: live claim, process in the worktree, --force and what it prints
-claim_ref() { # <issue> <state> <lease_until> <holder>: a claim ref on origin, as hack/claim.sh writes it
-	local tree c
+claim_ref() { # <issue> <state> <holder> [lease_until]: a claim ref on origin, as hack/claim.sh writes it
+	# (ADR 0104); with a lease_until, as the claim.sh from before ADR 0104 wrote it
+	local tree c lease=""
 	tree=$(git hash-object -t tree -w /dev/null)
-	c=$(printf 'claim #%s: x\n\nholder: %s\nhuman: h\nlease_until: %s\npr: \nnote: \nstate: %s\n' "$1" "$4" "$3" "$2" |
+	[ -z "${4:-}" ] || lease="lease_until: $4"$'\n'
+	c=$(printf 'claim #%s: x\n\nholder: %s\nhuman: h\n%spr: \nnote: \nstate: %s\n' "$1" "$3" "$lease" "$2" |
 		git commit-tree "$tree")
 	git push -q -f origin "$c:refs/heads/claim/$1"
 }
-future=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
 past=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
 : >"$FAKE_PRS"
 wt new live --branch fix/700-live >/dev/null 2>&1
 git -C "$tmp/kw/live" push -q origin fix/700-live
-claim_ref 700 held "$future" "alice/host/sess#l700"
+claim_ref 700 held "alice#l700"
 err=$(wt rm live 2>&1 || true)
-check "rm refuses a worktree with a live claim" test -d "$tmp/kw/live"
-check "rm names the claim check and the holder" grep -q "live claim on #700 is held by alice/host/sess#l700" <<<"$err"
-claim_ref 700 held "$past" "alice/host/sess#l700"
-# the lease has expired: the claim no longer guards, the process does
+check "rm refuses a worktree with a held claim" test -d "$tmp/kw/live"
+check "rm names the claim check and the holder" grep -q "live claim on #700 is held by alice#l700" <<<"$err"
+claim_ref 700 held "alice/host/sess#l700" "$past"
+err=$(wt rm live 2>&1 || true)
+check "rm refuses an old-format claim whose lease has passed (no lease since ADR 0104)" test -d "$tmp/kw/live"
+claim_ref 700 released "alice#l700"
+# the claim is released: the claim no longer guards, the process does
 (cd "$tmp/kw/live" && exec sleep 60) &
 sleeper=$!
 for _ in $(seq 1 50); do # wait until the dummy process runs with its cwd in the worktree
@@ -193,13 +197,13 @@ done
 err=$(wt rm live 2>&1 || true)
 check "rm refuses when a process has its cwd inside" test -d "$tmp/kw/live"
 check "rm names the process check" grep -q "working directory inside" <<<"$err"
-claim_ref 700 held "$future" "alice/host/sess#l700"
+claim_ref 700 held "alice#l700"
 err=$(wt rm live --force 2>&1) || true
 check "rm --force prints what it overrides" grep -q -- "--force overrides: a live claim" <<<"$err"
 check "rm --force removes it" test ! -e "$tmp/kw/live"
 kill "$sleeper" 2>/dev/null || true
 wait "$sleeper" 2>/dev/null || true
-claim_ref 700 released "$future" "alice/host/sess#l700"
+claim_ref 700 released "alice#l700"
 wt new live2 --branch fix/700-live2 >/dev/null 2>&1
 git -C "$tmp/kw/live2" push -q origin fix/700-live2
 check "rm ignores a released claim" wt rm live2
@@ -266,14 +270,14 @@ check "rm ignores .claude/worktrees with a root named worktrees" refuses env KOI
 check "rm left .claude/worktrees alone" test -d "$tmp/proj/.claude/worktrees/cc"
 git worktree remove --force "$tmp/proj/.claude/worktrees/cc"
 
-# a malformed lease fails closed
+# an old-format claim with a malformed lease is still held (the lease is ignored)
 wt new badl --branch fix/703-badl >/dev/null 2>&1
 git -C "$tmp/kw/badl" push -q origin fix/703-badl
-claim_ref 703 held "not-a-date" "alice/host/sess#l703"
+claim_ref 703 held "alice/host/sess#l703" "not-a-date"
 err=$(wt rm badl 2>&1 || true)
-check "rm refuses on a malformed lease" test -d "$tmp/kw/badl"
-check "rm says the claim state is unknown" grep -q "claim state of #703 unknown" <<<"$err"
-claim_ref 703 released "$future" "alice/host/sess#l703"
+check "rm refuses an old-format claim with a malformed lease" test -d "$tmp/kw/badl"
+check "rm names the holder" grep -q "live claim on #703 is held by alice/host/sess#l703" <<<"$err"
+claim_ref 703 released "alice/host/sess#l703"
 check "rm removes it once the claim is released" wt rm badl
 
 # gc: removes only on proof (merged PR, gone upstream)

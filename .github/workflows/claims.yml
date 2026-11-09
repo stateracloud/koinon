@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Work claims (ADR 0082). The logic lives in hack/claim.sh so it can be tested and linted; this file
-# only schedules it.
-#   sweeper   every 30 minutes (the lease is 2 h, stale at lease + 15 min): mark stale claims, release
-#             dead ones (draft PRs are kept)
-#   release   when a pull request closes: release the claims that point at it
-#   claim     required check on every pull request: it names an issue whose claim its author holds;
-#             on a merge queue build (#225, ADR 0094 decision 4) it reads <N> from the
-#             queue ref and runs the base's `check-pr <N>`: the fencing point, a claim taken or swept
-#             while the pull request waited fails here
+# Work claims (ADR 0082, reduced to the lock by ADR 0104). The logic lives in hack/claim.sh so it can be
+# tested and linted; this file only runs it. There is no schedule: a claim has no lease, so nothing
+# expires and nothing sweeps.
+#   release   when a pull request closes: release the claims of the issues it closes
+#   claim     required check on every pull request: fails only when another human holds a claim on an
+#             issue the pull request closes, or reserved an ADR number it adds. On a merge queue build
+#             (#225, ADR 0094 decision 4) it reads <N> from the queue ref and runs the base's
+#             `check-pr <N>`: the fencing point, a claim another human took while the pull request
+#             waited fails here
 #   (the branch updater lives in updater.yml: its triggers differ from the claim's, see there)
 #
 # pull_request_target: the `claim` and `release` jobs use the workflow file and the hack/claim.sh of
@@ -16,61 +16,34 @@
 # check. They check out the base commit only, with minimal permissions.
 #
 # Job count (old issue 596): every job here pays a fixed start-up cost (runner, checkout). The `claim` job runs
-# only for events that can change its answer (title, body, files, labels, state). A job skipped by
-# an `if:` reports "skipped", which a required check counts as passing and which replaces an earlier
-# failure of the same name, so the claim is never filtered at job level: unwanted events are left out
-# of `types:` below instead (no run, the earlier result stays).
+# only for events that can change its answer (title, body, files, state). A job skipped by an `if:`
+# reports "skipped", which a required check counts as passing and which replaces an earlier failure of
+# the same name, so the claim is never filtered at job level: unwanted events are left out of `types:`
+# below instead (no run, the earlier result stays).
 #
-# Token (ADR 0094 decision 3): the sweeper and release jobs run on GITHUB_TOKEN with the permissions
-# they list; no App, no Environment, no gate step. GITHUB_TOKEN cannot write an organization project,
-# so they make no board writes (KOINON_CLAIM_PROJECT=none): the board's built-in workflows set Done and
-# the next `claim.sh next` or `take` repairs the rest. The `claim` check needs no write access.
+# Token (ADR 0094 decision 3): the release job runs on GITHUB_TOKEN with the permissions it lists; no
+# App, no Environment, no gate step. It writes no board fields (ADR 0104: the assignee is the only
+# mirror; the board's built-in workflows set the status). The `claim` check needs no write access.
 name: claims
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
-  workflow_dispatch:
   merge_group:
     types: [checks_requested]
   pull_request_target:
     # Not auto_merge_enabled: the claim does not depend on auto-merge (it starts updater.yml).
-    # ready_for_review stays: a draft whose claim was swept or taken over must re-check when marked
-    # ready. labeled/unlabeled stay: unclaimed-ok
-    # decides the check and `types:` cannot filter by label name.
-    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, closed]
+    types: [opened, reopened, synchronize, edited, closed]
 
 permissions:
   contents: read
 
 jobs:
-  sweeper:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    name: sweeper
-    runs-on: ubuntu-latest
-    # GITHUB_TOKEN: claim refs (contents), labels, comments, unassign (issues), PR state (pull-requests).
-    # A missing permission makes a call fail and the job red; nothing here skips silently.
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: read
-    concurrency:
-      group: claims-sweeper
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          KOINON_CLAIM_REPO: ${{ github.repository }}
-          # GITHUB_TOKEN cannot write an organization project: no board writes (ADR 0094 decision 3).
-          KOINON_CLAIM_PROJECT: none
-        run: hack/claim.sh sweep
-
   # One group per pull request: a release must not be cancelled or replaced by another one.
   release:
     if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     name: release claims
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN: claim refs (contents), unassign (issues), the pull request (pull-requests). A missing
+    # permission makes a call fail and the job red; nothing here skips silently.
     permissions:
       contents: write
       issues: write
@@ -86,7 +59,6 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           KOINON_CLAIM_REPO: ${{ github.repository }}
-          KOINON_CLAIM_PROJECT: none
           PR: ${{ github.event.pull_request.number }}
         run: hack/claim.sh release-pr "$PR"
 
@@ -104,11 +76,11 @@ jobs:
       pull-requests: read
     steps:
       # Merge queue (ADR 0094 decision 4): the fencing point. The queue ref is
-      # gh-readonly-queue/<base>/pr-<N>-<base sha>; <N> is checked with the base's script, so a claim someone
-      # else took (or the sweeper released) while the pull request waited fails here. Fails closed. Limit: a
-      # merge_group run takes this workflow YAML from the queue commit (the pull request's own), so only the
-      # script is the base's; the guard against a PR that edits this file is the required review on .github/**
-      # plus the pull_request_target entry gate (docs/dev/ci.md "The merge queue").
+      # gh-readonly-queue/<base>/pr-<N>-<base sha>; <N> is checked with the base's script, so a claim another
+      # human took while the pull request waited fails here. Fails closed. Limit: a merge_group run takes this
+      # workflow YAML from the queue commit (the pull request's own), so only the script is the base's; the
+      # guard against a PR that edits this file is the required review on .github/** plus the
+      # pull_request_target entry gate (docs/dev/ci.md "The merge queue").
       - if: github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

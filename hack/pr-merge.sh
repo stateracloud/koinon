@@ -5,7 +5,7 @@
 # hand-written wait-then-merge loops: a draft's green rollup, a ready run that has not started yet and a
 # required context that never reported have each been merged over by hand before.
 #
-# Usage: hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]
+# Usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]
 #   1. refuses a draft (exit 5) and a PR that is not open
 #   2. hack/pr-wait.sh <PR> --checks, plus `--require e2e` when hack/needs-e2e.sh says the change needs
 #      the kind e2e (the ruleset's required contexts are read by --checks itself)
@@ -14,10 +14,7 @@
 #      of each workflow decides; each context must be success or skipped, otherwise it exits 1 without merging
 #   4. only then: re-reads the PR (no longer OPEN: exit 3; head moved: exit 2; head not origin's
 #      branch tip: exit 6 STALE-HEAD), `gh pr merge --merge` (with --admin when given, else --auto),
-#      pinned to the head SHA that was read, then hack/claim.sh review <N> for each issue the PR closes,
-#      in the claim's lane (read from `claim.sh mine`, or --lane), and only after the merge command
-#      succeeded (a review failure is a warning: the merge does not depend on the claim), and a PR
-#      comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
+#      pinned to the head SHA that was read, then a PR comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
 #      the output says `auto-merge enabled`.
 #   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
 #   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
@@ -29,14 +26,13 @@
 #   fails or is empty, e2e is required (fail closed).
 #   --admin        merge now with admin rights: the exception (a CODEOWNERS or sensitive path, AGENTS.md "Merging"), not the
 #                  default. With a merge queue and a change that needs the e2e it warns: the queue-commit quickstart is skipped.
-#   --lane L       the claim lane for `claim.sh review` (default: the lane of the claim in `claim.sh mine`)
 #   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
 #       a tool failed, 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_CLAIM, PR_MERGE_THREADS replace the helper scripts.
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_THREADS replace the helper scripts.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -47,25 +43,23 @@ export GH_PAGER=cat PAGER=cat
 here=$(cd "$(dirname "$0")" && pwd)
 wait_sh=${PR_MERGE_WAIT:-$here/pr-wait.sh}
 needs_sh=${PR_MERGE_NEEDS_E2E:-$here/needs-e2e.sh}
-claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
 # shellcheck source=/dev/null
 . "$here/lib/pr-verdict.sh"
 
 usage() {
-  echo "usage: hack/pr-merge.sh <PR> [--admin] [--lane L] [--approved-at <time>]" >&2
+  echo "usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]" >&2
   exit 64
 }
 
-pr="" admin=0 approved="" lane=""
+pr="" admin=0 approved=""
 while [ $# -gt 0 ]; do
   case $1 in
   --admin) admin=1 ;;
   --lane)
-    [ $# -ge 2 ] || usage
-    lane=$2
-    shift
+    echo "pr-merge: --lane is gone (ADR 0104): the merge releases the claim, pr-merge.sh no longer calls claim.sh" >&2
+    exit 64
     ;;
   --approved-at)
     [ $# -ge 2 ] || usage
@@ -194,23 +188,10 @@ if [ "$admin" != 0 ]; then
     echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444, ADR 0102) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
   fi
 fi
-gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc); the claim stays as it is" >&2; exit "$rc"; }
+gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc)" >&2; exit "$rc"; }
 
-# The claim moves to review only now. A lane claim (`holder#lane`) is reviewable only under its lane.
-mine=$("$claim_sh" mine 2>/dev/null) || mine=""
-for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$pr_json"); do
-  l=$lane
-  if [ -z "$l" ]; then
-    holder=$(awk -F'\t' -v n="#$n" '$1 == n { print $NF; exit }' <<<"$mine")
-    holder=${holder##*/}
-    case $holder in *'#'*) l=${holder#*#} ;; esac
-  fi
-  if [ -n "$l" ]; then
-    "$claim_sh" review "$n" --lane "$l" || echo "pr-merge: warning: claim.sh review $n --lane $l failed ($?)" >&2
-  else
-    "$claim_sh" review "$n" || echo "pr-merge: warning: claim.sh review $n failed ($?)" >&2
-  fi
-done
+# No claim step: the merge (or the close) releases the claims of the issues the PR closes, through
+# claims.yml's release job (ADR 0104).
 
 # What did `gh pr merge` achieve? It succeeds when GitHub accepted the request, not when the PR is queued or mergeable:
 # a PR blocked by a required review (required_reviewers) has auto-merge armed and is not in the queue (2026-11-07
