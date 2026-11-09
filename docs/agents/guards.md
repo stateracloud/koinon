@@ -9,8 +9,8 @@ people at different times. This table lists them together.
 Rule: each guard has a legal route. When a guard refuses, the agent can reach the same goal with a
 command or step that the other guards allow. A guard with no legal route is a defect (section 2).
 
-Status: written 2026-11-09 from the files named in it. The live ruleset and the classifier were not
-re-read from GitHub or Claude Code for this table.
+Status: written 2026-11-09 from the files named in it. The live ruleset for `main` was read on 2026-11-09
+with `gh api`; the ruleset rows match it. The classifier was not re-read from Claude Code.
 
 ## 1. The table
 
@@ -38,22 +38,23 @@ Owner: "repo" means a pull request changes it. "Owner" means only the human owne
 | A new `ci.yml` job is listed in `hack/ci-required.txt` | `hack/ci-required.txt` and its check `hack/ci-required-test.sh` (`docs/dev/ci.md` "required status checks") | the check fails | Add the job to the list, or mark it advisory, in the same PR | repo |
 | Worktrees are removed only by `hack/wt.sh` | `hack/wt.sh rm` refuses a live claim, a process in the tree, uncommitted changes, unpushed commits | `wt: refusing to remove <name>: <reason>` | Commit, push or release first; `--force` for your own worktree only | repo |
 | Ship from a feature branch, to a branch named for an issue | `hack/ship.sh` (refuses `main`, a merged or closed PR, a bad branch name, a lost claim) | `ship: FAIL ...` (exit 1), exit 3 for a lost claim | Branch `<type>/<N>-<slug>`; stop on exit 3 | repo |
-| Commit and merge commit carry an allowed git identity | `hack/git-identity-check.sh` (used by `hack/ship.sh`, the `hack/githooks/` pre-commit and pre-merge-commit hooks, and CI); list: `hack/git-identities.allowed` | exit 1 with the identity named; `ship: FAIL identity` | Set the repository git identity; a new contributor adds a line to the list in a PR | repo |
+| Commit and merge commit carry an allowed git identity | `hack/git-identity-check.sh` (used by `hack/ship.sh`, the `hack/githooks/` pre-commit and pre-merge-commit hooks, and CI); list: `hack/git-identities.allowed` | exit 1 with the identity named; `ship: FAIL identity` | Set the repository git identity; a new contributor adds a line to the list in a PR. In CI the allowed list is read from the base commit, so a new contributor's line counts from their next PR | repo |
 | Migrations are numbered, forward-only and, on a patch line, expand-only | `hack/migrate-lint.sh` (ADR 0047, 0085, 0099) | the script exits 1 with the file and rule | Add a new migration instead of editing a merged one; `hack/migrate-renumber.sh` after merging main | repo |
 | A dependency is at least 3 days old | `hack/dep-age-check.sh` (ADR 0079) | the script exits 1 with the version and its age | Pick an older version, or wait; a security fix follows the fast path in ADR 0079 | repo |
 | Release tags are immutable | the `release tags: immutable` ruleset (`docs/dev/releasing.md`) | push of a moved or deleted tag is refused | Cut the next rc tag | owner |
 | Write only where the sandbox allows | Claude Code sandbox: repository (`.claude/settings.json` entries) and owner (local settings); worktrees under `/tmp/kw` | `Operation not permitted` | `hack/wt.sh new`; `$TMPDIR`. `hack/lane-gates.sh` reports a sandbox denial as `notrun` | repo and owner |
 | No cluster by default | rule in AGENTS.md "Working rules" (explicit `KUBECONFIG`); no hook | text only | `KUBECONFIG=/dev/null`, or an explicit file | repo |
-| Do not relay the owner's approval to another session of the owner | `~/.config/koinon/hooks/relay-guard.sh`, PreToolUse on SendMessage and AskUserQuestion (header read only) | deny with a reason | The other session asks the owner itself | human owner only, not in the repository |
-| Compact the main session past 300k context | `~/.config/koinon/hooks/context-cap.sh`, PostToolUse hook and status line (header and message read only in part) | a message to compact, once per 50k step | Update the state files and ask the owner to run `/compact` | human owner only, not in the repository |
-| Questions to the owner go through the question tool | `~/.config/koinon/hooks/grilling-question-tool.sh` (PreToolUse on Skill) and `prose-question-stop.sh` (Stop hook); headers read only | the stop is blocked once, with a request to ask again through the tool | Ask through `AskUserQuestion` | human owner only, not in the repository |
+| Do not relay the owner's approval to another session of the owner | `~/.config/koinon/hooks/relay-guard.sh`, PreToolUse on SendMessage and AskUserQuestion (read in full 2026-11-09); it also allows a message that carries only the request or the question | deny with a reason | The other session asks the owner itself | human owner only, not in the repository |
+| Compact the main session past 300k context | `~/.config/koinon/hooks/context-cap.sh`, PostToolUse hook and status line (read in full 2026-11-09) | a message to compact, once per 50k step | Update the state files and ask the owner to run `/compact` | human owner only, not in the repository |
+| Questions to the owner go through the question tool | `~/.config/koinon/hooks/grilling-question-tool.sh` (PreToolUse on Skill) and `prose-question-stop.sh` (Stop hook); read in full 2026-11-09 | the stop is blocked once, with a request to ask again through the tool | Ask through `AskUserQuestion` | human owner only, not in the repository |
 
 Guards in the table: 29.
 
 ## 2. Guards with no legal route today
 
 1. **Admin merge by an agent.** The ruleset needs one team approval for PRs that touch the 15
-   sensitive path patterns (see the ruleset row); 74% of merged PRs touch them. The permission
+   sensitive path patterns (see the ruleset row); 74% of merged PRs touch them (293 of 395 PR
+   merges in the 30 days to 2026-11-09, from the diff of each first-parent merge). The permission
    classifier denies `--admin` from an agent (4 of 4 on 2026-11-08, from the audit record).
    `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Smallest fix: the `review` check of
    ADR 0103 (in progress). Until then the owner runs the command; the agent hands over
