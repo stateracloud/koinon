@@ -111,7 +111,8 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
   wording "only after a security review": no review path exists, and a proposal to change the rule
   amends this ADR first. `hack/runner-lint.sh` (CI job `scripts`, required) fails when a workflow or the
   actionlint config names `self-hosted` or a `blacksmith-*` label, or when a `runs-on` value is chosen at
-  run time from `vars.`, `inputs.`, `secrets.` or the event. The review of every workflow for a public
+  run time from `vars.`, `inputs.`, `secrets.`, `needs.`, `github.event.`, `github.head_ref`, `github.ref_name`,
+  `github.actor` or `github.triggering_actor`. The review of every workflow for a public
   repository is in `docs/dev/ci.md#workflow-security-review`.
 - _Amended (2026-10-29, later):_ while the repository is private, `e2e-kind.yml` also runs its go
   suite on ready (non-draft) pull requests to main that touch `internal/ledger`, `internal/gateway`,
