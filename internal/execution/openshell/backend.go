@@ -45,6 +45,8 @@ type Backend struct {
 	// workspace, which the reconciler converges concurrently (plan item LT1), and a profile
 	// imported twice at once is an AlreadyExists error.
 	profileMu sync.Mutex
+	// owner is the value of execution.LabelInstall this Backend stamps and enforces (WithOwner).
+	owner string
 }
 
 var _ execution.Backend = (*Backend)(nil)
@@ -132,12 +134,13 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, name string, labels map[s
 	for range 2 {
 		got, err := b.c.GetWorkspace(ctx, &openshellv1.GetWorkspaceRequest{Name: name})
 		if err == nil {
-			return workspaceFromProto(got.GetWorkspace()), nil
+			w := workspaceFromProto(got.GetWorkspace())
+			return w, b.check(op, "workspace", name, w.Labels)
 		}
 		if !errors.Is(wrap(op, err), execution.ErrNotFound) {
 			return execution.Workspace{}, wrap(op, err)
 		}
-		created, err := b.c.CreateWorkspace(ctx, &openshellv1.CreateWorkspaceRequest{Name: name, Labels: labels})
+		created, err := b.c.CreateWorkspace(ctx, &openshellv1.CreateWorkspaceRequest{Name: name, Labels: b.stamp(labels)})
 		if err == nil {
 			return workspaceFromProto(created.GetWorkspace()), nil
 		}
@@ -168,6 +171,7 @@ func workspaceFromProto(w *datamodelv1.Workspace) execution.Workspace {
 // CreateSandbox implements execution.Backend.
 func (b *Backend) CreateSandbox(ctx context.Context, workspace string, spec execution.SandboxSpec) (execution.Sandbox, error) {
 	const op = "CreateSandbox"
+	spec.Labels = b.stamp(spec.Labels)
 	req, err := renderSandbox(workspace, spec)
 	if err != nil {
 		return execution.Sandbox{}, &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}
@@ -177,7 +181,11 @@ func (b *Backend) CreateSandbox(ctx context.Context, workspace string, spec exec
 		return sandboxFromProto(resp.GetSandbox()), nil
 	}
 	if errors.Is(wrap(op, err), execution.ErrAlreadyExists) {
-		return b.GetSandbox(ctx, workspace, spec.Name)
+		sb, err := b.GetSandbox(ctx, workspace, spec.Name)
+		if err != nil {
+			return sb, err
+		}
+		return sb, b.check(op, "sandbox", spec.Name, sb.Labels)
 	}
 	return execution.Sandbox{}, wrap(op, err)
 }
@@ -193,6 +201,9 @@ func (b *Backend) GetSandbox(ctx context.Context, workspace, name string) (execu
 
 // StartSandbox implements execution.Backend.
 func (b *Backend) StartSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
+	if err := b.guardSandbox(ctx, "StartSandbox", workspace, name); err != nil {
+		return execution.Sandbox{}, err
+	}
 	resp, err := b.c.StartSandbox(ctx, &openshellv1.StartSandboxRequest{WorkspaceScope: scope(workspace), Name: name})
 	if err == nil {
 		return sandboxFromProto(resp.GetSandbox()), nil
@@ -203,6 +214,9 @@ func (b *Backend) StartSandbox(ctx context.Context, workspace, name string) (exe
 
 // StopSandbox implements execution.Backend.
 func (b *Backend) StopSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
+	if err := b.guardSandbox(ctx, "StopSandbox", workspace, name); err != nil {
+		return execution.Sandbox{}, err
+	}
 	resp, err := b.c.StopSandbox(ctx, &openshellv1.StopSandboxRequest{WorkspaceScope: scope(workspace), Name: name})
 	if err == nil {
 		return sandboxFromProto(resp.GetSandbox()), nil
@@ -232,6 +246,9 @@ func (b *Backend) settle(ctx context.Context, op, workspace, name string, err er
 
 // DeleteSandbox implements execution.Backend.
 func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) error {
+	if err := b.guardSandbox(ctx, "DeleteSandbox", workspace, name); err != nil {
+		return err
+	}
 	_, err := b.c.DeleteSandbox(ctx, &openshellv1.DeleteSandboxRequest{
 		WorkspaceScope: scope(workspace), Name: name, AllowMissing: true,
 	})
@@ -242,6 +259,9 @@ func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) err
 // canonical hash matches the latest revision, so an unchanged policy keeps its version.
 func (b *Backend) EnsurePolicy(ctx context.Context, workspace, sandbox string, p execution.Policy) (uint32, error) {
 	const op = "EnsurePolicy"
+	if err := b.guardSandbox(ctx, op, workspace, sandbox); err != nil {
+		return 0, err
+	}
 	policy, err := renderPolicy(p)
 	if err != nil {
 		return 0, &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}
@@ -257,6 +277,16 @@ func (b *Backend) EnsurePolicy(ctx context.Context, workspace, sandbox string, p
 
 // DeleteProvider implements execution.Backend.
 func (b *Backend) DeleteProvider(ctx context.Context, workspace, name string) error {
+	if b.owner != "" {
+		got, err := b.c.GetProvider(ctx, &openshellv1.GetProviderRequest{WorkspaceScope: scope(workspace), Name: name})
+		if err == nil {
+			if err := b.check("DeleteProvider", "provider", name, got.GetProvider().GetMetadata().GetLabels()); err != nil {
+				return err
+			}
+		} else if !errors.Is(wrap("DeleteProvider", err), execution.ErrNotFound) {
+			return wrap("DeleteProvider", err)
+		}
+	}
 	_, err := b.c.DeleteProvider(ctx, &openshellv1.DeleteProviderRequest{
 		WorkspaceScope: scope(workspace), Name: name, AllowMissing: true,
 	})
@@ -265,6 +295,16 @@ func (b *Backend) DeleteProvider(ctx context.Context, workspace, name string) er
 
 // DeleteProviderProfile implements execution.Backend.
 func (b *Backend) DeleteProviderProfile(ctx context.Context, workspace, id string) error {
+	if b.owner != "" {
+		got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: id})
+		if err == nil {
+			if err := b.check("DeleteProviderProfile", "provider profile", id, got.GetProfile().GetAnnotations()); err != nil {
+				return err
+			}
+		} else if !errors.Is(wrap("DeleteProviderProfile", err), execution.ErrNotFound) {
+			return wrap("DeleteProviderProfile", err)
+		}
+	}
 	_, err := b.c.DeleteProviderProfile(ctx, &openshellv1.DeleteProviderProfileRequest{
 		WorkspaceScope: scope(workspace), Id: id, AllowMissing: true,
 	})

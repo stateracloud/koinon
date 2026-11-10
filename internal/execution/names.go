@@ -5,7 +5,22 @@ package execution
 import (
 	"crypto/sha256"
 	"encoding/hex"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
+
+// LabelInstall is the label (and, on a provider profile, the annotation) that records which
+// install made an OpenShell object. Its value is [OwnerID]. An object without it was made before
+// the label existed and counts as this install's (issue 461).
+var LabelInstall = project.Domain + "/install"
+
+// OwnerID is the value of [LabelInstall]: 16 hex characters of a hash of the install ID (the
+// database's, which travels with a restore) and the namespace Koinon runs in. The install ID alone
+// is not enough: a database restored next to the live install carries the same one. The namespace
+// tells the two apart on one gateway, and stays the same across upgrades and reinstalls into it.
+func OwnerID(installID, namespace string) string {
+	return shortHash("owner", installID, namespace)
+}
 
 // Names of the OpenShell objects Koinon owns. The reconciler derives them when it first
 // renders an agent and records them in agent_sandboxes, which koinon-agentd reads; these

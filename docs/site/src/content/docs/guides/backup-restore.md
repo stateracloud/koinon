@@ -179,6 +179,18 @@ backup before the first start, if you can: a new install makes its own key Secre
 and step 3 replaces it with yours. Use the same `postgres.mode`; a `cnpg` install cannot be pointed at
 a database restored somewhere else.
 
+### Two installs on one OpenShell gateway
+
+A restored copy that runs next to the live install on the same gateway computes the same sandbox,
+provider and workspace names, because the org and agent IDs are the same. Every OpenShell object Koinon
+makes carries an install mark: a hash of the install ID and the namespace Koinon runs in. A Koinon
+install does not adopt, stop, change or delete an object that has another install's mark; the
+reconcile of that agent fails with "owned by another install" and the live install is not touched. The
+copy cannot run those agents on that gateway: give it its own gateway for a drill that needs running
+sandboxes. Objects made before this mark existed have none and count as the install's own, so a
+restored copy next to a live install that has never recreated them can still take them over. A sandbox
+gets the mark when it is recreated (an image or spec change does that).
+
 ## What to automate, and what is not covered
 
 An automated job runs the same commands on a schedule: a `pg_dump --format=custom` and a `keys export`

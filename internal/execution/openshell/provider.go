@@ -57,7 +57,7 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 		_, err = b.c.CreateProvider(ctx, &openshellv1.CreateProviderRequest{
 			WorkspaceScope: scope(workspace),
 			Provider: &datamodelv1.Provider{
-				Metadata:         &datamodelv1.ObjectMeta{Name: p.Name, Labels: maps.Clone(p.Labels)},
+				Metadata:         &datamodelv1.ObjectMeta{Name: p.Name, Labels: b.stamp(p.Labels)},
 				Type:             p.Profile.ID,
 				Credentials:      maps.Clone(p.Credentials),
 				Config:           config,
@@ -74,6 +74,9 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 	}
 
 	existing := got.GetProvider()
+	if err := b.check(op, "provider", p.Name, existing.GetMetadata().GetLabels()); err != nil {
+		return err
+	}
 	if existing.GetType() != p.Profile.ID || existing.GetProfileWorkspace() != workspace {
 		return &execution.Error{Op: op, Kind: execution.ErrConflict, Err: fmt.Errorf(
 			"provider %q has type %q in profile workspace %q; OpenShell cannot change either, delete and recreate it",
@@ -121,13 +124,18 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	if err != nil {
 		return &execution.Error{Op: op, Err: err}
 	}
-	profile.Annotations = map[string]string{SpecHashAnnotation: hash}
+	profile.Annotations = b.stamp(map[string]string{SpecHashAnnotation: hash})
 	item := &openshellv1.ProviderProfileImportItem{Profile: profile, Source: profileSource}
 
 	got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: p.ID})
 	found := err == nil
 	if err != nil && !errors.Is(wrap(op, err), execution.ErrNotFound) {
 		return wrap(op, err)
+	}
+	if found {
+		if err := b.check(op, "provider profile", p.ID, got.GetProfile().GetAnnotations()); err != nil {
+			return err
+		}
 	}
 	if found && got.GetProfile().GetAnnotations()[SpecHashAnnotation] == hash {
 		return nil

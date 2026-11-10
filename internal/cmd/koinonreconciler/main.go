@@ -34,6 +34,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -97,6 +98,16 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	defer func() { _ = backend.Close() }()
+	// The backend owns what it makes (issue 461): objects carry this install's mark, and an object
+	// that carries another install's is never adopted, changed or deleted. The mark is the install
+	// ID with the namespace, since a database restored next to this install has the same install ID.
+	installWaitCtx, installWaitCancel := context.WithTimeout(ctx, 2*time.Minute)
+	install, err := installid.Wait(installWaitCtx, pool, 2*time.Second)
+	installWaitCancel()
+	if err != nil {
+		return fmt.Errorf("read the install ID: %w", err)
+	}
+	backend.WithOwner(execution.OwnerID(install, cfg.namespace))
 
 	driver, err := newGatewayDriver(cfg, kube, log)
 	if err != nil {
