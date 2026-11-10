@@ -1230,6 +1230,8 @@ type Querier interface {
 	// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
 	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	// Ends every live session of the user (the operator's password reset).
+	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap

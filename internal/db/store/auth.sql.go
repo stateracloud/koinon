@@ -625,6 +625,25 @@ func (q *Queries) RevokeSessionsByMethod(ctx context.Context, arg RevokeSessions
 	return result.RowsAffected(), nil
 }
 
+const revokeUserSessions = `-- name: RevokeUserSessions :execrows
+UPDATE sessions SET revoked_at = $1
+WHERE user_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeUserSessionsParams struct {
+	Now    pgtype.Timestamptz
+	UserID pgtype.UUID
+}
+
+// Ends every live session of the user (the operator's password reset).
+func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserSessions, arg.Now, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setLocalPassword = `-- name: SetLocalPassword :exec
 UPDATE local_credentials
 SET password_hash = $1,

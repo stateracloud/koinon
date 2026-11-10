@@ -177,6 +177,11 @@ RETURNING user_id;
 UPDATE sessions SET revoked_at = @now
 WHERE user_id = @user_id AND id <> @keep_session_id AND revoked_at IS NULL;
 
+-- name: RevokeUserSessions :execrows
+-- Ends every live session of the user (the operator's password reset).
+UPDATE sessions SET revoked_at = @now
+WHERE user_id = @user_id AND revoked_at IS NULL;
+
 -- name: RevokeSessionsByMethod :execrows
 UPDATE sessions SET revoked_at = @now
 WHERE auth_method = @auth_method AND revoked_at IS NULL;
