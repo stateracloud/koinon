@@ -7,9 +7,9 @@
 #   hack/e2e-remote.sh [--local] [--out DIR] [--dry-run]              the local Docker (default)
 #   hack/e2e-remote.sh --ssh [--out DIR] [--dry-run]                  a Docker host over SSH ($KOINON_E2E_REMOTE)
 #
-# Other queues are not driven from this repository. What it accepts as e2e evidence is a green `e2e-lab`
-# commit status (an external e2e run that passed on this commit, hack/e2e-status.sh) or a green
-# `quickstart` run on the head (hack/e2e-gate.sh, hack/pr-wait.sh).
+# Other queues are not driven from this repository. This is for the dev loop and real-model runs, not merge
+# evidence (ADR 0105): the merge queue's hosted `quickstart` is the one e2e proof. It may still post `e2e-lab`
+# (hack/e2e-status.sh) as information.
 #
 # --ssh and --local run the pinned toolchain image of hack/e2e-toolchain (the Go from go.mod and the
 # kind, ko, helm and kubectl versions CI uses) against that host's Docker socket, so the result does

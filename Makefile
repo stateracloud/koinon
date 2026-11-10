@@ -169,7 +169,9 @@ test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install o
 
 # The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
 # OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape): `make test-escape-kind` runs
-# them against the one `make dev-kind-up` installs, `make test-escape` against any other.
+# them against the one `make dev-kind-up` installs (a bare OpenShell, no Koinon policy), `make test-escape`
+# against any other. The kind e2e runs them too, against the chart install with its sandbox policy live
+# (test/e2e/escape-openshell.sh, #109).
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
 
@@ -197,7 +199,7 @@ test-escape: ## Run the escape suite's OpenShell cases against a gateway you poi
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
 .PHONY: test-escape-kind
-test-escape-kind: ## Run the escape suite's OpenShell cases on the kind-koinon-dev gateway (after make dev-kind-up; runc, Kata cases skip)
+test-escape-kind: ## Run the escape suite's OpenShell cases on the kind-koinon-dev gateway (after make dev-kind-up; runc, Kata cases skip; the kind e2e runs them against the chart install)
 	CLUSTER=$(DEV_KIND_CLUSTER) test/escape/kind.sh
 
 # Dev loop (ADR 0039, docs/dev/loop.md). `make dev` picks the profile from the kube context:

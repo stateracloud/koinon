@@ -152,6 +152,8 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    tokenizer and a bytes-per-token ratio, and for default entries a source URL and access date. When
    several entries match, the exact provider beats `*`, then the more specific pattern, then the
    later `valid_from`.
+   _Amended 2026-11-09 (issue 310):_ an entry may list `not_hosts`; a provider whose URL host is one
+   of them, or a subdomain of one, is not priced by that entry. `ollama-local` excludes `ollama.com`.
 3. **Precedence and versions.** The org's own price entries win over the default list (the PV1 per-model
    rates were a layer above both until the W4 amendment folded them into org entries). Org prices are append-only: a change is a new
    version with a later `valid_from`; deleting one sets `retired_at`. A request is priced with the

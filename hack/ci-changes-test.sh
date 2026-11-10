@@ -16,6 +16,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# First, and on its own line so set -e stops the script when mktemp fails (old issue 476).
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-changes-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
 fails=0 total=0
 script=hack/ci-changes.sh
 
@@ -59,14 +63,31 @@ turns_on() {
 expect "docs" README.md
 expect "docs" docs/adr/0001-x.md
 expect "docs" docs/site/src/content/docs/quickstart.md
-# A script nobody runs in a gate: only the Go gates run (any non-doc file sets go).
-expect "go" hack/ship.sh
-expect "go" hack/ci-changes-test.sh
-# web: web/ and api/proto (the ts client is generated from them); `go` ignores web/ files.
-expect "web chartsmoke" web/src/app.ts
-expect "web chartsmoke docs" web/e2e-real/login.spec.ts # docs-check.sh reads web/e2e-real/*.spec.ts
-# The protos: generate, web (the generated client) and chartsmoke (api/ is in its pattern).
-expect "go web generate chartsmoke" api/proto/koinon/agent/v1/agent.proto
+# Shell tooling and other workflows cannot affect the Go jobs (fail-closed list: hack/paths.rules);
+# the scripts' own tests run in the always-on `scripts` job.
+expect "" hack/ship.sh
+expect "" hack/ci-changes-test.sh
+expect "" hack/hooks/bash-read-check.sh
+expect "" .github/workflows/e2e-kind.yml
+expect "" .github/actions/fetch-pinned/action.yml
+# ...but the scripts the Go jobs run, a non-script file of hack/ and an unknown path do.
+expect "go" hack/go-test.sh
+expect "go" hack/golangci-lint.sh
+expect "go" hack/agentgateway-pin.sh
+expect "go" hack/zzz-unknown.txt
+expect "go" some-new-top-level-file
+expect "go" hack/pgserver/main.go
+expect "go web chartsmoke" web/webui.go
+expect "go web chartsmoke" web/webui_stub.go
+# web: web/ and api/proto (the ts client is generated from them); `go` ignores web/ files. The
+# chart smoke builds without the webui tag, so web/ sources do not reach it.
+expect "web" web/src/app.ts
+expect "web docs" web/e2e-real/login.spec.ts # docs-check.sh reads web/e2e-real/*.spec.ts
+# The protos: generate and web (the generated client). The chart smoke ignores them: the generated
+# Go code is committed under internal/gen, where a change matches.
+expect "go web generate" api/proto/koinon/agent/v1/agent.proto
+expect "go chartsmoke" internal/zzz-new/x.go
+expect "go" internal/zzz-new/x_test.go # tests of other packages are not in a binary or the suite's imports
 
 # F3, generate: the Makefile's `generate` recipe reads each of these.
 expect "go generate chartsmoke" api/admin/v1/openapi.yaml       # oapi-codegen input
@@ -78,16 +99,16 @@ expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agen
 expect "go generate chartsmoke" internal/db/queries/agents.sql # sqlc.yaml queries
 expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/flavors)
 expect "go generate" sqlc.yaml
-expect "generate chartsmoke web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
-expect "generate chartsmoke web" web/pnpm-lock.yaml   # the version `make web-deps` installs
-expect "generate chartsmoke web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
+expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
+expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
+expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
 
 # F4, chart: hack/chart-check.sh sources hack/versions.env and hack/chart-check.d/*.sh.
-expect "go chart" hack/chart-check.d/10-new-feature.sh
+expect "chart" hack/chart-check.d/10-new-feature.sh
 expect "go chart docs" hack/versions.env # also read by docs-check.sh
-expect "go chart" hack/chart-check.sh
+expect "chart" hack/chart-check.sh
 expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart chartsmoke docs escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
@@ -113,8 +134,8 @@ expect "go chartsmoke" internal/zzz-not-imported/x.go
 # F6, docs: hack/docs-check.sh reads internal/preflight/preflight.go (the versions on the
 # Prerequisites page) and runs the tests of internal/declarative.
 expect "go chartsmoke docs" internal/preflight/preflight.go
-expect "go chartsmoke docs" internal/declarative/docs_test.go
-expect "go docs" hack/docs-check.sh
+expect "go docs" internal/declarative/docs_test.go # a test file of another package is not in the smoke build
+expect "docs" hack/docs-check.sh
 expect "go docs" test/e2e/run.sh # docs-check.sh compares its e1 blocks to the quickstart
 expect "go docs" test/e2e/quickstart.golden.sh
 
@@ -125,6 +146,9 @@ expect "$all" go.mod
 expect "$all" go.sum
 expect "$all" .github/workflows/ci.yml
 expect "$all" hack/ci-changes.sh
+expect "$all" hack/ci-skip-heavy.sh
+expect "$all" hack/paths.rules
+expect "$all" hack/paths-lib.sh
 # Several paths together: the union.
 expect "go chart chartsmoke docs escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
 
@@ -261,6 +285,33 @@ done <<<"$real_dirs"
 total=$((total + 1))
 if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' bash $script --stdin | grep -qx 'flavors=true'; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
+	fails=$((fails + 1))
+fi
+
+# An empty change list is not "nothing changed": it runs everything (fail closed).
+total=$((total + 1))
+all=$(bash $script | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ')
+[[ -n $all ]] || { echo "FAIL: no-argument run printed no jobs"; exit 1; }
+if [[ $(printf '' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
+	echo "FAIL: an empty change list must turn every job on"
+	fails=$((fails + 1))
+fi
+
+# A rename lists the old path too (--no-renames): moving a chart file to docs/ still turns the chart jobs on.
+total=$((total + 1))
+(
+	cd "$tmp"
+	git init -q -b main .
+	git config user.email t@example.invalid && git config user.name t
+	mkdir charts docs hack # the script cds to its own checkout: give the scratch repo a copy
+	cp "$OLDPWD/hack/ci-changes.sh" "$OLDPWD/hack/paths-lib.sh" "$OLDPWD/hack/paths.rules" hack/
+	echo a >charts/a.yaml && echo b >docs/b.md
+	git add -A && git commit -q -m base
+	git mv charts/a.yaml docs/a.yaml && git commit -q -m rename
+	CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash hack/ci-changes.sh HEAD~1
+) >"$tmp/rename.out" 2>&1 || true
+if ! grep -qx 'chart=true' "$tmp/rename.out"; then
+	echo "FAIL: renaming charts/a.yaml to docs/ must turn chart on: $(tr '\n' ' ' <"$tmp/rename.out")"
 	fails=$((fails + 1))
 fi
 

@@ -143,6 +143,15 @@ check "identity refusal is named" has "identity" "$tmp/o1"
 check "identity refusal names the address" has "t@example.invalid" "$tmp/o1"
 check "identity refusal commits nothing" eq "$(git rev-list --count origin/main..HEAD)" 0
 check "identity refusal pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+# ship ignores the local escape hatches: a disallowed identity stays refused with both set
+reset_state
+w=$(newwork); cd "$w"
+git config user.email t@example.invalid
+echo one >f.txt
+rc=$(KOINON_SKIP_IDENTITY_CHECK=1 KOINON_ALLOWED_IDENTITIES='Other <other@example.invalid>' run "$tmp/o1b" -m "feat: x")
+check "identity override ignored: exit 1" eq "$rc" 1
+check "identity override ignored: refusal names the address" has "t@example.invalid" "$tmp/o1b"
+check "identity override ignored: nothing committed" eq "$(git rev-list --count origin/main..HEAD)" 0
 
 # 2. sign-off, footer, push, any-email notice
 reset_state
@@ -290,19 +299,20 @@ check "board failure is best effort: exit 0" eq "$rc" 0
 check "board failure warns" has '^board warn$' "$tmp/o10c"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 11. ready, auto-merge refused when the e2e is needed, allowed when not
+# 11. ready, auto-merge (ADR 0105: no e2e refusal; the merge queue runs the e2e when the change needs it)
 reset_state
 w=$(newwork); cd "$w"
 echo e >e.txt
 echo 0 >"$FAKE_NEEDS_RC"
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123
 rc=$(run "$tmp/o11" -m "feat: e" --pr-title "t" --pr-body "$tmp/body.md" --ready --auto-merge)
-check "needs e2e: auto-merge refused, exit 1" eq "$rc" 1
-check "refusal says the e2e must be green" has 'needs the kind e2e' "$tmp/o11"
-check "no gh pr merge when refused" hasnt 'gh pr merge' "$FAKE_LOG"
-check "ready still happened before the refusal" has '^ready$' "$tmp/o11"
+check "needs e2e: auto-merge is allowed, exit 0" eq "$rc" 0
+check "no e2e refusal text" hasnt 'needs the kind e2e' "$tmp/o11"
+check "needs-e2e.sh is not consulted" hasnt 'needs-e2e' "$FAKE_LOG"
+check "gh pr merge --auto --merge for an e2e-relevant change" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 reset_state
 echo 1 >"$FAKE_NEEDS_RC"
-export FAKE_PR_URL=https://example.invalid/o/r/pull/123
 echo e2 >e2.txt
 rc=$(run "$tmp/o11b" -m "feat: e2" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
 check "e2e not needed: exit 0" eq "$rc" 0
@@ -329,28 +339,23 @@ check "--e2e open PR: label step before the push" has '^label e2e$' "$tmp/o11d"
 unset FAKE_PR_URL
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 12. claim review, and a lost claim
+# 12. --review is gone (ADR 0104): a usage error before anything runs, and ship never calls claim.sh
 reset_state
 w=$(newwork); cd "$w"
 echo c >c.txt
 rc=$(run "$tmp/o12" -m "feat: c" --review 7,8)
-check "review: exit 0" eq "$rc" 0
-check "review lines" has '^review ok #8$' "$tmp/o12"
-check "claim.sh review called per issue" has '^claim review 7$' "$FAKE_LOG"
-git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
-reset_state
-echo 3 >"$FAKE_CLAIM_RC"
-w=$(newwork); cd "$w"
-echo c >c.txt
-rc=$(run "$tmp/o12b" -m "feat: c" --review 7)
-check "claim lost: exit 3" eq "$rc" 3
+check "--review: exit 2" eq "$rc" 2
+check "--review: calls nothing" eq "$(wc -l <"$FAKE_LOG" | tr -d ' ')" 0
+rc=$(run "$tmp/o12b" -m "feat: c")
+check "ship: exit 0" eq "$rc" 0
+check "ship calls no claim.sh" bash -c "! grep -q '^claim ' '$FAKE_LOG'"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 13. dry run does nothing
 reset_state
 w=$(newwork); cd "$w"
 echo d >d.txt
-rc=$(run "$tmp/o13" -m "feat: d" --pr-title t --pr-body "$tmp/body.md" --ready --auto-merge --review 5 --dry-run)
+rc=$(run "$tmp/o13" -m "feat: d" --pr-title t --pr-body "$tmp/body.md" --ready --auto-merge --dry-run)
 check "dry run: exit 0" eq "$rc" 0
 check "dry run prints steps" has '^dry-run: would' "$tmp/o13"
 check "dry run commits nothing" eq "$(git rev-list --count origin/main..HEAD)" 0

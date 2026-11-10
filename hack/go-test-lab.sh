@@ -14,7 +14,7 @@
 #
 # `state` reads the repository from REPO or GITHUB_REPOSITORY, else from the current directory. The
 # status is not a required context of the ruleset (not every contributor can produce it) and
-# anyone with write access can post it: the same trust limit as `e2e-lab` (hack/e2e-gate.sh, old issue 568), a
+# anyone with write access can post it: the same trust limit as `e2e-lab` (old issue 568), a
 # guardrail against mistakes and not against a malicious member. Needs gh, jq (and git for touches-go).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -36,7 +36,7 @@ state)
 	;;
 touches-go)
 	base=${2:?usage: hack/go-test-lab.sh touches-go <base> <head>} head=${3:?usage: hack/go-test-lab.sh touches-go <base> <head>}
-	changed=$(git diff --name-only "$base" "$head" 2>/dev/null) || exit 2
+	changed=$(git diff --name-only --no-renames "$base" "$head" 2>/dev/null) || exit 2
 	[[ -n $changed ]] || exit 2
 	# Only go= is read: the directories of the flavors suite (a `go list`) are not needed.
 	line=$(CI_CHANGES_FLAVORS_DIRS=${CI_CHANGES_FLAVORS_DIRS:-none} "$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || exit 2

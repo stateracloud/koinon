@@ -424,7 +424,7 @@ _Avoid_: Backend, server, operator, manager
 ### Contributing
 
 **Claim**:
-An exclusive, leased hold on one issue by one agent session, so two agents never work the same issue.
+An exclusive hold on one issue by one lane of one human (the ref `claim/<N>`, ADR 0104), so two agents never work the same issue; it lasts until its pull request merges, or it is released.
 _Avoid_: Lock, assignment, reservation
 
 **Ready queue**:

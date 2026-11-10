@@ -15,7 +15,9 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp bash5 audit versions e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
+# seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
 # expected requirement was missing, so some suites or specs skipped; old issue 507). Full logs are under
@@ -30,7 +32,10 @@
 
 set -uo pipefail
 
-ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint mktemp bash5 audit versions e2e gitleaks"
+# shellcheck source=/dev/null
+. "$(dirname "$0")/paths-lib.sh" || exit 2
+paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
+ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -95,28 +100,48 @@ existing() { # <regexp>: changed files matching the regexp that still exist
 	while IFS= read -r f; do [[ -e $f ]] && echo "$f"; done < <(grep -E -- "$1" <<<"$FILES" || true)
 }
 
+# triggering <gate>: the changed files that turn the gate on. generate, chart, web and docs are CI
+# jobs: the job's rule (hack/paths.rules) decides, so preflight and CI cannot disagree.
+triggering() {
+	local f
+	while IFS= read -r f; do
+		[[ -n $f ]] || continue
+		case $1 in
+		generate | chart | web | docs) paths_job_triggers "$1" "$f" && echo "$f" ;;
+		*) paths_match gate "$1" "$f" && echo "$f" ;;
+		esac
+	done <<<"$FILES"
+	return 0
+}
+
 # reason <gate>: why the change triggers the gate; empty when it does not.
 reason() {
 	local n
 	case $1 in
-	go) n=$(count '\.go$'); [[ $n -gt 0 ]] && echo "$n Go files changed" ;;
-	tidy) match '\.go$|^go\.(mod|sum)$' && echo "Go files or go.mod/go.sum changed" ;;
-	deps) match '(^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$' && echo "dependency manifests, lockfiles or Dockerfiles changed" ;;
-	proto) match '\.proto$' && echo "proto files changed" ;;
-	generate) match '\.proto$|^internal/db/queries/.*\.sql$|^sqlc\.yaml$' && echo "proto or sqlc queries changed" ;;
-	migrate) match '^internal/db/migrations/' && echo "migrations changed" ;;
-	adr) match '^(docs/adr/|hack/adr-)' && echo "docs/adr or the ADR scripts changed" ;;
-	docs) match '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md)' && echo "docs or what docs-check checks changed" ;;
-	chart) match '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/)' && echo "charts changed" ;;
-	web) match '^web/' && echo "web/ changed" ;;
-	shell) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
-	actionlint) match '^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$' && echo "workflows or the actionlint config changed" ;;
-	mktemp) match '\.sh$|^Makefile$|^\.github/workflows/[^/]*\.yml$' && echo "shell scripts, the Makefile or workflows changed" ;;
-	bash5) n=$(count '\.sh$'); [[ $n -gt 0 ]] && echo "$n shell scripts changed" ;;
-	audit) match '\.go$|^internal/db/queries/.*\.sql$|^hack/audit-batch-lint' && echo "Go code, sqlc queries or the audit batch lint changed" ;;
-	versions) match '^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)' && echo "the versions file or a copy of one changed" ;;
-	e2e) echo "informational, always" ;;
-	gitleaks) echo "always" ;;
+	e2e) echo "informational, always"; return 0 ;;
+	gitleaks) echo "always"; return 0 ;;
+	esac
+	n=$(triggering "$1" | grep -c . || true)
+	[[ $n -gt 0 ]] || return 0
+	case $1 in
+	go) echo "$n Go files changed" ;;
+	tidy) echo "Go files or go.mod/go.sum changed" ;;
+	deps) echo "dependency manifests, lockfiles or Dockerfiles changed" ;;
+	proto) echo "proto files changed" ;;
+	generate) echo "a generator input or output changed" ;;
+	migrate) echo "migrations changed" ;;
+	adr) echo "docs/adr or the ADR scripts changed" ;;
+	docs) echo "docs or what docs-check checks changed" ;;
+	chart) echo "charts changed" ;;
+	web) echo "web/ changed" ;;
+	shell | bash5) echo "$n shell scripts changed" ;;
+	actionlint) echo "workflows or the actionlint config changed" ;;
+	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
+	pinned) echo "shell scripts, workflows or composite actions changed" ;;
+	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
+	audit) echo "Go code, sqlc queries or the audit batch lint changed" ;;
+	versions) echo "the versions file or a copy of one changed" ;;
+	scripts) echo "tooling the CI script checks cover changed" ;;
 	esac
 	return 0
 }
@@ -166,7 +191,14 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 	if [[ -z $out && $seen == 1 ]]; then
 		return 0
 	elif [[ -z $out ]]; then
-		go list ./... | grep -v '/test/flavors$' | tr '\n' ' '
+		# Directories, not import paths: golangci-lint reads each argument as a path under the cwd.
+		# `./...` skips nested modules; {{.Dir}} is absolute, so strip the repo root.
+		local root=$PWD
+		go list -f '{{.Dir}}' ./... | while IFS= read -r d; do
+			d=${d#"$root"}
+			d=.${d}
+			[[ $d == ./test/flavors ]] || printf '%s ' "$d"
+		done
 	else
 		echo "$out"
 	fi
@@ -250,10 +282,20 @@ g_shell() {
 	# shellcheck disable=SC2086
 	shellcheck $files
 }
-g_actionlint() { actionlint; } # the whole tree, as CI does: a workflow's lint can depend on its siblings
+g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
+	actionlint
+}
+g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
+	hack/runner-lint-test.sh
+	hack/runner-lint.sh
+}
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh
 	hack/mktemp-lint.sh
+}
+g_pinned() { # pinned release downloads retry and check sha256 (#431)
+	hack/fetch-pinned-test.sh
+	hack/pinned-download-lint.sh
 }
 g_bash5() { # every bash script starts with the bash 5 guard (ADR 0090, old issue 553)
 	hack/bash5-lint-test.sh
@@ -266,6 +308,26 @@ g_audit() { # only internal/audit writes the audit tables (the audit batch, #371
 g_versions() { # hack/versions.env against its literal copies (old issue 544)
 	hack/versions-check-test.sh
 	hack/versions-check.sh
+}
+g_scripts() { # the seconds-long checks of the quick checks, lint-shell and scripts CI jobs (hack/paths.rules)
+	local line cmd mb failed=0 name
+	mb=$(git merge-base "$base" HEAD) || return 1
+	while IFS= read -r line; do
+		[[ -n $line ]] || continue
+		cmd=${line//@BASE@/$mb}
+		cmd=${cmd//@HEAD@/HEAD}
+		name=${cmd%% *}
+		# shellcheck disable=SC2086 # the rule's words are the command and its arguments
+		if ! $cmd >"$logdir/scripts.$$.out" 2>&1; then
+			echo "FAIL $cmd"
+			tail -n 5 "$logdir/scripts.$$.out" | sed 's/^/  | /'
+			failed=1
+		else
+			echo "ok   $name"
+		fi
+	done < <(paths_raw script-check -)
+	rm -f "$logdir/scripts.$$.out"
+	return "$failed"
 }
 g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 

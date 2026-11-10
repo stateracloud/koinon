@@ -5,26 +5,16 @@
 # state change, so it is cheap to run in the background and read later. It only reports: it never
 # merges, never marks ready and never enables auto-merge.
 #
-# Usage: hack/pr-wait.sh <PR> [--merged] [--checks [--require CHECK|e2e]...] [--timeout DURATION] [--interval SECONDS]
+# Usage: hack/pr-wait.sh <PR> [--merged] [--checks [--require CHECK]...] [--timeout DURATION] [--interval SECONDS]
 #   --merged   (default) wait until the PR is merged or closed
 #   --checks   wait until every check has finished
 #   --require  (repeatable, with --checks) a check that must be green: once the others finish, a
 #              required check that is missing, skipped or not green exits 1 (`REQUIRED <name> missing|skipped|failed`).
 #              Only the newest check run of that name on the head counts: a later success supersedes an
 #              earlier skip or cancel, and a cancelled or skipped run never outranks one that is queued or
-#              in progress (even at the same startedAt): it keeps waiting for the live run. A required check
-#              that is missing, skipped or cancelled while an e2e-kind run on the head is still queued or in
-#              progress (whose jobs may not exist yet, old issue 468) is waited for too: `waiting for e2e-kind run <id>`;
-#              so are failed or cancelled checks of an earlier e2e-kind run on the head (its `decide`
-#              cancelled, its `e2e result` red). Checks of e2e-kind count by their newest run, like
-#              required ones. All green is not final while an e2e-kind run on the head is queued or
-#              in progress either (the `e2e` label dispatches one, whose `e2e result` comes last).
-#              Otherwise, if the newest is skipped or cancelled, the next line suggests
-#              `gh workflow run e2e-kind.yml --ref <branch>`.
-#              `--require e2e` is the merge gate for a needs-e2e PR (old issue 547): it passes when the commit status
-#              `e2e-lab` (an external e2e run that passed on this commit) is success on the head,
-#              OR any `quickstart` check run on the head succeeded. Otherwise it behaves like
-#              `--require quickstart` and prints `REQUIRED e2e missing|skipped|failed` with how to produce one.
+#              in progress (even at the same startedAt): it keeps waiting for the live run.
+#              The e2e is not a merge gate on the head (ADR 0105): the merge queue's `quickstart` is the proof. A PR's
+#              own `quickstart` is advisory; a red one prints `advisory quickstart failed` and does not decide.
 #              Every required check is also read from the head commit's check runs (`gh api
 #              commits/<sha>/check-runs`), not only from the PR rollup, which lists just one run per name: a
 #              dispatched run that passed counts next to a skipped pull_request run. A success on the head
@@ -34,12 +24,13 @@
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, old issue 562).
 #              A draft PR is never green (old issue 647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
-#              almost nothing, and `go`/`web` are red on purpose). A PR that is not a draft ignores the check
+#              nothing heavy; its `go`/`web` report success with "draft: not run", which is NOT evidence). A PR that is not a draft ignores the check
 #              runs of its draft-era `ci` runs (#218, #133), in every mode: a run whose display title is `ci (draft)`
 #              (the run-name of ci.yml when the event payload says draft), matched by run id. There is no time
 #              window, and a by-hand re-run of a draft run is ignored too. A non-draft run is never dropped: red
 #              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
-#              exist. dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
+#              exist (between `gh pr ready` and that run the draft run is the only `ci` run on the head, and its
+#              vacuous green must never decide). dco, gitleaks, claim and commit statuses keep their result. When gh cannot list
 #              the runs, nothing is dropped.
 #              A stale PR head (old issue 661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
@@ -55,7 +46,7 @@
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
-# `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
+# `conflict: merge origin/main`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
@@ -73,7 +64,7 @@ set -euo pipefail
 export GH_PAGER=cat PAGER=cat
 
 usage() {
-  echo "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK|e2e] [--timeout DURATION] [--interval SECONDS]" >&2
+  echo "usage: hack/pr-wait.sh <PR> [--merged] [--checks] [--require CHECK] [--timeout DURATION] [--interval SECONDS]" >&2
   exit 64
 }
 
@@ -89,20 +80,15 @@ duration() { # 90m | 30s | 2h | 45 -> seconds
 }
 
 pr="" mode=merged timeout=5400 interval=20
-required=() alias_e2e=0 explicit_qs=0
+required=()
 while [ $# -gt 0 ]; do
   case $1 in
   --merged) mode=merged ;;
   --checks) mode=checks ;;
   --require)
     [ $# -ge 2 ] || usage
-    if [ "$2" = e2e ]; then
-      alias_e2e=1
-      required+=(quickstart)
-    else
-      [ "$2" != quickstart ] || explicit_qs=1
-      required+=("$2")
-    fi
+    [ "$2" != e2e ] || { echo "pr-wait: --require e2e is gone (ADR 0105): the merge queue's quickstart is the e2e proof" >&2; exit 64; }
+    required+=("$2")
     shift
     ;;
   --timeout)
@@ -124,19 +110,6 @@ while [ $# -gt 0 ]; do
   shift
 done
 case $pr in '' | *[!0-9]*) usage ;; esac
-# An explicit quickstart is a plain required check: no `e2e` wording, no duplicate.
-if [ "$explicit_qs" = 1 ]; then
-  alias_show=0
-  dedup=()
-  seen_qs=0
-  for r in ${required[@]+"${required[@]}"}; do
-    if [ "$r" = quickstart ]; then [ "$seen_qs" = 0 ] || continue; seen_qs=1; fi
-    dedup+=("$r")
-  done
-  required=("${dedup[@]}")
-else
-  alias_show=$alias_e2e
-fi
 [ ${#required[@]} -eq 0 ] || [ "$mode" = checks ] || usage
 
 # One normalised row per check, judged by hack/lib/pr-verdict.sh (#133): the same rows and the same ordering as
@@ -144,10 +117,9 @@ fi
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "$0")" && pwd)/lib/pr-verdict.sh"
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
-norm="$PRV_JQ"'[(.statusCheckRollup // [])[] | prv_row] | prv_collapse($req)'
+norm="$PRV_JQ"'[(.statusCheckRollup // [])[] | prv_row] | prv_collapse'
 
-reqjson="[]"
-jqn() { jq --argjson req "$reqjson" "$@"; }
+jqn() { jq "$@"; }
 
 # head_runs <sha>: every check run of the commit as rollup-shaped rows (a JSON array); [] when gh fails.
 head_runs() {
@@ -155,17 +127,6 @@ head_runs() {
   rows=$(prv_check_rows "$1") || rows=""
   echo "${rows:-[]}"
 }
-
-# live_e2e <sha>: the e2e-kind runs on the commit that have not completed (queued, waiting, pending,
-# in progress), comma-separated. A run's jobs, and so its checks, appear only once it starts.
-live_e2e() {
-  [ "$no_live" = 0 ] || return 0 # `--require e2e` is already satisfied: a live e2e-kind run does not matter
-  gh run list --commit "$1" --workflow e2e-kind.yml --limit 20 --json databaseId,status \
-    --jq '[.[] | select(.status != "completed") | .databaseId | tostring] | join(",")' 2>/dev/null || true
-}
-
-# shown <check>: the name to print; `--require e2e` is judged on quickstart (and e2e-lab).
-shown() { if [ "$alias_show" = 1 ] && [ "$1" = quickstart ]; then echo e2e; else echo "$1"; fi; }
 
 # load_contexts <base branch>: the required status check contexts of the base branch's rules (the
 # ruleset), one per line, into $ctxs. Read until it succeeds once; a failed read leaves it empty.
@@ -190,7 +151,7 @@ load_contexts() {
 
 queue_state() { prv_queue_state "$1"; }
 
-no_live=0 last="" was_queued=0 dq_polls=0
+last="" was_queued=0 dq_polls=0
 emit() { # print only when the line differs from the previous one
   if [ "$1" != "$last" ]; then
     echo "$1"
@@ -285,14 +246,12 @@ while :; do
       fi
       stale_since=""
     fi
-    branch=$(jq -r '.headRefName // "<branch>"' <<<"$json")
     head=$(jq -r '.headRefOid // ""' <<<"$json")
     live=""
     # Required checks are judged on every check run of the head commit, not only on the PR rollup, which
     # lists one run per name (a dispatched run that passed hides behind the skipped pull_request run).
     req_now=()
     for r in ${required[@]+"${required[@]}"}; do req_now+=("$r"); done
-    no_live=0
     if [ ${#req_now[@]} -gt 0 ] && [ -n "$head" ]; then
       extra=$(head_runs "$head")
       json=$(jq --argjson x "$extra" --argjson names "$(printf '%s\n' "${req_now[@]}" | jq -R . | jq -sc .)" \
@@ -318,32 +277,14 @@ while :; do
           exit 1
         fi
         before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
-        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; ["quickstart"])' <<<"$json")
+        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft)' <<<"$json")
         if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then
           if jq -e 'any(.[]; .display_title == "ci (draft)")' <<<"$wfruns" >/dev/null; then ready_dropped=1; else superseded=1; fi
         fi
       fi
     fi
-    if [ "$alias_e2e" = 1 ] && [ "$explicit_qs" = 0 ]; then
-      # (An explicit `--require quickstart` stays required as it is: no alias relief.)
-      # `e2e` is satisfied by a green e2e-lab status or a green quickstart run on the head; then the other
-      # runs of those two names (skipped, cancelled, red) no longer matter.
-      reqjson='["quickstart"]'
-      if jq -e 'any((.statusCheckRollup // [])[]; (.name // .context // "") == "e2e-lab" and (.state // "") == "SUCCESS")' <<<"$json" >/dev/null; then
-        json=$(jq '.statusCheckRollup |= map(select(((.name // .context // "") | IN("quickstart", "e2e-lab") | not)
-          or (.state // "") == "SUCCESS" or (.conclusion // "") == "SUCCESS"))' <<<"$json")
-        req_now=()
-        for r in ${required[@]+"${required[@]}"}; do [ "$r" = quickstart ] || req_now+=("$r"); done
-        no_live=1
-      elif jqn -e "$norm | any(.[]; .name == \"quickstart\" and prv_ok)" <<<"$json" >/dev/null; then
-        # quickstart's newest verdict on the head is green (a newer failure would not be): a red e2e-lab is moot.
-        json=$(jq '.statusCheckRollup |= map(select((.name // .context // "") != "e2e-lab" or (.state // "") == "SUCCESS"))' <<<"$json")
-        no_live=1
-      fi
-    fi
     # Only required checks decide (AGENTS.md: advisory and third-party checks, DeepSource, CodeRabbit, Socket,
-    # do not count): the base branch's required contexts, the explicit --require names, the e2e aliases and
-    # the checks of the e2e-kind workflow. Any other failed or pending check is printed and dropped.
+    # do not count): the base branch's required contexts, the explicit --require names. Any other failed or pending check is printed and dropped.
     # Fail closed: when the required contexts cannot be read, nothing is judged (never "every check").
     # With --merged (#201) the read is best effort: it is tried once (with its retries), and when it fails
     # the wait goes on to the merge or the close with no check judged (every check is printed as advisory);
@@ -360,38 +301,29 @@ while :; do
       ctx_tried=1
     fi
     keep_names=("$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"})
-    [ "$alias_e2e" = 0 ] || keep_names+=(quickstart e2e-lab)
     keep=$(printf '%s\n' "${keep_names[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
-    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) == null) and (.workflowName // "") != "e2e-kind"))' <<<"$json")
-    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' --argjson req '[]' <<<"$adv_json" | sort -u)
-    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select(((.name // .context // "?") as $n | ($keep | index($n)) != null) or (.workflowName // "") == "e2e-kind"))' <<<"$json")
+    adv_json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select((.name // .context // "?") as $n | ($keep | index($n)) == null))' <<<"$json")
+    adv=$(jq -r "$norm"' | .[] | select((.done | not) or .bad) | "advisory \(.name) \(if .done then "failed" else "pending" end)"' <<<"$adv_json" | sort -u)
+    json=$(jq --argjson keep "$keep" '.statusCheckRollup |= map(select((.name // .context // "?") as $n | ($keep | index($n)) != null))' <<<"$json")
     if [ -n "$adv" ] && [ "$adv" != "${last_adv:-}" ]; then
       echo "$adv"
       last_adv=$adv
     fi
-    reqjson=$(printf '%s\n' ${req_now[@]+"${req_now[@]}"} | jq -R . | jq -sc .)
     failed=$(jqn -r "$norm | .[] | select(.bad) | [.name, .cancelled, ((.url | capture(\"/runs/(?<r>[0-9]+)\")? | .r) // \"\")] | @tsv" <<<"$json")
-    # The only failures are cancelled runs of required checks, or checks of an earlier e2e-kind run:
-    # an e2e-kind run on the head that is still queued or running brings newer ones (old issue 468), so wait
-    # for it instead of failing.
-    if [ -n "$failed" ] && [ -n "$head" ] &&
-      jqn -e "$norm | [.[] | select(.bad)] | all((.cancelled and (.name | IN(\$req[]))) or .wf == \"e2e-kind\")" <<<"$json" >/dev/null; then
-      live=$(live_e2e "$head")
-    fi
-    if [ -z "$live" ] && [ -n "$failed" ]; then
+    if [ -n "$failed" ]; then
       while IFS=$'\t' read -r name cancelled run; do
         if [ -n "$run" ]; then echo "FAILED $name (run $run)"; else echo "FAILED $name"; fi
         for r in ${req_now[@]+"${req_now[@]}"}; do
-          [ "$r" != "$name" ] || echo "REQUIRED $(shown "$name") failed"
+          [ "$r" != "$name" ] || echo "REQUIRED $name failed"
           if [ "$r" = "$name" ] && [ "$cancelled" = true ]; then
-            echo "only cancelled runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
+            echo "only cancelled runs of $name on this head; re-run the workflow's failed jobs, or push"
           fi
         done
       done <<<"$failed"
       exit 1
     fi
     if [ "$mstate" = DIRTY ]; then
-      echo "needs-update"
+      echo "conflict: merge origin/main into the branch, resolve it and push"
       exit 4
     fi
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).
@@ -406,15 +338,10 @@ while :; do
     total=$(jqn "$norm | length" <<<"$json")
     pending=$(jqn -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
     ndone=$(jqn "$norm | [.[] | select(.done)] | length" <<<"$json")
-    if [ -n "$live" ]; then
-      emit "waiting for e2e-kind run $live on ${head:0:7}"
-    elif [ "$total" -gt 0 ] && [ -z "$pending" ]; then
-      # Every check has finished, but an e2e-kind run on the head that has not created its jobs yet
-      # (queued; or dispatched by the `e2e` label, old issue 468) brings newer ones: wait for it.
-      [ -z "$head" ] || live=$(live_e2e "$head")
-      if [ -n "$live" ]; then
-        emit "waiting for e2e-kind run $live on ${head:0:7}"
-      elif [ -n "$missing_ctx" ] && [ "$ready_dropped" = 1 ]; then
+    if [ "$total" -gt 0 ] && [ -z "$pending" ]; then
+      # Every check has finished; a workflow run that has not created its jobs yet (queued) shows as a missing
+      # required context, so wait for it.
+      if [ -n "$missing_ctx" ] && [ "$ready_dropped" = 1 ]; then
         emit "waiting for the ready run"
         live=$missing_ctx
       elif [ -n "$missing_ctx" ] && [ "$superseded" = 1 ]; then
@@ -432,11 +359,9 @@ while :; do
         if [ ${#whys[@]} -gt 0 ]; then
           for w in "${whys[@]}"; do
             name=${w%%$'\t'*} why=${w#*$'\t'}
-            echo "REQUIRED $(shown "$name") $why"
-            if [ "$alias_show" = 1 ] && [ "$name" = quickstart ]; then
-              echo "no green e2e on this head ($why quickstart, no e2e-lab success); run: gh workflow run e2e-kind.yml --ref $branch"
-            elif [ "$why" = skipped ]; then
-              echo "only skipped runs of $name on this head; run: gh workflow run e2e-kind.yml --ref $branch"
+            echo "REQUIRED $name $why"
+            if [ "$why" = skipped ]; then
+              echo "only skipped runs of $name on this head"
             fi
           done
           exit 1

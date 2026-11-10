@@ -5,7 +5,7 @@
   - outsiders claim only on `good first issue` or `help wanted` issues;
   - leases of 3 days for people and 14 days for outsiders, with a day-10 reminder and a cap of 2;
   - the conflict-only check;
-  - no kind e2e in the queue (PR-head evidence plus the main backstop);
+  - no kind e2e in the queue (PR-head evidence plus the main backstop); amended by [0102](0102-merge-queue-runs-the-kind-e2e.md);
   - `/release` by the holder or any person;
   - `next` and `take` skip issues assigned to another person;
   - the App retired, with no fallback unless procoduck asks later;
@@ -13,6 +13,10 @@
 
   Probe 3 is skipped; decision 1 has a built-in fallback instead.
 - Date: 2026-11-05
+- Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e);
+  [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
+  claims, outsider classes, leases or sweeper);
+  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced)
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
@@ -245,7 +249,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   `hack/ci-required-test.sh` learns to fail a required check whose workflow has no `merge_group`
   trigger, the same way it fails an unlisted job. This keeps the AGENTS.md rule that a required job
   must report everywhere.
-- **`e2e result` on the queue commit.** On `merge_group` the `decide` job never starts the kind e2e,
+- **`e2e result` on the queue commit.** (Amended by [0102](0102-merge-queue-runs-the-kind-e2e.md): the queue
+  now runs the kind e2e. The text below is the original decision.) On `merge_group` the `decide` job never starts the kind e2e,
   and `e2e result` runs the base's `hack/e2e-gate.sh` against **the head SHA of pull request `<N>`**,
   not the queue commit.
   - A needs-e2e pull request still needs a green `quickstart` or `e2e-lab` on its own head before it
@@ -395,7 +400,7 @@ No result changes a decision.
 - **Auto-claim when a pull request opens.** Another writer with a write token on
   `pull_request_target`, for no gain: `next` and `take` already skip issues with an open pull request.
 - **Run the kind e2e in the merge queue.** It is exact, but costs 15-25 minutes per needs-e2e entry
-  and holds the queue. Deferred, with the exit condition in decision 4.
+  and holds the queue. Deferred here; adopted later by [0102](0102-merge-queue-runs-the-kind-e2e.md).
 - **Keep the App only for board Status.** It is a second identity for a mirror that ADR 0082 already
   calls best effort. Rejected; procoduck may ask for it later (decision 3).
 - **Tide or bors as the queue.** They are services with their own state; the native queue needs no
@@ -433,3 +438,24 @@ No result changes a decision.
 - [Merge queue GA (2023-07-12)](https://github.blog/changelog/2023-07-12-pull-request-merge-queue-is-now-generally-available/)
 - [Assigning issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/assigning-issues-and-pull-requests-to-other-github-users)
 - Prow `pkg/plugins/assign/assign.go` at `kubernetes-sigs/prow@a23969f4`; triagebot `src/handlers/assign.rs` at `rust-lang/triagebot@d34363e9`; bors `src/bors/merge_queue.rs` at `rust-lang/bors@1fbe59b4`; [triagebot #2532](https://github.com/rust-lang/triagebot/pull/2532)
+
+## Amendment: trigger (2026-11-09, procoduck, #463)
+
+The `claim` check no longer runs from `pull_request_target`; see the amendment in ADR 0082. Decision 8 (the merge queue) is unchanged.
+
+## Amendment: the updater is retired (2026-11-10, procoduck)
+
+Decision 4 kept `updater.yml` until "the first week of green queue merges with strict off". That
+condition is replaced: the updater has been a no-op since the queue went live (`hack/pr-updater.sh`
+returns at once when the ruleset has a `merge_queue` rule, and `strict_required_status_checks_policy` is
+`false`), so there is nothing to wait for. Retired in the same change: `.github/workflows/updater.yml`,
+`hack/pr-updater.sh` and its test, the `needs-update` label (an owner deletes it), the `claims-bot`
+Environment with its App secrets (an owner deletes them, `docs/dev/work-claims-setup.md` step 7) and the
+AGENTS.md sync points. A branch is merged with `origin/main` only when GitHub reports a conflict
+(`pr-wait.sh` exit 4, or the queue drops the entry, exit 8); "merge `main`, never rebase" stays.
+
+Also in this change: a draft pull request runs nothing heavy (its `go` and `web` report success with
+"draft: not run"), and the push to main skips its heavy jobs only when a successful `merge_group` `ci` run
+tested the pushed tree. The route itself (what admin merges may still do) is unchanged here; the follow-up
+pull request that makes the queue the single route (decisions on `--admin`, the single e2e proof and the
+break-glass path) carries its own ADR.

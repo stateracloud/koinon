@@ -111,7 +111,7 @@ func (s *Service) ModelWarnings(ctx context.Context, org pgtype.UUID, providerID
 	if err != nil {
 		return nil
 	}
-	res, err := s.res.Resolve(ctx, store.New(s.pool), org, Model{Name: name, ProviderType: prov.Type, Format: format}, time.Now())
+	res, err := s.res.Resolve(ctx, store.New(s.pool), org, Model{Name: name, ProviderType: prov.Type, ProviderURL: prov.Url, Format: format}, time.Now())
 	if err != nil {
 		return nil
 	}

@@ -20,6 +20,11 @@ list on the pull request's base (`main`), so a pull request cannot widen its own
 your first pull request (a local hook run uses `KOINON_ALLOWED_IDENTITIES` meanwhile) and it counts from
 the next one on. Agent worktrees made by `hack/wt.sh new` also refuse a
 commit under another identity (`hack/git-identity-check.sh install` does it for any worktree).
+The hooks set `core.hooksPath`, which replaces `.git/hooks` in that worktree (a global `core.hooksPath`
+is overridden too, so a hook kept there should go in `.git/hooks` to keep running); they chain to a hook of the
+same name in `.git/hooks` (`pre-commit`, `pre-merge-commit`), so a personal one such as a local gitleaks
+hook still runs. The hooks do not run on `--no-verify`, rebase or cherry-pick; CI checks every commit.
+`hack/ship.sh` ignores `KOINON_ALLOWED_IDENTITIES` and `KOINON_SKIP_IDENTITY_CHECK`.
 
 ## AI-assisted contributions
 
@@ -43,7 +48,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
 | Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
 | Node | 24 | web UI |
-| pnpm | `web/package.json` `packageManager` (12.14.0) | web UI, docs site |
+| pnpm | `web/package.json` `packageManager` (12.18.0) | web UI, docs site |
 | buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
 | golangci-lint | v2.15.0 | `make lint-go` |
 | Helm | v4.3.1 | `make chart-check`, `make docs-check`, admission tests, Tilt |
@@ -101,15 +106,16 @@ including how to point Tilt at a remote cluster of your own.
   bypass. Merge with a merge commit (keeps stacked pull requests intact); squash and rebase merges
   are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
   paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
-- A pull request names the issue it closes with `Closes #N`. Claim the issue first, so nobody else
-  starts on it: comment `/claim` on the issue (outside contributors: on issues labelled
-  `good first issue` or `help wanted`, at most 2 at a time, 14 days, renewed by commenting again),
-  or `hack/claim.sh take N` as a maintainer's agent; `/release` gives it back
+- A pull request names the issue it closes with `Closes #N`. A maintainer's agent claims the issue
+  first with `hack/claim.sh take N`, so no other lane starts on it; the claim ends when the pull
+  request merges, or with `hack/claim.sh release N` (or `release-pr <PR>` after a close without a merge)
   ([ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md),
-  [ADR 0094](docs/adr/0094-work-claims-on-the-public-repository.md)). The `claim` check fails only
-  when someone else holds a live claim on an issue the pull request closes, or on the number of an
-  ADR it adds; it names the holder and what to do. With strict checks, keep the branch up to date
-  with `main`; the updater bot also does it for auto-merge pull requests.
+  [ADR 0104](docs/adr/0104-work-claims-reduced-to-the-lock.md)). Outside contributors do not claim:
+  say on the issue that you are working on it. The `claim` check fails only when another person
+  holds a claim on an issue the pull request closes, or reserved the number of an ADR it adds; it
+  names the holder and what to do. There is no updater bot: merge `main` into
+  your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
+  `origin/main` and wait for green first.
 - ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
