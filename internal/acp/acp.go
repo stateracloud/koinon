@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	sdk "github.com/coder/acp-go-sdk"
 
@@ -173,6 +174,12 @@ func (c *Conn) ReadErr() error {
 // Close releases the reader if it is held back for a handler that lags. It does not end the
 // connection by itself: that happens when the agent's stream ends.
 func (c *Conn) Close() { c.t.abort() }
+
+// Dropped returns how many notifications the reader did not pass on to the SDK: extension and
+// unknown methods, and session/update lines the SDK would reject. None of them has an effect, and
+// the SDK queues each one like an update, so passing them on would let a flood of them overflow its
+// queue with no handler call to pace the reader by.
+func (c *Conn) Dropped() int64 { return c.t.dropped.Load() }
 
 // Done is closed when the connection has ended.
 func (c *Conn) Done() <-chan struct{} { return c.c.Done() }
@@ -361,8 +368,9 @@ const maxNotificationLag = 512
 //
 // The SDK dispatches notifications in order, so the oldest unhandled session/update marks the
 // head of the SDK's queue: every notification read after it is still queued, and everything
-// before it is done. Only session/update runs the handler; other notifications cost the SDK
-// next to nothing, so with no update pending nothing is queued for long.
+// before it is done. Only session/update runs the handler; every other notification does
+// nothing, and the reader drops it (see notifOther) so that it never takes a queue slot. The
+// queue then holds updates only, and each one is tracked.
 type tracker struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -374,6 +382,7 @@ type tracker struct {
 	readErr error // set when the reader ended the stream itself, not the agent
 	aborted bool
 	drained chan struct{}
+	dropped atomic.Int64 // notifications the reader did not pass on (see notifOther)
 }
 
 func newTracker() *tracker {
@@ -445,18 +454,24 @@ type countingReader struct {
 	fail error  // the error to return once out is empty
 }
 
-// counted accounts for one notification line. The observer runs before the wait, so the number
-// of updates it has seen ahead of the handler does not grow with the lag: the leak guard counts
-// them against what the gateway has reported (taint.go).
-func (cr *countingReader) counted(line []byte, kind notificationKind) {
-	if kind == notifNone {
-		return
+// counted accounts for one notification line and reports whether the line goes on to the SDK.
+// The observer runs before the wait, so the number of updates it has seen ahead of the handler
+// does not grow with the lag: the leak guard counts them against what the gateway has reported
+// (taint.go).
+func (cr *countingReader) counted(line []byte, kind notificationKind) bool {
+	switch kind {
+	case notifNone:
+		return true
+	case notifOther:
+		cr.t.dropped.Add(1)
+		return false
 	}
-	if kind == notifUpdate && cr.obs != nil {
+	if cr.obs != nil {
 		cr.obs.UpdateRead(line)
 	}
 	cr.t.waitLag()
-	cr.t.notified(kind == notifUpdate)
+	cr.t.notified(true)
+	return true
 }
 
 func (cr *countingReader) Read(p []byte) (int, error) {
@@ -482,11 +497,20 @@ const maxLineBytes = 10 << 20
 // caller asks ReadErr to tell that apart from a harness that exited.
 var ErrLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
 
-// next reads one line (or what is left at the end of the stream) into cr.out.
+// next reads one line (or what is left at the end of the stream) into cr.out. A notification
+// that no handler would act on is dropped here and the next line is read instead (see
+// [notifOther]), so cr.out is empty only when cr.fail is set.
 func (cr *countingReader) next() {
 	if cr.br == nil {
 		cr.br = bufio.NewReaderSize(cr.r, 64<<10)
 	}
+	for len(cr.out) == 0 && cr.fail == nil {
+		cr.readLine()
+	}
+}
+
+// readLine reads one line into cr.out, or leaves cr.out empty when it dropped the line.
+func (cr *countingReader) readLine() {
 	var line []byte
 	for {
 		chunk, err := cr.br.ReadSlice('\n')
@@ -503,12 +527,12 @@ func (cr *countingReader) next() {
 		}
 		if err != nil {
 			cr.fail = err
-			if len(line) > 0 {
-				cr.counted(line, classify(line))
+			if len(line) > 0 && !cr.counted(line, classify(line)) {
+				line = nil
 			}
 			cr.t.update(func() { cr.t.eof = true })
-		} else {
-			cr.counted(line[:len(line)-1], classify(line))
+		} else if !cr.counted(line[:len(line)-1], classify(line)) {
+			line = nil
 		}
 		break
 	}
@@ -519,7 +543,7 @@ type notificationKind int
 
 const (
 	notifNone   notificationKind = iota // not queued by the SDK: a response, a request, a cancel or garbage
-	notifOther                          // queued, and answered without the handler
+	notifOther                          // would be queued, then ignored or rejected without the handler
 	notifUpdate                         // queued, and handed to SessionUpdate
 )
 

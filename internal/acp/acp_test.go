@@ -409,33 +409,68 @@ var _ = Describe("a burst of updates against a slow handler", func() {
 	}, SpecTimeout(90*time.Second))
 })
 
-var _ = Describe("session/update lines the SDK rejects", func() {
-	It("do not count as unhandled, so the stream is never held back for them", func(ctx SpecContext) {
+// stallLogger is a slog handler whose records wait until release is closed. The SDK logs every
+// notification it rejects from its dispatching goroutine, so a stalled logger stalls the
+// dispatcher at a point the test controls, instead of one that depends on scheduling.
+type stallLogger struct{ release chan struct{} }
+
+func (l stallLogger) Enabled(context.Context, slog.Level) bool { return true }
+func (l stallLogger) Handle(context.Context, slog.Record) error {
+	<-l.release
+	return nil
+}
+func (l stallLogger) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l stallLogger) WithGroup(string) slog.Handler      { return l }
+
+var _ = Describe("notifications that no handler acts on", func() {
+	// The SDK queues 1024 notifications for one dispatcher and closes the connection when a
+	// burst overflows it. Here the dispatcher is stopped for the whole burst, so nothing the
+	// reader passes on is dispatched: the burst overflows the queue unless the reader keeps
+	// these lines out of it (issue 501: the same happened by chance on a loaded CI runner).
+	flood := func(ctx SpecContext, line string, bad int) {
 		fromAgentR, fromAgentW := io.Pipe()
 		rec := &slowRecorder{}
 		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
-		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
-		// More than the 512 lag limit of lines whose params the SDK refuses (InvalidParams),
-		// so the handler never sees them; then valid ones.
-		const bad, good = 1500, 20
+		release := make(chan struct{})
+		var once sync.Once
+		unstall := func() { once.Do(func() { close(release) }) }
+		DeferCleanup(unstall)
+		conn.SetLogger(slog.New(stallLogger{release: release}))
+		const good = 20
+		written := make(chan struct{})
 		go func() {
 			defer GinkgoRecover()
+			defer close(written)
 			for range bad {
-				if _, err := io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n"); err != nil {
+				if _, err := io.WriteString(fromAgentW, line); err != nil {
 					return
 				}
 			}
 			for i := range good {
-				if _, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%d"}}}}`+"\n", i); err != nil {
+				if _, err := io.WriteString(fromAgentW, updateLine(fmt.Sprint(i))); err != nil {
 					return
 				}
 			}
-			_ = fromAgentW.Close()
 		}()
+		// The reader takes every line while the dispatcher is stopped: the lines that
+		// reach the handler (the valid ones) are far below the SDK's queue.
+		Eventually(written).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.Dropped()).To(BeEquivalentTo(bad))
+		Expect(conn.Done()).NotTo(BeClosed(), "the SDK's queue did not overflow")
+		unstall()
+		_ = fromAgentW.Close()
 		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
 		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
 		Expect(rec.count()).To(Equal(good))
-	}, SpecTimeout(40*time.Second))
+	}
+
+	It("session/update lines the SDK rejects never reach its queue", func(ctx SpecContext) {
+		flood(ctx, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n", 3000)
+	}, SpecTimeout(60*time.Second))
+
+	It("unknown and extension methods never reach its queue", func(ctx SpecContext) {
+		flood(ctx, `{"jsonrpc":"2.0","method":"_ext/ping","params":{}}`+"\n", 3000)
+	}, SpecTimeout(60*time.Second))
 })
 
 // updateLine is a valid session/update notification with the given text.
