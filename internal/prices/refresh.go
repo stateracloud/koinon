@@ -219,14 +219,11 @@ type RunResult struct {
 
 // Run fetches every adapter, records the fetch, makes proposals and, when auto is true, applies
 // the proposals inside the held bounds (heldBounds: never looser than the recorded ones). A failing
-// source does not stop the others.
+// source does not stop the others. The proposals are classified under the held bounds, auto or not.
 func (r *Refresher) Run(ctx context.Context, trigger string, auto bool) (RunResult, error) {
-	b := r.bounds
-	if auto {
-		var err error
-		if b, err = r.heldBounds(ctx); err != nil {
-			return RunResult{Failed: map[string]string{}}, err
-		}
+	b, err := r.heldBounds(ctx)
+	if err != nil {
+		return RunResult{Failed: map[string]string{}}, err
 	}
 	return r.run(ctx, trigger, r.adapterNames(), auto, b)
 }
@@ -247,7 +244,7 @@ func (r *Refresher) adapterNames() []string {
 func (r *Refresher) run(ctx context.Context, trigger string, names []string, auto bool, b pricefetch.Bounds) (RunResult, error) {
 	res := RunResult{Failed: map[string]string{}}
 	for _, name := range names {
-		n, err := r.fetchOne(ctx, r.adapters[name], trigger)
+		n, err := r.fetchOne(ctx, r.adapters[name], trigger, b)
 		if err != nil {
 			res.Failed[name] = err.Error()
 			r.log.Warn("price source fetch failed", "source", name, "err", err)
@@ -280,7 +277,7 @@ func minModelsOf(a pricefetch.Adapter) int {
 	return 1
 }
 
-func (r *Refresher) fetchOne(ctx context.Context, a pricefetch.Adapter, trigger string) (int, error) {
+func (r *Refresher) fetchOne(ctx context.Context, a pricefetch.Adapter, trigger string, b pricefetch.Bounds) (int, error) {
 	now := r.now()
 	q := store.New(r.svc.pool)
 	lastGood := 0
@@ -320,7 +317,7 @@ func (r *Refresher) fetchOne(ctx context.Context, a pricefetch.Adapter, trigger 
 			return err
 		}
 		var err error
-		n, err = r.propose(ctx, tq, snap, OriginFetch, "", now)
+		n, err = r.propose(ctx, tq, snap, OriginFetch, "", now, b)
 		return err
 	})
 	if err != nil {
@@ -330,10 +327,11 @@ func (r *Refresher) fetchOne(ctx context.Context, a pricefetch.Adapter, trigger 
 	return n, nil
 }
 
-// propose diffs a snapshot against the effective prices and stores the proposals. It returns how
+// propose diffs a snapshot against the effective prices and stores the proposals, classified under
+// bounds (the held ones, so a stored class says what the auto-apply will find). It returns how
 // many proposals it created or refreshed. For a fetch it first records the observations that the
 // stability rule reads.
-func (r *Refresher) propose(ctx context.Context, q *store.Queries, snap pricefetch.Snapshot, origin, vouchedBy string, now time.Time) (int, error) {
+func (r *Refresher) propose(ctx context.Context, q *store.Queries, snap pricefetch.Snapshot, origin, vouchedBy string, now time.Time, bounds pricefetch.Bounds) (int, error) {
 	v, err := r.svc.view(ctx, q, now)
 	if err != nil {
 		return 0, err
@@ -368,7 +366,7 @@ func (r *Refresher) propose(ctx context.Context, q *store.Queries, snap pricefet
 			if !ok {
 				continue // a model missing from the source never changes a price
 			}
-			made, err := r.proposeModel(ctx, q, v, snap, o, origin, vouchedBy, now)
+			made, err := r.proposeModel(ctx, q, v, snap, o, origin, vouchedBy, now, bounds)
 			if err != nil {
 				return 0, err
 			}
@@ -380,7 +378,7 @@ func (r *Refresher) propose(ctx context.Context, q *store.Queries, snap pricefet
 	return n, nil
 }
 
-func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceView, snap pricefetch.Snapshot, o pricefetch.Offer, origin, vouchedBy string, now time.Time) (bool, error) {
+func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceView, snap pricefetch.Snapshot, o pricefetch.Offer, origin, vouchedBy string, now time.Time, bounds pricefetch.Bounds) (bool, error) {
 	cur := v.effective(o.ProviderType, o.Model, now)
 	var curEntry *pricing.Entry
 	if cur != nil {
@@ -433,7 +431,7 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 		verdict := pricefetch.Classify(pricefetch.Facts{
 			Origin: origin, Source: snap.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: entry,
 			Agreeing: []string{snap.Source}, Stable: stable,
-		}, r.bounds)
+		}, bounds)
 		if noMaxOutput {
 			// Never auto: a person supplies the output limit when accepting.
 			verdict.Failed = append([]string{pricefetch.ErrNoMaxOutput.Error()}, verdict.Failed...)
@@ -842,8 +840,12 @@ func (r *Refresher) Dismiss(ctx context.Context, actor audit.Actor, id string) e
 // uploader vouches for the file: the install cannot re-check the body hash. Imported proposals are
 // never applied automatically. Returns how many proposals were created or refreshed.
 func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.File) (int, error) {
+	held, err := r.heldBounds(ctx)
+	if err != nil {
+		return 0, err
+	}
 	total := 0
-	_, err := audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
+	_, err = audit.InTx(ctx, r.svc.pool, func(q *store.Queries, b audit.Batch) error {
 		now := r.now()
 		if err := pricefetch.CheckFile(f, now); err != nil {
 			return &InvalidError{Msg: err.Error()}
@@ -872,7 +874,7 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 			}); err != nil {
 				return err
 			}
-			n, err := r.propose(ctx, q, snap, OriginImport, actor.String(), now)
+			n, err := r.propose(ctx, q, snap, OriginImport, actor.String(), now, held)
 			if err != nil {
 				return err
 			}

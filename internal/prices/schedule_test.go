@@ -399,6 +399,26 @@ var _ = Describe("auto-apply under the Refresher's own bounds", func() {
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM platform_price_versions`)).To(BeZero())
 	})
 
+	// #354: the class stored at fetch time is the one the auto-apply will find.
+	It("classifies a fetched proposal under the recorded bounds, not the fetching Refresher's own", func(ctx SpecContext) {
+		pool := freshDB(ctx)
+		m := uniq()
+		src := defaultList("2000-01-01.1", m)
+		a := &fakeAdapter{model: m, in: "1.2", out: "2.4"} // +20%
+		now := time.Now()
+		tight := refresherOn(pool, src, a, &now, pricefetch.Bounds{MaxChangePercent: 10, MaxAutoPerDay: 10})
+		Expect(tight.SyncSettings(ctx, prices.RefreshAuto, 24*time.Hour)).To(Succeed())
+		cli := refresherOn(pool, src, a, &now) // the default bounds, 25%
+		_, err := cli.Run(ctx, prices.TriggerCLI, false)
+		Expect(err).NotTo(HaveOccurred())
+		now = now.Add(25 * time.Hour)
+		_, err = cli.Run(ctx, prices.TriggerCLI, false)
+		Expect(err).NotTo(HaveOccurred())
+		p := openProposal(ctx, cli, m)
+		Expect(p.Class).To(Equal(pricefetch.ClassNeedsReview))
+		Expect(p.FailedRules).To(ContainSubstring("more than 10%"))
+	})
+
 	It("gives the prices commands the bounds koinon-api started with", func(ctx SpecContext) {
 		pool := freshDB(ctx)
 		now := time.Now()

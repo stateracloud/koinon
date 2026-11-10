@@ -272,13 +272,21 @@ func revokeBootstrapSessions(ctx context.Context, pool *pgxpool.Pool, now time.T
 		if err != nil || n == 0 {
 			return err
 		}
-		b.Org(bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+		// Only the deferred path gets here: the marker tells this event from one of a normal start,
+		// which carries install_event_id.
+		b.Org(deferredRevocationEvent(org.ID, n))
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
 	return n, nil
+}
+
+// deferredRevocationEvent is the org.bootstrap_sessions.revoked event of the deferred path. The
+// marker is in the event's "after", so it is summary->'after'->>'installEventDeferred' in the table.
+func deferredRevocationEvent(org pgtype.UUID, revoked int64) audit.Event {
+	return bootstrapOrgEvent(org, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": revoked, "installEventDeferred": true})
 }
 
 // bootstrapOrgEvent is a change bootstrap made to the default org, in that org's chain.
