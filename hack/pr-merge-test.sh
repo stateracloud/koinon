@@ -66,6 +66,8 @@ show)
   case $2 in
   *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
   *:hack/claim.sh) [ -z "${SHOW_FAILS_CLAIM:-}" ] || exit 128; printf '#!/usr/bin/env bash\n' ;;
+  *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
+  *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
   *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
   *) exit 128 ;;
   esac ;;
@@ -90,7 +92,14 @@ echo "review EVENT=$EVENT PR=$PR SHA=$SHA GH_REPO=$GH_REPO" >>"$FAKE_DIR/calls"
 [ "${REVIEW_RC:-0}" = 0 ] || echo "::error::pull request #$PR touches sensitive paths and its head has no review-verdict status"
 exit "${REVIEW_RC:-0}"
 SH
+cat >"$tmp/bin/needs" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "needs $*" >>"$FAKE_DIR/calls"
+exit "${NEEDS_RC:-1}"
+SH
 chmod +x "$tmp/bin"/*
+export PR_MERGE_NEEDS_E2E="$tmp/bin/needs"
 
 fail=0
 setup() { # <isDraft> <runs rows, one JSON object per line>
@@ -183,6 +192,32 @@ check "with a merge queue --admin on a .github/ PR still merges directly" 0 merg
 grep -q -- '--merge --admin --match-head-commit' "$FAKE_DIR/calls" || { echo "FAIL: queue: admin bypass" >&2; fail=1; }
 grep -q 'added to the merge queue' <<<"$out" && { echo "FAIL: queue: admin is not queued" >&2; fail=1; }
 grep -q 'skips the merge queue and so the queue e2e' <<<"$out" || { echo "FAIL: admin says it skips the queue e2e: $out" >&2; fail=1; }
+# --admin stays fail-closed for the e2e: an e2e-relevant .github PR needs a green quickstart on the head
+setup false "$green"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, no quickstart: refused (10)" 10 nomerge
+grep -q 'no green quickstart (missing)' <<<"$out" || { echo "FAIL: refusal names the missing quickstart: $out" >&2; fail=1; }
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z failure)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, red quickstart: refused (10)" 10 nomerge
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, skipped quickstart: refused (10)" 10 nomerge
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z success)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, green quickstart: merges" 0 merge
+setup false "$green"
+NEEDS_RC=2 run 7 --admin
+check "--admin, needs-e2e cannot say (2): treated as needed, refused (10)" 10 nomerge
+setup false "$green"
+NEEDS_RC=1 run 7 --admin
+check "--admin, .github only, e2e not needed: merges without a quickstart" 0 merge
+setup false "$green"
+NEEDS_RC=0 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass does not need the quickstart" 0 merge
 # ADR 0105: --admin only for a PR with a .github/ path
 setup false "$green"
 echo true >"$FAKE_DIR/rules"
@@ -260,7 +295,23 @@ REVIEW_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass still needs the review verdict (9)" 9 nomerge
 setup false "$green"
 WAIT_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
-check "--break-glass still needs green checks" 1 nomerge
+check "--break-glass: a failed pr-wait --checks is a warning, not a stop" 0 merge
+grep -q 'WARNING: pr-wait.sh --checks exited 1' <<<"$out" || { echo "FAIL: break glass warns about the wait: $out" >&2; fail=1; }
+grep -q 'Checks not green at merge: pr-wait.sh --checks exited 1' "$FAKE_DIR/calls" || { echo "FAIL: the warning is in the break-glass issue" >&2; fail=1; }
+grep -q '^gh pr comment .*Checks not green when merged: pr-wait.sh --checks exited 1' "$FAKE_DIR/calls" || { echo "FAIL: the warning is in the PR comment" >&2; fail=1; }
+setup false "$(r go 2026-11-01T10:00:00Z failure)"
+run 7 --break-glass "runners down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: red or missing required contexts are a warning too" 0 merge
+grep -q 'Checks not green at merge: .*required context(s) not green' "$FAKE_DIR/calls" || { echo "FAIL: not-green contexts are in the issue" >&2; fail=1; }
+setup false "$green"
+WAIT_RC=3 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a closed PR (pr-wait 3) still stops" 3 nomerge
+setup false "$green"
+WAIT_RC=5 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a draft (pr-wait 5) still stops" 5 nomerge
+setup false "$green"
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+grep -q 'Checks not green at merge: none' "$FAKE_DIR/calls" || { echo "FAIL: a clean break glass says none" >&2; fail=1; }
 setup false "$green"
 ISSUE_NOLABEL_FAILS=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass: a missing label does not stop the merge or the issue" 0 merge

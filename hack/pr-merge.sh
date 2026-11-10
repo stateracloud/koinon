@@ -28,11 +28,13 @@
 #                  emergency, for a queue that cannot merge anything (GitHub's queue or the hosted runners down). Needs
 #                  --approved-at (the owner approves; exit 64 without). Runs the checks above and the review gate,
 #                  merges with `gh pr merge --admin --merge`, and opens a `break-glass` issue (sha, reason, approver).
-#   --admin        merge now with admin rights, for a pull request that changes a path under `.github/` only: a
+#   --admin        merge now with admin rights, for a pull request that changes at least one path under `.github/`: a
 #                  workflow file runs from the pull request and could fake the `review` check, so those keep the
 #                  CODEOWNERS approval, which one human cannot give (ADR 0103, ADR 0105). Any other pull request is
 #                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
-#                  e2e; the push e2e on main and the nightly are the backstop. Exit 2 when the file list cannot be read.
+#                  e2e, so it is fail-closed for it: when the base's needs-e2e.sh says the change needs the e2e (or cannot
+#                  say), the head needs a green `quickstart` of its own, else exit 10. Exit 2 when the file list cannot
+#                  be read.
 #   Both --admin and --break-glass run hack/review-gate.sh on the head first (the `review` check they bypass, ADR 0103)
 #   and refuse with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
 #                  The gate, claim.sh and CODEOWNERS are the base branch's (origin/<base>, fetched), not this
@@ -46,11 +48,13 @@
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
 #       a tool failed (also: the repository name, the base fetch or the gate copy for --admin, a file list that cannot
 #       be read, --jump without a queue), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
-#       9 --admin on a PR without a `.github/` path, or without a review verdict (ADR 0103), 64 usage
+#       9 --admin on a PR without a `.github/` path, or without a review verdict (ADR 0103), 10 --admin on an
+#       e2e-relevant PR without a green quickstart on the head, 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS replace the helper scripts.
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS replace the helper scripts; PR_MERGE_NEEDS_E2E replaces needs-e2e.sh
+# (with PR_MERGE_TEST=1).
 # PR_MERGE_REVIEW_GATE replaces the review gate only when PR_MERGE_TEST=1 is set too (a test hook). Not a
 # security boundary: whoever runs this script can set both variables or edit it. The boundary is the required
 # `review` check in the `main` ruleset; `--admin` and the web UI bypass it (ADR 0103).
@@ -135,9 +139,19 @@ if [ "$admin" = 1 ]; then
   fi
 fi
 
-wait_rc=0
+wait_rc=0 wait_warn=""
 "$wait_sh" "$pr" --checks || wait_rc=$?
-[ "$wait_rc" -eq 0 ] || { echo "pr-merge: pr-wait.sh exited $wait_rc; not merging" >&2; exit "$wait_rc"; }
+if [ "$wait_rc" -ne 0 ]; then
+  if [ "$glass" = 1 ] && [ "$wait_rc" -ne 3 ] && [ "$wait_rc" -ne 5 ]; then
+    # Break glass exists for a queue or runners that are down, when no check can pass: the wait is a warning that
+    # goes into the record, not a stop (ADR 0105). A closed PR (3) and a draft (5) still stop.
+    wait_warn="pr-wait.sh --checks exited $wait_rc on ${sha:0:7} (the required checks were not all green when this merged)"
+    echo "pr-merge: WARNING: $wait_warn; continuing: --break-glass" >&2
+  else
+    echo "pr-merge: pr-wait.sh exited $wait_rc; not merging" >&2
+    exit "$wait_rc"
+  fi
+fi
 
 # Every required context of hack/ci-required.txt, read on the head SHA and judged by hack/lib/pr-verdict.sh, the
 # same function hack/pr-wait.sh uses (#133): per workflow run, the newest counting run of each workflow decides.
@@ -151,19 +165,26 @@ wfruns=$(prv_runs "$sha") # empty when unreadable: nothing is dropped, so the ve
 rows=$(jq -nc --argjson a "${runs:-[]}" --argjson b "${stats:-[]}" '$a + $b')
 mapfile -t ctx_list <<<"$contexts"
 verdicts=$(prv_judge "$rows" "$wfruns" false "${ctx_list[@]}")
-green=0 bad=0
+green=0 bad=0 notgreen=""
 while IFS=$'\t' read -r name v _run; do
   case $v in
   success | skipped) green=$((green + 1)) ;;
   *)
     echo "NOT GREEN $name ($v${_run:+, run $_run}) on ${sha:0:7}" >&2
     bad=$((bad + 1))
+    notgreen+="${notgreen:+, }$name ($v)"
     ;;
   esac
 done <<<"$verdicts"
 if [ "$bad" -gt 0 ]; then
-  echo "pr-merge: $bad required context(s) not green on ${sha:0:7}; not merging" >&2
-  exit 1
+  if [ "$glass" = 1 ]; then
+    # With the runners down no context turns green: a warning in the record, not a stop (ADR 0105).
+    wait_warn+="${wait_warn:+; }$bad required context(s) not green on ${sha:0:7}: $notgreen"
+    echo "pr-merge: WARNING: $bad required context(s) not green on ${sha:0:7}; continuing: --break-glass" >&2
+  else
+    echo "pr-merge: $bad required context(s) not green on ${sha:0:7}; not merging" >&2
+    exit 1
+  fi
 fi
 
 # The wait can take an hour: read the PR again before merging (state, head, and origin's branch tip).
@@ -252,6 +273,30 @@ if [ $((admin + glass)) != 0 ]; then
   if [ "$glass" = 1 ]; then
     echo "pr-merge: BREAK GLASS: merging PR $pr without the queue (approved at $approved): $reason" >&2
   else
+    # --admin skips the queue's quickstart, so it stays fail-closed for the e2e: when the BASE's hack/needs-e2e.sh says
+    # this change needs it (or cannot say), the head needs a `quickstart` success of its own (exit 10).
+    needs_sh=""
+    [ "${PR_MERGE_TEST:-}" != 1 ] || needs_sh=${PR_MERGE_NEEDS_E2E:-}
+    if [ -z "$needs_sh" ]; then
+      ne_dir=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-ne.XXXXXX") || { echo "pr-merge: mktemp failed; not merging" >&2; exit 2; }
+      trap 'rm -rf "$ne_dir" "${gate_dir:-}"' EXIT
+      mkdir -p "$ne_dir/hack"
+      for f in hack/needs-e2e.sh hack/paths-lib.sh hack/paths.rules; do
+        git show "refs/remotes/origin/$base:$f" >"$ne_dir/$f" 2>/dev/null || { echo "pr-merge: cannot read $f from origin/$base to decide the e2e; not merging" >&2; exit 2; }
+      done
+      chmod +x "$ne_dir/hack/needs-e2e.sh"
+      needs_sh=$ne_dir/hack/needs-e2e.sh
+    fi
+    nrc=0
+    "$needs_sh" --stdin <<<"$files" >/dev/null 2>&1 || nrc=$?
+    if [ "$nrc" != 1 ]; then
+      # 0 = needed; anything else = the rule could not be applied: needed.
+      qv=$(prv_judge "$rows" "$wfruns" false quickstart | awk -F'\t' 'NR == 1 { print $2 }')
+      if [ "$qv" != success ]; then
+        echo "pr-merge: --admin: this change needs the kind e2e (hack/needs-e2e.sh on origin/$base, exit $nrc) and the head ${sha:0:7} has no green quickstart (${qv:-missing}); run it (the PR's own run, or hack/e2e-remote.sh then a green quickstart), or use the queue; not merging" >&2
+        exit 10
+      fi
+    fi
     echo "pr-merge: --admin skips the merge queue and so the queue e2e (.github/** pull request, ADR 0105); the push e2e on main is the backstop" >&2
   fi
 fi
@@ -290,6 +335,7 @@ verb=$(prv_merge_outcome "$mode" "$qs" "$after")
 note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest counting run of each workflow; all success or skipped) against $base, then $verb."
 [ "$jump" = 0 ] || note+=" Jumped to the front of the queue."
 [ "$glass" = 0 ] || note+=" BREAK GLASS: $reason."
+[ -z "$wait_warn" ] || note+=" Checks not green when merged: $wait_warn."
 [ -z "$approved" ] || note+=" Approved at $approved."
 gh pr comment "$pr" --body "$note"
 if [ "$glass" = 1 ]; then
@@ -300,6 +346,7 @@ if [ "$glass" = 1 ]; then
 
 - Reason: $reason
 - Approved at: $approved
+- Checks not green at merge: ${wait_warn:-none (every required context was green on the head)}
 - Skipped: the queue build (every required check on main plus the PR, and the kind e2e)
 
 Follow-up: find why the queue could not merge, and run the e2e on main (\`gh workflow run e2e-kind.yml --ref main\`)."
