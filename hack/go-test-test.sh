@@ -109,17 +109,19 @@ for bad in "" ./internal/nope "./internal/agentd ./internal/api" "../etc"; do
 done
 echo "ok: test-go-suite refuses a suite that hack/go-test.sh --list does not name"
 rc_file=$(mktemp "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
-KOINON_RC_FILE=$rc_file REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX") hack/go-test.sh ./no/such/pkg >/dev/null 2>&1 || true
+rd=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+KOINON_RC_FILE=$rc_file REPORT_DIR=$rd hack/go-test.sh ./no/such/pkg >/dev/null 2>&1 || true
 [[ $(cat "$rc_file") == 1 ]] || { echo "FAIL: KOINON_RC_FILE must hold go-test.sh's exit status (1 for a bad package)"; exit 1; }
 echo "ok: KOINON_RC_FILE carries the exit status past make"
 
 # old issue 512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
 # the same run says "ok ... 0 failed" (the first external gate run: a flaky plain test, exit 1, no hint).
 fx=$(mktemp -d "$root/internal/zzfailfixture.XXXXXX")
-trap 'rm -rf "$fx"' EXIT
+trap 'rm -rf "$fx" "$rd" "$rd2" "${rd3:-}" "${pf:-}"' EXIT
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzfail\n\nimport "testing"\n\nfunc TestFails(t *testing.T) { t.Fatal("deliberate") }\n' >"$fx/fail_test.go"
 rc=0
-out=$(REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX") hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
+rd2=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+out=$(REPORT_DIR=$rd2 hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
 [[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a failing plain test must exit 1, got $rc"; exit 1; }
 grep -q 'failing part(s): plain packages (exit 1)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the failing part is not named"; exit 1; }
 grep -q 'go-test verdict: FAILED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the verdict line must say FAILED for a failed plain test, not ok"; exit 1; }
@@ -132,9 +134,10 @@ grep -qF -e 'pflags+=(-parallel ' hack/go-test.sh || { echo "FAIL: go-test.sh do
 pf=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzparallel\n\nimport "testing"\n\nfunc needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }\n\nfunc TestNeedsHelm(t *testing.T) { needHelm(t) }\n' >"$pf/x_test.go"
 rc=0
-out=$(go run ./hack/testverdict -reports "$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")" -parallel "$pf" "$pf" 2>&1) || rc=$?
+rd3=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+out=$(go run ./hack/testverdict -reports "$rd3" -parallel "$pf" "$pf" 2>&1) || rc=$?
 [[ $rc != 0 ]] || { echo "$out"; echo "FAIL: testverdict passed a plain RequireT test in a -parallel suite"; exit 1; }
 grep -q 'TestNeedsHelm' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not name the plain RequireT test"; exit 1; }
 grep -q 'take the package off PARALLEL_SUITES' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not say how to fix it"; exit 1; }
-rm -rf "$pf"
+rm -rf "$pf" "$rd3"
 echo "ok: a plain RequireT test in a -parallel suite fails the verdict and says how to fix it"
