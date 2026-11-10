@@ -315,11 +315,12 @@ func (r *Refresher) ReportUnpriced(ctx context.Context) (map[string]int, error) 
 		n := 0
 		for _, row := range rows {
 			_, err := r.svc.res.Resolve(ctx, q, row.OrgID, Model{ID: row.ID.String(), Name: row.Name, ProviderType: pt}, now)
-			var bp *BadPriceError
+			// An unusable price is not "unpriced": the price report flags it elsewhere.
+			reason, ok := Unpriceable(err)
 			switch {
-			case errors.Is(err, ErrUnpriced):
+			case ok && reason == ReasonNoPrice:
 				n++
-			case err != nil && !errors.As(err, &bp):
+			case err != nil && !ok:
 				return out, err
 			}
 		}

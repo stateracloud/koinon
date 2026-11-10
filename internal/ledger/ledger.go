@@ -14,7 +14,7 @@
 //     followed by scheduler.CheckRunLimits, which cancels the run at its model-request or spend
 //     limit after the agent's, org's and platform's budgets were checked ([enforce]).
 //   - Cost truth (plan item PV2): the ledger recomputes each request's cost from the raw
-//     usage and the dated price ([prices.Resolver.Find]; the one place that prices a usage, old issue 373) and records the price version it used.
+//     usage and the dated price ([prices.Resolver.Find]; the one place that prices a usage, #373) and records the price version it used.
 //     That cost counts for limits and reports; agentgateway's own cost is kept beside it and
 //     a difference over 1% flags the price entry. Usage a provider did not report is estimated
 //     (package estimate), marked, and counted toward limits.
