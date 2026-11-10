@@ -91,8 +91,8 @@ if [[ $mode == range ]]; then
 	# CI: the list comes from the pull request's BASE commit, so a pull request cannot widen the list it
 	# is checked against (a new contributor's line counts from the next pull request on). The one
 	# exception: when the base has no list at all and the head adds the file, the head's list is used
-	# (the pull request that introduces the list). That fallback is only for a base that never had the
-	# file (a branch cut before koinon#320, e.g. an old release/*); a base that has the file always wins.
+	# (the pull request that introduces the list). That fallback is only for a base that does not have the file
+	# (e.g. a release/* cut before #320); a base that has the file always wins.
 	# KOINON_ALLOWED_IDENTITIES is not honoured here.
 	[[ $# -eq 3 ]] || usage
 	base=$2 head=$3

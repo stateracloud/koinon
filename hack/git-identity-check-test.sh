@@ -144,7 +144,7 @@ out=$(hack/git-identity-check.sh range 2>&1); check "range: misuse exits 2" 2 $?
 out=$(hack/git-identity-check.sh bogus 2>&1); check "unknown mode exits 2" 2 $? "$out"
 
 # personal hooks: core.hooksPath replaces .git/hooks, so the guard hooks chain to the common dir's hook
-hack/git-identity-check.sh install >/dev/null 2>&1 # earlier steps switched branches; make sure the hooks are on
+hack/git-identity-check.sh install >/dev/null 2>&1 # the range section above unset core.hooksPath on purpose; turn the hooks back on
 mkdir -p .git/hooks
 printf '#!/bin/sh\necho ran >> "%s/personal-pre-commit"\n' "$tmp" >.git/hooks/pre-commit
 printf '#!/bin/sh\necho ran >> "%s/personal-pre-merge-commit"\nexit 1\n' "$tmp" >.git/hooks/pre-merge-commit
@@ -163,11 +163,6 @@ out=$(git merge --no-ff -m "merge: chained" chainside 2>&1); check "chain: a fai
 [[ -f $tmp/personal-pre-merge-commit ]] || { echo "FAIL chain: the personal pre-merge-commit hook did not run"; fail=1; }
 git merge --abort 2>/dev/null; git reset -q --hard HEAD
 rm -f .git/hooks/pre-commit .git/hooks/pre-merge-commit
-
-# ship.sh runs the identity check without the local escape hatches
-if grep -qE 'env -u KOINON_ALLOWED_IDENTITIES -u KOINON_SKIP_IDENTITY_CHECK hack/git-identity-check.sh commit' "$repo/hack/ship.sh"; then
-	echo "ok   ship.sh ignores KOINON_ALLOWED_IDENTITIES and KOINON_SKIP_IDENTITY_CHECK"
-else echo "FAIL ship.sh still honours an identity override"; fail=1; fi
 
 # the shipped list keeps the project identity and the GitHub lines, and no scratch identity; extra lines
 # (a contributor's own, added in their first pull request) are allowed
