@@ -1054,14 +1054,17 @@ jobs:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - name: Push ghcr.io/<repo>/flavors/opencode:<content tag>
         id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
         run: |
-          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           tag=$(hack/flavor-tag.sh opencode)
           image="ghcr.io/$REPO/flavors/opencode:$tag"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
@@ -1086,3 +1089,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
+      # The escape suite's probe image (#482), pushed under its content tag (hack/probe-tag.sh) so the
+      # kind e2e pulls it and runs no apt step. Its base is the OpenCode flavor's pinned BASE.
+      - name: Push ghcr.io/<repo>/spike-probe:<content tag>
+        continue-on-error: true # a miss only means the e2e builds the probe itself
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          tag=$(hack/probe-tag.sh)
+          image="ghcr.io/$REPO/spike-probe:$tag"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+            exit 0
+          fi
+          base=$(sed -n 's/^ARG BASE=//p' flavors/opencode/Dockerfile | head -n 1)
+          docker buildx build --push --build-arg "BASE=$base" --tag "$image" hack/spike/probe

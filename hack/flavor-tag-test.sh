@@ -94,5 +94,48 @@ fb 2 "" "mirror.example.invalid/x@$pin" demo "a Dockerfile without a pinned ARG 
 fb 2 "" "mirror.example.invalid/x@$pin" nosuch "an unknown flavor: exit 2"
 fb 2 "" "" "" "no flavor: usage, exit 2"
 
+# hack/probe-tag.sh (#482): the probe image's tag is a pure function of hack/spike/probe and the flavor's
+# ARG BASE= line, so the e2e can pull the image flavor-publish pushed and run no apt step.
+cd "$tmp"
+mkdir -p pt/hack/spike/probe pt/flavors/opencode
+cp "$here/probe-tag.sh" pt/hack/probe-tag.sh
+(
+	cd pt
+	git init -q .
+	printf 'FROM x\n' >hack/spike/probe/Dockerfile
+	printf 'print(1)\n' >hack/spike/probe/p.py
+	printf 'ARG BASE=registry.example.invalid/base@%s\n' "$pin" >flavors/opencode/Dockerfile
+	git add -A
+)
+pt() { (cd pt && LC_ALL=${1:-C} hack/probe-tag.sh); }
+pt_check() { # <description> <ok if the two tags are equal: 1, differ: 0> <tag a> <tag b>
+	if { [[ $2 == 1 ]] && [[ $3 == "$4" ]]; } || { [[ $2 == 0 ]] && [[ $3 != "$4" ]]; }; then
+		echo "ok: probe-tag: $1"
+	else
+		printf 'FAIL: probe-tag: %s (%s, %s)\n' "$1" "$3" "$4" >&2
+		fail=1
+	fi
+}
+t0=$(pt)
+[[ $t0 =~ ^probe-[0-9a-f]{12}$ ]] || { echo "FAIL: probe-tag: unexpected tag $t0" >&2; fail=1; }
+pt_check "repeatable" 1 "$t0" "$(pt)"
+pt_check "an unstaged edit of a probe file changes the tag" 0 "$t0" "$(printf 'print(2)\n' >pt/hack/spike/probe/p.py && pt)"
+printf 'print(1)\n' >pt/hack/spike/probe/p.py
+pt_check "restoring the file restores the tag" 1 "$t0" "$(pt)"
+printf 'ARG BASE=registry.example.invalid/base@sha256:%s\n' "$(printf '%064d' 9)" >pt/flavors/opencode/Dockerfile
+pt_check "another flavor base changes the tag" 0 "$t0" "$(pt)"
+printf 'ARG BASE=registry.example.invalid/base@%s\n' "$pin" >pt/flavors/opencode/Dockerfile
+printf '# unrelated flavor edit\n' >>pt/flavors/opencode/Dockerfile
+pt_check "a flavor edit outside the BASE line keeps the tag" 1 "$t0" "$(pt)"
+printf 'x\n' >pt/flavors/unrelated
+pt_check "a file outside hack/spike/probe keeps the tag" 1 "$t0" "$(pt)"
+rm pt/hack/probe-tag.sh
+if (cd pt && cp "$here/probe-tag.sh" hack/probe-tag.sh && rm flavors/opencode/Dockerfile && hack/probe-tag.sh >/dev/null 2>&1); then
+	echo "FAIL: probe-tag: a missing flavor Dockerfile must fail" >&2
+	fail=1
+else
+	echo "ok: probe-tag: no flavor Dockerfile, exit non-zero"
+fi
+
 [[ $fail -eq 0 ]] && echo "flavor-tag-test: ok"
 exit "$fail"
