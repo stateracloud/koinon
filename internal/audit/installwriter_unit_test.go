@@ -16,6 +16,9 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 )
 
+// These stay plain tests, not Ginkgo specs: the TestAudit suite starts Postgres in BeforeSuite, so
+// specs would skip without Docker, and these need no database and must run without it.
+
 // scriptedRow answers InstallWriterCheck's query from a script, with no database: "ok" is a member,
 // "error" a failed query, "stall" a query that returns only when its context ends.
 type scriptedRow struct {
