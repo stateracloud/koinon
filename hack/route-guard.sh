@@ -129,6 +129,7 @@ else
 		if grep -q '^\.github/' <<<"$files"; then
 			head=$("$GH" api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null) || head=""
 			checks=""
+			# 15368 is the GitHub Actions app id; hack/release-gate.sh (conclusion_in_run) uses the same id.
 			[[ -z $head ]] || checks=$("$GH" api "repos/$REPO/commits/$head/check-runs?per_page=100" --paginate \
 				--jq '.check_runs[] | select(.app.id == 15368) | [.id, .name, .status, (.conclusion // "none")] | @tsv' 2>/dev/null) || checks=""
 			if [[ -z $checks ]]; then
