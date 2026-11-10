@@ -191,7 +191,14 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 	if [[ -z $out && $seen == 1 ]]; then
 		return 0
 	elif [[ -z $out ]]; then
-		go list ./... | grep -v '/test/flavors$' | tr '\n' ' '
+		# Directories, not import paths: golangci-lint reads each argument as a path under the cwd.
+		# `./...` skips nested modules; {{.Dir}} is absolute, so strip the repo root.
+		local root=$PWD
+		go list -f '{{.Dir}}' ./... | while IFS= read -r d; do
+			d=${d#"$root"}
+			d=.${d}
+			[[ $d == ./test/flavors ]] || printf '%s ' "$d"
+		done
 	else
 		echo "$out"
 	fi

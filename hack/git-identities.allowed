@@ -8,6 +8,9 @@
 procoduck <coder@procodus.dev>
 
 # GitHub-attributed identities: web UI commits and merges, the merge queue, bots, and contributors
-# who use their GitHub noreply address.
+# who use their GitHub noreply address. The `* <*@users.noreply.github.com>` line allows ANY name with a
+# GitHub noreply address on purpose: a web edit, "Update branch" or a bot commit carries the account's
+# display name, which this list cannot know. It is an attribution guard against a personal name from a
+# global git config, not an access control (that is branch protection and review).
 GitHub <noreply@github.com>
 * <*@users.noreply.github.com>
