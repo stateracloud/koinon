@@ -45,7 +45,7 @@ unset GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM GIT_EX
 dir=$1
 max=$2
 host=${3:-github.com}
-tmp=$(mktemp -d 2>/dev/null) || { echo "savework: cannot create a temporary directory" >&2; exit 2; }
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/savework.XXXXXX" 2>/dev/null) || { echo "savework: cannot create a temporary directory" >&2; exit 2; }
 trap 'rm -rf "$tmp"' EXIT
 command -v git >/dev/null 2>&1 || { echo "savework: git is not installed in this sandbox" >&2; exit 2; }
 tab=$(printf '\t')
