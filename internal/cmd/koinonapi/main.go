@@ -705,7 +705,7 @@ func serve(ctx context.Context, cfg config) error {
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
 	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
 	svc := services.New(pool, services.Options{
-		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc,
+		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: cfg.restoreHold,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.

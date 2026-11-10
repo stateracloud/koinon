@@ -25,10 +25,16 @@ not yet trusted.
    `koinon-api`, `koinon-agentd` and `koinon-reconciler` (package `internal/restorehold`). The chart value `restoreHold`
    (boolean, default false; a non-boolean fails the render) sets it on all three Deployments.
 2. **What a held process does.** It starts, serves its health and metrics listeners, logs `restore-hold` and
-   exports `koinon_restore_hold 1`. It does not act outward:
+   exports `koinon_restore_hold 1`. It does no automatic work and starts no outward call:
    - `koinon-api` runs no DBOS runtime (so no schedule fires, no pending workflow is recovered, no queue drains), no
      sweepers, no price refresh and no code-host scope refresh. It still serves the API and reads, and the CLI
-     commands (`keys verify`, `org-limits show|set`) the operator uses to check and tighten.
+     commands (`keys verify`, `org-limits show|set`) the operator uses to check and tighten. A call an admin
+     starts that would reach outward is refused with `FailedPrecondition` ("install is held for restore; release
+     the hold first"), by one check (`Server.refuseWhileHeld`) at the top of each such handler: the provider echo
+     check, creating, re-keying, testing and listing a code-host connection (and the scope read they queue), the
+     code-host check of an agent's repository bindings, an approval's diff, adding an MCP server or changing its
+     address (the add-time preflight), and saving or testing a run-trace destination. A new handler that calls
+     outward must start with that check.
    - `koinon-agentd` claims and takes over no run and touches no sandbox. It still serves `checkpoints resync`, which
      the runbook runs before the release.
    - `koinon-reconciler` converges no sandbox, applies no provider key and runs no spend settler or cost

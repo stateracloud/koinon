@@ -566,8 +566,10 @@ openshell:
 publicUrl: ""
 
 # Restore-hold (issue #462): koinon-api, koinon-agentd and koinon-reconciler start and answer health and
-# reads, but act on nothing. No schedule fires and no pending workflow is recovered, no run is claimed or
-# taken over, no sandbox is converged, no code-host scope or price list is fetched. Start a restored
+# reads, but do no automatic work. No schedule fires and no pending workflow is recovered, no run is claimed
+# or taken over, no sandbox is converged, no code-host scope or price list is fetched, and koinon-api
+# refuses the outward calls an admin starts (a provider check, a connection test, an MCP server add, a
+# trace destination test) with "install is held for restore". Start a restored
 # install with this on, check it (docs: Back up and restore), then release it: set it to false and
 # upgrade. It is read at start, so a release is a rollout of the three Deployments.
 restoreHold: false

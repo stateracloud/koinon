@@ -137,6 +137,9 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	if err != nil {
 		return nil, err
 	}
+	if err := s.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	// One request ID for the whole call, so the reading it starts audits under the same ID as the
 	// call's own events (a UI request carries none).
 	ctx = requestCtx(ctx)
@@ -265,6 +268,9 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	if err != nil {
 		return nil, err
 	}
+	if err := s.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	// One request ID for the whole call, so the reading it starts audits under the same ID as the
 	// call's own events (a UI request carries none).
 	ctx = requestCtx(ctx)
@@ -376,6 +382,9 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha1.SetConnectionSecretRequest) (*connectionv1alpha1.SetConnectionSecretResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	id, err := parseID("connection_id", req.GetConnectionId())
@@ -601,6 +610,9 @@ func (s *Server) TestConnection(ctx context.Context, req *connectionv1alpha1.Tes
 	if err != nil {
 		return nil, err
 	}
+	if err := s.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	// One request ID for the whole call, so the reading it starts audits under the same ID as the
 	// call's own events (a UI request carries none).
 	ctx = requestCtx(ctx)
@@ -704,6 +716,9 @@ const (
 func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alpha1.ListInstallationReposRequest) (*connectionv1alpha1.ListInstallationReposResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	id, err := parseID("connection_id", req.GetConnectionId())

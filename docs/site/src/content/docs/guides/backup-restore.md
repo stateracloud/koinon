@@ -101,7 +101,9 @@ If `wait` prints "no matching resources found", the pods were already gone.
 Now put the install in restore-hold mode, before anything starts again. A held install starts, serves
 its health checks and answers reads, but acts on nothing: no schedule fires and no pending workflow
 is recovered, no run is claimed and no expired run lease is taken over, no sandbox is created,
-stopped or recreated, and no code-host scope or price list is fetched. Without the hold, the first
+stopped or recreated, and no code-host scope or price list is fetched. The API also refuses the outward calls an
+admin could start (a provider check, a connection test, an MCP server add, a trace destination
+test) until you release the hold. Without the hold, the first
 start would run every due schedule once, let agentd take over every run whose lease ran out while the
 install was down, and let the reconciler converge sandboxes against the restored state, all before
 you have looked at it. The hold is one environment variable on the three Deployments (they are

@@ -66,8 +66,10 @@ spec:
           annotations:
             summary: Koinon is held in restore-hold mode, so it does no work
             description: >-
-              At least one Koinon component runs with restoreHold set: it serves health and reads but fires
-              no schedule, claims no run, converges no sandbox and makes no outward call. Check the keys and the
+              At least one Koinon component runs with restoreHold set: it serves health and reads but does
+              no automatic work (no schedule fires, no run is claimed, no sandbox is converged) and refuses the
+              outward calls an admin starts (a provider check, a code-host connection test, an MCP server add, a
+              trace destination test). Check the keys and the
               run limits, then release the hold by upgrading with restoreHold=false (see the "Back up and
               restore" guide).
 {{- end }}

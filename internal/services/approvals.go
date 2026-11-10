@@ -254,6 +254,9 @@ func (s *Server) GetApprovalDiff(ctx context.Context, req *approvalv1alpha1.GetA
 	if err != nil {
 		return nil, err
 	}
+	if err := s.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	id, err := parseID("approval_id", req.GetApprovalId())
 	if err != nil {
 		return nil, err

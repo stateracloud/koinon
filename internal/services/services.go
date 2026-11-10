@@ -150,6 +150,9 @@ type Options struct {
 	// Traces manages run-trace destinations, content levels and the platform ceiling (ADR 0074). Nil
 	// means TraceDestinationService answers UNIMPLEMENTED.
 	Traces *tracedest.Service
+	// RestoreHold is restore-hold mode (issue #462, ADR 0107): every call that reaches outward (a model
+	// call, a code-host read, an MCP server request, a trace export) is refused with FailedPrecondition.
+	RestoreHold bool
 }
 
 // Server implements the four services.
@@ -184,6 +187,8 @@ type Server struct {
 	traces      *tracedest.Service
 	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (old issue 350).
 	leakGuard *orgsettings.Service
+	// restoreHold refuses the calls that reach outward (refuseWhileHeld).
+	restoreHold bool
 }
 
 // New returns a Server backed by pool.
@@ -217,6 +222,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
+		restoreHold: opts.RestoreHold,
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
