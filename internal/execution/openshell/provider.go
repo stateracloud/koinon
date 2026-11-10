@@ -178,8 +178,11 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	if !lint.GetSupportsStablePlaceholder() {
 		return &execution.Error{Op: op, Kind: execution.ErrUnsupported, Err: errors.New("gateway does not support stable_placeholder")}
 	}
-	if !lint.GetValid() {
-		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: diagnostics(lint.GetDiagnostics())}
+	// Lint treats the request as an import, so it reports an id conflict for every profile that
+	// already exists. An update of a found profile must not fail on that one diagnostic;
+	// UpdateProviderProfiles validates on its own (issue 508).
+	if blocking := lintBlocking(lint.GetDiagnostics(), found, p.ID); len(blocking) > 0 {
+		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: diagnostics(blocking)}
 	}
 
 	if !found {
@@ -208,6 +211,22 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: diagnostics(resp.GetDiagnostics())}
 	}
 	return nil
+}
+
+// lintBlocking returns the error diagnostics that stop a write. When the profile exists, the
+// "id already exists" error for id is expected and dropped.
+func lintBlocking(ds []*openshellv1.ProviderProfileDiagnostic, exists bool, id string) []*openshellv1.ProviderProfileDiagnostic {
+	var out []*openshellv1.ProviderProfileDiagnostic
+	for _, d := range ds {
+		if d.GetSeverity() != "error" {
+			continue
+		}
+		if exists && d.GetField() == "id" && d.GetProfileId() == id && strings.Contains(d.GetMessage(), "already exists") {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func specHash(m proto.Message) (string, error) {

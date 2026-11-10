@@ -44,6 +44,18 @@ var _ = Describe("Backend ownership", func() {
 		Expect(execution.OwnerID("mark-live")).To(Equal(execution.OwnerID("mark-live")))
 	})
 
+	It("updates an existing profile when the owner changes its hash, and converges (issue 508)", func(ctx SpecContext) {
+		Expect(legacy.EnsureProvider(ctx, ws, agentgatewayProvider("1"))).To(Succeed())
+		before := gw.Profile(ws, "koinon-agentgateway").GetAnnotations()[openshell.SpecHashAnnotation]
+
+		Expect(live.EnsureProvider(ctx, ws, agentgatewayProvider("1"))).To(Succeed())
+		Expect(gw.Calls("UpdateProviderProfiles")).To(Equal(1))
+		Expect(gw.Profile(ws, "koinon-agentgateway").GetAnnotations()[openshell.SpecHashAnnotation]).NotTo(Equal(before))
+
+		Expect(live.EnsureProvider(ctx, ws, agentgatewayProvider("1"))).To(Succeed())
+		Expect(gw.Calls("UpdateProviderProfiles")).To(Equal(1), "converged: no second update")
+	})
+
 	It("stamps what it creates", func(ctx SpecContext) {
 		sb, err := live.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: name, Image: "img"})
 		Expect(err).NotTo(HaveOccurred())

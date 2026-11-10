@@ -463,6 +463,18 @@ func (g *Gateway) LintProviderProfiles(_ context.Context, req *openshellv1.LintP
 		return nil, err
 	}
 	diags := lint(req.GetProfiles())
+	// Upstream Lint behaves like an import: it reports every ID already in the workspace
+	// (OpenShell v0.1.7 grpc/provider.rs profile_conflict_diagnostics).
+	ws := req.GetWorkspaceScope().GetWorkspace()
+	for _, it := range req.GetProfiles() {
+		id := it.GetProfile().GetId()
+		if _, ok := g.profiles[key{ws, id}]; ok {
+			diags = append(diags, &openshellv1.ProviderProfileDiagnostic{
+				Source: it.GetSource(), ProfileId: id, Field: "id",
+				Message: fmt.Sprintf("custom provider profile '%s' already exists", id), Severity: "error",
+			})
+		}
+	}
 	return &openshellv1.LintProviderProfilesResponse{
 		Diagnostics: diags, Valid: len(diags) == 0, SupportsStablePlaceholder: !g.NoStablePlaceholder,
 	}, nil
