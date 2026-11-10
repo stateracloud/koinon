@@ -337,7 +337,6 @@ note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest counti
 [ "$glass" = 0 ] || note+=" BREAK GLASS: $reason."
 [ -z "$wait_warn" ] || note+=" Checks not green when merged: $wait_warn."
 [ -z "$approved" ] || note+=" Approved at $approved."
-gh pr comment "$pr" --body "$note"
 if [ "$glass" = 1 ]; then
   # The record of a break-glass merge (ADR 0105): an issue the retro and the overnight report read. The `break-glass`
   # label is created by the owner; without it the issue is still opened, unlabelled.
@@ -354,4 +353,6 @@ Follow-up: find why the queue could not merge, and run the e2e on main (\`gh wor
     gh issue create --title "$gtitle" --body "$gbody" >/dev/null 2>&1 ||
     echo "pr-merge: WARNING: could not open the break-glass issue; open one by hand (title: $gtitle)" >&2
 fi
+# The comment comes after the record: a failed comment is a warning, never a reason to skip the issue (set -e).
+gh pr comment "$pr" --body "$note" || echo "pr-merge: WARNING: could not post the PR comment" >&2
 echo "pr-merge: PR $pr at ${sha:0:7}: $verb ($green contexts green)"

@@ -61,7 +61,7 @@ fails=0
 job() { printf '{"name":"%s","status":"%s","conclusion":%s}' "$1" "${3:-completed}" "$([[ ${2:-success} == null ]] && echo null || echo "\"${2:-success}\"")"; }
 jobs_file() { local IFS=,; printf '{"jobs":[%s]}' "$*" >"$tmp/${F:-jobs.json}"; }
 all_green_jobs() { jobs_file "$(job go)" "$(job 'quick checks')" "$(job chart skipped)" "$(job flavors failure)"; }
-chk() { printf '{"id":%s,"name":"%s","status":"completed","conclusion":"%s"}' "$1" "$2" "$3"; }
+chk() { printf '{"id":%s,"name":"%s","status":"completed","conclusion":"%s","app":{"id":%s}}' "$1" "$2" "$3" "${4:-15368}"; }
 checks_file() { local IFS=,; printf '{"check_runs":[%s]}' "$*" >"$tmp/checks.json"; }
 green_checks() { checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)"; }
 reset() {
@@ -169,6 +169,18 @@ echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
 checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)" "$(chk 7 go failure)"
 run
 has "newest row per check wins: issue" 'issue create'
+
+# 2e. a same-named green check from another app does not count (review red from Actions, green from elsewhere)
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review failure)" "$(chk 7 review success 999)"
+run
+has "other-app green review does not count: issue" 'issue create'
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success 999)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)"
+run
+has "other-app only go does not count: issue" 'issue create'
 
 # 3. any other admin merge: break-glass
 reset

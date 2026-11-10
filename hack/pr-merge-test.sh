@@ -35,7 +35,7 @@ case "$1 $2" in
 "pr view")
   sed "s/\"mergeStateStatus\":\"CLEAN\"/\"mergeStateStatus\":\"${MSTATE:-CLEAN}\"/" "$FAKE_DIR/pr.json" ;;
 "pr merge") exit "${MERGE_RC:-0}" ;;
-"pr comment") ;;
+"pr comment") exit "${COMMENT_RC:-0}" ;;
 "pr edit") exit "${EDIT_RC:-0}" ;;
 "issue create") [ -z "${ISSUE_NOLABEL_FAILS:-}" ] || [[ $* != *--label* ]] || exit 1; exit 0 ;;
 "api repos/{owner}/{repo}/pulls/"*"/files")
@@ -303,6 +303,13 @@ setup false "$(r go 2026-11-01T10:00:00Z failure)"
 run 7 --break-glass "runners down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass: red or missing required contexts are a warning too" 0 merge
 grep -q 'Checks not green at merge: .*required context(s) not green' "$FAKE_DIR/calls" || { echo "FAIL: not-green contexts are in the issue" >&2; fail=1; }
+setup false "$green"
+COMMENT_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a failed PR comment is a warning, the merge stands" 0 merge
+grep -q '^gh issue create' "$FAKE_DIR/calls" || { echo "FAIL: the issue is opened though the comment failed" >&2; fail=1; }
+setup false "$green"
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+if [ "$(grep -n '^gh issue create' "$FAKE_DIR/calls" | head -1 | cut -d: -f1)" -lt "$(grep -n '^gh pr comment' "$FAKE_DIR/calls" | head -1 | cut -d: -f1)" ]; then :; else echo "FAIL: the issue comes before the comment" >&2; fail=1; fi
 setup false "$green"
 WAIT_RC=3 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass: a closed PR (pr-wait 3) still stops" 3 nomerge

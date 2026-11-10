@@ -130,7 +130,7 @@ else
 			head=$("$GH" api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null) || head=""
 			checks=""
 			[[ -z $head ]] || checks=$("$GH" api "repos/$REPO/commits/$head/check-runs?per_page=100" --paginate \
-				--jq '.check_runs[] | [.id, .name, .status, (.conclusion // "none")] | @tsv' 2>/dev/null) || checks=""
+				--jq '.check_runs[] | select(.app.id == 15368) | [.id, .name, .status, (.conclusion // "none")] | @tsv' 2>/dev/null) || checks=""
 			if [[ -z $checks ]]; then
 				verdict=unknown why="$why; could not read the checks of the head of PR #$pr"
 			else
