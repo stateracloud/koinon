@@ -117,7 +117,7 @@ wfruns=$(prv_runs "$sha") # empty when unreadable: nothing is dropped, so the ve
 [ -n "$wfruns" ] || echo "pr-merge: cannot list the workflow runs of $sha; judging every check run on it" >&2
 rows=$(jq -nc --argjson a "${runs:-[]}" --argjson b "${stats:-[]}" '$a + $b')
 mapfile -t ctx_list <<<"$contexts"
-verdicts=$(prv_judge "$rows" "$wfruns" "quickstart" "${ctx_list[@]}")
+verdicts=$(prv_judge "$rows" "$wfruns" false "quickstart" "${ctx_list[@]}")
 green=0 bad=0
 while IFS=$'\t' read -r name v _run; do
   case $v in

@@ -2,8 +2,12 @@
 name: ci
 
 # A draft pull request runs nothing heavy (hack/ci-skip-heavy.sh, from PR_DRAFT below): its `go` and
-# `web` report success with "draft: not run". A draft cannot be enqueued or merged, `ready_for_review`
-# starts the full run, and the merge queue re-runs every required check, so no gate reads a draft's green.
+# `web` report success with "draft: not run". That green is vacuous, so the run says it is a draft, from
+# the event payload (old issue 676): hack/lib/pr-verdict.sh drops runs whose `display_title` (`displayTitle`
+# in `gh run list --json`) is `ci (draft)` (the run `name` stays `ci`), so between `gh pr ready` and the
+# ready_for_review run the gates see no ci run and wait. A re-run replays the event, so keeps its label.
+# A draft cannot be enqueued or merged, and the merge queue re-runs every required check.
+run-name: ${{ github.event.pull_request.draft && 'ci (draft)' || 'ci' }}
 
 on:
   # ready_for_review is not a default type: it runs the full suite on the same head when a draft is

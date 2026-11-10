@@ -6,8 +6,9 @@
 #
 # The rule (docs/dev/ci.md "One verdict per workflow run"):
 #   1. Judge per WORKFLOW RUN, not per check name. For each workflow file (`path`) on the head take the
-#      newest run that counts: by `created_at`, then `run_attempt`. (A draft runs nothing heavy, so its run needs
-#      no filter: the ready run is newer and decides.) The check runs of every other run of that workflow are dropped, so an
+#      newest run that counts: by `created_at`, then `run_attempt`. A run titled `ci (draft)` does not
+#      count once the PR is ready: a draft runs nothing heavy and its `go`/`web` are green by skipping, so
+#      until the ready_for_review run exists nothing on the head is evidence. The check runs of every other run of that workflow are dropped, so an
 #      older green can never outvote a newer run that was cancelled, skipped or is still queued.
 #   2. Inside the chosen run, a check name is judged by its newest row: a row that has not finished
 #      (a live re-run attempt) outranks finished ones; otherwise the newest by start time (completion time
@@ -18,7 +19,7 @@
 #      workflow (`e2e result` and its jobs): any green row on the head counts, from any non-draft run, unless a newer
 #      row failed. A newer cancelled or unfinished row does not hide an older green; a newer red does.
 #   5. A completed newest run with no check run at all (startup_failure) is a failure (prv_empty), never a wait.
-#   6. When the runs cannot be listed nothing is dropped (fail towards "not green": an old red shows
+#   6. When the runs cannot be listed nothing is dropped (fail towards "not green": a draft run's red shows
 #      as red, never as green).
 # A verdict word per context: success skipped pending failure cancelled missing.
 #
@@ -60,7 +61,7 @@ def prv_newest($any): sort_by([.ts, .job]) | . as $s | ($s | last) as $l
     else $l end;
 # Rule 2 for the prv_row rows of a list: a name is collapsed within one run (statuses have no run: one group), and across
 # runs for the names in $anyok and for the checks of e2e-kind, whose several runs on one head are normal. When the
-# runs could not be listed, two runs of one other name both stay, so an older run's red is never outvoted by a newer green.
+# runs could not be listed, two runs of one other name both stay, so a draft run's red is never outvoted by a newer green.
 def prv_collapse($anyok): group_by(.name)
   | map(if (.[0].name | IN($anyok[])) or all(.[]; .wf == "e2e-kind") then [prv_newest(true)] else (group_by(.run) | map(prv_newest(false))) end)
   | add // [];
@@ -73,11 +74,12 @@ def prv_stamp($runs):
         (first($runs[] | select((.id | tostring) == $id)) // null) as $r
         | if $r == null then . else .workflowName = (if ($r.path | endswith("/e2e-kind.yml")) then "e2e-kind" else ($r.name // "") end) end
       else . end);
+def prv_live($runs; $draft): [$runs[] | select($draft or (.display_title != "ci (draft)"))];
 def prv_cur($live): $live | group_by(.path) | map(if (.[0].path | endswith("/e2e-kind.yml")) then (.[] | .id | tostring) else (max_by([.created_at, .run_attempt]) | .id | tostring) end);
-def prv_drop($runs; $anyok):
+def prv_drop($runs; $draft; $anyok):
   if $runs == null then . else
     ($runs | map(.id | tostring)) as $known
-    | $runs as $live
+    | prv_live($runs; $draft) as $live
     | ($live | map(.id | tostring)) as $liveids
     | prv_cur($live) as $cur
     | map(prv_rid as $id | prv_name as $n
@@ -90,10 +92,10 @@ def prv_drop($runs; $anyok):
 # A run that ended success or skipped is not such a case: its jobs ran but are not in the PR's rollup (for
 # example a workflow_dispatch on the head), so it is no part of the verdict and is ignored.
 # Applies to the raw rows (before prv_drop). Prints {id, name, conclusion} objects; none when the runs are unreadable.
-def prv_empty($runs):
+def prv_empty($runs; $draft):
   if $runs == null then [] else
     (map(prv_rid) | map(select(. != null))) as $have
-    | $runs as $live
+    | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
     | [$live[] | select((.id | tostring) as $i | ($cur | index($i)) != null and (.path | startswith(".github/workflows/")) and (.path | endswith("/e2e-kind.yml") | not)
         and .status == "completed" and ((.conclusion // "") | IN("success", "skipped") | not) and ($have | index($i)) == null)
@@ -126,22 +128,22 @@ prv_status_rows() {
     jq -sc . 2>/dev/null
 }
 
-# prv_judge <rows json> <runs json|""> <anyok names, space separated> <context>...
+# prv_judge <rows json> <runs json|""> <draft true|false> <anyok names, space separated> <context>...
 # One line per context: `<name>\t<success|skipped|pending|failure|cancelled|missing>\t<run id>`.
 prv_judge() {
-  local rows=$1 runs=${2:-null} want ok
+  local rows=$1 runs=${2:-null} draft=$3 want ok
   local -a anyok
-  read -r -a anyok <<<"$3"
-  shift 3
+  read -r -a anyok <<<"$4"
+  shift 4
   want=$(printf '%s\n' "$@" | jq -R . | jq -sc 'map(select(. != ""))')
   ok=$(printf '%s\n' "${anyok[@]}" | jq -R . | jq -sc 'map(select(. != ""))')
-  jq -nr --argjson rows "$rows" --argjson runs "$runs" --argjson want "$want" \
+  jq -nr --argjson rows "$rows" --argjson runs "$runs" --argjson draft "$draft" --argjson want "$want" \
     --argjson anyok "$ok" "$PRV_JQ"'
-    ($rows | prv_drop($runs; $anyok) | map(prv_row) | prv_collapse($anyok)) as $r
+    ($rows | prv_drop($runs; $draft; $anyok) | map(prv_row) | prv_collapse($anyok)) as $r
     | (($want[] | . as $n
       | [$r[] | select(.name == $n)] as $c
       | if ($c | length) == 0 then [$n, "missing", ""] else (([$c[] | select(prv_ok | not)] | first) // $c[0]) as $x | [$n, ($x | prv_word), ($x.run // "")] end),
-      ($rows | prv_empty($runs)[] | ["\(.name): run has no jobs (\(.conclusion))", "failure", .id]))
+      ($rows | prv_empty($runs; $draft)[] | ["\(.name): run has no jobs (\(.conclusion))", "failure", .id]))
     | @tsv'
 }
 

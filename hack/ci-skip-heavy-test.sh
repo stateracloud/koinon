@@ -78,11 +78,11 @@ done
 expect "recorded ready_for_review payload" false "ready" EVENT_NAME=pull_request PR_DRAFT="$(echo '{"action":"ready_for_review","pull_request":{"draft":false}}' | jq -r .pull_request.draft)"
 # A re-run of a draft run after the PR became ready replays the draft payload: still a draft run.
 expect "re-run of a draft run after ready is a draft run again" true "draft" EVENT_NAME=pull_request PR_DRAFT=true
-# The run name no longer carries a draft form (a draft runs nothing, so no gate filters on it).
-if grep -q '^run-name:' "$(dirname "$script")/../.github/workflows/ci.yml"; then
-	echo "FAIL: ci.yml still sets a run-name (the draft filter is gone)"; fails=1
+# ci.yml labels the run from the same flag as it feeds the script: pr-verdict.sh filters on that title.
+if grep -q "^run-name: .*github.event.pull_request.draft.*'ci (draft)'" "$(dirname "$script")/../.github/workflows/ci.yml"; then
+	echo "ok: ci.yml run-name labels draft runs"
 else
-	echo "ok: ci.yml has no draft run-name"
+	echo "FAIL: ci.yml run-name does not label draft runs"; fails=1
 fi
 # shellcheck disable=SC2016 # a literal workflow expression, not a shell one
 if grep -q 'PR_DRAFT: ${{ github.event.pull_request.draft }}' "$(dirname "$script")/../.github/workflows/ci.yml"; then

@@ -326,15 +326,20 @@ status or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
 
 A draft runs nothing heavy. Only `changes`, `quick checks`, `lint-shell`, `scripts`, `dco`, `gitleaks` and
 `claim` run; `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
-is green anyway). That is safe because nothing reads a draft's green: a draft cannot be enqueued or merged
-(`pr-merge.sh` and `pr-wait.sh --checks` exit 5), marking it ready fires `ready_for_review`, which runs
-everything on the same head (the newest `ci` run carries the verdict, "One verdict per workflow run"), and
-the merge queue re-runs every required check on its own commit. Get WIP feedback from `hack/preflight.sh`,
-not CI. The draft flag comes from the event payload (old issue 676), not from the live state, and
-`hack/ci-skip-heavy.sh` decides from that flag (`PR_DRAFT`). A re-run replays the original event: re-running
-a draft run after the PR is ready is a draft run again; re-run the `ready_for_review` run (or push) instead.
-There is no `ci (draft)` run name and no gate filters draft runs. Mark the PR ready (`hack/ship.sh --ready`,
-`gh pr ready`) before you wait on it with `hack/pr-wait.sh`: a draft's green is not merge evidence.
+is green anyway). That green is vacuous, so it must never count as evidence. A draft cannot be enqueued or
+merged (`pr-merge.sh` and `pr-wait.sh --checks` exit 5), and marking it ready fires `ready_for_review`, which
+runs everything on the same head. But between `gh pr ready` and that run's first check the draft run is the
+only `ci` run on the head, and it would be the newest. So the run is named `ci (draft)` (ci.yml `run-name`)
+when `github.event.pull_request.draft` is true (event payload, old issue 676), else `ci`, and
+`hack/ci-skip-heavy.sh` decides from that same flag (`PR_DRAFT`). A gate that must ignore draft runs drops the
+runs whose `display_title` (`displayTitle` in `gh run list --json`) is `ci (draft)`; the run `name` stays `ci`
+for every run, so never filter on it. `pr-wait.sh` (and `pr-merge.sh`, which calls it) does exactly that
+(#218, via `hack/lib/pr-verdict.sh`, "One verdict per workflow run"): no time window, and until the ready run
+has checks it prints `waiting for the ready run`. A re-run replays the original event: re-running a
+`ci (draft)` run after the PR is ready is a draft run again, and `pr-wait.sh` ignores it; to re-run, use the
+`ci` run of `ready_for_review` (or push). Get WIP feedback from `hack/preflight.sh`, not CI. Mark the PR
+ready (`hack/ship.sh --ready`, `gh pr ready`) before you wait on it with `hack/pr-wait.sh`. The merge queue
+re-runs every required check on its own commit.
 
 ### One run per head (old issue 675)
 
@@ -579,11 +584,12 @@ skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
 succeeded a PR comment with the head SHA and the number of contexts it read. It does not call
 `claim.sh`, and `--lane` is a usage error (ADR 0104). `pr-wait.sh --checks` exits 5 on a draft. After
-`ready_for_review` the ready run is the newest `ci` run and decides; there is no draft filter (a draft run
-is green by skipping, so it needs none). A red or cancelled newest run is never dropped, and
-while the ready run has no checks yet it prints `waiting for the newest run of each workflow`, never green. dco,
-gitleaks, claim and commit statuses (`e2e-lab`) keep their result; when gh cannot list the runs, nothing is
-dropped (an older run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
+`ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
+`--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
+re-run of a draft run is ignored too). A draft run is green by skipping, so it must never decide. A red or
+cancelled run of the ready `ci` is never dropped, and while the ready run has no checks yet it prints
+`waiting for the ready run`, never green. dco, gitleaks, claim and commit statuses (`e2e-lab`) keep their
+result; when gh cannot list the runs, nothing is dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
 
@@ -594,7 +600,8 @@ both source it, so they cannot disagree (they used to keep two orderings, and a 
 green passed). The rule:
 
 1. Judge per workflow run, not per check name. For each workflow file on the head (`GET actions/runs?head_sha=`,
-   keyed by `path`) take the newest run that counts, by `created_at` then `run_attempt`. The check runs of every other run of that workflow are dropped: an older
+   keyed by `path`) take the newest run that counts, by `created_at` then `run_attempt`. A run titled `ci (draft)` does
+   not count once the PR is ready (#218): its `go`/`web` are green by skipping. The check runs of every other run of that workflow are dropped: an older
    green never outvotes a newer run that was cancelled, red, still running or has no checks yet (that one is
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)

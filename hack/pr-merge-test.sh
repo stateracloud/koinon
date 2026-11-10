@@ -326,15 +326,15 @@ $(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
 wfruns "$ci_old" "$(wfrun 72 ci.yml ci 2026-11-01T10:05:00Z 2)"
 run 7 --admin
 check "#133: a re-run attempt that passed replaces its failed attempt" 0 merge
-# no draft filter: a newer run of ci decides, whatever it was for (a draft now runs nothing, so its run is green)
-d_run=$(wfrun 70 ci.yml ci 2026-11-01T10:06:00Z)
+# the draft-era run stops counting once the PR is ready, whatever its age
+d_run=$(wfrun 70 ci.yml "ci (draft)" 2026-11-01T10:06:00Z)
 setup false "$(r go 2026-11-01T10:00:00Z success 71)
 $(r go 2026-11-01T10:06:00Z failure 70)
 $(r 'quick checks' 2026-11-01T10:00:00Z success 71)
 $(r 'quick checks' 2026-11-01T10:06:00Z success 70)"
 wfruns "$ci_old" "$d_run"
 run 7 --admin
-check "#133: a newer run of ci decides, its red stands" 1 nomerge
+check "#133: a newer draft-era run is ignored on a ready PR (the ready run's green stands)" 0 merge
 # gh cannot list the workflow runs: nothing is dropped and the verdict is stricter, never looser
 setup false "$(r go 2026-11-01T10:00:00Z success 71)
 $(r go 2026-11-01T10:05:00Z cancelled 72)
@@ -343,9 +343,8 @@ run 7 --admin
 check "#133: unreadable workflow runs: the newest row of a name still decides, and says so" 1 nomerge
 grep -q 'cannot list the workflow runs' <<<"$out" || { echo "FAIL: says the runs were unreadable" >&2; fail=1; }
 
-# #133: a recorded real answer (PR #386's head while it was a draft, before drafts ran nothing: its ci run went red,
-# dco green, secrets red). There is no draft filter any more: the red ci run is the newest run of ci, so go is red,
-# never green; dco is green.
+# #133: a recorded real answer (PR #386's head while it was a draft: ci (draft) went red, dco green, secrets red).
+# Read as a ready PR: the draft run does not count, so go and quick checks are missing, never green; dco is green.
 # shellcheck disable=SC1091
 . "$repo/hack/lib/pr-verdict.sh"
 fx=$repo/hack/testdata/pr-verdict
@@ -355,19 +354,19 @@ cp "$fx/status-386-draft-era.json" "$FAKE_DIR/statuses"
 cp "$fx/runs-386-draft-era.json" "$FAKE_DIR/wfruns"
 run 7 --admin
 check "#133 recorded answer: a draft-era head is not merge evidence" 1 nomerge
-grep -q 'NOT GREEN go (failure' <<<"$out" || { echo "FAIL: recorded: go is red: $out" >&2; fail=1; }
+grep -q 'NOT GREEN go (missing)' <<<"$out" || { echo "FAIL: recorded: go missing: $out" >&2; fail=1; }
 grep -q 'NOT GREEN dco' <<<"$out" && { echo "FAIL: recorded: dco is green" >&2; fail=1; }
-# the same rows through the verdict function: the red go is named
+# the same answer read as a draft PR: the draft run counts and its red go is named
 rows=$(jq -c '[.check_runs[] | {name, status: (.status|ascii_upcase), conclusion: ((.conclusion // "")|ascii_upcase), startedAt: .started_at, completedAt: .completed_at, detailsUrl: .details_url, workflowName: ""}]' "$fx/check-runs-386-draft-era.json")
-v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" "" go "quick checks" dco)
-[ "$v" = "$(printf 'go\tfailure\t42471681674\nquick checks\tsuccess\t42471681674\ndco\tsuccess\t42471681684')" ] || { echo "FAIL: recorded, verdict: $v" >&2; fail=1; }
+v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true "" go "quick checks" dco)
+[ "$v" = "$(printf 'go\tfailure\t42471681674\nquick checks\tsuccess\t42471681674\ndco\tsuccess\t42471681684')" ] || { echo "FAIL: recorded, draft read: $v" >&2; fail=1; }
 
 # #133: a dispatched e2e-kind run (81) failed, e2e-lab passed, and the PR run's (82) `e2e result` was re-run to green: the
 # re-run keeps its created_at, but GitHub's newest check run per name is green, and so is the verdict.
 e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}' "$1" "$2" "$2" "$3"; }
 e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
 e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
-v=$(prv_judge "$e2e_rows" "$e2e_runs" "quickstart" "e2e result")
+v=$(prv_judge "$e2e_rows" "$e2e_runs" false "quickstart" "e2e result")
 [ "$v" = "$(printf 'e2e result\tsuccess\t81')" ] || { echo "FAIL: e2e result re-run green after a red dispatched run: $v" >&2; fail=1; }
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
