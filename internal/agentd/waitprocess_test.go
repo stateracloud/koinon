@@ -37,6 +37,7 @@ func (p *stuckProcess) Close() error {
 	p.once.Do(func() { close(p.closed) })
 	return nil
 }
+
 func (p *stuckProcess) Wait() (int, error) {
 	if p.stubborn {
 		select {}
