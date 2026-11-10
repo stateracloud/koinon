@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // PrefixTakenAction is audited (actor system, in the agent's org) when koinon-agentd finds that a
@@ -42,7 +43,7 @@ const PrefixTakenAction = "home.repository_prefix_taken"
 func errPrefixTaken(agent pgtype.UUID, prefix string, free int32) error {
 	return fmt.Errorf("the repository prefix %s already holds a kopia repository this database has no password for "+
 		"(one started after the dump the database was restored from?): run `koinon-api keys new-repositories --agent %s`, "+
-		"which starts the agent's next repository at the free epoch %d (docs/ops/secret-keys.md)", prefix, agent, free)
+		"which starts the agent's next repository at the free epoch %d ("+project.SecretKeysDocURL+")", prefix, agent, free)
 }
 
 // unopenedError is a repository epoch whose prefix does not open with the epoch's password although
@@ -57,7 +58,7 @@ type unopenedError struct {
 func (e *unopenedError) Error() string {
 	return fmt.Sprintf("the repository at %s does not open with the password that wrote its %d complete checkpoint(s): "+
 		"koinon-agentd uses the wrong bucket, or the repository's kopia.repository is damaged; do not start a new repository "+
-		"for the agent, which would retire this one and its homes (docs/ops/secret-keys.md)", e.prefix, e.checkpoints)
+		"for the agent, which would retire this one and its homes ("+project.SecretKeysDocURL+")", e.prefix, e.checkpoints)
 }
 
 // freeEpochAfter returns the first epoch after epoch and after every epoch of held, the agent's

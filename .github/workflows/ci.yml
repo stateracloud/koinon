@@ -45,7 +45,7 @@ jobs:
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, docs, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (`go` and `web` then report success with
+  # chart, chartsmoke, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (`go` and `web` then report success with
   # "draft: not run"; marking it ready runs everything on the same head), and a push to main whose
   # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
   # `lint-shell` run except on that push to main (old issue 594). Read the script's header before changing this.
@@ -72,7 +72,6 @@ jobs:
       generate: ${{ steps.paths.outputs.generate }}
       chart: ${{ steps.paths.outputs.chart }}
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
-      docs: ${{ steps.paths.outputs.docs }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
     steps:
@@ -673,30 +672,6 @@ jobs:
           key: envtest-1.37.0
       - run: make test-chart-smoke
 
-  # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
-  # test/e2e, the chart and the web spec. This job does not deploy the site. Required: a
-  # run skipped because no docs file changed reports success.
-  docs:
-    needs: changes
-    if: needs.changes.outputs.docs == 'true'
-    name: docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-        with:
-          version: v4.3.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          package_json_file: docs/site/package.json
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: docs/site/pnpm-lock.yaml
-      - run: make docs-check
-      - run: make docs
-
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
   # envtest's API server. The OpenShell cases need a gateway and run on kind (make test-escape-kind, and in the kind e2e).
   escape-admission:
@@ -725,8 +700,8 @@ jobs:
           version: v4.3.1
       - run: make test-admission
 
-  # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses, minus the
-  # generated golden file) and actionlint over the workflows (actionlint also runs shellcheck on the
+  # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses)
+  # and actionlint over the workflows (actionlint also runs shellcheck on the
   # `run:` blocks). Its own job, not a step of `scripts`: it needs no Go toolchain and is cheap, and it
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
@@ -763,7 +738,7 @@ jobs:
           tar xzf "$RUNNER_TEMP/pinned/actionlint.tar.gz" -C "$bin" actionlint
           echo "$bin" >>"$GITHUB_PATH"
       - name: shellcheck
-        run: git ls-files -z '*.sh' ':!:*.golden.sh' | xargs -0 shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck
       - name: actionlint
         run: actionlint
 
@@ -792,6 +767,7 @@ jobs:
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - run: hack/needs-e2e-test.sh
+      - run: hack/e2e-commands-check.sh
       - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
         run: |
           sudo locale-gen en_US.UTF-8
@@ -953,24 +929,6 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-
-  warm-caches-docs:
-    name: warm-caches-docs
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          package_json_file: docs/site/package.json
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: docs/site/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-        working-directory: docs/site
 
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as

@@ -29,7 +29,6 @@ quick checks
 generated code
 chart
 chart smoke
-docs
 escape (admission)
 lint-shell
 scripts
@@ -46,7 +45,6 @@ advisory flavors
 advisory flavor-publish
 advisory warm-caches
 advisory warm-caches-web
-advisory warm-caches-docs
 
 # Advisory checks that other workflows produce (no `advisory` line: that form names ci.yml jobs). Each
 # listens to merge_group (checked like the required ones); it moves to `external` above when the

@@ -3,8 +3,8 @@
 #
 # Backup, restore and verify on the install that test/e2e/run.sh just exercised (ADR 0085 decision 18,
 # issue #90). It runs the blocks of test/e2e/commands/backup-restore.e1 (through hack/docs-e1.sh) as
-# written; the guide on the docs site shows the same commands (hack/docs-check.sh and the koinon-docs CI
-# compare them, ADR 0108), so the guide is the thing under test:
+# written; the guide on the docs site shows the same commands (the koinon-docs CI compares its page with
+# the file, ADR 0108; hack/e2e-commands-check.sh checks this script against the file):
 #
 #   1. note the install: the install ID, the number of tasks and runs, the keys and what they wrap;
 #   2. back up the keys and the database (the guide's backup blocks) and read the dump back;

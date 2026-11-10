@@ -18,6 +18,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // RequestedAction is the audit action of checkpoints resync, one event per agent, in the agent's
@@ -268,7 +269,7 @@ func (t *Tool) summary(got []outcome) error {
 		len(got)-failed-replaced, len(got), snapshots, added, missing, skipped)
 	if taken > 0 {
 		_, _ = fmt.Fprintf(t.Out, "%d repository prefix(es) hold a repository this database has no password for, started after the dump: "+
-			"the agents' next repositories start past them (audit home.repository_prefix_taken, docs/ops/secret-keys.md).\n", taken)
+			"the agents' next repositories start past them (audit home.repository_prefix_taken, "+project.SecretKeysDocURL+").\n", taken)
 	}
 	for _, o := range got {
 		who := fmt.Sprintf("agent %s (org %s)", o.agent.String(), o.org.String())

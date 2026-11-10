@@ -48,10 +48,10 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
 | Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
 | Node | 24 | web UI |
-| pnpm | `web/package.json` `packageManager` (12.18.0) | web UI, docs site |
+| pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |
 | buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
 | golangci-lint | v2.15.0 | `make lint-go` |
-| Helm | v4.3.1 | `make chart-check`, `make docs-check`, admission tests, Tilt |
+| Helm | v4.3.1 | `make chart-check`, admission tests, Tilt |
 | kind | v0.33.0 (Kubernetes 1.37.0) | `make dev-kind-up`, `make test-e2e-kind` |
 | kubectl | within one minor of 1.37 | kind loop, e2e |
 | ko | 0.19 or newer (CI: 0.19.1) | Koinon images for kind and Tilt |
@@ -130,7 +130,7 @@ modules, npm packages (including transitive ones), GitHub Actions, container ima
 binaries, Helm dependencies and the pinned OpenShell and Agent Sandbox versions, major versions
 included. [ADR 0079](docs/adr/0079-dependency-cooldown.md) has the reasoning and the exact rules.
 
-- Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml` and `docs/site/pnpm-workspace.yaml`, strict;
+- Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml`, strict;
   `bootConfig` extends it to the pnpm binary that `packageManager` selects) enforce it for the bot and for
   `pnpm add`. The dependency age steps of the `quick checks` CI job (`hack/dep-age-check.sh`) check the rest on every pull
   request. You can run it locally: `hack/dep-age-check.sh origin/main`. Publication dates are a guard

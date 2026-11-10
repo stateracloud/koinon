@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // BackendLocal is the [Local] adapter's backend name.
@@ -326,7 +328,7 @@ func (ws Wrappers) acceptUnbound(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %w: KEK %q is stored unbound (format 1, wrapped before old issue 615), and the bound-only marker of this install was %s. "+
 			"The KEK Secret is an old backup or belongs to another install: restore one taken after the KEKs were bound. "+
 			"If the database holds no encrypted values yet (a new install, where GitOps or a backup restore put an old Secret in place), "+
-			"delete the KEK Secret and rerun the key-admin Job instead: no values are lost (docs/ops/secret-keys.md)",
+			"delete the KEK Secret and rerun the key-admin Job instead: no values are lost ("+project.SecretKeysDocURL+")",
 			ErrBoundOnly, ErrOpen, id, b)
 	}
 	return nil

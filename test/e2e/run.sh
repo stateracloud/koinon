@@ -7,15 +7,15 @@
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
 #      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
 #   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
-#      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site shows the
-#      same commands and is checked against that file, so the docs cannot drift from this test. They create the namespace, copy the OpenShell client
+#      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site
+#      (stateracloud/koinon-docs) shows the same commands and its CI compares its page with that file. They create the namespace, copy the OpenShell client
 #      certificate, (SUITE=go) declare the model provider with a labelled Secret and `helm install`
 #      charts/koinon (runc, CNPG, the fakes as model and GitHub). SUITE=web adds the provider through
 #      the Providers page instead, as quickstart step 4 does. Only three things differ from a
 #      reader's run: values.yaml is test/e2e/kind/koinon-values.yaml, model-provider.yaml is
 #      test/e2e/kind/model-provider.yaml (the fake model), and kubectl/helm are wrappers that add
 #      the kind context;
-#      hack/docs-check.sh (make docs-check) fails when this script, the file and the docs page disagree;
+#      hack/e2e-commands-check.sh fails when this script and the file disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
 #      SUITE=web: Playwright (web/e2e-real, old issue 50) drives the same install through the

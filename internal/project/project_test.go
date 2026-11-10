@@ -28,3 +28,11 @@ func TestGroupsUnderDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestDocsURLs(t *testing.T) {
+	for _, u := range []string{project.SecretKeysDocURL, project.InstallAuditDocURL} {
+		if !strings.HasPrefix(u, project.DocsURL+"/docs/") {
+			t.Fatalf("%q is not a page of the docs site %q", u, project.DocsURL)
+		}
+	}
+}

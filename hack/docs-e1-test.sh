@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests hack/docs-e1.sh against throwaway command files and docs pages, and that the checked-in command
+# Tests hack/docs-e1.sh against throwaway command files, and that the checked-in command
 # files (test/e2e/commands/*.e1) parse and run through it (ADR 0108). Offline; no cluster.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -46,44 +46,37 @@ if E1_FILE=$work/cmds.e1 "$e1" show nope >/dev/null 2>&1; then bad "an unknown b
 printf '# e1=a\necho 1\n# e1=a\necho 2\n' >"$work/dup.e1"
 if E1_FILE=$work/dup.e1 "$e1" names >/dev/null 2>&1; then bad "a duplicate block name is an error"; else ok "a duplicate block name is an error"; fi
 
-# A command line that starts with a tab (a <<-EOF body) is kept byte for byte, in a file and in a page.
+# A command line that starts with a tab (a <<-EOF body) is kept byte for byte, in a file.
 printf '# e1=tabs\ncat <<-EOF\n\tindented\n\t\ttwice\nEOF\n' >"$work/tabs.e1"
 want=$'cat <<-EOF\n\tindented\n\t\ttwice\nEOF'
 is "a tab-leading line survives show" "$want" "$(E1_FILE=$work/tabs.e1 "$e1" show tabs)"
 is "a tab-leading line survives script" $'# e1=tabs\n'"$want" "$(E1_FILE=$work/tabs.e1 "$e1" script)"
-printf '%s\n' '```sh e1=tabs' 'cat <<-EOF' $'\tindented' $'\t\ttwice' EOF '```' >"$work/tabs.md"
-is "a tab-leading line survives show in a page" "$want" "$(E1_DOC=$work/tabs.md "$e1" show tabs)"
 # Command content above the first marker is an error that names the file and the line.
 printf '# header\n\necho stray\n# e1=a\necho 1\n' >"$work/stray.e1"
 if E1_FILE=$work/stray.e1 "$e1" names >/dev/null 2>"$work/stray.err"; then bad "a command before the first marker is an error"; elif grep -q 'stray.e1:3:' "$work/stray.err"; then ok "a command before the first marker is an error"; else bad "the error names the file and line"; fi
 
-# The same blocks in a docs page give the same script as the command file.
-cat >"$work/page.md" <<'X'
-Some text.
-
-```sh e1=first
-echo one
-
-echo two
-```
-
-```sh
-echo not-a-block
-```
-
-```bash e1=second
-# a comment that belongs to the block
-echo three
-```
-X
-E1_FILE=$work/cmds.e1 "$e1" script >"$work/file.script"
-E1_DOC=$work/page.md "$e1" script >"$work/page.script"
-if diff -u "$work/file.script" "$work/page.script" >/dev/null; then ok "a page and a command file with the same blocks give the same script"; else bad "page and file scripts differ"; fi
-sed -i.bak 's/echo three/echo THREE/' "$work/page.md"
-E1_DOC=$work/page.md "$e1" script >"$work/page.script"
-if (cd "$(dirname "$e1")/.." && bash hack/docs-check.sh --update >"$work/upd.out" 2>&1); then bad "docs-check --update is an error"; elif grep -q 'there is nothing to generate' "$work/upd.out"; then ok "docs-check --update is an error"; else bad "docs-check --update says why"; fi
-if diff -u "$work/file.script" "$work/page.script" >/dev/null; then bad "a changed command in the page is seen"; else ok "a changed command in the page is seen"; fi
-if E1_DOC=$work/page.md E1_FILE=$work/cmds.e1 E1_WORKDIR=$work "$e1" run second >"$work/run.out" 2>&1 && grep -q '^three$' "$work/run.out"; then ok "run reads the command file even when E1_DOC is set"; else bad "run reads the command file even when E1_DOC is set"; fi
+# script exits non-zero when reading the names fails (a duplicate marker, a command before the first one),
+# and prints nothing on stdout then.
+if E1_FILE=$work/dup.e1 "$e1" script >"$work/dup.out" 2>/dev/null; then bad "script fails on a duplicate block name"; elif [[ ! -s $work/dup.out ]]; then ok "script fails on a duplicate block name"; else bad "script prints nothing when names fails"; fi
+if E1_FILE=$work/stray.e1 "$e1" script >/dev/null 2>&1; then bad "script fails on a command before the first marker"; else ok "script fails on a command before the first marker"; fi
+is "script prints every block under its marker" $'# e1=first\necho one\necho two\n# e1=second\n# a comment that belongs to the block\necho three' "$(E1_FILE=$work/cmds.e1 "$e1" script)"
+# Empty lines are dropped; a line that holds only a tab or only spaces is kept.
+printf '# e1=ws\necho a\n\n\t\n  \necho b\n' >"$work/ws.e1"
+is "an empty line is dropped, a tab-only and a space-only line are kept" $'echo a\n\t\n  \necho b' "$(E1_FILE=$work/ws.e1 "$e1" show ws)"
+# A marker-shaped line inside a heredoc body starts a block (a documented limit of the format).
+printf '# e1=h\ncat <<EOF\n# e1=inner\nEOF\n' >"$work/heredoc.e1"
+is "a marker line inside a heredoc starts a block (documented limit)" "h inner" "$(E1_FILE=$work/heredoc.e1 "$e1" names | tr '\n' ' ' | sed 's/ $//')"
+if grep -q 'also inside a heredoc body' "$e1"; then ok "the limit is written in the script header"; else bad "the limit is not written in the script header"; fi
+# A line that starts with '# e1=' but is not a valid marker is an error.
+for bad_marker in '# e1=Bad' '# e1=' '# e1=a b' '#e1=nospace'; do
+  printf '# e1=a\necho 1\n%s\necho 2\n' "$bad_marker" >"$work/badmark.e1"
+  rc=0; err=$(E1_FILE=$work/badmark.e1 "$e1" names 2>&1 >/dev/null) || rc=$?
+  if [ "$rc" = 2 ] && [[ $err == *"badmark.e1:3: invalid e1 marker"* ]]; then ok "invalid marker '$bad_marker' exits 2 with file:line"; else bad "invalid marker '$bad_marker': rc=$rc err=$err"; fi
+done
+# The page mode is gone: E1_DOC changes nothing.
+# shellcheck disable=SC2016 # the backticks are literal Markdown
+printf '```sh e1=page\necho page\n```\n' >"$work/page.md"
+is "E1_DOC is ignored" "first second" "$(E1_DOC=$work/page.md E1_FILE=$work/cmds.e1 "$e1" names | tr '\n' ' ' | sed 's/ $//')"
 
 # The checked-in command files: names, and every block is valid shell.
 for f in "$here"/../test/e2e/commands/*.e1; do

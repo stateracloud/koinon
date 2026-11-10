@@ -65,7 +65,7 @@ api:
   # the mounted Secret; they re-read every few seconds). agentgateway watches the token file and
   # reloads it, so the gateway's next export carries the new token without a restart (kubernetes
   # mode: the controller reads the Secret and pushes the value to the proxy). When every sender sends
-  # the new token, delete "previous". See docs/ops/secret-keys.md.
+  # the new token, delete "previous". See https://koinon.stateracloud.com/docs/operate/secret-keys/.
   # With a Secret you manage (existingSecret), rotate the same way.
   otlpToken:
     existingSecret: ""
@@ -333,7 +333,7 @@ gateway:
     port: 4000
 
 # Model providers and models are not chart values: orgs add them in the UI or the admin API, or
-# declare them with labelled Secrets (ADR 0056, docs/site guides/models). Their keys are encrypted
+# declare them with labelled Secrets (ADR 0056, https://koinon.stateracloud.com/docs/operate/models/). Their keys are encrypted
 # in Postgres with the key-encryption keys below.
 # Providers and remote MCP servers may not name loopback, link-local or metadata addresses, names
 # without a dot, or hosts in Koinon's own namespace (they would make the gateway a request-forgery
@@ -358,7 +358,7 @@ secrets:
     existingSecret: ""
     # "koinon-api keys status" warns when the active key is older than this.
     activePeriod: 8760h
-    # Wrapping the KEKs with a KMS (optional; ADR 0085 decision 12, docs/ops/secret-keys.md). The
+    # Wrapping the KEKs with a KMS (optional; ADR 0085 decision 12, https://koinon.stateracloud.com/docs/operate/secret-keys/). The
     # default, local, keeps the KEKs in the Secret as they are; it is fully supported. With a KMS the
     # Secret holds only KEKs encrypted by the KMS key, which never leaves the KMS. Every pod signs in
     # with its own service account; no KMS credential is in these values. koinon-api and the
@@ -385,7 +385,7 @@ secrets:
         # <fullname>-reconciler, <fullname>-key-admin) as eks.amazonaws.com/role-arn. With EKS Pod
         # Identity leave them empty and associate each role with its ServiceAccount in EKS.
         # Policies: koinon-api and the reconciler kms:Decrypt on the key; the key-admin Job
-        # kms:Encrypt and kms:Decrypt. docs/ops/secret-keys.md has the policies.
+        # kms:Encrypt and kms:Decrypt. https://koinon.stateracloud.com/docs/operate/secret-keys/ has the policies.
         roleArns:
           api: ""
           reconciler: ""
@@ -423,7 +423,7 @@ secrets:
         # rewrap, keys retire the old ones. The Job runs again whenever this or the KMS settings
         # change; with nothing to do it changes nothing.
         addKey: ""
-        # Recovery from a lost KMS key that wrapped the active KEK (docs/ops/secret-keys.md, issue
+        # Recovery from a lost KMS key that wrapped the active KEK (https://koinon.stateracloud.com/docs/operate/secret-keys/, issue
         # #255): with addKey set to a new ID, when the KEK Secret has no usable active KEK (you removed
         # the entries of the lost KEKs and `active` names one of them), the Job makes the added KEK
         # active in the same write. With a working active KEK it changes nothing about activation.
@@ -433,7 +433,7 @@ secrets:
         # copied to another install, or a database restored into the wrong one, does not open. true
         # also binds the KEKs of the primary wrapping key wrapped before that (the KEKs themselves
         # are unchanged). A binary older than old issue 615 cannot read a bound KEK, so leave it false until
-        # you will not roll back below it (docs/ops/secret-keys.md).
+        # you will not roll back below it (https://koinon.stateracloud.com/docs/operate/secret-keys/).
         rewrapUnbound: false
         resources:
           requests:
@@ -808,7 +808,7 @@ sandboxPolicy:
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
   # sandbox namespaces. Everyone else is denied, cluster admins included. CONNECT (pods/exec, attach,
   # portforward, proxy; services/proxy) is denied to everyone with no exemption; the break-glass
-  # is the runbook docs/ops/sandbox-break-glass.md, not an identity list.
+  # is the runbook https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/, not an identity list.
   identities:
     # Pods: the Agent Sandbox controller.
     pods:

@@ -2,6 +2,8 @@
 #
 # The commands of the quickstart page (docs site, stateracloud/koinon-docs). test/e2e/run.sh runs them by name through hack/docs-e1.sh.
 # One block per '# e1=<name>' line; the lines up to the next marker are the block's commands.
+# Limits (hack/docs-e1.sh header): empty lines are dropped, so keep heredoc bodies free of them; a line that
+# is exactly a marker starts a block also inside a heredoc body, so never write one there.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/quickstart.e1
 # e1=namespace
 kubectl create namespace koinon --dry-run=client -o yaml | kubectl apply -f -

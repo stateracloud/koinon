@@ -4,7 +4,7 @@
 # OpenRouter routes, OpenRouter's models API, which is its price list). Each entry cites the page
 # and the date it was read. A model whose price could not be verified from a primary source is
 # left out: add it to the list in a pull request that cites the page. Org admins override any
-# entry; they never edit this file. See docs/ops/prices.md for the update process.
+# entry; they never edit this file. See docs/dev/prices.md for the update process.
 #
 # valid_from is the earliest date Koinon applies the entry (the day the price was verified).
 # Change a price by adding an entry with the same id, the new price and a later valid_from, so

@@ -16,7 +16,8 @@
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
-#     install (test/e2e/backup-restore.sh, the guide's own commands) and checks it came back. A red run after a green one opens
+#     install (test/e2e/backup-restore.sh, which runs
+#     test/e2e/commands/backup-restore.e1) and checks it came back. A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 # The `e2e result` job is the one to require: on a queue build, a push, the nightly or a dispatch it passes when

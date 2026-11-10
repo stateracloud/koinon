@@ -12,11 +12,6 @@ web/dist/
 tilt_modules/
 .tilt-ko-*
 
-# Docs site
-docs/site/node_modules/
-docs/site/dist/
-docs/site/.astro/
-
 # Binaries built into the repo root with go build ./cmd/<name>
 /koinon-api
 /koinon-agentd

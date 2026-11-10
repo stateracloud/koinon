@@ -54,7 +54,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -137,7 +137,7 @@ echo "syntax = 'proto3';" >api.proto
 printf '#!/bin/sh\n' >hack/new.sh
 commit_all
 pf "$tmp/l2" --list >/dev/null
-for g in chart web generate migrate adr docs shell mktemp pinned bash5; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
+for g in chart web generate migrate adr shell mktemp pinned bash5; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
 check "no Go files: go not selected" hasnt '^go:' "$tmp/l2"
 check "no Go files: tidy not selected" hasnt '^tidy:' "$tmp/l2"
 
@@ -316,7 +316,6 @@ check "multi-area change passes: exit 0" eq "$rc" 0
 check "migrate-lint gets the base" has '^migrate-lint.sh origin/main' "$FAKE_LOG"
 check "adr-lint ran" has '^adr-lint.sh' "$FAKE_LOG"
 check "adr-lint-test ran" has '^adr-lint-test.sh' "$FAKE_LOG"
-check "docs-check ran" has '^docs-check.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"

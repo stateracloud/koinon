@@ -11,8 +11,10 @@ Instructions for coding agents working on Koinon.
   no database, fixed port or fixed path between processes. `test/flavors`: `make test-flavors`.
   Details: `docs/dev/ci.md#go-test-suites`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
-- Docs site: `make docs` · `make docs-check`. The commands live in `test/e2e/commands/*.e1`
-  (ADR 0108); `test/e2e` runs them. Edit the file, then make the page's `sh e1=<name>` blocks match.
+- Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at
+  <https://koinon.stateracloud.com>. The quickstart and backup commands live in `test/e2e/commands/*.e1`;
+  `test/e2e` runs them and `make e2e-commands-check` checks them. Edit the file; the docs repository's CI
+  compares its pages with it at the release it names.
 - After changing `.proto` files or `internal/db/queries/*.sql`, run `make generate` and commit the
   output. CI fails if generated code is stale.
 - Chart: `hack/chart-check.sh`. Add an assertion for every chart behaviour you change, in the matching

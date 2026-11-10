@@ -491,7 +491,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 				err := connect(ctx, user, ns, c.resource, name, c.sub)
 				denied(err, c.resource+"/"+c.sub+" is not allowed in sandbox namespaces")
 				Expect(err.Error()).To(ContainSubstring(user))
-				Expect(err.Error()).To(ContainSubstring("docs/ops/sandbox-break-glass.md"))
+				Expect(err.Error()).To(ContainSubstring("https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/"))
 			}
 		}
 	})

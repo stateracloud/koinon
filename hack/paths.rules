@@ -89,12 +89,6 @@ except chartsmoke ^api/proto/.*\.proto$
 # suite's own _test.go files are under test/chartsmoke/ and stay.
 except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 
-# --- docs: hack/docs-check.sh -----------------------------------------------------------------------
-# It also reads internal/preflight/preflight.go and hack/versions.env and runs the tests of
-# internal/declarative. Its repository-link check reads any file of the repo, so the inputs cannot
-# all be listed: this is partial, and a push to main runs docs anyway.
-job docs ^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)
-
 # --- escape: the admission specs (the only ones CI runs) read the chart and the testenv helper -----
 # The reconciler-side cases need kind or the lab (#66), so their packages are not triggers.
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
@@ -108,13 +102,12 @@ lane go - preflight
 lane web - preflight
 lane generate - preflight
 lane chart - preflight
-lane docs - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
 lane flavors docker,go test-flavors
 lane escape helm,go test-admission
 
 # --- preflight gates that have no CI job of their own ------------------------------------------------
-# (go, generate, chart, web and docs use the `job` rules above, so preflight and CI agree.)
+# (go, generate, chart and web use the `job` rules above, so preflight and CI agree.)
 gate go \.go$
 gate tidy \.go$
 gate tidy ^go\.(mod|sum)$
@@ -179,6 +172,7 @@ script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
 script-check - hack/route-guard-test.sh
 script-check - hack/ci-cache-test.sh
+script-check - hack/e2e-commands-check.sh
 script-check - hack/chart-check-test.sh
 script-check - hack/paths-test.sh
 script-check - hack/runner-lint-test.sh
@@ -260,7 +254,7 @@ e2e-forced - ^hack/(spike/probe/|probe-tag\.sh$)
 e2e-forced - ^\.github/workflows/e2e-kind\.yml$
 # Agent prompts and instructions may be Markdown.
 e2e-forced - ^flavors/.*\.md$
-# run.sh runs the quickstart blocks through docs-e1.sh, names the flavor image with flavor-tag.sh
+# run.sh runs the quickstart blocks (test/e2e/commands/*.e1) through docs-e1.sh, names the flavor image with flavor-tag.sh
 # and sets its base image with flavor-base.sh (FLAVOR_BASE, #200).
 e2e-forced - ^hack/docs-e1\.sh$
 e2e-forced - ^hack/flavor-tag\.sh$
@@ -272,9 +266,6 @@ e2e-forced - ^hack/versions-env\.sh$
 e2e-forced - ^hack/fetch-pinned\.sh$
 # The web toolchain image run.sh uses (Chromium for the browser suite).
 e2e-forced - ^hack/e2e-toolchain/
-e2e-forced - ^docs/site/src/content/docs/quickstart\.md$
-# test/e2e/backup-restore.sh runs its blocks (#90).
-e2e-forced - ^docs/site/src/content/docs/guides/backup-restore\.md$
 # Not needed (unless forced). Playwright covers the web app; hack/ holds scripts the e2e does not
 # call (see forced); Go tests outside test/e2e are not the e2e.
 e2e-ignored - \.md$

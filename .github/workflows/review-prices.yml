@@ -2,7 +2,7 @@
 #
 # Once a month, opens a "Review default prices" issue that lists every entry of
 # pricing/default.yaml with its source URL and last-checked date, so someone compares the
-# provider pricing pages with the list (docs/ops/prices.md). It does nothing when such an issue is
+# provider pricing pages with the list (docs/dev/prices.md). It does nothing when such an issue is
 # already open. It only reads the one file; no build tooling and no tests run.
 name: review-prices
 
@@ -38,7 +38,7 @@ jobs:
             exit 0
           fi
           {
-            echo "Compare each entry of \`pricing/default.yaml\` with its provider pricing page, then update the list as described in docs/ops/prices.md (a changed price is a new entry with a later \`valid_from\`, and \`version\` is bumped). Close this issue when done."
+            echo "Compare each entry of \`pricing/default.yaml\` with its provider pricing page, then update the list as described in docs/dev/prices.md (a changed price is a new entry with a later \`valid_from\`, and \`version\` is bumped). Close this issue when done."
             echo
             echo "List version: $(yq '.version' pricing/default.yaml)"
             echo

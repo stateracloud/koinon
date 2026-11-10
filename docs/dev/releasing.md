@@ -120,7 +120,7 @@ not record a release candidate. Refreshing and what to do when a folder stops lo
 
 The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from
 vX.Y" section by hand, where X.Y is the previous minor line (for `v0.2.0`, "Upgrading from v0.1").
-Operators follow [Upgrading Koinon](../site/src/content/docs/guides/upgrading.md) (ADR 0085); the notes
+Operators follow [Upgrading Koinon](https://koinon.stateracloud.com/docs/operate/upgrading/) (ADR 0085); the notes
 say what is specific to this release. Template:
 
 ```markdown
@@ -147,7 +147,7 @@ keys, and restoring from them, are supported: take both before you upgrade.
 For `v0.1.0` and `v0.2.0` use the notice above. v0.1.0 is a first release, so its "Upgrading from"
 section says there is nothing to upgrade from and keeps the notice. Name the restore runbook only if
 it exists on `main` when you publish the notes; otherwise link
-[Upgrading Koinon](../site/src/content/docs/guides/upgrading.md#roll-back). For `v0.3.0`, write that
+[Upgrading Koinon](https://koinon.stateracloud.com/docs/operate/upgrading/#roll-back). For `v0.3.0`, write that
 it is the compatibility baseline, and how an earlier install reaches it (stop, migrate, start, or a
 reinstall) and that it cannot roll back to an earlier release.
 

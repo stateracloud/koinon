@@ -1,7 +1,7 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
 Alerting rules (metrics.prometheusRule.enabled), for prometheus-operator. Off by default; it needs
-the monitoring.coreos.com/v1 PrometheusRule CRD. The rules are the ones docs/site/.../guides/metrics.md
+the monitoring.coreos.com/v1 PrometheusRule CRD. The rules are the ones https://koinon.stateracloud.com/docs/operate/metrics/
 documents, for installs that do not write their own.
 
 Restore hold (ADR 0107, issue #462): koinon_restore_hold is 1 on a component that runs in restore-hold

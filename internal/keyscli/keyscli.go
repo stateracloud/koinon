@@ -2,7 +2,7 @@
 
 // Package keyscli implements "koinon-api keys": managing the key-encryption keys (KEKs) that
 // wrap the data keys of Koinon's stored secrets (ADR 0056, plan item PV1; the design and its
-// sources are in docs/research/kek-rotation.md, the procedures in docs/ops/secret-keys.md).
+// sources are in docs/research/kek-rotation.md, the procedures in the secret keys page of the docs site, project.SecretKeysDocURL).
 //
 //	status      list the KEKs, which one is active and how many values each wraps
 //	add         generate a new KEK (not active yet)
@@ -631,7 +631,7 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 			return fmt.Errorf("KEK %s is not in the key set", id)
 		}
 		// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
-		// set the configured primary to local first (docs/ops/secret-keys.md), then activate.
+		// set the configured primary to local first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
 		if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
 			return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
 		}
@@ -902,7 +902,7 @@ func (t *Tool) each(ctx context.Context, verb, command, action string, fn rowFn)
 		if err != nil {
 			// The rows of a column could not be listed: the database is most likely gone for the rest of the
 			// run too. It counts as one database failure, whatever the number of rows, and the remaining
-			// columns are not tried (docs/ops/secret-keys.md): run the command again.
+			// columns are not tried (the secret keys page of the docs site, project.SecretKeysDocURL): run the command again.
 			errs, failed = append(errs, err), failed+1
 			failures["database"]++
 			break

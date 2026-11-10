@@ -31,13 +31,29 @@ without making this repository wait for it.
    longer read a docs page. A file can be fetched at a release tag with one raw-file request.
 6. **The docs repository checks its pages against the files.** Its CI fetches the two files at the release
    named in its `koinon.ref` and fails when a page's `sh e1=<name>` blocks differ. This repository never waits
-   for the docs repository. Until step 7, `hack/docs-check.sh` runs the same comparison here, in the other
-   direction: the page must equal the file.
-7. **Removal.** A follow-up pull request removes `docs/site/`, `make docs`, the `docs` CI job and its path
-   filters, and updates links; the checks that need this source tree (chart values, Secret manifests, UI
-   labels, prerequisite pins) get a new home in that pull request.
-8. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
-   later work, tracked on #491.
+   for the docs repository. Between the move (part 1) and the removal (step 7), `hack/docs-check.sh` ran the
+   same comparison here, in the other direction; it is gone with the pages.
+7. **Removal (part 2 of #491, done).** One pull request removed `docs/site/`, `docs/ops/`, `make docs`,
+   `hack/docs-check.sh`, and the `docs` and `warm-caches-docs` CI jobs and their path filters. The `main`
+   ruleset still lists the `docs` job as a required status check; a pull request cannot change a ruleset, so the
+   maintainer removes that required context before the merge. Links now point to the pages on the site. What stays
+   here is `hack/e2e-commands-check.sh` (`make e2e-commands-check`, run by the `scripts` job): the command
+   files parse and the e2e scripts run exactly their blocks. The page-side checks left with the pages and
+   are ported to `koinon-docs`: `helm lint` of the `chart-values` blocks, the Go parse of the
+   `model-provider` and `mcp-server` Secret blocks, the UI labels against the Playwright spec, and the
+   prerequisite versions against the pins. The manifests of the e2e test and the dev profiles are still
+   parsed here (`internal/declarative`). The developer part of the prices document moved to
+   `docs/dev/prices.md`; the install writer's log hint and the other messages name the page address
+   (`internal/project`).
+8. **What this repository provides to `koinon-docs`.** Two things, both at a release tag: the command files
+   `test/e2e/commands/quickstart.e1` and `test/e2e/commands/backup-restore.e1`, and the page-manifest tests
+   `TestDocumentedSecretsParse` and `TestDocumentedMCPServerSecretsParse` in `internal/declarative/pages_test.go`.
+   The tests read the pages in the directory named by `KOINON_PAGES_DIR`, skip when it is not set, and
+   fail when the directory is missing, when it holds fewer than two `model-provider` blocks or no `mcp-server`
+   block, or when a block does not parse. Names and variable are a contract: change them only with a change in
+   `koinon-docs`.
+9. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
+   later work, tracked on #505.
 
 ## Alternatives considered
 
@@ -48,9 +64,9 @@ without making this repository wait for it.
   can still carry prose around a command. Revisit if drift shows up in practice.
 - **One command file for both pages:** simpler to fetch, but the backup guide and the quickstart change for
   different reasons and are compared with different pages. One file per page keeps each comparison local.
-- **Name the files `*.sh`:** shellcheck and the bash 5 guard would then treat them as scripts, and the
-  generated-file exclusion lives in `.github/`. The `.e1` name says what they are and needs no exclusion;
-  `hack/docs-check.sh` still runs `bash -n` on every block.
+- **Name the files `*.sh`:** shellcheck and the bash 5 guard would then treat them as scripts, and a block
+  is not a whole script. The `.e1` name says what they are and needs no exclusion;
+  `hack/e2e-commands-check.sh` still runs `bash -n` on every block.
 
 ## Consequences
 
@@ -59,6 +75,11 @@ without making this repository wait for it.
 - Negative: two places show a command (the file and the page); the check in `koinon-docs` is the only guard
   once `docs/site/` is gone, and it compares with the newest release, so a command changed on `main` reaches
   the pages with the next release.
-- Follow-ups: part 2 of #491 (removal and links); the install writer's log hint
-  (`docs/ops/secret-keys.md`) must name the page address; the developer part of the prices document moves to
-  `docs/dev/`.
+- Follow-ups: none for this repository. The page-side checks and the reference pages are tracked on #505
+  for `koinon-docs`. Older ADRs still name `docs/ops/` and `docs/site/` paths; those files moved to
+  `koinon-docs` (decision 1) and the ADR text is left as written.
+- The `docs/site` Dependabot follow-up of ADR 0079 is void. Links in older ADRs (0056, 0085, 0098) to
+  `docs/ops/` pages now point at pages on the docs site: `docs/ops/sandbox-break-glass.md` is
+  `https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/`, `docs/ops/secret-keys.md` is
+  `https://koinon.stateracloud.com/docs/operate/secret-keys/` and the prices page is
+  `https://koinon.stateracloud.com/docs/operate/default-prices/`.

@@ -34,7 +34,7 @@ var sandboxStates = []store.SandboxState{
 	store.SandboxStateRetained,
 }
 
-// Metrics are the reconciler's Prometheus metrics (docs/site guide "Metrics").
+// Metrics are the reconciler's Prometheus metrics (docs site, https://koinon.stateracloud.com/docs/operate/metrics/).
 type Metrics struct {
 	PassDuration prometheus.Histogram
 	Passes       *prometheus.CounterVec

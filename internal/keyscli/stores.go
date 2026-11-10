@@ -192,7 +192,7 @@ func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func
 			return false, fmt.Errorf("check for stored secrets before creating the KEK Secret: %w", err)
 		}
 		if used {
-			return false, fmt.Errorf("%w: the KEK Secret %s/%s is missing but the database holds encrypted values that only its keys can open; restore the Secret from your backup (docs/ops/secret-keys.md). Nothing was created", ErrKEKMissing, namespace, name)
+			return false, fmt.Errorf("%w: the KEK Secret %s/%s is missing but the database holds encrypted values that only its keys can open; restore the Secret from your backup ("+project.SecretKeysDocURL+"). Nothing was created", ErrKEKMissing, namespace, name)
 		}
 	}
 	if beforeCreate != nil {

@@ -149,16 +149,11 @@ flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/flavors/...
 
-# Docs site (plan item DOC1): Starlight in docs/site (moves to stateracloud/koinon-docs, ADR 0108). The
-# command files test/e2e/commands/*.e1 are what test/e2e runs; docs-check keeps the pages, the e2e
-# scripts and the code in step.
-.PHONY: docs
-docs: ## Build the docs site into docs/site/dist
-	cd docs/site && $(PNPM) install --frozen-lockfile && ASTRO_TELEMETRY_DISABLED=1 $(PNPM) build
-
-.PHONY: docs-check
-docs-check: ## Check the docs against test/e2e, the chart and the web spec (needs helm)
-	hack/docs-check.sh
+# The commands of the quickstart and of the backup guide are plain files that test/e2e runs (ADR 0108).
+# The docs site is in stateracloud/koinon-docs.
+.PHONY: e2e-commands-check
+e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the scripts that run them
+	hack/e2e-commands-check.sh
 
 .PHONY: test-e2e-kind
 test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)

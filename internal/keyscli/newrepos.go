@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -47,7 +48,7 @@ type homeTarget struct{ org, agent pgtype.UUID }
 //
 // Each agent changes in one transaction with its audit event ([NewRepositoriesAction], actor cli).
 // The command does not wait for the seeds (koinon_agentd_home_repository_seeds). It does not rotate
-// the bucket's S3 credentials: the operator does that at the S3 provider (docs/ops/secret-keys.md).
+// the bucket's S3 credentials: the operator does that at the S3 provider (the secret keys page of the docs site, project.SecretKeysDocURL).
 // Like keys forget, it asks on a terminal and needs --yes without one. Agents without a home
 // repository are skipped: their first one is made under the active KEK.
 func (t *Tool) NewRepositories(ctx context.Context, all bool, agents []string) error {
@@ -152,7 +153,7 @@ func (t *Tool) confirmNewRepositories(ctx context.Context, n int) error {
 	}
 	got, err := t.Prompt.Input(ctx,
 		fmt.Sprintf("Replace the home repositories of %d agent(s)? Type %q to continue", n, newRepositoriesWord),
-		"Each agent keeps only its newest checkpoint, copied into a new repository; the older checkpoints are deleted. Rotate the checkpoint bucket's S3 key as well (docs/ops/secret-keys.md).",
+		"Each agent keeps only its newest checkpoint, copied into a new repository; the older checkpoints are deleted. Rotate the checkpoint bucket's S3 key as well ("+project.SecretKeysDocURL+").",
 		func(s string) error {
 			if strings.TrimSpace(s) != newRepositoriesWord {
 				return fmt.Errorf("type %s to continue", newRepositoriesWord)
@@ -217,5 +218,5 @@ func (t *Tool) reportNewRepositories(res NewRepositoriesResult) {
 	}
 	_, _ = fmt.Fprintln(t.Out, "koinon-agentd copies each agent's newest checkpoint into its new repository, then deletes the old one;")
 	_, _ = fmt.Fprintln(t.Out, "koinon_agentd_home_repository_seeds{state=\"pending\"} falls to 0 when it is done, and {state=\"failed\"} counts the seeds it gave up on.")
-	_, _ = fmt.Fprintln(t.Out, "Rotate the checkpoint bucket's S3 key at your S3 provider and restart koinon-agentd, if you have not yet (docs/ops/secret-keys.md).")
+	_, _ = fmt.Fprintln(t.Out, "Rotate the checkpoint bucket's S3 key at your S3 provider and restart koinon-agentd, if you have not yet ("+project.SecretKeysDocURL+").")
 }

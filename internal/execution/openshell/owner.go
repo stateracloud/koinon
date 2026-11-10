@@ -28,7 +28,7 @@ import (
 // hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
 // and homes and are not recreated, so an old workspace stays unmarked; a new one is stamped and checked. Until the
 // live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind and koinon_openshell_unmarked_objects_stale is 0), a second
-// install on the gateway can still touch its unlabeled objects; docs/site guides/upgrading.md says so. An empty id turns
+// install on the gateway can still touch its unlabeled objects; the upgrading page of the docs site, https://koinon.stateracloud.com/docs/operate/upgrading/, says so. An empty id turns
 // the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
 // set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
 // "ready" rows. It returns b.

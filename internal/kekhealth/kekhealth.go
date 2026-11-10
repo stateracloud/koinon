@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -218,7 +219,7 @@ func (m *Monitor) observeUnbound(l secretstore.Loaded, log *slog.Logger) {
 		// Rewrapping cannot help: the install accepts bound KEKs only, so the unbound ones are from a
 		// Secret restored from before the binding.
 		log.Warn("key-encryption keys stored unbound were refused by the bound-only policy of this install (old issue 615): "+
-			"restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete it and rerun the key-admin Job (docs/ops/secret-keys.md)",
+			"restore a KEK Secret taken after the KEKs were bound, or, while the database holds no encrypted values, delete it and rerun the key-admin Job ("+project.SecretKeysDocURL+")",
 			"unbound", n, "err", l.Err)
 		return
 	}

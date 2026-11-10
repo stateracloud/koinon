@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -448,7 +449,7 @@ func describeMode(name, valuesFile string) {
 			Expect(mc.Args).To(ContainElement("--require-install-writer"))
 			w := rn.start(ctx, migrate.Name, migrate.Spec.Template.Spec, mc, jobDeadline)
 			Expect(w.ExitCode(ctx)).NotTo(BeZero(), "logs:\n%s", w.Logs(ctx))
-			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring("docs/ops/secret-keys.md"),
+			Expect(w.Logs(ctx)).To(And(ContainSubstring("the role koinon_install_audit_writer does not exist"), ContainSubstring(project.SecretKeysDocURL),
 				ContainSubstring("no migration was applied")))
 			Expect(migrations()).To(Equal(before))
 
