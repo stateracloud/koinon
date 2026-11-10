@@ -1079,6 +1079,20 @@ jobs:
           rm -rf "$RUNNER_TEMP/flavor-cache"
           mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
           echo "cache_written=true" >>"$GITHUB_OUTPUT"
+      # The escape suite's probe image (#482), pushed under its content tag (hack/probe-tag.sh) so the
+      # kind e2e pulls it and runs no apt step. Its base is the OpenCode flavor's pinned BASE.
+      - name: Push ghcr.io/<repo>/spike-probe:<content tag>
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          tag=$(hack/probe-tag.sh)
+          image="ghcr.io/$REPO/spike-probe:$tag"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+            exit 0
+          fi
+          base=$(sed -n 's/^ARG BASE=//p' flavors/opencode/Dockerfile | head -n 1)
+          docker buildx build --push --build-arg "BASE=$base" --tag "$image" hack/spike/probe
       # Main saves what its builds wrote: this job builds on every main push that changes the
       # flavors, also the ones where the flavors job was skipped (#595).
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

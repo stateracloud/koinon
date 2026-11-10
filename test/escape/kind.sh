@@ -5,7 +5,9 @@
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
-# nvcr.io or apt at run time, old issue 357) and loaded into the node; the gateway is reached through a
+# nvcr.io or apt at run time, old issue 357) and loaded into the node. PROBE_PULL_REPO=<repo> pulls
+# <repo>:<hack/probe-tag.sh tag> (the image ci.yml's flavor-publish pushes on main) when
+# KOINON_OPENSHELL_IMAGE is unset, so the e2e needs no apt mirror (#482); a miss falls back to the build; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
 # The gateway-route case needs a stand-in for agentgateway on port 4000 (ADR 0080, old issue 270): unless
@@ -113,6 +115,14 @@ diagnostics() {
 }
 trap 'diagnostics; [[ -z $pf ]] || { kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null; } || true; rm -rf "$tmp"' EXIT
 
+if [[ -z ${KOINON_OPENSHELL_IMAGE:-} && -n ${PROBE_PULL_REPO:-} ]]; then
+  if probe_tag=$("$root/hack/probe-tag.sh"); then
+    KOINON_OPENSHELL_IMAGE="$PROBE_PULL_REPO:$probe_tag"
+    IMAGE=$KOINON_OPENSHELL_IMAGE
+  else
+    echo "probe tag computation failed; building the probe image instead" >&2
+  fi
+fi
 if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]] && docker pull -q "$IMAGE" >"$tmp/pull.log" 2>&1; then
   # kind loads by name: a digest-only reference gets a local tag the sandboxes then use.
   if [[ $IMAGE == *@* ]]; then

@@ -152,9 +152,13 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   the Agent Sandbox controller create for every sandbox of the run, and the live case, which fails here
   instead of skipping (`KOINON_ESCAPE_POLICY_REQUIRED=1`), dry-runs refused pods as the controller and as
   the gateway (Kata annotations, no runtime class, a wrong runtime class; for the supervisor: an API-audience, a
-  missing-audience or a long-lived token, a token mounted by default, a foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image build, one ko stand-in
+  missing-audience or a long-lived token, a token mounted by default, a foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image pull, or its build on a miss, one ko stand-in
   image, a dozen sandboxes); the step's `Escape suite (OpenShell cases)` row in the run's table is the
   real number. A skip of a case it needs is a failure (`KOINON_REQUIRE=openshell,cluster,escape-gateway`).
+  The probe image has no apt step in the run (#482): `flavor-publish` pushes it to
+  `ghcr.io/<repo>/spike-probe:<tag>` on main (the tag is `hack/probe-tag.sh`, a hash of `hack/spike/probe` and the
+  flavor's `ARG BASE=`), and the e2e sets `PROBE_PULL_REPO` so `test/escape/kind.sh` pulls that tag. Only a miss
+  (a branch that changes the probe before main has published it) builds the image, with apt.
   The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
   image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no

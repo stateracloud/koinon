@@ -23,7 +23,7 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
     to Secrets and Sandbox objects are denied. Runs in CI (`escape-admission` job); skipped
     without `KUBEBUILDER_ASSETS`.
   - `make test-escape-kind` (label `openshell`): the same cases against the OpenShell gateway that
-    `make dev-kind-up` installs on kind-koinon-dev. It builds the probe image from `hack/spike/probe`,
+    `make dev-kind-up` installs on kind-koinon-dev. It builds the probe image from `hack/spike/probe` (or pulls `$PROBE_PULL_REPO:<hack/probe-tag.sh>`, which the e2e does),
     loads it into the node, port-forwards the gateway and reads the client certificate from its
     Secret, so it needs no registry and no home lab (Docker, kind, kubectl, jq). kind runs
     sandboxes under runc: the Kata guest case and the cases that need extra fixtures (the model

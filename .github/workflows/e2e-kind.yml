@@ -252,6 +252,9 @@ jobs:
           KEEP: "1"
           # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.
           FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
+          # The escape suite's probe image: pulled when flavor-publish pushed this hack/spike/probe tree
+          # (hack/probe-tag.sh), so the run needs no apt mirror (#482). A miss builds it.
+          PROBE_PULL_REPO: ghcr.io/${{ github.repository }}/spike-probe
           # A flavor build (the pull missed) imports the restored layer cache and authenticates the
           # Dockerfile's GitHub release downloads with the workflow token as a BuildKit secret.
           FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
