@@ -191,8 +191,11 @@ backup before the first start, if you can: a new install makes its own key Secre
 and step 3 replaces it with yours.
 
 Then decide about the install mark. If the new install **replaces** the old one on the same OpenShell
-gateway (the old install is gone or will be uninstalled), apply the mark backup before the first
-start, so the new install owns the sandboxes, providers and workspaces the old one made:
+gateway, stop the old install first (scale its Deployments to zero or uninstall it). Two running
+installs with the same mark both own the objects, which is the clash this mark prevents (issue 461). Then
+apply the mark backup before step 4 (Start), so the new install owns the sandboxes, providers and
+workspaces the old one made. The pods read the mark from the Secret only when they start; a pod that is
+already running keeps the mark it had until you restart it.
 
 ```sh
 kubectl -n koinon apply -f koinon-install-mark-backup.json
@@ -200,7 +203,9 @@ kubectl -n koinon apply -f koinon-install-mark-backup.json
 
 If you restore a **copy next to the live install** (a drill), do not apply it. The copy keeps the
 mark its own chart install made, and then it cannot touch the live install's objects. With the live
-mark, the copy would own them and could stop and delete them. Use the same `postgres.mode`; a `cnpg` install cannot be pointed at
+mark, the copy would own them and could stop and delete them.
+
+Use the same `postgres.mode` as the install the dump came from; a `cnpg` install cannot be pointed at
 a database restored somewhere else.
 
 ### Two installs on one OpenShell gateway
@@ -222,10 +227,26 @@ create `koinon-install-mark` again with the old `token`
 (`installMark.existingSecret` names a Secret you manage), or delete the install's sandboxes, providers
 and workspaces on the gateway so that the reconciler makes them again with the new mark.
 
-Objects made before this mark existed have none. The live install marks them itself on its first
-reconcile after the upgrade (see [Upgrading](../upgrading/)). Do not run a restored copy on the same
-gateway until the live install has reconciled once on this release: before that, the copy cannot tell
-the unmarked objects from its own.
+Objects made before this mark existed have none, and an unmarked object is open to a second install:
+the copy cannot tell it from its own, and can claim, stop or delete it. The live install marks them
+over several passes after the upgrade (see [Upgrading](../upgrading/#upgrading-to-install-marked-openshell-objects-issue-461)):
+a sandbox is recreated with the mark only when no run holds the agent and within the per-pass recreate
+cap, and a provider that a sandbox still attaches is remade only on the pass after that sandbox is gone.
+One pass is therefore not enough.
+
+Run a copy on the same gateway only when **every sandbox, provider and provider profile of the live
+install carries the mark**. Check it on the live install's reconciler metrics
+([Metrics](../metrics/)):
+
+```promql
+koinon_openshell_unmarked_objects
+```
+
+The condition is that the gauge is 0 for each of `kind="sandbox"`, `"provider"` and `"profile"`. If it is
+not, wait: runs that hold an agent finish, and the next passes recreate those sandboxes. To go faster,
+raise `reconciler.maxRecreatesPerPass` (default 4) with a `helm upgrade`, or end the runs that hold
+the agents. Do not delete the sandboxes on the gateway by hand to speed it up: the reconciler recreates
+them, but only on a pass when no run holds the agent, and the home volume is replaced.
 
 ## What to automate, and what is not covered
 

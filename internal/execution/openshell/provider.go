@@ -81,7 +81,9 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 	if err := b.check(op, "provider", p.Name, existing.GetMetadata().GetLabels()); err != nil {
 		return err
 	}
-	if p.ClaimLegacy && b.unlabeled(existing.GetMetadata().GetLabels()) {
+	legacy := b.unlabeled(existing.GetMetadata().GetLabels())
+	b.noteUnmarked("provider", p.Name, legacy)
+	if p.ClaimLegacy && legacy {
 		// Made before the install label existed (issue 461). Labels are immutable, so claim it by
 		// recreating it with the label and the credentials of this pass. The caller sets ClaimLegacy
 		// only while no sandbox attaches it; until then the record is taken as this install's.
@@ -90,7 +92,11 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 		}); err != nil {
 			return wrap(op, err)
 		}
-		return create()
+		if err := create(); err != nil {
+			return err
+		}
+		b.noteUnmarked("provider", p.Name, false)
+		return nil
 	}
 	if existing.GetType() != p.Profile.ID || existing.GetProfileWorkspace() != workspace {
 		return &execution.Error{Op: op, Kind: execution.ErrConflict, Err: fmt.Errorf(
@@ -158,6 +164,9 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 			return err
 		}
 	}
+	if found {
+		b.noteUnmarked("profile", p.ID, b.unlabeled(got.GetProfile().GetAnnotations()))
+	}
 	if found && got.GetProfile().GetAnnotations()[SpecHashAnnotation] == hash {
 		return nil
 	}
@@ -203,6 +212,7 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	if !resp.GetUpdated() {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: diagnostics(resp.GetDiagnostics())}
 	}
+	b.noteUnmarked("profile", p.ID, false)
 	return nil
 }
 

@@ -87,19 +87,24 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
 
 The release that adds the install mark (Secret `koinon-install-mark`) makes every OpenShell object
 carry the mark of the install that made it, so two installs on one gateway do not touch each other's
-objects. OpenShell keeps labels immutable, so on the first reconcile after the upgrade the live install
-claims what it made before:
+objects. OpenShell keeps labels immutable, so the live install claims what it made before over several
+reconcile passes, not in one:
 
 - Each sandbox without the mark is recreated, like after a spec change: not while a run holds the
-  agent, at most the per-pass recreate cap, and after the home backup. The recreation replaces the
-  sandbox's home volume (it is restored from the backup).
-- Each provider without the mark is deleted and made again with the credentials of that pass, and
-  each provider profile is imported again with the mark.
-- Workspaces are not recreated. They stay without the mark; they only group sandboxes and a second
-  install that ensures one changes nothing in it.
+  agent (parked runs included), at most the per-pass recreate cap (`reconciler.maxRecreatesPerPass`),
+  and after the home backup. The recreation replaces the sandbox's home volume (it is restored from the
+  backup).
+- Each provider without the mark is deleted and made again with the credentials of that pass, but only
+  on a pass when no sandbox attaches it. An attached provider is remade after its sandbox has been
+  recreated, so on a later pass. Each provider profile is imported again with the mark.
+- Old workspaces are not recreated and stay without the mark; they only group sandboxes and a second
+  install that ensures one changes nothing in it. Workspaces made after the upgrade carry the mark.
 
-Sandbox and provider names do not change. A restored copy of the database must not share the
-gateway with the live install until the live install has reconciled once on the new release.
+Sandbox and provider names do not change. Until the last of these is done, an unmarked object is open to a
+second install on the gateway. Do not run a restored copy on the same gateway until the gauge
+`koinon_openshell_unmarked_objects` is 0 for `kind="sandbox"`, `"provider"` and `"profile"`
+([Back up and restore](../backup-restore/#two-installs-on-one-openshell-gateway)). Runs that hold an agent
+for a long time delay it; a higher `reconciler.maxRecreatesPerPass` shortens it.
 
 ## Upgrading to the install audit chain (ADR 0100)
 

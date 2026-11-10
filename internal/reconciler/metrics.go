@@ -23,6 +23,9 @@ const (
 	errKindSandbox         = "sandbox"          // converging an agent's sandbox failed
 )
 
+// unmarkedKinds are the label values of koinon_openshell_unmarked_objects.
+var unmarkedKinds = []string{"sandbox", "provider", "profile"}
+
 // sandboxStates are the label values of koinon_reconciler_sandboxes: the enum of the
 // agent_sandboxes.state column.
 var sandboxStates = []store.SandboxState{
@@ -41,8 +44,10 @@ type Metrics struct {
 	GatewayConfigRejected prometheus.Gauge
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
-	SandboxRepairs        prometheus.Counter
-	AgentsUnhealthy       prometheus.Counter
+	// UnmarkedObjects counts the OpenShell objects the last pass saw without the install mark, by kind.
+	UnmarkedObjects *prometheus.GaugeVec
+	SandboxRepairs  prometheus.Counter
+	AgentsUnhealthy prometheus.Counter
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
@@ -75,6 +80,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AgentsHeldBack: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_agents_waiting_for_gateway_key", Help: "Agents whose sandbox work was held back in the last pass because the gateway does not serve their new key yet.",
 		}),
+		UnmarkedObjects: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell objects this install saw without its install mark in the last pass, by kind (sandbox, provider or profile). 0 for every kind means no other install can claim them (ADR 0106).",
+		}, []string{"kind"}),
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
@@ -98,11 +106,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, k := range observerReasons {
 		m.ObserverErrors.WithLabelValues(k)
 	}
+	for _, k := range unmarkedKinds {
+		m.UnmarkedObjects.WithLabelValues(k)
+	}
 	for _, s := range sandboxStates {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects,
 			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors)
 	}
 	return m

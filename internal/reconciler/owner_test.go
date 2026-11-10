@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"context"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,6 +31,7 @@ var _ = Describe("Reconciler install ownership", func() {
 		user pgtype.UUID
 		ws   string
 		mk   func(owner string, maxRecreates int) *reconciler.Reconciler
+		m    *reconciler.Metrics
 	)
 	sandboxOf := func(agent store.Agent) string { return execution.AgentSandboxName(org.Bytes, agent.ID.Bytes) }
 	labels := func(agent store.Agent) map[string]string {
@@ -53,6 +55,7 @@ var _ = Describe("Reconciler install ownership", func() {
 		org, user = newOrg(ctx)
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
+		m = reconciler.NewMetrics(nil)
 		mk = func(owner string, maxRecreates int) *reconciler.Reconciler {
 			b := openshell.New(cc)
 			if owner != "" {
@@ -70,6 +73,7 @@ var _ = Describe("Reconciler install ownership", func() {
 				},
 				RuntimeClassName:    "kata",
 				MaxRecreatesPerPass: maxRecreates,
+				Metrics:             m,
 				Logger:              slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -115,6 +119,19 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(labels(agent)).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 			Expect(osg.Calls("DeleteProvider")).To(Equal(1))
+		})
+
+		It("is counted in koinon_openshell_unmarked_objects until it is recreated and claimed", func(ctx SpecContext) {
+			gauge := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind)) }
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed()) // deletes the sandbox; its provider is still attached
+			Expect(gauge("sandbox")).To(Equal(1.0))
+			Expect(gauge("provider")).To(Equal(1.0))
+			Expect(live.ReconcileAll(ctx)).To(Succeed()) // claims the provider, creates the sandbox
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(gauge(kind)).To(BeZero(), kind)
+			}
 		})
 
 		It("is not recreated while a run holds the agent", func(ctx SpecContext) {

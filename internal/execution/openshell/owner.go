@@ -23,9 +23,9 @@ import (
 // and, once no sandbox attaches it, EnsureProvider deletes and recreates an unlabeled provider when
 // [execution.Provider.ClaimLegacy] is set (until then it is taken as this install's), and a profile's owner is part of its spec
 // hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
-// and homes, are not recreated, and stay unmarked (they are shared, idempotent records). Until the
-// live install has reconciled once, a second install on the gateway can still touch its unlabeled
-// objects; docs/site guides/upgrading.md says so. An empty id turns
+// and homes and are not recreated, so an old workspace stays unmarked; a new one is stamped and checked. Until the
+// live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind), a second
+// install on the gateway can still touch its unlabeled objects; docs/site guides/upgrading.md says so. An empty id turns
 // the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
 // set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
 // "ready" rows. It returns b.
@@ -42,6 +42,39 @@ func (b *Backend) Owner() string { return b.owner }
 // the object carries no install label.
 func (b *Backend) unlabeled(labels map[string]string) bool {
 	return b.owner != "" && labels[execution.LabelInstall] == ""
+}
+
+// noteUnmarked records that the provider or profile name was seen without the install label
+// (marked false: it carries one now, or was just recreated with it).
+func (b *Backend) noteUnmarked(kind, name string, unmarked bool) {
+	b.unmarkedMu.Lock()
+	defer b.unmarkedMu.Unlock()
+	if b.unmarked == nil {
+		b.unmarked = map[string]map[string]struct{}{}
+	}
+	if b.unmarked[kind] == nil {
+		b.unmarked[kind] = map[string]struct{}{}
+	}
+	if unmarked {
+		b.unmarked[kind][name] = struct{}{}
+	} else {
+		delete(b.unmarked[kind], name)
+	}
+}
+
+// ResetUnmarked forgets what Unmarked counted; the reconciler calls it at the start of a pass.
+func (b *Backend) ResetUnmarked() {
+	b.unmarkedMu.Lock()
+	defer b.unmarkedMu.Unlock()
+	b.unmarked = nil
+}
+
+// Unmarked returns how many providers and provider profiles were seen without the install label
+// since ResetUnmarked and not made again with it. It feeds koinon_openshell_unmarked_objects.
+func (b *Backend) Unmarked() (providers, profiles int) {
+	b.unmarkedMu.Lock()
+	defer b.unmarkedMu.Unlock()
+	return len(b.unmarked["provider"]), len(b.unmarked["profile"])
 }
 
 // stamp returns labels with the owner label added.

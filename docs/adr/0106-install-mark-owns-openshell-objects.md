@@ -32,20 +32,24 @@ namespace on another cluster that shares the gateway, or a different namespace o
    `error` with reason `OwnedByAnotherInstall`; `koinon-agentd` fails the runs of that agent and does not run
    them in the other install's sandbox.
 4. **Unmarked means own.** An object without a mark was made before this ADR. The install treats it as its
-   own, so nothing is recreated by the upgrade itself.
+   own and the upgrade itself recreates nothing at once; decision 5 says how and when it marks them.
 5. **The live install claims legacy objects when it recreates them.** OpenShell keeps labels immutable. An
    unmarked sandbox is recreated with the mark like any spec change (never while a run holds the agent, and
    within the per-pass recreate cap, ADR 0085). An unmarked provider is deleted and made again with the mark
    only on a pass with no sandbox, because a provider that a live sandbox attaches must not be removed.
-   Workspaces stay unmarked: they are shared, idempotent records, and profiles are re-imported with the mark
-   (it is part of their spec hash).
+   An attached provider is therefore claimed only on the pass after its sandbox is gone. Old workspaces stay
+   unmarked: they are shared, idempotent records. New workspaces are stamped and checked. Profiles are
+   re-imported with the mark (it is part of their spec hash). The claim takes several passes, longer while
+   runs hold agents; the reconciler gauge `koinon_openshell_unmarked_objects{kind}` (sandbox, provider,
+   profile) says how many objects it still saw unmarked in the last pass.
 6. **Names do not change.** No sandbox is recreated only because of the names.
 
 ## Alternatives considered
 
 - **Put an install ID in the names.** The ID is in Postgres, so a restore has the same one; a new ID for
   a restore would break the binding to the key Secret. It would also rename every object on upgrade and
-  recreate the whole fleet.
+  recreate the whole fleet. Decision 5 has the same cost: every unmarked sandbox is recreated once and its
+  home volume replaced, only spread over passes by the held-run rule and the cap, and not renamed.
 - **Install ID plus a hash of the namespace.** Two installs can share a namespace name (two clusters, one
   gateway), and a namespace move would change the owner of a healthy install. This was the first version of
   this change; review round 1 rejected it.
@@ -67,8 +71,10 @@ name. Velero's restore marks restored objects the same way.
   reconciler makes them again with a new mark.
 - Moving an install to another namespace keeps its objects when the mark Secret moves with it. A restore that
   replaces the old install applies the mark backup before its first start; a drill copy does not.
-- Legacy objects stay open to a second install until the live install has recreated them. A restored copy
-  must not run on the same gateway before the live install has reconciled once on this release.
+- Legacy objects stay open to a second install until the live install has recreated them, which takes
+  several passes (held runs, the cap, attached providers). A restored copy may run on the same gateway only
+  when every sandbox, provider and provider profile of the live install carries the mark: the gauge
+  `koinon_openshell_unmarked_objects` is 0 for every kind.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
