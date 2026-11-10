@@ -29,9 +29,9 @@
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
 #   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
 #   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
-#   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the guide
-#   docs/site/src/content/docs/guides/backup-restore.md backs up the keys and the database, the install is
-#   changed, then the guide restores both and the script checks the install is the one that was backed up
+#   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
+#   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
+#   changed, then the file restores both and the script checks the install is the one that was backed up
 #   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
@@ -316,7 +316,7 @@ fi
 
 if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
-  step "backup and restore (guides/backup-restore.md)"
+  step "backup and restore (commands/backup-restore.e1)"
   OUT="$OUT" "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
   done_step "Backup, keys export, restore and verify"
   cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"

@@ -65,7 +65,7 @@ done < <(
 		else
 			find "$root" \( -name .git -o -name node_modules \) -prune -o -name '*.sh' -type f -print
 		fi
-	} | grep -v '\.golden\.sh$' | sort
+	} | sort
 )
 
 if ((fail)); then

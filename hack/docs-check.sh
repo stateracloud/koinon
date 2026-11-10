@@ -116,7 +116,7 @@ for n in $gnames; do
 done
 ok "test/e2e/backup-restore.sh runs every e1 block of the backup file: $(tr '\n' ' ' <<<"$gused")"
 
-# 3. Chart values blocks. The block list goes through a file (see the golden check above).
+# 3. Chart values blocks. The block list goes through a file (see the command-file check above).
 for d in "$docs"/*.md "$docs"/guides/*.md; do
   awk -v dir="$tmp" -v base="$(basename "$d" .md)" '
     /^```yaml chart-values/ { n++; out = sprintf("%s/%s-%d.yaml", dir, base, n); printf "" > out; inblock = 1; next }
