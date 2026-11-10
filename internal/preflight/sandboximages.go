@@ -180,14 +180,19 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		if wantSupervisor {
 			status = Fail
 		}
-		return []Result{{
+		res := []Result{{
 			Check: checkGatewayConfig, Status: status,
-			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image and gateway ID are not checked, " +
+			Message: cause + ", so the gateway's sandbox pull secrets, supervisor image, gateway ID and supervisor token lifetime (from its file) are not checked, " +
 				"and the reconciler cannot see an OpenShell upgrade: sandboxes are not recreated for a new supervisor image",
 			Fix: "set preflight.openshell.namespace and .configMap to the OpenShell release's gateway ConfigMap " +
 				"(<fullname>-config), or check by hand that the OpenShell release has server.sandboxImagePullSecrets and " +
 				"a supervisor image that sandboxPolicy.supervisorImages lists, and a gateway_id that equals openshell.gatewayId" + seeGuide,
 		}}
+		if wantTTL {
+			// The environment variable lives on the workload, not in the ConfigMap, so it can still be checked.
+			res = append(res, c.tokenTTLResult(ctx, gatewayImages{}, false))
+		}
+		return res
 	}
 	g := parseGatewayConfig(cm.Data[gatewayConfigKey])
 
@@ -227,7 +232,7 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		results = append(results, r)
 	}
 	if wantTTL {
-		results = append(results, c.tokenTTLResult(ctx, g))
+		results = append(results, c.tokenTTLResult(ctx, g, true))
 	}
 	if wantGatewayID {
 		results = append(results, c.gatewayIDResults(g)...)
@@ -244,7 +249,7 @@ const (
 )
 
 // tokenTTLEnv is the name of the gateway environment variable that overrides sa_token_ttl_secs.
-const tokenTTLEnv = "OPENSHELL_K8S_SA_TOKEN_TTL_SECS"
+const tokenTTLEnv = "OPENSHELL_K8S_SA_TOKEN_TTL_SECS" //nolint:gosec // G101: an environment variable name, not a credential
 
 // gatewayTokenTTLEnv reads OPENSHELL_K8S_SA_TOKEN_TTL_SECS from the gateway workload (a StatefulSet, or
 // a Deployment) in the OpenShell namespace. It returns the value (0 when the variable is not set or
@@ -291,11 +296,23 @@ func (c *Checker) gatewayTokenTTLEnv(ctx context.Context) (value int, ok bool) {
 // above the bound, so a longer TTL means no sandbox starts. The gateway's OPENSHELL_K8S_SA_TOKEN_TTL_SECS
 // wins over sa_token_ttl_secs in its configuration file, so the check reads both. When the workload
 // cannot be read, the environment variable is unknown and the result is a warning, never a pass.
-func (c *Checker) tokenTTLResult(ctx context.Context, g gatewayImages) Result {
+// fileKnown is false when the gateway ConfigMap could not be read: only the environment variable can
+// then decide, and without it the lifetime is unknown.
+func (c *Checker) tokenTTLResult(ctx context.Context, g gatewayImages, fileKnown bool) Result {
 	ttl, bound := g.saTokenTTL, c.Config.SupervisorTokenMaxSeconds
 	envTTL, observed := c.gatewayTokenTTLEnv(ctx)
 	if envTTL > 0 {
 		ttl = envTTL
+	}
+	if !fileKnown && (!observed || envTTL <= 0) {
+		return Result{
+			Check: checkSATokenTTL, Status: Warn,
+			Message: fmt.Sprintf("the gateway ConfigMap could not be read and %s is not set on the gateway workload %s/%s (or it could not be read), "+
+				"so the supervisor token lifetime was not checked against sandboxPolicy.supervisorTokenMaxSeconds=%d. "+
+				"If it is above the bound, the sandbox admission policy denies every supervisor pod",
+				tokenTTLEnv, c.Config.OpenShellConfigNamespace, c.Config.OpenShellWorkload, bound),
+			Fix: fmt.Sprintf("check by hand that sa_token_ttl_secs and %s on the OpenShell gateway are at most %d", tokenTTLEnv, bound),
+		}
 	}
 	if ttl == 0 {
 		ttl = openShellDefaultSATokenTTL

@@ -192,6 +192,22 @@ var _ = Describe("Sandbox image checks", func() {
 			Expect(r.Message).To(ContainSubstring("not checked"))
 		})
 
+		It("still fails on the environment variable when the gateway ConfigMap is missing", func(ctx SpecContext) {
+			c := withConfig(nil, bound(3600))
+			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", Value: "7200"}))
+			results := c.run(ctx)
+			Expect(find(results, name).Status).To(Equal(preflight.Fail))
+			Expect(find(results, "OpenShell gateway configuration").Message).To(ContainSubstring("token lifetime"))
+		})
+
+		It("warns that the lifetime was not checked when the ConfigMap is missing and no variable is set", func(ctx SpecContext) {
+			c := withConfig(nil, bound(3600))
+			c.with(gateway())
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("lifetime was not checked"))
+		})
+
 		It("warns when the variable comes from a reference", func(ctx SpecContext) {
 			c := withConfig(openshellConfig(""), bound(3600))
 			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", ValueFrom: &corev1.EnvVarSource{
