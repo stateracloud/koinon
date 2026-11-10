@@ -19,12 +19,9 @@ const markChunky = "CHUNKY"
 var _ = Describe("Items, not chunks (old issue 344)", func() {
 	It("stores a number of run events proportional to the items, not to the ACP chunks", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		// The ACP connection queues 1024 notifications between its reader and the handler, and
-		// closes the connection when a burst overflows it (acp-go-sdk, "notification queue
-		// overflow"); a harness cannot be slowed to the handler's pace. With 3n+1 chunks below
-		// that, the spec cannot overflow however far a loaded runner delays the handler; at
-		// n = 400 it did, under ginkgo -p, and the run never finished.
-		const n = 300
+		// 3n+1 = 1201 chunks exceed the SDK's 1024-notification queue; acp.NewConn holds the
+		// harness back while the handler lags, so the burst must not overflow it.
+		const n = 400
 		e.harness.set(func(h *harness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()

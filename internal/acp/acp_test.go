@@ -381,3 +381,28 @@ var _ = Describe("a ReadObserver handler", func() {
 		}
 	})
 })
+
+var _ = Describe("a burst of updates against a slow handler", func() {
+	It("holds the agent's stream back instead of overflowing the SDK's queue", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		// Three times the SDK's queue of 1024. slowRecorder takes its time with each update, so
+		// without backpressure the reader gets ahead and the SDK closes the connection.
+		const n = 3000
+		go func() {
+			defer GinkgoRecover()
+			for i := range n {
+				_, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%d"}}}}`+"\n", i)
+				if err != nil {
+					return
+				}
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(60 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(n), "every update reaches the handler")
+	}, SpecTimeout(90*time.Second))
+})
