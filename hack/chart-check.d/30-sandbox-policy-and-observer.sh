@@ -102,3 +102,24 @@ has "the pods policy refuses SPIFFE CSI volumes" "SPIFFE CSI volumes \(csi.spiff
 has "the pods policy refuses the SPIRE agent socket hostPath" "the SPIRE agent socket must not be mounted in sandbox pods"
 has "the pods policy matches the csi.spiffe.io driver" "v.csi.driver != 'csi.spiffe.io'"
 lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
+
+# Old issue 475: the namespace label policy. The sandbox policies select namespaces by label, so
+# relabelling a namespace would take it out of all of them; only sandboxPolicy.identities.namespaces
+# may change the labels the selectors use. It binds to every namespace UPDATE (a namespaceSelector
+# reads the NEW object's labels) and judges the OLD object's labels itself.
+nsp=templates/sandbox-policy.yaml
+has "the namespace label policy renders" '^  name: koinon-koinon-sandbox-namespaces$' --show-only "$nsp"
+has "the namespace label policy fails closed" 'failurePolicy: Fail' --show-only "$nsp"
+has "the namespace label policy covers namespace updates only" 'operations: \[UPDATE\]' --show-only "$nsp"
+has "the namespace label policy names the namespace lifecycle owner" 'request.userInfo.username in \[\\"system:serviceaccount:openshell:openshell\\"\]' --show-only "$nsp"
+has "the namespace label policy guards gateway-id and managed-by" '\[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\"\]' --show-only "$nsp"
+has "the namespace label policy judges the old object" 'variables.oldLabels\[\\"openshell.ai/managed-by\\"\] == \\"openshell\\"' --show-only "$nsp"
+has "the namespace label policy follows openshell.gatewayId" 'variables.oldLabels\[\\"openshell.ai/gateway-id\\"\] == \\"prod\\"' --set openshell.gatewayId=prod --show-only "$nsp"
+has "the namespace label policy follows sandboxPolicy.identities.namespaces" 'request.userInfo.username in \[\\"system:serviceaccount:ns:own\\"\]' --set-json 'sandboxPolicy.identities.namespaces=["system:serviceaccount:ns:own"]' --show-only "$nsp"
+has "a key of sandboxPolicy.namespaceSelector is guarded" '\[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\",\\"team\\"\]' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$nsp"
+nsb=$(render --show-only "$nsp" | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/ && /sandbox-namespaces/')
+[[ -n $nsb ]] || fail "the namespace label policy has a binding"
+! grep -Eq -- 'namespaceSelector|objectSelector' <<<"$nsb" || fail "the namespace label policy binds without a selector (it reads the old object itself)"
+grep -Fq -- 'validationActions: ["Deny"]' <<<"$nsb" || fail "the namespace label binding denies"
+[[ $(render --show-only "$nsp" | grep -c -- '^  name: koinon-koinon-sandbox-namespaces$') == 2 ]] || fail "the namespace label policy and binding render once each"
+lacks "no namespace label policy with sandboxPolicy.enabled=false" 'sandbox-namespaces' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false

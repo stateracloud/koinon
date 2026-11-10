@@ -79,3 +79,22 @@ or `dev` (kind and CI only).
 - Decision 6: the VAP's allowed runtime classes are the tier's.
 - Decisions 1 to 4 and 7, and the 0048 additions (`stable_placeholder`, Landlock `hard_requirement`,
   telemetry off, requester-identity VAP rules, `io.katacontainers.*` denied), hold in every tier.
+
+## Amendment (2026-11-10): the policies' own scope (old issue 475)
+
+The policies select sandbox namespaces by label, so three paths could move a sandbox out of them.
+
+- **Namespace labels are protected.** A fourth policy, `<namespace>-<fullname>-sandbox-namespaces`,
+  refuses any change to the labels the selectors use (`openshell.ai/managed-by`,
+  `openshell.ai/gateway-id` and every key of `sandboxPolicy.namespaceSelector`) on a namespace the
+  policies cover, except from `sandboxPolicy.identities.namespaces` (default: the OpenShell gateway,
+  which creates the namespaces in managed mode). Cluster admins are denied. It binds to every
+  namespace update and reads the old object's labels itself, because a namespace selector reads the
+  new object's labels, and the new object is the one that has just left the selection. Moving a
+  namespace into the policies (adding the labels) stays open.
+- **Gateway ID drift is reported.** The reconciler compares `openshell.gatewayId` with the gateway's
+  `gateway_id` (read from OpenShell's gateway ConfigMap) on every pass, the first included, and sets
+  `koinon_reconciler_openshell_gateway_id_mismatch`. The preflight still fails the install or upgrade.
+- **PersistentVolumes are not resolved.** A pod rule sees the pod's volumes, not the PersistentVolume
+  behind a claim, and a ValidatingAdmissionPolicy cannot follow the claim. Decision open: see the
+  issue.

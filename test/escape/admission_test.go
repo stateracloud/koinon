@@ -158,7 +158,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 		for _, b := range bindingsB {
 			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
-			if !strings.HasSuffix(b.Name, "-unlabelled") {
+			if !strings.HasSuffix(b.Name, "-unlabelled") && !strings.HasSuffix(b.Name, "-sandbox-namespaces") {
 				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
 			}
 		}
@@ -465,12 +465,71 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 
+	// Old issue 475: the policies select namespaces by label, so relabelling a namespace would take it
+	// out of all of them. Only the namespace lifecycle owners (sandboxPolicy.identities.namespaces)
+	// may change those labels on a namespace the policies cover.
+	It("refuses relabelling a sandbox namespace out of the policies, except by the namespace owners", func(ctx SpecContext) {
+		relabel := func(user, namespace string, mutate func(map[string]string)) error {
+			n, err := admin.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			if n.Labels == nil {
+				n.Labels = map[string]string{}
+			}
+			mutate(n.Labels)
+			_, err = as[user].CoreV1().Namespaces().Update(ctx, n, dryRunUpdate)
+			return err
+		}
+		const msg = "only the namespace lifecycle owners may change the labels"
+		moves := map[string]func(map[string]string){
+			"removing gateway-id":          func(l map[string]string) { delete(l, "openshell.ai/gateway-id") },
+			"changing gateway-id":          func(l map[string]string) { l["openshell.ai/gateway-id"] = "elsewhere" },
+			"removing managed-by":          func(l map[string]string) { delete(l, "openshell.ai/managed-by") },
+			"changing managed-by":          func(l map[string]string) { l["openshell.ai/managed-by"] = "someone" },
+			"removing both":                func(l map[string]string) { delete(l, "openshell.ai/gateway-id"); delete(l, "openshell.ai/managed-by") },
+			"dropping every label at once": func(l map[string]string) { clear(l) },
+		}
+		for _, user := range []string{"admin", controllerUser, otherUser} {
+			for _, move := range moves {
+				denied(relabel(user, ns, move), msg)
+			}
+		}
+
+		By("the namespace owner may still change them")
+		for _, move := range moves {
+			Expect(relabel(gatewayUser, ns, move)).To(Succeed())
+		}
+
+		By("a namespace without a gateway-id label is covered too: nobody else may claim it for a gateway")
+		denied(relabel("admin", unlabelled, func(l map[string]string) { l["openshell.ai/gateway-id"] = "openshell" }), msg)
+		denied(relabel(otherUser, unlabelled, func(l map[string]string) { delete(l, "openshell.ai/managed-by") }), msg)
+
+		By("another release's gateway namespace is covered by that release's own policy")
+		denied(relabel("admin", nsB, func(l map[string]string) { delete(l, "openshell.ai/gateway-id") }), msg)
+
+		By("other labels and annotations stay open (control)")
+		Expect(relabel("admin", ns, func(l map[string]string) { l["team"] = "sandboxes" })).To(Succeed())
+		Expect(relabel(otherUser, unlabelled, func(l map[string]string) { l["pod-security.kubernetes.io/enforce"] = "restricted" })).To(Succeed())
+
+		By("a namespace that is not a sandbox namespace is free (control), and may be labelled into the policies")
+		Expect(relabel("admin", plain, func(l map[string]string) { l["team"] = "other" })).To(Succeed())
+		Expect(relabel("admin", plain, func(l map[string]string) {
+			l["openshell.ai/managed-by"], l["openshell.ai/gateway-id"] = "openshell", "openshell"
+		})).To(Succeed())
+		_, err := admin.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
 		for _, p := range policies {
 			Expect(p.Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)), p.Name)
 		}
 		for _, b := range bindings {
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
+			if strings.HasSuffix(b.Name, "-sandbox-namespaces") {
+				// Judges the old object's labels itself: a namespaceSelector reads the new object's.
+				Expect(b.Spec.MatchResources).To(BeNil(), b.Name)
+				continue
+			}
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
 			if strings.HasSuffix(b.Name, "-unlabelled") {
@@ -687,8 +746,8 @@ func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extra
 			Fail(fmt.Sprintf("unexpected %s in sandbox-policy.yaml", meta.Kind))
 		}
 	}
-	Expect(policies).To(HaveLen(3), "the pods, objects and connect policies")
-	Expect(bindings).To(HaveLen(6), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label")
+	Expect(policies).To(HaveLen(4), "the pods, objects, connect and namespace label policies")
+	Expect(bindings).To(HaveLen(7), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label, and the namespace label policy's")
 	return policies, bindings
 }
 

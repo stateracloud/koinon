@@ -991,3 +991,46 @@ sandboxPolicy.namespaceSelector plus gateway-id DoesNotExist (old issue 460).
 {{- $_ := set $sel "matchExpressions" (append $exprs (dict "key" "openshell.ai/gateway-id" "operator" "DoesNotExist")) -}}
 {{- toYaml $sel -}}
 {{- end }}
+
+{{/*
+koinon.selectorCEL renders a label selector (a dict with matchLabels and matchExpressions) as a CEL
+condition over a map variable of labels: (list $selector "variables.oldLabels"). It is the same
+selector semantics as a namespaceSelector, for a policy that has to judge a namespace's labels
+itself (old issue 475). Operators other than In, NotIn, Exists and DoesNotExist fail the render.
+*/}}
+{{- define "koinon.selectorCEL" -}}
+{{- $sel := index . 0 -}}
+{{- $v := index . 1 -}}
+{{- $conds := list -}}
+{{- range $k, $val := ($sel.matchLabels | default dict) -}}
+{{- $conds = append $conds (printf "(%s in %s && %s[%s] == %s)" ($k | quote) $v $v ($k | quote) ($val | quote)) -}}
+{{- end -}}
+{{- range ($sel.matchExpressions | default list) -}}
+{{- $k := .key | quote -}}
+{{- if eq .operator "In" -}}
+{{- $conds = append $conds (printf "(%s in %s && %s[%s] in %s)" $k $v $v $k (.values | toJson)) -}}
+{{- else if eq .operator "NotIn" -}}
+{{- $conds = append $conds (printf "(!(%s in %s) || !(%s[%s] in %s))" $k $v $v $k (.values | toJson)) -}}
+{{- else if eq .operator "Exists" -}}
+{{- $conds = append $conds (printf "(%s in %s)" $k $v) -}}
+{{- else if eq .operator "DoesNotExist" -}}
+{{- $conds = append $conds (printf "(!(%s in %s))" $k $v) -}}
+{{- else -}}
+{{- fail (printf "sandboxPolicy.namespaceSelector.matchExpressions: operator %q is not supported by the namespace label policy (In, NotIn, Exists, DoesNotExist)" .operator) -}}
+{{- end -}}
+{{- end -}}
+{{- if $conds -}}{{- join " && " $conds -}}{{- else -}}true{{- end -}}
+{{- end }}
+
+{{/*
+koinon.sandboxGuardedLabels is the JSON list of label keys the namespace label policy protects: every
+key the sandbox policies' namespace selectors use, plus openshell.ai/managed-by and
+openshell.ai/gateway-id (old issue 475).
+*/}}
+{{- define "koinon.sandboxGuardedLabels" -}}
+{{- $sel := .Values.sandboxPolicy.namespaceSelector -}}
+{{- $keys := list "openshell.ai/managed-by" "openshell.ai/gateway-id" -}}
+{{- range $k, $_ := ($sel.matchLabels | default dict) -}}{{- $keys = append $keys $k -}}{{- end -}}
+{{- range ($sel.matchExpressions | default list) -}}{{- $keys = append $keys .key -}}{{- end -}}
+{{- $keys | uniq | sortAlpha | toJson -}}
+{{- end }}

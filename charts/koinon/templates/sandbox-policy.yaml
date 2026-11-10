@@ -309,4 +309,63 @@ spec:
     namespaceSelector:
       {{- include "koinon.sandboxUnlabelledSelector" $ | nindent 6 }}
 {{- end }}
+{{- /*
+Namespace labels (old issue 475): the policies above select namespaces by label, so removing or
+changing openshell.ai/managed-by or openshell.ai/gateway-id takes a namespace out of all of them.
+Only the identities that own the namespace lifecycle (sandboxPolicy.identities.namespaces) may change
+the labels the selectors use on a namespace the policies cover. The policy cannot bind by namespace
+selector: for a Namespace the selector reads the NEW object's labels, which is the object that has
+just left the selection. It binds to every namespace UPDATE and judges the OLD object's labels itself,
+with the same selector semantics as the bindings (koinon.selectorCEL). Pod and Sandbox rules need no
+such care; this one fails closed on any CEL error, so it only reads labels.
+*/}}
+{{- $nsPolicy := printf "%s-sandbox-namespaces" $base }}
+{{- $scope := include "koinon.selectorCEL" (list (include "koinon.sandboxNamespaceSelector" $ | fromYaml) "variables.oldLabels") }}
+{{- if $p.scopeToGateway }}
+{{- $scope = printf "(%s) || (%s)" $scope (include "koinon.selectorCEL" (list (include "koinon.sandboxUnlabelledSelector" $ | fromYaml) "variables.oldLabels")) }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $nsPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [namespaces]
+  variables:
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.namespaces | default list)) | quote }}
+    - name: oldLabels
+      expression: "has(oldObject.metadata.labels) ? oldObject.metadata.labels : {'koinon.dev/none': ''}"
+    - name: newLabels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {'koinon.dev/none': ''}"
+    - name: covered
+      expression: {{ $scope | quote }}
+    - name: guarded
+      expression: {{ include "koinon.sandboxGuardedLabels" . | quote }}
+  validations:
+    - expression: >-
+        variables.trusted || !variables.covered ||
+        variables.guarded.all(k, (k in variables.oldLabels) == (k in variables.newLabels) &&
+          (!(k in variables.oldLabels) || variables.oldLabels[k] == variables.newLabels[k]))
+      messageExpression: >-
+        'only the namespace lifecycle owners may change the labels the sandbox policies select by (' +
+        variables.guarded.join(', ') + ') on a sandbox namespace, not ' + request.userInfo.username
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $nsPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $nsPolicy }}
+  validationActions: {{ toJson $p.validationActions }}
 {{- end }}
