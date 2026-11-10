@@ -127,3 +127,4 @@ are in [0046](0046-adr-conventions.md).
 | [0106](0106-install-mark-owns-openshell-objects.md) | An install mark decides which OpenShell objects an install owns | Accepted |
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
 | [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |
+| [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted |
