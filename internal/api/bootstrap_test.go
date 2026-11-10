@@ -235,7 +235,7 @@ var _ = Describe("bootstrap", func() {
 			Expect(orgEvents(ctx, e, "org.bootstrap_sessions.revoked")).To(Equal(1))
 			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = 'org.bootstrap_sessions.revoked' AND NOT (summary ? 'install_event_id')`)).To(Equal(1),
 				"no install event exists to point at yet")
-			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = 'org.bootstrap_sessions.revoked' AND (summary->>'installEventDeferred')::boolean`)).To(Equal(1),
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = 'org.bootstrap_sessions.revoked' AND (summary->'after'->>'installEventDeferred')::boolean`)).To(Equal(1),
 				"the deferred event says so")
 			Expect(count(ctx, e, `SELECT count(*) FROM platform_admins`)).To(BeZero(), "the rest of the transaction rolled back")
 			Expect(install(ctx, e, "platform_admin.grant")).To(BeZero())
