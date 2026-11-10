@@ -158,13 +158,12 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
 		}
-		policies, bindings = append(policies, policiesB...), append(bindings, bindingsB...)
-
-		for _, p := range policies {
+		// The specs below that inspect `policies` and `bindings` mean release A's; both are applied.
+		for _, p := range append(slices.Clone(policies), policiesB...) {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, p, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
-		for _, b := range bindings {
+		for _, b := range append(slices.Clone(bindings), bindingsB...) {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Create(ctx, b, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -196,7 +195,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		// Release B's gateway creates its supervisor pod and Secret in its own workspace namespace: release A's
 		// policies do not bind there (old issue 460).
 		Expect(createPod(ctx, gatewayBUser, nsB, supervisor("b-supervisor"))).To(Succeed())
-		Expect(createPod(ctx, gatewayBUser, nsB, workload("b-workload"))).To(Succeed())
+		Expect(createPod(ctx, controllerUser, nsB, workload("b-workload"))).To(Succeed())
 		_, err := as[gatewayBUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
 		Expect(err).NotTo(HaveOccurred())
 		// The same identity is still denied in a namespace of release A's gateway.
