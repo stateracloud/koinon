@@ -309,9 +309,11 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 	}
 	// The outcome is recorded on its own bounded context, not on tctx (which may have just expired,
 	// and would then fail the record of a snapshot that exists) and not on ctx alone (a stalled
-	// database would keep the writer's slot past its lease). It is cut from the attempt's deadline but
-	// still ends at shutdown; Timeout + outcomeBound is shorter than Lease (checked in New).
-	octx, ocancel := context.WithTimeout(context.WithoutCancel(tctx), outcomeBound)
+	// database would keep the writer's slot past its lease). It keeps the attempt's deadline plus
+	// outcomeBound (WithoutCancel drops the deadline, so it is set again) and still ends at shutdown;
+	// Timeout + outcomeBound is shorter than Lease (checked in New).
+	attemptDeadline, _ := tctx.Deadline()
+	octx, ocancel := context.WithDeadline(context.WithoutCancel(tctx), attemptDeadline.Add(outcomeBound))
 	defer ocancel()
 	stop := context.AfterFunc(ctx, ocancel)
 	defer stop()
@@ -327,6 +329,9 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 		// The snapshot exists but the row still says running. Release it for another attempt (or fail
 		// it after the last one) instead of leaving it to the lease.
 		log.Warn("recording a complete checkpoint failed", "err", cerr)
+		if ctx.Err() != nil {
+			return // shutting down: the lease runs out and another replica takes the request over
+		}
 		err = fmt.Errorf("recording the complete checkpoint: %w", cerr)
 	}
 	msg := truncateText(err.Error(), 400)

@@ -195,13 +195,15 @@ func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer)
 	return ctx.Err()
 }
 
-// lateStore is a checkpoint store whose backup finishes only after its context has expired, as one
-// that completes just past the attempt deadline does.
+// lateStore is a checkpoint store whose backup reads the whole stream and writes the snapshot, then
+// returns only after its context has expired, as one that completes just past the attempt deadline
+// does. It reads first: the exec stdout pipe is closed when the attempt context ends.
 type lateStore struct{ agentd.HomeStore }
 
 func (l lateStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
+	res, err := l.HomeStore.Backup(ctx, prefix, pw, r, m)
 	<-ctx.Done()
-	return l.HomeStore.Backup(context.WithoutCancel(ctx), prefix, pw, r, m)
+	return res, err
 }
 
 var _ = Describe("home checkpoints", func() {
