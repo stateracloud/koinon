@@ -37,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -66,6 +67,9 @@ type config struct {
 	checkpointInterval   time.Duration
 	s3Endpoint, s3Region string
 	s3Bucket             string
+
+	// restoreHold keeps the process from claiming or driving any run (issue #462).
+	restoreHold bool
 }
 
 // flags registers the settings of koinon-agentd.
@@ -105,6 +109,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.s3Endpoint, "checkpoints-s3-endpoint", "", "S3 endpoint of the checkpoint bucket, host:port or an http(s) URL")
 	fs.StringVar(&c.s3Region, "checkpoints-s3-region", "", "S3 region")
 	fs.StringVar(&c.s3Bucket, "checkpoints-s3-bucket", "", "S3 bucket of the checkpoints (credentials: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)")
+	restorehold.Flag(fs, &c.restoreHold)
 	fs.StringVar(&c.pool.SessionCwd, "session-cwd", "/sandbox/work", "harness session directory in the sandbox")
 }
 
@@ -239,6 +244,7 @@ func run(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
+	restorehold.Metric(reg, cfg.restoreHold)
 	// The MCP leak guard's feed (ADR 0091 decision 4): agentd fingerprints the sandbox's own tool
 	// results in this process and stores the fingerprints only.
 	cfg.pool.Taint = mcpguard.NewFeed(db, nil)
@@ -266,7 +272,15 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
-	err = pool.Run(ctx)
+	if cfg.restoreHold {
+		// No worker starts: no run is claimed, no expired lease is taken over, no sandbox is touched and no
+		// checkpoint is written. Only "koinon-api checkpoints resync" is served, because the runbook runs it
+		// before the release. The health listener and /metrics above keep answering.
+		slog.Warn("restore-hold: koinon-agentd claims no run and touches no sandbox until the hold is released (restoreHold=false in the chart); it only serves checkpoints resync")
+		err = pool.RunHeld(ctx)
+	} else {
+		err = pool.Run(ctx)
+	}
 	stopHealth()
 	slog.Info("stopping koinon-agentd")
 	return err

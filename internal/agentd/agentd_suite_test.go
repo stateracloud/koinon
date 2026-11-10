@@ -374,6 +374,16 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 
 // poolOn is pool on its own connection pool, like a separate agentd process on the same Postgres.
 func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Config)) (stop func()) {
+	return e.poolRunning(conns, name, (*agentd.Pool).Run, mutate...)
+}
+
+// heldPool is a pool in restore-hold mode (issue #462): it runs RunHeld, not Run.
+func (e *env) heldPool(name string, mutate ...func(*agentd.Config)) (stop func()) {
+	return e.poolRunning(db, name, (*agentd.Pool).RunHeld, mutate...)
+}
+
+// poolRunning starts a pool whose loop is run.
+func (e *env) poolRunning(conns *pgxpool.Pool, name string, run func(*agentd.Pool, context.Context) error, mutate ...func(*agentd.Config)) (stop func()) {
 	cfg := agentd.Config{
 		Prices:         prices.NewResolver(pricing.Embedded()),
 		OwnerID:        name,
@@ -407,7 +417,7 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 	go func() {
 		defer GinkgoRecover()
 		defer close(done)
-		Expect(p.Run(ctx)).To(Succeed())
+		Expect(run(p, ctx)).To(Succeed())
 	}()
 	stopped := false
 	stop = func() {

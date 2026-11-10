@@ -46,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/schemagate"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -168,6 +169,14 @@ func serve(ctx context.Context, cfg config) error {
 	audit.RegisterMetrics(reg)
 	reg.MustRegister(kekMetrics.Collectors()...)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
+		return err
+	}
+	restorehold.Metric(reg, cfg.restoreHold)
+	if cfg.restoreHold {
+		// Nothing converges: no sandbox is created, stopped or recreated, no provider key is applied, and the
+		// spend settler and the provider cost reconciliation do not run (issue #462).
+		err = restorehold.Wait(ctx, log, "koinon-reconciler")
+		log.Info("stopping koinon-reconciler")
 		return err
 	}
 	// One price list for the reconciler and the settler.

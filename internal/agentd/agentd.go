@@ -395,6 +395,26 @@ func (p *Pool) Run(ctx context.Context) error {
 	return nil
 }
 
+// RunHeld is Run for restore-hold mode (issue #462): no worker starts, so no run is claimed or taken
+// over, and the checkpoint loop does not start, so no sandbox is checkpointed, stopped or restored.
+// The one thing it does is the checkpoint resync (resync.go): "koinon-api checkpoints resync" is a
+// step of the restore runbook that must finish before the hold is released, and it reads the
+// bucket and writes the database only. It returns when ctx ends.
+func (p *Pool) RunHeld(ctx context.Context) error {
+	c := p.cfg.Checkpoints
+	if c == nil {
+		<-ctx.Done()
+		return nil
+	}
+	for ctx.Err() == nil {
+		safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
+		if !sleep(ctx, c.Poll) {
+			break
+		}
+	}
+	return nil
+}
+
 // work claims and drives runs. ctx ends when the pool stops (no more claims); runCtx ends when the
 // drain deadline passes (the runs in progress are handed off).
 func (p *Pool) work(ctx, runCtx context.Context, owner string) {

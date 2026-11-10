@@ -535,7 +535,7 @@ contents. The list:
   `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `github-api-url`;
 - keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
   `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
-- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`;
+- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
 - the chart and image version.
 
 The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR

@@ -130,6 +130,11 @@ func (in TriggeredTask) eventPayload(fire string, p map[string]any) map[string]a
 // delivery or a duplicate fire finds the record and creates nothing. The sandbox pre-wake is sent
 // after the commit. The returned task is the existing one for a replay, and created is false.
 func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (task store.Task, created bool, err error) {
+	// The one place every trigger fire (schedule, Run now, a future webhook) creates its task: a
+	// held install queues no new work (ADR 0107).
+	if err := s.hold.Err(); err != nil {
+		return store.Task{}, false, err
+	}
 	origin := in.Origin
 	if origin == "" {
 		origin = store.RunOriginScheduled

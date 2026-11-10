@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/restorehold"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -125,6 +127,14 @@ type Service struct {
 	client *export.Client
 	log    *slog.Logger
 	now    func() time.Time
+	hold   *restorehold.Guard
+}
+
+// WithRestoreHold makes every method that sends a trace (Create, Update, Test and the platform
+// ones) refuse with restorehold.ErrHeld while g holds (issue #462, ADR 0107).
+func (s *Service) WithRestoreHold(g *restorehold.Guard) *Service {
+	s.hold = g
+	return s
 }
 
 // New returns a Service. keys may be nil: destinations without secrets still work. The client dials
@@ -521,6 +531,9 @@ func testColumns(o export.Outcome, at time.Time) (pgtype.Timestamptz, pgtype.Boo
 // does not take it gives a *TestFailedError and nothing is saved. While the org's content level is
 // full, only an owner may add a destination.
 func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, user pgtype.UUID, who Authority, in Input) (Destination, error) {
+	if err := s.hold.Err(); err != nil {
+		return Destination{}, err
+	}
 	if !namePattern.MatchString(in.Name) {
 		return Destination{}, invalid("name must be 1 to 64 characters of a-z, 0-9 and '-', starting and ending with a letter or digit")
 	}
@@ -571,6 +584,9 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 // those (enabled, name, resource attributes) is saved untested, so a destination whose backend is
 // down can still be disabled. expectedVersion, when set, must be the ConfigVersion the caller read.
 func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor, who Authority, id string, expectedVersion *int64, in Input) (Destination, error) {
+	if err := s.hold.Err(); err != nil {
+		return Destination{}, err
+	}
 	if !namePattern.MatchString(in.Name) {
 		return Destination{}, invalid("name must be 1 to 64 characters of a-z, 0-9 and '-', starting and ending with a letter or digit")
 	}
@@ -665,6 +681,9 @@ func (s *Service) Delete(ctx context.Context, org pgtype.UUID, actor audit.Actor
 // configuration is still the one that was tested: a destination deleted or changed meanwhile is
 // ErrNotFound or ErrChanged, and nothing is written back. A failure is the outcome, not an error.
 func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string) (Destination, export.Outcome, error) {
+	if err := s.hold.Err(); err != nil {
+		return Destination{}, export.Outcome{}, err
+	}
 	cur, err := s.row(ctx, store.New(s.pool), org, id)
 	if err != nil {
 		return Destination{}, export.Outcome{}, err

@@ -48,6 +48,7 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/pricing"
@@ -306,6 +307,8 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusNotFound, NotFound, "not found")
 	case errors.Is(err, triggers.ErrTriggerNotFound):
 		return set(http.StatusNotFound, NotFound, err.Error())
+	case errors.Is(err, restorehold.ErrHeld):
+		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, triggers.ErrCannotRun):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, budget.ErrForbidden):

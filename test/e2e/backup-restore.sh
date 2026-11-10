@@ -8,7 +8,8 @@
 #   1. note the install: the install ID, the number of tasks and runs, the keys and what they wrap;
 #   2. back up the keys and the database (the guide's backup blocks) and read the dump back;
 #   3. change the install after the backup: add a marker table, and delete the KEK Secret;
-#   4. stop, restore the database, restore the keys, start, resync (the guide's restore blocks);
+#   4. stop, hold, restore the database, restore the keys, start held, resync (the guide's restore
+#      blocks), check that nothing acts while held, verify the keys, release (issue #462);
 #   5. verify: the marker is gone, the install ID, the task and run counts and the keys are the ones of
 #      step 1, the KEK Secret is back, and the key tool reports no warning.
 #
@@ -84,10 +85,31 @@ sql "INSERT INTO public.e2e_after_backup VALUES ('written after the backup')"
 step "restore"
 t_restore=$(date +%s)
 blk stop
+blk hold
 blk restore-db
 blk restore-keys
 blk start
 blk resync
+# Held: every component says so, and the schedule and run machinery is off. The restored install has a
+# due-schedule and run backlog that must not move before the release.
+for c in koinon-api koinon-reconciler koinon-agentd; do
+  logs=$("${K[@]}" -n "$NS" logs "deploy/$c")
+  grep -q 'restore-hold' <<<"$logs" || fail "$c did not log that it is in restore-hold mode"
+done
+api_logs=$("${K[@]}" -n "$NS" logs deploy/koinon-api)
+if grep -q 'DBOS runtime started' <<<"$api_logs"; then
+  fail "koinon-api started the DBOS runtime while held"
+fi
+claimed=$(sql "SELECT count(*) FROM runs WHERE owner_id IS NOT NULL AND state IN ('starting', 'running') AND lease_expires_at > now()")
+[[ $claimed == 0 ]] || fail "$claimed run(s) hold a live lease while the install is held"
+blk verify-keys
+blk release
+for c in koinon-api koinon-reconciler koinon-agentd; do
+  envs=$("${K[@]}" -n "$NS" get "deploy/$c" -o jsonpath='{.spec.template.spec.containers[0].env[*].name}')
+  if grep -q 'KOINON_RESTORE_HOLD' <<<"$envs"; then
+    fail "$c still has KOINON_RESTORE_HOLD after the release"
+  fi
+done
 t_done=$(date +%s)
 
 step "verify"
@@ -96,8 +118,9 @@ step "verify"
 "${K[@]}" -n "$NS" get secret koinon-kek >/dev/null || fail "the KEK Secret is not back"
 state | tee "$work/state.after"
 diff -u "$work/state.before" "$work/state.after" || fail "the restored install differs from the one that was backed up"
-if keys_status | grep -qiE 'warning|missing'; then
-  keys_status >&2
+ks=$(keys_status)
+if grep -qiE 'warning|missing' <<<"$ks"; then
+  printf '%s\n' "$ks" >&2
   fail "keys status warns after the restore"
 fi
 # The migration role must still own its schema: this is what the next helm upgrade Job runs as.

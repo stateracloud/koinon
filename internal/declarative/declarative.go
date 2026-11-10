@@ -80,6 +80,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
 )
 
 // Event reasons.
@@ -351,6 +352,11 @@ func (i *Importer) applyMCPServer(ctx context.Context, org pgtype.UUID, sec *cor
 		return &invalidError{errors.New("remote MCP servers are not configured on this install")}
 	}
 	changed, err := i.MCP.ApplyDeclared(ctx, org, d)
+	if errors.Is(err, restorehold.ErrHeld) {
+		// The change would dial the server; the rest of the pass goes on (ADR 0107).
+		i.log().Info("held: MCP server "+d.Name+" not applied until release", "secret", sec.Name, "org", sec.Labels[LabelOrg])
+		return nil
+	}
 	if err != nil {
 		return err
 	}
