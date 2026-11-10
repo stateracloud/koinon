@@ -152,6 +152,15 @@ func tarOf(files map[string]string) io.Reader {
 	return &b
 }
 
+// hangingRepo is a repository source whose Get (the call that may reach a KMS) returns only when its
+// context ends.
+type hangingRepo struct{ fixedRepo }
+
+func (hangingRepo) Get(ctx context.Context, _, _ pgtype.UUID) (checkpoint.Repository, error) {
+	<-ctx.Done()
+	return checkpoint.Repository{}, ctx.Err()
+}
+
 // failingStore is a checkpoint store whose backups, or restores of one snapshot, fail.
 type failingStore struct {
 	agentd.HomeStore
@@ -417,6 +426,17 @@ var _ = Describe("home checkpoints", func() {
 		Expect(cp.Attempts).To(BeEquivalentTo(2))
 		Expect(cp.Error.String).To(ContainSubstring("access denied"))
 		Expect(cp.SnapshotID.Valid).To(BeFalse())
+	})
+
+	It("bounds a hang before the exec by the backup timeout (#235)", func(ctx SpecContext) {
+		id := request(ctx, store.CheckpointReasonRecreate)
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
+			c.Repositories = hangingRepo{}
+			c.Timeout = 500 * time.Millisecond
+			c.Attempts = 1
+		}))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("deadline exceeded"))
 	})
 
 	It("fails a backup into a prefix that holds a repository the database has no password for, at once, and records the next free epoch (#262)", func(ctx SpecContext) {

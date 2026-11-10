@@ -297,13 +297,19 @@ func (p *Pool) sweepRepositories(ctx context.Context) {
 func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 	c := p.cfg.Checkpoints
 	log := p.log.With("agent", cp.AgentID.String(), "checkpoint", cp.ID.String(), "reason", cp.Reason, "attempt", cp.Attempts)
-	res, err := p.backupHome(ctx, cp)
+	// Timeout bounds the whole attempt from here: the lookups before the exec (the database, and the
+	// repository password, which may call a KMS), the transfer and the record of the result. Timeout is
+	// shorter than Lease, so a writer ends within its lease and FailAbandonedHomeCheckpoints and the
+	// sweeper never act on a row whose writer still writes.
+	tctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
+	res, err := p.backupHome(tctx, cp)
 	if ctx.Err() != nil {
 		return // shutting down: the lease runs out and another replica takes the request over
 	}
 	if err == nil {
 		log.Info("home checkpoint complete", "bytes", res.Bytes, "files", res.Files)
-		if _, err := p.q.CompleteHomeCheckpoint(ctx, store.CompleteHomeCheckpointParams{
+		if _, err := p.q.CompleteHomeCheckpoint(tctx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
 			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
 		}); err != nil {
@@ -343,6 +349,7 @@ type backupResult struct {
 	repositoryEpoch int32
 }
 
+// backupHome runs under the attempt's Timeout (takeCheckpoint sets it on ctx).
 func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupResult, error) {
 	c := p.cfg.Checkpoints
 	sb, err := p.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: cp.OrgID, AgentID: cp.AgentID})
@@ -368,10 +375,8 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	}
 	generation := sb.HomeGeneration.String
 
-	actx, cancel := context.WithTimeout(ctx, c.Timeout)
-	defer cancel()
 	var stderr tail
-	proc, err := p.backend.Exec(actx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
+	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
 		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "--hard-dereference", "-cf", "-", ".")...)...),
 		Stderr:  &stderr, Timeout: c.Timeout,
 	})
@@ -394,7 +399,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 		}
 		return readErr
 	}
-	res, err := c.Store.Backup(actx, repo.Prefix, repo.Password, proc.Stdout(), checkpoint.Meta{
+	res, err := c.Store.Backup(ctx, repo.Prefix, repo.Password, proc.Stdout(), checkpoint.Meta{
 		CheckpointID: cp.ID.String(), Generation: generation, Epoch: epoch,
 		Reason: string(cp.Reason), Sandbox: sb.SandboxID.String, Ready: ready,
 	})
@@ -408,7 +413,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 		return backupResult{}, err
 	}
 	if cp.Reason == store.CheckpointReasonRecreate {
-		if err := c.Store.Verify(actx, repo.Prefix, repo.Password, res.SnapshotID); err != nil {
+		if err := c.Store.Verify(ctx, repo.Prefix, repo.Password, res.SnapshotID); err != nil {
 			return backupResult{}, fmt.Errorf("verifying the snapshot: %w", err)
 		}
 	}
