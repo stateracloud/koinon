@@ -144,8 +144,16 @@ func TestDiffObjects(t *testing.T) {
 	}
 }
 
+// Run IDs are random hex: an all-digit one (381049) or one like 12e4 must stay a string label.
 func TestFakeModelManifestIsLabelledAndParses(t *testing.T) {
-	m := drill.FakeModelManifest("koinon-drill-fakes-a1b2c3", "a1b2c3", "kind.local/koinon-fakemodel:e2e", "model: drill\nturns:\n  - text: x\n")
+	for _, id := range []string{"a1b2c3", "381049", "123e45"} {
+		checkFakeModelManifest(t, id)
+	}
+}
+
+func checkFakeModelManifest(t *testing.T, id string) {
+	t.Helper()
+	m := drill.FakeModelManifest("koinon-drill-fakes-"+id, id, "kind.local/koinon-fakemodel:e2e", "model: drill\nturns:\n  - text: x\n")
 	docs := strings.Split(m, "\n---\n")
 	if len(docs) != 4 {
 		t.Fatalf("want 4 documents, got %d", len(docs))
@@ -160,8 +168,8 @@ func TestFakeModelManifestIsLabelledAndParses(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(d), &v); err != nil {
 			t.Fatalf("document %d: %v", i, err)
 		}
-		if v.Metadata.Labels[drill.RunLabel] != "a1b2c3" {
-			t.Errorf("document %d (%s) has no run label", i, v.Metadata.Name)
+		if v.Metadata.Labels[drill.RunLabel] != id {
+			t.Errorf("run %s: document %d (%s) has no run label", id, i, v.Metadata.Name)
 		}
 	}
 }

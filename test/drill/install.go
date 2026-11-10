@@ -61,7 +61,7 @@ kind: Namespace
 metadata:
   name: %[1]s
   labels:
-    %[3]s: %[2]s
+    %[3]s: "%[2]s"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -69,7 +69,7 @@ metadata:
   name: fakemodel-scripts
   namespace: %[1]s
   labels:
-    %[3]s: %[2]s
+    %[3]s: "%[2]s"
 data:
   drill.yaml: |
 %[5]s
@@ -79,14 +79,14 @@ kind: Deployment
 metadata:
   name: fakemodel
   namespace: %[1]s
-  labels: {app: fakemodel, %[3]s: %[2]s}
+  labels: {app: fakemodel, %[3]s: "%[2]s"}
 spec:
   replicas: 1
   selector:
     matchLabels: {app: fakemodel}
   template:
     metadata:
-      labels: {app: fakemodel, %[3]s: %[2]s}
+      labels: {app: fakemodel, %[3]s: "%[2]s"}
     spec:
       automountServiceAccountToken: false
       containers:
@@ -115,7 +115,7 @@ metadata:
   name: fakemodel
   namespace: %[1]s
   labels:
-    %[3]s: %[2]s
+    %[3]s: "%[2]s"
 spec:
   selector: {app: fakemodel}
   ports:

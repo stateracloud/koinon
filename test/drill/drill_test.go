@@ -98,7 +98,7 @@ func onSuiteEnd(f func(context.Context)) { cleanups = append(cleanups, f) }
 func ensureNamespace(ctx context.Context, ns string) {
 	GinkgoHelper()
 	must(drill.CheckNamespace(ns), ns)
-	_, err := kube.KubectlStdin(ctx, fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: %s\n", ns, drill.RunLabel, runID), "apply", "-f", "-")
+	_, err := kube.KubectlStdin(ctx, fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: \"%s\"\n", ns, drill.RunLabel, runID), "apply", "-f", "-")
 	must(err, "create namespace "+ns)
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") == "1" {
@@ -513,7 +513,7 @@ metadata:
   labels:
     %s/secret-type: model-provider
     %s/org: default
-    %s: %s
+    %s: "%s"
 stringData:
   name: drill-declared
   provider: openai
