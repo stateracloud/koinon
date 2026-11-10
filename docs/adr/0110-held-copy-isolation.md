@@ -68,15 +68,17 @@ own mark with the row:
   restore guide starts the chart held and then loads the dump, which replaces the table and the audit chain. On
   each check it writes the unbound row when the row is absent, and sets `install_binding.held_since` when it is NULL
   **and its own process start time is after `install_binding.released_at`** (or `released_at` is NULL). Only the
-  release step (decision 1) clears `held_since`, and it sets `released_at`. So an old held pod that is still
-  running during the rolling release cannot set `held_since` again after the new koinon-api released, and the
-  sessions are revoked once.
+  release step (decision 1) clears `held_since`, and it sets `released_at` and `released_by` (the `OwnerID` of the
+  releasing process's mark). So an old held pod that is still running during the rolling release cannot set
+  `held_since` again after the new koinon-api released, and the sessions are revoked once.
 - **After a load, the hold is not visible for up to 30 s.** In that window the database carries only the dump's
-  rows. The runbook therefore says: after the load, run `restore status` until it shows `held_since` set (and a
-  `same` or `copy` state that fits the restore), then release. The `restore-release-check` Job refuses a release
-  when the state is not `same`, `held_since` is NULL and `released_at` is NULL or older than the dump time
-  (decision 2): the copy's hold has not been re-asserted yet. For an in-place restore (state `same`) the Job cannot
-  tell this window from a normal upgrade, so there the runbook step is the guard.
+  rows. For a **copy** this does not matter: the dumped row carries the source's mark and the source's
+  `released_by` (or NULL), never this install's mark, so decision 1 counts the release as pending from the first
+  read, held or not, until this install's own release step sets `released_by`. For an **in-place** restore (state
+  `same`) nothing in the database tells the window from a normal upgrade, so the runbook is the guard there: after
+  the load, run `restore status` until it shows `held_since` set, then release. No chart Job refuses an upgrade on
+  this rule: an absent row (the first upgrade of an existing install) and a live install that lost its mark must
+  stay upgradable, security fixes included.
 - **Who writes what.** Each binary writes only its own columns: koinon-api the public URL and the OIDC redirect
   URL, agentd the checkpoint endpoint and bucket; any binary the mark (only by the claim) and `held_since`. Every
   write is guarded by the state: the targets are refreshed only in state `same`. The claim is
@@ -99,10 +101,16 @@ operator accepts them, audited.**
   one Kubernetes Event per Secret (reason `HeldNotApplied`), and exports
   `koinon_declarative_held_changes{kind,action}` (kinds: model-provider, mcp-server, connection; actions: apply,
   remove). `restore status` (decision 5) prints the plan.
-- **A release is pending** while `install_binding.held_since` is set, or a `restore-hold=true` settings record
-  (ADR 0100) is newer than the newest `restore.release` event. The binding state is not part of it: a copy stays
-  `copy` until `adopt-restore`, and that must not make every start a release. A live install has neither, so a
-  normal upgrade is never blocked.
+- **A release is pending** while any of these holds:
+  - `install_binding.held_since` is set;
+  - a `restore-hold=true` settings record (ADR 0100) is newer than the newest `restore.release` event;
+  - the state is `copy` and `install_binding.released_by` is not this install's `OwnerID`.
+
+  The third clause catches a fresh copy inside the 30 s window (decision 0) and ends with the copy's own release
+  step, so a copy that stays `copy` until `adopt-restore` is not pending at every start. A live install that lost
+  its mark Secret is pending once and runs the audited release step once (its sessions are revoked; see
+  Consequences). An absent row (`unknown`, the first upgrade of an existing install) is not pending, so that upgrade
+  is never blocked. A live install with its mark has none of these.
 - **The release step** runs once per hold, in koinon-api, at its first unheld start while a release is pending (one
   replica wins: the step holds a row lock on `install_binding` and re-checks "pending" under it). In one
   transaction it:
@@ -112,11 +120,11 @@ operator accepts them, audited.**
     name, item ID, release ID, state), with state `accepted` when `restore.acceptImporterDeletions` is true (a chart
     value passed to koinon-api and to the Job) and `waiting` otherwise;
   - records `restore.release` in the install audit chain with the plan hash, the list of removals and their state;
-  - clears `held_since`, sets `released_at`, and replaces the list of any earlier release (a successful step clears
-    the old list).
+  - clears `held_since`, sets `released_at` and `released_by`, and replaces the list of any earlier release (a
+    successful step clears the old list).
 - **The importer is the gate, also after the release.** While a release is pending, removals are plan-only. After
-  it, an item on `restore_accepted_removals` is removed only in state `accepted`, and its row is deleted when the
-  removal is done; in state `waiting` the removal stays plan-only and is logged (`restore: removal of <kind> <name>
+  it, an item on `restore_accepted_removals` is removed only in state `accepted`, and the removal and the delete of
+  its row are one transaction (a crash leaves both or neither); in state `waiting` the removal stays plan-only and is logged (`restore: removal of <kind> <name>
   waits for restore.acceptImporterDeletions`), however long ago the release was. When the Secret comes back, its row
   is deleted and nothing is removed. Items not on the list (declared after the release) follow the normal rules, so
   the list blocks only what the restore brought in.
@@ -132,13 +140,17 @@ operator accepts them, audited.**
   false. Under Helm it is a `pre-upgrade` hook with `helm.sh/hook-weight: "10"`, after the migrate Job
   (`charts/koinon/templates/migrate-job.yaml`, weight `"0"`). Under Argo CD it carries `argocd.argoproj.io/hook:
   Sync` and `argocd.argoproj.io/sync-wave: "2"`, after the migrate Job's wave `"1"`. It exits 0 when the schema or
-  the audit table does not exist yet (a first install; Argo CD's hooks run then too) and when no release is pending.
-  On a pending release it prints the plan and the `restore status` report and fails when the plan has a removal and
-  the value is not true, so `helm upgrade` stops before any Deployment changes and the install stays held. Under
+  the audit table does not exist yet (a first install; Argo CD's hooks run then too) and when no release is pending
+  (decision 1's rule, the same function koinon-api uses). On a pending release it prints the plan and fails only
+  when the plan has a removal and the value is not true, so `helm upgrade` stops before any Deployment changes and
+  the install stays held. It refuses nothing else; in particular it never blocks an upgrade because of the
+  binding state. Under
   Argo CD the Deployments (wave 0) are applied before wave 2, so there the Job is only a preview; with
   `--no-hooks` or a plain `kubectl apply` it does not run at all. The importer gate above holds in every case.
-- The value is read only on a pending release, so leaving it set does nothing later; the chart NOTES say to remove
-  it.
+- **Leaving the value set is not harmless.** It is read on a pending release and at every koinon-api start while
+  `waiting` rows exist, so a value left set auto-accepts at the next start every removal that waits. NOTES.txt
+  prints a warning on every render with the value true ("restore.acceptImporterDeletions is set: every waiting
+  removal of a restore is accepted at the next start; remove it after the release"), and `restore status` shows it.
 - The drill sets `restore.acceptImporterDeletions: true` on purpose on its fresh copy, and has one spec that a
   release without it fails under Helm, leaves the hold on, and that the removals stay `waiting` (and the sessions
   are still revoked) when the Job is
@@ -166,7 +178,9 @@ API tokens are **not** revoked by the release. `restore status` lists the tokens
 (not revoked, not expired, with `last_used_at` and creator). The **dump time** is the timestamp of the newest audit
 or install chain event that is older than the first held record (`install_binding.held_since`, or the oldest
 `restore-hold=true` settings record after the newest `restore.release`); it is an upper bound, since the data can
-be a little older than its last event. They are **not** refused (procoduck, 2026-11-10). A
+be a little older than its last event. With no held record (a restore started unheld, or the 30 s window of decision
+0) the dump time is unknown: `restore status` says so and lists every active token. The dump time is used only for
+this list; nothing refuses or blocks on it. They are **not** refused (procoduck, 2026-11-10). A
 platform admin re-checks the list, and the runbook says to revoke each token that was revoked or reported lost since
 the dump.
 
@@ -422,7 +436,8 @@ picture).
   from the bound one, so the state is `copy`: its own targets equal the recorded ones, so checkpoints go
   restore-only (no new snapshots) and OIDC login is off, until a platform admin runs `adopt-restore` or applies the
   mark backup. The alerts `KoinonRestoreIsolationConflict` (decision 4) and the `koinon_install_binding{state="copy"}`
-  gauge make this visible within minutes; the backup and restore guide gets a "lost mark Secret" section.
+  gauge make this visible within minutes; it also runs the release step once (decision 1), which signs everyone
+  out. It stays upgradable throughout. The backup and restore guide gets a "lost mark Secret" section.
 - Negative: every release signs everyone out, also a release with no data loss (a hold kept only for a check).
 - Negative: an operator on a copy cannot use a source API token; automation against a copy needs a new token.
 - **CRD.** The chart ships its first CustomResourceDefinition (`PlatformAdminRecovery`), in `crds/`. A CRD is
@@ -432,9 +447,15 @@ picture).
   later install fails. A `recovery.crd.create` switch fixes that only for an operator who remembers it. Helm's
   `crds/` semantics match a shared API instead: install when missing, never owned by a release, never deleted.
   The cost: Helm does not upgrade a CRD in `crds/`. So the CRD changes only by adding fields (ADR 0085), each chart
-  version names the CRD version it needs in an annotation, the reconciler refuses to start when the installed CRD is
-  older (the reason names `kubectl apply --server-side -f crds/`), and the upgrade guide carries that step. Argo CD
-  applies `crds/` on every sync. Uninstall leaves the CRD; the guide says how to delete it once no release is left.
+  version names the CRD version it needs in an annotation, and the upgrade guide carries the
+  `kubectl apply --server-side -f crds/` step. A missing or older CRD never stops the reconciler: it starts and
+  works normally (a routine `helm upgrade --wait` must not crashloop until someone with cluster rights applies the
+  CRD); only the recovery handler refuses, each request with the reason `CRD older than required (kubectl apply
+  --server-side -f crds/)` or `CRD missing`, and the reconciler exports `koinon_recovery_crd_ready` (0 or 1, no
+  labels; ADR 0023) with the chart alert `KoinonRecoveryCRDNotReady` after 30 minutes at 0. Argo CD applies
+  `crds/` on every sync. Installers that cannot create CRDs use `helm install --skip-crds` (the guide says so;
+  `crds/` ignores `recovery.enabled`, so this flag is the way to leave it out); recovery is then refused with the
+  same reason. Uninstall leaves the CRD; the guide says how to delete it once no release is left.
 - **Two releases on one cluster.** A new chart check (`hack/chart-check.d/99-platform-recovery.sh`) renders two
   releases in two namespaces and asserts that no cluster-scoped object name repeats (policy, binding,
   ClusterRole), that each binding selects only its own namespace, and that the CRD is not in the templates.
@@ -449,14 +470,15 @@ picture).
   `99-platform-recovery.sh` and `99-restore-release.sh` (hook weight and Argo CD wave of the Job included).
 - **Chart smoke.** New startup inputs: `KOINON_INSTALL_MARK` on koinon-api, the CRD the reconciler watches, and the
   `restore-release-check` Job. `make test-chart-smoke` asserts koinon-api starts with the mark, the reconciler
-  starts with the CRD present and refuses to start without it when `recovery.enabled` is true, and the Job exits 0
-  on a first install (no schema yet) and on a plain upgrade.
+  starts and becomes ready with the CRD present, missing, or older than required (in the last two cases recovery
+  requests are refused and `koinon_recovery_crd_ready` is 0), and the Job exits 0 on a first install (no schema
+  yet), on the first upgrade of an existing install (no `install_binding` row), and on a plain upgrade.
 - **Admission.** The ValidatingAdmissionPolicy is native (never Kyverno), `failurePolicy: Fail`, binding
   `validationActions: [Deny]`. `make test-admission` gets cases: a create with another user's `requester` or groups
   is refused; an update of `spec` is refused while a status update passes; a create with a `ttl` over 1 h, with no
   `nonce`, or a secret-result action with no `recipientPublicKey` is refused; a valid create is admitted. The
   reconciler-side check (policy and binding present and strict, CR newer than the binding) gets a unit test.
-- Schema: new tables `install_binding` (with `held_since` and `released_at`), `restore_accepted_removals` and `recovery_requests`, the enum value `recovery` on
+- Schema: new tables `install_binding` (with `held_since`, `released_at` and `released_by`), `restore_accepted_removals` and `recovery_requests`, the enum value `recovery` on
   `platform_admin_source`, a nullable `expires_at` on `platform_admins`, and nullable columns elsewhere only
   (expand-only; allowed in a patch line, ADR 0085).
 - ADR 0107 is amended: the importer no longer writes while held (only the purger, the audit anchor and the hold
@@ -488,7 +510,7 @@ Each part is one pull request. The drill specs of its decisions move from known 
 - **(d) `PlatformAdminRecovery`** (decision 6). The CRD with its status subresource, the ValidatingAdmissionPolicy
   and the reconciler's check that it is in force, the Roles, the reconciler handler (also while held),
   `recovery_requests`, the sealed result, the temporary platform admin grant and its expiry, and the admission and
-  chart-smoke cases, the two-release chart check, the CRD version gate. The age library (`filippo.io/age`) enters
+  chart-smoke cases, the two-release chart check, the CRD version check of the recovery handler (`koinon_recovery_crd_ready` and its alert). The age library (`filippo.io/age`) enters
   at a version at least 3 days old (ADR 0079, `hack/dep-age-check.sh`). Built on the password-reset and token
   functions of #512, moved into `internal/recovery`. Depends on #512, on (b1) for `adopt-restore`, and on (b2)
   because `adopt-restore` clears decision 4's conflicts and lists them.
