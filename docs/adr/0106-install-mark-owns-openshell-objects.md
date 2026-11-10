@@ -1,6 +1,6 @@
 # 0106. An install mark decides which OpenShell objects an install owns
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-10
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0051](0051-session-home-generations.md), [0045](0045-openshell-hardening-defaults.md), [0046](0046-adr-conventions.md)
 - Issues: #461, #275 (the restore drill)
