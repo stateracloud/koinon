@@ -117,3 +117,12 @@ stay on.
   those pods. OpenShell labels only its workspace namespaces.
 - Do not grant RBAC on `nodes/proxy`. It reaches the kubelet's exec API directly, bypassing
   admission just like node access does, so it is a way around this policy.
+
+## Relabelling a sandbox namespace
+
+The `...-sandbox-namespaces` policy refuses changes to a sandbox namespace's `openshell.ai/managed-by`
+and `openshell.ai/gateway-id` labels (and any label key in `sandboxPolicy.namespaceSelector`) from
+every identity except `sandboxPolicy.identities.namespaces`, cluster admins included, because removing
+one takes the namespace out of every sandbox policy. To relabel on purpose, change the identity list
+through the chart, or suspend the `...-sandbox-namespaces` binding the way the CONNECT binding is
+suspended above, and restore it afterwards.

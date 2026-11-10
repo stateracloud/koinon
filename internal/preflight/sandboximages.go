@@ -121,6 +121,17 @@ func SupervisorImage(toml string) string {
 	return parseGatewayConfig(toml).supervisorImage
 }
 
+// GatewayID reads the gateway's gateway_id out of the gateway.toml text, as the gateway uses it: the
+// key under [openshell.drivers.kubernetes], or OpenShell's default when the file does not set one.
+// The reconciler uses it to notice that the admission policies no longer match the gateway's
+// namespaces (old issue 475).
+func GatewayID(toml string) string {
+	if id := parseGatewayConfig(toml).gatewayID; id != "" {
+		return id
+	}
+	return openShellDefaultGatewayID
+}
+
 // checkSandboxImages checks OpenShell's gateway configuration for what sandbox pods need to pull
 // the images Koinon names:
 //   - when Koinon pulls with credentials or through a mirror (ExpectSandboxPullSecrets), that the

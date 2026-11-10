@@ -86,6 +86,14 @@ spec:
         object.metadata.labels['openshell.ai/boundary-role'] == 'workload'
     - name: supervisorCreator
       expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.supervisorPods | default list)) | quote }}
+    # The Sandbox that controls this pod (ownerReferences, set by the Agent Sandbox controller before
+    # it creates the pod). Empty when no Sandbox controls the pod.
+    - name: owningSandboxes
+      expression: >-
+        !has(object.metadata.ownerReferences) ? [] :
+        object.metadata.ownerReferences.filter(o,
+          o.kind == 'Sandbox' && o.apiVersion.startsWith('agents.x-k8s.io/') &&
+          has(o.controller) && o.controller).map(o, o.name)
   validations:
     - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
       message: ephemeral containers are not allowed on sandbox pods
@@ -118,6 +126,27 @@ spec:
       message: SPIFFE CSI volumes (csi.spiffe.io) are not allowed in sandbox pods
     - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
       message: hostPath volumes are not allowed
+    # Claims (issue 475; ADR 0045 amendment 2026-11-10): a pod rule sees the pod, not the
+    # PersistentVolume behind a claim, so a claim to a hostPath or csi.spiffe.io PV would pass the
+    # volume rules above. A sandbox pod therefore mounts only the claim its own Sandbox made. Agent
+    # Sandbox v1.0.7 names the claim of volumeClaimTemplate T for Sandbox S "T-S" and mounts it as
+    # volume T (sandbox_controller.go:1510-1516); OpenShell 0.1.7 asks for exactly one template,
+    # "workspace" (driver.rs:7562-7590). Any other claim, a generic ephemeral volume, and a claim
+    # on a pod no Sandbox controls are denied. "T-S" is ambiguous when T may contain '-' (volume
+    # "workspace-sb" on Sandbox "a" and volume "workspace" on Sandbox "sb-a" give one name), so the
+    # objects policy refuses hyphens in template names and this rule refuses them in the volume name.
+    # CREATE only: pod volumes cannot change after create (the API server refuses it), and an UPDATE
+    # that only drops the owner reference (the garbage collector orphaning the pod when its Sandbox is
+    # deleted with orphan propagation) must not be denied and leave the pod stuck. The rule above
+    # already denies any other identity a spec change.
+    - expression: >-
+        request.operation != 'CREATE' || !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.persistentVolumeClaim) ||
+          (size(variables.owningSandboxes) == 1 && !v.name.contains('-') &&
+            v.persistentVolumeClaim.claimName == v.name + '-' + variables.owningSandboxes[0]))
+      message: sandbox pods may mount only the PersistentVolumeClaim their Sandbox made (volumeClaimTemplate name-sandbox name)
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.ephemeral))"
+      message: generic ephemeral volumes are not allowed in sandbox pods
     - expression: >-
         object.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) &&
         (!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))
@@ -231,6 +260,17 @@ spec:
   validations:
     - expression: "variables.trusted || variables.contentUnchanged"
       messageExpression: "'only the OpenShell gateway may write ' + request.resource.resource + ' in sandbox namespaces, not ' + request.userInfo.username"
+    # Claim templates (issue 475; ADR 0045): the pods policy accepts the claim "<template>-<sandbox>", so
+    # a template name must not contain '-' (OpenShell 0.1.7 uses only "workspace") and a template must
+    # not bind its claim to a chosen PersistentVolume. Applies to every identity, trusted ones included.
+    - expression: >-
+        variables.isSecret || !has(object.spec) || !has(object.spec.volumeClaimTemplates) ||
+        object.spec.volumeClaimTemplates.all(t, has(t.metadata) && has(t.metadata.name) && !t.metadata.name.contains('-'))
+      message: Sandbox volumeClaimTemplates names must be set and must not contain '-'
+    - expression: >-
+        variables.isSecret || !has(object.spec) || !has(object.spec.volumeClaimTemplates) ||
+        object.spec.volumeClaimTemplates.all(t, !has(t.spec) || !has(t.spec.volumeName) || t.spec.volumeName == '')
+      message: Sandbox volumeClaimTemplates must not set spec.volumeName (a claim bound to a chosen PersistentVolume)
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -309,4 +349,63 @@ spec:
     namespaceSelector:
       {{- include "koinon.sandboxUnlabelledSelector" $ | nindent 6 }}
 {{- end }}
+{{- /*
+Namespace labels (old issue 475): the policies above select namespaces by label, so removing or
+changing openshell.ai/managed-by or openshell.ai/gateway-id takes a namespace out of all of them.
+Only the identities that own the namespace lifecycle (sandboxPolicy.identities.namespaces) may change
+the labels the selectors use on a namespace the policies cover. The policy cannot bind by namespace
+selector: for a Namespace the selector reads the NEW object's labels, which is the object that has
+just left the selection. It binds to every namespace UPDATE and judges the OLD object's labels itself,
+with the same selector semantics as the bindings (koinon.selectorCEL). Pod and Sandbox rules need no
+such care; this one fails closed on any CEL error, so it only reads labels.
+*/}}
+{{- $nsPolicy := printf "%s-sandbox-namespaces" $base }}
+{{- $scope := include "koinon.selectorCEL" (list (include "koinon.sandboxNamespaceSelector" $ | fromYaml) "variables.oldLabels") }}
+{{- if $p.scopeToGateway }}
+{{- $scope = printf "(%s) || (%s)" $scope (include "koinon.selectorCEL" (list (include "koinon.sandboxUnlabelledSelector" $ | fromYaml) "variables.oldLabels")) }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $nsPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [namespaces]
+  variables:
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.namespaces | default list)) | quote }}
+    - name: oldLabels
+      expression: "has(oldObject.metadata.labels) ? oldObject.metadata.labels : {'koinon.dev/none': ''}"
+    - name: newLabels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {'koinon.dev/none': ''}"
+    - name: covered
+      expression: {{ $scope | quote }}
+    - name: guarded
+      expression: {{ include "koinon.sandboxGuardedLabels" . | quote }}
+  validations:
+    - expression: >-
+        variables.trusted || !variables.covered ||
+        variables.guarded.all(k, (k in variables.oldLabels) == (k in variables.newLabels) &&
+          (!(k in variables.oldLabels) || variables.oldLabels[k] == variables.newLabels[k]))
+      messageExpression: >-
+        'only the namespace lifecycle owners may change the labels the sandbox policies select by (' +
+        variables.guarded.join(', ') + ') on a sandbox namespace, not ' + request.userInfo.username
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $nsPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $nsPolicy }}
+  validationActions: {{ toJson $p.validationActions }}
 {{- end }}

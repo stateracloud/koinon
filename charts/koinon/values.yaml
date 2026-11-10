@@ -804,3 +804,10 @@ sandboxPolicy:
     # Secrets: the OpenShell gateway.
     secrets:
       - system:serviceaccount:openshell:openshell
+    # Namespace labels: the identities that own the sandbox namespaces' lifecycle (OpenShell's managed
+    # workspace mode has the gateway create them). Only these may add, change or remove the labels the
+    # policies select by (openshell.ai/managed-by, openshell.ai/gateway-id and every key of
+    # namespaceSelector) on a namespace the policies cover; everyone else is denied, cluster admins
+    # included, so a namespace cannot be moved out of the policies by relabelling (old issue 475).
+    namespaces:
+      - system:serviceaccount:openshell:openshell
