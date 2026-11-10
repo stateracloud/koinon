@@ -16,7 +16,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/dep-age-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Only the function: the script itself needs git and the network.
-eval "$(sed -n '/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p' "$repo/hack/dep-age-check.sh")"
+eval "$(sed -n '/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p' "$repo/hack/dep-age-check.sh")"
 
 fail=0
 # The URLs are assembled from parts so that no release-asset URL literal appears in this file:
@@ -56,6 +56,13 @@ pins "packageManager pin with hash" '  "packageManager": "pnpm@12.18.0+sha512.ab
 pins "Dockerfile PNPM_VERSION" 'ARG PNPM_VERSION=12.18.0' "pnpm 12.18.0"
 pins "other ARG is not a pin" 'ARG NODE_VERSION=24.1.0' ""
 pins "unrelated JSON line" '  "version": "0.0.0",' ""
+
+# The Dockerfile pathspecs must select every Dockerfile, named ones included.
+# shellcheck disable=SC2154 # defined by the eval above
+selected=$(git -C "$repo" ls-files -- "${dockerfile_specs[@]}")
+for want_file in hack/e2e-toolchain/Dockerfile hack/e2e-toolchain/web.Dockerfile; do
+	if grep -qxF "$want_file" <<<"$selected"; then echo "ok   dockerfile specs select $want_file"; else echo "FAIL dockerfile specs miss $want_file"; fail=1; fi
+done
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"
