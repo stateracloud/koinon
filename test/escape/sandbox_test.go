@@ -331,6 +331,23 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		}
 	}, NodeTimeout(4*time.Minute))
 
+	It("has no SPIFFE or SPIRE agent socket reachable (ADR 0097 decision 11)", func(ctx SpecContext) {
+		res := probe(ctx,
+			check{"id": "mounts", "op": "mounts", "contains": []string{"spire", "spiffe"}},
+			check{"id": "files", "op": "find", "roots": scanRoots(), "segments": []string{"spire", "spiffe", "spire-agent", "agent.sock", "spire-agent.sock", "spiffe-workload-api"}},
+			check{"id": "run", "op": "read", "path": "/run/spire"},
+			check{"id": "var run", "op": "read", "path": "/var/run/spire"},
+			check{"id": "tmp", "op": "read", "path": "/tmp/spire-agent"},
+		)
+		Expect(res["mounts"]).To(BeEmpty(), "mounts that look like the SPIRE agent socket or the SPIFFE CSI driver")
+		files := res["files"].(map[string]any)
+		Expect(files["visited"]).To(BeNumerically(">", 1000), "the walk read too few entries to mean anything")
+		Expect(files["found"]).To(BeEmpty(), "files that look like a SPIFFE socket")
+		Expect(res["run"]).To(BeElementOf("ENOENT", "EACCES"))
+		Expect(res["var run"]).To(BeElementOf("ENOENT", "EACCES"))
+		Expect(res["tmp"]).To(BeElementOf("ENOENT", "EACCES"))
+	}, NodeTimeout(4*time.Minute))
+
 	It("has no ServiceAccount token mounted anywhere, projected or not", func(ctx SpecContext) {
 		res := probe(ctx,
 			check{"id": "mounts", "op": "mounts", "contains": []string{"serviceaccount", "kubernetes.io", "secrets"}},

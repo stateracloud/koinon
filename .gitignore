@@ -43,3 +43,4 @@ docs/site/.astro/
 # moves them to reports/; a bare `go tool ginkgo` or `go test -args -ginkgo.junit-report` leaves them)
 **/junit.xml
 **/report.json
+__pycache__/
