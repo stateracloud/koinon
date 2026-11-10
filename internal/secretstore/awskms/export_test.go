@@ -58,3 +58,12 @@ var SigningKey = signingKey
 
 // ErrDryRunUnverified is the probe's reason for an endpoint that does not do the dry run.
 var ErrDryRunUnverified = errDryRunUnverified
+
+// RefreshIdle reports whether no credential refresh is in flight: a refresh that was started has
+// finished and installed its result (or kept the old credentials after a failure). Tests wait on
+// it, on the client side, before they move the clock or the token again.
+func (w *Wrapper) RefreshIdle() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.pending == nil
+}

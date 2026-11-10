@@ -76,12 +76,13 @@ func (r *runner) waitModel(ctx context.Context, model string) error {
 		if !recorded {
 			// A model without a usable price is never served (ADR 0041): fail now, not after the wait.
 			pm := prices.Model{ID: m.ModelID.String(), Name: model, ProviderType: m.ProviderType, ProviderURL: m.ProviderUrl}
-			var bad *prices.BadPriceError
-			switch _, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, pm, now()); {
-			case errors.Is(err, prices.ErrUnpriced):
+			_, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, pm, now())
+			reason, unpriceable := prices.Unpriceable(err)
+			switch {
+			case unpriceable && reason == prices.ReasonNoPrice:
 				return &failure{reason: fmt.Sprintf("the model %q has no price, so the gateway does not serve it; "+
 					"add a price for it on the Prices page and run the task again", model)}
-			case errors.As(err, &bad):
+			case unpriceable:
 				return &failure{reason: fmt.Sprintf("the model %q is not served: %v; fix its price on the Prices page", model, err)}
 			case err != nil && ctx.Err() != nil:
 				return ctx.Err()

@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -233,6 +234,33 @@ var _ = Describe("runs", func() {
 			r := runIn(ctx, store.RunStateRunning)
 			_, err := pool.Exec(ctx, `UPDATE runs SET epoch = epoch - 1 WHERE org_id = $1 AND id = $2`, r.OrgID, r.ID)
 			Expect(err).To(MatchError(ContainSubstring("epoch must not decrease")))
+		})
+	})
+
+	Describe("the orgs a worker polls (issue 378)", func() {
+		It("lists an org only while a run in it can be claimed or taken over", func(ctx SpecContext) {
+			polled := func(org pgtype.UUID) bool {
+				GinkgoHelper()
+				ids, err := q.ListOrgIDsWithRunWork(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				return slices.Contains(ids, org)
+			}
+			idle := newFixture(ctx)
+			Expect(polled(idle.org)).To(BeFalse(), "an org with no run costs a worker nothing")
+
+			f := newFixture(ctx)
+			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			Expect(polled(f.org)).To(BeTrue(), "a queued run can be claimed")
+
+			r := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			Expect(polled(f.org)).To(BeFalse(), "a run under a live lease is nobody's work")
+
+			expireLease(ctx, r)
+			Expect(polled(f.org)).To(BeTrue(), "an expired lease can be taken over")
+
+			_, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-b", LeaseSeconds: lease})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(polled(f.org)).To(BeFalse())
 		})
 	})
 
