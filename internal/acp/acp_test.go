@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,7 +202,7 @@ var _ = Describe("Conn", func() {
 		agent := &fakeAgent{cancelled: make(chan struct{})}
 		agent.conn = sdk.NewAgentSideConnection(agent, fromAgentW, toAgentR)
 		rec = &recorder{}
-		conn = acp.NewConn(rec, toAgentW, fromAgentR)
+		conn = acp.NewConn(context.Background(), rec, toAgentW, fromAgentR)
 		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
 	})
 
@@ -273,7 +275,7 @@ var _ = Describe("Conn.WaitUpdates", func() {
 	It("returns once the connection ended and every update reached the handler", func(ctx SpecContext) {
 		fromAgentR, fromAgentW := io.Pipe()
 		rec := &slowRecorder{}
-		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
 		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
 		const n = 50
 		go func() {
@@ -360,7 +362,7 @@ var _ = Describe("a ReadObserver handler", func() {
 	It("sees each update as it is read, before the handler gets it, and nothing else", func(ctx SpecContext) {
 		fromAgentR, fromAgentW := io.Pipe()
 		obs := &observer{}
-		conn := acp.NewConn(obs, io.Discard, fromAgentR)
+		conn := acp.NewConn(context.Background(), obs, io.Discard, fromAgentR)
 		go func() {
 			defer GinkgoRecover()
 			for i := range 2 {
@@ -386,7 +388,7 @@ var _ = Describe("a burst of updates against a slow handler", func() {
 	It("holds the agent's stream back instead of overflowing the SDK's queue", func(ctx SpecContext) {
 		fromAgentR, fromAgentW := io.Pipe()
 		rec := &slowRecorder{}
-		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
 		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
 		// Three times the SDK's queue of 1024. slowRecorder takes its time with each update, so
 		// without backpressure the reader gets ahead and the SDK closes the connection.
@@ -411,7 +413,7 @@ var _ = Describe("session/update lines the SDK rejects", func() {
 	It("do not count as unhandled, so the stream is never held back for them", func(ctx SpecContext) {
 		fromAgentR, fromAgentW := io.Pipe()
 		rec := &slowRecorder{}
-		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
 		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
 		// More than the 512 lag limit of lines whose params the SDK refuses (InvalidParams),
 		// so the handler never sees them; then valid ones.
@@ -434,4 +436,137 @@ var _ = Describe("session/update lines the SDK rejects", func() {
 		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
 		Expect(rec.count()).To(Equal(good))
 	}, SpecTimeout(40*time.Second))
+})
+
+// updateLine is a valid session/update notification with the given text.
+func updateLine(text string) string {
+	return `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + text + `"}}}}` + "\n"
+}
+
+// gate is a handler that holds every update until release is closed.
+type gate struct {
+	slowRecorder
+	release chan struct{}
+}
+
+func (g *gate) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+	}
+	return g.slowRecorder.SessionUpdate(ctx, n)
+}
+
+var _ = Describe("a reader held back by a handler that does not return", func() {
+	// 700 updates against a handler that is stuck: the reader stops at the lag limit. The
+	// connection must still be releasable from outside, since the SDK's own Done is closed by
+	// the goroutine that is held.
+	run := func(release func(cancel context.CancelFunc, conn *acp.Conn)) {
+		ctx, cancel := context.WithCancel(context.Background())
+		DeferCleanup(cancel)
+		fromAgentR, fromAgentW := io.Pipe()
+		g := &gate{release: make(chan struct{})}
+		DeferCleanup(func() { close(g.release) })
+		conn := acp.NewConn(ctx, g, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		var written atomic.Int32
+		go func() {
+			for i := range 700 {
+				if _, err := io.WriteString(fromAgentW, updateLine(fmt.Sprint(i))); err != nil {
+					return
+				}
+				written.Add(1)
+			}
+		}()
+		Eventually(written.Load).Should(BeNumerically(">=", 512))
+		Consistently(written.Load, "300ms").Should(BeNumerically("<", 700), "the reader is held back")
+		release(cancel, conn)
+		Eventually(written.Load).Should(BeNumerically("==", 700))
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(6 * time.Second).Should(BeClosed())
+	}
+
+	It("is freed when the context ends", func() {
+		run(func(cancel context.CancelFunc, _ *acp.Conn) { cancel() })
+	})
+
+	It("is freed by Close", func() {
+		run(func(_ context.CancelFunc, conn *acp.Conn) { conn.Close() })
+	})
+})
+
+var _ = Describe("what counts as a notification", func() {
+	It("counts a session/update with a null id, which the SDK treats as a notification", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		const n = 3000
+		go func() {
+			for i := range n {
+				line := strings.Replace(updateLine(fmt.Sprint(i)), `"jsonrpc":"2.0",`, `"jsonrpc":"2.0","id":null,`, 1)
+				if _, err := io.WriteString(fromAgentW, line); err != nil {
+					return
+				}
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(60 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(n))
+	}, SpecTimeout(90*time.Second))
+
+	It("does not count a line the SDK cannot decode", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		const bad, good = 1500, 20
+		go func() {
+			for range bad {
+				// jsonrpc is not a string: the SDK drops the line.
+				line := strings.Replace(updateLine("x"), `"jsonrpc":"2.0"`, `"jsonrpc":2`, 1)
+				if _, err := io.WriteString(fromAgentW, line); err != nil {
+					return
+				}
+			}
+			for i := range good {
+				if _, err := io.WriteString(fromAgentW, updateLine(fmt.Sprint(i))); err != nil {
+					return
+				}
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(good))
+	}, SpecTimeout(40*time.Second))
+})
+
+var _ = Describe("a burst of mixed notifications against a slow handler", func() {
+	It("holds the stream back for every notification the SDK queues, not only updates", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		// 1000 updates, each followed by three extension or unknown notifications: 4000 queued
+		// notifications, but never more than 512 updates in flight.
+		const n = 1000
+		go func() {
+			for i := range n {
+				if _, err := io.WriteString(fromAgentW, updateLine(fmt.Sprint(i))); err != nil {
+					return
+				}
+				for _, m := range []string{"_ext/one", "_ext/two", "unknown/three"} {
+					if _, err := io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"`+m+`","params":{}}`+"\n"); err != nil {
+						return
+					}
+				}
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(60 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(n))
+	}, SpecTimeout(90*time.Second))
 })

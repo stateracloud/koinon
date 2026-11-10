@@ -119,7 +119,7 @@ func (s *sandbox) harness(ctx context.Context, workdir string, cmd []string) *ha
 	h := &harness{cmd: c, stdin: stdin, client: &client{}}
 	c.Stderr = &h.stderr
 	Expect(c.Start()).To(Succeed())
-	h.conn = acp.NewConn(h.client, stdin, stdout)
+	h.conn = acp.NewConn(context.Background(), h.client, stdin, stdout)
 	h.conn.SetLogger(newLogger())
 	return h
 }

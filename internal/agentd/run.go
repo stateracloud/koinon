@@ -605,7 +605,15 @@ func (r *runner) execute(ctx context.Context) error {
 	// (runs_one_active_per_agent), or the agent's next run could start its harness first and
 	// have it ended: on end_turn below, before the run is finished; otherwise deferred, before
 	// conclude finishes or releases the run.
-	closeHarness := sync.OnceFunc(func() { closeProcess(proc) })
+	// conn is set once the harness is started; closeHarness first frees a reader held back by a
+	// lagging handler, which closing the process alone does not reach.
+	var conn *acp.Conn
+	closeHarness := sync.OnceFunc(func() {
+		if conn != nil {
+			conn.Close()
+		}
+		closeProcess(proc)
+	})
 	sweepOnce := sync.OnceFunc(func() { r.sweepAfter(ctx, workspace, sandbox) })
 	defer sweepOnce()
 	defer closeHarness()
@@ -625,7 +633,7 @@ func (r *runner) execute(ctx context.Context) error {
 		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
 		return errDropped
 	}
-	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
+	conn = acp.NewConn(fctx, handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
 	harnessErr := func(what string, err error) error {
 		return r.harnessErr(ctx, conn, proc, &stderr, what, err)
