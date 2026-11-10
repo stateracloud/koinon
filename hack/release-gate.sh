@@ -7,8 +7,8 @@
 # swapped for a "local checks recorded" gate without touching the release job.
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
-# (needs checks:read, contents:read, statuses:read and pull-requests:read; the ruleset is read with the implicit
-# metadata permission, and actions:read for the merge queue's runs). The required checks are read from
+# (needs checks:read, contents:read, actions:read and pull-requests:read; the ruleset is read with the implicit
+# metadata permission, for the merge queue's runs). The required checks are read from
 # the `main` ruleset, in this order (ADR 0104-era route, docs/dev/releasing.md): the tagged commit itself;
 # where it reports `skipped` (the push skipped its heavy jobs because the merge queue had tested the
 # tree) or, for the pull-request-only contexts (pr_only below), the successful merge_group `ci` run on a

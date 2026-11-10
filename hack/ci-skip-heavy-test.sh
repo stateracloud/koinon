@@ -165,10 +165,10 @@ expect "no queue run (an admin merge) runs everything" false "no successful merg
 checks go:success "quick checks:success" "generated code:success" flavors:success
 # shellcheck disable=SC2046
 expect "a green pull request head without a queue run runs everything" false "no successful merge_group" $(push "$merge_same")
-# A queue run whose head commit cannot be read is not trusted.
+# A queue run that carries no tree for its head commit matches nothing.
 mq_runs 3333333333333333333333333333333333333333
 # shellcheck disable=SC2046
-expect "an unreadable queue commit runs everything" false "no successful merge_group" $(push "$merge_same")
+expect "a queue run with no tree for its head runs everything" false "no successful merge_group" $(push "$merge_same")
 mq_runs "$qh_same"
 # shellcheck disable=SC2046
 expect "an API error on the runs list runs everything" false "cannot list" $(push "$merge_same") FAKE_FAIL_RUNS=1
@@ -181,6 +181,7 @@ checks flavors:failure
 # shellcheck disable=SC2046
 expect "flavors red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")
 commit_json "$qh_same" "$(tree_of "$merge_flav")"
+mq_runs "$qh_same"
 # shellcheck disable=SC2046
 expect "flavors red and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
 checks flavors:success
@@ -191,6 +192,7 @@ checks
 expect "flavors never ran and its files changed runs everything" false "no completed run" $(push "$merge_flav")
 # A one-parent commit (squash or rebase landing) is judged the same way, by tree.
 commit_json "$qh_same" "$(tree_of "$plain")"
+mq_runs "$qh_same"
 checks flavors:success
 # shellcheck disable=SC2046
 expect "a one-parent commit with a queue run on its tree: skip" true "merge_group" $(push "$plain")
