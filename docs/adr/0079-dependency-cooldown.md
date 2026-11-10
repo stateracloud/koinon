@@ -223,7 +223,8 @@ which runs before any dependency is installed. Two controls cover it, so the bin
    back to the top-level settings unless a config dependency owns them (pnpm source,
    `crates/config/src/boot_config.rs` at v12.15.0), so the explicit block is defence in depth that
    keeps working if a config dependency is ever added. It needs pnpm 12.15 or newer; a `packageManager`
-   pin below that does not honour it. `bootConfig` accepts `minimumReleaseAgeExclude`; an exemption
+   pin below that does not honour it, so under a pin below 12.15 the date check (control 2) is the only
+   control for the binary. `bootConfig` accepts `minimumReleaseAgeExclude`; an exemption
    for the pnpm binary follows the fast-path rules above and is listed there.
 2. **The pin is dated at review time**: `hack/dep-age-check.sh` (step 4a) dates the npm release of
    every `packageManager` pin and every `ARG PNPM_VERSION` default of a Dockerfile that a pull request
@@ -239,7 +240,7 @@ check on `PNPM_VERSION` is its control, and the image's installs of `web/` then 
 
 - [0052](0052-opencode-v2-flavor.md), [0077](0077-pinned-openshell-and-installer.md)
 - [CONTRIBUTING.md](../../CONTRIBUTING.md), `.github/dependabot.yml`, `web/pnpm-workspace.yaml`,
-  `hack/dep-age-check.sh`
+  `docs/site/pnpm-workspace.yaml`, `hack/dep-age-check.sh`
 - William Woodruff, "We should all be using dependency cooldowns" (2025-11-21) and "Cooldowns redux"
   (2025-12-13), blog.yossarian.net
 - GitHub, "The case for a cooldown" (2026-07-23) and the Dependabot default cooldown changelog
