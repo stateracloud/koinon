@@ -907,6 +907,8 @@ var _ = Describe("New", func() {
 		repos := fixedRepo{}
 		_, err := agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos, Timeout: 20 * time.Minute, Lease: 20 * time.Minute}))
 		Expect(err).To(MatchError(ContainSubstring("Checkpoints.Timeout must be shorter than Checkpoints.Lease")))
+		_, err = agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos, Timeout: 19*time.Minute + 45*time.Second, Lease: 20 * time.Minute}))
+		Expect(err).To(MatchError(ContainSubstring("Checkpoints.Timeout must be shorter than Checkpoints.Lease")), "room for the outcome record")
 		_, err = agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos, Timeout: 30 * time.Minute}))
 		Expect(err).To(MatchError(ContainSubstring("Checkpoints.Timeout")), "against the default Lease")
 		_, err = agentd.New(db, nil, cfg(agentd.Checkpoints{Store: &checkpoint.Writer{}, Repositories: repos}))

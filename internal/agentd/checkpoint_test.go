@@ -195,6 +195,15 @@ func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer)
 	return ctx.Err()
 }
 
+// lateStore is a checkpoint store whose backup finishes only after its context has expired, as one
+// that completes just past the attempt deadline does.
+type lateStore struct{ agentd.HomeStore }
+
+func (l lateStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
+	<-ctx.Done()
+	return l.HomeStore.Backup(context.WithoutCancel(ctx), prefix, pw, r, m)
+}
+
 var _ = Describe("home checkpoints", func() {
 	var (
 		e      *env
@@ -437,6 +446,17 @@ var _ = Describe("home checkpoints", func() {
 		}))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("deadline exceeded"))
+	})
+
+	It("records a snapshot that finished after the attempt deadline as complete (#235)", func(ctx SpecContext) {
+		id := request(ctx, store.CheckpointReasonStop)
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
+			c.Store = lateStore{HomeStore: writer}
+			c.Timeout = 500 * time.Millisecond
+			c.Attempts = 1
+		}))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Expect(checkpointOf(ctx, id)().SnapshotID.Valid).To(BeTrue())
 	})
 
 	It("fails a backup into a prefix that holds a repository the database has no password for, at once, and records the next free epoch (#262)", func(ctx SpecContext) {

@@ -307,33 +307,49 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 	if ctx.Err() != nil {
 		return // shutting down: the lease runs out and another replica takes the request over
 	}
+	// The outcome is recorded on its own bounded context, not on tctx (which may have just expired,
+	// and would then fail the record of a snapshot that exists) and not on ctx alone (a stalled
+	// database would keep the writer's slot past its lease). It is cut from the attempt's deadline but
+	// still ends at shutdown; Timeout + outcomeBound is shorter than Lease (checked in New).
+	octx, ocancel := context.WithTimeout(context.WithoutCancel(tctx), outcomeBound)
+	defer ocancel()
+	stop := context.AfterFunc(ctx, ocancel)
+	defer stop()
 	if err == nil {
 		log.Info("home checkpoint complete", "bytes", res.Bytes, "files", res.Files)
-		if _, err := p.q.CompleteHomeCheckpoint(tctx, store.CompleteHomeCheckpointParams{
+		_, cerr := p.q.CompleteHomeCheckpoint(octx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
 			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
-		}); err != nil {
-			log.Warn("recording a complete checkpoint failed", "err", err)
+		})
+		if cerr == nil {
+			return
 		}
-		return
+		// The snapshot exists but the row still says running. Release it for another attempt (or fail
+		// it after the last one) instead of leaving it to the lease.
+		log.Warn("recording a complete checkpoint failed", "err", cerr)
+		err = fmt.Errorf("recording the complete checkpoint: %w", cerr)
 	}
 	msg := truncateText(err.Error(), 400)
 	var perm *permanent
 	if errors.As(err, &perm) || int(cp.Attempts) >= c.Attempts {
 		log.Warn("home checkpoint failed", "err", msg)
-		if _, err := p.q.FailHomeCheckpoint(ctx, store.FailHomeCheckpointParams{OrgID: cp.OrgID, ID: cp.ID, Error: pgtype.Text{String: msg, Valid: true}}); err != nil {
+		if _, err := p.q.FailHomeCheckpoint(octx, store.FailHomeCheckpointParams{OrgID: cp.OrgID, ID: cp.ID, Error: pgtype.Text{String: msg, Valid: true}}); err != nil {
 			log.Warn("recording a failed checkpoint failed", "err", err)
 		}
 		return
 	}
 	delay := c.Retry << (cp.Attempts - 1)
 	log.Warn("home checkpoint attempt failed; trying again", "err", msg, "in", delay)
-	if _, err := p.q.ReleaseHomeCheckpoint(ctx, store.ReleaseHomeCheckpointParams{
+	if _, err := p.q.ReleaseHomeCheckpoint(octx, store.ReleaseHomeCheckpointParams{
 		OrgID: cp.OrgID, ID: cp.ID, Error: pgtype.Text{String: msg, Valid: true}, DelaySeconds: int32(delay.Seconds()),
 	}); err != nil {
 		log.Warn("releasing a checkpoint failed", "err", err)
 	}
 }
+
+// outcomeBound bounds the record of an attempt's outcome (complete, fail or release) after the
+// attempt's own deadline. Checkpoints.Timeout + outcomeBound must stay shorter than Lease.
+const outcomeBound = 30 * time.Second
 
 // permanent marks an error that another attempt cannot fix.
 type permanent struct{ err error }
