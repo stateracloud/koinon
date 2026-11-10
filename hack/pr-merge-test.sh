@@ -371,16 +371,16 @@ grep -q 'NOT GREEN go (missing)' <<<"$out" || { echo "FAIL: recorded: go missing
 grep -q 'NOT GREEN dco' <<<"$out" && { echo "FAIL: recorded: dco is green" >&2; fail=1; }
 # the same answer read as a draft PR: the draft run counts and its red go is named
 rows=$(jq -c '[.check_runs[] | {name, status: (.status|ascii_upcase), conclusion: ((.conclusion // "")|ascii_upcase), startedAt: .started_at, completedAt: .completed_at, detailsUrl: .details_url, workflowName: ""}]' "$fx/check-runs-386-draft-era.json")
-v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true "" go "quick checks" dco)
+v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true go "quick checks" dco)
 [ "$v" = "$(printf 'go\tfailure\t42471681674\nquick checks\tsuccess\t42471681674\ndco\tsuccess\t42471681684')" ] || { echo "FAIL: recorded, draft read: $v" >&2; fail=1; }
 
-# #133: a dispatched e2e-kind run (81) failed, e2e-lab passed, and the PR run's (82) `e2e result` was re-run to green: the
-# re-run keeps its created_at, but GitHub's newest check run per name is green, and so is the verdict.
+# #133, ADR 0105: e2e-kind is judged like any workflow. A dispatched run (81) re-run to green does not outvote the
+# newer PR run (82): the newest run of the workflow decides, so its red `e2e result` is the verdict.
 e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}' "$1" "$2" "$2" "$3"; }
 e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
 e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
-v=$(prv_judge "$e2e_rows" "$e2e_runs" false "quickstart" "e2e result")
-[ "$v" = "$(printf 'e2e result\tsuccess\t81')" ] || { echo "FAIL: e2e result re-run green after a red dispatched run: $v" >&2; fail=1; }
+v=$(prv_judge "$e2e_rows" "$e2e_runs" false "e2e result")
+[ "$v" = "$(printf 'e2e result\tfailure\t82')" ] || { echo "FAIL: the newest e2e-kind run decides, an older run's re-run green does not: $v" >&2; fail=1; }
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
 # review (required_reviewers): it is NOT in the queue (2026-11-07 printed "added to the merge queue" for it).
