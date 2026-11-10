@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/pr-merge.sh offline: `gh` is a stub on PATH answering from files in $FAKE_DIR, and the
-# helper scripts (pr-wait, needs-e2e, claim, threads) are stubs that record their calls. The stub answers `gh api`
+# helper scripts (pr-wait, needs-e2e, threads, review-gate) are stubs that record their calls. The stub answers `gh api`
 # with API-shaped JSON (what GitHub prints; a recorded real answer lives in hack/testdata/pr-verdict/) and applies the
 # call's own `--jq` filter to it, so the script's parsing is tested, not a pre-chewed list.
 
@@ -16,8 +16,8 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
-export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CLAIM="$tmp/bin/claim"
-export PR_MERGE_THREADS="$tmp/bin/threads"
+export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs"
+export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -51,8 +51,23 @@ esac
 SH
 cat >"$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = ls-remote ] && [ -f "$FAKE_DIR/remote" ] || exit 2
-printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3"
+# ls-remote answers from $FAKE_DIR/remote; the base's review gate (fetch, cat-file, show) from $FAKE_DIR/base-gate.
+case $1 in
+ls-remote)
+  [ -f "$FAKE_DIR/remote" ] || exit 2
+  printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3" ;;
+fetch) echo "git $*" >>"$FAKE_DIR/calls"; exit "${FETCH_RC:-0}" ;;
+cat-file) [ -f "$FAKE_DIR/base-gate" ] ;;
+show)
+  echo "git $*" >>"$FAKE_DIR/calls"
+  case $2 in
+  *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
+  *:hack/claim.sh) [ -z "${SHOW_FAILS_CLAIM:-}" ] || exit 128; printf '#!/usr/bin/env bash\n' ;;
+  *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
+  *) exit 128 ;;
+  esac ;;
+*) exit 2 ;;
+esac
 SH
 cat >"$tmp/bin/wait" <<'SH'
 #!/usr/bin/env bash
@@ -66,16 +81,17 @@ cat >/dev/null
 echo "needs $*" >>"$FAKE_DIR/calls"
 exit "${NEEDS_RC:-1}"
 SH
-cat >"$tmp/bin/claim" <<'SH'
-#!/usr/bin/env bash
-echo "claim $*" >>"$FAKE_DIR/calls"
-if [ "$1" = mine ] && [ -f "$FAKE_DIR/mine" ]; then cat "$FAKE_DIR/mine"; fi
-SH
 cat >"$tmp/bin/threads" <<'SH'
 #!/usr/bin/env bash
 echo "threads $*" >>"$FAKE_DIR/calls"
 [ "${THREADS_RC:-0}" != 7 ] || echo "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
 exit "${THREADS_RC:-0}"
+SH
+cat >"$tmp/bin/review" <<'SH'
+#!/usr/bin/env bash
+echo "review EVENT=$EVENT PR=$PR SHA=$SHA GH_REPO=$GH_REPO" >>"$FAKE_DIR/calls"
+[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::pull request #$PR touches sensitive paths and its head has no review-verdict status"
+exit "${REVIEW_RC:-0}"
 SH
 chmod +x "$tmp/bin"/*
 
@@ -210,16 +226,14 @@ NEEDS_RC=1 run 7
 grep -q 'pulls/7/files --paginate' "$FAKE_DIR/calls" || { echo "FAIL: file list is paginated" >&2; fail=1; }
 grep -q -- '--require' "$FAKE_DIR/calls" && { echo "FAIL: a not-needed change adds no --require" >&2; fail=1; }
 
-# 2. claim review only after a successful merge; early exit when no longer OPEN; --auto wording
+# 2. early exit when no longer OPEN; --auto wording
 setup false "$green"
 MERGE_RC=1 run 7
 check "a failed merge fails" 1 merge
-grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review after a failed merge" >&2; fail=1; }
 setup false "$green"
 touch "$FAKE_DIR/close-after-wait"
 run 7
 check "a PR closed while waiting is not merged" 3 nomerge
-grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review for a closed PR" >&2; fail=1; }
 setup false "$green"
 run 7
 grep -q 'auto-merge enabled' <<<"$out" || { echo "FAIL: --auto says auto-merge enabled" >&2; fail=1; }
@@ -251,7 +265,6 @@ MSTATE=BLOCKED THREADS_RC=7 run 7 --admin
 check "BLOCKED by unresolved threads right before the merge is refused" 7 nomerge
 grep -q 'UNRESOLVED hack/x.sh:42 deepsource-io' <<<"$out" || { echo "FAIL: lists the thread" >&2; fail=1; }
 grep -q 'BLOCKED by unresolved review threads' <<<"$out" || { echo "FAIL: names the block" >&2; fail=1; }
-grep -q '^claim review' "$FAKE_DIR/calls" && { echo "FAIL: no claim review when blocked by threads" >&2; fail=1; }
 setup false "$green"
 MSTATE=BLOCKED THREADS_RC=0 run 7 --admin
 check "BLOCKED without unresolved threads still merges" 0 merge
@@ -389,5 +402,68 @@ sed -i.bak 's/"reviewDecision":""/"reviewDecision":"REVIEW_REQUIRED"/;s/"autoMer
 run 7
 grep -q 'armed but' <<<"$out" && { echo "FAIL: no auto-merge request, must not say armed: $out" >&2; fail=1; }
 grep -q 'auto-merge is NOT armed.*review is required' <<<"$out" || { echo "FAIL: says not armed, review required: $out" >&2; fail=1; }
+
+# ADR 0103: --admin bypasses the ruleset's `review` check, so pr-merge runs the gate on the head itself.
+setup false "$green"
+REVIEW_RC=1 run 7 --admin
+check "--admin on a sensitive PR without a review verdict is refused" 9 nomerge
+grep -q 'hack/review-verdict.sh 7 ready <reviewer> abc1234def' <<<"$out" || { echo "FAIL: the refusal names hack/review-verdict.sh: $out" >&2; fail=1; }
+grep -q 'has no review-verdict status' <<<"$out" || { echo "FAIL: the gate's reason is shown: $out" >&2; fail=1; }
+grep -q '^review EVENT=pull_request PR=7 SHA=abc1234def GH_REPO=o/r$' "$FAKE_DIR/calls" || { echo "FAIL: the gate runs on the PR head" >&2; fail=1; }
+setup false "$green"
+REVIEW_RC=0 run 7 --admin
+check "--admin with a review verdict (or no sensitive path) merges" 0 merge
+setup false "$green"
+REVIEW_RC=1 run 7
+check "without --admin the ruleset judges the review check: the gate is not run here" 0 merge
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran without --admin" >&2; fail=1; }
+
+# The gate comes from the base (origin/main), not this checkout; PR_MERGE_REVIEW_GATE needs PR_MERGE_TEST=1.
+base_gate() { # the base's gate as `git show` prints it: records where it runs, checks its siblings, exits REVIEW_RC
+  cat >"$FAKE_DIR/base-gate" <<'SH'
+#!/usr/bin/env bash
+d=$(cd "$(dirname "$0")/.." && pwd)
+[ -x "$d/hack/claim.sh" ] && [ -f "$d/.github/CODEOWNERS" ] || { echo "base gate: siblings missing"; exit 3; }
+echo "basegate PR=$PR SHA=$SHA" >>"$FAKE_DIR/calls"
+echo "baseenv CLAIM=${CLAIM-unset} CODEOWNERS=${CODEOWNERS-unset} KOINON_CLAIM_CODEOWNERS=${KOINON_CLAIM_CODEOWNERS-unset}" >>"$FAKE_DIR/calls"
+[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::base gate: no review-verdict"
+exit "${REVIEW_RC:-0}"
+SH
+}
+setup false "$green"; base_gate
+REVIEW_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "--admin runs the base's gate (refuses)" 9 nomerge
+grep -q '^git fetch -q --no-tags origin main$' "$FAKE_DIR/calls" || { echo "FAIL: the base is fetched" >&2; fail=1; }
+grep -q '^git show refs/remotes/origin/main:hack/review-gate.sh$' "$FAKE_DIR/calls" || { echo "FAIL: the gate is read from origin/main" >&2; fail=1; }
+grep -q '^basegate PR=7 SHA=abc1234def$' "$FAKE_DIR/calls" || { echo "FAIL: the base's gate ran: $out" >&2; fail=1; }
+grep -q 'base gate: no review-verdict' <<<"$out" || { echo "FAIL: the base gate's reason is shown: $out" >&2; fail=1; }
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the hook gate ran instead of the base's" >&2; fail=1; }
+setup false "$green"; base_gate
+REVIEW_RC=0 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "--admin with the base's gate passing merges" 0 merge
+setup false "$green"; base_gate
+CLAIM=/nonexistent/claim.sh CODEOWNERS=/nonexistent/CODEOWNERS KOINON_CLAIM_CODEOWNERS=/nonexistent/CO REVIEW_RC=0 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "the caller's CLAIM, CODEOWNERS and KOINON_CLAIM_CODEOWNERS do not reach the base's gate" 0 merge
+grep -q '^baseenv CLAIM=unset CODEOWNERS=unset KOINON_CLAIM_CODEOWNERS=unset$' "$FAKE_DIR/calls" || { echo "FAIL: the base gate saw the caller's file variables" >&2; fail=1; }
+setup false "$green"; base_gate
+REVIEW_RC=0 PR_MERGE_TEST="" PR_MERGE_REVIEW_GATE=true run 7 --admin
+check "PR_MERGE_REVIEW_GATE without PR_MERGE_TEST=1 is ignored" 0 merge
+grep -q '^basegate ' "$FAKE_DIR/calls" || { echo "FAIL: the hook replaced the gate without PR_MERGE_TEST=1" >&2; fail=1; }
+setup false "$green"
+PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "no gate on the base: the local copy runs (and fails closed on the stub)" 9 nomerge
+grep -q 'origin/main has no hack/review-gate.sh yet.*using the local copy' <<<"$out" || { echo "FAIL: says it uses the local copy: $out" >&2; fail=1; }
+grep -q '::error::' <<<"$out" || { echo "FAIL: the local gate ran: $out" >&2; fail=1; }
+setup false "$green"; base_gate
+FETCH_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "a failed base fetch is a tool failure" 2 nomerge
+setup false "$green"; base_gate
+SHOW_FAILS_CLAIM=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+check "a base file that git show cannot read is a tool failure" 2 nomerge
+grep -q 'cannot read hack/claim.sh from origin/main' <<<"$out" || { echo "FAIL: names the unreadable base file: $out" >&2; fail=1; }
+grep -q '^basegate ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran with a missing base file" >&2; fail=1; }
+setup false "$green"
+GH_REPO="" run 7 --admin
+check "an unreadable repository name is a tool failure" 2 nomerge
 
 exit "$fail"

@@ -484,6 +484,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `review.yml` | `pull_request`, `merge_group` (the `review` job, ADR 0103); `push` to `main` (passes) | `GITHUB_TOKEN` only, `contents: read, pull-requests: read, statuses: read`; no secret, no Environment | ok: checks out main's tip at run time (`pull_request.base.ref`; `merge_group.base_sha` in the queue) and runs its `hack/review-gate.sh`, `hack/claim.sh` and CODEOWNERS; the PR's code never runs. The workflow file is the PR head's; the guard is the approval on `.github/**` (see "The `review` check") |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
@@ -633,9 +634,8 @@ loop (a pipe after `pr-wait.sh` hides its exit code, old issue 626).
 Strict "up to date with main" made every merge put every other open PR behind. The merge queue
 builds main plus the queued PRs on a `gh-readonly-queue/main/...` branch, runs the required checks
 there and merges in order, so the ruleset drops strict (ADR 0094 decision 4) and nothing syncs a branch by
-hand. The repository half is in place and inert until the ruleset has a
-`merge_queue` rule; the ruleset change itself is made by the maintainer's session through
-`gh api` (backup, diff), never from a pull request.
+hand. The ruleset's `merge_queue` rule is live since 2026-11-09; ruleset changes are made by the
+maintainer's session through `gh api` (backup, diff), never from a pull request.
 
 What a `merge_group` build runs (event `checks_requested`, no pull request in the payload):
 
@@ -711,6 +711,46 @@ Scripts, with the rule detected at run time (no queue: nothing changes):
   e2e-relevant change: such a PR should be enqueued, and `pr-merge.sh --admin` warns when the queue is on and
   `needs-e2e.sh` says the e2e is required. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
   whether or not the PR is queued.
+
+### The `review` check (ADR 0103)
+
+`review` (`.github/workflows/review.yml`, `hack/review-gate.sh`) records the independent review of a
+sensitive-path pull request as a check. A pull request that touches none of the patterns of `hack/claim.sh
+sensitive-paths` passes. Otherwise its head needs the commit status `review-verdict` = success, posted after
+the review of exactly that commit:
+
+    hack/review-verdict.sh <PR> ready <reviewer> <reviewed sha> ['<note>']   # or not-ready
+
+The script refuses when the head is no longer the reviewed SHA (exit 4, `STALE`): a push, a merge of `main`
+included, needs a new review. It re-runs a `review` job whose result disagrees with the new verdict; while
+that run is still going, use "Re-run all jobs" when it ends.
+
+- Only a status from a listed poster counts: the user logins on the sensitive lines of the base's
+  `.github/CODEOWNERS` (no team, never a `*[bot]` login). The newest such status counts; a status from any
+  other login neither passes nor blocks.
+- Drafts skip the job, which counts as passed for a required check; `ready_for_review` starts a new run.
+- Pull request runs use `pull_request` (no `pull_request_target`, #463) with a read-only token, and check
+  out main's tip at run time (`pull_request.base.ref`, not the recorded `base.sha`, which can be an old
+  base without the gate) to run its gate, `claim.sh` and CODEOWNERS. A checkout without the gate passes
+  only while main has none either. The gate's own files
+  (`review.yml`, CODEOWNERS, `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh`) are
+  sensitive paths, so a change to them needs a verdict too.
+- Trade-off: the workflow file is the pull request's own, so a pull request could edit `review.yml` to
+  make `review` pass. The guard is the CODEOWNERS approval rule, kept for `.github/**` only: a pull
+  request that changes anything under `.github/` still needs the second human (or an admin merge), and
+  everything else moves to `review` and the merge queue. The ruleset "required workflows" rule would
+  remove that last pattern when the plan has it.
+- A `merge_group` build judges the queued pull request's head and files, with the gate from
+  `merge_group.base_sha`, and fails unless that head is a parent of the queue commit.
+- An exact pattern also matches `<pattern>/*`. Every read error fails the check.
+- `hack/pr-merge.sh --admin` runs the gate on the head itself and refuses with exit 9 (naming
+  `hack/review-verdict.sh`), with the base's gate; an admin merge in the web UI skips it.
+- A listed owner posts the status, so it records a review; it is no separation of duties.
+
+The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
+PUT adds the context `review`, pinned to the GitHub Actions app (`integration_id: 15368`, so a status
+posted by a user cannot satisfy it), and cuts `required_reviewers` to `.github/**`, and `review` moves to
+`external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
 
 ### Review threads (#187)
 
