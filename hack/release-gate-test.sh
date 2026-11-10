@@ -97,6 +97,7 @@ check() { # <name> <got> <want>
 
 sha=aaaa111
 pr_head=bbbb222
+qh=qqqq333
 
 # new_case: a fresh fixture dir with the rules requiring `go`, `dco` and `e2e result`, the
 # checks green on the tagged commit (go, quickstart) and on the PR head (dco, e2e result).
@@ -124,7 +125,7 @@ set_ruleset() { # <context>...: the rules/branches answer
 run_on() { # <sha> <name> <conclusion> [started_at] [workflow run id]
 	local f=$FX/checks-$1.json
 	[[ -f $f ]] || echo '{"check_runs":[]}' >"$f"
-	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-1}" "$f" >"$f.new"
+	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, app: {id: 15368}, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-$([[ $1 == "$qh" ]] && echo 900 || echo 1)}" "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merge_group ci run on the tree
@@ -210,7 +211,6 @@ echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" go success
 check "quickstart missing on the commit fails" "$(gate_rc)" 1
 
-qh=qqqq333
 new_case
 # main skipped the heavy job because the merge queue tested the tree: the queue build is the evidence.
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
@@ -290,6 +290,33 @@ run_on "$sha" go success
 echo '{"workflow_runs":[]}' >"$FX/mg-runs.json"
 check "admin commit: quickstart missing fails with the dispatch hint" "$(gate_rc)" 1
 check "...and says to run e2e-kind" "$(grep -c 'run the e2e-kind workflow' "$tmp/err")" 1
+
+# The queue commit is the tagged commit (a fast-forward merge): the sha has the merge_group run's result
+# and the push run's later skipped; the queue run decides, not the newest check run on the sha.
+ff_case() { # <go-test conclusion of the merge_group run>
+	new_case
+	sha=$qh
+	echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"treeS\"}}" >"$FX/commit-$sha.json"
+	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+	run_on "$sha" quickstart success
+	ci_queue_run "$sha" treeS
+	for c in go dco "e2e result"; do run_on "$sha" "$c" success "2026-01-01T00:00:00Z" 900; done
+	run_on "$sha" go-test "$1" "2026-01-01T00:00:00Z" 900
+	for c in go go-test; do run_on "$sha" "$c" skipped "2026-01-01T01:00:00Z" 901; done
+}
+export GIT_DIFF=internal/x/x.go
+ff_case success
+check "fast-forward queue commit: merge_group success beats the newer push skipped" "$(gate_rc)" 0
+ff_case failure
+check "fast-forward queue commit: merge_group failure plus push skipped is refused" "$(gate_rc)" 1
+ff_case success
+jq '.check_runs |= map(select(.details_url | test("/runs/900/") | not))' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
+check "fast-forward queue commit: only the push skipped, no queue result, is refused" "$(gate_rc)" 1
+ff_case success
+jq '.check_runs |= map(if .details_url | test("/runs/900/") then .app.id = 1 else . end)' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
+check "fast-forward queue commit: a run not from the Actions app is not read" "$(gate_rc)" 1
+sha=aaaa111
+unset GIT_DIFF
 
 # go-test: skipped on main (the queue ran it), the queue build decides; or the change has no Go.
 go_test_case() { # a fresh case in which main skipped go-test, the queue build's go-test is $1 ("" = no run)
