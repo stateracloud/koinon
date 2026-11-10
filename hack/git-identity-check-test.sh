@@ -144,6 +144,7 @@ out=$(hack/git-identity-check.sh range 2>&1); check "range: misuse exits 2" 2 $?
 out=$(hack/git-identity-check.sh bogus 2>&1); check "unknown mode exits 2" 2 $? "$out"
 
 # personal hooks: core.hooksPath replaces .git/hooks, so the guard hooks chain to the common dir's hook
+hack/git-identity-check.sh install >/dev/null 2>&1 # earlier steps switched branches; make sure the hooks are on
 mkdir -p .git/hooks
 printf '#!/bin/sh\necho ran >> "%s/personal-pre-commit"\n' "$tmp" >.git/hooks/pre-commit
 printf '#!/bin/sh\necho ran >> "%s/personal-pre-merge-commit"\nexit 1\n' "$tmp" >.git/hooks/pre-merge-commit
