@@ -124,3 +124,4 @@ are in [0046](0046-adr-conventions.md).
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Accepted (direction by procoduck, 2026-11-09; details by the implementing lane) |
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Proposed |
+| [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Proposed |
