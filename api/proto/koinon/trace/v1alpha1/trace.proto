@@ -5,6 +5,7 @@ syntax = "proto3";
 package koinon.trace.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/outward/v1alpha1/outward.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1;tracev1alpha1";
 
@@ -125,6 +126,9 @@ message Destination {
   // forget`, ADR 0085 decision 13): the destination receives nothing until a tested update enters every secret
   // in secret_fields again. Unset otherwise.
   google.protobuf.Timestamp credential_lost_at = 14;
+  // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+  // not called, probed or offered to runs. Unset otherwise.
+  koinon.outward.v1alpha1.AdminDisabled admin_disabled = 15;
 }
 
 // DestinationInput is what a caller writes.

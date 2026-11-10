@@ -806,6 +806,9 @@ type McpDataClass = []string
 
 // McpServer defines model for McpServer.
 type McpServer struct {
+	// AdminDisabled Present while an admin holds the target off (the outward switch). Absent means enabled.
+	AdminDisabled *OutwardAdminDisabled `json:"adminDisabled,omitempty"`
+
 	// CodeHostConnectionId The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
 	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
@@ -1134,6 +1137,18 @@ type OrgBudgetUpdate struct {
 	MonthlyCapUsd *string `json:"monthlyCapUsd,omitempty"`
 }
 
+// OutwardAdminDisabled Present while an admin holds the target off (the outward switch). Absent means enabled.
+type OutwardAdminDisabled struct {
+	At time.Time `json:"at"`
+
+	// By The actor as the audit log reads it, for example `token <id>` or `secret <name>`.
+	By string `json:"by"`
+
+	// Declared True when the declaring Secret says `disabled: true`; the API cannot enable it.
+	Declared bool    `json:"declared"`
+	Note     *string `json:"note,omitempty"`
+}
+
 // OutwardTargetDisabled defines model for OutwardTargetDisabled.
 type OutwardTargetDisabled struct {
 	Disabled bool `json:"disabled"`
@@ -1312,6 +1327,9 @@ type PriceVersion struct {
 
 // Provider defines model for Provider.
 type Provider struct {
+	// AdminDisabled Present while an admin holds the target off (the outward switch). Absent means enabled.
+	AdminDisabled *OutwardAdminDisabled `json:"adminDisabled,omitempty"`
+
 	// AnthropicWorkspaceId The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
 	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
 

@@ -10,6 +10,8 @@ import { OrgDefaultModel } from '@/components/org-default-model'
 import { ProviderEchoCheck } from '@/components/provider-echo-check'
 import { ProviderForm } from '@/components/provider-form'
 import { RequireAdmin } from '@/components/require-admin'
+import { OutwardSwitch } from '@/components/outward-switch'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -207,6 +209,7 @@ function ProviderCard({
           This provider and its models are declared by the Secret {p.managedBySecret}. Change or delete that Secret to change them here.
         </p>
       )}
+      <OutwardSwitch kind={OutwardTargetKind.MODEL_PROVIDER} targetId={p.id} subject={`provider ${p.name}`} disabled={p.adminDisabled} />
       {editing?.kind === 'provider' && editing.id === p.id ? (
         <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={closeOnly(setEditing, { kind: 'provider', id: p.id })} onSaved={() => onSaved()} />
       ) : (

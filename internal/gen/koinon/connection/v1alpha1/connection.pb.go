@@ -9,6 +9,7 @@
 package connectionv1alpha1
 
 import (
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -665,6 +666,9 @@ type Connection struct {
 	// forget`, ADR 0085 decision 13): the connection is not usable (bound agents report it and runs that need it fail) until the
 	// secret is entered again. Unset otherwise.
 	CredentialLostAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=credential_lost_at,json=credentialLostAt,proto3" json:"credential_lost_at,omitempty"`
+	// admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+	// not called, probed or offered to runs. Unset otherwise.
+	AdminDisabled *v1alpha1.AdminDisabled `protobuf:"bytes,16,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`
 	// Types that are valid to be assigned to Settings:
 	//
 	//	*Connection_Github
@@ -784,6 +788,13 @@ func (x *Connection) GetRemoved() bool {
 func (x *Connection) GetCredentialLostAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CredentialLostAt
+	}
+	return nil
+}
+
+func (x *Connection) GetAdminDisabled() *v1alpha1.AdminDisabled {
+	if x != nil {
+		return x.AdminDisabled
 	}
 	return nil
 }
@@ -2108,7 +2119,7 @@ var File_koinon_connection_v1alpha1_connection_proto protoreflect.FileDescriptor
 
 const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\n" +
-	"+koinon/connection/v1alpha1/connection.proto\x12\x1akoinon.connection.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x85\x01\n" +
+	"+koinon/connection/v1alpha1/connection.proto\x12\x1akoinon.connection.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\x85\x01\n" +
 	"\x05Scope\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04tier\x18\x02 \x01(\x0e2 .koinon.connection.v1alpha1.TierR\x04tier\x12 \n" +
@@ -2143,7 +2154,7 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\aci_dirs\x18\x03 \x03(\tR\x06ciDirs\x12E\n" +
 	"\x11read_token_set_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x0ereadTokenSetAt\x12G\n" +
 	"\x12write_token_set_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x0fwriteTokenSetAt\x127\n" +
-	"\x18token_warn_after_seconds\x18\x06 \x01(\x03R\x15tokenWarnAfterSeconds\"\xbe\x05\n" +
+	"\x18token_warn_after_seconds\x18\x06 \x01(\x03R\x15tokenWarnAfterSeconds\"\x8d\x06\n" +
 	"\n" +
 	"Connection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
@@ -2158,7 +2169,8 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x06source\x18\v \x01(\tR\x06source\x12*\n" +
 	"\x11managed_by_secret\x18\f \x01(\tR\x0fmanagedBySecret\x12\x18\n" +
 	"\aremoved\x18\r \x01(\bR\aremoved\x12H\n" +
-	"\x12credential_lost_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12F\n" +
+	"\x12credential_lost_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12M\n" +
+	"\x0eadmin_disabled\x18\x10 \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\x12F\n" +
 	"\x06github\x18\n" +
 	" \x01(\v2,.koinon.connection.v1alpha1.GitHubConnectionH\x00R\x06github\x12C\n" +
 	"\x05gitea\x18\x0e \x01(\v2+.koinon.connection.v1alpha1.GiteaConnectionH\x00R\x05giteaB\n" +
@@ -2330,6 +2342,7 @@ var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(*ListInstallationReposResponse)(nil),  // 30: koinon.connection.v1alpha1.ListInstallationReposResponse
 	(*structpb.Struct)(nil),                // 31: google.protobuf.Struct
 	(*timestamppb.Timestamp)(nil),          // 32: google.protobuf.Timestamp
+	(*v1alpha1.AdminDisabled)(nil),         // 33: koinon.outward.v1alpha1.AdminDisabled
 }
 var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	0,  // 0: koinon.connection.v1alpha1.Scope.tier:type_name -> koinon.connection.v1alpha1.Tier
@@ -2343,45 +2356,46 @@ var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	6,  // 8: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
 	32, // 9: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
 	32, // 10: koinon.connection.v1alpha1.Connection.credential_lost_at:type_name -> google.protobuf.Timestamp
-	7,  // 11: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
-	8,  // 12: koinon.connection.v1alpha1.Connection.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnection
-	9,  // 13: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 14: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	9,  // 15: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 16: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	15, // 17: koinon.connection.v1alpha1.SetConnectionSecretRequest.github:type_name -> koinon.connection.v1alpha1.GitHubConnectionSecret
-	16, // 18: koinon.connection.v1alpha1.SetConnectionSecretRequest.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnectionSecret
-	9,  // 19: koinon.connection.v1alpha1.SetConnectionSecretResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 20: koinon.connection.v1alpha1.SetConnectionSecretResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	9,  // 21: koinon.connection.v1alpha1.GetConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	23, // 22: koinon.connection.v1alpha1.BoundAgents.agents:type_name -> koinon.connection.v1alpha1.BoundAgent
-	9,  // 23: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
-	9,  // 24: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 25: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	29, // 26: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
-	4,  // 27: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
-	10, // 28: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	12, // 29: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:input_type -> koinon.connection.v1alpha1.CreateGiteaConnectionRequest
-	14, // 30: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:input_type -> koinon.connection.v1alpha1.SetConnectionSecretRequest
-	18, // 31: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
-	24, // 32: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
-	26, // 33: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
-	20, // 34: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
-	28, // 35: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
-	5,  // 36: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
-	11, // 37: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	13, // 38: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:output_type -> koinon.connection.v1alpha1.CreateGiteaConnectionResponse
-	17, // 39: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:output_type -> koinon.connection.v1alpha1.SetConnectionSecretResponse
-	19, // 40: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
-	25, // 41: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
-	27, // 42: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
-	21, // 43: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
-	30, // 44: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
-	36, // [36:45] is the sub-list for method output_type
-	27, // [27:36] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	33, // 11: koinon.connection.v1alpha1.Connection.admin_disabled:type_name -> koinon.outward.v1alpha1.AdminDisabled
+	7,  // 12: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
+	8,  // 13: koinon.connection.v1alpha1.Connection.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnection
+	9,  // 14: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 15: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	9,  // 16: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 17: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	15, // 18: koinon.connection.v1alpha1.SetConnectionSecretRequest.github:type_name -> koinon.connection.v1alpha1.GitHubConnectionSecret
+	16, // 19: koinon.connection.v1alpha1.SetConnectionSecretRequest.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnectionSecret
+	9,  // 20: koinon.connection.v1alpha1.SetConnectionSecretResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 21: koinon.connection.v1alpha1.SetConnectionSecretResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	9,  // 22: koinon.connection.v1alpha1.GetConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	23, // 23: koinon.connection.v1alpha1.BoundAgents.agents:type_name -> koinon.connection.v1alpha1.BoundAgent
+	9,  // 24: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
+	9,  // 25: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 26: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	29, // 27: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
+	4,  // 28: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
+	10, // 29: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	12, // 30: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:input_type -> koinon.connection.v1alpha1.CreateGiteaConnectionRequest
+	14, // 31: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:input_type -> koinon.connection.v1alpha1.SetConnectionSecretRequest
+	18, // 32: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
+	24, // 33: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
+	26, // 34: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
+	20, // 35: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
+	28, // 36: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
+	5,  // 37: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
+	11, // 38: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	13, // 39: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:output_type -> koinon.connection.v1alpha1.CreateGiteaConnectionResponse
+	17, // 40: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:output_type -> koinon.connection.v1alpha1.SetConnectionSecretResponse
+	19, // 41: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
+	25, // 42: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
+	27, // 43: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
+	21, // 44: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
+	30, // 45: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
+	37, // [37:46] is the sub-list for method output_type
+	28, // [28:37] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_koinon_connection_v1alpha1_connection_proto_init() }

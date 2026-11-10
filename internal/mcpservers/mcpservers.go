@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
@@ -202,6 +203,8 @@ type Server struct {
 	// forget, ADR 0085 decision 13): the server is not served until the credential is entered again.
 	// CredentialHeader and CredentialPrefix are kept.
 	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	// AdminDisabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5).
+	AdminDisabled *outward.Disabled `json:"adminDisabled,omitempty"`
 	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
 	// the legs it carries, in the order of Legs. A server nobody classified is DefaultDeclaration.
 	Kind      string   `json:"kind"`
@@ -337,7 +340,7 @@ func toServer(r store.McpServer) Server {
 		ID: r.ID.String(), Name: r.Name, URL: r.Url, Transport: string(r.Transport),
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
-		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), Health: string(r.Health), HealthReason: r.HealthReason.String,
+		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,

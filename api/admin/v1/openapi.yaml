@@ -1228,6 +1228,8 @@ components:
           description: >-
             Set when the API key was lost with the key that encrypted it (`koinon-api keys forget`):
             the provider is not served until the key is entered again.
+        adminDisabled:
+          $ref: "#/components/schemas/OutwardAdminDisabled"
         anthropicWorkspaceId:
           type: string
           example: wrkspc_01AbCdEf
@@ -1460,6 +1462,8 @@ components:
           description: >-
             Set when the credential was lost with the key that encrypted it (`koinon-api keys forget`):
             the server is not served until the credential is entered again.
+        adminDisabled:
+          $ref: "#/components/schemas/OutwardAdminDisabled"
         credentialHeader: {type: string, example: Authorization}
         credentialPrefix: {type: string, example: "Bearer "}
         source: {$ref: "#/components/schemas/Source"}
@@ -1501,6 +1505,19 @@ components:
     OutwardTargetKind:
       type: string
       enum: [mcp-server, model-provider, connection, trace-destination]
+    OutwardAdminDisabled:
+      type: object
+      description: Present while an admin holds the target off (the outward switch). Absent means enabled.
+      required: [at, by, declared]
+      properties:
+        at: {type: string, format: date-time}
+        by:
+          type: string
+          description: The actor as the audit log reads it, for example `token <id>` or `secret <name>`.
+        note: {type: string}
+        declared:
+          type: boolean
+          description: "True when the declaring Secret says `disabled: true`; the API cannot enable it."
     OutwardTargetDisabled:
       type: object
       required: [disabled]

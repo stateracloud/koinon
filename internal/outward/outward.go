@@ -381,3 +381,20 @@ func (s *Service) List(ctx context.Context, org pgtype.UUID) ([]Target, error) {
 	}
 	return out, nil
 }
+
+// Disabled is the switch as a target's Get and List show it. A nil *Disabled is an enabled target.
+type Disabled struct {
+	At   time.Time
+	By   string
+	Note string
+	// Declared is true when the declaring Secret holds the target disabled; the API cannot enable it.
+	Declared bool
+}
+
+// FromRow reads the three admin_disabled_* columns of a row: nil when the target is enabled.
+func FromRow(at pgtype.Timestamptz, by, note pgtype.Text) *Disabled {
+	if !at.Valid {
+		return nil
+	}
+	return &Disabled{At: at.Time, By: by.String, Note: note.String, Declared: strings.HasPrefix(by.String, DeclaredActorPrefix)}
+}

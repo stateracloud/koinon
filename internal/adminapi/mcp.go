@@ -51,6 +51,7 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		out.Removed = &t
 	}
 	out.CredentialLostAt = m.CredentialLostAt
+	out.AdminDisabled = adminDisabledJSON(m.AdminDisabled)
 	return out
 }
 

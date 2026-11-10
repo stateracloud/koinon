@@ -93,6 +93,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
 		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
 		CredentialLostAt: tsProto(c.CredentialLostAt),
+		AdminDisabled: adminDisabledProto(outward.FromRow(c.AdminDisabledAt, c.AdminDisabledBy, c.AdminDisabledNote)),
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {

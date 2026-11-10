@@ -363,6 +363,7 @@ func toProvider(p catalog.Provider) Provider {
 		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
 	}
 	out.CredentialLostAt = p.CredentialLostAt
+	out.AdminDisabled = adminDisabledJSON(p.AdminDisabled)
 	out.HasCostKey = p.HasCostKey
 	if p.CostScope != "" {
 		out.CostScope = &p.CostScope

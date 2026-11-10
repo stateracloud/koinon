@@ -56,3 +56,13 @@ message OutwardTargetState {
   string disabled_by = 6;
   string note = 7;
 }
+
+// AdminDisabled is the switch as Get and List of a target show it. A target without it is enabled.
+message AdminDisabled {
+  google.protobuf.Timestamp at = 1;
+  // by is the actor as the audit log reads it, for example "token <id>" or "secret <name>".
+  string by = 2;
+  string note = 3;
+  // declared is true when the declaring Secret says disabled: true; the API cannot enable such a target.
+  bool declared = 4;
+}

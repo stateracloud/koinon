@@ -199,6 +199,8 @@ type Destination struct {
 	// CredentialLostAt is set when the stored credentials were lost with a key (ADR 0085 decision
 	// 13): nothing is exported to the destination until they are entered again.
 	CredentialLostAt *time.Time
+	// AdminDisabled is set while an admin holds the destination off (the outward switch, ADR 0110 decision 5).
+	AdminDisabled *outward.Disabled
 	// ConfigVersion changes with every change of the configuration and with nothing the router records.
 	ConfigVersion int64
 	CreatedAt     time.Time
@@ -450,6 +452,7 @@ func toDestination(d store.TraceDestination) Destination {
 		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
 		ConfigVersion: d.ConfigVersion, CreatedAt: d.CreatedAt.Time, UpdatedAt: d.UpdatedAt.Time,
 		CredentialLostAt: optTime(d.CredentialLostAt),
+		AdminDisabled:    outward.FromRow(d.AdminDisabledAt, d.AdminDisabledBy, d.AdminDisabledNote),
 	}
 }
 
@@ -461,6 +464,7 @@ func toPlatform(d store.PlatformTraceDestination) Destination {
 		Health:        Health{LastSuccessAt: optTime(d.LastSuccessAt), LastErrorAt: optTime(d.LastErrorAt), LastError: d.LastError.String, SpansDropped: d.SpansDropped},
 		ConfigVersion: d.ConfigVersion, UpdatedAt: d.UpdatedAt.Time,
 		CredentialLostAt: optTime(d.CredentialLostAt),
+		AdminDisabled:    outward.FromRow(d.AdminDisabledAt, d.AdminDisabledBy, d.AdminDisabledNote),
 	}
 }
 

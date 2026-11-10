@@ -73,7 +73,7 @@ func traceDestinationProto(d tracedest.Destination) *tracev1alpha1.Destination {
 	return &tracev1alpha1.Destination{
 		Id: d.ID, Name: d.Name, Backend: backendToProto[d.Backend], EndpointUrl: d.EndpointURL, Params: d.Params,
 		SecretFields: d.SecretFields, ResourceAttributes: d.ResourceAttributes, Enabled: d.Enabled,
-		LastTest: testResultProto(d.LastTest), CredentialLostAt: optTime(d.CredentialLostAt),
+		LastTest: testResultProto(d.LastTest), CredentialLostAt: optTime(d.CredentialLostAt), AdminDisabled: adminDisabledProto(d.AdminDisabled),
 		Health: &tracev1alpha1.Health{
 			LastSuccessAt: optTime(d.Health.LastSuccessAt), LastErrorAt: optTime(d.Health.LastErrorAt),
 			LastError: d.Health.LastError, SpansDropped: d.Health.SpansDropped,

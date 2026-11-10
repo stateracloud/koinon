@@ -58,3 +58,19 @@ func TestDeclaredState(t *testing.T) {
 		t.Fatal("an admin's disable, or no disable, is not declared")
 	}
 }
+
+// The read model Get and List show: nil when enabled, the actor and note when not, and Declared when a
+// Secret holds the target off.
+func TestFromRow(t *testing.T) {
+	if d := outward.FromRow(pgtype.Timestamptz{}, pgtype.Text{}, pgtype.Text{}); d != nil {
+		t.Fatalf("an enabled target: %+v", d)
+	}
+	at := pgtype.Timestamptz{Valid: true}
+	d := outward.FromRow(at, pgtype.Text{String: "user u-1", Valid: true}, pgtype.Text{String: "restored copy", Valid: true})
+	if d == nil || d.By != "user u-1" || d.Note != "restored copy" || d.Declared {
+		t.Fatalf("an admin's disable: %+v", d)
+	}
+	if d := outward.FromRow(at, pgtype.Text{String: outward.DeclaredActorPrefix + "s", Valid: true}, pgtype.Text{}); d == nil || !d.Declared {
+		t.Fatalf("a declared disable: %+v", d)
+	}
+}

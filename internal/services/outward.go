@@ -15,6 +15,7 @@ import (
 	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var outwardKindFromProto = map[outwardv1alpha1.OutwardTargetKind]outward.Kind{
@@ -96,4 +97,12 @@ func (s *Server) outwardError(err error) error {
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}
 	return s.dbError(err, "outward target")
+}
+
+// adminDisabledProto is the switch as a Get or List shows it: nil for an enabled target.
+func adminDisabledProto(d *outward.Disabled) *outwardv1alpha1.AdminDisabled {
+	if d == nil {
+		return nil
+	}
+	return &outwardv1alpha1.AdminDisabled{At: timestamppb.New(d.At), By: d.By, Note: d.Note, Declared: d.Declared}
 }

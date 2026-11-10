@@ -57,3 +57,15 @@ func (s *Server) SetOutwardTargetDisabled(ctx context.Context, req SetOutwardTar
 	}
 	return out, nil
 }
+
+// adminDisabledJSON is the switch as a Get or List shows it: nil for an enabled target.
+func adminDisabledJSON(d *outward.Disabled) *OutwardAdminDisabled {
+	if d == nil {
+		return nil
+	}
+	out := &OutwardAdminDisabled{At: d.At, By: d.By, Declared: d.Declared}
+	if d.Note != "" {
+		out.Note = &d.Note
+	}
+	return out
+}

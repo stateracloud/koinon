@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/outward/v1alpha1/outward.proto.
  */
 export const file_koinon_outward_v1alpha1_outward: GenFile = /*@__PURE__*/
-  fileDesc("CiVrb2lub24vb3V0d2FyZC92MWFscGhhMS9vdXR3YXJkLnByb3RvEhdrb2lub24ub3V0d2FyZC52MWFscGhhMSKeAQofU2V0T3V0d2FyZFRhcmdldERpc2FibGVkUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSOAoEa2luZBgCIAEoDjIqLmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLk91dHdhcmRUYXJnZXRLaW5kEhEKCXRhcmdldF9pZBgDIAEoCRIQCghkaXNhYmxlZBgEIAEoCBIMCgRub3RlGAUgASgJIl4KIFNldE91dHdhcmRUYXJnZXREaXNhYmxlZFJlc3BvbnNlEjoKBXN0YXRlGAEgASgLMisua29pbm9uLm91dHdhcmQudjFhbHBoYTEuT3V0d2FyZFRhcmdldFN0YXRlItUBChJPdXR3YXJkVGFyZ2V0U3RhdGUSOAoEa2luZBgBIAEoDjIqLmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLk91dHdhcmRUYXJnZXRLaW5kEhEKCXRhcmdldF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEhAKCGRpc2FibGVkGAQgASgIEi8KC2Rpc2FibGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtkaXNhYmxlZF9ieRgGIAEoCRIMCgRub3RlGAcgASgJKocCChFPdXR3YXJkVGFyZ2V0S2luZBIjCh9PVVRXQVJEX1RBUkdFVF9LSU5EX1VOU1BFQ0lGSUVEEAASIgoeT1VUV0FSRF9UQVJHRVRfS0lORF9NQ1BfU0VSVkVSEAESJgoiT1VUV0FSRF9UQVJHRVRfS0lORF9NT0RFTF9QUk9WSURFUhACEiIKHk9VVFdBUkRfVEFSR0VUX0tJTkRfQ09OTkVDVElPThADEikKJU9VVFdBUkRfVEFSR0VUX0tJTkRfVFJBQ0VfREVTVElOQVRJT04QBBIyCi5PVVRXQVJEX1RBUkdFVF9LSU5EX1BMQVRGT1JNX1RSQUNFX0RFU1RJTkFUSU9OEAUyogEKDk91dHdhcmRTZXJ2aWNlEo8BChhTZXRPdXR3YXJkVGFyZ2V0RGlzYWJsZWQSOC5rb2lub24ub3V0d2FyZC52MWFscGhhMS5TZXRPdXR3YXJkVGFyZ2V0RGlzYWJsZWRSZXF1ZXN0Gjkua29pbm9uLm91dHdhcmQudjFhbHBoYTEuU2V0T3V0d2FyZFRhcmdldERpc2FibGVkUmVzcG9uc2VCVVpTZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vb3V0d2FyZC92MWFscGhhMTtvdXR3YXJkdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("CiVrb2lub24vb3V0d2FyZC92MWFscGhhMS9vdXR3YXJkLnByb3RvEhdrb2lub24ub3V0d2FyZC52MWFscGhhMSKeAQofU2V0T3V0d2FyZFRhcmdldERpc2FibGVkUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSOAoEa2luZBgCIAEoDjIqLmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLk91dHdhcmRUYXJnZXRLaW5kEhEKCXRhcmdldF9pZBgDIAEoCRIQCghkaXNhYmxlZBgEIAEoCBIMCgRub3RlGAUgASgJIl4KIFNldE91dHdhcmRUYXJnZXREaXNhYmxlZFJlc3BvbnNlEjoKBXN0YXRlGAEgASgLMisua29pbm9uLm91dHdhcmQudjFhbHBoYTEuT3V0d2FyZFRhcmdldFN0YXRlItUBChJPdXR3YXJkVGFyZ2V0U3RhdGUSOAoEa2luZBgBIAEoDjIqLmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLk91dHdhcmRUYXJnZXRLaW5kEhEKCXRhcmdldF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEhAKCGRpc2FibGVkGAQgASgIEi8KC2Rpc2FibGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtkaXNhYmxlZF9ieRgGIAEoCRIMCgRub3RlGAcgASgJImMKDUFkbWluRGlzYWJsZWQSJgoCYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEgoKAmJ5GAIgASgJEgwKBG5vdGUYAyABKAkSEAoIZGVjbGFyZWQYBCABKAgqhwIKEU91dHdhcmRUYXJnZXRLaW5kEiMKH09VVFdBUkRfVEFSR0VUX0tJTkRfVU5TUEVDSUZJRUQQABIiCh5PVVRXQVJEX1RBUkdFVF9LSU5EX01DUF9TRVJWRVIQARImCiJPVVRXQVJEX1RBUkdFVF9LSU5EX01PREVMX1BST1ZJREVSEAISIgoeT1VUV0FSRF9UQVJHRVRfS0lORF9DT05ORUNUSU9OEAMSKQolT1VUV0FSRF9UQVJHRVRfS0lORF9UUkFDRV9ERVNUSU5BVElPThAEEjIKLk9VVFdBUkRfVEFSR0VUX0tJTkRfUExBVEZPUk1fVFJBQ0VfREVTVElOQVRJT04QBTKiAQoOT3V0d2FyZFNlcnZpY2USjwEKGFNldE91dHdhcmRUYXJnZXREaXNhYmxlZBI4LmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLlNldE91dHdhcmRUYXJnZXREaXNhYmxlZFJlcXVlc3QaOS5rb2lub24ub3V0d2FyZC52MWFscGhhMS5TZXRPdXR3YXJkVGFyZ2V0RGlzYWJsZWRSZXNwb25zZUJVWlNnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9vdXR3YXJkL3YxYWxwaGExO291dHdhcmR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message koinon.outward.v1alpha1.SetOutwardTargetDisabledRequest
@@ -121,6 +121,44 @@ export type OutwardTargetState = Message<"koinon.outward.v1alpha1.OutwardTargetS
  */
 export const OutwardTargetStateSchema: GenMessage<OutwardTargetState> = /*@__PURE__*/
   messageDesc(file_koinon_outward_v1alpha1_outward, 2);
+
+/**
+ * AdminDisabled is the switch as Get and List of a target show it. A target without it is enabled.
+ *
+ * @generated from message koinon.outward.v1alpha1.AdminDisabled
+ */
+export type AdminDisabled = Message<"koinon.outward.v1alpha1.AdminDisabled"> & {
+  /**
+   * @generated from field: google.protobuf.Timestamp at = 1;
+   */
+  at?: Timestamp | undefined;
+
+  /**
+   * by is the actor as the audit log reads it, for example "token <id>" or "secret <name>".
+   *
+   * @generated from field: string by = 2;
+   */
+  by: string;
+
+  /**
+   * @generated from field: string note = 3;
+   */
+  note: string;
+
+  /**
+   * declared is true when the declaring Secret says disabled: true; the API cannot enable such a target.
+   *
+   * @generated from field: bool declared = 4;
+   */
+  declared: boolean;
+};
+
+/**
+ * Describes the message koinon.outward.v1alpha1.AdminDisabled.
+ * Use `create(AdminDisabledSchema)` to create a new message.
+ */
+export const AdminDisabledSchema: GenMessage<AdminDisabled> = /*@__PURE__*/
+  messageDesc(file_koinon_outward_v1alpha1_outward, 3);
 
 /**
  * OutwardTargetKind is what kind of target the switch is for.
