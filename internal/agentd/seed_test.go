@@ -570,6 +570,27 @@ var _ = Describe("home repository seeds", func() {
 			))
 		})
 
+		It("is not failed while the sandbox is ready: the writer takes it over when a slot is free (#235)", func(ctx SpecContext) {
+			// No pool runs: the query alone decides. Every writer slot busy leaves such a row unclaimed.
+			fail := func() []store.HomeCheckpoint {
+				rows, err := q.FailAbandonedHomeCheckpoints(ctx, store.FailAbandonedHomeCheckpointsParams{
+					OrgID: e.org, LeaseSeconds: int32((30 * time.Minute).Seconds()), WaitSeconds: int32((30 * time.Minute).Seconds()),
+					Error: pgtype.Text{String: "abandoned", Valid: true},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				return rows
+			}
+			_, err := db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'ready' WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fail()).To(BeEmpty())
+			Expect(status(ctx)().Status).To(Equal(store.CheckpointStatusRunning))
+
+			_, err = db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fail()).To(HaveLen(1))
+			Expect(status(ctx)().Status).To(Equal(store.CheckpointStatusFailed))
+		})
+
 		It("is left running within its lease and the sandbox wait", func(ctx SpecContext) {
 			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 2 * time.Hour }))
 			Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())

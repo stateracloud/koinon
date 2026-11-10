@@ -152,6 +152,15 @@ func tarOf(files map[string]string) io.Reader {
 	return &b
 }
 
+// hangingRepo is a repository source whose Get (the call that may reach a KMS) returns only when its
+// context ends.
+type hangingRepo struct{ fixedRepo }
+
+func (hangingRepo) Get(ctx context.Context, _, _ pgtype.UUID) (checkpoint.Repository, error) {
+	<-ctx.Done()
+	return checkpoint.Repository{}, ctx.Err()
+}
+
 // failingStore is a checkpoint store whose backups, or restores of one snapshot, fail.
 type failingStore struct {
 	agentd.HomeStore
@@ -184,6 +193,17 @@ func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer)
 	<-ctx.Done()
 	close(b.stopped)
 	return ctx.Err()
+}
+
+// lateStore is a checkpoint store whose backup reads the whole stream and writes the snapshot, then
+// returns only after its context has expired, as one that completes just past the attempt deadline
+// does. It reads first: the exec stdout pipe is closed when the attempt context ends.
+type lateStore struct{ agentd.HomeStore }
+
+func (l lateStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
+	res, err := l.HomeStore.Backup(ctx, prefix, pw, r, m)
+	<-ctx.Done()
+	return res, err
 }
 
 var _ = Describe("home checkpoints", func() {
@@ -417,6 +437,28 @@ var _ = Describe("home checkpoints", func() {
 		Expect(cp.Attempts).To(BeEquivalentTo(2))
 		Expect(cp.Error.String).To(ContainSubstring("access denied"))
 		Expect(cp.SnapshotID.Valid).To(BeFalse())
+	})
+
+	It("bounds a hang before the exec by the backup timeout (#235)", func(ctx SpecContext) {
+		id := request(ctx, store.CheckpointReasonRecreate)
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
+			c.Repositories = hangingRepo{}
+			c.Timeout = 500 * time.Millisecond
+			c.Attempts = 1
+		}))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("deadline exceeded"))
+	})
+
+	It("records a snapshot that finished after the attempt deadline as complete (#235)", func(ctx SpecContext) {
+		id := request(ctx, store.CheckpointReasonStop)
+		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
+			c.Store = lateStore{HomeStore: writer}
+			c.Timeout = 5 * time.Second
+			c.Attempts = 1
+		}))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Expect(checkpointOf(ctx, id)().SnapshotID.Valid).To(BeTrue())
 	})
 
 	It("fails a backup into a prefix that holds a repository the database has no password for, at once, and records the next free epoch (#262)", func(ctx SpecContext) {

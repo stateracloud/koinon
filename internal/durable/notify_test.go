@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 )
@@ -48,7 +49,7 @@ var _ = Describe("Notifier", func() {
 			return n
 		})
 
-		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries) ([]durable.Notification, error) {
+		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 			_, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: org, Title: "t", AgentID: agent, CreatedByKind: store.TaskCreatorKindTrigger,
 				CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
@@ -73,7 +74,7 @@ var _ = Describe("Notifier", func() {
 		notifier.Handle("test.wake", func(context.Context, durable.Notification) error { delivered.Add(1); return nil })
 
 		boom := errors.New("boom")
-		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries) ([]durable.Notification, error) {
+		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 			_, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: org, Title: "t", AgentID: agent, CreatedByKind: store.TaskCreatorKindTrigger,
 				CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
@@ -91,7 +92,7 @@ var _ = Describe("Notifier", func() {
 	It("reports a failed send after the commit as a SendError and keeps the change", func(ctx SpecContext) {
 		org, agent := newOrgWithAgent(ctx)
 		notifier := durable.NewNotifier(nil, nil) // inline, and no handler for the kind
-		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries) ([]durable.Notification, error) {
+		err := durable.Commit(ctx, pool, notifier, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 			_, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: org, Title: "t", AgentID: agent, CreatedByKind: store.TaskCreatorKindTrigger,
 				CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
