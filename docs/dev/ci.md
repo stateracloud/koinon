@@ -214,28 +214,24 @@ after the driver: it runs the commands of `docs/site/src/content/docs/guides/bac
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
-observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). If yes, the PR's own run already runs the quickstart on GitHub;
-a green `e2e-lab` commit status (an external e2e run that passed on this commit) is enough to merge
-once the PR's own quickstart has finished (a flaky red one does not hide a green external run). Without
-one, wait
-for the PR's quickstart, or dispatch it earlier (`gh workflow run e2e-kind.yml --ref <branch>`). The
-`e2e` label is for a change the rule thinks irrelevant but you want tested.
-`hack/e2e-remote.sh` on your own Docker (`--local`) is a dev and debug tool only: it produces
-neither `e2e-lab` nor `quickstart`, so it is not merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
+observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
+queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts
+(ADR 0105); the PR's own run is advisory feedback and a green one is not merge evidence. The `e2e`
+label is for a change the rule thinks irrelevant but you want tested: the queue reads it when it
+builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
+merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
 
 ### The `e2e result` gate
 
-The required check is `e2e result`: green when nothing needs the e2e, but for a PR that needs one
-(`hack/needs-e2e.sh`) it is red until the head has a green `quickstart` (this run or a dispatched
-one) or `e2e-lab` success (`hack/e2e-gate.sh`, old issue 562); a later `e2e-lab` or a passing dispatch
-re-runs the `e2e result` job itself (not when the PR run is still in progress: then "Re-run failed
-jobs"). `e2e-lab` is not a required context of its own: the PR's own quickstart is the path every
-contributor has.
+The required check is `e2e result`. On `pull_request` it is always green (the PR's quickstart is
+advisory). On `merge_group` it is green iff the `quickstart` job succeeded, or it was skipped because
+`decide` found the change not e2e-relevant (no label on the queued PR, no e2e-relevant path); a red
+quickstart drops the entry from the queue. `decide` fails closed: an unreadable label list or an
+unparsable queue ref runs the e2e. The job has no checkout, no token scope and no status write.
 
-Trust limit: `result` runs from the PR's own `e2e-kind.yml`, so a PR can edit the YAML to drop the
-gate; the guard is the ruleset's required review on `.github/**` (not CODEOWNERS), `e2e result` is
-not pinned to an app and anyone with write access can post `e2e-lab`: a guardrail against
-mistakes, not a malicious member (pinned integration_id: old issue 568).
+Trust limit: `result` runs from the entry's own `e2e-kind.yml`, so a PR could edit the YAML to drop the
+gate; the guard is the ruleset's required review on `.github/**` (ADR 0105: CODEOWNERS approval kept
+for that path only).
 
 Why the e2e exists: old issue 281 (branch naming in githubtools) and old issue 284 (a startup flag the chart's
 migrate Job lacked) passed every package test and failed only in a full install.
@@ -361,10 +357,7 @@ It needs `actions: write` on `changes` and is best effort (a fork's read-only to
 
 `hack/ship.sh --ready` on an existing draft PR marks it ready BEFORE the push, so the push is the only
 event that starts a run on the new head.
-`hack/e2e-rerun-result.sh` does not re-run `e2e result` while the branch has a live `e2e-kind` run on
-another commit: that workflow's PR group still cancels in progress, and a re-run joins it. Tests:
-`hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/e2e-rerun-result-test.sh`,
-`hack/ship-test.sh`.
+Tests: `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/ship-test.sh`.
 
 ### Push to main (old issue 595)
 
@@ -481,7 +474,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 
 | Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
 |---|---|---|---|
-| `ci.yml`, `dco.yml`, `secrets.yml`, `e2e-label.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`); `e2e-label.yml` has `actions: write` (dispatches `e2e-kind`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
+| `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `review.yml` | `pull_request`, `merge_group` (the `review` job, ADR 0103); `push` to `main` (passes) | `GITHUB_TOKEN` only, `contents: read, pull-requests: read, statuses: read`; no secret, no Environment | ok: checks out main's tip at run time (`pull_request.base.ref`; `merge_group.base_sha` in the queue) and runs its `hack/review-gate.sh`, `hack/claim.sh` and CODEOWNERS; the PR's code never runs. The workflow file is the PR head's; the guard is the approval on `.github/**` (see "The `review` check") |
@@ -493,8 +486,8 @@ Checks behind the table:
 - No workflow uses `pull_request_target` (#463). GitHub blocks it by default for public repositories (brownouts from 2026-11-09, permanent 2026-12-02); it runs with the base branch's secrets and a write token next to pull request content. `hack/runner-lint.sh` fails any workflow that names it, and bringing it back needs an ADR that amends ADR 0082 plus an admin Actions event policy.
 - No workflow reads a secret besides `GITHUB_TOKEN` (the `claims-bot` Environment went with the updater;
   its leftover secrets are deleted by an owner, `docs/dev/work-claims-setup.md`).
-- Fork pull requests get a read-only token and no secrets under `pull_request`; `e2e-label.yml` notes that a
-  fork's token cannot dispatch, so a fork's e2e is run by a maintainer after review.
+- Fork pull requests get a read-only token and no secrets under `pull_request`; a fork's e2e runs only in
+  the merge queue (the `e2e` label on the PR forces it).
 - No `runs-on` is a self-hosted or Blacksmith label; none is chosen at run time.
 - Script injection: expressions spliced into `run:` are SHAs and numbers, except two: the base branch
   name in the `migrations (lint)` and `dependency age` steps of `ci.yml`. Fixed in this change: both go
@@ -572,21 +565,19 @@ ruleset "required workflow" could pin the file, and is a settings change (ADR 00
 
 ## Merging
 
-The only merge method is a merge commit: `gh pr merge --auto --merge`. `e2e result` is required
-and fails a needs-e2e PR without a passing e2e on its head (old issue 562), so a plain auto-merge cannot
-skip it. With the merge queue, the hosted `quickstart` on the queue commit (main plus the PR) is the merge evidence (#444, ADR 0102), so a
-main that moved during a lab run no longer forces a re-run: the lab's `e2e-lab` is pre-merge confidence on the PR head. Still, a pull request that changes startup flags, chart Jobs or hooks, or anything the
-e2e expects does not get auto-merge until `hack/pr-wait.sh <PR> --checks --require e2e` passes
-(`--checks` also waits for every required context of the ruleset to exist on the head, so a
-queued `ci` run is not "green"): a green `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the
-head (`e2e-kind.yml` has no `paths:` filter; its `decide` job runs the base branch's copy of `hack/needs-e2e.sh` with the base branch's
-`hack/paths.rules` (and `paths-lib.sh`, all from one ref; a base without them uses the standalone script), and a change that rule does not select needs a dispatch:
-`gh workflow run e2e-kind.yml --ref <branch>`). Then enable auto-merge. There is no claim step:
-the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104).
+The only merge method is a merge commit, and the merge queue is the single route to main
+(ADR 0105): `hack/pr-merge.sh <PR>` enqueues; the queue builds main plus the PR and its `quickstart`
+is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
+head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
+runs the review gate, merges with `--admin`, and opens a `break-glass` issue with the reason.
+`--admin` alone is for a PR that changes a `.github/` path (exit 9 otherwise). `hack/ship.sh
+--auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
+the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
+(`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
+(`admin:github` or `break-glass`), and the overnight report reads the rule-suites record of every bypass.
 
-`hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
-draft, runs `pr-wait.sh --checks` (with `--require e2e` when `needs-e2e.sh` says so; it reads the PR's whole
-file list with `gh api pulls/<PR>/files --paginate` and requires e2e when that read fails or is empty),
+`hack/pr-merge.sh <PR> [--jump | --admin | --break-glass "<reason>"] [--e2e] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
+draft, runs `pr-wait.sh --checks` (`--require e2e` is gone and exits 64),
 reads every required context of `hack/ci-required.txt` on the head SHA with the shared verdict (below; success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
@@ -596,7 +587,7 @@ succeeded a PR comment with the head SHA and the number of contexts it read. It 
 `--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
 re-run of a draft run is ignored too). A draft run is green by skipping, so it must never decide. A red or
 cancelled run of the ready `ci` is never dropped, and while the ready run has no checks yet it prints
-`waiting for the ready run`, never green. dco, gitleaks, claim and commit statuses (`e2e-lab`) keep their
+`waiting for the ready run`, never green. dco, gitleaks, claim and commit statuses keep their
 result; when gh cannot list the runs, nothing is dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
@@ -613,14 +604,10 @@ green passed). The rule:
    green never outvotes a newer run that was cancelled, red, still running or has no checks yet (that one is
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
-   outranks every finished one, a green included (except under rule 4); else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
+   outranks every finished one, a green included; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
    never-started cancelled job with a null `startedAt`), then job id.
-3. Commit statuses (`e2e-lab`) and check runs without a run have nothing to choose: the newest row of that name wins.
-4. `quickstart` (the e2e gate, old issue 547) and every other check of the `e2e-kind` workflow (`e2e result` and the
-   e2e-kind jobs) are the exception: any green row on the head from a non-draft run counts unless a newer one failed,
-   because a dispatched `e2e-kind` run and the skipped `pull_request` run are normal side by side. A newer cancelled
-   or unfinished e2e-kind run does not hide an older green; a newer red does (the e2e rule is "any green e2e on the head").
-5. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
+3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins.
+4. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
    `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come.
 6. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
 
@@ -658,59 +645,24 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
   guard is the required CODEOWNERS review on `.github/**`. The trade-off is in the ADR 0082 amendment; the
   ruleset "required workflow" option would run main's file instead.
-- `e2e result` and the quickstart (#444, ADR 0102): when the entry's diff against `base_sha` is
-  e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant), `decide` answers
+- `e2e result` and the quickstart (#444, ADR 0102, ADR 0105): when the entry's diff against `base_sha` is
+  e2e-relevant (the full rule or the e2e's own files; a rule failure counts as relevant) or the queued PR
+  carries the `e2e` label (read from the PR number in the queue ref; fail closed), `decide` answers
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That
-  run is the merge evidence: `e2e result` is green when it passes, and a red one drops the entry from the
-  queue. `required` stays false, so no PR-head lookup happens at queue time (the PR-head gate still runs
-  before the entry can be queued). `e2e-lab` cannot run on the read-only, short-lived queue ref, so it stays
-  pre-merge confidence on the PR head and is not read in the queue. Not relevant: the job is skipped and
-  `e2e result` is green. The queue's `quickstart` builds the flavor image itself when GHCR has none for the tree.
-  The push to main after the queue merge does not run the quickstart again: `decide` (push) accepts a green
-  `merge_group` quickstart job whose head commit has the pushed commit's tree (`PUSH_SHA`).
-- Bootstrap shim (#444, follow-up: #452): the entry that merges #444, and any entry built on a main older
-  than #444, runs the OLD `decide` from `base_sha`, which answers `needed=false, required=true`. Only then does
-  `e2e result` look up the queued PR head (`hack/e2e-queue-head.sh`, then the old PR-head gate). Removed when main's
-  `decide` is the new one and no older-base entry can remain.
-
-Ruleset values (ADR 0094 decision 4), set by the maintainer's session: `strict_required_status_checks_policy`
-`false`, `merge_queue` with grouping strategy `ALLGREEN`, merge method `MERGE`, 1 entry merged per group (`min` and `max`
-group size 1), at most 5 builds at once, check timeout 60 minutes. The 60 stays with the e2e in the queue: the
-slowest of the last 200 successful or failed `quickstart` jobs took 14.2 minutes (851 s; typical 12 to 13.5),
-so there are 45 minutes of headroom (measured 2026-11-09). A cold flavor build in the queue is not in that sample;
-if the queue starts timing out entries, raise `check_response_timeout_minutes` (to 90) then.
-
-The updater is retired (ADR 0094, amendment): `updater.yml`, `hack/pr-updater.sh` and the `needs-update`
-label are gone. The queue tests each pull request on main's tip, so a branch is merged with `origin/main`
-only when GitHub reports a conflict (`pr-wait.sh` exit 4) or the queue drops the entry for one (exit 8).
-
-Cost: one full `ci` run per queue build, plus a `quickstart` of about 12 to 15 minutes (more for a cold flavor build) for each e2e-relevant entry
-(75-minute job timeout, 60-minute queue check timeout: the queue gives up first). Entries build concurrently (up to 5), so
-the e2e adds latency per entry, not per queue; the throughput limit is the 1-entry-per-group merge. A red group drops
-only its entry and rebuilds the entries behind it. Raise the group size (`max_entries_to_merge`, `min_entries_to_merge`
-with `min_entries_to_merge_wait_minutes`) only after measuring: a batch of n entries costs one e2e, but a red batch
-costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge runs `decide_push` in `ci.yml`, which skips the heavy jobs
-when a successful `merge_group` `ci` run (the queue build) tested the pushed commit's tree, so they do not run
-twice; an admin merge has no queue run and runs everything. The kind e2e has its own rule: see above.
-
-Scripts, with the rule detected at run time (no queue: nothing changes):
-
-- `hack/pr-merge.sh` runs the same waits and reads, then `gh pr merge --merge --auto`, which enqueues
-  when the ruleset has a queue (output `added to the merge queue`). A PR must pass its pull request
-  checks, review and threads rules to be enqueued; the queue then re-runs the required checks on the
-  queue commit.
-- `hack/pr-wait.sh <PR>` prints `in the merge queue (<position> <state>)` while the PR is queued
-  (GraphQL `isInMergeQueue`/`mergeQueueEntry`; `gh pr view --json` has no queue fields) and ends with
-  `MERGED`. A PR that was queued and reads open and out of the queue on two consecutive polls exits **8** `DEQUEUED`
-  (one such poll is not enough: the queue clears just before the PR reads `MERGED`) (failed
-  queue build, conflict with an entry ahead, removed by hand; `gh` cannot remove an entry, the PR page
-  can). Read the queue build's failures on the PR page, fix, and run `pr-merge.sh` again.
-- `--admin` (CODEOWNERS paths): verified (ADR 0094, "Verification by probe", probe 5): `gh pr merge --admin
-  --merge` merges directly and bypasses the queue and the review rule, so a sensitive-path PR needs no
-  enqueue. An admin merge lands without the queue-commit quickstart (#444, ADR 0102), the merge evidence for an
-  e2e-relevant change: such a PR should be enqueued, and `pr-merge.sh --admin` warns when the queue is on and
-  `needs-e2e.sh` says the e2e is required. `pr-merge.sh --admin` still runs `pr-wait.sh --checks` first, which judges the head's checks
-  whether or not the PR is queued.
+  run is the only merge evidence: `e2e result` is green when it passes, and a red one drops the entry from the
+  queue. Not relevant: the job is skipped and `e2e result` is green. The queue's `quickstart` builds the
+  flavor image itself when GHCR has none for the tree. The push to main after the queue merge does not run the
+  quickstart again: `decide` (push) accepts a green `merge_group` quickstart job whose head commit has the
+  pushed commit's tree (`PUSH_SHA`). The PR-head lookup shim and `e2e-lab` gate are gone (#452).
+- Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; `review` pinned to the
+  Actions app; required checks on `merge_group`). PR B merges only with or after it.
+- Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
+  successful `merge_group` `ci` run; labels `admin:github` and `break-glass` (`docs/agents/triage-labels.md`).
+  The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
+- `--admin` (only for a PR that changes a `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
+  `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the
+  queue-commit quickstart, so `pr-merge.sh --admin` exits 9 for a PR with no `.github/` path; `--break-glass` is
+  the audited exception for anything else. Both run `pr-wait.sh --checks` and the review gate first.
 
 ### The `review` check (ADR 0103)
 
