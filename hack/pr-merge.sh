@@ -5,42 +5,52 @@
 # hand-written wait-then-merge loops: a draft's green rollup, a ready run that has not started yet and a
 # required context that never reported have each been merged over by hand before.
 #
-# Usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]
+# Usage: hack/pr-merge.sh <PR> [--jump | --break-glass "<reason>" | --admin] [--e2e] [--approved-at <time>]
 #   1. refuses a draft (exit 5) and a PR that is not open
-#   2. hack/pr-wait.sh <PR> --checks, plus `--require e2e` when hack/needs-e2e.sh says the change needs
-#      the kind e2e (the ruleset's required contexts are read by --checks itself)
+#   2. hack/pr-wait.sh <PR> --checks (the ruleset's required contexts are read by --checks itself). The e2e is not
+#      checked on the head: the merge queue's quickstart is the one e2e proof (ADR 0105).
 #   3. reads every context of hack/ci-required.txt (not `advisory`) on the head SHA and judges it with
 #      hack/lib/pr-verdict.sh, the function pr-wait.sh uses too (#133): per workflow run, the newest counting run
 #      of each workflow decides; each context must be success or skipped, otherwise it exits 1 without merging
 #   4. only then: re-reads the PR (no longer OPEN: exit 3; head moved: exit 2; head not origin's
-#      branch tip: exit 6 STALE-HEAD), `gh pr merge --merge` (with --admin when given, else --auto),
-#      pinned to the head SHA that was read, then a PR comment naming that SHA and the number of green contexts read. With --auto the PR is merged later:
-#      the output says `auto-merge enabled`.
-#   Merge queue (#225): when the base branch's ruleset has a `merge_queue` rule (read at run time), the
-#   same `gh pr merge --merge --auto` adds the PR to the queue and the output says `added to the merge queue`;
-#   --admin still merges directly (bypass, and no queue-commit quickstart: #444, ADR 0102, an e2e-relevant PR should be enqueued). Without the rule nothing changes. docs/dev/ci.md "Merging".
-#   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
-#   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
-#   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
-#   The e2e decision reads the PR's whole file list (`gh api pulls/<PR>/files --paginate`); when that read
-#   fails or is empty, e2e is required (fail closed).
-#   --admin        merge now with admin rights: the exception (a CODEOWNERS or sensitive path, AGENTS.md "Merging"), not the
-#                  default. With a merge queue and a change that needs the e2e it warns: the queue-commit quickstart is skipped.
-#                  It runs hack/review-gate.sh on the head first (the `review` check it bypasses, ADR 0103) and
-#                  refuses with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
+#      branch tip: exit 6 STALE-HEAD), and merges pinned to the head SHA that was read, then a PR comment naming
+#      that SHA and the number of green contexts read.
+#   The route (ADR 0105):
+#   (default)      `gh pr merge --merge --auto`: with the merge queue rule it adds the PR to the queue, which builds main
+#                  plus the PR, runs every required check and the kind e2e when the entry needs it, and merges that
+#                  commit; the output says `added to the merge queue`. Without the rule: auto-merge.
+#   --jump         urgent: GraphQL enqueuePullRequest(jump: true, expectedHeadOid), the front of the queue. The change
+#                  is still tested on main's tip. For a red main or a security fix, not for "slow". Needs the queue
+#                  rule (exit 2 without it).
+#   --e2e          force the queue e2e: adds the `e2e` label before enqueueing. The label is read when the queue builds
+#                  the entry; on a PR that is already queued it is not (the output says to dequeue and enqueue again).
+#   --break-glass "<reason>"
+#                  emergency, for a queue that cannot merge anything (GitHub's queue or the hosted runners down). Needs
+#                  --approved-at (the owner approves; exit 64 without). Runs the checks above and the review gate,
+#                  merges with `gh pr merge --admin --merge`, and opens a `break-glass` issue (sha, reason, approver).
+#   --admin        merge now with admin rights, for a pull request that changes a path under `.github/` only: a
+#                  workflow file runs from the pull request and could fake the `review` check, so those keep the
+#                  CODEOWNERS approval, which one human cannot give (ADR 0103, ADR 0105). Any other pull request is
+#                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
+#                  e2e; the push e2e on main and the nightly are the backstop. Exit 2 when the file list cannot be read.
+#   Both --admin and --break-glass run hack/review-gate.sh on the head first (the `review` check they bypass, ADR 0103)
+#   and refuse with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
 #                  The gate, claim.sh and CODEOWNERS are the base branch's (origin/<base>, fetched), not this
 #                  checkout's; only when the base has no gate yet does it use the local copy, and says so.
 #                  That fallback also runs for a PR whose base branch has no gate (a base other than main), and
 #                  the local copy can then be the PR's own; harmless while the ruleset protects only main.
-#   --approved-at  when the human approved the admin merge; recorded in the comment, not checked
+#   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
+#   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
+#   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
+#   --approved-at  when the human approved the merge; recorded in the comment (required by --break-glass)
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed (also: the repository name, the base fetch or the gate copy for --admin), 3 closed,
-#       4 conflict, 5 draft, 6 stale head, 7 unresolved review threads, 9 --admin without a review verdict
-#       (ADR 0103), 64 usage
+#       a tool failed (also: the repository name, the base fetch or the gate copy for --admin, a file list that cannot
+#       be read, --jump without a queue), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
+#       9 --admin on a PR without a `.github/` path, or without a review verdict (ADR 0103), 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_NEEDS_E2E, PR_MERGE_THREADS replace the helper scripts.
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS replace the helper scripts.
 # PR_MERGE_REVIEW_GATE replaces the review gate only when PR_MERGE_TEST=1 is set too (a test hook). Not a
 # security boundary: whoever runs this script can set both variables or edit it. The boundary is the required
 # `review` check in the `main` ruleset; `--admin` and the web UI bypass it (ADR 0103).
@@ -53,7 +63,6 @@ export GH_PAGER=cat PAGER=cat
 
 here=$(cd "$(dirname "$0")" && pwd)
 wait_sh=${PR_MERGE_WAIT:-$here/pr-wait.sh}
-needs_sh=${PR_MERGE_NEEDS_E2E:-$here/needs-e2e.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
 review_gate=""
@@ -62,14 +71,21 @@ review_gate=""
 . "$here/lib/pr-verdict.sh"
 
 usage() {
-  echo "usage: hack/pr-merge.sh <PR> [--admin] [--approved-at <time>]" >&2
+  echo "usage: hack/pr-merge.sh <PR> [--jump | --break-glass \"<reason>\" | --admin] [--e2e] [--approved-at <time>]" >&2
   exit 64
 }
 
-pr="" admin=0 approved=""
+pr="" admin=0 approved="" jump=0 glass=0 reason="" e2e=0
 while [ $# -gt 0 ]; do
   case $1 in
   --admin) admin=1 ;;
+  --jump) jump=1 ;;
+  --e2e) e2e=1 ;;
+  --break-glass)
+    [ $# -ge 2 ] || usage
+    glass=1 reason=$2
+    shift
+    ;;
   --lane)
     echo "pr-merge: --lane is gone (ADR 0104): the merge releases the claim, pr-merge.sh no longer calls claim.sh" >&2
     exit 64
@@ -88,11 +104,18 @@ while [ $# -gt 0 ]; do
   shift
 done
 case $pr in '' | *[!0-9]*) usage ;; esac
+[ $((admin + jump + glass)) -le 1 ] || { echo "pr-merge: --jump, --break-glass and --admin are exclusive" >&2; exit 64; }
+if [ "$glass" = 1 ]; then
+  [ -n "${reason//[[:space:]]/}" ] || { echo "pr-merge: --break-glass needs a reason" >&2; exit 64; }
+  [ -n "$approved" ] || { echo "pr-merge: --break-glass needs --approved-at <time>: only the owner approves it" >&2; exit 64; }
+fi
+[ "$e2e" = 0 ] || [ $((admin + glass)) -eq 0 ] || { echo "pr-merge: --e2e forces the queue e2e; --admin and --break-glass skip the queue" >&2; exit 64; }
 
-pr_json=$(gh pr view "$pr" --json state,isDraft,headRefOid,baseRefName,closingIssuesReferences) || { echo "pr-merge: cannot read PR $pr" >&2; exit 2; }
+pr_json=$(gh pr view "$pr" --json id,state,isDraft,headRefOid,baseRefName,closingIssuesReferences) || { echo "pr-merge: cannot read PR $pr" >&2; exit 2; }
 json=$pr_json
 state=$(jq -r '.state' <<<"$json")
 sha=$(jq -r '.headRefOid' <<<"$json")
+node=$(jq -r '.id // ""' <<<"$json")
 base=$(jq -r '.baseRefName' <<<"$json")
 [ "$state" = OPEN ] || { echo "pr-merge: PR $pr is $state, not open" >&2; exit 3; }
 if [ "$(jq -r '.isDraft' <<<"$json")" = true ]; then
@@ -100,23 +123,20 @@ if [ "$(jq -r '.isDraft' <<<"$json")" = true ]; then
   exit 5
 fi
 
-# Does the change need the kind e2e? Judged on the PR's own file list, not on the local checkout.
-req=()
-rc=0
-# Fail closed: an unreadable or empty list requires e2e. `gh pr view --json files` stops at 100 files.
-if files=$(gh api "repos/{owner}/{repo}/pulls/$pr/files" --paginate --jq '.[].filename' 2>/dev/null) && [ -n "$files" ]; then
-  "$needs_sh" --stdin <<<"$files" >/dev/null 2>&1 || rc=$?
-else
-  echo "pr-merge: cannot read the file list of PR $pr; requiring e2e" >&2
-  rc=2
+# --admin is for `.github/**` pull requests only (ADR 0105): judged on the PR's own file list, not on the local
+# checkout. `gh pr view --json files` stops at 100 files, so page through the API. Fail closed: an unreadable or
+# empty list is a tool failure (exit 2), never a license to bypass the queue.
+if [ "$admin" = 1 ]; then
+  files=$(gh api "repos/{owner}/{repo}/pulls/$pr/files" --paginate --jq '.[].filename' 2>/dev/null) || files=""
+  [ -n "$files" ] || { echo "pr-merge: cannot read the file list of PR $pr; not merging with --admin" >&2; exit 2; }
+  if ! grep -q '^\.github/' <<<"$files"; then
+    echo "pr-merge: --admin is for pull requests that change a path under .github/ (ADR 0105); PR $pr changes none. Use hack/pr-merge.sh $pr (the merge queue), --jump for an urgent one, or --break-glass \"<reason>\" --approved-at <time> when the queue cannot merge anything" >&2
+    exit 9
+  fi
 fi
-case $rc in
-1) ;;                  # not needed
-*) req=(--require e2e) # needed, or it could not be decided (exit 2): treat as needed
-esac
 
 wait_rc=0
-"$wait_sh" "$pr" --checks ${req[@]+"${req[@]}"} || wait_rc=$?
+"$wait_sh" "$pr" --checks || wait_rc=$?
 [ "$wait_rc" -eq 0 ] || { echo "pr-merge: pr-wait.sh exited $wait_rc; not merging" >&2; exit "$wait_rc"; }
 
 # Every required context of hack/ci-required.txt, read on the head SHA and judged by hack/lib/pr-verdict.sh, the
@@ -195,7 +215,11 @@ fi
 # above) and GitHub merges it after the queue build is green: no manual sync. --admin is GitHub's "merge
 # without waiting for requirements" (a bypass actor merges directly, skipping the queue and the review rule).
 mode=--auto
-if [ "$admin" != 0 ]; then
+if [ "$jump" = 1 ] && [ "$queue" != 1 ]; then
+  echo "pr-merge: --jump needs the merge queue rule on $base, and the ruleset shows none; use hack/pr-merge.sh $pr" >&2
+  exit 2
+fi
+if [ $((admin + glass)) != 0 ]; then
   mode=--admin
   # --admin bypasses the ruleset, so the `review` check too (ADR 0103): run the gate on the head here. A
   # sensitive-path PR without a success review-verdict from a listed owner is refused (exit 9).
@@ -225,11 +249,33 @@ if [ "$admin" != 0 ]; then
     echo "pr-merge: --admin: the review gate (hack/review-gate.sh) fails on ${sha:0:7}; record the independent review with hack/review-verdict.sh $pr ready <reviewer> $sha, then run this again; not merging" >&2
     exit 9
   fi
-  if [ "$queue" = 1 ] && [ "${#req[@]}" -gt 0 ]; then
-    echo "pr-merge: WARNING: --admin skips the merge queue, so the quickstart on the queue commit (the merge evidence, #444, ADR 0102) does not run for this e2e-relevant change; enqueue it (no --admin) unless the path is CODEOWNERS-only" >&2
+  if [ "$glass" = 1 ]; then
+    echo "pr-merge: BREAK GLASS: merging PR $pr without the queue (approved at $approved): $reason" >&2
+  else
+    echo "pr-merge: --admin skips the merge queue and so the queue e2e (.github/** pull request, ADR 0105); the push e2e on main is the backstop" >&2
   fi
 fi
-gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc)" >&2; exit "$rc"; }
+
+# --e2e: the label is read when the queue builds the entry (ADR 0105 decision 3). On a PR that is already queued it
+# does not rebuild the entry.
+if [ "$e2e" = 1 ]; then
+  e2e_qs=$(prv_queue_state "$pr")
+  if [ "$e2e_qs" = no ] || [ "$e2e_qs" = unknown ]; then
+    gh pr edit "$pr" --add-label e2e >/dev/null || { echo "pr-merge: cannot add the e2e label to PR $pr; not merging" >&2; exit 2; }
+  else
+    echo "pr-merge: PR $pr is already in the merge queue: the e2e label is read when the queue builds the entry, so it would not apply. Remove the PR from the queue (PR page), then run this again with --e2e" >&2
+    exit 2
+  fi
+fi
+
+if [ "$jump" = 1 ]; then
+  # shellcheck disable=SC2016 # $id, $oid are GraphQL variables
+  jump_query='mutation($id: ID!, $oid: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $id, jump: true, expectedHeadOid: $oid}) { mergeQueueEntry { position } } }'
+  [ -n "$node" ] || { echo "pr-merge: cannot read the node id of PR $pr; not merging" >&2; exit 2; }
+  gh api graphql -f query="$jump_query" -f id="$node" -f oid="$sha" >/dev/null || { rc=$?; echo "pr-merge: enqueuePullRequest(jump: true) failed ($rc)" >&2; exit "$rc"; }
+else
+  gh pr merge "$pr" --merge "$mode" --match-head-commit "$sha" || { rc=$?; echo "pr-merge: gh pr merge failed ($rc)" >&2; exit "$rc"; }
+fi
 
 # No claim step: the merge releases the claims of the issues the PR closes, through claims.yml's
 # release job (ADR 0104). A close without a merge releases nothing: `claim.sh release-pr <PR>` or `release <N>`.
@@ -242,6 +288,23 @@ qs=no
 after=$(gh pr view "$pr" --json state,mergeStateStatus,reviewDecision,autoMergeRequest 2>/dev/null) || after="{}"
 verb=$(prv_merge_outcome "$mode" "$qs" "$after")
 note="pr-merge.sh: read $green required contexts on head \`$sha\` (newest counting run of each workflow; all success or skipped) against $base, then $verb."
+[ "$jump" = 0 ] || note+=" Jumped to the front of the queue."
+[ "$glass" = 0 ] || note+=" BREAK GLASS: $reason."
 [ -z "$approved" ] || note+=" Approved at $approved."
 gh pr comment "$pr" --body "$note"
+if [ "$glass" = 1 ]; then
+  # The record of a break-glass merge (ADR 0105): an issue the retro and the overnight report read. The `break-glass`
+  # label is created by the owner; without it the issue is still opened, unlabelled.
+  gtitle="break-glass: PR $pr merged without the merge queue (${sha:0:7})"
+  gbody="PR #$pr was merged with \`hack/pr-merge.sh --break-glass\` at head \`$sha\`, skipping the merge queue and its required checks on the queue commit.
+
+- Reason: $reason
+- Approved at: $approved
+- Skipped: the queue build (every required check on main plus the PR, and the kind e2e)
+
+Follow-up: find why the queue could not merge, and run the e2e on main (\`gh workflow run e2e-kind.yml --ref main\`)."
+  gh issue create --title "$gtitle" --body "$gbody" --label break-glass >/dev/null 2>&1 ||
+    gh issue create --title "$gtitle" --body "$gbody" >/dev/null 2>&1 ||
+    echo "pr-merge: WARNING: could not open the break-glass issue; open one by hand (title: $gtitle)" >&2
+fi
 echo "pr-merge: PR $pr at ${sha:0:7}: $verb ($green contexts green)"

@@ -11,8 +11,9 @@
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
-# --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (old issue 468).
+# --e2e adds the `e2e` label before the push (an open PR) or at PR creation: it forces the merge queue's e2e (the
+# label is read when the queue builds the entry, ADR 0105) and runs the advisory quickstart on the PR. Creation
+# labels in a second call; e2e-kind's `opened` run reads the labels live (old issue 468).
 #
 # --ready on a draft PR that exists marks it ready BEFORE the push (old issue 675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
@@ -231,7 +232,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
-		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
+		[[ $auto == 1 ]] && say "dry-run: would enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
 		if [[ -n $pr_title ]]; then
@@ -281,12 +282,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			fi
 		fi
 		if [[ $auto == 1 ]]; then
-			rc=0
-			needs=$(hack/needs-e2e.sh origin/main 2>&1) || rc=$?
-			if [[ $rc -ne 1 ]]; then
-				echo "$needs" | head -8 >&2
-				fail "auto-merge refused: this change needs the kind e2e (or hack/needs-e2e.sh failed); run it or add the e2e label, wait until e2e-kind is green, then enable auto-merge"
-			fi
+			# No e2e refusal (ADR 0105): the merge queue runs the kind e2e on the queue commit when the change needs it.
 			gh pr merge "$pr_url" --auto --merge >/dev/null || fail "gh pr merge --auto failed"
 			say "auto-merge on"
 		fi
