@@ -41,7 +41,11 @@ namespace on another cluster that shares the gateway, or a different namespace o
    unmarked: they are shared, idempotent records. New workspaces are stamped and checked. Profiles are
    re-imported with the mark (it is part of their spec hash). The claim takes several passes, longer while
    runs hold agents; the reconciler gauge `koinon_openshell_unmarked_objects{kind}` (sandbox, provider,
-   profile) says how many objects it still saw unmarked in the last pass.
+   profile) says how many objects are still unmarked. It counts from one gateway list per pass (the
+   sandboxes, providers and profiles of the install's own workspaces), not from the objects a pass touched, so
+   held-back, failing, ephemeral and archived `retained` objects are counted. If the list fails the gauge
+   keeps its last values and `koinon_openshell_unmarked_objects_stale` is 1 (it is also 1 before the first
+   count).
 6. **Names do not change.** No sandbox is recreated only because of the names.
 
 ## Alternatives considered
@@ -74,7 +78,9 @@ name. Velero's restore marks restored objects the same way.
 - Legacy objects stay open to a second install until the live install has recreated them, which takes
   several passes (held runs, the cap, attached providers). A restored copy may run on the same gateway only
   when every sandbox, provider and provider profile of the live install carries the mark: the gauge
-  `koinon_openshell_unmarked_objects` is 0 for every kind.
+  `koinon_openshell_unmarked_objects` is 0 for every kind and `koinon_openshell_unmarked_objects_stale` is 0.
+  A retained (archived) sandbox is counted and is claimed only when it is recreated, so the operator unarchives
+  its agent on the live install first, or deletes the sandbox when its home volume is not needed.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it

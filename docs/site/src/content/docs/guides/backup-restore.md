@@ -240,10 +240,16 @@ install carries the mark**. Check it on the live install's reconciler metrics
 
 ```promql
 koinon_openshell_unmarked_objects
+koinon_openshell_unmarked_objects_stale
 ```
 
-The condition is that the gauge is 0 for each of `kind="sandbox"`, `"provider"` and `"profile"`. If it is
-not, wait: runs that hold an agent finish, and the next passes recreate those sandboxes. To go faster,
+The condition is that the first gauge is 0 for each of `kind="sandbox"`, `"provider"` and `"profile"` **and**
+the second is 0. A stale value of 1 means the last count of the gateway failed (or none has run yet), so the
+zeros may be old. The count lists the gateway, so it also covers agents that a pass held back or failed
+on, and archived (`retained`) sandboxes. The reconciler claims a retained sandbox only when it recreates it,
+and an archived agent is not reconciled. Unarchive such an agent on the live install first and wait until it
+is recreated with the mark (you can archive it again after that). Delete its sandbox on the gateway only when
+you do not need its home volume: that data is gone. If the gauge is not 0, wait: runs that hold an agent finish, and the next passes recreate those sandboxes. To go faster,
 raise `reconciler.maxRecreatesPerPass` (default 4) with a `helm upgrade`, or end the runs that hold
 the agents. Do not delete the sandboxes on the gateway by hand to speed it up: the reconciler recreates
 them, but only on a pass when no run holds the agent, and the home volume is replaced.

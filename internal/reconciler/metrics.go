@@ -44,8 +44,11 @@ type Metrics struct {
 	GatewayConfigRejected prometheus.Gauge
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
-	// UnmarkedObjects counts the OpenShell objects the last pass saw without the install mark, by kind.
+	// UnmarkedObjects counts the OpenShell objects in this install's workspaces without the install
+	// mark, from one gateway list per pass, by kind. UnmarkedStale is 1 until a list has succeeded
+	// completely and after one has failed (the values are then the last good ones).
 	UnmarkedObjects *prometheus.GaugeVec
+	UnmarkedStale   prometheus.Gauge
 	SandboxRepairs  prometheus.Counter
 	AgentsUnhealthy prometheus.Counter
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
@@ -81,8 +84,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_agents_waiting_for_gateway_key", Help: "Agents whose sandbox work was held back in the last pass because the gateway does not serve their new key yet.",
 		}),
 		UnmarkedObjects: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell objects this install saw without its install mark in the last pass, by kind (sandbox, provider or profile). 0 for every kind means no other install can claim them (ADR 0106).",
+			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell sandboxes, providers and profiles in this install's workspaces without its install mark, from one gateway list per pass, by kind (sandbox, provider or profile). Read with koinon_openshell_unmarked_objects_stale: 0 for every kind and stale 0 means no other install can claim them (ADR 0106).",
 		}, []string{"kind"}),
+		UnmarkedStale: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_openshell_unmarked_objects_stale", Help: "1 until the gateway list behind koinon_openshell_unmarked_objects has succeeded completely, and after a pass where it failed (the object gauge then shows the last good values); 0 after a good count.",
+		}),
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
@@ -109,11 +115,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, k := range unmarkedKinds {
 		m.UnmarkedObjects.WithLabelValues(k)
 	}
+	m.UnmarkedStale.Set(1) // nothing has been counted yet
 	for _, s := range sandboxStates {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects,
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedStale,
 			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors)
 	}
 	return m

@@ -36,11 +36,14 @@ func OwnerID(mark string) string {
 // Provider names follow the same limit to be safe.
 const MaxSandboxName = 19
 
+// WorkspacePrefix starts every name [WorkspaceName] returns.
+const WorkspacePrefix = "kw-"
+
 // WorkspaceName is the OpenShell workspace of an org (one per org, ADR 0002): "kw-" and 16 hex
 // characters. In managed mode OpenShell prefixes it to form the namespace name, so it is kept
 // short.
 func WorkspaceName(org [16]byte) string {
-	return "kw-" + shortHash("workspace", UUIDString(org))
+	return WorkspacePrefix + shortHash("workspace", UUIDString(org))
 }
 
 // AgentNames are the per-agent object names, all derived from (org_id, agent_id).

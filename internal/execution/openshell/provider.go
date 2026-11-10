@@ -82,7 +82,6 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 		return err
 	}
 	legacy := b.unlabeled(existing.GetMetadata().GetLabels())
-	b.noteUnmarked("provider", p.Name, legacy)
 	if p.ClaimLegacy && legacy {
 		// Made before the install label existed (issue 461). Labels are immutable, so claim it by
 		// recreating it with the label and the credentials of this pass. The caller sets ClaimLegacy
@@ -95,7 +94,6 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 		if err := create(); err != nil {
 			return err
 		}
-		b.noteUnmarked("provider", p.Name, false)
 		return nil
 	}
 	if existing.GetType() != p.Profile.ID || existing.GetProfileWorkspace() != workspace {
@@ -164,9 +162,6 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 			return err
 		}
 	}
-	if found {
-		b.noteUnmarked("profile", p.ID, b.unlabeled(got.GetProfile().GetAnnotations()))
-	}
 	if found && got.GetProfile().GetAnnotations()[SpecHashAnnotation] == hash {
 		return nil
 	}
@@ -212,7 +207,6 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	if !resp.GetUpdated() {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: diagnostics(resp.GetDiagnostics())}
 	}
-	b.noteUnmarked("profile", p.ID, false)
 	return nil
 }
 

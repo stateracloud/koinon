@@ -47,9 +47,6 @@ type Backend struct {
 	profileMu sync.Mutex
 	// owner is the value of execution.LabelInstall this Backend stamps and enforces (WithOwner).
 	owner string
-	// unmarked holds the providers and profiles seen without the install label (kind -> names).
-	unmarkedMu sync.Mutex
-	unmarked   map[string]map[string]struct{}
 }
 
 var _ execution.Backend = (*Backend)(nil)

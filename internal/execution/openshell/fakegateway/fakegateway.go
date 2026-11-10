@@ -33,6 +33,7 @@ import (
 	"net"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -241,6 +242,91 @@ func workspaceOf(sel *datamodelv1.WorkspaceSelector) (string, error) {
 		return "", status.Error(codes.InvalidArgument, "workspace_scope must name one workspace")
 	}
 	return ws, nil
+}
+
+// ListWorkspaces implements openshellv1.OpenShellServer. It returns everything in one page.
+func (g *Gateway) ListWorkspaces(_ context.Context, _ *openshellv1.ListWorkspacesRequest) (*openshellv1.ListWorkspacesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListWorkspaces"); err != nil {
+		return nil, err
+	}
+	out := &openshellv1.ListWorkspacesResponse{}
+	for _, name := range slices.Sorted(maps.Keys(g.workspaces)) {
+		out.Workspaces = append(out.Workspaces, clone(g.workspaces[name]))
+	}
+	return out, nil
+}
+
+// ListSandboxes implements openshellv1.OpenShellServer. It returns one workspace in one page.
+func (g *Gateway) ListSandboxes(_ context.Context, req *openshellv1.ListSandboxesRequest) (*openshellv1.ListSandboxesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListSandboxes"); err != nil {
+		return nil, err
+	}
+	ws, err := workspaceOf(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	out := &openshellv1.ListSandboxesResponse{}
+	for _, k := range sortedKeys(g.sandboxes) {
+		if k.workspace == ws {
+			out.Sandboxes = append(out.Sandboxes, clone(g.sandboxes[k]))
+		}
+	}
+	return out, nil
+}
+
+// ListProviders implements openshellv1.OpenShellServer. It returns one workspace in one page.
+func (g *Gateway) ListProviders(_ context.Context, req *openshellv1.ListProvidersRequest) (*openshellv1.ListProvidersResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListProviders"); err != nil {
+		return nil, err
+	}
+	ws, err := workspaceOf(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	out := &openshellv1.ListProvidersResponse{}
+	for _, k := range sortedKeys(g.providers) {
+		if k.workspace == ws {
+			out.Providers = append(out.Providers, redacted(g.providers[k]))
+		}
+	}
+	return out, nil
+}
+
+// ListProviderProfiles implements openshellv1.OpenShellServer. It returns one workspace in one page.
+func (g *Gateway) ListProviderProfiles(_ context.Context, req *openshellv1.ListProviderProfilesRequest) (*openshellv1.ListProviderProfilesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListProviderProfiles"); err != nil {
+		return nil, err
+	}
+	ws, err := workspaceOf(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	out := &openshellv1.ListProviderProfilesResponse{}
+	for _, k := range sortedKeys(g.profiles) {
+		if k.workspace == ws {
+			out.Profiles = append(out.Profiles, clone(g.profiles[k]))
+		}
+	}
+	return out, nil
+}
+
+func sortedKeys[V any](m map[key]V) []key {
+	keys := slices.Collect(maps.Keys(m))
+	slices.SortFunc(keys, func(a, b key) int {
+		if a.workspace != b.workspace {
+			return strings.Compare(a.workspace, b.workspace)
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	return keys
 }
 
 // GetWorkspace implements openshellv1.OpenShellServer.

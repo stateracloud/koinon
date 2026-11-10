@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"context"
+	"errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"log/slog"
 
@@ -121,17 +122,40 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(osg.Calls("DeleteProvider")).To(Equal(1))
 		})
 
-		It("is counted in koinon_openshell_unmarked_objects until it is recreated and claimed", func(ctx SpecContext) {
+		It("is counted in koinon_openshell_unmarked_objects from the gateway until it is recreated and claimed", func(ctx SpecContext) {
 			gauge := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind)) }
+			stale := func() float64 { return testutil.ToFloat64(m.UnmarkedStale) }
+			Expect(stale()).To(Equal(1.0), "nothing has been counted yet")
 			live := mk("mark-live", 0)
 			Expect(live.ReconcileAll(ctx)).To(Succeed()) // deletes the sandbox; its provider is still attached
-			Expect(gauge("sandbox")).To(Equal(1.0))
+			Expect(stale()).To(BeZero())
+			Expect(gauge("sandbox")).To(BeZero(), "the unmarked sandbox is gone")
 			Expect(gauge("provider")).To(Equal(1.0))
 			Expect(live.ReconcileAll(ctx)).To(Succeed()) // claims the provider, creates the sandbox
 			Expect(live.ReconcileAll(ctx)).To(Succeed())
 			for _, kind := range []string{"sandbox", "provider", "profile"} {
 				Expect(gauge(kind)).To(BeZero(), kind)
 			}
+			Expect(stale()).To(BeZero())
+		})
+
+		It("counts a sandbox the pass held back or failed on, and keeps the values and sets stale when the list fails", func(ctx SpecContext) {
+			gauge := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind)) }
+			queueRun(ctx, org, user, agent.ID)
+			claimRun(ctx, org)
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed()) // a run holds the agent: the sandbox stays unmarked
+			Expect(gauge("sandbox")).To(Equal(1.0))
+			Expect(gauge("provider")).To(Equal(1.0))
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
+
+			osg.FailNext("ListWorkspaces", errors.New("gateway unavailable"))
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(Equal(1.0))
+			Expect(gauge("sandbox")).To(Equal(1.0), "the last good value stays")
+
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
 		})
 
 		It("is not recreated while a run holds the agent", func(ctx SpecContext) {

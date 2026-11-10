@@ -102,7 +102,8 @@ reconcile passes, not in one:
 
 Sandbox and provider names do not change. Until the last of these is done, an unmarked object is open to a
 second install on the gateway. Do not run a restored copy on the same gateway until the gauge
-`koinon_openshell_unmarked_objects` is 0 for `kind="sandbox"`, `"provider"` and `"profile"`
+`koinon_openshell_unmarked_objects` is 0 for `kind="sandbox"`, `"provider"` and `"profile"` and
+`koinon_openshell_unmarked_objects_stale` is 0
 ([Back up and restore](../backup-restore/#two-installs-on-one-openshell-gateway)). Runs that hold an agent
 for a long time delay it; a higher `reconciler.maxRecreatesPerPass` shortens it.
 

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // WithOwner makes the Backend an owner of what it makes (issue 461): it stamps [execution.LabelInstall]
@@ -24,7 +26,7 @@ import (
 // [execution.Provider.ClaimLegacy] is set (until then it is taken as this install's), and a profile's owner is part of its spec
 // hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
 // and homes and are not recreated, so an old workspace stays unmarked; a new one is stamped and checked. Until the
-// live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind), a second
+// live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind and koinon_openshell_unmarked_objects_stale is 0), a second
 // install on the gateway can still touch its unlabeled objects; docs/site guides/upgrading.md says so. An empty id turns
 // the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
 // set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
@@ -44,37 +46,94 @@ func (b *Backend) unlabeled(labels map[string]string) bool {
 	return b.owner != "" && labels[execution.LabelInstall] == ""
 }
 
-// noteUnmarked records that the provider or profile name was seen without the install label
-// (marked false: it carries one now, or was just recreated with it).
-func (b *Backend) noteUnmarked(kind, name string, unmarked bool) {
-	b.unmarkedMu.Lock()
-	defer b.unmarkedMu.Unlock()
-	if b.unmarked == nil {
-		b.unmarked = map[string]map[string]struct{}{}
-	}
-	if b.unmarked[kind] == nil {
-		b.unmarked[kind] = map[string]struct{}{}
-	}
-	if unmarked {
-		b.unmarked[kind][name] = struct{}{}
-	} else {
-		delete(b.unmarked[kind], name)
-	}
-}
+// UnmarkedKinds are the keys of the map [Backend.CountUnmarked] returns.
+var UnmarkedKinds = []string{"sandbox", "provider", "profile"}
 
-// ResetUnmarked forgets what Unmarked counted; the reconciler calls it at the start of a pass.
-func (b *Backend) ResetUnmarked() {
-	b.unmarkedMu.Lock()
-	defer b.unmarkedMu.Unlock()
-	b.unmarked = nil
-}
+// CountUnmarked counts, from the gateway and not from what a reconcile pass touched, the sandboxes,
+// providers and provider profiles in this install's workspaces that carry no install mark (issue 461).
+// This install's workspaces are the ones named like [execution.WorkspaceName] whose mark is empty
+// or its own; a workspace marked by another install is left out, and so are the objects in it.
+// Inside them an object with another install's mark is not counted either: it is not this install's
+// to claim. It lists workspaces, then each workspace's sandboxes, providers and profiles, to the
+// last page. Any failed list returns an error and no counts, so a caller never publishes a partial
+// number. Without an owner nothing is stamped, and it returns an error.
+func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
+	const op = "CountUnmarked"
+	if b.owner == "" {
+		return nil, &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: errors.New("no install mark is set")}
+	}
+	mine := func(labels map[string]string) bool {
+		return labels[execution.LabelInstall] == "" || labels[execution.LabelInstall] == b.owner
+	}
+	unmarked := func(labels map[string]string) bool { return labels[execution.LabelInstall] == "" }
 
-// Unmarked returns how many providers and provider profiles were seen without the install label
-// since ResetUnmarked and not made again with it. It feeds koinon_openshell_unmarked_objects.
-func (b *Backend) Unmarked() (providers, profiles int) {
-	b.unmarkedMu.Lock()
-	defer b.unmarkedMu.Unlock()
-	return len(b.unmarked["provider"]), len(b.unmarked["profile"])
+	var workspaces []string
+	token := ""
+	for {
+		resp, err := b.c.ListWorkspaces(ctx, &openshellv1.ListWorkspacesRequest{PageSize: 1000, PageToken: token})
+		if err != nil {
+			return nil, wrap(op, err)
+		}
+		for _, w := range resp.GetWorkspaces() {
+			if strings.HasPrefix(w.GetMetadata().GetName(), execution.WorkspacePrefix) && mine(w.GetMetadata().GetLabels()) {
+				workspaces = append(workspaces, w.GetMetadata().GetName())
+			}
+		}
+		if token = resp.GetNextPageToken(); token == "" {
+			break
+		}
+	}
+
+	counts := map[string]int{}
+	for _, k := range UnmarkedKinds {
+		counts[k] = 0
+	}
+	for _, ws := range workspaces {
+		token = ""
+		for {
+			resp, err := b.c.ListSandboxes(ctx, &openshellv1.ListSandboxesRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
+			if err != nil {
+				return nil, wrap(op, err)
+			}
+			for _, s := range resp.GetSandboxes() {
+				if unmarked(s.GetMetadata().GetLabels()) {
+					counts["sandbox"]++
+				}
+			}
+			if token = resp.GetNextPageToken(); token == "" {
+				break
+			}
+		}
+		for {
+			resp, err := b.c.ListProviders(ctx, &openshellv1.ListProvidersRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
+			if err != nil {
+				return nil, wrap(op, err)
+			}
+			for _, p := range resp.GetProviders() {
+				if unmarked(p.GetMetadata().GetLabels()) {
+					counts["provider"]++
+				}
+			}
+			if token = resp.GetNextPageToken(); token == "" {
+				break
+			}
+		}
+		for {
+			resp, err := b.c.ListProviderProfiles(ctx, &openshellv1.ListProviderProfilesRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
+			if err != nil {
+				return nil, wrap(op, err)
+			}
+			for _, p := range resp.GetProfiles() {
+				if unmarked(p.GetAnnotations()) {
+					counts["profile"]++
+				}
+			}
+			if token = resp.GetNextPageToken(); token == "" {
+				break
+			}
+		}
+	}
+	return counts, nil
 }
 
 // stamp returns labels with the owner label added.

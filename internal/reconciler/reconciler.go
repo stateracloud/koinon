@@ -214,8 +214,6 @@ type Reconciler struct {
 	supErr   error
 	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
 	recreates atomic.Int32
-	// unmarkedSandboxes counts the sandboxes this pass saw without the install mark.
-	unmarkedSandboxes atomic.Int32
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
@@ -356,7 +354,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	}
 	r.m.Passes.WithLabelValues(result).Inc()
 	r.observeSandboxes(ctx)
-	r.observeUnmarked()
+	r.observeUnmarked(ctx)
 	return err
 }
 
@@ -379,35 +377,41 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	}
 }
 
-// unmarkedTracker is implemented by a backend that reports the providers and profiles it saw
-// without the install mark since ResetUnmarked (the OpenShell backend with an owner).
-type unmarkedTracker interface {
-	ResetUnmarked()
-	Unmarked() (providers, profiles int)
+// unmarkedCounter is implemented by a backend that counts, from the gateway, the objects in this
+// install's workspaces that carry no install mark (the OpenShell backend with an owner).
+type unmarkedCounter interface {
+	CountUnmarked(ctx context.Context) (map[string]int, error)
 }
 
-// observeUnmarked sets koinon_openshell_unmarked_objects from what the pass saw. Without an install
-// mark nothing is unmarked.
-func (r *Reconciler) observeUnmarked() {
-	var providers, profiles int
-	if t, ok := r.backend.(unmarkedTracker); ok && r.owns() {
-		providers, profiles = t.Unmarked()
+// observeUnmarked sets koinon_openshell_unmarked_objects from one list of the gateway's sandboxes,
+// providers and profiles, whatever this pass did or failed to do (issue 461). A list that fails keeps
+// the previous values and sets koinon_openshell_unmarked_objects_stale to 1; a complete one sets it
+// to 0. Without an install mark nothing is unmarked.
+func (r *Reconciler) observeUnmarked(ctx context.Context) {
+	c, ok := r.backend.(unmarkedCounter)
+	if !ok || !r.owns() {
+		for _, k := range unmarkedKinds {
+			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
+		}
+		r.m.UnmarkedStale.Set(0)
+		return
 	}
-	sandboxes := 0
-	if r.owns() {
-		sandboxes = int(r.unmarkedSandboxes.Load())
+	counts, err := c.CountUnmarked(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.log.Warn("counting unmarked OpenShell objects failed; the gauge keeps its last values", "err", err)
+		}
+		r.m.UnmarkedStale.Set(1)
+		return
 	}
-	r.m.UnmarkedObjects.WithLabelValues("sandbox").Set(float64(sandboxes))
-	r.m.UnmarkedObjects.WithLabelValues("provider").Set(float64(providers))
-	r.m.UnmarkedObjects.WithLabelValues("profile").Set(float64(profiles))
+	for _, k := range unmarkedKinds {
+		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(counts[k]))
+	}
+	r.m.UnmarkedStale.Set(0)
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	r.recreates.Store(0)
-	r.unmarkedSandboxes.Store(0)
-	if t, ok := r.backend.(unmarkedTracker); ok {
-		t.ResetUnmarked()
-	}
 	r.refreshSupervisor(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
@@ -1077,9 +1081,6 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// (agentd waits on Error and Deleting). With no running run, delete it so the next pass
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
-	}
-	if r.unmarked(sb) {
-		r.unmarkedSandboxes.Add(1)
 	}
 	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
