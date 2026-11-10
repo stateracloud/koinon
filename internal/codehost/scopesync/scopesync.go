@@ -108,8 +108,20 @@ func (s *Syncer) run(ctx context.Context, row store.Connection, actor audit.Acto
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	if err := s.read(ctx, row, actor); err != nil {
-		s.log.Warn("code-host scope: could not read the connection's repositories; the stored reading ages out", "org", row.OrgID.String(), "connection", row.ID.String(), "connector", row.Connector, "err", err)
+		s.logReadFailure(ctx, row, err)
 	}
+}
+
+// logReadFailure logs a failed reading. A reading that Drain cancelled at shutdown is no failure
+// worth a warning, so it is logged at Debug; this is the case where the error is context.Canceled
+// and the reading's context is done. A real failure, including DeadlineExceeded from the per-reading
+// timeout, keeps the Warn.
+func (s *Syncer) logReadFailure(ctx context.Context, row store.Connection, err error) {
+	level := slog.LevelWarn
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		level = slog.LevelDebug
+	}
+	s.log.Log(ctx, level, "code-host scope: could not read the connection's repositories; the stored reading ages out", "org", row.OrgID.String(), "connection", row.ID.String(), "connector", row.Connector, "err", err)
 }
 
 // read reads one connection's repositories and replaces its part of the scope, audited as actor.

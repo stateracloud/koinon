@@ -180,7 +180,9 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the
   wait or the merge. With the merge queue, enqueue (no `--admin`) a needs-e2e PR: the queue runs the
   hosted quickstart on main plus the PR, which is the merge evidence, so a main that moved during the
-  lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). Details: `docs/dev/ci.md#merging`.
+  lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). After the
+  independent review of a sensitive-path PR's head, record it with `hack/review-verdict.sh <PR>
+  ready|not-ready <reviewer> <sha>` (the `review` check, ADR 0103; advisory until the ruleset requires it). Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

@@ -3,7 +3,10 @@
 package scopesync
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -250,5 +253,34 @@ var _ = Describe("the scope readings queue", func() {
 		j.drain(context.Background())
 		j.start(context.Background(), testConn(1), audit.Actor{})
 		Consistently(f.started, 100*time.Millisecond).ShouldNot(Receive())
+	})
+})
+
+var _ = Describe("logging a failed reading", func() {
+	logged := func(ctx context.Context, err error) string {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		(&Syncer{log: log}).logReadFailure(ctx, testConn(1), err)
+		return buf.String()
+	}
+	It("warns about a real failure", func() {
+		Expect(logged(context.Background(), errors.New("boom"))).To(ContainSubstring("level=WARN"))
+	})
+	It("warns about the per-reading timeout, with the connection's ID", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		defer cancel()
+		<-ctx.Done()
+		out := logged(ctx, context.DeadlineExceeded)
+		Expect(out).To(ContainSubstring("level=WARN"))
+		Expect(out).To(ContainSubstring(testConn(1).ID.String()))
+	})
+	It("does not warn about a reading Drain cancelled", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		out := logged(ctx, fmt.Errorf("list: %w", context.Canceled))
+		Expect(out).NotTo(ContainSubstring("level=WARN"))
+	})
+	It("warns about a Canceled error while the context is still live", func() {
+		Expect(logged(context.Background(), context.Canceled)).To(ContainSubstring("level=WARN"))
 	})
 })
