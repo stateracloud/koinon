@@ -7,7 +7,7 @@ outside the OpenShell supervisor's Landlock and seccomp policy and its OCSF audi
 defeat the boundary the sandbox exists for. The chart enforces this with the
 ValidatingAdmissionPolicy `<namespace>-<fullname>-sandbox-connect` (for a release `koinon` in
 namespace `koinon`: `koinon-koinon-sandbox-connect`) and its binding of the same name, on every
-namespace labelled `openshell.ai/managed-by=openshell`. Neither the OpenShell gateway nor the Agent
+namespace labelled `openshell.ai/managed-by=openshell` and `openshell.ai/gateway-id=<openshell.gatewayId>`. Neither the OpenShell gateway nor the Agent
 Sandbox controller uses these calls, so nobody is exempt.
 
 This runbook is for the rare case where that is not enough. It is not an exemption: it is a

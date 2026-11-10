@@ -29,6 +29,7 @@ stays "unknown" in the wait cause. Remove all of this once OpenShell surfaces po
 {{- $user := printf "system:serviceaccount:%s:%s" .Release.Namespace $sa }}
 {{- $gatewayID := .Values.openshell.gatewayId }}
 {{- /* The sandbox namespaces are the ones sandboxPolicy.namespaceSelector selects, as CEL over the namespace's labels. */}}
+{{- /* The unscoped selector on purpose: gateway-id is checked separately below (ourGateway), and another release binds a differently named role. */}}
 {{- $sel := .Values.sandboxPolicy.namespaceSelector }}
 {{- $conds := list }}
 {{- range $k, $v := ($sel.matchLabels | default dict) }}

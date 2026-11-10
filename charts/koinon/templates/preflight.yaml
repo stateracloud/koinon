@@ -188,6 +188,9 @@ spec:
             - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
             - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
             - --openshell-gateway-id={{ .Values.openshell.gatewayId }}
+            {{- if and .Values.sandboxPolicy.enabled .Values.sandboxPolicy.scopeToGateway }}
+            - --sandbox-policy-scoped-to-gateway
+            {{- end }}
             {{- if not .Values.sandboxObserver.enabled }}
             - --sandbox-observer-disabled
             {{- end }}
