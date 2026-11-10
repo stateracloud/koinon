@@ -34,8 +34,9 @@ without making this repository wait for it.
    for the docs repository. Between the move (part 1) and the removal (step 7), `hack/docs-check.sh` ran the
    same comparison here, in the other direction; it is gone with the pages.
 7. **Removal (part 2 of #491, done).** One pull request removed `docs/site/`, `docs/ops/`, `make docs`,
-   `hack/docs-check.sh`, the `docs` and `warm-caches-docs` CI jobs and their path filters, and the `docs`
-   status check that the `main` ruleset required. Links now point to the pages on the site. What stays
+   `hack/docs-check.sh`, and the `docs` and `warm-caches-docs` CI jobs and their path filters. The `main`
+   ruleset still lists the `docs` job as a required status check; a pull request cannot change a ruleset, so the
+   maintainer removes that required context before the merge. Links now point to the pages on the site. What stays
    here is `hack/e2e-commands-check.sh` (`make e2e-commands-check`, run by the `scripts` job): the command
    files parse and the e2e scripts run exactly their blocks. The page-side checks left with the pages and
    are ported to `koinon-docs`: `helm lint` of the `chart-values` blocks, the Go parse of the
@@ -52,7 +53,7 @@ without making this repository wait for it.
    block, or when a block does not parse. Names and variable are a contract: change them only with a change in
    `koinon-docs`.
 9. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
-   later work, tracked on #491.
+   later work, tracked on #505.
 
 ## Alternatives considered
 
@@ -74,6 +75,11 @@ without making this repository wait for it.
 - Negative: two places show a command (the file and the page); the check in `koinon-docs` is the only guard
   once `docs/site/` is gone, and it compares with the newest release, so a command changed on `main` reaches
   the pages with the next release.
-- Follow-ups: none for this repository. The page-side checks and the reference pages are tracked on #491
+- Follow-ups: none for this repository. The page-side checks and the reference pages are tracked on #505
   for `koinon-docs`. Older ADRs still name `docs/ops/` and `docs/site/` paths; those files moved to
   `koinon-docs` (decision 1) and the ADR text is left as written.
+- The `docs/site` Dependabot follow-up of ADR 0079 is void. Links in older ADRs (0056, 0085, 0098) to
+  `docs/ops/` pages now point at pages on the docs site: `docs/ops/sandbox-break-glass.md` is
+  `https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/`, `docs/ops/secret-keys.md` is
+  `https://koinon.stateracloud.com/docs/operate/secret-keys/` and the prices page is
+  `https://koinon.stateracloud.com/docs/operate/default-prices/`.

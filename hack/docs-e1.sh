@@ -39,6 +39,9 @@ FILE=${E1_FILE:-$root/test/e2e/commands/quickstart.e1}
 # the start of each block.
 blocks() {
   awk '
+    /^# e1=/ && $0 !~ /^# e1=[a-z0-9-]+$/ {
+      print "docs-e1: " FILENAME ":" FNR ": invalid e1 marker (want # e1=<lowercase-name>): " $0 > "/dev/stderr"; exit 2
+    }
     match($0, /^# e1=[a-z0-9-]+$/) {
       name = substr($0, 6)
       if (name in seen) { print "duplicate e1 block: " name > "/dev/stderr"; exit 2 }

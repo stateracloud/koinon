@@ -15,7 +15,9 @@ import (
 )
 
 // pagesDirEnv names the directory of docs pages that the two tests below check. The docs site lives in
-// stateracloud/koinon-docs (ADR 0108); its CI sets this variable and runs these tests at a release tag.
+// stateracloud/koinon-docs (ADR 0108). This is the entry point this repository provides to it: koinon-docs
+// uses it from the first release that has it (#505). koinon-docs owns which page carries which block and
+// asserts that on its side; the minimum here counts blocks in the whole directory only.
 const pagesDirEnv = "KOINON_PAGES_DIR"
 
 // pageBlock is one fenced manifest block found in a page.
@@ -29,7 +31,7 @@ func pagesDir(t *testing.T) string {
 	t.Helper()
 	dir := os.Getenv(pagesDirEnv)
 	if dir == "" {
-		t.Skipf("%s is not set; stateracloud/koinon-docs sets it in its CI to the directory of its pages", pagesDirEnv)
+		t.Skipf("%s is not set; set it to a directory of docs pages (the entry point for stateracloud/koinon-docs, ADR 0108, #505)", pagesDirEnv)
 	}
 	return dir
 }
@@ -38,13 +40,15 @@ func pagesDir(t *testing.T) string {
 // It fails the test when dir does not exist or cannot be read.
 func pageBlocks(t *testing.T, dir string, re *regexp.Regexp) []pageBlock {
 	t.Helper()
-	info, err := os.Stat(dir)
+	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		t.Fatalf("%s=%q: %v", pagesDirEnv, dir, err)
+		t.Fatalf("%s=%q does not resolve to a directory: %v", pagesDirEnv, dir, err)
 	}
-	if !info.IsDir() {
-		t.Fatalf("%s=%q is not a directory", pagesDirEnv, dir)
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("%s=%q does not resolve to a directory (%s)", pagesDirEnv, dir, resolved)
 	}
+	dir = resolved
 	var found []pageBlock
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
