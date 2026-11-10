@@ -110,7 +110,9 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 
 	qt, err := in.Prices.Find(ctx, q, org, e.Model, e.Time)
 	p.model = qt.Model
-	if err == nil {
+	if err != nil {
+		err = withRequest(e.RequestID, err)
+	} else {
 		var out priced
 		out, err = in.priceWith(ctx, q, org, e, p, qt, gw)
 		if err == nil {
@@ -208,7 +210,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			// The bound the gateway key holds back while the provider's figure is pending; never charged.
 			bound, err := qt.Price(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
 			if err != nil {
-				return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
+				return p, withRequest(e.RequestID, err)
 			}
 			p.reserve = bound.Cost // the charge is subtracted below, once it is known
 		}
@@ -224,7 +226,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if bound > p.totalOut() {
 			b, err := qt.Price(p.usage(max(bound-p.reasoning, 0)))
 			if err != nil {
-				return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
+				return p, withRequest(e.RequestID, err)
 			}
 			p.reserve = b.Cost
 		}
@@ -232,7 +234,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 	u := p.usage(p.output)
 	charged, err := qt.Price(u)
 	if err != nil {
-		return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
+		return p, withRequest(e.RequestID, err)
 	}
 	cost := charged.Cost
 	p.cost = cost
@@ -251,6 +253,12 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		p.estimate = raw
 	}
 	return p, nil
+}
+
+// withRequest names the request in a price error, so a flagged entry's price_error says which
+// request it was. The error stays classifiable by [prices.Unpriceable].
+func withRequest(requestID string, err error) error {
+	return fmt.Errorf("price request %s: %w", requestID, err)
 }
 
 // differs reports |cost - gateway| > 1% of the gateway's cost (any difference when it is 0).
