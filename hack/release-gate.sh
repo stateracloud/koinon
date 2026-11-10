@@ -15,7 +15,9 @@
 # commit with the same tree (the queue build); and only when there is no queue run (an admin merge) the
 # head commit of the pull request that merged the tagged commit, for the pull-request-only contexts and
 # the dependency-age half of `quick checks`. A `go`/`web`/other ci job is never read from a PR head: a
-# draft's green is vacuous. Needs gh, git and awk, and a clone with origin/main.
+# draft's green is vacuous. The queue build's result is read from the queue head's merge_group runs by
+# run id (conclusion_in_run), not as the newest check run on the sha. Needs gh, git and awk, and a clone
+# with origin/main.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -70,7 +72,7 @@ conclusion_of() {
 }
 
 # conclusion_in_run <sha> <name> <run ids, "|"-separated>: the conclusion of the check run of that name on
-# <sha> that the Actions app (integration 15368) reported for one of those workflow runs (the run id is in
+# <sha> that the Actions app (integration 15368, the same id as in hack/route-guard.sh) reported for one of those workflow runs (the run id is in
 # the check run's details_url), or empty. A queue merge fast-forwards main to the queue commit, so one sha carries the
 # merge_group run's result and the push run's later `skipped`: the queue build is read by run, never as
 # the newest check run on the sha.
