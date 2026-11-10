@@ -256,9 +256,12 @@ them, but only on a pass when no run holds the agent, and the home volume is rep
 
 The reconciler claims only the objects of agents and orgs that still exist. The objects of a **deleted
 agent or org** are still counted but are never claimed, so the gauge stays above 0 for them. Find them on
-the gateway by the missing `koinon.dev/install` label (list the sandboxes and providers of each `koinon-` workspace on the gateway, and the provider profiles
-that carry no `koinon.dev/install` annotation), check that no live agent uses each one, and delete
-them on the gateway before the drill. Then the gauge can reach 0.
+the gateway by the missing `koinon.dev/install` label. Workspaces are named `kw-<16 hex>`. List the sandboxes
+and providers of each `kw-` workspace that has no `koinon.dev/install` label, and the provider profiles of
+each such workspace that carry no `koinon.dev/install` annotation, and of each `kw-` workspace that carries
+this install's own label. Skip every workspace and object with another install's label: on a shared
+gateway that is the other install's, and you must not delete it. Check that no live agent uses each
+unmarked object, and delete it on the gateway before the drill. Then the gauge can reach 0.
 
 ## What to automate, and what is not covered
 
