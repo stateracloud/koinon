@@ -169,15 +169,12 @@ script-check - hack/agentgateway-pin.sh --check
 script-check - hack/golangci-lint-test.sh
 script-check - hack/preflight-stop-test.sh
 script-check - hack/e2e-decide-test.sh
-script-check - hack/e2e-gate-test.sh
-script-check - hack/e2e-label-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
 script-check - hack/lane-gates-test.sh
 script-check - hack/ci-supersede-test.sh
-script-check - hack/e2e-rerun-result-test.sh
 script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
 script-check - hack/ci-cache-test.sh

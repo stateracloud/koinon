@@ -39,53 +39,18 @@ check "claims.yml: on merge_group the claim job runs check-pr for the queued PR 
 # shellcheck disable=SC2016
 check "claims.yml: on pull_request the claim job checks out the base branch tip" bash -c '
 	grep -q "ref: \${{ github.event.pull_request.base.ref }}" "$1" && ! grep -q "pull_request.base.sha }}" "$1"' _ "$wfdir/claims.yml"
-# #444: the queue commit runs the quickstart itself (decide answers needed); `e2e result` reads the
-# queued PR's head only in the bootstrap shim (hack/e2e-queue-head.sh), and only when an OLD base's decide
-# answered required=true on merge_group. The lab's e2e-lab status cannot test the queue ref.
+# #444, ADR 0105: the queue commit runs the quickstart itself (decide answers needed), and `e2e result` looks nothing
+# up: no PR head, no queue ref, no `e2e-lab` status, no dispatched run, no bootstrap shim (#452).
 # shellcheck disable=SC2016
-check "e2e-kind.yml: e2e result looks up the queued PR head only through the guarded shim" bash -c '
-	! grep -q "headRefOid" "$1" && ! grep -q "gh-readonly-queue" "$1" &&
-	[ "$(grep -c "e2e-queue-head.sh" "$1")" -ge 2 ] &&
-	grep -q "if \[\[ \$EVENT == merge_group && \$REQUIRED == true \]\]; then" "$1" &&
-	grep -A1 "if \[\[ \$EVENT == merge_group && \$REQUIRED == true \]\]; then" "$1" | grep -q "hack/e2e-queue-head.sh"' _ "$wfdir/e2e-kind.yml"
-check "e2e-kind.yml: the shim names its exit condition and the follow-up" grep -q "BOOTSTRAP SHIM (follow-up: #452)" "$wfdir/e2e-kind.yml"
-# The shim: merge_group + required=true (only an old base's decide produces it) -> the PR-head lookup runs,
-# and hack/e2e-gate.sh then judges that head. A fake gh answers `pr view`.
-fakebin=$(mktemp -d "${TMPDIR:-/tmp}/ci-mg-test.XXXXXX") || exit 1
-trap 'rm -rf "$fakebin"' EXIT
-cat >"$fakebin/gh" <<'EOF'
-#!/usr/bin/env bash
-# fake gh: `pr view N --json headRefOid|headRefName --jq ...`
-case "$*" in
-*headRefOid*) echo "${FAKE_HEAD_SHA-0123456789abcdef0123456789abcdef01234567}" ;;
-*headRefName*) echo "ci/444-fake-branch" ;;
-esac
-EOF
-chmod +x "$fakebin/gh"
-shim="$repo/hack/e2e-queue-head.sh"
-export GH="$fakebin/gh"
-check "shim: reads the PR head and branch from the queue ref" bash -c '
-	out=$(GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-444-aaaa "$1" 2>/dev/null) &&
-	grep -q "^SHA=0123456789abcdef0123456789abcdef01234567$" <<<"$out" && grep -q "^BRANCH=ci/444-fake-branch$" <<<"$out"' _ "$shim"
-check "shim: fails closed on a ref without a PR number" bash -c '! GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-x-aaaa "$1" 2>/dev/null' _ "$shim"
-check "shim: fails closed when the PR head is empty" bash -c '! FAKE_HEAD_SHA= GITHUB_REF=refs/heads/gh-readonly-queue/main/pr-444-aaaa "$1" 2>/dev/null' _ "$shim"
-# Old-style decide on merge_group (needed=false, required=true, quickstart skipped): without a head the gate
-# fails (the bug), with the shim's head and an e2e-lab success it passes.
-gate="$repo/hack/e2e-gate.sh"
-labgh="$fakebin/labgh"
-cat >"$labgh" <<'EOF'
-#!/usr/bin/env bash
-case "$*" in
-*"run list"*) ;;
-*"/statuses"*) echo '[{"context":"e2e-lab","state":"success"}]' ;;
-esac
-EOF
-chmod +x "$labgh"
-check "gate: merge_group + required=true without a looked-up head fails closed" bash -c '! DECIDE=success QUICKSTART=skipped REQUIRED=true SHA= GH_REPO=x/y GH="$2" "$1"' _ "$gate" "$labgh"
-# shellcheck disable=SC2016
-check "gate: merge_group + required=true with the shim's head and e2e-lab success passes" bash -c '
-	DECIDE=success QUICKSTART=skipped REQUIRED=true SHA=0123456789abcdef0123456789abcdef01234567 BRANCH=b GH_REPO=x/y GH="$2" "$1"' _ "$gate" "$labgh"
-unset GH
+check "e2e-kind.yml: e2e result does not look up the queued PR head or any other run" bash -c '
+	! grep -Eq "headRefOid|e2e-queue-head|e2e-gate|e2e-rerun|BOOTSTRAP SHIM" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: result keeps no write or status permission" bash -c '
+	! awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /(actions: write|statuses: read|pull-requests: )/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: decide has no required output" bash -c '! grep -q "outputs.required" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: decide reads the queue ref and the head repo (label and fork cases)" bash -c '
+	grep -q "QUEUE_REF:" "$1" && grep -q "HEAD_REPO:" "$1" && grep -q "pull-requests: read" "$1"' _ "$wfdir/e2e-kind.yml"
+check "the deleted e2e evidence helpers are gone" bash -c '
+	cd "$1"; for f in hack/e2e-gate.sh hack/e2e-rerun-result.sh hack/e2e-label.sh hack/e2e-queue-head.sh .github/workflows/e2e-label.yml; do [ ! -e "$f" ] || exit 1; done' _ "$repo"
 # shellcheck disable=SC2016
 check "e2e-kind.yml: the quickstart job is not limited to pull requests and pushes" bash -c '
 	! awk "/^  quickstart:/ { j = 1 } /^  result:/ { j = 0 } j && /^    if:.*event_name/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/e2e-kind.yml"
@@ -246,14 +211,8 @@ while IFS= read -r name; do
 		pass=$((pass + 1))
 		;;
 	MISSING*)
-		# `review` is ADR 0103's job; until it is on main there is no workflow to read. Any other name must exist.
-		if [[ $name == review ]]; then
-			echo "ok: required 'review': no job yet (ADR 0103 not on main); this check applies once review.yml lands"
-			pass=$((pass + 1))
-		else
-			echo "FAIL: required '$name': $res" >&2
-			fail=$((fail + 1))
-		fi
+		echo "FAIL: required '$name': $res" >&2
+		fail=$((fail + 1))
 		;;
 	*)
 		echo "FAIL: required '$name': $res" >&2
