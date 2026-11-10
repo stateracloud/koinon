@@ -54,8 +54,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "escape suite (OpenShell cases) against the chart install in kind-$CLUSTER: policy $ns-koinon-sandbox-pods, $bindings binding(s)"
-CLUSTER="$CLUSTER" \
 # The published probe image (PROBE_PULL_REPO) is pulled; only without it is the probe built on this base.
+CLUSTER="$CLUSTER" \
 KOINON_OPENSHELL_WORKSPACE="$ws" \
 KOINON_ESCAPE_CHART_NAMESPACE="$ns" \
 KOINON_ESCAPE_DELETE_WORKSPACE=1 \
