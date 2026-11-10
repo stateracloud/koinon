@@ -608,7 +608,15 @@ func (r *runner) execute(ctx context.Context) error {
 	// (runs_one_active_per_agent), or the agent's next run could start its harness first and
 	// have it ended: on end_turn below, before the run is finished; otherwise deferred, before
 	// conclude finishes or releases the run.
-	closeHarness := sync.OnceFunc(func() { closeProcess(proc) })
+	// conn is set once the harness is started; closeHarness first frees a reader held back by a
+	// lagging handler, which closing the process alone does not reach.
+	var conn *acp.Conn
+	closeHarness := sync.OnceFunc(func() {
+		if conn != nil {
+			conn.Close()
+		}
+		closeProcess(proc)
+	})
 	sweepOnce := sync.OnceFunc(func() { r.sweepAfter(ctx, workspace, sandbox) })
 	defer sweepOnce()
 	defer closeHarness()
@@ -628,7 +636,7 @@ func (r *runner) execute(ctx context.Context) error {
 		r.interrupted(ctx, "start the leak guard's feed: "+err.Error(), nil, "")
 		return errDropped
 	}
-	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
+	conn = acp.NewConn(fctx, handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
 	harnessErr := func(what string, err error) error {
 		return r.harnessErr(ctx, conn, proc, &stderr, what, err)
@@ -821,7 +829,17 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 		r.log.Warn("not every session update was delivered before the connection ended")
 	}
 	cancel()
-	code, werr := proc.Wait()
+	if errors.Is(conn.ReadErr(), acp.ErrLineTooLong) {
+		// The harness wrote a line the protocol reader refuses. It is still blocked writing to a
+		// pipe nobody reads, and a resumed harness would write the same line: end it, and fail.
+		closeProcess(proc)
+		r.own.FlushItems(ctx, true)
+		return &failure{
+			reason: lineTooLongReason(stderr.String()),
+			class:  classFatal,
+		}
+	}
+	code, werr := waitProcess(proc, harnessExitWait)
 	if werr == nil && permanentExit[code] {
 		return &failure{reason: fmt.Sprintf("the harness exited with code %d: %s", code, strings.TrimSpace(stderr.String()))}
 	}
@@ -834,6 +852,51 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 	}
 	r.interrupted(ctx, reason, exit, stderr.String())
 	return errDropped
+}
+
+// lineTooLongReason is the failure text of a harness that wrote a line over the limit, with the
+// tail of its stderr when it has one.
+func lineTooLongReason(stderr string) string {
+	reason := "harness output line too long: the harness wrote a line of more than 10 MiB without a newline"
+	if t := strings.TrimSpace(stderr); t != "" {
+		reason += ": " + t
+	}
+	return reason
+}
+
+// harnessExitWait is how long agentd waits for a harness to exit after its connection ended
+// before it closes the exec stream.
+const harnessExitWait = 10 * time.Second
+
+// waitProcess waits for proc to exit, at most d. A harness that does not exit (it can be blocked
+// writing to a pipe nobody reads) has its stream closed, which ends the command; then the wait
+// is bounded once more. The error says so when the process never reported an exit.
+func waitProcess(proc execution.Process, d time.Duration) (int, error) {
+	type result struct {
+		code int
+		err  error
+	}
+	res := make(chan result, 1)
+	go func() {
+		code, err := proc.Wait()
+		res <- result{code, err}
+	}()
+	select {
+	case r := <-res:
+		return r.code, r.err
+	case <-time.After(d):
+	}
+	// Close can block on the same signal as Wait (an OpenShell exec), so it must not hold the bound.
+	go func() { _ = proc.Close() }()
+	select {
+	case r := <-res:
+		if r.err == nil {
+			r.err = errors.New("the harness did not exit after its connection ended; its stream was closed")
+		}
+		return r.code, r.err
+	case <-time.After(d):
+		return 0, errors.New("the harness did not exit after its connection ended, and closing its stream did not end it")
+	}
 }
 
 // interrupted records why the harness connection was lost, for the run's timeline.

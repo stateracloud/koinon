@@ -80,7 +80,7 @@ var _ = Describe("KubeProber", func() {
 			Client: client, Namespace: "koinon", NamePrefix: "koinon-preflight-probe",
 			Image: "ghcr.io/stateracloud/koinon/api:0.1.0", ImagePullSecrets: []string{"ghcr"},
 			RuntimeClassName: "kata", Labels: map[string]string{"app.kubernetes.io/component": "preflight-probe"},
-			Timeout: time.Second, PollInterval: 10 * time.Millisecond,
+			Timeout: 30 * time.Second, PollInterval: 10 * time.Millisecond,
 			Logs: func(_ context.Context, ns, name string) (string, error) {
 				Expect(ns + "/" + name).To(Equal("koinon/koinon-preflight-probe-abcde"))
 				return "koinon-seccomp-probe seccomp=2 filters=1 keyctl=EPERM\n", nil
@@ -129,7 +129,9 @@ var _ = Describe("KubeProber", func() {
 
 	It("reports why the pod did not start when it times out, and deletes it", func(ctx SpecContext) {
 		createAs(corev1.PodPending, &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "pull denied"})
-		_, err := prober().Probe(ctx)
+		p := prober()
+		p.Timeout = 300 * time.Millisecond // only this spec waits for the timeout
+		_, err := p.Probe(ctx)
 		Expect(err).To(MatchError(And(
 			ContainSubstring("probe pod koinon-preflight-probe-abcde still Pending"),
 			ContainSubstring("ImagePullBackOff: pull denied"),
