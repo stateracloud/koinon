@@ -142,7 +142,8 @@ var _ = Describe("Backend ownership", func() {
 		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
 
-		// OpenShell (assumed) refuses to delete an attached provider, so a claim then fails loudly.
+		// OpenShell may refuse to delete an attached provider; the fake does when asked, so a claim then fails loudly.
+		gw.RefuseAttachedProviderDelete()
 		claim := p
 		claim.ClaimLegacy = true
 		Expect(live.EnsureProvider(ctx, ws, claim)).NotTo(Succeed())

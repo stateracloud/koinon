@@ -75,17 +75,19 @@ type Gateway struct {
 	// next_page_token, so a client's paging loop runs more than once. Zero returns one page.
 	ListPageSize int
 
-	mu         sync.Mutex
-	seq        int
-	workspaces map[string]*datamodelv1.Workspace
-	profiles   map[key]*openshellv1.ProviderProfile
-	providers  map[key]*datamodelv1.Provider
-	sandboxes  map[key]*openshellv1.Sandbox
-	policies   map[key][]*sandboxv1.SandboxPolicy
-	commands   map[string]Command
-	execs      []*openshellv1.ExecSandboxRequest
-	calls      map[string]int
-	faults     map[string][]error
+	mu sync.Mutex
+	// refuseAttachedDelete makes DeleteProvider fail for a provider a sandbox attaches.
+	refuseAttachedDelete bool
+	seq                  int
+	workspaces           map[string]*datamodelv1.Workspace
+	profiles             map[key]*openshellv1.ProviderProfile
+	providers            map[key]*datamodelv1.Provider
+	sandboxes            map[key]*openshellv1.Sandbox
+	policies             map[key][]*sandboxv1.SandboxPolicy
+	commands             map[string]Command
+	execs                []*openshellv1.ExecSandboxRequest
+	calls                map[string]int
+	faults               map[string][]error
 
 	ssh *sshState
 
@@ -349,6 +351,15 @@ func (g *Gateway) ListProviders(_ context.Context, req *openshellv1.ListProvider
 		return nil, err
 	}
 	return &openshellv1.ListProvidersResponse{Providers: items, NextPageToken: next}, nil
+}
+
+// RefuseAttachedProviderDelete makes DeleteProvider fail with FailedPrecondition for a provider a
+// sandbox still attaches. Whether real OpenShell does this is not confirmed, so the fake does it
+// only when a spec asks, to prove Koinon does not delete an attached provider.
+func (g *Gateway) RefuseAttachedProviderDelete() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.refuseAttachedDelete = true
 }
 
 // AddPlatformProfile adds a built-in platform profile, the kind a real gateway returns next to the
@@ -655,15 +666,11 @@ func (g *Gateway) DeleteProvider(_ context.Context, req *openshellv1.DeleteProvi
 		}
 		return nil, status.Errorf(codes.NotFound, "provider %q not found", req.GetName())
 	}
-	// ASSUMPTION, to confirm against real OpenShell: it refuses to delete a provider that a
-	// sandbox still attaches (like a profile a provider uses). Koinon must not depend on the
-	// opposite, so the fake refuses.
-	for sk, sb := range g.sandboxes {
-		if sk.workspace != k.workspace {
-			continue
-		}
-		if slices.Contains(sb.GetSpec().GetProviders(), req.GetName()) {
-			return nil, status.Errorf(codes.FailedPrecondition, "provider %q is attached to sandbox %q", req.GetName(), sk.name)
+	if g.refuseAttachedDelete {
+		for sk, sb := range g.sandboxes {
+			if sk.workspace == k.workspace && slices.Contains(sb.GetSpec().GetProviders(), req.GetName()) {
+				return nil, status.Errorf(codes.FailedPrecondition, "provider %q is attached to sandbox %q", req.GetName(), sk.name)
+			}
 		}
 	}
 	delete(g.providers, k)

@@ -5,12 +5,12 @@ package reconciler_test
 import (
 	"context"
 	"errors"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -35,6 +35,9 @@ var _ = Describe("Reconciler install ownership", func() {
 		m    *reconciler.Metrics
 	)
 	sandboxOf := func(agent store.Agent) string { return execution.AgentSandboxName(org.Bytes, agent.ID.Bytes) }
+	sandboxProviderName := func(agent store.Agent) string {
+		return execution.AgentObjectNames(org.Bytes, agent.ID.Bytes).Provider
+	}
 	labels := func(agent store.Agent) map[string]string {
 		GinkgoHelper()
 		sb := osg.Sandbox(ws, sandboxOf(agent))
@@ -116,10 +119,11 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 			Expect(osg.Provider(ws, names.Provider)).NotTo(BeNil())
 			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
+			oldID := osg.Provider(ws, names.Provider).GetMetadata().GetId()
 			Expect(live.ReconcileAll(ctx)).To(Succeed()) // claims the provider, creates the sandbox
 			Expect(labels(agent)).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
-			Expect(osg.Calls("DeleteProvider")).To(Equal(1))
+			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetId()).NotTo(Equal(oldID), "the record was made again")
 		})
 
 		It("is counted in koinon_openshell_unmarked_objects from the gateway until it is recreated and claimed", func(ctx SpecContext) {
@@ -171,7 +175,8 @@ var _ = Describe("Reconciler install ownership", func() {
 			claimRun(ctx, org)
 			Expect(mk("mark-live", 0).ReconcileAll(ctx)).To(Succeed())
 			Expect(osg.Calls("DeleteSandbox")).To(BeZero())
-			Expect(osg.Calls("DeleteProvider")).To(BeZero())
+			Expect(osg.Provider(ws, sandboxProviderName(agent))).NotTo(BeNil())
+			Expect(osg.Provider(ws, sandboxProviderName(agent)).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
 			Expect(row(ctx, agent).Message).To(ContainSubstring("after the active and parked runs finish"))
 		})
 
