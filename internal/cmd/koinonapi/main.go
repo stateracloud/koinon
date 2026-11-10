@@ -607,7 +607,7 @@ func serve(ctx context.Context, cfg config) error {
 				return err
 			}
 			if created {
-				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
+				slog.Warn("created the key-encryption key Secret; back it up now ("+project.SecretKeysDocURL+")", "secret", cfg.kekSecret)
 			}
 		}
 		if keyring, err = loadKeyring(ctx, kekStore, kekMonitor.Observer()); err != nil {
@@ -1033,7 +1033,7 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 	if o.requireWriter {
 		if err := migrations.CheckInstallAuditWriter(ctx, db); err != nil {
 			return fmt.Errorf("%w: create the role and add koinon-api's login role to it "+
-				"(docs/ops/secret-keys.md, The install audit chain), then run the migration again; no migration was applied; "+
+				"("+project.InstallAuditDocURL+"), then run the migration again; no migration was applied; "+
 				"without it koinon-api records no install audit event", err)
 		}
 	}
@@ -1059,12 +1059,12 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 	if !granted && o.requireWriter {
 		// The role was there before the migrations (checked above): it was dropped meanwhile.
 		return fmt.Errorf("the role %s or the install audit tables disappeared during the migration: "+
-			"create the role (docs/ops/secret-keys.md, The install audit chain), then run the migration again", migrations.InstallAuditWriterRole)
+			"create the role ("+project.InstallAuditDocURL+"), then run the migration again", migrations.InstallAuditWriterRole)
 	}
 	if !granted {
 		slog.Warn("the role " + migrations.InstallAuditWriterRole + " does not exist yet, so it was granted nothing: " +
 			"with the chart's CloudNativePG cluster its post-upgrade grant hook grants it once the Cluster has created it; " +
-			"on an external database create it (docs/ops/secret-keys.md, The install audit chain) and run koinon-api migrate again. " +
+			"on an external database create it (" + project.InstallAuditDocURL + ") and run koinon-api migrate again. " +
 			"Until then koinon-api writes no install audit event")
 	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the

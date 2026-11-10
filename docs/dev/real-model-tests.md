@@ -68,16 +68,16 @@ Helm lists replace, so keep the profile's own entries. On kind, create `hack/dev
 containing `values: [hack/dev/values-rt1.example.yaml]` and restart `tilt up`: that file has the four
 hosts plus the fake model server. On a remote cluster, copy it, replace the fake model entry with your
 model endpoint and name your copy under `values:` in your local.yaml. Then register each as an MCP server
-([MCP servers](../site/src/content/docs/guides/mcp-servers.md)). Give `rt1-fakecicost` and
+([MCP servers](https://koinon.stateracloud.com/docs/operate/mcp-servers/)). Give `rt1-fakecicost` and
 `rt1-searxng-mcp` a bearer credential: the token in the Secrets above.
 
 ### 2. The model provider and a cost guard
 
-Add the provider and its models in the UI ([Models](../site/src/content/docs/guides/models.md)) and
-give every model a price ([Prices](../site/src/content/docs/guides/prices.md)); a model without a
+Add the provider and its models in the UI ([Models](https://koinon.stateracloud.com/docs/operate/models/)) and
+give every model a price ([Prices](https://koinon.stateracloud.com/docs/operate/prices/)); a model without a
 price is not served, and the spend figures need prices.
 
-Then set the guards **before** the first run ([Budgets](../site/src/content/docs/guides/budgets.md)):
+Then set the guards **before** the first run ([Budgets](https://koinon.stateracloud.com/docs/operate/budgets/)):
 
 - the org's monthly cap at the most you are willing to lose in total;
 - each agent's daily limit at a fraction of it;
@@ -104,9 +104,9 @@ and should be discarded, not interpreted. Keep the echo test's request ID with t
 ### 4. Run the stories
 
 Create the agents from the templates the stories need and run them from the UI or the API
-([tasks and inbox](../site/src/content/docs/guides/tasks-and-inbox.md),
-[triggers](../site/src/content/docs/guides/triggers.md),
-[ask_user](../site/src/content/docs/guides/ask-user.md)):
+([tasks and inbox](https://koinon.stateracloud.com/docs/use/tasks-and-inbox/),
+[triggers](https://koinon.stateracloud.com/docs/use/triggers/),
+[ask_user](https://koinon.stateracloud.com/docs/use/ask-user/)):
 
 - RT1: an agent with the three cost MCP servers, a schedule trigger or a direct task: "check yesterday's
   cloud, CI and inference costs and report anomalies". Check the report against the planted anomalies
@@ -114,8 +114,8 @@ Create the agents from the templates the stories need and run them from the UI o
 - RT2: an agent with the search MCP server and a research question of your own that takes many turns.
   Let it run past a compaction; interrupt it once and resume it.
 - RT3: an agent bound to a repository on your Git host (a sandbox repository, not one you care about)
-  with the code-host connector ([GitHub](../site/src/content/docs/guides/github-app.md),
-  [Gitea](../site/src/content/docs/guides/gitea.md)). Answer its `ask_user` question from the inbox and
+  with the code-host connector ([GitHub](https://koinon.stateracloud.com/docs/operate/github-app/),
+  [Gitea](https://koinon.stateracloud.com/docs/operate/gitea/)). Answer its `ask_user` question from the inbox and
   approve the pull request.
 
 Watch spend on the Budgets page while a story runs, and stop the window if it exceeds your plan.

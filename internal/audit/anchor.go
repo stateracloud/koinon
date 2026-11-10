@@ -341,7 +341,7 @@ func (j *AnchorJob) Tick(ctx context.Context) {
 		anchorAge.Set(0)
 		j.state = ""
 		// The success line is a witness the database cannot rewrite once the logs are shipped off the
-		// cluster (guides/audit.md, "Anchors"); heads_root and install_head are audit chain hashes, not secrets.
+		// cluster (docs site, https://koinon.stateracloud.com/docs/operate/audit/, "Anchors"); heads_root and install_head are audit chain hashes, not secrets.
 		j.Log.Info(AnchorLogMessage, "chain_seq", res.ChainSeq, "orgs", res.OrgCount,
 			"heads_root", res.HeadsRoot, "install_head", res.InstallHead)
 		if len(res.Inconsistent) > 0 {

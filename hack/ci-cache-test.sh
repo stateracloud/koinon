@@ -28,7 +28,6 @@ check "warm-caches runs on pushes to main only" has "$warm" "if: github.event_na
 check "warm-caches does not wait for changes (never skipped by ci-skip-heavy)" hasnt "$warm" 'needs:'
 check "warm-caches looks up with lookup-only" has "$warm" 'lookup-only: true'
 warmweb=$(job_body "$wf" warm-caches-web)
-warmdocs=$(job_body "$wf" warm-caches-docs)
 for k in 'go-ci-' 'envtest-'; do
   check "warm-caches saves $k" has "$warm" "key: ${k}"
   check "warm-caches saves $k only on a miss" has "$warm" "cache-hit != 'true'"
@@ -36,19 +35,16 @@ done
 check "warm-caches uses actions/cache/save" has "$warm" 'actions/cache/save@'
 check "warm-caches-web saves playwright- only on a miss" has "$warmweb" "key: playwright-"
 check "warm-caches-web saves with actions/cache/save" has "$warmweb" 'actions/cache/save@'
-for j in warm-caches-web warm-caches-docs; do
-  check "$j runs on pushes to main only" has "$(job_body "$wf" $j)" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
-  check "$j does not wait for changes" hasnt "$(job_body "$wf" $j)" 'needs:'
-  check "$j is advisory" grep -qx "advisory $j" "$repo/hack/ci-required.txt"
-done
+check "warm-caches-web runs on pushes to main only" has "$warmweb" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
+check "warm-caches-web does not wait for changes" hasnt "$warmweb" 'needs:'
+check "warm-caches-web is advisory" grep -qx "advisory warm-caches-web" "$repo/hack/ci-required.txt"
 
 # setup-node keys its pnpm cache on the hash of every cache-dependency-path entry, so each lockfile
 # list a consumer uses must be warmed by one job with exactly that list (a single path per warm job).
 check "warm-caches-web warms web/pnpm-lock.yaml alone" has "$warmweb" '^          cache-dependency-path: web/pnpm-lock.yaml$'
-check "warm-caches-docs warms docs/site/pnpm-lock.yaml alone" has "$warmdocs" '^          cache-dependency-path: docs/site/pnpm-lock.yaml$'
-warmpaths=$(printf '%s\n%s\n' "$warmweb" "$warmdocs" | grep -E '^          cache-dependency-path: ' | sort -u)
+warmpaths=$(printf '%s\n' "$warmweb" | grep -E '^          cache-dependency-path: ' | sort -u)
 while read -r job path; do
-  [ "$job" = warm-caches-web ] || [ "$job" = warm-caches-docs ] && continue
+  [ "$job" = warm-caches-web ] && continue
   if [ "$path" = '|' ] || [ -z "$path" ]; then continue; fi
   check "consumer $job cache-dependency-path '$path' is warmed" has "$warmpaths" "cache-dependency-path: ${path}\$"
 done < <(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /cache-dependency-path:/ { sub(/.*cache-dependency-path: */, ""); print job, $0 }' "$wf")

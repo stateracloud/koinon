@@ -252,7 +252,7 @@ To let agents use them, the gateway must be allowed to reach the four hosts
 `rt1-prometheus.koinon-fixtures.svc.cluster.local:8080` and
 `rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080`; the MCP path is `/mcp`): add them to the chart's
 `egress.allowedInternalHosts` and `networkPolicy.gatewayEgressTo` (ports 8000 and 8080 in
-`koinon-fixtures`), then register each as an MCP server (`docs/site/src/content/docs/guides/mcp-servers.md`).
+`koinon-fixtures`), then register each as an MCP server (<https://koinon.stateracloud.com/docs/operate/mcp-servers/>).
 For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agentgateway injects the header.
 
 ## Building images

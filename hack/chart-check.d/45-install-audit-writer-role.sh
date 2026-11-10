@@ -42,7 +42,7 @@ if ! grep -qE '^        ensure: present$' <<<"$block" || ! grep -qE '^        lo
 	fail "the managed group role is ensure: present, login: false"
 fi
 
-# No non-CNPG render creates a role (the roles are the operator's, ADR 0100 docs/ops/secret-keys.md).
+# No non-CNPG render creates a role (the roles are the operator's, ADR 0100 https://koinon.stateracloud.com/docs/operate/secret-keys/).
 lacks "an external database render has no CNPG group role" 'koinon_install_audit_writer' --set postgres.mode=external --set postgres.external.secretName=db
 
 # The grant hook (install-audit-grants.yaml): on an upgrade of a cluster initialised before ADR 0100,

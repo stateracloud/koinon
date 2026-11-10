@@ -216,7 +216,7 @@ e2e-relevant, one running and the newest pending) and nightly, always, to catch 
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
-(ADR 0085 decision 18). `hack/docs-check.sh` keeps the guide's `e1` blocks equal to that file (ADR 0108). Locally:
+(ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
@@ -270,7 +270,7 @@ its offline self-test (stubbed gates, run by the `scripts` job).
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `docs`, `escape (admission)` and `flavors`. `changes` and
+`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors`. `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
@@ -301,7 +301,7 @@ that file and nowhere else.
   are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
   narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
   list cannot name, so it is not done.
-- **Preflight equals CI.** The gates `generate`, `chart`, `web` and `docs` use the CI job's rule. The
+- **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
@@ -381,7 +381,7 @@ build (the `merge_group` `ci` run on the tagged commit's tree), never from the P
 ## Cache ownership (#147)
 
 A pull request can read its own caches and the default branch's, never another pull request's, so a
-cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-docs`) run on
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`) run on
 every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
 push whose tree the merge queue already tested, which used to leave main without fresh
 entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
@@ -392,7 +392,7 @@ work that fills it, then saves:
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
-| pnpm stores (`web`, `docs/site`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web` and `warm-caches-docs`, each with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
+| pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
 
 Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with

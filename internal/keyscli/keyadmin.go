@@ -15,6 +15,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -225,7 +226,7 @@ func (a KeyAdmin) recoverActive(ctx context.Context, now func() time.Time, prima
 	defer func() { _ = c.Commit(ctx) }()
 	if err != nil {
 		if errors.Is(err, secretstore.ErrOpen) || errors.Is(err, secretstore.ErrUnreachable) {
-			return false, fmt.Errorf("recover the active KEK: %w; if the wrapping key of those KEKs is lost for good, remove the entries of the KEKs that cannot be unwrapped from the KEK Secret first (docs/ops/secret-keys.md)", err)
+			return false, fmt.Errorf("recover the active KEK: %w; if the wrapping key of those KEKs is lost for good, remove the entries of the KEKs that cannot be unwrapped from the KEK Secret first ("+project.SecretKeysDocURL+")", err)
 		}
 		return false, err
 	}

@@ -33,7 +33,7 @@ expect rough edges and changes between candidates. The design lives in
 | `templates/` | Agent templates |
 | `charts/koinon/` | Helm chart |
 | `test/` | End-to-end and sandbox escape tests |
-| `docs/` | Design, ADRs, spikes and the docs site |
+| `docs/` | Design, ADRs, spikes and developer documents (the docs site is in [stateracloud/koinon-docs](https://github.com/stateracloud/koinon-docs), live at <https://koinon.stateracloud.com>) |
 
 ## Contributing
 

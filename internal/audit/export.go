@@ -20,7 +20,7 @@ import (
 )
 
 // Export writes a chain as JSON lines that anyone can verify without the database (ADR 0100
-// decision 5, docs/site/src/content/docs/guides/audit-export.md). VerifyExport checks such a file
+// decision 5, the audit export page of the docs site, https://koinon.stateracloud.com/docs/operate/audit-export/). VerifyExport checks such a file
 // with the hash code the in-database verifier uses (hashRow), so the two cannot disagree.
 
 // ExportFormat is the value of the header's "format" field.

@@ -22,7 +22,7 @@ Argo CD renders with `helm template` and ignores Helm hooks when its own annotat
 idempotent, so rerunning it on every upgrade or sync is harmless.
 
 External mode has no such Job: the operator creates the role before the upgrade
-(docs/ops/secret-keys.md) and the pre-upgrade migrate Job grants it.
+(https://koinon.stateracloud.com/docs/operate/secret-keys/) and the pre-upgrade migrate Job grants it.
 */ -}}
 {{- if eq .Values.postgres.mode "cnpg" }}
 {{- $name := include "koinon.componentName" (list . "migrate-grants") }}

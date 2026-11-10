@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // installWriterOK is 1 while koinon-api's own database login inherits the install audit writer role,
@@ -110,11 +111,11 @@ func (c *InstallWriterCheck) Check(ctx context.Context) WriterStatus {
 		c.Log.Error("the role "+migrations.InstallAuditWriterRole+" does not exist, so koinon-api records no install audit event; "+
 			"with the chart's CloudNativePG cluster its post-upgrade hook waits for it; otherwise, as an administrator, run: "+
 			"CREATE ROLE "+migrations.InstallAuditWriterRole+" NOLOGIN; "+grant+"; then koinon-api migrate --grants-only "+
-			"(docs/ops/secret-keys.md, The install audit chain)", "login", s.User)
+			"("+project.InstallAuditDocURL+")", "login", s.User)
 	case "not-member":
 		c.Log.Error("koinon-api's database login is not a member of "+migrations.InstallAuditWriterRole+
 			" (or does not inherit it), so the database refuses its install audit events; as an administrator run: "+grant+
-			" (docs/ops/secret-keys.md, The install audit chain)", "login", s.User)
+			" ("+project.InstallAuditDocURL+")", "login", s.User)
 	default:
 		if first {
 			c.Log.Info("koinon-api's database login can write the install audit chain", "login", s.User, "role", migrations.InstallAuditWriterRole)
@@ -127,7 +128,7 @@ func (c *InstallWriterCheck) Check(ctx context.Context) WriterStatus {
 
 // WarnSharedWriterLogin logs a warning when a component other than koinon-api (component names it)
 // connects as a login that inherits the install audit writer role: then it shares koinon-api's login,
-// or a role with its privilege, and could append install events under any actor (docs/ops/secret-keys.md).
+// or a role with its privilege, and could append install events under any actor (the secret keys page of the docs site, project.SecretKeysDocURL).
 // It never fails the start, and waits at most 5 seconds; a database it cannot ask is ignored, the
 // component's own checks see it.
 func WarnSharedWriterLogin(ctx context.Context, db Row, component string, log *slog.Logger) {
@@ -139,7 +140,7 @@ func WarnSharedWriterLogin(ctx context.Context, db Row, component string, log *s
 	}
 	log.Warn(component+"'s database login can write the install audit chain: it shares koinon-api's login or a role "+
 		"with its privilege, so it could append install events under any actor; give "+component+" a login of its own, "+
-		"not in "+migrations.InstallAuditWriterRole+" (docs/ops/secret-keys.md, The install audit chain)", "login", s.User)
+		"not in "+migrations.InstallAuditWriterRole+" ("+project.InstallAuditDocURL+")", "login", s.User)
 }
 
 // Run checks every interval until ctx ends, after the check the caller made at startup: a grant, or

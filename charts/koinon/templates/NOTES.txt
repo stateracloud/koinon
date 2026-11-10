@@ -55,10 +55,10 @@ keys in Secret {{ include "koinon.kekSecretName" . }}{{ if not .Values.secrets.k
 
   kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.kekSecretName" . }} -o yaml > koinon-kek-backup.yaml
 
-Rotation and the compromise procedure: docs/ops/secret-keys.md.
+Rotation and the compromise procedure: https://koinon.stateracloud.com/docs/operate/secret-keys/.
 
 Models: add a provider and its models in the UI, with the admin API, or declare them with a labelled
-Secret (koinon.dev/secret-type: model-provider); see the docs site, guide "Models".
+Secret (koinon.dev/secret-type: model-provider); see https://koinon.stateracloud.com/docs/operate/models/.
 
 Open the UI:
 {{- if .Values.ingress.enabled }}

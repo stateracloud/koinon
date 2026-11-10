@@ -44,7 +44,6 @@ EOF
 cat >"$tmp/changes" <<'EOF'
 #!/usr/bin/env bash
 for j in $STUB_JOBS; do echo "$j=true"; done
-echo "docs=false"
 EOF
 # Stub make: target behaviour from $STUB_MAKE_<target>.
 cat >"$tmp/make" <<'EOF'

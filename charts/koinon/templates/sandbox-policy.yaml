@@ -17,7 +17,7 @@ never Kyverno). Rules key on the requesting identity, which a pod's creator cann
   Sandbox controller uses them (both talk through the supervisor's relay). It is a third policy
   because an options object has no spec or metadata, and admission runs before the connection is
   made. DELETE stays out: deleting a pod does not weaken confinement. Break-glass is not an
-  exemption but the runbook docs/ops/sandbox-break-glass.md (a cluster admin suspends the CONNECT
+  exemption but the runbook https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/ (a cluster admin suspends the CONNECT
   binding, which shows in the audit log and as GitOps drift).
 Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPath or privileged
 containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
@@ -316,7 +316,7 @@ spec:
         resources: [pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy]
   validations:
     - expression: "false"
-      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in sandbox namespaces (requested by ' + request.userInfo.username + '): use OpenShell exec and logs; see docs/ops/sandbox-break-glass.md'"
+      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in sandbox namespaces (requested by ' + request.userInfo.username + '): use OpenShell exec and logs; see https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/'"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -17,7 +17,7 @@ ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1" >&2; fail=1; }
 
 # 1. make targets, as `make -n` sees them (a target without a recipe or a rule is an error).
-for t in test-go test-go-suite test-admission test-chart-smoke chart-check docs-check; do
+for t in test-go test-go-suite test-admission test-chart-smoke chart-check e2e-commands-check; do
 	if grep -qE "^${t}:" Makefile; then ok "make target $t"; else bad "Makefile has no target $t"; fi
 	if make -n -s "$t" SUITE=./internal/x >/dev/null 2>&1; then ok "make -n $t"; else bad "make -n $t fails"; fi
 done

@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy deps generate proto migrate adr docs chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -100,14 +100,14 @@ existing() { # <regexp>: changed files matching the regexp that still exist
 	while IFS= read -r f; do [[ -e $f ]] && echo "$f"; done < <(grep -E -- "$1" <<<"$FILES" || true)
 }
 
-# triggering <gate>: the changed files that turn the gate on. generate, chart, web and docs are CI
+# triggering <gate>: the changed files that turn the gate on. generate, chart and web are CI
 # jobs: the job's rule (hack/paths.rules) decides, so preflight and CI cannot disagree.
 triggering() {
 	local f
 	while IFS= read -r f; do
 		[[ -n $f ]] || continue
 		case $1 in
-		generate | chart | web | docs) paths_job_triggers "$1" "$f" && echo "$f" ;;
+		generate | chart | web) paths_job_triggers "$1" "$f" && echo "$f" ;;
 		*) paths_match gate "$1" "$f" && echo "$f" ;;
 		esac
 	done <<<"$FILES"
@@ -131,7 +131,6 @@ reason() {
 	generate) echo "a generator input or output changed" ;;
 	migrate) echo "migrations changed" ;;
 	adr) echo "docs/adr or the ADR scripts changed" ;;
-	docs) echo "docs or what docs-check checks changed" ;;
 	chart) echo "charts changed" ;;
 	web) echo "web/ changed" ;;
 	shell | bash5) echo "$n shell scripts changed" ;;
@@ -272,7 +271,6 @@ g_generate() {
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
 g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
-g_docs() { hack/docs-check.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {

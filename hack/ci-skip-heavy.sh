@@ -3,7 +3,7 @@
 #
 # Decides whether the `changes` job of ci.yml switches the heavy jobs off, and applies
 # the decision to the output of hack/ci-changes.sh. The heavy jobs are the ones `changes` gates: go-*
-# (through `go`), web-* (through `web`), generated code, chart, chart smoke, docs, escape (admission)
+# (through `go`), web-* (through `web`), generated code, chart, chart smoke, escape (admission)
 # and flavors. A job switched off by its `if:` reports success, so every required check still reports.
 # On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (their own `if:`
 # in ci.yml, not an output of this script): the merge queue already ran them on this tree.
@@ -55,7 +55,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-heavy=(go web generate chart chartsmoke docs escape flavors)
+heavy=(go web generate chart chartsmoke escape flavors)
 
 emit() { echo "skip=$1"; echo "reason=$2"; }
 

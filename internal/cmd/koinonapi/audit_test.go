@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -416,7 +417,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		err = migrate(ctx, dsn, time.Minute, required)
 		Expect(err).To(MatchError(ContainSubstring("the role koinon_install_audit_writer does not exist")))
-		Expect(err).To(MatchError(ContainSubstring("docs/ops/secret-keys.md")))
+		Expect(err).To(MatchError(ContainSubstring(project.SecretKeysDocURL)))
 		Expect(err).To(MatchError(ContainSubstring("no migration was applied")))
 		untouched()
 

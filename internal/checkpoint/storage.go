@@ -88,7 +88,7 @@ type S3 struct {
 
 // AccessKeyFingerprint names the access key without showing it: the first 16 hex digits of the
 // SHA-256 of its ID. koinon-agentd logs it at start, so that after the bucket's key is rotated
-// (docs/ops/secret-keys.md, "Suspected compromise") the operator sees the restarted replicas use
+// (the secret keys page of the docs site, project.SecretKeysDocURL, "Suspected compromise") the operator sees the restarted replicas use
 // the new one. Empty without a key ID.
 func (s S3) AccessKeyFingerprint() string {
 	if s.AccessKeyID == "" {

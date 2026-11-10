@@ -59,10 +59,9 @@ turns_on() {
 
 # --- 1. The table. A comment names the file a job reads for each row. ------------------------------
 
-# Documentation only: docs reads docs/ and README.md (hack/docs-check.sh); nothing needs Go.
-expect "docs" README.md
-expect "docs" docs/adr/0001-x.md
-expect "docs" docs/site/src/content/docs/quickstart.md
+# Documentation only: no CI job reads it (the docs site is in stateracloud/koinon-docs, ADR 0108).
+expect "" README.md
+expect "" docs/adr/0001-x.md
 # Shell tooling and other workflows cannot affect the Go jobs (fail-closed list: hack/paths.rules);
 # the scripts' own tests run in the always-on `scripts` job.
 expect "" hack/ship.sh
@@ -82,7 +81,7 @@ expect "go web chartsmoke" web/webui_stub.go
 # web: web/ and api/proto (the ts client is generated from them); `go` ignores web/ files. The
 # chart smoke builds without the webui tag, so web/ sources do not reach it.
 expect "web" web/src/app.ts
-expect "web docs" web/e2e-real/login.spec.ts # docs-check.sh reads web/e2e-real/*.spec.ts
+expect "web" web/e2e-real/login.spec.ts
 # The protos: generate and web (the generated client). The chart smoke ignores them: the generated
 # Go code is committed under internal/gen, where a change matches.
 expect "go web generate" api/proto/koinon/agent/v1/agent.proto
@@ -107,10 +106,10 @@ expect "go chartsmoke" api/admin/v1/spec.go
 
 # F4, chart: hack/chart-check.sh sources hack/versions.env and hack/chart-check.d/*.sh.
 expect "chart" hack/chart-check.d/10-new-feature.sh
-expect "go chart docs" hack/versions.env # also read by docs-check.sh
+expect "go chart" hack/versions.env
 expect "chart" hack/chart-check.sh
 expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
-expect "go chart chartsmoke docs escape" charts/koinon/values.yaml
+expect "go chart chartsmoke escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
 expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the admission specs import it
@@ -130,19 +129,17 @@ expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh
 expect "go flavors" hack/spike/probe/Dockerfile
-# Negative: a package the suite does not import (docs-check reads internal/preflight, see below).
+# Negative: a package the suite does not import.
 expect "go chartsmoke" internal/zzz-not-imported/x.go
 
-# F6, docs: hack/docs-check.sh reads internal/preflight/preflight.go (the versions on the
-# Prerequisites page) and runs the tests of internal/declarative.
-expect "go chartsmoke docs" internal/preflight/preflight.go
-expect "go docs" internal/declarative/docs_test.go # a test file of another package is not in the smoke build
-expect "docs" hack/docs-check.sh
-expect "go docs" test/e2e/run.sh # docs-check.sh compares its e1 blocks to the command file
-expect "go docs" test/e2e/commands/quickstart.e1
+# F6: a test file of another package is not in the smoke build; the e2e scripts and command files are Go inputs.
+expect "go chartsmoke" internal/preflight/preflight.go
+expect "go" internal/declarative/docs_test.go
+expect "go" test/e2e/run.sh
+expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke docs escape flavors generate go web"
+all="chart chartsmoke escape flavors generate go web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum
@@ -152,7 +149,7 @@ expect "$all" hack/ci-skip-heavy.sh
 expect "$all" hack/paths.rules
 expect "$all" hack/paths-lib.sh
 # Several paths together: the union.
-expect "go chart chartsmoke docs escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
+expect "go chart chartsmoke escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
 
 # The real `go list` path (no CI_CHANGES_FLAVORS_DIRS): a dependency of the suite, and one it lacks.
 total=$((total + 2))
@@ -250,20 +247,6 @@ chart_inputs+=(charts/koinon/Chart.yaml)
 for p in "${chart_inputs[@]}"; do
 	[[ -e $p ]] || { echo "FAIL: derived chart input $p does not exist"; fails=$((fails + 1)); continue; }
 	turns_on chart "$(probe "$p")"
-done
-
-# docs: every repository path hack/docs-check.sh names (outside comments) must turn docs on.
-docs_inputs=()
-while IFS= read -r tok; do
-	tok=${tok#./}
-	tok=${tok%%[*?{]*} # up to the first glob character
-	tok=${tok%/}
-	[[ -n $tok && -e $tok ]] && docs_inputs+=("$tok")
-done < <(grep -v '^[[:space:]]*#' hack/docs-check.sh | grep -oE '(\./)?(internal|hack|test|web|charts|docs|cmd|pkg)/[A-Za-z0-9_./*-]+' | sort -u)
-docs_inputs+=(README.md)
-need_min "docs-check inputs" 8 ${#docs_inputs[@]}
-for p in "${docs_inputs[@]}"; do
-	turns_on docs "$(probe "$p")"
 done
 
 # flavors, independent of the script: a real `go list` of the suite (import paths, not .Dir, so
