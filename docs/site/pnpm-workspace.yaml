@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependency cooldown (ADR 0079), the same policy as web/pnpm-workspace.yaml: no version younger than 3 days (4320 minutes), direct or
+# transitive, and strict, so an install fails rather than falling back to a younger version.
+minimumReleaseAge: 4320
+minimumReleaseAgeStrict: true
+# Refuse a release whose publisher trust dropped (trusted publisher -> provenance -> nothing).
+trustPolicy: no-downgrade
+# Entries that the lockfile no longer resolves are removed on the next install.
+minimumReleaseAgeExcludePrune: true
+# Security fast path only (ADR 0079): EXACT versions, never a bare name or a pattern, each with a
+# comment naming the advisory and the date, added in the same PR as the diff review. Example:
+#   - some-pkg@1.2.3 # GHSA-xxxx-xxxx-xxxx, 2026-11-02
+minimumReleaseAgeExclude: []
+# The same policy for the pnpm binary that `packageManager` selects and for config dependencies
+# (pnpm 12.15+, issue 450). Explicit, so it does not depend on the fallback to the settings above.
+bootConfig:
+  minimumReleaseAge: 4320
+  minimumReleaseAgeStrict: true
+  trustPolicy: no-downgrade
