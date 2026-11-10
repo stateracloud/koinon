@@ -117,6 +117,9 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 // binding stores the host's spelling. It returns the repositories in that spelling, in the order
 // given. Nothing is written to the host.
 func (s *Server) checkInstallation(ctx context.Context, p codehost.Provider, conn store.Connection, field string, repos []string) ([]string, error) {
+	if err := s.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	name := p.Capabilities().DisplayName
 	c, err := connections.Load(ctx, s.keys, conn)
 	if err == nil {

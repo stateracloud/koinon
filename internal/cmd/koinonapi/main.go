@@ -94,6 +94,7 @@ import (
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -118,10 +119,13 @@ type config struct {
 	pricesMaxChange       int
 	pricesMaxAutoPerDay   int
 
-	addr           string
-	databaseURL    string
-	migrate        bool
-	durable        bool
+	addr        string
+	databaseURL string
+	migrate     bool
+	durable     bool
+	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
+	// code-host scope refresh (issue #462).
+	restoreHold    bool
 	executorID     string
 	wait           time.Duration
 	trustedOrigins string
@@ -200,6 +204,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"the executors heartbeat into a table and one of them recovers the workflows of a dead one (ADR 0085). "+
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
+	c.restoreHoldFlag(fs)
 	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
 		"the scheduled price refresh (ADR 0098): auto fetches OpenRouter's public price list only while some org has an openrouter provider, "+
 			"on always fetches it, off never makes a request to any price source; a fetched change applies by itself only within the bounds below")
@@ -487,20 +492,28 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
-	safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
-		scheduler.Sweeper(ctx, pool, cfg.sweepInterval, slog.Default())
-	})
+	if cfg.restoreHold {
+		// Restore-hold (issue #462): nothing acts until the operator releases it. The sweepers cancel runs
+		// past their wall clock and expire approvals and questions by time, and a restored backlog is older
+		// than its clock; the DBOS runtime would fire schedules and recover pending workflows.
+		slog.Warn("restore-hold: schedules, the DBOS runtime, the sweepers, the price refresh and the code-host scope refresh are off until the hold is released (restoreHold=false in the chart)")
+	} else {
+		safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
+			scheduler.Sweeper(ctx, pool, cfg.sweepInterval, slog.Default())
+		})
+	}
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
 	var durableRT *durable.Runtime // for its metrics, registered once the registry exists
 	var sched *schedule.Scheduler
+	runDurable := cfg.durable && !cfg.restoreHold
 	if !cfg.durable {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
 	}
 	var directMessages *services.DirectMessageQueue
 	var runNow *services.RunNowQueue
-	if cfg.durable {
+	if runDurable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
 		rt := durable.New(durable.Config{
@@ -651,7 +664,9 @@ func serve(ctx context.Context, cfg config) error {
 		Approve:    askSrv.RequestApproval,
 		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
 	})
-	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
+	// One guard for every service that reaches outward (issue #462, ADR 0107).
+	hold := restorehold.NewGuard(cfg.restoreHold)
+	approvalOpts := approvals.Options{RestoreHold: hold, Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -659,7 +674,9 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	approvalSvc := approvals.New(pool, approvalOpts)
-	safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
+	if !cfg.restoreHold {
+		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
+	}
 	tokenSvc := tokens.New(pool, nil)
 	var catalogKeys catalog.Keys
 	if keyring != nil {
@@ -667,7 +684,7 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
-	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
+	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy)).WithRestoreHold(hold)
 	// The provider echo check sends one request through the gateway with the org's model-check key,
 	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
 	// access the check answers that it is not configured.
@@ -685,18 +702,22 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	traceSvc.WithRestoreHold(hold)
+	echo.WithRestoreHold(hold)
 	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
 	// visibility, read when a connection is created or tested and again every few minutes, so the
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
-	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
+	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default()).WithRestoreHold(hold)
 	svc := services.New(pool, services.Options{
-		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc,
+		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
-	safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
-	// The notification of an opened question (the park that opens it commits in koinon-agentd).
-	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
+	if !cfg.restoreHold {
+		safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
+		// The notification of an opened question (the park that opens it commits in koinon-agentd).
+		safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
+	}
 	if sched != nil {
 		sched.Bind(svc)
 		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
@@ -736,6 +757,7 @@ func serve(ctx context.Context, cfg config) error {
 	})
 	reg.MustRegister(kekMetrics.Collectors()...)
 	reg.MustRegister(guardMetrics.Collectors()...)
+	restorehold.Metric(reg, cfg.restoreHold)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
@@ -778,9 +800,11 @@ func serve(ctx context.Context, cfg config) error {
 	// The loop gets the configured setting but runs each tick in the recorded one where that fetches
 	// less (Refresher.Effective): while the retry above has not recorded the setting and its install
 	// event, mode on does not fetch on the strength of an unrecorded change.
-	safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
-		refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
-	})
+	if !cfg.restoreHold {
+		safego.GoOrStop(bgCtx, slog.Default(), "price-refresh", stop, func(ctx context.Context) {
+			refresher.Loop(ctx, refreshMode, cfg.pricesRefreshInterval)
+		})
+	}
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}
@@ -841,7 +865,9 @@ func serve(ctx context.Context, cfg config) error {
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
 				defer cancel()
-				if _, err := approvalSvc.Execute(ctx, org, id); err != nil {
+				if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
+					slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
+				} else if err != nil {
 					slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
 				}
 			},

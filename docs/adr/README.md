@@ -124,4 +124,5 @@ are in [0046](0046-adr-conventions.md).
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Accepted (direction by procoduck, 2026-11-09; details by the implementing lane) |
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Proposed |
+| [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
 | [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |

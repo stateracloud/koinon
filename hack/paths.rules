@@ -100,7 +100,7 @@ job docs ^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
 
 # --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
-job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)
+job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
 # --- local gates of the CI jobs (hack/lane-gates.sh) -------------------------------------------------
 # A job without a lane line has no local gate and is reported as not run.
@@ -255,6 +255,8 @@ e2e-needed - ^release/versions\.yaml$
 e2e-forced - ^test/e2e/
 # run.sh calls test/escape/kind.sh through test/e2e/escape-openshell.sh and escape-mcp.sh.
 e2e-forced - ^test/escape/
+# The probe image kind.sh pulls or builds, and the tag it is pulled under (#482).
+e2e-forced - ^hack/(spike/probe/|probe-tag\.sh$)
 e2e-forced - ^\.github/workflows/e2e-kind\.yml$
 # Agent prompts and instructions may be Markdown.
 e2e-forced - ^flavors/.*\.md$

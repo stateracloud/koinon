@@ -98,6 +98,29 @@ kubectl -n koinon wait --for=delete pod -l 'app.kubernetes.io/instance=koinon,ap
 
 If `wait` prints "no matching resources found", the pods were already gone.
 
+Now put the install in restore-hold mode, before anything starts again. A held install starts, serves
+its health checks and answers reads, but acts on nothing: no schedule fires and no pending workflow
+is recovered, no run is claimed and no expired run lease is taken over, no sandbox is created,
+stopped or recreated, and no code-host scope or price list is fetched. The API also refuses the outward calls an
+admin could start (a provider check, a connection test, an MCP server add, a trace destination
+test, approving a request, Run now; denying one stays open) until you release the hold. No new work is queued
+while it holds: Run now, creating a task or ticket, sending a follow-up message and sending a direct message are all refused. The declarative importer
+skips an `mcp-server` Secret that would dial out (a new server or a changed URL) and logs
+`held: MCP server <name> not applied until release`; it applies the rest of the Secrets and imports the skipped
+one after the release. The hold does not stop sandboxes that are already running: if you restore in place while
+sandboxes are live, stop them first (their model calls go through agentgateway, not through Koinon). Without the hold, the first
+start would run every due schedule once, let agentd take over every run whose lease ran out while the
+install was down, and let the reconciler converge sandboxes against the restored state, all before
+you have looked at it. The hold is one environment variable on the three Deployments (they are
+scaled to 0, so nothing restarts):
+
+```sh e1=hold
+kubectl -n koinon set env deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd KOINON_RESTORE_HOLD=true
+```
+
+With Helm or GitOps, skip this command: the hold goes in with the chart value in step 4, after the
+database and the keys are back.
+
 ### 2. Restore the database
 
 Drop the schemas the dump will bring back, then load it. `--exit-on-error` stops at the first
@@ -132,10 +155,11 @@ koinon-api refuses to start without the Secret and never makes a new key when th
 holds sealed values (it says "KEK Secret missing; restore it from your backup"). A Secret with the
 wrong keys shows in the start-up log and in `keys status`.
 
-### 4. Start
+### 4. Start, held
 
 Scale the components back to the replica counts in your values (`helm -n koinon get values koinon`).
-The default is one each. Start the API and reconciler first, then agentd:
+The default is one each. Start the API and reconciler first, then agentd. All three log
+"restore-hold" and report `koinon_restore_hold 1` on `/metrics`:
 
 ```sh e1=start
 kubectl -n koinon scale deployment/koinon-api deployment/koinon-reconciler --replicas=1
@@ -144,7 +168,15 @@ kubectl -n koinon scale deployment/koinon-agentd --replicas=1
 kubectl -n koinon rollout status deployment/koinon-agentd --timeout=5m
 ```
 
-Starting the API again is also what makes it read the restored install ID.
+With Helm or GitOps, do not run `kubectl scale` or the `set env` command from step 1. Set the chart
+value `restoreHold: true` and upgrade. That starts the three Deployments held, after the database and
+the keys are back (an upgrade earlier would start them against a database that step 2 replaces), and
+a GitOps controller with self-heal would undo a `kubectl scale`. Set it back to `false` to release. Do
+not mix the two ways: a variable set with `kubectl set env` is not in the chart, so a Helm upgrade
+neither adds nor removes it.
+
+Starting the API again is also what makes it read the restored install ID. Ready means the process
+is up and its schema is supported; a held install is Ready and does nothing.
 
 ### 5. Rebuild the checkpoint list
 
@@ -158,17 +190,61 @@ kubectl -n koinon exec deploy/koinon-api -- koinon-api checkpoints resync --all
 ```
 
 [After a database restore](/guides/home-checkpoints/#after-a-database-restore) says what it changes.
-Run it before `keys forget` or any key compromise procedure.
+Run it before `keys forget` or any key compromise procedure. This is the one job agentd does while
+held: it reads the bucket and writes the checkpoint list, and touches no sandbox.
 
-## Check the result
+## Check the result, held
+
+The install is held, so you can look at it before it acts.
 
 1. `kubectl -n koinon get pods`: the three Deployments and the gateway are Ready.
 2. `kubectl -n koinon exec deploy/koinon-api -- koinon-api keys status` lists the keys, marks the
    active one and prints no warning about a missing key or a fingerprint that differs.
-3. Sign in, open an agent and a provider: a stored provider key is decrypted when a run starts, so
-   start a run to prove it.
-4. Pending schedules fire again on their next due time; workflows that were pending in the dump are
-   recovered when koinon-api starts.
+
+Open every stored credential with the restored keys. `keys verify` reads each sealed value (provider
+and cost keys, connection secrets, MCP and trace credentials, home-repository passwords), opens it
+and prints one line for each that does not. It changes nothing and writes no audit event, and it
+does not print a value:
+
+```sh e1=verify-keys
+kubectl -n koinon exec deploy/koinon-api -- koinon-api keys verify
+```
+
+It exits 1 when a value does not open. `unknown_kek` means the key backup lacks the key that sealed
+the value: apply the backup that holds it (step 3) and run it again. `open` means the key is there
+but the value does not open, so the database and the keys come from different installs.
+
+Then look at the backlog: sign in and see the queued and running runs, and the schedule triggers with
+their next due times. Runs that were running when the backup was taken are `running` with an expired
+lease; they wait for the release.
+
+Tighten what the backlog may do on release. An org's cap on runs that start or run at once is read
+at every claim, so a lower cap also holds back the runs that are already queued. Show an org's
+limits and set a lower cap (`--org` takes the slug or the ID; `0` returns a limit to the default):
+
+```sh
+kubectl -n koinon exec deploy/koinon-api -- koinon-api org-limits show --org acme
+kubectl -n koinon exec deploy/koinon-api -- koinon-api org-limits set --org acme --max-concurrent-runs 2
+```
+
+`--trigger-concurrency` and `--trigger-rate-per-minute` bound the org's share of the trigger queue
+the same way. Every change is audited as `org.run_limits.set` (actor `cli`). Raise the cap again
+when the backlog has drained.
+
+## Release
+
+When the checks pass, release the hold. Each Deployment restarts without the variable and starts to
+act: the DBOS runtime starts and recovers the workflows that were pending in the dump, schedules fire
+again on their next due time (a schedule that came due while the install was down fires once), agentd
+claims runs and takes over the expired leases, and the reconciler converges the sandboxes.
+
+```sh e1=release
+kubectl -n koinon set env deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd KOINON_RESTORE_HOLD-
+kubectl -n koinon rollout status deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd --timeout=5m
+```
+
+Start a run to prove that a stored provider key is decrypted. If you held the install with the chart
+value, set `restoreHold: false` and upgrade instead.
 
 ## Restore into a new install
 

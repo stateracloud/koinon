@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/restorehold"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,6 +100,13 @@ type Service struct {
 	// Timeout bounds the request to the gateway.
 	Timeout time.Duration
 	now     func() time.Time
+	hold    *restorehold.Guard
+}
+
+// WithRestoreHold makes Check refuse with restorehold.ErrHeld while g holds (issue #462, ADR 0107).
+func (s *Service) WithRestoreHold(g *restorehold.Guard) *Service {
+	s.hold = g
+	return s
 }
 
 // New returns a Service. A nil chat makes every check fail as unavailable.
@@ -178,6 +187,9 @@ func Diff(a, b string) []Segment {
 // rest). The check, its stored result and its audit event are the only effects; a gateway failure
 // stores nothing and returns *UnavailableError.
 func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model string, actor audit.Actor, user pgtype.UUID) (Result, error) {
+	if err := s.hold.Err(); err != nil {
+		return Result{}, err
+	}
 	q := store.New(s.pool)
 	p, err := q.GetProvider(ctx, store.GetProviderParams{OrgID: org, ID: provider})
 	if errors.Is(err, pgx.ErrNoRows) {

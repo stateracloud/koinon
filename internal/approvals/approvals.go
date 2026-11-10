@@ -40,6 +40,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/restorehold"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,6 +105,9 @@ const (
 
 // Options configures a Service.
 type Options struct {
+	// RestoreHold refuses Approve, Execute and Diff with restorehold.ErrHeld while it holds (issue
+	// #462, ADR 0107): an approved call reaches outward (code host, MCP server, saved-work push).
+	RestoreHold *restorehold.Guard
 	// Keys opens connections' stored secret fields. Without it execution fails.
 	Keys connections.Opener
 	// GatewayMCPURL is agentgateway's MCP endpoint and ExecKeys the org's executor keys: approved
@@ -149,6 +154,7 @@ type Service struct {
 	maxExec   int
 	now       func() time.Time
 	log       *slog.Logger
+	hold      *restorehold.Guard
 	onMCP     func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error
 }
 
@@ -172,7 +178,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 	return &Service{
 		now:  opts.Now,
 		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts,
-		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, onMCP: opts.OnMCPResult,
+		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, hold: opts.RestoreHold, onMCP: opts.OnMCPResult,
 	}
 }
 
@@ -232,6 +238,11 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 // wider one also records an approval scope for the agent (see Scope). The caller checks that the
 // approver is an org admin or owner, as for any approval.
 func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UUID, argsSHA256, note string, scope Scope) (store.ApprovalRequest, error) {
+	// An approval runs the call at once; a held install does not act outward, so it does not approve
+	// either (Deny stays open).
+	if err := s.hold.Err(); err != nil {
+		return store.ApprovalRequest{}, err
+	}
 	scope, err := scope.normalize(s.now())
 	if err != nil {
 		return store.ApprovalRequest{}, err
@@ -403,6 +414,9 @@ func isPermanent(err error) bool {
 // Execute executes an approved request it can claim and records the outcome. A request
 // that is not approved, or that another executor holds, is returned as it is.
 func (s *Service) Execute(ctx context.Context, org, id pgtype.UUID) (store.ApprovalRequest, error) {
+	if err := s.hold.Err(); err != nil {
+		return store.ApprovalRequest{}, err
+	}
 	row, err := s.q.ClaimApprovalExecution(ctx, store.ClaimApprovalExecutionParams{
 		OrgID: org, ID: id, LeaseSeconds: int32(s.lease / time.Second), //nolint:gosec // bounded by configuration
 	})
@@ -569,6 +583,9 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 	})
 	if err != nil {
 		return err
+	}
+	if s.hold.Held() {
+		return nil // the hold executes nothing; the due calls wait for the release
 	}
 	due, err := s.q.ListExecutableApprovalRequests(ctx, store.ListExecutableApprovalRequestsParams{OrgID: org, MaxRequests: 20})
 	if err != nil {

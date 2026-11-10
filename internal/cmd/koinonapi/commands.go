@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/restorehold"
 )
 
 // NewRootCommand is koinon-api's command tree (ADR 0088). Every command declares its own flags and
@@ -26,7 +27,7 @@ func NewRootCommand() *cobra.Command {
 		Long: "koinon-api serves the Koinon API and web UI (serve, also what runs without a subcommand), " +
 			"applies the database migrations (migrate), checks the install prerequisites (preflight), " +
 			"creates generated Secrets (ensure-secrets), wraps new KEKs with a KMS (key-admin) and offers the operator " +
-			"tools (keys, audit).\n\n" +
+			"tools (keys, audit, org-limits).\n\n" +
 			"Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper case with " +
 			"dashes as underscores (--database-url is KOINON_DATABASE_URL). Secrets are read from files, never from flags.",
 	}
@@ -36,7 +37,7 @@ func NewRootCommand() *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES", "KOINON_KEK_ACTIVE_PERIOD")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(), newMigrateCommand(), newPreflightCommand(), newEnsureSecretsCommand(),
-		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand())
+		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand(), newOrgLimitsCommand())
 	return root
 }
 
@@ -48,6 +49,9 @@ func (c *config) databaseFlag(fs *pflag.FlagSet) {
 func (c *config) durableFlag(fs *pflag.FlagSet, usage string) {
 	fs.BoolVar(&c.durable, "durable", false, usage)
 }
+
+// restoreHoldFlag registers --restore-hold (issue #462).
+func (c *config) restoreHoldFlag(fs *pflag.FlagSet) { restorehold.Flag(fs, &c.restoreHold) }
 
 func (c *config) waitFlag(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")

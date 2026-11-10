@@ -128,6 +128,8 @@ expect "go chartsmoke flavors" templates/agent.yaml
 expect "go flavors" flavors/opencode/Dockerfile
 expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
+expect "flavors" hack/probe-tag.sh
+expect "go flavors" hack/spike/probe/Dockerfile
 # Negative: a package the suite does not import (docs-check reads internal/preflight, see below).
 expect "go chartsmoke" internal/zzz-not-imported/x.go
 

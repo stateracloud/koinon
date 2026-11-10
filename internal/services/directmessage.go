@@ -85,6 +85,10 @@ func threadTitle(text string) string {
 // waiting) commit in one transaction, and the sandbox pre-wake follows the commit. It refuses an
 // agent that is not active or has no direct_message trigger in effect.
 func (s *Server) DeliverDirectMessage(ctx context.Context, in DirectMessage) (DirectMessageResult, error) {
+	// A held install queues no new work, also for a message queued before the hold (ADR 0107).
+	if err := s.hold.Err(); err != nil {
+		return DirectMessageResult{}, err
+	}
 	var res DirectMessageResult
 	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		res = DirectMessageResult{}
@@ -218,6 +222,10 @@ func checkMessageID(id string) error {
 func (a taskAPI) SendDirectMessage(ctx context.Context, req *taskv1alpha1.SendDirectMessageRequest) (*taskv1alpha1.SendDirectMessageResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleMember)
 	if err != nil {
+		return nil, err
+	}
+	// A held install queues no new work (ADR 0107); the queued path would only retry the refusal.
+	if err := a.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	agentID, err := parseID("agent_id", req.GetAgentId())
