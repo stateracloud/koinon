@@ -52,8 +52,8 @@ done
 manifest=$(mktemp "${TMPDIR:-/tmp}/teardown.XXXXXX")
 trap 'rm -f "$manifest"' EXIT
 curl -fsSL -o "$manifest" \
-  https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.7/sandbox-with-extensions.yaml
-echo "136c10c9347cb5a6740b351444cae82f404e883c3f520272257ba785f2af0da8  $manifest" | shasum -a 256 -c - >/dev/null
+  https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.10/sandbox-with-extensions.yaml
+echo "7cc1eca2fb45844b0ec0c35fc975340dc01af2994301ffa8bf05db1ad1e397ee  $manifest" | shasum -a 256 -c - >/dev/null
 step "${K[@]}" delete -f "$manifest" --ignore-not-found
 
 # Gitea: the spike org (with repo hello and its PRs) and the bot user. The admin token

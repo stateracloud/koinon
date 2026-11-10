@@ -167,7 +167,7 @@ type cluster struct {
 func healthyCluster() *cluster {
 	return &cluster{
 		kube: []runtime.Object{
-			controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.7"),
+			controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.10"),
 			agentgatewayController("cr.agentgateway.dev/controller:v1.7.0"),
 			runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"}),
 			cnpgWebhook(),
@@ -294,7 +294,7 @@ var _ = Describe("Checker", func() {
 		for _, r := range results {
 			Expect(r.Status).To(Equal(preflight.Pass), "%s: %s", r.Check, r.Message)
 		}
-		Expect(find(results, "Agent Sandbox").Message).To(ContainSubstring("controller v1.0.7"))
+		Expect(find(results, "Agent Sandbox").Message).To(ContainSubstring("controller v1.0.10"))
 		Expect(find(results, "OpenShell").Message).To(ContainSubstring("version 0.1.7"))
 		Expect(find(results, "CloudNativePG").Message).To(ContainSubstring("operator webhook cnpg-system/cnpg-webhook-service ready"))
 
@@ -337,7 +337,7 @@ var _ = Describe("Checker", func() {
 			Expect(out.String()).To(ContainSubstring("Preflight failed: 1 of 7 checks failed"))
 		},
 		Entry("Agent Sandbox CRD", func(c *cluster) { c.without("sandboxes.agents.x-k8s.io") },
-			"Agent Sandbox", "CRD sandboxes.agents.x-k8s.io not found", "v1.0.7/sandbox-with-extensions.yaml"),
+			"Agent Sandbox", "CRD sandboxes.agents.x-k8s.io not found", "v1.0.10/sandbox-with-extensions.yaml"),
 		Entry("Agent Sandbox API version", func(c *cluster) { c.with(crd("sandboxes.agents.x-k8s.io", "v1alpha1")) },
 			"Agent Sandbox", "serves [v1alpha1], not v1beta1", "v1.0.x"),
 		Entry("Agent Sandbox controller", func(c *cluster) { c.without("agent-sandbox-controller") },
@@ -458,7 +458,7 @@ var _ = Describe("Checker", func() {
 var _ = Describe("imageTag", func() {
 	DescribeTable("extracts the tag",
 		func(ref, tag string) { Expect(preflight.ImageTag(ref)).To(Equal(tag)) },
-		Entry("tag", "registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.7", "v1.0.7"),
+		Entry("tag", "registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.10", "v1.0.10"),
 		Entry("tag and digest", "r.example:5000/a/b:v1.0.2@sha256:abc", "v1.0.2"),
 		Entry("registry port, no tag", "r.example:5000/a/b", ""),
 		Entry("digest only", "r.example/a/b@sha256:abc", ""),

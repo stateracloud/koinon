@@ -15,7 +15,7 @@ pi-acp's missing `session/resume`, pi's exit code 65, and flavor images that the
 does not publish yet.
 
 procoduck decided on 2026-10-26 to focus v0.1 on OpenCode v2 only ([0052](0052-opencode-v2-flavor.md),
-`@opencode/cli` pinned at 2.0.24 then; 2.2.0 since 2026-10-28, see the amendment in 0052). Extending the set of harnesses (Hermes, pi, Claude
+`@opencode/cli` pinned at 2.0.24 then; 2.2.0 from 2026-10-28, 2.2.6 since 2026-11-10, see the amendments in 0052). Extending the set of harnesses (Hermes, pi, Claude
 Code, Codex) is a later release.
 
 ## Decision
