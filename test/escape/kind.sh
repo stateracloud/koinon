@@ -115,9 +115,11 @@ diagnostics() {
 }
 trap 'diagnostics; [[ -z $pf ]] || { kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null; } || true; rm -rf "$tmp"' EXIT
 
+tagged_probe=0
 if [[ -z ${KOINON_OPENSHELL_IMAGE:-} && -n ${PROBE_PULL_REPO:-} ]]; then
   if probe_tag=$("$root/hack/probe-tag.sh"); then
     KOINON_OPENSHELL_IMAGE="$PROBE_PULL_REPO:$probe_tag"
+    tagged_probe=1
     IMAGE=$KOINON_OPENSHELL_IMAGE
   else
     echo "probe tag computation failed; building the probe image instead" >&2
@@ -138,9 +140,9 @@ else
   echo "== probe image $IMAGE (built from hack/spike/probe)"
   # KOINON_PROBE_BASE=<image> builds on an image already on this machine. With PROBE_PULL_REPO set the image
   # carries a content tag that names the pinned base (hack/probe-tag.sh), so the fallback ignores
-  # KOINON_PROBE_BASE: one tag, one image. Unset, the base is the digest pin of the OpenCode flavor
+  # KOINON_PROBE_BASE: one tag, one image. An explicit KOINON_OPENSHELL_IMAGE keeps the override. Unset, the base is the digest pin of the OpenCode flavor
   # Dockerfile, the one definition of that base.
-  [[ -z ${PROBE_PULL_REPO:-} ]] || KOINON_PROBE_BASE=
+  (( ! tagged_probe )) || KOINON_PROBE_BASE=
   probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/flavors/opencode/Dockerfile" | head -n 1)}
   [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in flavors/opencode/Dockerfile" >&2; exit 1; }
   probe_args=(--build-arg "BASE=$probe_base")
