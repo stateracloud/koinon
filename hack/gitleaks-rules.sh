@@ -12,7 +12,7 @@
 # hack/gitleaks-rules/export.go.txt in the copy, and keeps only the JSON. Literal strings of the
 # rules that look like keys (allowlist examples and the like) are dropped by the exporter.
 #
-# Updating the rules is a reviewed bump: change GITLEAKS_VERSION (and the CI checksum and GITLEAKS_SRC_SHA256 below), run this
+# Updating the rules is a reviewed bump: change GITLEAKS_VERSION (and the CI checksum and GITLEAKS_MODULE_SUM below), run this
 # script, read the diff, run `go test ./internal/tracing/scrub`, commit both.
 #
 # Usage: hack/gitleaks-rules.sh [--src DIR]   (DIR: an unpacked gitleaks checkout of that version)
@@ -25,8 +25,14 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=hack/versions.env disable=SC1091
 . "$root/hack/versions.env"
-# sha256 of the v$GITLEAKS_VERSION source archive (github.com/.../archive/refs/tags); bump with GITLEAKS_VERSION.
-GITLEAKS_SRC_SHA256=e90fb266d75837e75894c778bf594ab8e2787f12dce5a62651f21b893eaf9abb
+# The gitleaks source comes from the Go module proxy, not a GitHub tag archive: GitHub does not
+# promise byte-stable archives, so a sha256 of one can break CI with no change on our side. A module
+# zip is immutable in the proxy and its h1: hash is a digest of the file contents, so the pin below
+# is content-addressed. `go mod download` also checks it against the public checksum database
+# (sum.golang.org), and we compare it with the pin. The tree needs the whole module (cmd/generate
+# plus config, cmd/generate/config/rules, and its go.mod), so a few raw files would not do.
+# Bump with GITLEAKS_VERSION: go mod download -json github.com/gitleaks/gitleaks/v8@v<version> (field Sum).
+GITLEAKS_MODULE_SUM=h1:47Qm4HBVPbTTKH85chTXyHuVM5i7JT0vv3DjAApVay8=
 
 src=""
 while [[ $# -gt 0 ]]; do
@@ -42,11 +48,13 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/gitleaks-rules.XXXXXX")
 trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 
 if [[ -z $src ]]; then
-	"$root/hack/fetch-pinned.sh" \
-		"https://github.com/gitleaks/gitleaks/archive/refs/tags/v${GITLEAKS_VERSION}.tar.gz" \
-		"$GITLEAKS_SRC_SHA256" "$work/src.tar.gz" >&2
-	tar -xz -C "$work" --strip-components=1 -f "$work/src.tar.gz"
-	rm -f "$work/src.tar.gz"
+	mod=github.com/gitleaks/gitleaks/v8@v${GITLEAKS_VERSION}
+	info=$(cd "$work" && GOFLAGS='' go mod download -json "$mod") || { echo "go mod download $mod failed" >&2; exit 1; }
+	got=$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*"Sum": "\(.*\)",\{0,1\}$/\1/p')
+	dir=$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*"Dir": "\(.*\)",\{0,1\}$/\1/p')
+	[[ $got == "$GITLEAKS_MODULE_SUM" ]] || { echo "gitleaks $GITLEAKS_VERSION: module hash $got, pinned $GITLEAKS_MODULE_SUM" >&2; exit 1; }
+	cp -R "$dir"/. "$work"/
+	chmod -R u+w "$work"
 else
 	cp -R "$src"/. "$work"/
 	chmod -R u+w "$work"

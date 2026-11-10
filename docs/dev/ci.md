@@ -445,8 +445,12 @@ poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without
 (`pull_request` has its own cache scope; pushes and queue builds are trusted refs), `secrets.yml` and
 `g2-kind.yml` (the dispatched ref's own scope) keep the action and save. Any new caller on an
 untrusted ref passes `save: 'false'` and takes the action from a trusted checkout. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
-`curl` or `wget` of `releases/download` in a workflow, composite action, `hack/*.sh` or `test/**/*.sh`
-that bypasses the helper; `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
+`curl` or `wget` of `releases/download`, a `github.com/<owner>/<repo>/archive/` tag archive or
+`raw.githubusercontent.com` in a workflow, composite action, `hack/*.sh` or `test/**/*.sh` that
+bypasses the helper. GitHub does not promise byte-stable tag archives, so a pin on one can break with
+no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks source from the Go
+module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
+`go mod download` also checks against sum.golang.org; `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
 The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
