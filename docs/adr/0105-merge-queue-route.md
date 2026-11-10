@@ -92,17 +92,27 @@ only queue latency and runner slots.
    - **Emergency (break glass):** `hack/pr-merge.sh <PR> --break-glass "<reason>" --approved-at <time>`, for a
      queue that cannot merge anything (GitHub's queue or hosted runners down, or every entry fails for a cause
      outside the pull request and the fix cannot pass the queue). Never for "slow" or "flaky". Only the owner
-     approves it; an agent asks. It runs `pr-wait.sh --checks` and the ADR 0103 review gate on the head, merges
-     with `gh pr merge --admin --merge`, and opens a `break-glass` issue (sha, reason, approver, skipped checks).
-   - **`--admin` stays for `.github/**` only** (decision 6). `pr-merge.sh --admin` refuses (exit 9) a pull
-     request with no changed path under `.github/`, and names the queue and `--break-glass`.
+     approves it; an agent asks. It runs the ADR 0103 review gate on the head, merges with `gh pr merge --admin
+     --merge`, and opens a `break-glass` issue (sha, reason, approver, skipped checks). `pr-wait.sh --checks` and
+     the required-context read still run, but with the hosted runners down (a main reason for break glass) they
+     cannot pass, so a failure there is a **warning recorded** in the PR comment and the issue, not a stop; a
+     closed or draft PR still stops it.
+   - **`--admin` stays for `.github/**` only** (decision 6): a pull request that changes at least one `.github/**` path.
+     `pr-merge.sh --admin` refuses (exit 9) one with none, and names the queue and `--break-glass`. It skips the
+     queue's quickstart, so it stays fail-closed for the e2e: when the base's `hack/needs-e2e.sh` says the change
+     needs the e2e (or cannot say), the head needs a green `quickstart` of its own, else exit 10.
    - **The alarm.** The real alarm is the overnight local report: it reads the rule-suites API (`GET
      /repos/{owner}/{repo}/rulesets/rule-suites?ref=refs/heads/main&rule_suite_result=bypass`), which records
      every bypass of the `main` ruleset whatever tool made it, and lists each one: a `.github/**` admin merge as
      expected, anything else as a break-glass event to explain. A fast in-repo signal backs it up: a
      `route-guard` workflow on push to main checks whether a successful `merge_group` `ci` run exists for the
      pushed tree; when none does, it opens (or comments on) an issue labelled `break-glass` or, for a
-     `.github/**` pull request, `admin:github`. The job stays green: it never turns main red, because a red job
+     `.github/**` pull request. A queue merge is recognised by the REQUIRED jobs (`hack/ci-required.txt`) passing on
+     a `merge_group` run of that tree, not by the run's conclusion (the queue merges on the required contexts
+     while the advisory `flavors` job may be red or the run still running); an in-progress run is polled for up
+     to about 10 minutes. The expected `--admin` merge of a `.github/**` pull request whose required checks and
+     `review` were green on its head opens no issue; a direct push, or anything else, opens a `break-glass`
+     issue. The job stays green: it never turns main red, because a red job
      on main is noise for every later reader and cannot undo the merge.
    - **The ruleset keeps one bypass actor** (OrganizationAdmin, `bypass_mode: pull_request`, no direct push):
      the `.github/**` route needs it, and without it a broken queue could not merge its own fix. Target: break
@@ -112,8 +122,9 @@ only queue latency and runner slots.
    `.github/**`, because a pull request's own workflow files run on `pull_request` and `merge_group` and could
    fake `review`. With one human that approval needs the bypass (7 of the last 40 merged pull requests touched
    `.github/`, read 2026-11-09). The owner chose speed: no machine account; these pull requests keep
-   `pr-merge.sh --admin`, which still runs `pr-wait.sh --checks` and the review gate on the head, and so skip
-   the queue and its e2e. The batched push e2e on main and the nightly are their backstop.
+   `pr-merge.sh --admin`, which still runs `pr-wait.sh --checks` and the review gate on the head, and skips the
+   queue (an e2e-relevant one needs a green `quickstart` on its head, exit 10 otherwise). The batched push e2e on
+   main and the nightly are the backstop.
 
    **Exit condition: a pinned required workflow.** Organization rulesets are on the Team plan since
    2025-06-16 (github.blog/changelog/2025-06-16-organization-rulesets-now-available-for-github-team-plans/).
@@ -196,10 +207,123 @@ It is the step of ADR 0103, done as one `PUT` so no window has both rules or nei
   that every required name has a job that reports there.
 - `merge_queue` (MERGE, ALLGREEN, group size 1, 60 minutes), `strict_required_status_checks_policy: false` and the
   one bypass actor (OrganizationAdmin, `bypass_mode: pull_request`) stay. Never `always`.
+- The full `rules` array after the change (the live ruleset 26610739 read with `gh api
+  repos/stateracloud/koinon/rulesets/26610739`, read only; the whole PUT body, with `name`, `target`,
+  `enforcement`, `conditions` and `bypass_actors` unchanged, is in `/tmp/claude-502/kw/ruleset-26610739-after.json`,
+  the live one in `ruleset-26610739-before.json`, for the owner's `gh api -X PUT`):
+
+```json
+[
+  {
+    "type": "deletion"
+  },
+  {
+    "type": "non_fast_forward"
+  },
+  {
+    "type": "pull_request",
+    "parameters": {
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews_on_push": true,
+      "required_reviewers": [
+        {
+          "minimum_approvals": 1,
+          "file_patterns": [
+            ".github/**"
+          ],
+          "reviewer": {
+            "id": 20443899,
+            "type": "Team"
+          }
+        }
+      ],
+      "require_code_owner_review": false,
+      "dismissal_restriction": {
+        "enabled": false,
+        "allowed_actors": []
+      },
+      "require_last_push_approval": false,
+      "required_review_thread_resolution": true,
+      "require_extra_approval_for_unattributed_changes": true,
+      "allowed_merge_methods": [
+        "merge"
+      ]
+    }
+  },
+  {
+    "type": "required_status_checks",
+    "parameters": {
+      "strict_required_status_checks_policy": false,
+      "do_not_enforce_on_create": false,
+      "required_status_checks": [
+        {
+          "context": "dco"
+        },
+        {
+          "context": "go"
+        },
+        {
+          "context": "web"
+        },
+        {
+          "context": "generated code"
+        },
+        {
+          "context": "gitleaks"
+        },
+        {
+          "context": "chart"
+        },
+        {
+          "context": "escape (admission)"
+        },
+        {
+          "context": "claim"
+        },
+        {
+          "context": "e2e result"
+        },
+        {
+          "context": "scripts"
+        },
+        {
+          "context": "lint-shell"
+        },
+        {
+          "context": "chart smoke"
+        },
+        {
+          "context": "docs"
+        },
+        {
+          "context": "quick checks"
+        },
+        {
+          "context": "review",
+          "integration_id": 15368
+        }
+      ]
+    }
+  },
+  {
+    "type": "merge_queue",
+    "parameters": {
+      "merge_method": "MERGE",
+      "max_entries_to_build": 5,
+      "min_entries_to_merge": 1,
+      "max_entries_to_merge": 1,
+      "min_entries_to_merge_wait_minutes": 0,
+      "grouping_strategy": "ALLGREEN",
+      "check_response_timeout_minutes": 60
+    }
+  }
+]
+```
+
 - Before the PUT every open pull request needs a `review` run on its head (ADR 0103). After it, move the
   `review` line of `hack/ci-required.txt` per ADR 0103, and watch one real queue entry report `review` on
   `merge_group`.
-- Labels `break-glass` and `admin:github` (owner step; `route-guard` creates an issue without a label if one is
+- Label `break-glass` (owner step; `route-guard` creates an issue without a label if one is
   missing and says so).
 
 ## Open: probe P3

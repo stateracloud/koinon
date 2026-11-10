@@ -20,6 +20,6 @@ for a new contributor) is not a triage label. `good first
 issue` and `help wanted` mark issues for outside contributors; there are no comment claims since
 [ADR 0104](../adr/0104-work-claims-reduced-to-the-lock.md).
 
-`break-glass` and `admin:github` are not triage labels: `hack/pr-merge.sh --break-glass` and
-`.github/workflows/route-guard.yml` put them on the issue for a main commit that the merge queue did not
-build (ADR 0105). `admin:github` is the expected `--admin` route for a `.github/**` pull request.
+`break-glass` is not a triage label: `hack/pr-merge.sh --break-glass` and
+`.github/workflows/route-guard.yml` put it on the issue for a main commit that the merge queue did not
+build (ADR 0105). An `--admin` merge of a `.github/**` pull request with green checks is the expected route and opens no issue.

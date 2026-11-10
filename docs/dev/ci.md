@@ -513,7 +513,7 @@ subscribes in the same PR.
 
 Third-party analysers are advisory: their checks never enter the list or the ruleset, and
 `hack/pr-wait.sh` (so `hack/pr-merge.sh`) judges only the base branch's required contexts, the
-`--require` names and the e2e aliases: any other check that is red or pending is printed as
+`--require` names: any other check that is red or pending is printed as
 `advisory <name> failed|pending` and ignored. When the required contexts cannot be read, it exits 2
 instead of judging every check. DeepSource
 (GitHub App) reads `.deepsource.toml` at the root (#180): Go, JS/TS, shell and Dockerfile
@@ -570,11 +570,11 @@ The only merge method is a merge commit, and the merge queue is the single route
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
 runs the review gate, merges with `--admin`, and opens a `break-glass` issue with the reason.
-`--admin` alone is for a PR that changes a `.github/` path (exit 9 otherwise). `hack/ship.sh
+`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
 (`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
-(`admin:github` or `break-glass`), and the overnight report reads the rule-suites record of every bypass.
+(`break-glass`; an `--admin` merge of a `.github/**` PR with green checks is expected and opens none), and the overnight report reads the rule-suites record of every bypass.
 
 `hack/pr-merge.sh <PR> [--jump | --admin | --break-glass "<reason>"] [--e2e] [--approved-at <time>]` does all of this in one script (old issue 647): it refuses a
 draft, runs `pr-wait.sh --checks` (`--require e2e` is gone and exits 64),
@@ -657,9 +657,9 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; `review` pinned to the
   Actions app; required checks on `merge_group`). PR B merges only with or after it.
 - Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
-  successful `merge_group` `ci` run; labels `admin:github` and `break-glass` (`docs/agents/triage-labels.md`).
+  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks and `review` opens none.
   The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
-- `--admin` (only for a PR that changes a `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
+- `--admin` (only for a PR that changes at least one `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
   `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the
   queue-commit quickstart, so `pr-merge.sh --admin` exits 9 for a PR with no `.github/` path; `--break-glass` is
   the audited exception for anything else. Both run `pr-wait.sh --checks` and the review gate first.

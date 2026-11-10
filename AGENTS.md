@@ -177,8 +177,8 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   `hack/pr-merge.sh <PR>` does it: it refuses a draft, runs `hack/pr-wait.sh --checks`, reads every
   required context on the head, then enqueues and comments on the PR. It does not call `claim.sh`: the push to
   main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the wait or the merge.
-  `--jump` enqueues at the front. `--admin` is for a PR that changes `.github/**` only (owner decision,
-  ADR 0105). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved; it
+  `--jump` enqueues at the front. `--admin` is for a PR that changes at least one `.github/**` path (owner
+  decision, ADR 0105); an e2e-relevant one also needs a green `quickstart` on its head. `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved; it
   opens a `break-glass` issue. After the independent review of a sensitive-path PR's head, record it with
   `hack/review-verdict.sh <PR> ready|not-ready <reviewer> <sha>` (the `review` check, ADR 0103). Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
