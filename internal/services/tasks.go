@@ -118,6 +118,10 @@ func enqueue(ctx context.Context, q *store.Queries, t store.Task) (*runv1alpha1.
 // createTask creates a task owned by an active agent, created by the caller, with its first
 // message and a queued run. It is what both TaskService and the ticket compatibility layer call.
 func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, title, msg string) (store.Task, *runv1alpha1.Run, error) {
+	// A held install queues no new work, on the task and the ticket API alike (ADR 0107).
+	if err := s.hold.Err(); err != nil {
+		return store.Task{}, nil, err
+	}
 	var (
 		task store.Task
 		run  *runv1alpha1.Run
@@ -232,6 +236,11 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 // reopen, a message on a completed task reopens it; without, a completed task refuses it (the deprecated
 // ticket API, where Done is a board column a person chose).
 func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string, reopen bool) (store.TaskEvent, *runv1alpha1.Run, error) {
+	// The message and its queued run commit together, so a held install refuses the whole call
+	// (task and ticket API alike): it queues no new work (ADR 0107).
+	if err := s.hold.Err(); err != nil {
+		return store.TaskEvent{}, nil, err
+	}
 	var (
 		ev  store.TaskEvent
 		run *runv1alpha1.Run

@@ -104,7 +104,7 @@ is recovered, no run is claimed and no expired run lease is taken over, no sandb
 stopped or recreated, and no code-host scope or price list is fetched. The API also refuses the outward calls an
 admin could start (a provider check, a connection test, an MCP server add, a trace destination
 test, approving a request, Run now; denying one stays open) until you release the hold. No new work is queued
-while it holds: Run now, creating a task and sending a direct message are all refused. The declarative importer
+while it holds: Run now, creating a task or ticket, sending a follow-up message and sending a direct message are all refused. The declarative importer
 skips an `mcp-server` Secret that would dial out (a new server or a changed URL) and logs
 `held: MCP server <name> not applied until release`; it applies the rest of the Secrets and imports the skipped
 one after the release. The hold does not stop sandboxes that are already running: if you restore in place while
