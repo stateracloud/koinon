@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Restore-hold (issue #462): all three binaries start with --restore-hold (KOINON_RESTORE_HOLD) on a
+# durable install, the shape of a restored one. The contract and smoke tests prove they start and
+# answer their probes while holding.
+restoreHold: true
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+gateway:
+  mode: kubernetes
+networkPolicy:
+  enabled: false
+sandboxPolicy:
+  enabled: false
+# The observer needs the policy.
+sandboxObserver:
+  enabled: false
+preflight:
+  seccompProbe:
+    enabled: false
+api:
+  durable:
+    enabled: true

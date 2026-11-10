@@ -187,6 +187,35 @@ func (q *Queries) SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunCo
 	return err
 }
 
+const setOrgRunLimits = `-- name: SetOrgRunLimits :exec
+INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (org_id) DO UPDATE
+SET max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+    trigger_concurrency = EXCLUDED.trigger_concurrency,
+    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute
+`
+
+type SetOrgRunLimitsParams struct {
+	OrgID                pgtype.UUID
+	MaxConcurrentRuns    pgtype.Int4
+	TriggerConcurrency   pgtype.Int4
+	TriggerRatePerMinute pgtype.Int4
+}
+
+// The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
+// platform default. It touches only these three columns, so the latency overrides and the other
+// settings stay.
+func (q *Queries) SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams) error {
+	_, err := q.db.Exec(ctx, setOrgRunLimits,
+		arg.OrgID,
+		arg.MaxConcurrentRuns,
+		arg.TriggerConcurrency,
+		arg.TriggerRatePerMinute,
+	)
+	return err
+}
+
 const upsertOrgSettings = `-- name: UpsertOrgSettings :one
 INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds,
                           max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,

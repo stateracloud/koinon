@@ -125,3 +125,4 @@ are in [0046](0046-adr-conventions.md).
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Proposed |
 | [0106](0106-install-mark-owns-openshell-objects.md) | An install mark decides which OpenShell objects an install owns | Accepted |
+| [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |

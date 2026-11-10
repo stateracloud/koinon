@@ -38,6 +38,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/restorehold"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -254,6 +256,14 @@ type Service struct {
 	log       *slog.Logger
 	policy    catalog.URLPolicy
 	preflight Preflight
+	hold      *restorehold.Guard
+}
+
+// WithRestoreHold makes the preflight (the only outward call of this service) refuse with
+// restorehold.ErrHeld while g holds (issue #462, ADR 0107).
+func (s *Service) WithRestoreHold(g *restorehold.Guard) *Service {
+	s.hold = g
+	return s
 }
 
 // Preflight inspects a server before it is saved. It returns an *InvalidError to refuse it, for
@@ -581,6 +591,9 @@ func prefixIf(prefix string, has bool) string {
 }
 
 func (s *Service) runPreflight(ctx context.Context, rawURL, transport string) error {
+	if err := s.hold.Err(); err != nil {
+		return err
+	}
 	if s.preflight == nil {
 		return nil
 	}

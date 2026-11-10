@@ -69,6 +69,13 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil
 		}
+		// A new server or a new address is one the prober will dial: a held install applies neither
+		// (the importer skips this Secret and goes on; ADR 0107). A change of credential alone dials nothing.
+		if cur == nil || cur.Url != in.URL || string(cur.Transport) != in.Transport {
+			if err := s.hold.Err(); err != nil {
+				return err
+			}
+		}
 		// A credential-less probe of the new settings is not run here: a declared server may be
 		// applied before the server it names is reachable. The prober reports its health.
 		if err := q.ShadowUIMCPServers(ctx, store.ShadowUIMCPServersParams{OrgID: org, Name: d.Name, Reason: pgtype.Text{String: ReasonShadowed, Valid: true}}); err != nil {

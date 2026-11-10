@@ -135,7 +135,9 @@ type config struct {
 	resyncInterval                        time.Duration
 	homeRetention                         string
 	checkpoints                           bool
-	flavorImages                          map[string]string
+	// restoreHold starts the process without converging anything (issue #462).
+	restoreHold  bool
+	flavorImages map[string]string
 
 	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
 	sandboxResources sandboxres.Policy

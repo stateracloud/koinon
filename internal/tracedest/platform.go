@@ -46,6 +46,9 @@ func (s *Service) GetPlatform(ctx context.Context) (Platform, error) {
 // connection (see Update). Stored secrets are kept only while backend and endpoint origin stay the
 // same. Audited in the install audit chain (ADR 0100 decision 3), in the transaction of the change.
 func (s *Service) SetPlatformDestination(ctx context.Context, actor audit.Actor, expectedVersion *int64, in Input) (Destination, error) {
+	if err := s.hold.Err(); err != nil {
+		return Destination{}, err
+	}
 	q := store.New(s.pool)
 	cur, err := q.GetPlatformTraceDestination(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -161,6 +164,9 @@ func (s *Service) DeletePlatformDestination(ctx context.Context, actor audit.Act
 // the configuration is still the one that was tested: a destination deleted meanwhile is ErrNotFound
 // and one changed meanwhile is ErrChanged; neither is written back.
 func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destination, export.Outcome, error) {
+	if err := s.hold.Err(); err != nil {
+		return Destination{}, export.Outcome{}, err
+	}
 	cur, err := store.New(s.pool).GetPlatformTraceDestination(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Destination{}, export.Outcome{}, ErrNotFound

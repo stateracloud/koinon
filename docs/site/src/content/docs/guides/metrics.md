@@ -108,6 +108,25 @@ time they read the KEK Secret (at start and about once a minute).
 | `koinon_kek_active_reachable` | gauge | `backend`: the adapter name of the active KEK (`local`, or the KMS adapter) | 1 while the key that wraps the active KEK answers this process, else 0. With the default local KEK it is always 1. A 0 means stored secrets cannot be opened after the next restart. If the KMS is down when a pod starts, the pod does not start (fail closed) and never reports 0. |
 | `koinon_kek_unbound` | gauge | none | KEKs in the loaded key set that a KMS wrapped before the install binding (old issue 615), so they are not bound to the install ID; set on every load of the key set. Local KEKs are not counted. While it is above 0 the process logs a warning; bind them with `secrets.kek.kms.keyAdmin.rewrapUnbound` or rotate them out ([secret keys](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)). |
 
+### Restore-hold
+
+koinon-api, koinon-agentd and koinon-reconciler each export this gauge ([Back up and restore](/guides/backup-restore/)).
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `koinon_restore_hold` | gauge | none | 1 while the process runs in restore-hold mode and acts on nothing (`restoreHold` in the chart), else 0. After a release it is 0 on all three. |
+
+The chart renders an alert on it when `metrics.prometheusRule.enabled` is true; without prometheus-operator,
+load the rule into your own Prometheus:
+
+```yaml
+- alert: KoinonRestoreHoldOn
+  expr: max(koinon_restore_hold) == 1
+  for: 30m
+```
+
+A held install does no work. Release it as the [Back up and restore](/guides/backup-restore/) guide describes.
+
 ### Durable workflows
 
 With `api.durable.enabled`, koinon-api runs its timers and triggers as durable (DBOS) workflows. A

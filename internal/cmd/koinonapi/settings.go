@@ -110,6 +110,7 @@ var recordedSettings = []platformSetting{
 	setting("otlp-addr", kindValue),
 	{Flag: "otlp-token-dir", Key: "otlp-auth-dir", Kind: kindRef},
 	setting("durable", kindValue),
+	setting("restore-hold", kindValue),
 	setting("run-cap-sweep-interval", kindValue),
 	setting("audit-anchor-interval", kindValue),
 
