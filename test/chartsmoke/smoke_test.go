@@ -178,9 +178,16 @@ func describeMode(name, valuesFile string) {
 			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
 			Expect(ran).To(ContainElement("koinon-migrate"), "the migrate Job is a pre-install hook")
 			if slices.Contains(ran, "koinon-ensure-secrets") {
-				// What the chart expects from it.
-				Expect(cl.Secret(ctx, "koinon-otlp-token")).NotTo(BeNil())
-				Expect(cl.Secret(ctx, "koinon-otlp-token").Data).To(HaveKey("token"))
+				// What the chart expects from it: each token Secret it generates (a Secret the operator
+				// supplies, as in external-operator-secrets mode, is not the Job's to create). The
+				// reconciler and agentd read the install mark from its Secret (issue 461).
+				generated := r.generatedSecretNames()
+				for _, name := range []string{"koinon-otlp-token", "koinon-install-mark"} {
+					if generated[name] {
+						Expect(cl.Secret(ctx, name)).NotTo(BeNil(), name)
+						Expect(cl.Secret(ctx, name).Data).To(HaveKey("token"), name)
+					}
+				}
 			}
 		}, SpecTimeout(5*time.Minute))
 

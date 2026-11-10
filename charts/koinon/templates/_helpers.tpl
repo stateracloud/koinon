@@ -484,7 +484,29 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if not .Values.api.otlpToken.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.otlpTokenName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
 {{- end -}}
+{{- if not .Values.installMark.existingSecret -}}
+{{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
+{{- end -}}
 {{- $specs | toJson -}}
+{{- end }}
+
+{{/*
+The Secret with this install's mark (issue 461): a random value, key "token", that the hook Job generates once
+and never changes. koinon-reconciler and koinon-agentd label every OpenShell object they make with a hash of it
+and refuse an object that carries another install's. It is deliberately not in Postgres: a restored database
+next to the live install, on the same gateway, must not share it. It is not a credential (only its hash leaves
+the pod), but it is a Secret so that it is not rendered into a manifest or a ConfigMap.
+*/}}
+{{- define "koinon.installMarkName" -}}
+{{- .Values.installMark.existingSecret | default (include "koinon.componentName" (list . "install-mark")) }}
+{{- end }}
+
+{{- define "koinon.installMarkEnv" -}}
+- name: KOINON_INSTALL_MARK
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "koinon.installMarkName" . }}
+      key: token
 {{- end }}
 
 {{/*

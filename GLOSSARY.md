@@ -398,6 +398,10 @@ _Avoid_: Audit queue, audit buffer, event list
 The install-wide audit log of platform actions that belong to no org, such as platform price changes, written only by koinon-api (ADR 0100).
 _Avoid_: Platform log, global audit log
 
+**Install mark**:
+The random token in the Secret `koinon-install-mark`, made once per deployment and not stored in Postgres. A hash of it labels every OpenShell object the install makes, and an install refuses objects with another mark, so a restore next to the live install cannot touch them (ADR 0106).
+_Avoid_: Install ID (that one is in the database), namespace hash
+
 **System actor**:
 The actor of an audit event that Koinon itself caused, named `<component>:<function>`, such as `koinon-api:price-refresh`; the format is frozen and an ID is never renamed (ADR 0100 decision 2).
 _Avoid_: Bot, auto, system user

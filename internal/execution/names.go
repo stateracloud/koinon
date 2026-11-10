@@ -5,7 +5,27 @@ package execution
 import (
 	"crypto/sha256"
 	"encoding/hex"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
+
+// LabelInstall is the label (and, on a provider profile, the annotation) that records which
+// install made an OpenShell object. Its value is [OwnerID]. An object without it was made before
+// the label existed and counts as this install's (issue 461).
+var LabelInstall = project.Domain + "/install"
+
+// OwnerID is the value of [LabelInstall]: 16 hex characters of a hash of the install mark. The mark
+// is a random value the chart's ensure-secrets hook Job writes once into a Secret of the install's
+// namespace (koinon-install-mark). It is not in Postgres, so it does not travel with a backup:
+// a database restored next to the live install, in the same namespace name on another cluster too,
+// gets its own mark and so its own owner, and cannot touch the live install's objects. The Secret
+// outlives an upgrade and a helm uninstall; an install that loses it (the namespace is deleted)
+// no longer owns its objects, and an operator takes them back by creating the Secret again with the
+// old token or by deleting the install's sandboxes and providers on the gateway so the reconciler
+// makes them again. See the backup and restore guide.
+func OwnerID(mark string) string {
+	return shortHash("owner", mark)
+}
 
 // Names of the OpenShell objects Koinon owns. The reconciler derives them when it first
 // renders an agent and records them in agent_sandboxes, which koinon-agentd reads; these
@@ -16,11 +36,14 @@ import (
 // Provider names follow the same limit to be safe.
 const MaxSandboxName = 19
 
+// WorkspacePrefix starts every name [WorkspaceName] returns.
+const WorkspacePrefix = "kw-"
+
 // WorkspaceName is the OpenShell workspace of an org (one per org, ADR 0002): "kw-" and 16 hex
 // characters. In managed mode OpenShell prefixes it to form the namespace name, so it is kept
 // short.
 func WorkspaceName(org [16]byte) string {
-	return "kw-" + shortHash("workspace", UUIDString(org))
+	return WorkspacePrefix + shortHash("workspace", UUIDString(org))
 }
 
 // AgentNames are the per-agent object names, all derived from (org_id, agent_id).

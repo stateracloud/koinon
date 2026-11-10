@@ -219,7 +219,7 @@ func (s *Server) resolveQuestion(ctx context.Context, c caller, id pgtype.UUID,
 	do func(q *store.Queries, b audit.Batch) (store.Question, error),
 ) (store.Question, error) {
 	var out store.Question
-	err := s.commitAudit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
+	err := s.commit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
 		var err error
 		if out, err = do(q, b); err != nil {
 			return nil, err

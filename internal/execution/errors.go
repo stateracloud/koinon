@@ -13,6 +13,9 @@ var (
 	ErrAlreadyExists = errors.New("already exists")
 	// ErrConflict: an optimistic-concurrency check failed; re-read and retry.
 	ErrConflict = errors.New("conflict")
+	// ErrForeign: the object exists but another install owns it (its install label differs from
+	// this install's). Koinon neither adopts nor changes nor deletes it (issue 461).
+	ErrForeign = errors.New("owned by another install")
 	// ErrInvalid: the request was rejected as invalid, including policies that break the
 	// hardening defaults.
 	ErrInvalid = errors.New("invalid")

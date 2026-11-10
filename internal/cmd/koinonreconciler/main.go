@@ -34,6 +34,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -98,6 +99,14 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	defer func() { _ = backend.Close() }()
+	// The backend owns what it makes (issue 461): objects carry this install's mark, and an object
+	// that carries another install's is never adopted, changed or deleted. The mark is a random
+	// value the chart keeps in a Secret, not in Postgres, so a restored database does not share it.
+	if cfg.installMark == "" {
+		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
+	} else {
+		backend.WithOwner(execution.OwnerID(cfg.installMark))
+	}
 
 	driver, err := newGatewayDriver(cfg, kube, log)
 	if err != nil {

@@ -190,13 +190,15 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg     Config
-	log     *slog.Logger
-	pool    *pgxpool.Pool
-	q       *store.Queries
-	backend execution.Backend
-	gw      gateway.ModelGateway
-	secrets SecretStore
+	cfg Config
+	log *slog.Logger
+	// lastUnmarked is when the loop last counted unmarked objects; only the leading loop touches it.
+	lastUnmarked time.Time
+	pool         *pgxpool.Pool
+	q            *store.Queries
+	backend      execution.Backend
+	gw           gateway.ModelGateway
+	secrets      SecretStore
 
 	mu sync.Mutex
 	// wsMu guards the per-pass workspace map, which per-sandbox jobs read concurrently.
@@ -352,7 +354,17 @@ func (w *work) logAttrs() []any {
 
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
 // could not converge; the others are converged regardless.
+//
+// It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
+// runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
+	err := r.reconcilePass(ctx)
+	r.observeUnmarked(ctx)
+	return err
+}
+
+// reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
+func (r *Reconciler) reconcilePass(ctx context.Context) error {
 	start := time.Now()
 	err := r.reconcileAll(ctx)
 	r.m.PassDuration.Observe(time.Since(start).Seconds())
@@ -363,6 +375,19 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	r.m.Passes.WithLabelValues(result).Inc()
 	r.observeSandboxes(ctx)
 	return err
+}
+
+// observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
+// count, so a burst of NOTIFY wake-ups does not list the gateway every time. The count has its own
+// timeout (unmarkedTimeout) and never runs inside the pass's. The gauge keeps its values between counts.
+func (r *Reconciler) observeUnmarkedDue(ctx context.Context) {
+	if !r.lastUnmarked.IsZero() && time.Since(r.lastUnmarked) < r.cfg.ResyncInterval {
+		return
+	}
+	r.lastUnmarked = time.Now()
+	uctx, cancel := context.WithTimeout(ctx, unmarkedTimeout)
+	defer cancel()
+	r.observeUnmarked(uctx)
 }
 
 // observeSandboxes sets the sandboxes gauge from the recorded states. A failed read keeps the
@@ -382,6 +407,40 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	for _, s := range sandboxStates {
 		r.m.Sandboxes.WithLabelValues(string(s)).Set(float64(counts[s]))
 	}
+}
+
+// unmarkedCounter is implemented by a backend that counts, from the gateway, the objects in this
+// install's workspaces that carry no install mark (the OpenShell backend with an owner).
+type unmarkedCounter interface {
+	CountUnmarked(ctx context.Context) (map[string]int, error)
+}
+
+// observeUnmarked sets koinon_openshell_unmarked_objects from one list of the gateway's sandboxes,
+// providers and profiles, whatever this pass did or failed to do (issue 461). A list that fails keeps
+// the previous values and sets koinon_openshell_unmarked_objects_stale to 1; a complete one sets it
+// to 0. Without an install mark ownership is off, no object can be claimed and nothing is safe: the
+// kinds read 0 and stale reads 1, so the drill condition ("0 and stale 0") is not met.
+func (r *Reconciler) observeUnmarked(ctx context.Context) {
+	c, ok := r.backend.(unmarkedCounter)
+	if !ok || !r.owns() {
+		for _, k := range unmarkedKinds {
+			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
+		}
+		r.m.UnmarkedStale.Set(1)
+		return
+	}
+	counts, err := c.CountUnmarked(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.log.Warn("counting unmarked OpenShell objects failed; the gauge keeps its last values", "err", err)
+		}
+		r.m.UnmarkedStale.Set(1)
+		return
+	}
+	for _, k := range unmarkedKinds {
+		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(counts[k]))
+	}
+	r.m.UnmarkedStale.Set(0)
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
@@ -672,7 +731,11 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 				if err != nil {
 					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
-					r.recordMessage(ctx, w, err)
+					if errors.Is(err, execution.ErrForeign) {
+						r.recordForeign(ctx, w, err)
+					} else {
+						r.recordMessage(ctx, w, err)
+					}
 					j.mu.Lock()
 					j.errs = append(j.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 					j.mu.Unlock()
@@ -924,13 +987,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names := w.names()
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
-	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
-		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Flavor, flavor),
-		Credentials:        map[string]string{keyEnvVar: w.material},
-		CredentialRevision: w.key.ID,
-		Labels:             ownerLabels(w.org.ID, w.agent.ID),
-	}); err != nil {
+	ensureKey := func(claim bool) error {
+		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
+			Name:               names.Provider,
+			Profile:            r.profile(w.agent.Flavor, flavor),
+			Credentials:        map[string]string{keyEnvVar: w.material},
+			CredentialRevision: w.key.ID,
+			Labels:             ownerLabels(w.org.ID, w.agent.ID),
+			ClaimLegacy:        claim,
+		})
+	}
+	if err := ensureKey(false); err != nil {
 		return err
 	}
 
@@ -946,7 +1013,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, false); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
@@ -974,6 +1041,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
+		if r.owns() {
+			// No sandbox attaches the providers now, so the ones made before the install label
+			// existed can be claimed (deleted and made again with the label), issue 461. While the
+			// sandbox lived they were taken as this install's, because OpenShell may refuse to delete
+			// an attached provider and a delete must not strip a live sandbox of it.
+			if err := ensureKey(true); err != nil {
+				return err
+			}
+			if hasRead {
+				if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, true); err != nil {
+					return err
+				}
+			}
+		}
 		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
 			// Nothing wants the agent, so no sandbox is created: it starts on demand (old issue 315). A
 			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
@@ -1035,7 +1116,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) {
+	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1093,6 +1174,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// unmarked reports a sandbox without the install label while the backend owns what it makes: it
+// was made before the label existed (issue 461). Labels are immutable, so the sandbox is recreated
+// with the label, like any spec change. A sandbox labeled for another install never gets here:
+// GetSandbox refuses it.
+func (r *Reconciler) unmarked(sb execution.Sandbox) bool {
+	return r.owns() && sb.Labels[execution.LabelInstall] == ""
+}
+
+// owns reports whether the backend owns what it makes (an install mark is set).
+func (r *Reconciler) owns() bool {
+	o, ok := r.backend.(interface{ Owner() string })
+	return ok && o.Owner() != ""
 }
 
 // maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours, stuck and failed
@@ -1307,6 +1402,18 @@ func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.Sandbox
 	}
 	w.sb = sb
 	return nil
+}
+
+// ForeignReason is the reason recorded on an agent whose sandbox, workspace or provider another install
+// owns (issue 461).
+const ForeignReason = "OwnedByAnotherInstall"
+
+// recordForeign moves the row out of ready and into error when an object of the agent belongs to
+// another install. A database restored next to the live install still holds the live install's
+// "ready" rows; koinon-agentd trusts a ready row, so without this it would run in the other
+// install's sandbox. In error, agentd fails the run with sandbox-unavailable and does not exec.
+func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
+	_ = r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "")
 }
 
 // recordMessage stores a reconcile error on the row for operators, keeping the state.

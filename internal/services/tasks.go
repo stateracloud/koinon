@@ -16,6 +16,7 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
@@ -126,7 +127,7 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 		task store.Task
 		run  *runv1alpha1.Run
 	)
-	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
+	err := s.commit(ctx, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 		agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: agentID})
 		if err != nil {
 			return nil, err
@@ -245,7 +246,7 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		ev  store.TaskEvent
 		run *runv1alpha1.Run
 	)
-	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
+	err := s.commit(ctx, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 		// The row lock serialises this with concurrent messages (and so the queued-run check in
 		// Enqueue) and with setState, so a task that ends concurrently takes no message.
 		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org, ID: id})

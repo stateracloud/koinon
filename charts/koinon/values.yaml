@@ -565,6 +565,16 @@ openshell:
 # expose the API another way.
 publicUrl: ""
 
+# This install's mark (issue 461). koinon-reconciler and koinon-agentd label every OpenShell object they make
+# with a hash of it and refuse an object that carries another install's, so two installs on one gateway (a
+# restore next to the live install) cannot adopt, stop or delete each other's sandboxes. The ensure-secrets
+# hook Job generates it once into koinon-install-mark (key "token": 64 hex characters) and never changes it; it
+# is not in Postgres, so a restored database gets its own. With existingSecret you supply that Secret (same key);
+# to take over another install's objects deliberately, give it the same token. Losing the Secret (the namespace
+# is deleted) ends the install's ownership: see the backup and restore guide.
+installMark:
+  existingSecret: ""
+
 # Restore-hold (issue #462): koinon-api, koinon-agentd and koinon-reconciler start and answer health and
 # reads, but do no automatic work. No schedule fires and no pending workflow is recovered, no run is claimed
 # or taken over, no sandbox is converged, no code-host scope or price list is fetched, and koinon-api

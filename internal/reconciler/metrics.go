@@ -23,6 +23,9 @@ const (
 	errKindSandbox         = "sandbox"          // converging an agent's sandbox failed
 )
 
+// unmarkedKinds are the label values of koinon_openshell_unmarked_objects.
+var unmarkedKinds = []string{"sandbox", "provider", "profile"}
+
 // sandboxStates are the label values of koinon_reconciler_sandboxes: the enum of the
 // agent_sandboxes.state column.
 var sandboxStates = []store.SandboxState{
@@ -41,8 +44,13 @@ type Metrics struct {
 	GatewayConfigRejected prometheus.Gauge
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
-	SandboxRepairs        prometheus.Counter
-	AgentsUnhealthy       prometheus.Counter
+	// UnmarkedObjects counts the OpenShell objects in this install's workspaces without the install
+	// mark, from the gateway at most once per resync interval, by kind. UnmarkedStale is 1 until a list has succeeded
+	// completely and after one has failed (the values are then the last good ones).
+	UnmarkedObjects *prometheus.GaugeVec
+	UnmarkedStale   prometheus.Gauge
+	SandboxRepairs  prometheus.Counter
+	AgentsUnhealthy prometheus.Counter
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
@@ -78,6 +86,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AgentsHeldBack: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_agents_waiting_for_gateway_key", Help: "Agents whose sandbox work was held back in the last pass because the gateway does not serve their new key yet.",
 		}),
+		UnmarkedObjects: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell sandboxes, providers and profiles in this install's workspaces without its install mark, from the gateway at most once per resync interval, by kind (sandbox, provider or profile). Read with koinon_openshell_unmarked_objects_stale: 0 for every kind and stale 0 means no other install can claim them (ADR 0106).",
+		}, []string{"kind"}),
+		UnmarkedStale: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_openshell_unmarked_objects_stale", Help: "1 until the gateway count behind koinon_openshell_unmarked_objects has succeeded completely, after a count that failed (the object gauge then shows the last good values), and when ownership is off (no install mark: nothing can be claimed, so nothing is safe); 0 after a good count.",
+		}),
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
@@ -105,11 +119,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, k := range observerReasons {
 		m.ObserverErrors.WithLabelValues(k)
 	}
+	for _, k := range unmarkedKinds {
+		m.UnmarkedObjects.WithLabelValues(k)
+	}
+	m.UnmarkedStale.Set(1) // nothing has been counted yet
 	for _, s := range sandboxStates {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedStale,
 			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.GatewayIDMismatch)
 	}
 	return m
