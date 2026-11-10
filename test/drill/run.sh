@@ -51,14 +51,15 @@ fi
 
 cleanup() {
   local rc=$?
-  if [[ -s $kubeconfig && $KEEP != 1 ]]; then
-    KUBECONFIG=$kubeconfig "$here/sweep.sh" "$RUN" 2>&1 | tee "$OUT/sweep.log" || true
-  fi
+  # Diagnostics first: the sweep deletes the objects they describe.
   if [[ -s $kubeconfig && $status -ne 0 ]]; then
     {
       kubectl --kubeconfig "$kubeconfig" get pods -A -o wide
       kubectl --kubeconfig "$kubeconfig" get events -A --sort-by=.lastTimestamp
     } >"$OUT/cluster-state.txt" 2>&1 || true
+  fi
+  if [[ -s $kubeconfig && $KEEP != 1 ]]; then
+    KUBECONFIG=$kubeconfig "$here/sweep.sh" "$RUN" 2>&1 | tee "$OUT/sweep.log" || true
   fi
   if [[ $created_cluster == 1 && $KEEP != 1 && ${DRILL_KEEP_CLUSTER:-0} != 1 ]]; then CLUSTER="$CLUSTER" "$root/test/e2e/kind/down.sh" || true; fi
   echo "logs, reports and drill-result.json in $OUT"

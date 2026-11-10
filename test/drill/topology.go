@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // NamespacePrefix starts every namespace the drill creates or touches. The sweep and the topology
@@ -22,7 +24,7 @@ import (
 const NamespacePrefix = "koinon-drill-"
 
 // RunLabel is the label every object of one drill run carries; its value is the run ID.
-const RunLabel = "koinon.dev/drill-run"
+const RunLabel = project.Domain + "/drill-run"
 
 // Install is one Koinon install and the OpenShell gateway it uses. {run} in a name is replaced by
 // the run ID.

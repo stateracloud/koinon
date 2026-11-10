@@ -22,6 +22,7 @@ import (
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/test/drill"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 )
@@ -53,7 +54,7 @@ var (
 	fakeAtRelease int
 	// sourceSession is the source admin's session cookie, for the quarantine check.
 	sourceSession string
-	dumpEndUnix   int64
+	snapshotUnix  int64 // when the backup began: a fire due after it is not in the dump
 	releasedUnix  int64
 )
 
@@ -369,10 +370,6 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			code, body := admin(ctx, &src, http.MethodPost, "/agents/"+src.agent+"/triggers/"+drill.TriggerID+"/run")
 			Expect(code).To(Equal(http.StatusAccepted), string(body))
 		}
-		rows := sql(ctx, &src, "SELECT workflow_uuid FROM dbos.workflow_status WHERE status = 'ENQUEUED' ORDER BY created_at")
-		enqueued = strings.Fields(rows)
-		Expect(len(enqueued)).To(BeNumerically(">=", top.RunNowCalls-1), "N-1 Run-now calls stay ENQUEUED behind the low limits, got %v", enqueued)
-		AddReportEntry("enqueued at backup", enqueued)
 	})
 
 	step("backup: the guide's backup blocks, then the source is lost", func(ctx SpecContext) {
@@ -399,13 +396,20 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}()
 		Eventually(func() bool { _, ok := markers.Load(retentionMin + 1); return ok }).WithTimeout(time.Minute).Should(BeTrue(), "the marker writer works")
 
+		// The snapshot: what is ENQUEUED now is what the dump will hold, and a trigger fire due after this
+		// instant is not in it. Both are read just before the backup-db block, not at the end of the seed.
+		snapshotUnix = time.Now().Unix()
+		rows := sql(ctx, &src, "SELECT workflow_uuid FROM dbos.workflow_status WHERE status = 'ENQUEUED' ORDER BY created_at")
+		enqueued = strings.Fields(rows)
+		Expect(len(enqueued)).To(BeNumerically(">=", top.RunNowCalls-1), "N-1 Run-now calls stay ENQUEUED behind the low limits, got %v", enqueued)
+		AddReportEntry("enqueued at backup", enqueued)
+
 		marks.DumpStart = time.Now()
 		for _, b := range []string{"backup-keys", "check-keys", "backup-db", "verify-dump"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, src.in.Namespace, src.in.Release)
 			must(err, out)
 		}
 		marks.DumpEnd = time.Now()
-		dumpEndUnix = marks.DumpEnd.Unix()
 		Expect(filepath.Join(workDir, "koinon.dump")).To(BeARegularFile())
 
 		// t_disaster: the source is lost. Its components stop; its gateway and its objects stay, for the isolation check.
@@ -507,8 +511,8 @@ metadata:
   name: drill-declared
   namespace: %s
   labels:
-    koinon.dev/secret-type: model-provider
-    koinon.dev/org: default
+    %s/secret-type: model-provider
+    %s/org: default
     %s: %s
 stringData:
   name: drill-declared
@@ -517,7 +521,7 @@ stringData:
   apiKey: koinon_test_not-a-real-key
   models: |
     - name: drill
-`, dst.in.Namespace, drill.RunLabel, runID, drill.FakeModelURL(top.FakesNamespace))
+`, dst.in.Namespace, project.Domain, project.Domain, drill.RunLabel, runID, drill.FakeModelURL(top.FakesNamespace))
 			_, err := kube.KubectlStdin(ctx, secret, "apply", "-f", "-")
 			must(err, "declare a provider")
 			time.Sleep(60 * time.Second)
@@ -596,7 +600,7 @@ stringData:
 		It("fires one catch-up per due trigger, then a normal fire", Label("schedule"), func(ctx SpecContext) {
 			needs("release")
 			// A fire is the DBOS workflow "trigger-fire:<org>:<trigger>@<due unix time>". Fires with a due
-			// time after the dump and up to the release are catch-up fires; the dump holds the earlier ones.
+			// time after the snapshot and up to the release are catch-up fires; the dump holds the earlier ones.
 			dues := func() (catchUp, normal int, err error) {
 				rows, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, "SELECT workflow_uuid FROM dbos.workflow_status WHERE workflow_uuid LIKE 'trigger-fire:%'")
 				if err != nil {
@@ -612,7 +616,7 @@ stringData:
 						continue
 					}
 					switch {
-					case due > dumpEndUnix && due <= releasedUnix:
+					case due > snapshotUnix && due <= releasedUnix:
 						catchUp++
 					case due > releasedUnix:
 						normal++
@@ -634,15 +638,39 @@ stringData:
 		It("completes every run that was ENQUEUED, once", Label("workflow-queue"), func(ctx SpecContext) {
 			needs("release")
 			Expect(enqueued).NotTo(BeEmpty())
+			// A workflow's run is Koinon's own row: dedupe_records maps the fire key of the workflow ID to the
+			// task it made, and runs.task_id to the run. dbos.workflow_status is keyed by workflow_uuid, so
+			// counting it by that key proves nothing about doing the work once.
+			runs := func(id string) (total, terminal int, err error) {
+				key, ok := fireKey(id)
+				if !ok {
+					return 0, 0, fmt.Errorf("workflow ID %q is not a trigger fire", id)
+				}
+				q := fmt.Sprintf("SELECT count(*) || ' ' || count(*) FILTER (WHERE r.state IN ('succeeded','failed','canceled')) FROM runs r JOIN dedupe_records d ON d.org_id = r.org_id AND d.effect_kind = 'task' AND d.effect_id = r.task_id WHERE d.key = '%s'", strings.ReplaceAll(key, "'", "''"))
+				out, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, q)
+				if err != nil {
+					return 0, 0, err
+				}
+				if _, err := fmt.Sscanf(strings.TrimSpace(out), "%d %d", &total, &terminal); err != nil {
+					return 0, 0, fmt.Errorf("read %q: %w", out, err)
+				}
+				return total, terminal, nil
+			}
 			Eventually(func(g Gomega) {
 				for _, id := range enqueued {
 					status, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, fmt.Sprintf("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = '%s'", strings.ReplaceAll(id, "'", "''")))
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(status).To(Equal("SUCCESS"), "workflow %s", id)
+					total, terminal, err := runs(id)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(terminal).To(Equal(1), "workflow %s: runs in a terminal state (of %d)", id, total)
 				}
 			}).WithContext(ctx).WithTimeout(2 * top.ReleasedWait).WithPolling(15 * time.Second).Should(Succeed())
 			for _, id := range enqueued {
-				Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM dbos.workflow_status WHERE workflow_uuid = '%s'", strings.ReplaceAll(id, "'", "''")))).To(Equal(1))
+				total, terminal, err := runs(id)
+				must(err, "count the runs of "+id)
+				Expect(total).To(Equal(1), "workflow %s made exactly one run", id)
+				Expect(terminal).To(Equal(1), "workflow %s: its run is terminal", id)
 			}
 			marks.QueueDrained = time.Now()
 		}, NodeTimeout(30*time.Minute))
@@ -689,3 +717,16 @@ stringData:
 		AddReportEntry("phases (seconds)", t.Phases)
 	})
 })
+
+// fireKey is the dedupe key of the trigger fire a workflow ID names: "run-now:<org>:<trigger>:<unix>" and
+// "trigger-fire:<org>:<trigger>@<unix>" both fire the key "<trigger>@<unix>" (durable.TriggerFireKey).
+func fireKey(workflowID string) (string, bool) {
+	parts := strings.Split(workflowID, ":")
+	switch {
+	case parts[0] == "run-now" && len(parts) == 4:
+		return parts[2] + "@" + parts[3], true
+	case parts[0] == "trigger-fire" && len(parts) == 3:
+		return parts[2], true
+	}
+	return "", false
+}
