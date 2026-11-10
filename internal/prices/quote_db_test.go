@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -27,6 +28,27 @@ var _ = Describe("Resolver.Find", func() {
 		reason, ok := prices.Unpriceable(err)
 		Expect(ok).To(BeTrue())
 		Expect(reason).To(Equal(prices.ReasonNoPrice))
+	})
+
+	// agentd's modelFacts keeps the model's format and provider type from this Quote.
+	It("returns the enabled model with ErrUnpriced when no entry prices it", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, db)
+		var pid pgtype.UUID
+		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, 'unpriced-find', 'openrouter', 'https://example.com/v1') RETURNING id`, org).Scan(&pid)).To(Succeed())
+		name := uniq()
+		_, err := db.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, org, pid, name)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The default list prices another model; the org has no override and the platform no entry.
+		rv := prices.NewResolver(defaultList("2026-10-24.1", "fake/known"))
+		qt, err := rv.Find(ctx, store.New(db), org, name, time.Now())
+		Expect(err).To(MatchError(prices.ErrUnpriced))
+		reason, ok := prices.Unpriceable(err)
+		Expect(ok).To(BeTrue())
+		Expect(reason).To(Equal(prices.ReasonNoPrice))
+		Expect(qt.Model.Name).To(Equal(name))
+		Expect(qt.Model.Format).NotTo(BeEmpty())
+		Expect(qt.Model.ProviderType).To(Equal("openrouter"))
 	})
 })
 

@@ -14,7 +14,7 @@
 package acp
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -140,15 +140,39 @@ type Conn struct {
 
 // NewConn starts a client connection that writes requests to toAgent (the harness's stdin)
 // and reads from fromAgent (its stdout). The connection ends when fromAgent returns an error
-// or end-of-file.
-func NewConn(h Handler, toAgent io.Writer, fromAgent io.Reader) *Conn {
+// or end-of-file. Cancelling ctx or calling [Conn.Close] releases a reader that is held back
+// by a lagging handler; it does not close fromAgent, so the caller still ends the process.
+func NewConn(ctx context.Context, h Handler, toAgent io.Writer, fromAgent io.Reader) *Conn {
 	t := newTracker()
 	obs, _ := h.(ReadObserver)
-	return &Conn{
+	c := &Conn{
 		c: sdk.NewClientSideConnection(client{h: h, t: t}, toAgent, &countingReader{r: fromAgent, t: t, obs: obs}),
 		t: t,
 	}
+	// A reader held back by waitLag sits inside the SDK's receive goroutine, which is also what
+	// closes Done on a drop, so Done cannot be the only release: ctx and Close release it from
+	// outside, and Done covers a connection that ends some other way.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-c.c.Done():
+		}
+		t.abort()
+	}()
+	return c
 }
+
+// ReadErr returns [ErrLineTooLong] if the connection ended because the agent wrote a line
+// that is too long, and nil otherwise.
+func (c *Conn) ReadErr() error {
+	c.t.mu.Lock()
+	defer c.t.mu.Unlock()
+	return c.t.readErr
+}
+
+// Close releases the reader if it is held back for a handler that lags. It does not end the
+// connection by itself: that happens when the agent's stream ends.
+func (c *Conn) Close() { c.t.abort() }
 
 // Done is closed when the connection has ended.
 func (c *Conn) Done() <-chan struct{} { return c.c.Done() }
@@ -324,22 +348,45 @@ func (c client) SessionUpdate(ctx context.Context, n sdk.SessionNotification) er
 	return c.h.SessionUpdate(ctx, n)
 }
 
-// tracker counts the session/update notifications read from the agent and those handled,
-// to tell when every update of an ended connection has been delivered.
+// maxNotificationLag is how many notifications may be read from the agent but not yet
+// processed. The SDK queues 1024 notifications (session/update and every other method without
+// an id, except $/cancel_request) between its reader and one dispatching goroutine, and closes
+// the connection when a burst overflows the queue, so the reader holds the stream (and so the
+// harness, through the pipe) at half of that until the handler catches up.
+const maxNotificationLag = 512
+
+// tracker follows the notifications read from the agent. Two things come out of it: when every
+// session/update of an ended connection has reached the handler (drained), and how far the
+// handler lags behind the reader, to hold the reader back.
+//
+// The SDK dispatches notifications in order, so the oldest unhandled session/update marks the
+// head of the SDK's queue: every notification read after it is still queued, and everything
+// before it is done. Only session/update runs the handler; other notifications cost the SDK
+// next to nothing, so with no update pending nothing is queued for long.
 type tracker struct {
 	mu      sync.Mutex
-	read    int64
-	done    int64
+	cond    *sync.Cond
+	seq     int64   // notifications read so far
+	pend    []int64 // seq of each session/update read and not yet handled, oldest first
+	read    int64   // session/updates the SDK will dispatch
+	done    int64   // session/updates handled
 	eof     bool
+	readErr error // set when the reader ended the stream itself, not the agent
+	aborted bool
 	drained chan struct{}
 }
 
-func newTracker() *tracker { return &tracker{drained: make(chan struct{})} }
+func newTracker() *tracker {
+	t := &tracker{drained: make(chan struct{})}
+	t.cond = sync.NewCond(&t.mu)
+	return t
+}
 
 func (t *tracker) update(f func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	f()
+	t.cond.Broadcast()
 	if t.eof && t.done >= t.read {
 		select {
 		case <-t.drained:
@@ -349,60 +396,159 @@ func (t *tracker) update(f func()) {
 	}
 }
 
-func (t *tracker) handled() { t.update(func() { t.done++ }) }
-
-// countingReader passes the agent's output through and counts its session/update
-// notifications. The SDK reads lines in order and queues each notification before it reads
-// the next, so once Read has returned an error every counted notification is queued.
-type countingReader struct {
-	r       io.Reader
-	t       *tracker
-	obs     ReadObserver
-	partial []byte
+// notified records a notification read; update is true for one the SDK hands to SessionUpdate.
+func (t *tracker) notified(update bool) {
+	t.update(func() {
+		t.seq++
+		if update {
+			t.read++
+			t.pend = append(t.pend, t.seq)
+		}
+	})
 }
 
-func (cr *countingReader) counted(line []byte) {
-	cr.t.update(func() { cr.t.read++ })
-	if cr.obs != nil {
+func (t *tracker) handled() {
+	t.update(func() {
+		t.done++
+		if len(t.pend) > 0 {
+			t.pend = t.pend[1:]
+		}
+	})
+}
+
+// abort releases a reader held by waitLag: nothing more will be handled.
+func (t *tracker) abort() { t.update(func() { t.aborted = true }) }
+
+// waitLag blocks until reading one more notification would leave fewer than maxNotificationLag
+// queued behind the oldest unhandled update, or until abort.
+func (t *tracker) waitLag() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for len(t.pend) > 0 && t.seq-t.pend[0]+1 >= maxNotificationLag && !t.aborted {
+		t.cond.Wait()
+	}
+}
+
+// countingReader passes the agent's output through, one line per Read, and counts its
+// notifications. The SDK reads lines in order and queues each notification before it reads the
+// next, so once Read has returned an error every counted notification is queued. Because a Read
+// never returns more than one line, the reader can stop between two notifications: it waits
+// while maxNotificationLag are queued behind an unhandled update, which slows the harness to
+// the handler's pace instead of overflowing the SDK's queue.
+type countingReader struct {
+	r   io.Reader
+	t   *tracker
+	obs ReadObserver
+
+	br   *bufio.Reader
+	out  []byte // the rest of the line being handed out
+	fail error  // the error to return once out is empty
+}
+
+// counted accounts for one notification line. The observer runs before the wait, so the number
+// of updates it has seen ahead of the handler does not grow with the lag: the leak guard counts
+// them against what the gateway has reported (taint.go).
+func (cr *countingReader) counted(line []byte, kind notificationKind) {
+	if kind == notifNone {
+		return
+	}
+	if kind == notifUpdate && cr.obs != nil {
 		cr.obs.UpdateRead(line)
 	}
+	cr.t.waitLag()
+	cr.t.notified(kind == notifUpdate)
 }
 
 func (cr *countingReader) Read(p []byte) (int, error) {
-	n, err := cr.r.Read(p)
-	data := p[:n]
-	for len(data) > 0 {
-		i := bytes.IndexByte(data, '\n')
-		if i < 0 {
-			cr.partial = append(cr.partial, data...)
-			break
+	if len(cr.out) == 0 {
+		if cr.fail != nil {
+			return 0, cr.fail
 		}
-		line := data[:i]
-		if len(cr.partial) > 0 {
-			line = append(cr.partial, line...)
-			cr.partial = nil
-		}
-		if isUpdate(line) {
-			cr.counted(line)
-		}
-		data = data[i+1:]
+		cr.next()
 	}
-	if err != nil {
-		if len(cr.partial) > 0 && isUpdate(cr.partial) {
-			cr.counted(cr.partial)
-		}
-		cr.partial = nil
-		cr.t.update(func() { cr.t.eof = true })
+	n := copy(p, cr.out)
+	cr.out = cr.out[n:]
+	if len(cr.out) == 0 && cr.fail != nil {
+		return n, cr.fail
 	}
-	return n, err
+	return n, nil
 }
 
-func isUpdate(line []byte) bool {
-	var m struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
+// maxLineBytes is the longest line the SDK reads (maxBufSize of its receive loop in connection.go).
+const maxLineBytes = 10 << 20
+
+// ErrLineTooLong is what [Conn.ReadErr] returns when the agent wrote a line longer than the SDK
+// reads (10 MiB). The SDK then sees a failed stream and reports the peer as disconnected, so the
+// caller asks ReadErr to tell that apart from a harness that exited.
+var ErrLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
+
+// next reads one line (or what is left at the end of the stream) into cr.out.
+func (cr *countingReader) next() {
+	if cr.br == nil {
+		cr.br = bufio.NewReaderSize(cr.r, 64<<10)
 	}
-	return json.Unmarshal(line, &m) == nil && m.ID == nil && m.Method == sdk.ClientMethodSessionUpdate
+	var line []byte
+	for {
+		chunk, err := cr.br.ReadSlice('\n')
+		line = append(line, chunk...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			if len(line) >= maxLineBytes {
+				// The SDK would refuse the line at the same size (ErrTooLong); stop before the
+				// harness makes agentd buffer more than that.
+				cr.fail = ErrLineTooLong
+				cr.t.update(func() { cr.t.eof = true; cr.t.readErr = ErrLineTooLong })
+				return
+			}
+			continue
+		}
+		if err != nil {
+			cr.fail = err
+			if len(line) > 0 {
+				cr.counted(line, classify(line))
+			}
+			cr.t.update(func() { cr.t.eof = true })
+		} else {
+			cr.counted(line[:len(line)-1], classify(line))
+		}
+		break
+	}
+	cr.out = line
+}
+
+type notificationKind int
+
+const (
+	notifNone   notificationKind = iota // not queued by the SDK: a response, a request, a cancel or garbage
+	notifOther                          // queued, and answered without the handler
+	notifUpdate                         // queued, and handed to SessionUpdate
+)
+
+// classify tells what the SDK does with line, decoding it as the SDK's receive loop does
+// (anyMessage in connection.go). A line that does not decode is dropped there. A message
+// without an id (a JSON null is none) and a method is queued, except $/cancel_request, which is
+// handled at once. A session/update whose params fail to decode or validate is answered with
+// InvalidParams and never reaches the handler, so it counts as other: waiting for a handler
+// call that never comes would hold the reader forever.
+func classify(line []byte) notificationKind {
+	var m struct {
+		JSONRPC string            `json:"jsonrpc"`
+		ID      *json.RawMessage  `json:"id,omitempty"`
+		Method  string            `json:"method,omitempty"`
+		Params  json.RawMessage   `json:"params,omitempty"`
+		Result  json.RawMessage   `json:"result,omitempty"`
+		Error   *sdk.RequestError `json:"error,omitempty"`
+	}
+	if json.Unmarshal(line, &m) != nil || m.ID != nil || m.Method == "" || m.Method == "$/cancel_request" {
+		return notifNone
+	}
+	if m.Method != sdk.ClientMethodSessionUpdate {
+		return notifOther
+	}
+	var n sdk.SessionNotification
+	if json.Unmarshal(m.Params, &n) != nil || n.Validate() != nil {
+		return notifOther
+	}
+	return notifUpdate
 }
 
 func (c client) RequestPermission(ctx context.Context, req sdk.RequestPermissionRequest) (sdk.RequestPermissionResponse, error) {
