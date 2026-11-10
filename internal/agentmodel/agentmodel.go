@@ -130,15 +130,15 @@ func Check(ctx context.Context, rv prices.Resolver, q *store.Queries, org pgtype
 		if m.ModelName != model {
 			continue
 		}
-		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, Format: modelformat.Format(m.ModelFormat)}
+		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, ProviderURL: m.Url, Format: modelformat.Format(m.ModelFormat)}
 		_, err := rv.Resolve(ctx, q, org, pm, at)
-		var bad *prices.BadPriceError
-		switch {
-		case err == nil:
+		if err == nil {
 			return nil
-		case errors.Is(err, prices.ErrUnpriced):
-			return &UnusableError{Model: model, Reason: "unpriced"}
-		case errors.As(err, &bad):
+		}
+		if reason, ok := prices.Unpriceable(err); ok {
+			if reason == prices.ReasonNoPrice {
+				return &UnusableError{Model: model, Reason: "unpriced"}
+			}
 			return &UnusableError{Model: model, Reason: "bad_price", Detail: err}
 		}
 		return err
@@ -155,7 +155,7 @@ func ListServed(ctx context.Context, rv prices.Resolver, q *store.Queries, org p
 	}
 	out := make([]Served, 0, len(rows))
 	for _, m := range rows {
-		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, Format: modelformat.Format(m.ModelFormat)}
+		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, ProviderURL: m.Url, Format: modelformat.Format(m.ModelFormat)}
 		if _, err := rv.Resolve(ctx, q, org, pm, at); err == nil {
 			out = append(out, Served{Name: m.ModelName, Provider: m.ProviderName})
 		}

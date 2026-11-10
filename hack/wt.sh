@@ -16,8 +16,8 @@
 #       remove the worktree (<name> is found through `git worktree list`, wherever $TMPDIR points:
 #       rm, ls, gc and path manage every linked worktree that lives in a directory named kw, also one
 #       created under another $TMPDIR, as a sandboxed and an unsandboxed shell resolve it differently).
-#       Refuses, naming each check that failed, when: a live claim (claim/<N> on origin, N from a
-#       branch named <type>/<N>-<slug>) is held on its branch; a process has its working directory in
+#       Refuses, naming each check that failed, when: a claim (claim/<N> on origin, N from a branch
+#       named <type>/<N>-<slug>) is held on its branch (no lease: held until released, ADR 0104); a process has its working directory in
 #       it; it has uncommitted changes; or it has commits on no remote branch. --force overrides all
 #       of them and prints what it overrides. --branch also deletes its local branch, never one with
 #       an open PR. Remove worktrees only through this script, never `git worktree remove`.
@@ -206,34 +206,23 @@ claim_fetch() {
 	git fetch -q origin '+refs/heads/claim/*:refs/remotes/origin/claim/*' >/dev/null 2>&1 || claim_fetch_failed=1
 }
 claim_reason() {
-	local branch=$1 n ref msg state holder lease now
+	local branch=$1 n ref msg state holder
 	[[ $branch =~ ^[a-z]+/([0-9]+)- ]] || return 0
 	n=${BASH_REMATCH[1]}
 	if [ "$claim_fetch_failed" -eq 1 ]; then
 		echo "could not fetch claim refs from origin; claim state of #$n unknown"
 		return 0
 	fi
-	if ! command -v jq >/dev/null 2>&1; then
-		echo "jq is not installed; claim state of #$n unknown"
-		return 0
-	fi
+	# A held claim is live until it is released (ADR 0104: no lease); a lease_until line in a claim from
+	# before ADR 0104 is ignored.
 	for ref in "refs/remotes/origin/claim/$n" "refs/heads/claim/$n"; do
 		git rev-parse -q --verify "$ref" >/dev/null 2>&1 || continue
 		msg=$(git log -1 --format=%B "$ref" 2>/dev/null) || continue
-		state=$(sed -n 's/^state: *//p' <<<"$msg" | head -n1)
+		state=$(sed -n 's/^state: *//p' <<<"$msg" | tail -n1)
 		holder=$(sed -n 's/^holder: *//p' <<<"$msg" | head -n1)
-		lease=$(sed -n 's/^lease_until: *//p' <<<"$msg" | head -n1)
 		[ "$state" = held ] || continue
-		now=$(date -u +%s)
-		lease=$(jq -rn --arg l "$lease" '$l | fromdateiso8601' 2>/dev/null) || lease=""
-		if ! [[ $lease =~ ^[0-9]+$ ]]; then
-			echo "claim on #$n has a lease_until that does not parse; claim state of #$n unknown"
-			return 0
-		fi
-		if [ "$now" -le "$lease" ]; then
-			echo "a live claim on #$n is held by ${holder:-unknown} (lease until $(jq -rn --argjson e "$lease" '$e | todate'))"
-			return 0
-		fi
+		echo "a live claim on #$n is held by ${holder:-unknown}"
+		return 0
 	done
 }
 

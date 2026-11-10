@@ -27,7 +27,7 @@ func TestOpenBao(t *testing.T) {
 }
 
 // image is the OpenBao the adapter is tested against.
-const image = "docker.io/openbao/openbao:2.4.1"
+const image = "docker.io/openbao/openbao:2.7.2"
 
 // rootToken is the dev server's root token: obviously fake, and only ever the test container's.
 const rootToken = "koinon_test_not-a-real-token"

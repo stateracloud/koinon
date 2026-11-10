@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// OpenCode 2.2.0 configuration for the Koinon OpenCode flavor. Read-only in the image at
+// OpenCode 2.2.6 configuration for the Koinon OpenCode flavor. Read-only in the image at
 // /etc/koinon/opencode/opencode.jsonc, which is OpenCode's global config because koinon-opencode
 // sets OPENCODE_CONFIG_DIR=/etc/koinon/opencode. The KOINON_* values come from koinon-opencode's
 // arguments; KOINON_MODEL_KEY is the agent's agentgateway key, an OpenShell placeholder inside a

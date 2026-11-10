@@ -42,7 +42,9 @@ func ParseRefreshMode(s string) (RefreshMode, error) {
 
 // SyncSettings records the refresh setting koinon-api started with and audits a change
 // (price.refresh.settings_changed, an install event of system koinon-api:price-refresh). The first
-// start with the default mode (auto) records and audits nothing. A bound looser than the default
+// start with the default mode (auto) records and audits nothing. The row then holds the interval
+// too, with no event: a recorded interval only holds a replica back (Tighter takes the longer one),
+// so it widens nothing (#354). A bound looser than the default
 // never gets here: NewRefresher refuses it. No platform admin is needed.
 func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval time.Duration) error {
 	if _, err := ParseRefreshMode(string(mode)); err != nil {
@@ -214,6 +216,7 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 	effective() // says at the start which schedule the first tick will run
 	tick := time.NewTimer(time.Minute)
 	defer tick.Stop()
+	every := interval // the effective interval of the last good read; the configured one before any
 	for {
 		select {
 		case <-ctx.Done():
@@ -221,12 +224,13 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 		case <-tick.C:
 		}
 		if eff, ok := effective(); ok {
+			every = eff.Interval
 			if _, err := r.runSchedule(ctx, eff); err != nil && ctx.Err() == nil {
 				r.log.Warn("scheduled price refresh", "err", err)
 			}
 		}
 		// Off accepts any interval, zero included: never spin.
-		tick.Reset(min(max(interval, time.Minute), time.Hour))
+		tick.Reset(min(max(every, time.Minute), time.Hour))
 	}
 }
 
@@ -304,6 +308,9 @@ func (r *Refresher) ReportUnpriced(ctx context.Context) (map[string]int, error) 
 	q := store.New(r.svc.pool)
 	now := r.now()
 	out := map[string]int{}
+	// ListModelsOfProviderType does not return the provider URL, so Resolve here sees no host and a
+	// `not_hosts` exclusion never applies. That is fine for the types counted (the ones a source
+	// prices): none has a not_hosts entry, and the count is by type, not per endpoint.
 	for _, pt := range pricefetch.PricedProviderTypes() {
 		rows, err := q.ListModelsOfProviderType(ctx, pt)
 		if err != nil {
@@ -312,11 +319,12 @@ func (r *Refresher) ReportUnpriced(ctx context.Context) (map[string]int, error) 
 		n := 0
 		for _, row := range rows {
 			_, err := r.svc.res.Resolve(ctx, q, row.OrgID, Model{ID: row.ID.String(), Name: row.Name, ProviderType: pt}, now)
-			var bp *BadPriceError
+			// An unusable price is not "unpriced": the price report flags it elsewhere.
+			reason, ok := Unpriceable(err)
 			switch {
-			case errors.Is(err, ErrUnpriced):
+			case ok && reason == ReasonNoPrice:
 				n++
-			case err != nil && !errors.As(err, &bp):
+			case err != nil && !ok:
 				return out, err
 			}
 		}

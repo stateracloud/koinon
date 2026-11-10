@@ -25,4 +25,6 @@
 /internal/secretstore/ @procoduck @ovirandunu
 /internal/tracing/scrub/ @procoduck @ovirandunu
 /hack/claim.sh @procoduck @ovirandunu
+/hack/review-gate.sh @procoduck @ovirandunu
+/hack/review-verdict.sh @procoduck @ovirandunu
 /hack/migrate-patch-line @procoduck @ovirandunu

@@ -2,17 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Ships the current feature branch: commit (signed off, checked identity), blob check, merge
-# origin/main, gitleaks, push, pull request, board, ready, auto-merge, claim review. One line per step.
+# origin/main, gitleaks, push, pull request, board, ready, auto-merge. One line per step.
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--hold] [--review N[,M]] [--no-issue] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
 # PR that has auto-merge on prints a warning (it can merge at the old head before CI sees the new
 # commits); --hold turns auto-merge off before the push and prints the command that turns it back on.
-# --e2e adds the `e2e` label before the push (an open PR) or at PR creation. Creation labels in a
-# second call; e2e-kind's `opened` run reads the labels live and runs the e2e (old issue 468).
+# --e2e adds the `e2e` label before the push (an open PR) or at PR creation: it forces the merge queue's e2e (the
+# label is read when the queue builds the entry, ADR 0105) and runs the advisory quickstart on the PR. Creation
+# labels in a second call; e2e-kind's `opened` run reads the labels live (old issue 468).
 #
 # --ready on a draft PR that exists marks it ready BEFORE the push (old issue 675): ready
 # after the push starts a second ci run on the same head. A new PR is created ready, so it has one run.
@@ -26,8 +27,8 @@
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
 #
 # Steps: commit ok <sha> | blobs ok | merged origin/main | gitleaks ok (N commits) | pushed <branch> |
-#        PR #N <url> | board ok | ready | auto-merge on | review ok #N
-# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 3 claim lost, 4 merge conflict.
+#        PR #N <url> | board ok | ready | auto-merge on
+# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 4 merge conflict.
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -35,7 +36,7 @@
 
 set -euo pipefail
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 review="" dry=0 no_issue=0 ready_done=0 cr_fresh=0
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -48,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
-	--review) need "$@"; review=$2; shift 2 ;;
+	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
 	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -61,7 +62,6 @@ done
 [[ -z $pr_body || -r $pr_body ]] || { echo "ship: cannot read $pr_body" >&2; exit 2; }
 [[ $draft == 0 || $ready == 0 ]] || { echo "ship: --draft and --ready contradict" >&2; exit 2; }
 [[ $draft == 0 || -n $pr_title ]] || { echo "ship: --draft needs --pr-title/--pr-body" >&2; exit 2; }
-[[ -z $review || $review =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "ship: --review wants N or N,M" >&2; exit 2; }
 
 fail() { echo "ship: FAIL $*" >&2; exit 1; }
 say() { echo "$*"; }
@@ -84,7 +84,8 @@ email=$(git config user.email || true)
 [[ -n $name && -n $email ]] || fail "git user.name/user.email not set"
 # The same check the commit hooks and CI run (koinon#320): author and committer must be on the allowlist.
 [[ -x hack/git-identity-check.sh ]] || fail "hack/git-identity-check.sh is missing: this branch was cut before koinon#320; run 'git merge origin/main' (never rebase), then ship again"
-id_out=$(hack/git-identity-check.sh commit 2>&1) || { echo "$id_out" >&2; fail "identity: $name <$email> is not allowed (hack/git-identities.allowed)"; }
+# Ship ignores the local escape hatches (KOINON_ALLOWED_IDENTITIES, KOINON_SKIP_IDENTITY_CHECK): CI would refuse the commits anyway.
+id_out=$(env -u KOINON_ALLOWED_IDENTITIES -u KOINON_SKIP_IDENTITY_CHECK hack/git-identity-check.sh commit 2>&1) || { echo "$id_out" >&2; fail "identity: $name <$email> is not allowed (hack/git-identities.allowed)"; }
 say "identity $email"
 
 limit_mib=${KOINON_SHIP_MAX_BLOB_MIB:-5}
@@ -231,7 +232,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
-		[[ $auto == 1 ]] && say "dry-run: would check hack/needs-e2e.sh and enable auto-merge"
+		[[ $auto == 1 ]] && say "dry-run: would enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
 		if [[ -n $pr_title ]]; then
@@ -281,28 +282,9 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			fi
 		fi
 		if [[ $auto == 1 ]]; then
-			rc=0
-			needs=$(hack/needs-e2e.sh origin/main 2>&1) || rc=$?
-			if [[ $rc -ne 1 ]]; then
-				echo "$needs" | head -8 >&2
-				fail "auto-merge refused: this change needs the kind e2e (or hack/needs-e2e.sh failed); run it or add the e2e label, wait until e2e-kind is green, then enable auto-merge"
-			fi
+			# No e2e refusal (ADR 0105): the merge queue runs the kind e2e on the queue commit when the change needs it.
 			gh pr merge "$pr_url" --auto --merge >/dev/null || fail "gh pr merge --auto failed"
 			say "auto-merge on"
 		fi
 	fi
-fi
-
-# claims
-if [[ -n $review ]]; then
-	for n in ${review//,/ }; do
-		if [[ $dry == 1 ]]; then say "dry-run: would run hack/claim.sh review $n"; continue; fi
-		rc=0
-		hack/claim.sh review "$n" >/dev/null || rc=$?
-		case $rc in
-		0) say "review ok #$n" ;;
-		3) echo "ship: claim for #$n is lost" >&2; exit 3 ;;
-		*) fail "claim.sh review $n exited $rc" ;;
-		esac
-	done
 fi

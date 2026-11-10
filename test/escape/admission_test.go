@@ -36,6 +36,9 @@ const (
 	gatewayUser    = "system:serviceaccount:openshell:openshell"
 	// Any other workload identity, for example Koinon's own reconciler.
 	otherUser = "system:serviceaccount:koinon:koinon-reconciler"
+	// The gateway of a second Koinon release on the same cluster (gateway ID "prod"): not an identity
+	// of the release under test (gateway ID "openshell"), whose policies must leave its namespaces alone.
+	gatewayBUser = "system:serviceaccount:openshell-b:openshell"
 )
 
 var sandboxGVR = schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
@@ -51,7 +54,9 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		as                      map[string]*kubernetes.Clientset
 		asDynamic               map[string]*dynamic.DynamicClient
 		ns                      = "kw-escape"
+		nsB                     = "kw-escape-b" // a workspace namespace of another gateway (ID prod)
 		plain                   = "koinon-escape-plain"
+		unlabelled              = "kw-escape-unlabelled" // managed-by but no gateway-id: no gateway owns it
 		dryRun                  = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 		dryRunUpdate            = metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}}
 		existingPod, existingSc = "existing", "existing"
@@ -101,7 +106,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 
 		as = map[string]*kubernetes.Clientset{"admin": admin}
 		asDynamic = map[string]*dynamic.DynamicClient{"admin": dynamic.NewForConfigOrDie(cfg)}
-		for _, user := range []string{controllerUser, gatewayUser, otherUser} {
+		for _, user := range []string{controllerUser, gatewayUser, otherUser, gatewayBUser} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-" + strings.ReplaceAll(user, ":", "-")},
@@ -121,8 +126,10 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(err).NotTo(HaveOccurred())
 		}
 		for name, labels := range map[string]map[string]string{
-			ns:    {"openshell.ai/managed-by": "openshell"}, // an OpenShell workspace namespace
-			plain: nil,
+			ns:         {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"}, // a workspace namespace of this release's gateway
+			nsB:        {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod"},      // one of another release's gateway
+			unlabelled: {"openshell.ai/managed-by": "openshell"},
+			plain:      nil,
 		} {
 			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -131,11 +138,36 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(err).NotTo(HaveOccurred())
 		}
 
+		By("a second release on the same cluster: another name, namespace and gateway ID")
+		// Its objects must not clash with the first release's by name, and each release's policies
+		// must bind to their own gateway's namespaces only (old issue 460).
+		policiesB, bindingsB := renderSandboxPolicyAs(ctx, "koinon-b", "koinon-b",
+			"--set", "openshell.gatewayId=prod",
+			"--set-json", `sandboxPolicy.identities.supervisorPods=["`+gatewayBUser+`"]`,
+			"--set-json", `sandboxPolicy.identities.secrets=["`+gatewayBUser+`"]`,
+			"--set-json", `sandboxPolicy.identities.sandboxes=["`+gatewayBUser+`","`+controllerUser+`"]`)
+		names := map[string]bool{}
 		for _, p := range policies {
+			names[p.Name] = true
+		}
+		for _, b := range bindings {
+			names[b.Name] = true
+		}
+		for _, p := range policiesB {
+			Expect(names).NotTo(HaveKey(p.Name), "policy name clash between releases")
+		}
+		for _, b := range bindingsB {
+			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
+			if !strings.HasSuffix(b.Name, "-unlabelled") {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
+			}
+		}
+		// The specs below that inspect `policies` and `bindings` mean release A's; both are applied.
+		for _, p := range append(slices.Clone(policies), policiesB...) {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, p, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
-		for _, b := range bindings {
+		for _, b := range append(slices.Clone(bindings), bindingsB...) {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Create(ctx, b, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -161,6 +193,34 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(createPod(ctx, controllerUser, ns, workload("ok"))).To(Succeed())
 		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu") }))).To(Succeed())
 		Expect(createPod(ctx, controllerUser, ns, workload("ok-qemu-rs", func(p *corev1.Pod) { p.Spec.RuntimeClassName = new("kata-qemu-runtime-rs") }))).To(Succeed())
+	})
+
+	It("covers its own gateway's namespaces only: another gateway's creator is admitted in its namespace, denied in this one", func(ctx SpecContext) {
+		// Release B's gateway creates its supervisor pod and Secret in its own workspace namespace: release A's
+		// policies do not bind there (old issue 460).
+		Expect(createPod(ctx, gatewayBUser, nsB, supervisor("b-supervisor"))).To(Succeed())
+		Expect(createPod(ctx, controllerUser, nsB, workload("b-workload"))).To(Succeed())
+		_, err := as[gatewayBUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
+		Expect(err).NotTo(HaveOccurred())
+		// The same identity is still denied in a namespace of release A's gateway.
+		denied(createPod(ctx, gatewayBUser, ns, supervisor("b-in-a")), "may create pods in sandbox namespaces")
+		_, err = as[gatewayBUser].CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "b-secret"}}, dryRun)
+		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
+
+		By("symmetric: gateway A's identity is admitted in its own namespace and denied in gateway B's")
+		Expect(createPod(ctx, gatewayUser, ns, supervisor("a-supervisor"))).To(Succeed())
+		_, err = as[gatewayUser].CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "a-secret"}}, dryRun)
+		Expect(err).NotTo(HaveOccurred())
+		denied(createPod(ctx, gatewayUser, nsB, supervisor("a-in-b")), "may create pods in sandbox namespaces")
+		_, err = as[gatewayUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "a-secret"}}, dryRun)
+		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
+	})
+
+	It("keeps an OpenShell namespace without a gateway-id label deny-by-default", func(ctx SpecContext) {
+		// No release's gateway owns it, so every release's unlabelled binding covers it.
+		denied(createPod(ctx, otherUser, unlabelled, workload("unlabelled-other")), "may create pods in sandbox namespaces")
+		denied(createPod(ctx, gatewayUser, unlabelled, workload("unlabelled-gateway")), "may create pods in sandbox namespaces")
+		Expect(createPod(ctx, controllerUser, unlabelled, workload("unlabelled-controller"))).To(Succeed())
 	})
 
 	It("applies only in sandbox namespaces (control)", func(ctx SpecContext) {
@@ -218,6 +278,34 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 
+	It("denies the SPIRE agent socket in every sandbox pod: the SPIFFE CSI driver and the socket's hostPath (ADR 0097 decision 11)", func(ctx SpecContext) {
+		const csiMessage = "SPIFFE CSI volumes (csi.spiffe.io) are not allowed in sandbox pods"
+		const socketMessage = "the SPIRE agent socket must not be mounted in sandbox pods"
+		spiffeCSI := corev1.Volume{Name: "spiffe", VolumeSource: corev1.VolumeSource{CSI: &corev1.CSIVolumeSource{Driver: "csi.spiffe.io", ReadOnly: new(true)}}}
+		socketHostPath := func(path string) corev1.Volume {
+			return corev1.Volume{Name: "spire", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: path}}}
+		}
+		for _, c := range []struct {
+			message string
+			volume  corev1.Volume
+		}{
+			{csiMessage, spiffeCSI},
+			{socketMessage, socketHostPath("/run/spire/agent-sockets")},
+			{socketMessage, socketHostPath("/var/run/spire")},
+			{socketMessage, socketHostPath("/tmp/spire-agent/public")},
+		} {
+			volumes := []corev1.Volume{c.volume}
+			denied(createPod(ctx, controllerUser, ns, workload("spire-workload", func(p *corev1.Pod) { p.Spec.Volumes = volumes })), c.message)
+			denied(createPod(ctx, gatewayUser, ns, supervisor("spire-supervisor", func(p *corev1.Pod) {
+				p.Spec.Volumes = append(p.Spec.Volumes, volumes...)
+			})), c.message)
+		}
+
+		By("a CSI volume of another driver is not this rule's business (control)")
+		other := corev1.Volume{Name: "other", VolumeSource: corev1.VolumeSource{CSI: &corev1.CSIVolumeSource{Driver: "csi.example.invalid"}}}
+		Expect(createPod(ctx, controllerUser, ns, workload("other-csi", func(p *corev1.Pod) { p.Spec.Volumes = []corev1.Volume{other} }))).To(Succeed())
+	})
+
 	It("denies a ServiceAccount token on workload pods, the controller's included", func(ctx SpecContext) {
 		const mount = "sandbox workload pods must set automountServiceAccountToken to false"
 		const project = "sandbox workload pods must not project a ServiceAccount token"
@@ -240,6 +328,18 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			v.Projected.Sources = v.Projected.Sources[:1]
 			p.Spec.Volumes = []corev1.Volume{*v}
 		}))).To(Succeed())
+
+		By("pods from trusted identities must carry a boundary role")
+		role := "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing", func(p *corev1.Pod) { p.Labels = nil })), role)
+		denied(createPod(ctx, controllerUser, ns, workload("role-other", func(p *corev1.Pod) { p.Labels = map[string]string{"openshell.ai/boundary-role": "admin"} })), role)
+		// The creator rule catches an unlabelled gateway pod first: the API server reports only the first denial.
+		denied(createPod(ctx, gatewayUser, ns, supervisor("sup-role-missing", func(p *corev1.Pod) { p.Labels = nil })), "may create pods in sandbox namespaces")
+		// The gap this closes: an unlabelled pod with an API-audience token escaped both rule sets.
+		denied(createPod(ctx, controllerUser, ns, workload("role-missing-token", func(p *corev1.Pod) {
+			p.Labels = nil
+			p.Spec.AutomountServiceAccountToken = new(true)
+		})), role)
 
 		By("supervisor pods: automount false and only a bounded openshell-gateway token")
 		Expect(createPod(ctx, gatewayUser, ns, supervisor("supervisor-real-shape"))).To(Succeed())
@@ -290,6 +390,25 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		p.Labels["koinon-escape"] = "label"
 		_, err = admin.CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("denies removing the boundary role label from trusted identities", func(ctx SpecContext) {
+		const key = "openshell.ai/boundary-role"
+		const role = "sandbox pods must carry the label openshell.ai/boundary-role=workload or openshell.ai/boundary-role=supervisor"
+		unlabel := func(user string) error {
+			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Labels).To(HaveKey(key))
+			delete(p.Labels, key)
+			_, err = as[user].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			return err
+		}
+		denied(unlabel(controllerUser), role)
+		denied(unlabel(gatewayUser), role)
+
+		By("other identities (kubelet, metadata writers) are not held to the role rule (control)")
+		Expect(unlabel(otherUser)).To(Succeed())
+		Expect(unlabel("admin")).To(Succeed())
 	})
 
 	// connect sends a CONNECT-class request (exec, attach, portforward, pods/proxy, services/proxy)
@@ -354,6 +473,13 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
+			if strings.HasSuffix(b.Name, "-unlabelled") {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).NotTo(HaveKey("openshell.ai/gateway-id"), b.Name)
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchExpressions).To(ContainElement(
+					metav1.LabelSelectorRequirement{Key: "openshell.ai/gateway-id", Operator: metav1.LabelSelectorOpDoesNotExist}), b.Name)
+			} else {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "openshell"), b.Name)
+			}
 			// An options object has no labels: an objectSelector would silently match nothing.
 			Expect(b.Spec.MatchResources.ObjectSelector).To(BeNil(), b.Name)
 		}
@@ -523,11 +649,17 @@ func supervisorPod(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 // any extra helm arguments.
 func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	GinkgoHelper()
+	return renderSandboxPolicyAs(ctx, "koinon", "koinon", extraArgs...)
+}
+
+// renderSandboxPolicyAs renders the same template as the Helm release `release` in `namespace`.
+func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
+	GinkgoHelper()
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	Expect(err).NotTo(HaveOccurred(), "helm renders the chart's policies")
 	var out, stderr bytes.Buffer
 	args := append([]string{
-		"template", "koinon", "../../charts/koinon", "--namespace", "koinon",
+		"template", release, "../../charts/koinon", "--namespace", namespace,
 		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-policy.yaml",
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)
@@ -556,7 +688,7 @@ func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admission
 		}
 	}
 	Expect(policies).To(HaveLen(3), "the pods, objects and connect policies")
-	Expect(bindings).To(HaveLen(3))
+	Expect(bindings).To(HaveLen(6), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label")
 	return policies, bindings
 }
 

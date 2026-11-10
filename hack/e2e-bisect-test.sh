@@ -20,7 +20,7 @@ for b in koinon-api koinon-reconciler koinon-agentd koinon-fakemodel koinon-fake
 done
 mkdir -p test/e2e charts docs web
 printf 'package e2e\n' >test/e2e/e2e.go
-mkdir -p hack && cp "$repo/hack/needs-e2e.sh" hack/ && cp "$repo/hack/e2e-bisect.sh" hack/
+mkdir -p hack && cp "$repo/hack/needs-e2e.sh" "$repo/hack/paths-lib.sh" "$repo/hack/paths.rules" hack/ && cp "$repo/hack/e2e-bisect.sh" hack/
 g add -A && g commit -q -m "base"
 green=$(git rev-parse HEAD)
 commit() { mkdir -p "$(dirname "$1")"; echo "$2" >"$1"; g add -A; g commit -q -m "$3"; }

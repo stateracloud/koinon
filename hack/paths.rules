@@ -1,0 +1,283 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The path rules of Koinon's CI and local gates: ONE source. Read by hack/paths-lib.sh and, through
+# it, by hack/ci-changes.sh (which CI jobs a change turns on), hack/needs-e2e.sh (the kind e2e),
+# hack/preflight.sh (which local gates run) and hack/lane-gates.sh (which local gate stands for a CI
+# job). No script keeps a private copy of a pattern. Why each rule exists: docs/dev/ci.md#path-rules.
+#
+# One rule per line:  <kind> <name> <rest of the line>
+# Comment lines start with `#`; there are no trailing comments. Patterns are POSIX extended regular
+# expressions (bash `[[ =~ ]]`) matched against a repository-relative path. Several lines of one
+# kind and name are alternatives.
+#
+#   everything -  <re>   a change to this path turns every CI job on
+#   job <job>     <re>   a change to this path can affect the CI job (ci.yml `changes` output)
+#   except <job>  <re>   ... unless it also matches this (a path that cannot affect the job)
+#   keep <job>    <re>   ... except that a path matching this stays a trigger after all
+#   gate <gate>   <re>   a change to this path turns the preflight gate on (gates that have no CI job)
+#   lane <job> <needs> <command...>   how hack/lane-gates.sh runs the local gate of a CI job:
+#                        <needs> is a comma list of tools (docker,helm,go) or `-`; <command> is
+#                        `preflight` (the preflight gate of the same name) or a make target line
+#   script-check - <cmd> a static check or script test of the quick checks, lint-shell and scripts
+#                        CI jobs that takes seconds: the preflight gate `scripts` runs it. @BASE@
+#                        is the merge base with the preflight base, @HEAD@ is HEAD
+#   script-skip -  <cmd> a script step of those jobs that preflight does not run (slow, covered by
+#                        another gate, or not runnable on a Mac); hack/paths-test.sh fails when a
+#                        step of ci.yml is in neither list
+#   e2e-binary -  <pkg>  a command test/e2e/run.sh builds and loads into kind
+#   e2e-needed -  <re>   needs the kind e2e (hack/needs-e2e.sh)
+#   e2e-forced -  <re>   needs the kind e2e, even if e2e-ignored matches (the e2e's own files)
+#   e2e-ignored - <re>   does not need it, unless forced or in a binary's build graph
+#
+# FAIL CLOSED: a path that no rule mentions runs the job. `job go .` below is that catch-all for
+# the Go jobs; `except go` lists what cannot affect them. To skip a job for a path, name the path
+# in an `except` rule and say why in the comment above it.
+
+# --- Changes that run everything: CI itself, the Makefile, the Go module, and these rules ---------
+everything - ^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh|Makefile|go\.mod|go\.sum)$
+
+# --- go: go-tidy, go-lint, go-test (Postgres), go-race --------------------------------------------
+# Any path can affect them, except what is listed here. Not listed on purpose: charts/, test/,
+# internal/, cmd/ (Go tests read them), hack/versions.env and hack/dev/ (Go tests read them), and
+# every non-Go file under hack/ outside the three directories below.
+job go .
+# Documentation, the web app (own jobs; its Go files stay a trigger by `keep`), and GitHub's
+# non-CI files (other workflows and actions are separate jobs; ci.yml itself is `everything`).
+except go \.md$
+except go ^docs/
+except go ^web/
+except go ^\.github/
+except go ^\.claude/
+# Top-level shell scripts of hack/, hook scripts and chart assertions: the Go jobs run Go, and the
+# few scripts they call are listed in `keep`. The script tests run in the `scripts` job.
+except go ^hack/[^/]+\.sh$
+except go ^hack/hooks/
+except go ^hack/chart-check\.d/
+# The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
+# wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
+# (internal/compat) and flavor-tag.sh (test/flavors).
+keep go ^hack/(go-test|golangci-lint|agentgateway-pin|record-compat-fixtures|flavor-tag)\.sh$
+keep go \.go$
+
+# --- web ------------------------------------------------------------------------------------------
+job web ^(web/|api/proto/)
+
+# --- generate: every input and output of `make generate` ------------------------------------------
+# hack/ci-changes-test.sh derives them from the Makefile and the generator configs and fails when
+# one is missing here: the protos and the vendored OpenShell and agentgateway protos, the OpenAPI
+# spec and its config, the sqlc inputs, the buf and sqlc configs, protoc-gen-es (web/package.json,
+# its lockfile) and the outputs.
+job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)
+
+# --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
+job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
+
+# --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
+# The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
+# no build tags (test/chartsmoke/images_test.go), so what can change the result is the chart, the
+# Go packages those commands and the suite import, the files they embed, and go.mod/go.sum.
+# The list is hand-written and partial (the Jobs also read hack/versions.env and other files the
+# suite names); a push to main runs the job anyway.
+job chartsmoke ^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/.*\.go$|test/chartsmoke/|go\.(mod|sum))
+# web/ without .go: the suite builds without the `webui` tag, so web/src, web/package.json and
+# the rest never reach a binary (web/webui.go and web/webui_stub.go are Go files and stay).
+# api/proto/: the Go code generated from it is committed under internal/gen, where a change
+# matches; a proto edit without regenerating fails the `generate` job. api/admin/v1/openapi.yaml
+# is embedded by api/admin/v1/spec.go and stays a trigger.
+except chartsmoke ^api/proto/.*\.proto$
+# Test files of other packages are not compiled into a binary or into the suite's imports; the
+# suite's own _test.go files are under test/chartsmoke/ and stay.
+except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
+
+# --- docs: hack/docs-check.sh -----------------------------------------------------------------------
+# It also reads internal/preflight/preflight.go and hack/versions.env and runs the tests of
+# internal/declarative. Its repository-link check reads any file of the repo, so the inputs cannot
+# all be listed: this is partial, and a push to main runs docs anyway.
+job docs ^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)
+
+# --- escape: the admission specs (the only ones CI runs) read the chart and the testenv helper -----
+# The reconciler-side cases need kind or the lab (#66), so their packages are not triggers.
+job escape ^(charts/|test/escape/|internal/testing/testenv/)
+
+# --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
+job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)
+
+# --- local gates of the CI jobs (hack/lane-gates.sh) -------------------------------------------------
+# A job without a lane line has no local gate and is reported as not run.
+lane go - preflight
+lane web - preflight
+lane generate - preflight
+lane chart - preflight
+lane docs - preflight
+lane chartsmoke docker,helm,go test-chart-smoke
+lane flavors docker,go test-flavors
+lane escape helm,go test-admission
+
+# --- preflight gates that have no CI job of their own ------------------------------------------------
+# (go, generate, chart, web and docs use the `job` rules above, so preflight and CI agree.)
+gate go \.go$
+gate tidy \.go$
+gate tidy ^go\.(mod|sum)$
+gate deps (^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$
+gate proto \.proto$
+gate migrate ^internal/db/migrations/
+gate adr ^(docs/adr/|hack/adr-)
+gate shell \.sh$
+gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
+gate runnerlint ^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$
+gate pinned \.sh$
+gate pinned ^\.github/workflows/[^/]*\.yml$
+gate pinned ^\.github/actions/
+gate mktemp \.sh$
+gate mktemp ^Makefile$
+gate mktemp ^\.github/workflows/[^/]*\.yml$
+gate mktemp ^internal/.*\.go$
+gate bash5 \.sh$
+gate audit \.go$
+gate audit ^internal/db/queries/.*\.sql$
+gate audit ^hack/audit-batch-lint
+gate versions ^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)
+# The script tests and static checks of the quick checks, lint-shell and scripts CI jobs that take
+# seconds (hack/preflight.sh gate `scripts`; the list itself is hack/script-checks.list).
+gate scripts ^(hack/|\.github/|Makefile$|test/e2e/|docs/adr/|AGENTS\.md$)
+
+# --- script checks: what `preflight` runs of the `quick checks`, `lint-shell` and `scripts` jobs -------
+# Checks that take seconds (measured 2026-11-09 on a Mac: at most 15 s each). The gates adr,
+# migrate, mktemp, pinned, bash5, audit, versions, shell and actionlint run their own.
+script-check - hack/migrate-lint-test.sh
+script-check - hack/migrate-renumber-test.sh
+script-check - hack/commit-subject-check-test.sh
+script-check - hack/commit-subject-check.sh @BASE@ HEAD
+script-check - hack/git-identity-check-test.sh
+script-check - hack/git-identity-check.sh range @BASE@ HEAD
+script-check - hack/koinon-fetch-test.sh
+script-check - hack/fetch-pinned-test.sh
+script-check - hack/apt-retries-test.sh --self-test
+script-check - hack/apt-retries-test.sh
+script-check - hack/e2e-remote-test.sh
+script-check - hack/ci-fail-test.sh
+script-check - hack/ci-go-gate-test.sh
+script-check - hack/ci-web-gate-test.sh
+script-check - hack/ci-required-test.sh
+script-check - hack/repo-contract-test.sh
+script-check - hack/tmp-safety-test.sh
+script-check - hack/notes-expiry-test.sh
+script-check - hack/old-issue-refs-lint-test.sh
+script-check - hack/old-issue-refs-lint.sh
+script-check - hack/agentgateway-pin-test.sh
+script-check - hack/agentgateway-pin.sh --check
+script-check - hack/golangci-lint-test.sh
+script-check - hack/preflight-stop-test.sh
+script-check - hack/e2e-decide-test.sh
+script-check - hack/hooks/agent-spawn-check_test.sh
+script-check - hack/hooks/read-hooks_test.sh
+script-check - hack/agent-state-test.sh
+script-check - hack/dep-age-check-test.sh
+script-check - hack/lane-gates-test.sh
+script-check - hack/ci-supersede-test.sh
+script-check - hack/ci-concurrency-test.sh
+script-check - hack/ci-merge-group-test.sh
+script-check - hack/route-guard-test.sh
+script-check - hack/ci-cache-test.sh
+script-check - hack/chart-check-test.sh
+script-check - hack/paths-test.sh
+script-check - hack/runner-lint-test.sh
+script-check - hack/runner-lint.sh
+# Slow (23 to 85 s; CI runs them): the decision rule's own tests need
+# `go list`, the others start many git repositories.
+script-skip - hack/needs-e2e-test.sh
+script-skip - hack/ci-changes-test.sh
+script-skip - hack/versions-check-test.sh
+script-skip - hack/pr-wait-test.sh
+script-skip - hack/pr-merge-test.sh
+script-skip - hack/go-test-test.sh
+script-skip - hack/ship-test.sh
+script-skip - hack/preflight-test.sh
+script-skip - hack/release-gate-test.sh
+script-skip - hack/ci-skip-heavy-test.sh
+script-skip - hack/claim_test.sh
+script-skip - hack/review-gate-test.sh
+script-skip - hack/migrate-lint.sh
+# Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
+script-skip - hack/flavor-tag-test.sh
+# Fail on a Mac with the sandbox's /private/tmp paths or its git setup; they run on Linux in CI.
+script-skip - hack/wt-test.sh
+script-skip - hack/wt-install-test.sh
+script-skip - hack/e2e-bisect-test.sh
+# Covered by another preflight gate (versions, mktemp, pinned, bash5, audit, adr).
+script-skip - hack/versions-check.sh
+script-skip - hack/mktemp-lint-test.sh
+script-skip - hack/mktemp-lint.sh
+script-skip - hack/pinned-download-lint.sh
+script-skip - hack/audit-batch-lint-test.sh
+script-skip - hack/audit-batch-lint.sh
+script-skip - hack/bash5-lint-test.sh
+script-skip - hack/bash5-lint.sh
+script-skip - hack/adr-lint-test.sh
+script-skip - hack/adr-lint.sh
+
+# --- the kind e2e (hack/needs-e2e.sh) ------------------------------------------------------------------
+# Needed for changes whose behaviour only a full install observes: startup, flags and environment,
+# chart objects including Jobs, the schema, cross-service flows, the harness, and the e2e itself
+# (old issue 281 changed branch naming in githubtools; old issue 284 a startup flag the chart's
+# migrate Job lacked). Unit and package tests cannot see those.
+#
+# Go code is not listed by directory: the binaries are the commands test/e2e/run.sh builds with ko
+# (the three services and the three fakes it deploys; hack/needs-e2e-test.sh checks them against
+# its `ko build` line). A non-test file in the directory of a package in their dependency graph
+# (`go list -deps`, this module only), or below it (embedded files), is relevant.
+e2e-binary - ./cmd/koinon-api
+e2e-binary - ./cmd/koinon-reconciler
+e2e-binary - ./cmd/koinon-agentd
+e2e-binary - ./cmd/koinon-fakemodel
+e2e-binary - ./cmd/koinon-fakegithub
+e2e-binary - ./cmd/koinon-fakemcp
+#
+# A path is relevant when it is forced, or needed and not ignored, or in the build graph.
+# Needed. A renamed binary directory breaks `go list` (that also fails closed), so cmd/ is a backstop.
+e2e-needed - ^cmd/
+e2e-needed - ^vendor/
+e2e-needed - ^charts/
+e2e-needed - ^internal/db/migrations/
+e2e-needed - ^flavors/
+# Dependency changes reach the binaries.
+e2e-needed - ^go\.(mod|sum)$
+e2e-needed - ^go\.work(\.sum)?$
+# test-e2e-kind is `make test-e2e-kind`.
+e2e-needed - ^Makefile$
+# How ko builds the six images.
+e2e-needed - ^\.ko\.yaml$
+# The chart's image pins, if present.
+e2e-needed - ^release/versions\.yaml$
+# Forced: the e2e runs the quickstart's shell blocks, so the quickstart page is an input although it
+# is Markdown, and the e2e's own test files are the e2e, not "Go tests outside it".
+# The driver, run.sh, kind/ (up.sh, fakes, values).
+e2e-forced - ^test/e2e/
+# run.sh calls test/escape/kind.sh through test/e2e/escape-openshell.sh and escape-mcp.sh.
+e2e-forced - ^test/escape/
+e2e-forced - ^\.github/workflows/e2e-kind\.yml$
+# Agent prompts and instructions may be Markdown.
+e2e-forced - ^flavors/.*\.md$
+# run.sh runs the quickstart blocks through docs-e1.sh, names the flavor image with flavor-tag.sh
+# and sets its base image with flavor-base.sh (FLAVOR_BASE, #200).
+e2e-forced - ^hack/docs-e1\.sh$
+e2e-forced - ^hack/flavor-tag\.sh$
+e2e-forced - ^hack/flavor-base\.sh$
+# The kind, ko and helm versions e2e-kind.yml installs (old issue 565), the filter that loads them
+# into the workflow's environment, and the downloader it uses (#431).
+e2e-forced - ^hack/versions\.env$
+e2e-forced - ^hack/versions-env\.sh$
+e2e-forced - ^hack/fetch-pinned\.sh$
+# The web toolchain image run.sh uses (Chromium for the browser suite).
+e2e-forced - ^hack/e2e-toolchain/
+e2e-forced - ^docs/site/src/content/docs/quickstart\.md$
+# test/e2e/backup-restore.sh runs its blocks (#90).
+e2e-forced - ^docs/site/src/content/docs/guides/backup-restore\.md$
+# Not needed (unless forced). Playwright covers the web app; hack/ holds scripts the e2e does not
+# call (see forced); Go tests outside test/e2e are not the e2e.
+e2e-ignored - \.md$
+e2e-ignored - ^docs/
+e2e-ignored - ^web/
+e2e-ignored - ^hack/
+e2e-ignored - /testdata/
+e2e-ignored - _test\.go$

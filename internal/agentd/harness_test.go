@@ -27,6 +27,9 @@ const (
 	// markHang: on the first attempt stream two chunks and hang until the stream goes away
 	// (the worker is killed); the resumed turn finishes.
 	markHang = "HANG-ONCE"
+	// markLongLine: write 11 MiB without a newline to stdout, as a harness that dumps a huge
+	// blob would. The ACP reader refuses a line over 10 MiB; the run must fail, not resume.
+	markLongLine = "LONG-LINE"
 	// markOutside: ask permission for reads and an edit inside and outside the session
 	// directory, all with ordinary kinds, then report the answers.
 	markOutside = "OUTSIDE"
@@ -108,7 +111,7 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	h.mu.Lock()
 	h.args = append(h.args, slices.Clone(args))
 	h.mu.Unlock()
-	p := &process{h: h, crash: make(chan struct{}), cancelled: make(chan struct{}), ready: make(chan struct{})}
+	p := &process{out: stdout, h: h, crash: make(chan struct{}), cancelled: make(chan struct{}), ready: make(chan struct{})}
 	p.conn = sdk.NewAgentSideConnection(p, stdout, stdin)
 	close(p.ready)
 	select {
@@ -242,6 +245,7 @@ func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]str
 
 // process is one harness process: one ACP connection.
 type process struct {
+	out       io.Writer // the command's stdout
 	h         *harness
 	conn      *sdk.AgentSideConnection
 	crash     chan struct{}
@@ -314,6 +318,17 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	p.h.prompts = append(p.h.prompts, text)
 	p.h.metas = append(p.h.metas, r.Meta)
 	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))
+	if strings.Contains(text, markLongLine) {
+		p.h.mu.Unlock()
+		chunk := []byte(strings.Repeat("a", 1<<20))
+		for range 11 {
+			if _, err := p.out.Write(chunk); err != nil {
+				break
+			}
+		}
+		<-ctx.Done()
+		return sdk.PromptResponse{}, ctx.Err()
+	}
 	firstCrash := strings.Contains(text, markCrash) && !p.h.crashed
 	if firstCrash {
 		p.h.crashed = true
