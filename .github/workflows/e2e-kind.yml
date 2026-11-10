@@ -72,7 +72,7 @@ permissions:
 # replaces the older (batching). Everything else (dispatch, nightly, a merge queue build) runs alone:
 # a queue build is never cancelled (its group is its run id, cancel-in-progress is off for it).
 concurrency:
-  group: ${{ github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
+  group: ${{ github.ref_type == 'tag' && format('e2e-drill-{0}', github.ref) || github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -308,6 +308,69 @@ jobs:
             ~/go/pkg/mod
           key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
+  # The one check to require (ADR 0105). On a pull request it is always green: the quickstart there is advisory
+  # and the queue is the proof, but the context must exist for the pull request to be enqueued. On a queue build,
+  # a push, the nightly and a dispatch it is green when the quickstart passed or when it was skipped because
+  # `decide` answered needed=false (nothing needed it); red when it failed or was cancelled, and when `decide`
+  # itself failed (the composite-check pattern).
+  result:
+    name: e2e result
+    needs: [decide, quickstart]
+    if: always() && github.ref_type != 'tag' && inputs.suite != 'drill'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail unless the e2e passed or was not needed
+        shell: bash # -eo pipefail
+        env:
+          EVENT: ${{ github.event_name }}
+          DECIDE: ${{ needs.decide.result }}
+          QUICKSTART: ${{ needs.quickstart.result }}
+          NEEDED: ${{ needs.decide.outputs.needed }}
+        run: |
+          if [[ $EVENT == pull_request ]]; then
+            echo "pull request: the quickstart is advisory (decide: $DECIDE, quickstart: $QUICKSTART); the merge queue decides."
+            exit 0
+          fi
+          case $QUICKSTART in
+          success) echo "quickstart passed" ;;
+          skipped)
+            if [[ $DECIDE == success && $NEEDED == false ]]; then
+              echo "quickstart skipped: nothing needs the e2e"
+            else
+              echo "::error::quickstart was skipped but decide said needed=$NEEDED (decide: $DECIDE)"
+              exit 1
+            fi
+            ;;
+          *) echo "::error::quickstart $QUICKSTART (decide: $DECIDE)"; exit 1 ;;
+          esac
+
+  # A red run on main: find the merge that did it and open one issue (hack/e2e-bisect.sh).
+  bisect:
+    needs: quickstart
+    if: >-
+      always() && needs.quickstart.result == 'failure'
+      && (github.event_name == 'push' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      issues: write # the issue naming the culprit
+      actions: write # dispatches the e2e on each candidate
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: hack/e2e-bisect.sh
+
   # The automated restore drill (ADR 0109, #514), advisory: nightly, on rc tags and on dispatch with suite=drill. A red
   # check that is not a declared known gap (label known-gap, message "known gap: #N") turns this job red; the
   # known gaps stay red in the report and do not. Never required, never a queue check.
@@ -420,66 +483,3 @@ jobs:
       - name: Delete cluster
         if: always()
         run: test/e2e/kind/down.sh
-
-  # The one check to require (ADR 0105). On a pull request it is always green: the quickstart there is advisory
-  # and the queue is the proof, but the context must exist for the pull request to be enqueued. On a queue build,
-  # a push, the nightly and a dispatch it is green when the quickstart passed or when it was skipped because
-  # `decide` answered needed=false (nothing needed it); red when it failed or was cancelled, and when `decide`
-  # itself failed (the composite-check pattern).
-  result:
-    name: e2e result
-    needs: [decide, quickstart]
-    if: always() && github.ref_type != 'tag' && inputs.suite != 'drill'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Fail unless the e2e passed or was not needed
-        shell: bash # -eo pipefail
-        env:
-          EVENT: ${{ github.event_name }}
-          DECIDE: ${{ needs.decide.result }}
-          QUICKSTART: ${{ needs.quickstart.result }}
-          NEEDED: ${{ needs.decide.outputs.needed }}
-        run: |
-          if [[ $EVENT == pull_request ]]; then
-            echo "pull request: the quickstart is advisory (decide: $DECIDE, quickstart: $QUICKSTART); the merge queue decides."
-            exit 0
-          fi
-          case $QUICKSTART in
-          success) echo "quickstart passed" ;;
-          skipped)
-            if [[ $DECIDE == success && $NEEDED == false ]]; then
-              echo "quickstart skipped: nothing needs the e2e"
-            else
-              echo "::error::quickstart was skipped but decide said needed=$NEEDED (decide: $DECIDE)"
-              exit 1
-            fi
-            ;;
-          *) echo "::error::quickstart $QUICKSTART (decide: $DECIDE)"; exit 1 ;;
-          esac
-
-  # A red run on main: find the merge that did it and open one issue (hack/e2e-bisect.sh).
-  bisect:
-    needs: quickstart
-    if: >-
-      always() && needs.quickstart.result == 'failure'
-      && (github.event_name == 'push' || github.event_name == 'schedule')
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      issues: write # the issue naming the culprit
-      actions: write # dispatches the e2e on each candidate
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: hack/e2e-bisect.sh

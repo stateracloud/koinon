@@ -31,6 +31,11 @@ type Install struct {
 	Release          string `yaml:"release" json:"release"`
 	GatewayNamespace string `yaml:"gatewayNamespace" json:"gatewayNamespace"`
 	GatewayRelease   string `yaml:"gatewayRelease" json:"gatewayRelease"`
+	// GatewayID is the gateway's gateway_id (its chart's gatewayId, Koinon's openshell.gatewayId). In
+	// managed mode OpenShell names workspace namespaces openshell-<gatewayId>-<workspace>, and the
+	// restored org has the same workspace as the source, so two gateways with one ID would manage the
+	// same namespace. The ID is per run and per side.
+	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
 // S3 is the object store checkpoints use. Phase 1 runs with checkpoints off; the fields are the
@@ -76,7 +81,7 @@ type Topology struct {
 
 // LoadTopology reads and checks a topology file, and expands {run} with runID.
 func LoadTopology(file, runID string) (*Topology, error) {
-	b, err := os.ReadFile(file)
+	b, err := os.ReadFile(file) //nolint:gosec // the topology path comes from the operator
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +101,8 @@ func LoadTopology(file, runID string) (*Topology, error) {
 func (t *Topology) expand(runID string) {
 	r := strings.NewReplacer("{run}", runID)
 	for _, p := range []*string{
-		&t.Source.Namespace, &t.Source.Release, &t.Source.GatewayNamespace, &t.Source.GatewayRelease,
-		&t.Target.Namespace, &t.Target.Release, &t.Target.GatewayNamespace, &t.Target.GatewayRelease,
+		&t.Source.Namespace, &t.Source.Release, &t.Source.GatewayNamespace, &t.Source.GatewayRelease, &t.Source.GatewayID,
+		&t.Target.Namespace, &t.Target.Release, &t.Target.GatewayNamespace, &t.Target.GatewayRelease, &t.Target.GatewayID,
 		&t.FakesNamespace,
 	} {
 		*p = r.Replace(*p)
@@ -123,6 +128,14 @@ func (t *Topology) Validate() error {
 	}
 	if t.Source.GatewayNamespace == t.Target.GatewayNamespace {
 		return fmt.Errorf("source and target share the OpenShell gateway namespace %q: the target has its own gateway", t.Source.GatewayNamespace)
+	}
+	for name, id := range map[string]string{"source.gatewayId": t.Source.GatewayID, "target.gatewayId": t.Target.GatewayID} {
+		if !gatewayIDRE.MatchString(id) {
+			return fmt.Errorf("%s %q must start with %q (the sweep deletes the openshell-<gatewayId>-* namespaces of this run by it)", name, id, GatewayIDPrefix)
+		}
+	}
+	if t.Source.GatewayID == t.Target.GatewayID {
+		return fmt.Errorf("source and target share the gateway ID %q: both gateways would manage the same openshell-%s-<workspace> namespaces", t.Source.GatewayID, t.Source.GatewayID)
 	}
 	// The chart names objects <release> when the release contains "koinon" and <release>-koinon
 	// otherwise; the guide substitution relies on the first.
@@ -156,6 +169,11 @@ func (t *Topology) Validate() error {
 	}
 	return nil
 }
+
+// GatewayIDPrefix starts every gateway ID the drill uses; the sweep refuses any other.
+const GatewayIDPrefix = "drill-"
+
+var gatewayIDRE = regexp.MustCompile(`^drill-[a-z0-9-]{1,40}$`)
 
 var nsRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 

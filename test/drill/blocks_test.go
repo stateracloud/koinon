@@ -3,6 +3,7 @@
 package drill_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -58,7 +59,7 @@ func TestSubstituteCoversEveryBlockOfTheGuide(t *testing.T) {
 	if _, err := os.Stat(script); err != nil {
 		t.Skip("run from the repository")
 	}
-	cmd := exec.Command(script, "names")
+	cmd := exec.CommandContext(context.Background(), script, "names")
 	cmd.Env = append(os.Environ(), "E1_FILE=../e2e/commands/backup-restore.e1")
 	names, err := cmd.Output()
 	if err != nil {
@@ -69,7 +70,7 @@ func TestSubstituteCoversEveryBlockOfTheGuide(t *testing.T) {
 		t.Fatal("the guide has no blocks")
 	}
 	for _, n := range fields {
-		show := exec.Command(script, "show", n)
+		show := exec.CommandContext(context.Background(), script, "show", n)
 		show.Env = append(os.Environ(), "E1_FILE=../e2e/commands/backup-restore.e1")
 		text, err := show.Output()
 		if err != nil {

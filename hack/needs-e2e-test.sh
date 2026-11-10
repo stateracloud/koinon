@@ -96,15 +96,15 @@ expect 1 web/package.json docs/x.md
 expect 1 # empty change
 
 # The binaries listed in the rule are the ones run.sh builds.
-want=$(grep -oE '\./cmd/koinon-[a-z]+' test/e2e/run.sh | sort -u | tr '\n' ' ')
+want=$(grep -hoE '\./cmd/koinon-[a-z]+' test/e2e/run.sh test/e2e/kind/images.sh | sort -u | tr '\n' ' ')
 have=$(grep -E '^e2e-binary ' hack/paths.rules | grep -oE '\./cmd/koinon-[a-z]+' | sort -u | tr '\n' ' ')
-[[ $want == "$have" ]] || { echo "FAIL: BINARIES in hack/paths.rules ($have) differ from run.sh's ko build ($want)" >&2; fail=1; }
+[[ $want == "$have" ]] || { echo "FAIL: BINARIES in hack/paths.rules ($have) differ from images.sh ko build ($want)" >&2; fail=1; }
 
 # Every hack/ path run.sh calls must be matched.
 while IFS= read -r p; do
   [[ -f $p ]] || continue
   expect 0 "$p"
-done < <(grep -v '^ *#' test/e2e/run.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
+done < <(grep -hv '^ *#' test/e2e/run.sh test/e2e/kind/images.sh | grep -oE 'hack/[A-Za-z0-9_.-]+\.sh' | sort -u)
 
 # old issue 565: every file the jobs that run the e2e (the `quickstart` job of e2e-kind.yml, not decide, result
 # or bisect, which are about whether to run) read, and every file under hack/e2e-toolchain/, is an

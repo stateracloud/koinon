@@ -9,7 +9,8 @@
 #
 # It deletes, in this order: Helm releases in the labelled namespaces, labelled cluster-scoped objects
 # (the chart's ClusterRoles and admission policies), labelled Secrets in any namespace (the install-mark
-# Secrets survive `helm uninstall`), then the labelled namespaces. A namespace that does not start with
+# Secrets survive `helm uninstall`), then the labelled namespaces and the
+# OpenShell workspace namespaces of the run's two gateway IDs. A namespace that does not start with
 # koinon-drill- is refused even when labelled, and an object without the label is never selected. The
 # suite's DeferCleanup removes what it made as it goes; this script is the backstop (run.sh calls it
 # in a trap, CI in an always() step).
@@ -41,8 +42,23 @@ for ns in $namespaces; do
   esac
 done
 
+# The OpenShell workspace namespaces the two gateways of this run manage (openshell-<gatewayId>-<workspace>).
+# The gateway creates them, so they carry no run label; they are found by the gateway-id label of the run's
+# own IDs and only when the name has the matching prefix.
+os_namespaces=""
+for side in src dst; do
+  gid="drill-$side-$run"
+  for ns in $("${k[@]}" get namespace -l "openshell.ai/gateway-id=$gid" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+    case $ns in
+      "openshell-$gid-"*) os_namespaces+="$ns " ;;
+      *) echo "REFUSED: namespace $ns carries gateway-id $gid but is not named openshell-$gid-*" >&2; exit 1 ;;
+    esac
+  done
+done
+
 if (( list_only )); then
   echo "namespaces: ${namespaces:-none}"
+  echo "openshell workspace namespaces: ${os_namespaces:-none}"
   "${k[@]}" get clusterrole,clusterrolebinding,validatingadmissionpolicy,validatingadmissionpolicybinding -l "$label" -o name || true
   "${k[@]}" get secret -A -l "$label" -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers || true
   exit 0
@@ -57,6 +73,10 @@ done
 "${k[@]}" delete clusterrolebinding,clusterrole,validatingadmissionpolicybinding,validatingadmissionpolicy -l "$label" --ignore-not-found --wait=false
 # Secrets with the label, wherever they are; the namespaces below take the rest.
 "${k[@]}" delete secret -A -l "$label" --ignore-not-found --wait=false
+if [[ -n $os_namespaces ]]; then
+  # shellcheck disable=SC2086 # the names are one word each
+  "${k[@]}" delete namespace $os_namespaces --ignore-not-found --wait=false
+fi
 if [[ -n $namespaces ]]; then
   # shellcheck disable=SC2086 # the names are one word each
   "${k[@]}" delete namespace $namespaces --ignore-not-found --wait=false

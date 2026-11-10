@@ -2,6 +2,7 @@
 #
 # The drill's topology on kind (ADR 0109): the cluster test/e2e/kind/up.sh makes, the images
 # test/e2e/kind/images.sh loads, a second OpenShell gateway for each install. {run} is the run ID.
+# Each gateway has its own gatewayId, so the workspace namespaces openshell-<gatewayId>-* do not collide.
 # Namespaces must start with koinon-drill-. Releases contain "koinon" so the chart names its objects
 # <release>-api and so on. Checkpoints are off in phase 1, so there is no object store yet.
 name: kind
@@ -11,11 +12,13 @@ source:
   release: koinon-drill-src-{run}
   gatewayNamespace: koinon-drill-os-src-{run}
   gatewayRelease: openshell-src-{run}
+  gatewayId: drill-src-{run}
 target:
   namespace: koinon-drill-dst-{run}
   release: koinon-drill-dst-{run}
   gatewayNamespace: koinon-drill-os-dst-{run}
   gatewayRelease: openshell-dst-{run}
+  gatewayId: drill-dst-{run}
 fakesNamespace: koinon-drill-fakes-{run}
 chartPath: charts/koinon
 valuesFile: test/e2e/kind/koinon-values.yaml

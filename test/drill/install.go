@@ -28,9 +28,9 @@ func FakeModelURL(fakesNS string) string {
 }
 
 // ValuesOverlay is the part of the Koinon chart values that differs from the base file for one
-// install: the fake model's host in the egress policy, the install's own gateway and its client TLS
+// install: the fake model's host in the egress policy, the install's own gateway, its gateway ID and its client TLS
 // Secret, and the hold. The base file is the kind quickstart's (test/e2e/kind/koinon-values.yaml).
-func ValuesOverlay(fakesNS string, gw Gateway, hold bool, storageClass string) (string, error) {
+func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, storageClass string) (string, error) {
 	pg := map[string]any{"cnpg": map[string]any{"storage": map[string]any{"size": "1Gi"}}}
 	if storageClass != "" {
 		pg["cnpg"].(map[string]any)["storage"].(map[string]any)["storageClass"] = storageClass
@@ -43,7 +43,7 @@ func ValuesOverlay(fakesNS string, gw Gateway, hold bool, storageClass string) (
 			"to":    []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": fakesNS}}}},
 			"ports": []any{map[string]any{"port": 8080}},
 		}}},
-		"openshell": map[string]any{"address": gw.Address(), "clientTLSSecret": gw.ClientTLSSecret},
+		"openshell": map[string]any{"address": gw.Address(), "clientTLSSecret": gw.ClientTLSSecret, "gatewayId": gatewayID},
 	}
 	b, err := yaml.Marshal(v)
 	if err != nil {

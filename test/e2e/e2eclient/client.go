@@ -42,7 +42,7 @@ func (t *sessionTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	t.mu.Unlock()
 	if token != "" {
 		req = req.Clone(req.Context())
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token})
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token}) //nolint:gosec // request cookie; Secure and HttpOnly are response attributes
 	}
 	res, err := t.base.RoundTrip(req)
 	if err != nil {

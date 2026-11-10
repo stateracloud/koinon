@@ -104,6 +104,16 @@ func TestTopologyRefusesAForeignNamespace(t *testing.T) {
 		t.Fatal("a shared gateway must be refused")
 	}
 	top, _ = drill.LoadTopology("topology/kind.yaml", "a1b2c3")
+	top.Target.GatewayID = top.Source.GatewayID
+	if top.Validate() == nil {
+		t.Fatal("a shared gateway ID must be refused")
+	}
+	top, _ = drill.LoadTopology("topology/kind.yaml", "a1b2c3")
+	top.Target.GatewayID = "openshell"
+	if top.Validate() == nil {
+		t.Fatal("the default gateway ID must be refused")
+	}
+	top, _ = drill.LoadTopology("topology/kind.yaml", "a1b2c3")
 	top.Target.Release = "prod"
 	if top.Validate() == nil {
 		t.Fatal("a release without koinon must be refused")
@@ -145,11 +155,11 @@ func TestFakeModelManifestIsLabelledAndParses(t *testing.T) {
 
 func TestValuesOverlayHoldsAndNamesTheGateway(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-dst-a1b2c3", Service: "openshell-dst-a1b2c3", ClientTLSSecret: "openshell-dst-a1b2c3-client-tls"}
-	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, true, "")
+	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-dst-a1b2c3", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"restoreHold: true", "openshell-dst-a1b2c3.koinon-drill-os-dst-a1b2c3.svc:8080", "fakemodel.koinon-drill-fakes-a1b2c3.svc:8080", "openshell-dst-a1b2c3-client-tls"} {
+	for _, want := range []string{"restoreHold: true", "openshell-dst-a1b2c3.koinon-drill-os-dst-a1b2c3.svc:8080", "fakemodel.koinon-drill-fakes-a1b2c3.svc:8080", "openshell-dst-a1b2c3-client-tls", "gatewayId: drill-dst-a1b2c3"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in:\n%s", want, s)
 		}

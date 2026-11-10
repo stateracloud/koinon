@@ -93,6 +93,11 @@ edited.
   on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`.
 - The suite shows what is missing before the product fixes land. `known gap: #N` is a red line in the
   report on purpose: it is the list of work, and it ends when the issue closes.
+- Each gateway has its own `gatewayId` (`drill-src-<run>`, `drill-dst-<run>`; the gateway chart value and
+  Koinon's `openshell.gatewayId`). The restored org has the source's workspace name, so with one ID (the
+  default `openshell`) both gateways would manage the same `openshell-<id>-<workspace>` namespace. The
+  topology check refuses equal IDs; the sweep deletes the `openshell-drill-*-<run>-*` namespaces of the
+  run by the `openshell.ai/gateway-id` label.
 - A second OpenShell gateway and an object store run in the kind cluster, which loads a 4 vCPU runner.
   Phase 1 measures it; the answer decides whether the drill needs a larger runner.
 - The guide's blocks name the namespace `koinon` and the release `koinon`. The drill substitutes both
@@ -109,7 +114,7 @@ edited.
   in-place restore, and a pending workflow and an archived agent are fragile to seed in bash. It is kept
   as the `inplace` scenario.
 - **Two kind clusters.** Strongest isolation, but doubles the control planes on one runner, and a
-  second namespace with its own gateway already shows that nothing is shared. Revisit if a
+  second namespace with its own gateway and its own gateway ID shows that nothing is shared. Revisit if a
   cluster-scoped object is added.
 - **A copy of live data as the gate.** Real shapes, but no fixtures, not repeatable, and the copy holds
   valid live credentials.

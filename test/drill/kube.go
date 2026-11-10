@@ -33,7 +33,7 @@ func NewKube(kubeconfig, kubeContext, dir string) (*Kube, error) {
 		return nil, fmt.Errorf("the kube context is empty")
 	}
 	k := &Kube{Kubeconfig: kubeconfig, Context: kubeContext, BinDir: dir}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
 	for tool, flag := range map[string]string{"kubectl": "--context", "helm": "--kube-context"} {
@@ -54,7 +54,7 @@ func (k *Kube) cmd(ctx context.Context, tool string, args ...string) *exec.Cmd {
 	if tool == "helm" {
 		flag = "--kube-context"
 	}
-	c := exec.CommandContext(ctx, tool, append([]string{flag, k.Context}, args...)...)
+	c := exec.CommandContext(ctx, tool, append([]string{flag, k.Context}, args...)...) //nolint:gosec // tool is kubectl or helm, fixed by the callers
 	c.Env = append(os.Environ(), "KUBECONFIG="+k.Kubeconfig)
 	return c
 }
@@ -172,7 +172,7 @@ func (k *Kube) Label(ctx context.Context, runID, ns string, args ...string) erro
 // GuideBlock runs one block of the backup and restore guide, as written, for the install in ns with
 // the given release, in workdir (where the dump and the key backup live). It returns the combined output.
 func (k *Kube) GuideBlock(ctx context.Context, repoRoot, workdir, name, ns, release string) (string, error) {
-	show := exec.CommandContext(ctx, filepath.Join(repoRoot, "hack", "docs-e1.sh"), "show", name)
+	show := exec.CommandContext(ctx, filepath.Join(repoRoot, "hack", "docs-e1.sh"), "show", name) //nolint:gosec // a repository script with fixed arguments
 	show.Env = append(os.Environ(), "E1_FILE="+filepath.Join(repoRoot, "test", "e2e", "commands", "backup-restore.e1"))
 	text, err := run(show)
 	if err != nil {
@@ -182,7 +182,7 @@ func (k *Kube) GuideBlock(ctx context.Context, repoRoot, workdir, name, ns, rele
 	if err != nil {
 		return "", fmt.Errorf("guide block %s: %w", name, err)
 	}
-	c := exec.CommandContext(ctx, "bash", "-euo", "pipefail", "-c", script)
+	c := exec.CommandContext(ctx, "bash", "-euo", "pipefail", "-c", script) //nolint:gosec // the guide block is the thing under test
 	c.Dir = workdir
 	c.Env = append(os.Environ(), "KUBECONFIG="+k.Kubeconfig, "PATH="+k.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var out bytes.Buffer

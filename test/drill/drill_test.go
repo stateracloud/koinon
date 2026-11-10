@@ -106,7 +106,7 @@ func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 	GinkgoHelper()
 	ensureNamespace(ctx, in.GatewayNamespace)
 	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, top.GatewayChart, "--version", top.GatewayVersion,
-		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--wait", "--timeout", "8m")
+		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
 	must(err, "install the OpenShell gateway "+in.GatewayRelease)
 	DeferCleanup(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
@@ -134,7 +134,7 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 	_, err = kube.KubectlStdin(ctx, string(b), "apply", "-f", "-")
 	must(err, "copy the client certificate")
 
-	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, hold, top.StorageClass)
+	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass)
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
@@ -262,7 +262,7 @@ func knownGap(issue, what string, probe func() (finding string)) {
 }
 
 var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
-	var marks = &res.Marks
+	marks := &res.Marks
 
 	step("fakes: the drill's fake model server", func(ctx SpecContext) {
 		ensureNamespace(ctx, top.FakesNamespace)
