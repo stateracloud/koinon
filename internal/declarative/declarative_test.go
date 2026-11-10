@@ -159,8 +159,11 @@ var _ = Describe("Importer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list).To(BeEmpty())
 		Expect(logs.String()).To(ContainSubstring("held: MCP server tracker not applied until release"))
+		// Only the held Secret: the provider fixture carries rates, which earn their own Warning.
 		for _, e := range events(ctx) {
-			Expect(e.Type).NotTo(Equal(corev1.EventTypeWarning))
+			if e.InvolvedObject.Name == "tracker" {
+				Expect(e.Type).NotTo(Equal(corev1.EventTypeWarning), e.Message)
+			}
 		}
 		provs, err := store.New(pool).ListProviders(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
