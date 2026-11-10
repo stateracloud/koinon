@@ -101,7 +101,14 @@ The policies select sandbox namespaces by label, so three paths could move a san
   every `persistentVolumeClaim` volume whose `claimName` is not `<volume name>-<sandbox name>`,
   where the sandbox is the one `Sandbox` controller owner reference (`agents.x-k8s.io`) on the pod
   itself. A pod with no such owner, a claim of another name and every generic `ephemeral` volume
-  are denied (supervisor pods too). The facts it rests on:
+  are denied (supervisor pods too). `<template>-<sandbox>` is ambiguous when a template name may
+  hold `-` (volume `workspace-sb` on Sandbox `a`, volume `workspace` on Sandbox `sb-a`), so the
+  pods policy refuses a `-` in the volume name and the objects policy refuses a `-` in any
+  `Sandbox` `spec.volumeClaimTemplates[].metadata.name` and a set
+  `spec.volumeClaimTemplates[].spec.volumeName` (it would bind the claim to a chosen PV). The
+  claim check runs on CREATE only: pod volumes cannot change after create, and an update that
+  drops the owner reference (the garbage collector orphaning the pod) must not be denied. Other
+  spec changes stay denied to everyone but the controller. The facts it rests on:
   - Agent Sandbox v1.0.7 names the claim of `volumeClaimTemplate` T for Sandbox S `T-S`, mounts it
     as volume T, creates it with S as controller owner, and refuses a claim owned by another
     controller. It adopts an unowned one only with the sandbox tracking label or the pool label:

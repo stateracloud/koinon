@@ -303,6 +303,16 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		denied(createPod(ctx, gatewayUser, ns, supervisor("pvc-supervisor", func(p *corev1.Pod) {
 			p.Spec.Volumes = append(p.Spec.Volumes, claim("workspace", "admin-data"))
 		})), claimMessage)
+		By("a hyphen in the volume name makes the claim name ambiguous across sandboxes: denied")
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-hyphen", with([]metav1.OwnerReference{owned("a")}, claim("workspace-sb", "workspace-sb-a")))), claimMessage)
+		By("an update that only drops the owner reference (orphan garbage collection) is not denied")
+		for _, user := range []string{"admin", otherUser} {
+			p, err := admin.CoreV1().Pods(ns).Get(ctx, "pvc-ok", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			p.OwnerReferences = nil
+			_, err = as[user].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			Expect(err).NotTo(HaveOccurred(), user)
+		}
 		By("a generic ephemeral volume is denied")
 		ephemeral := corev1.Volume{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
 			Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -692,6 +702,31 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		By("Secrets outside sandbox namespaces are not affected (control)")
 		_, err = admin.CoreV1().Secrets(plain).Create(ctx, secret, dryRun)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("lets Sandbox volumeClaimTemplates carry only hyphen-free names and no volumeName (issue 475)", func(ctx SpecContext) {
+		template := func(name string, spec map[string]any) map[string]any {
+			return map[string]any{"metadata": map[string]any{"name": name}, "spec": spec}
+		}
+		sandbox := func(templates ...any) *unstructured.Unstructured {
+			return &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": sandboxGVR.GroupVersion().String(), "kind": "Sandbox",
+				"metadata": map[string]any{"name": "templated"},
+				"spec": map[string]any{
+					"podTemplate":          map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "agent", "image": "registry.invalid/x:1"}}}},
+					"volumeClaimTemplates": templates,
+				},
+			}}
+		}
+		create := func(user string, sb *unstructured.Unstructured) error {
+			_, err := asDynamic[user].Resource(sandboxGVR).Namespace(ns).Create(ctx, sb, dryRun)
+			return err
+		}
+		for _, user := range []string{gatewayUser, controllerUser} {
+			Expect(create(user, sandbox(template("workspace", map[string]any{"accessModes": []any{"ReadWriteOnce"}})))).To(Succeed(), user)
+			denied(create(user, sandbox(template("workspace-sb", map[string]any{}))), "must not contain '-'")
+			denied(create(user, sandbox(template("workspace", map[string]any{"volumeName": "pv-admin"}))), "must not set spec.volumeName")
+		}
 	})
 
 	It("lets only the OpenShell gateway and the controller write Sandbox objects", func(ctx SpecContext) {

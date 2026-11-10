@@ -109,6 +109,10 @@ has "the pods policy derives the owning Sandbox from ownerReferences" "o.kind ==
 has "the pods policy checks claimName against volume name and owner" "claimName == v.name .* variables.owningSandboxes\[0\]"
 has "the pods policy refuses foreign claims" "sandbox pods may mount only the PersistentVolumeClaim their Sandbox made"
 has "the pods policy refuses generic ephemeral volumes" "generic ephemeral volumes are not allowed in sandbox pods"
+has "the pods policy refuses a hyphen in a claim volume name" "!v.name.contains\\('-'\\)"
+has "the pods policy checks claims on CREATE only" "request.operation != 'CREATE' \\|\\| !has\\(object.spec.volumes\\)"
+has "the objects policy refuses hyphens in volumeClaimTemplate names" "must not contain '-'"
+has "the objects policy refuses a volumeClaimTemplate volumeName" "must not set spec.volumeName"
 lacks "no claim rule without the sandbox policy" 'owningSandboxes' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
 
 # Old issue 475: the namespace label policy. The sandbox policies select namespaces by label, so
