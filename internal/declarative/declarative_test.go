@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/sinkclass"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -147,6 +148,30 @@ var _ = Describe("Importer", func() {
 		Expect(list[0].Removed).To(BeFalse())
 		Expect(list[0].DisabledReason).To(BeEmpty())
 		Expect(list[0].HasCredential).To(BeFalse())
+	})
+
+	It("skips an mcp-server Secret while the install is held, and still applies the rest of the pass", func(ctx SpecContext) {
+		imp.MCP = mcpservers.New(pool, ring, nil).WithRestoreHold(restorehold.NewGuard(true))
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, map[string]string{"name": "tracker", "url": "https://mcp.example.com/mcp"})
+		put(ctx, "prov", declarative.TypeModelProvider, slug, provider("prov"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, err := mcp.List(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list).To(BeEmpty())
+		Expect(logs.String()).To(ContainSubstring("held: MCP server tracker not applied until release"))
+		for _, e := range events(ctx) {
+			Expect(e.Type).NotTo(Equal(corev1.EventTypeWarning))
+		}
+		provs, err := store.New(pool).ListProviders(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(provs).NotTo(BeEmpty())
+
+		By("release applies it")
+		imp.MCP = mcp
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, map[string]string{"name": "tracker", "url": "https://mcp.example.com/mcp"})
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = mcp.List(ctx, org)
+		Expect(list).To(HaveLen(1))
 	})
 
 	It("ignores an invalid mcp-server Secret with a Warning Event that quotes no value", func(ctx SpecContext) {

@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runpark"
 )
 
@@ -296,6 +297,19 @@ var _ = Describe("Service", func() {
 		Expect(row.Error.String).To(ContainSubstring(`unknown GitHub write tool "delete_repository"`))
 		Expect(f.gh.Mints()).To(BeZero(), "nothing is executed, not even as a comment")
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
+	})
+
+	It("still denies while the install is held: Deny starts nothing outward (ADR 0107)", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.park(ctx)
+		held := approvals.New(pool, approvals.Options{RestoreHold: restorehold.NewGuard(true)})
+
+		row, err := held.Deny(ctx, f.org, mustID(req.ID), f.owner, "held")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusDenied))
+		_, err = held.Approve(ctx, f.org, mustID(req.ID), f.owner, req.ArgsSHA256, "")
+		Expect(err).To(MatchError(restorehold.ErrHeld))
 	})
 
 	It("denies with a note and resumes the parked run", func(ctx SpecContext) {

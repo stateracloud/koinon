@@ -335,6 +335,10 @@ func (a taskAPI) CreateTask(ctx context.Context, req *taskv1alpha1.CreateTaskReq
 	if err != nil {
 		return nil, err
 	}
+	// A held install queues no new work (ADR 0107).
+	if err := a.refuseWhileHeld(); err != nil {
+		return nil, err
+	}
 	agentID, err := parseID("agent_id", req.GetAgentId())
 	if err != nil {
 		return nil, err

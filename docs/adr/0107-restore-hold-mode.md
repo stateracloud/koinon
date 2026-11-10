@@ -38,7 +38,12 @@ not yet trusted.
      preflight); saving or testing a run-trace destination; approving a request (**Approve**; the approved call
      would run at once, and Deny stays open), an approved call's execution (including trusted-preset calls) and an
      approval's diff; creating, re-keying, testing and listing a code-host connection and the scope read they
-     queue; the code-host check of an agent's repository bindings; and **Run now** of a schedule trigger. The
+     queue; the code-host check of an agent's repository bindings; and **Run now** of a schedule trigger.
+     No new work is queued while held: **Run now**, `CreateTask` and direct messages (which create or
+     continue a task) are refused with the same guard, at the service layer. The declarative importer skips an
+     `mcp-server` Secret whose apply would dial out (a new server or a changed URL): it logs
+     `held: MCP server <name> not applied until release` once per pass, records no Invalid Event, and carries on
+     with the other Secrets and the removal pass; the Secret is imported after the release. The
      connection and binding handlers call the code host themselves, with no service in between, so they keep a
      check of their own (`Server.refuseWhileHeld`).
    - `koinon-agentd` claims and takes over no run and touches no sandbox. It still serves `checkpoints resync`, which
@@ -77,5 +82,8 @@ a state in the data, for the reasons above.
 - Negative: release is a rollout (a minute), not a toggle.
 - The hold is not complete silence. The purger, the audit anchor and the importer still write while held (they keep
   the retention rules and the audit chain current); the operator should expect those writes.
+- The hold does not stop sandboxes that are already running. An in-place restore with live sandboxes leaves them
+  running; their model calls go through agentgateway, not koinon-api. Stop them first. (The branch check in the
+  GitHub tool server is reachable only from such a sandbox.)
 - A forgotten hold is an outage; the alert is the guard.
 - ADR 0085: the flag changes no schema and adds no migration, so it is allowed within a shipped patch line.

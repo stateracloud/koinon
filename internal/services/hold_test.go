@@ -21,6 +21,7 @@ import (
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
@@ -103,6 +104,15 @@ var _ = Describe("restore hold", func() {
 		Expect(err).To(MatchError(restorehold.ErrHeld)) // the admin REST API maps this one itself
 		_, err = held.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: org, TriggerId: "t"})
 		refused(err)
+	})
+
+	It("queues no new work: CreateTask and direct messages are refused, in the handler and the service", func() {
+		_, err := taskAPI{held}.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{OrgId: org, AgentId: org, Title: "t", Message: "m"})
+		refused(err)
+		_, err = taskAPI{held}.SendDirectMessage(ctx, &taskv1alpha1.SendDirectMessageRequest{OrgId: org, AgentId: org, MessageId: "m1", Text: "hi"})
+		refused(err)
+		_, err = held.DeliverDirectMessage(ctx, DirectMessage{Org: pgtype.UUID{Valid: true}, Text: "hi"})
+		Expect(err).To(MatchError(restorehold.ErrHeld))
 	})
 
 	It("maps the service's ErrHeld to FailedPrecondition with the one message", func() {
