@@ -73,21 +73,21 @@ prog='
 use strict; use warnings;
 my ($owner, $wit, $allow) = map { qr/$_/ } @ENV{qw(OWNER_RE WRITEINTX_RE SQL_ALLOW_RE)};
 my $q = qr/\\?"/;                                      # a double quote, escaped inside a Go "string"
-my $tbl = qr/(?:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head|install_audit_anchor_heads)/;
+my $tbl = qr/(?i:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head|install_audit_anchor_heads)/;
 my $name = qr/(?:$q$tbl$q|\b$tbl\b)/;                  # bare or quoted table name
 my $schema = qr/(?:$q\w+$q|\b\w+)\s*\.\s*/;            # optional schema qualifier, bare or quoted
-my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?|copy|merge\s+into)\s+(?:only\s+)?/i;
+my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?(?:\s+only)?\s+(?:[\w."]+\s*,\s*)*|copy|merge\s+into)\s*(?:only\s+)?/i;
 my $sqlre = qr/$verb(?:$schema)?$name/i;
 # Rule 2: the Go tokens a quote can open or hide in (comments, raw and interpreted strings, runes),
 # and the value of a string literal that is a table name, optionally qualified and quoted.
 my $tokre = qr{//[^\n]*|/\*.*?\*/|`[^`]*`|"(?:[^"\\\n]|\\.)*"|\x27(?:[^\x27\\\n]|\\.)*\x27}s;
-my $litre = qr/\A\s*(?:(?:"\w+"|\w+)\s*\.\s*)?(?:"$tbl"|$tbl)\s*\z/;
+my $litre = qr/\A\s*(?:(?:"\w+"|\w+)\s*\.\s*)?(?:"$tbl"|$tbl\b)/;
 my $markre = qr{^[ \t]*//[ \t]*audit-lint:allow\b[ \t]*(.*?)[ \t]*$}m;
 my %msg = (
 	sql => "SQL write to an audit table outside internal/audit (add the event to an audit batch)",
-	lit => "audit table name as a whole string literal outside internal/audit (dynamic SQL; add the event to an audit batch)",
+	lit => "string literal that is or starts with an audit table name outside internal/audit (dynamic SQL; add the event to an audit batch)",
 	wit => "audit.WriteInTx outside internal/keyscli (use audit.InTx or audit.InPgTx)",
-	mkr => "audit-lint:allow needs a reason: // audit-lint:allow <reason>",
+	mkr => "audit-lint:allow needs a reason of at least two words: // audit-lint:allow <reason>",
 	mkt => "audit-lint:allow is for _test.go files only",
 	mkp => "audit-lint:allow goes on a comment line of its own, directly above the statement",
 	mku => "audit-lint:allow marks no audit write on the next line",
@@ -115,7 +115,7 @@ while (my $f = <STDIN>) {
 			my ($l, $why) = ($line->($-[0]), $1);
 			$own{$l} = 1;
 			if (!$test) { $say->($l, "mkt") }
-			elsif ($why eq "") { $say->($l, "mkr") }
+			elsif (length($why) < 10 || $why !~ /\S\s+\S/) { $say->($l, "mkr") }
 			else { $marked{$l + 1} = $l }
 		}
 		while ($src =~ /audit-lint:allow/g) {      # a marker after code on its line
