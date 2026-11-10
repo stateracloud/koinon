@@ -117,6 +117,50 @@ var _ = Describe("Sandbox image checks", func() {
 		Entry("no gateway.toml", &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "openshell-config", Namespace: "openshell"}}, ""),
 	)
 
+	Describe("the supervisor token lifetime (old issue 419)", func() {
+		bound := func(n int) func(*preflight.Config) {
+			return func(c *preflight.Config) { c.SupervisorTokenMaxSeconds = n }
+		}
+		const name = "Sandbox supervisor token lifetime"
+
+		It("passes on OpenShell's default of 3600 seconds when the bound is the default", func(ctx SpecContext) {
+			r := find(withConfig(openshellConfig(""), bound(3600)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Pass))
+		})
+
+		It("fails when sa_token_ttl_secs is above the bound, naming both values", func(ctx SpecContext) {
+			results := withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(3600)).run(ctx)
+			r := find(results, name)
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("7200"))
+			Expect(r.Message).To(ContainSubstring("supervisorTokenMaxSeconds=3600"))
+			Expect(r.Fix).To(ContainSubstring("at least 7200"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		})
+
+		It("passes when the bound is raised to match", func(ctx SpecContext) {
+			r := find(withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(7200)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Pass))
+		})
+
+		It("applies OpenShell's clamp to 600-86400", func(ctx SpecContext) {
+			Expect(find(withConfig(openshellConfig("sa_token_ttl_secs = 5\n"), bound(600)).run(ctx), name).Status).To(Equal(preflight.Pass))
+			r := find(withConfig(openshellConfig("sa_token_ttl_secs = 999999\n"), bound(86399)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("86400"))
+		})
+
+		It("reads only the Kubernetes driver's table", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			cm.Data["gateway.toml"] += "\n[other]\nsa_token_ttl_secs = 9000\n"
+			Expect(find(withConfig(cm, bound(3600)).run(ctx), name).Status).To(Equal(preflight.Pass))
+		})
+
+		It("is not checked when the policy is off (bound 0)", func(ctx SpecContext) {
+			Expect(checks(withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(0)).run(ctx))).NotTo(ContainElement(name))
+		})
+	})
+
 	Describe("the gateway ID (ADR 0078)", func() {
 		// OpenShell 0.1.5 on kind: gateway_id appears twice, under the Kubernetes driver and under
 		// gateway_jwt, and only the first is the one that names the namespaces.

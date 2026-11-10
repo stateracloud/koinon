@@ -65,6 +65,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.check.SandboxPolicyScopedToGateway, "sandbox-policy-scoped-to-gateway", false, "the sandbox admission policies bind by openshell.gatewayId: fail when it differs from the OpenShell gateway's gateway_id")
 	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
 	fs.StringVar(&c.supervisorImages, "supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
+	fs.IntVar(&c.check.SupervisorTokenMaxSeconds, "supervisor-token-max-seconds", 0, "sandboxPolicy.supervisorTokenMaxSeconds: fail when the OpenShell gateway's supervisor token lifetime is above it")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")

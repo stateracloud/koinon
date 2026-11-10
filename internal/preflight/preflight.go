@@ -141,6 +141,9 @@ type Config struct {
 	ExpectSandboxPullSecrets bool
 	// SupervisorImages is the effective sandboxPolicy.supervisorImages; empty when the policy is off.
 	SupervisorImages []string
+	// SupervisorTokenMaxSeconds is sandboxPolicy.supervisorTokenMaxSeconds; 0 when the policy is off. The
+	// gateway's supervisor token lifetime above it fails the preflight (every supervisor pod is denied).
+	SupervisorTokenMaxSeconds int
 	// OpenShellGatewayID is openshell.gatewayId: compared with the gateway's gateway_id, because the
 	// sandbox observer derives the workspace namespaces from it (ADR 0078). Empty skips the check.
 	OpenShellGatewayID string

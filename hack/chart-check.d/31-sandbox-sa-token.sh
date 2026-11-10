@@ -29,6 +29,10 @@ has "supervisor tokens are pinned to the openshell-gateway audience" "audience =
 has "supervisor token expiry is required and bounded (default 3600)" 'expirationSeconds <= 3600' --show-only $pol
 has "the supervisor expiry message renders" 'must bound the ServiceAccount token to 3600 seconds' --show-only $pol
 has "supervisorTokenMaxSeconds overrides the bound" 'expirationSeconds <= 7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only $pol
+# The preflight is told the bound, to compare it with the gateway's token lifetime (old issue 419).
+has "preflight is told the supervisor token bound" '--supervisor-token-max-seconds=3600' --show-only templates/preflight.yaml
+has "preflight is told an overridden supervisor token bound" '--supervisor-token-max-seconds=7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only templates/preflight.yaml
+lacks "no token bound to check when the policy is off" '--supervisor-token-max-seconds' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --show-only templates/preflight.yaml
 for msg in \
   "sandbox supervisor pods must set automountServiceAccountToken to false" \
   "sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway" \

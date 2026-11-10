@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,6 +24,7 @@ const (
 	checkGatewayID       = "OpenShell gateway ID"
 	checkWorkspaceMode   = "OpenShell workspace mode"
 	checkSandboxObserver = "Sandbox observer"
+	checkSATokenTTL      = "Sandbox supervisor token lifetime"
 )
 
 var (
@@ -34,6 +36,7 @@ var (
 	// A table header, "[openshell.drivers.kubernetes]" (not an array of tables, "[[...]]").
 	tableHeader = regexp.MustCompile(`^\s*\[([^\[\]]+)\]\s*$`)
 	stringKey   = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')\s*$`)
+	intKey      = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*([0-9][0-9_]*)\s*$`)
 )
 
 // kubernetesDriverTable is the table of OpenShell's gateway.toml that holds the Kubernetes driver's
@@ -52,6 +55,8 @@ type gatewayImages struct {
 	// gatewayID and workspaceMode are the keys of [openshell.drivers.kubernetes]; empty when unset.
 	gatewayID     string
 	workspaceMode string
+	// saTokenTTL is sa_token_ttl_secs of [openshell.drivers.kubernetes]; 0 when unset.
+	saTokenTTL int
 }
 
 // stripComment cuts a line at the first # that is outside a basic ("...") or literal ('...') string.
@@ -98,6 +103,12 @@ func parseGatewayConfig(toml string) gatewayImages {
 			continue
 		}
 		if table != kubernetesDriverTable {
+			continue
+		}
+		if m := intKey.FindStringSubmatch(line); m != nil && m[1] == "sa_token_ttl_secs" {
+			if n, err := strconv.Atoi(strings.ReplaceAll(m[2], "_", "")); err == nil {
+				g.saTokenTTL = n
+			}
 			continue
 		}
 		if m := stringKey.FindStringSubmatch(line); m != nil {
@@ -148,7 +159,8 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	wantSecrets := c.Config.ExpectSandboxPullSecrets
 	wantSupervisor := len(c.Config.SupervisorImages) > 0
 	wantGatewayID := c.Config.OpenShellGatewayID != ""
-	if (!wantSecrets && !wantSupervisor && !wantGatewayID) || c.Config.OpenShellConfigMap == "" {
+	wantTTL := c.Config.SupervisorTokenMaxSeconds > 0
+	if (!wantSecrets && !wantSupervisor && !wantGatewayID && !wantTTL) || c.Config.OpenShellConfigMap == "" {
 		return nil
 	}
 	ns, name := c.Config.OpenShellConfigNamespace, c.Config.OpenShellConfigMap
@@ -213,10 +225,45 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		}
 		results = append(results, r)
 	}
+	if wantTTL {
+		results = append(results, c.tokenTTLResult(g))
+	}
 	if wantGatewayID {
 		results = append(results, c.gatewayIDResults(g)...)
 	}
 	return results
+}
+
+// OpenShell's supervisor token lifetime (driver-kubernetes config.rs; ADR 0006): default 3600 seconds,
+// clamped to 600-86400.
+const (
+	openShellDefaultSATokenTTL = 3600
+	openShellMinSATokenTTL     = 600
+	openShellMaxSATokenTTL     = 86400
+)
+
+// tokenTTLResult compares the lifetime OpenShell gives the supervisor's ServiceAccount token with
+// sandboxPolicy.supervisorTokenMaxSeconds. The policy denies a supervisor pod whose expirationSeconds is
+// above the bound, so a longer TTL means no sandbox starts. It reads sa_token_ttl_secs from the gateway
+// configuration file; OPENSHELL_K8S_SA_TOKEN_TTL_SECS on the gateway can override it, and the
+// preflight cannot see that.
+func (c *Checker) tokenTTLResult(g gatewayImages) Result {
+	ttl, bound := g.saTokenTTL, c.Config.SupervisorTokenMaxSeconds
+	if ttl == 0 {
+		ttl = openShellDefaultSATokenTTL
+	}
+	ttl = min(max(ttl, openShellMinSATokenTTL), openShellMaxSATokenTTL)
+	r := Result{Check: checkSATokenTTL}
+	if ttl > bound {
+		r.Status = Fail
+		r.Message = fmt.Sprintf("the OpenShell gateway gives supervisor ServiceAccount tokens a lifetime of %d seconds, above "+
+			"sandboxPolicy.supervisorTokenMaxSeconds=%d: the sandbox admission policy denies every supervisor pod, so no sandbox starts", ttl, bound)
+		r.Fix = fmt.Sprintf("set sandboxPolicy.supervisorTokenMaxSeconds to at least %d, or lower OPENSHELL_K8S_SA_TOKEN_TTL_SECS (sa_token_ttl_secs) on the OpenShell gateway to at most %d", ttl, bound)
+		return r
+	}
+	r.Status = Pass
+	r.Message = fmt.Sprintf("the gateway's supervisor token lifetime (%d seconds) is within sandboxPolicy.supervisorTokenMaxSeconds (%d)", ttl, bound)
+	return r
 }
 
 // openShellDefaultGatewayID is the gateway_id OpenShell uses when gateway.toml sets none: the
