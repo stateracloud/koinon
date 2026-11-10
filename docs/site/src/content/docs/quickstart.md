@@ -373,9 +373,9 @@ wrappers add the kind context.
 `make docs-check` runs on every pull request. It fails when:
 
 - the `e1` blocks differ from
-  [`test/e2e/quickstart.golden.sh`](https://github.com/stateracloud/koinon/blob/main/test/e2e/quickstart.golden.sh),
-  the commands the test runs. Change a command and the check shows the difference. Update the golden
-  file in the same pull request;
+  [`test/e2e/commands/quickstart.e1`](https://github.com/stateracloud/koinon/blob/main/test/e2e/commands/quickstart.e1),
+  the commands the test runs. The file is the source: change a command there, then make the page
+  show the same, in the same pull request;
 - `run.sh` does not run an `e1` block, or runs one that does not exist;
 - a `chart-values` block is not valid chart values;
 - a bold label in the browser steps is missing from the Playwright spec;

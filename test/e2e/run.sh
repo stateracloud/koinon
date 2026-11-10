@@ -6,16 +6,16 @@
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
 #      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
-#   3. the quickstart's shell commands (plan item DOC1): the blocks marked `sh e1=<name>` in
-#      docs/site/src/content/docs/quickstart.md, run by name through hack/docs-e1.sh, so the docs
-#      cannot drift from this test. They create the namespace, copy the OpenShell client
+#   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
+#      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site shows the
+#      same commands and is checked against that file, so the docs cannot drift from this test. They create the namespace, copy the OpenShell client
 #      certificate, (SUITE=go) declare the model provider with a labelled Secret and `helm install`
 #      charts/koinon (runc, CNPG, the fakes as model and GitHub). SUITE=web adds the provider through
 #      the Providers page instead, as quickstart step 4 does. Only three things differ from a
 #      reader's run: values.yaml is test/e2e/kind/koinon-values.yaml, model-provider.yaml is
 #      test/e2e/kind/model-provider.yaml (the fake model), and kubectl/helm are wrappers that add
 #      the kind context;
-#      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
+#      hack/docs-check.sh (make docs-check) fails when this script, the file and the docs page disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
 #      SUITE=web: Playwright (web/e2e-real, old issue 50) drives the same install through the
@@ -223,7 +223,7 @@ step "fakes ($FAKES)"
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
 done_step "Fakes deployed"
 
-# The quickstart blocks, as the docs show them (quickstart.md). The Go suite declares the model
+# The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
 # provider with a labelled Secret (the docs' GitOps alternative): model-provider.yaml declares the
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
 step "quickstart: namespace, OpenShell client certificate, model provider"

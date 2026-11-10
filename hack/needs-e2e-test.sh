@@ -32,6 +32,8 @@ forced 0 test/e2e/run.sh
 forced 0 test/e2e/kind/up.sh
 forced 0 .github/workflows/e2e-kind.yml
 forced 0 hack/docs-e1.sh
+forced 0 test/e2e/commands/quickstart.e1
+forced 0 test/e2e/commands/backup-restore.e1
 forced 0 docs/site/src/content/docs/quickstart.md
 forced 0 docs/site/src/content/docs/guides/backup-restore.md
 forced 0 flavors/opencode/prompt.md

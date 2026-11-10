@@ -208,9 +208,9 @@ needs nothing from a maintainer to get one (issue #148). A PR nothing in the rul
 it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
-after the driver: it runs the commands of `docs/site/src/content/docs/guides/backup-restore.md` (key export,
+after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
-(ADR 0085 decision 18). `hack/docs-check.sh` keeps the script and the guide's `e1` blocks in step. Locally:
+(ADR 0085 decision 18). `hack/docs-check.sh` keeps the guide's `e1` blocks equal to that file (ADR 0108). Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
