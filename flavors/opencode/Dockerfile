@@ -12,24 +12,24 @@
 # OpenShell's default sandbox base (ADR 0035), multi-arch index digest, checked 2026-10-22.
 ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3bdb76c7038bd4c90a090c21eb7c9f40686
 
-# OpenCode 2.2.0 (ADR 0052) is the compiled glibc build that npm's @opencode/cli package installs
+# OpenCode 2.2.6 (ADR 0052) is the compiled glibc build that npm's @opencode/cli package installs
 # as an optional dependency (@opencode/cli-linux-<arch>). The sha256 values below were computed
 # from the registry tarballs after checking them against npm's published sha512 integrity:
-#   x64:   sha512-XTGFTiZTgugps6rgTXp4mPjOM8klsa5uHn/Shcms2o3k1bjSA3Sgl6O4yJ48y18WWxn9My5Pxt7JKcLID7LOHg==
-#   arm64: sha512-NCCltb8h/8WL30X9o2KTm3UFX0lmfk48lG8tglXJN9moscxeB7w2qOmfHVa32iFngk0iVAKH4xRPlBc88Y0qlw==
-# Re-pinning is old issue 54: the entry script and README name 2.2.0-specific workarounds.
+#   x64:   sha512-g1NShGt+20y/7nzQvqAnO7bQshC8nZGaz8WC7J8vjgXIOZ1uzoxz5OiLnCbUWertf2CM3Dlh9tzrmZJf0ic9Aw==
+#   arm64: sha512-/Hr0ZBwHY4t4NSoakRu6SrR4SZiXIQx5Qbgwrsfn6JoZ1/REvTo8ZhOJ2cJjCzoQLt1oToS1tLJgMJBHAdF4Vg==
+# Re-pinning is old issue 54: the entry script and README name workarounds first seen on 2.2.0 (re-checked on 2.2.6 by the flavor e2e, #422).
 FROM ${BASE} AS fetch-amd64
-ADD --checksum=sha256:fe3046b86872e624f62268058f4801a1f1efffc193103a9988238c891b8ca028 \
-    https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.2.0.tgz /tmp/opencode.tgz
+ADD --checksum=sha256:dfcd69f1d511ae10ed626768b41d84b8100cc4aa64cecb69da38ba7a29d33551 \
+    https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.2.6.tgz /tmp/opencode.tgz
 
 FROM ${BASE} AS fetch-arm64
-ADD --checksum=sha256:6a40643c0dca3aff9d37c87c26c0ee003c46abb810e1c6ddde094ffbf7460b8b \
-    https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.2.0.tgz /tmp/opencode.tgz
+ADD --checksum=sha256:22352e200630ec61a48a65b9f5c2b627328ae5002658d81c067f67c5fb689898 \
+    https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.2.6.tgz /tmp/opencode.tgz
 
 FROM fetch-${TARGETARCH} AS fetch
 RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
  && install -m 0755 /tmp/package/bin/opencode /opencode \
- && /opencode --version | grep -qx 'opencode v2.2.0'
+ && /opencode --version | grep -qx 'opencode v2.2.6'
 
 # Data and code tools for the agent (ADR 0052, amendment 2026-10-28): small release binaries, one
 # fetch stage per architecture like OpenCode's. Each sha256 is the GitHub release asset's `digest`
