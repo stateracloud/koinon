@@ -1,6 +1,6 @@
 # 0107. Restore-hold mode: a restored install starts held
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-10
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (the patch-line rule; recovery policy),
   [0100](0100-install-audit-chain.md) (`restore-hold` is a recorded setting), [0023](0023-observability-and-audit.md) (fixed metric label sets)
@@ -28,13 +28,19 @@ not yet trusted.
    exports `koinon_restore_hold 1`. It does no automatic work and starts no outward call:
    - `koinon-api` runs no DBOS runtime (so no schedule fires, no pending workflow is recovered, no queue drains), no
      sweepers, no price refresh and no code-host scope refresh. It still serves the API and reads, and the CLI
-     commands (`keys verify`, `org-limits show|set`) the operator uses to check and tighten. A call an admin
-     starts that would reach outward is refused with `FailedPrecondition` ("install is held for restore; release
-     the hold first"), by one check (`Server.refuseWhileHeld`) at the top of each such handler: the provider echo
-     check, creating, re-keying, testing and listing a code-host connection (and the scope read they queue), the
-     code-host check of an agent's repository bindings, an approval's diff, adding an MCP server or changing its
-     address (the add-time preflight), and saving or testing a run-trace destination. A new handler that calls
-     outward must start with that check.
+     commands (`keys verify`, `org-limits show|set`) the operator uses to check and tighten. A call that would reach outward is
+     refused with `FailedPrecondition` on the Connect API and `409` on the admin REST API ("install is held for
+     restore; release the hold first"). The guard is at the service layer: one shared `restorehold.Guard`
+     sits in each service that calls out (the provider echo check, the MCP server preflight, run-trace
+     destinations, approvals, the code-host scope read), which returns `restorehold.ErrHeld`, so the hold holds
+     for every caller and both API surfaces, and a new caller of a guarded service is held without any check of its
+     own. What is refused: the provider echo check; adding an MCP server or changing its address (the add-time
+     preflight); saving or testing a run-trace destination; approving a request (**Approve**; the approved call
+     would run at once, and Deny stays open), an approved call's execution (including trusted-preset calls) and an
+     approval's diff; creating, re-keying, testing and listing a code-host connection and the scope read they
+     queue; the code-host check of an agent's repository bindings; and **Run now** of a schedule trigger. The
+     connection and binding handlers call the code host themselves, with no service in between, so they keep a
+     check of their own (`Server.refuseWhileHeld`).
    - `koinon-agentd` claims and takes over no run and touches no sandbox. It still serves `checkpoints resync`, which
      the runbook runs before the release.
    - `koinon-reconciler` converges no sandbox, applies no provider key and runs no spend settler or cost

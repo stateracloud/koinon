@@ -44,7 +44,7 @@ var _ = Describe("restore hold", func() {
 		org = "01010101-0101-0101-0101-010101010101"
 		ctx = auth.WithPrincipal(context.Background(), &auth.Principal{
 			PlatformAdmin: true, UserID: id,
-			Memberships:   []auth.Membership{{OrgID: id, Role: store.OrgRoleOwner}},
+			Memberships: []auth.Membership{{OrgID: id, Role: store.OrgRoleOwner}},
 		})
 		// The services share one guard, as koinon-api wires them; a handler refuses through the service.
 		wire := func(restoreHold bool) *Server {
