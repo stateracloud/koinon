@@ -68,14 +68,10 @@ func RegisterNotifications(n *durable.Notifier, pool *pgxpool.Pool) {
 }
 
 // commit runs fn in a transaction and sends the notifications it returns after the commit
-// (durable.Commit). A failed send is returned as *durable.SendError.
-func (s *Server) commit(ctx context.Context, fn func(q *store.Queries) ([]durable.Notification, error)) error {
+// (durable.Commit). fn adds its audit events to b; a change with nothing to audit leaves it empty. A
+// failed send is returned as *durable.SendError.
+func (s *Server) commit(ctx context.Context, fn func(q *store.Queries, b audit.Batch) ([]durable.Notification, error)) error {
 	return durable.Commit(ctx, s.pool, s.notifier, fn)
-}
-
-// commitAudit is commit for an audited change: fn adds its audit events to b (durable.CommitAudit).
-func (s *Server) commitAudit(ctx context.Context, fn func(q *store.Queries, b audit.Batch) ([]durable.Notification, error)) error {
-	return durable.CommitAudit(ctx, s.pool, s.notifier, fn)
 }
 
 // sendFailed logs a *durable.SendError, which leaves the committed change standing and the
@@ -143,7 +139,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 	if fire == "" {
 		fire = triggers.FireScheduled
 	}
-	err = s.commitAudit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
+	err = s.commit(ctx, func(q *store.Queries, b audit.Batch) ([]durable.Notification, error) {
 		var notes []durable.Notification
 		out, err := durable.Once(ctx, q, in.Org, in.Source, in.Key, func(q *store.Queries) (string, pgtype.UUID, error) {
 			agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: in.Org, ID: in.Agent})
