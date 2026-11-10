@@ -4,7 +4,7 @@
 # A pinned tool or manifest from a GitHub release must come through hack/fetch-pinned.sh (retry,
 # sha256 check) or the composite action .github/actions/fetch-pinned (the same plus a cache), never
 # through a bare curl or wget (#431: releases/download answers 504 now and then). This fails on a
-# curl or wget whose command (backslash continuations joined) names `releases/download`, in the
+# curl or wget whose command (backslash continuations joined) names `releases/download`, a tag archive or raw.githubusercontent.com, in the
 # workflows, the composite actions, the top-level hack/*.sh scripts and test/**/*.sh. The spike
 # scripts under hack/spike are local experiments and out of scope.
 # `hack/pinned-download-lint.sh --self-test` checks the checker against bad input.
@@ -20,12 +20,12 @@ check() {
 	awk '
 		function flush(   n, hit) {
 			if (cmd ~ /(^|[^A-Za-z0-9_.\/-])(curl|wget)[ \t]/) {
-				hit = (cmd ~ /releases\/download/)
+				hit = (cmd ~ /releases\/download|github\.com\/[^\/ ]+\/[^\/ ]+\/archive\/|raw\.githubusercontent\.com/)
 				# A URL held in a variable (X_URL="https://.../releases/download/...") counts too.
 				for (n in vars)
 					if (cmd ~ ("\\$\\{?" n "([^A-Za-z0-9_]|$)")) hit = 1
 				if (hit)
-					printf "%s:%d: curl/wget of releases/download; use hack/fetch-pinned.sh or .github/actions/fetch-pinned\n", FILENAME, start
+					printf "%s:%d: curl/wget of a pinned GitHub asset (releases/download, archive, raw); use hack/fetch-pinned.sh or .github/actions/fetch-pinned\n", FILENAME, start
 			}
 			cmd = ""
 		}
@@ -69,6 +69,10 @@ self_test() {
 	[ "$(check "$tmp/var" | wc -l)" -eq 1 ] || { echo "self-test: curl of a URL variable not flagged" >&2; exit 1; }
 	[ -z "$(check "$tmp/good")" ] || { echo "self-test: helper use flagged" >&2; exit 1; }
 	[ -z "$(check "$tmp/comment")" ] || { echo "self-test: comment flagged" >&2; exit 1; }
+	printf 'curl -fsSL "https://github.com/a/b/archive/refs/tags/v1.tar.gz" | tar -xz\n' >"$tmp/arch"
+	printf 'curl -fsSL https://raw.githubusercontent.com/a/b/v1/x.yaml\n' >"$tmp/raw"
+	[ "$(check "$tmp/arch" | wc -l)" -eq 1 ] || { echo "self-test: archive curl not flagged" >&2; exit 1; }
+	[ "$(check "$tmp/raw" | wc -l)" -eq 1 ] || { echo "self-test: raw curl not flagged" >&2; exit 1; }
 	echo "pinned-download-lint self-test: ok"
 }
 
