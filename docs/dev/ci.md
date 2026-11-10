@@ -216,7 +216,7 @@ e2e-relevant, one running and the newest pending) and nightly, always, to catch 
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
-(ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). Locally:
+(ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). The docs repository also runs `go test ./internal/declarative -run TestDocumented` at a release tag with `KOINON_PAGES_DIR` set to its pages; the tests skip without it (ADR 0108). Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install

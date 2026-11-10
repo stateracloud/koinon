@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Default prices: how the list is maintained
 
 Koinon prices every model request itself, from the raw usage and a dated price. This page is for

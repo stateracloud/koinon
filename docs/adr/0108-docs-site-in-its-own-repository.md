@@ -44,7 +44,14 @@ without making this repository wait for it.
    parsed here (`internal/declarative`). The developer part of the prices document moved to
    `docs/dev/prices.md`; the install writer's log hint and the other messages name the page address
    (`internal/project`).
-8. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
+8. **What this repository provides to `koinon-docs`.** Two things, both at a release tag: the command files
+   `test/e2e/commands/quickstart.e1` and `test/e2e/commands/backup-restore.e1`, and the page-manifest tests
+   `TestDocumentedSecretsParse` and `TestDocumentedMCPServerSecretsParse` in `internal/declarative/pages_test.go`.
+   The tests read the pages in the directory named by `KOINON_PAGES_DIR`, skip when it is not set, and
+   fail when the directory is missing, when it holds fewer than two `model-provider` blocks or no `mcp-server`
+   block, or when a block does not parse. Names and variable are a contract: change them only with a change in
+   `koinon-docs`.
+9. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
    later work, tracked on #491.
 
 ## Alternatives considered
