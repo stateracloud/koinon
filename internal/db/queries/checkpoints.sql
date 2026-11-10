@@ -380,10 +380,13 @@ RETURNING *;
 -- Running requests whose writer died (past @lease_seconds) and that nobody took over for
 -- @wait_seconds more, because the sandbox was not ready (ClaimHomeCheckpoint takes over only then):
 -- failed, so they do not sit as running and the agent can be checkpointed again.
-UPDATE home_checkpoints
+UPDATE home_checkpoints AS h
 SET status = 'failed', finished_at = now(), error = @error
-WHERE org_id = @org_id AND status = 'running'
-  AND started_at < now() - make_interval(secs => @lease_seconds::int) - make_interval(secs => @wait_seconds::int)
+WHERE h.org_id = @org_id AND h.status = 'running'
+  AND h.started_at < now() - make_interval(secs => @lease_seconds::int) - make_interval(secs => @wait_seconds::int)
+  -- A ready sandbox is ClaimHomeCheckpoint's to take over (it may only wait for a free writer slot).
+  AND NOT EXISTS (SELECT 1 FROM agent_sandboxes s
+                  WHERE s.org_id = h.org_id AND s.agent_id = h.agent_id AND s.state = 'ready')
 RETURNING *;
 
 -- checkpoints resync (ADR 0085 decision 17; #89): home_checkpoints rebuilt from the bucket after a

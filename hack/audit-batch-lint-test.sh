@@ -49,6 +49,12 @@ case_ "raw DELETE FROM audit_chain_heads fails" 1 internal/foo/a_test.go 'packag
 var s = `DELETE FROM audit_chain_heads`'
 case_ "raw TRUNCATE install_audit_chain_head fails" 1 internal/foo/a_test.go 'package foo
 var s = `TRUNCATE TABLE install_audit_chain_head`'
+case_ "TRUNCATE list with ONLY fails" 1 internal/foo/a.go 'package foo
+var s = `TRUNCATE agents, ONLY orgs, audit_events`'
+case_ "TRUNCATE list with a star fails" 1 internal/foo/a.go 'package foo
+var s = `TRUNCATE agents *, audit_events`'
+case_ "TRUNCATE list with escaped quotes fails" 1 internal/foo/a.go 'package foo
+var s = "TRUNCATE \"agents\", audit_events"'
 case_ "raw INSERT INTO install_audit_anchor_heads fails" 1 internal/foo/a.go 'package foo
 var s = `INSERT INTO install_audit_anchor_heads (anchor_id) VALUES ($1)`'
 case_ "a SELECT of an audit table passes" 0 internal/foo/a.go 'package foo
@@ -193,6 +199,30 @@ case_ "a table literal inside internal/audit passes" 0 internal/audit/a.go 'pack
 var t = "audit_events"'
 case_ "a table literal in an allowlisted migration test passes" 0 internal/db/migrations/audit_chain_test.go 'package migrations
 var t = "audit_chain_heads"'
+
+# #394 gaps: split strings, case, TRUNCATE lists, one-word reasons.
+case_ "a split string with the table at the start of the second literal fails" 1 internal/foo/a.go 'package foo
+var s = "INSERT INTO " + "audit_events (org_id) VALUES ($1)"'
+case_ "an upper-case table name fails" 1 internal/foo/a.go 'package foo
+var s = `INSERT INTO AUDIT_EVENTS (org_id) VALUES ($1)`'
+case_ "an upper-case table literal fails" 1 internal/foo/a.go 'package foo
+var t = "Audit_Events"'
+case_ "TRUNCATE with a list ending in an audit table fails" 1 internal/foo/a.go 'package foo
+var s = `TRUNCATE agents, audit_events`'
+case_ "TRUNCATE TABLE ONLY with a list fails" 1 internal/foo/a_test.go 'package foo
+var s = `TRUNCATE TABLE ONLY agents, public."install_audit_events" CASCADE`'
+case_ "TRUNCATE of other tables passes" 0 internal/foo/a.go 'package foo
+var s = `TRUNCATE agents, orgs`'
+case_ "a one-word marker reason fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow x
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
+case_ "a one-long-word marker reason fails" 1 internal/foo/a_test.go 'package foo
+func f() {
+	// audit-lint:allow tamper-testing-only
+	_, _ = tx.Exec(ctx, `UPDATE install_audit_events SET target_id = $1`)
+}'
 
 # A git checkout: untracked files that git does not ignore are scanned, ignored ones and deleted
 # tracked files are skipped.

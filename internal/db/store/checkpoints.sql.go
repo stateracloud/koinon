@@ -435,10 +435,13 @@ func (q *Queries) ExpireRetiredHomeRepositoryEpochs(ctx context.Context, arg Exp
 }
 
 const failAbandonedHomeCheckpoints = `-- name: FailAbandonedHomeCheckpoints :many
-UPDATE home_checkpoints
+UPDATE home_checkpoints AS h
 SET status = 'failed', finished_at = now(), error = $1
-WHERE org_id = $2 AND status = 'running'
-  AND started_at < now() - make_interval(secs => $3::int) - make_interval(secs => $4::int)
+WHERE h.org_id = $2 AND h.status = 'running'
+  AND h.started_at < now() - make_interval(secs => $3::int) - make_interval(secs => $4::int)
+  -- A ready sandbox is ClaimHomeCheckpoint's to take over (it may only wait for a free writer slot).
+  AND NOT EXISTS (SELECT 1 FROM agent_sandboxes s
+                  WHERE s.org_id = h.org_id AND s.agent_id = h.agent_id AND s.state = 'ready')
 RETURNING org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch, snapshot_missing_at
 `
 
