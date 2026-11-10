@@ -1288,6 +1288,10 @@ type Querier interface {
 	// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
 	// It touches only this column, so the latency and limit overrides stay.
 	SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error
+	// The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
+	// platform default. It touches only these three columns, so the latency overrides and the other
+	// settings stay.
+	SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams) error
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
 	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
 	// destination matches nothing and is not brought back.

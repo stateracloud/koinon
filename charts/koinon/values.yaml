@@ -565,6 +565,13 @@ openshell:
 # expose the API another way.
 publicUrl: ""
 
+# Restore-hold (issue #462): koinon-api, koinon-agentd and koinon-reconciler start and answer health and
+# reads, but act on nothing. No schedule fires and no pending workflow is recovered, no run is claimed or
+# taken over, no sandbox is converged, no code-host scope or price list is fetched. Start a restored
+# install with this on, check it (docs: Back up and restore), then release it: set it to false and
+# upgrade. It is read at start, so a release is a rollout of the three Deployments.
+restoreHold: false
+
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
 # <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works:
 # enabled=false turns the API's password login off and revokes the bootstrap sessions. The bootstrap admin

@@ -282,6 +282,11 @@ gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list 
     resourceFieldRef:
       resource: limits.memory
       divisor: "1"
+{{- /* Restore-hold (issue #462): all three Deployments start but act on nothing until the value is false again. */}}
+{{- if .Values.restoreHold }}
+- name: KOINON_RESTORE_HOLD
+  value: "true"
+{{- end }}
 {{- end }}
 
 {{/*

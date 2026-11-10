@@ -146,6 +146,38 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(out.String()).To(ContainSubstring("active for 295 of 365 days"))
 	})
 
+	It("verify opens every value, changes nothing and names the values that do not open", func(ctx SpecContext) {
+		ids := seed(ctx, 2)
+		seedMCP(ctx)
+		snapshot := func() string {
+			var s string
+			Expect(pool.QueryRow(ctx, `SELECT coalesce(string_agg(api_key::text, ',' ORDER BY id), '') FROM providers WHERE org_id = $1`, org).Scan(&s)).To(Succeed())
+			return s
+		}
+		events := func() int {
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events`).Scan(&n)).To(Succeed())
+			return n
+		}
+		before, nEvents := snapshot(), events()
+
+		Expect(tool.Verify(ctx)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("3 value(s) opened, 0 failed."))
+		Expect(snapshot()).To(Equal(before), "verify writes no row")
+		Expect(events()).To(Equal(nEvents), "verify writes no audit event")
+
+		By("a value sealed under a KEK the key set lacks")
+		out.Reset()
+		_, err := pool.Exec(ctx, `UPDATE providers SET api_key = jsonb_set(api_key, '{kek_id}', '"gone"') WHERE id = $1`, ids[0])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tool.Verify(ctx)).To(MatchError(keyscli.ErrVerifyFailed))
+		Expect(out.String()).To(And(
+			ContainSubstring("FAIL providers.api_key org "+org.String()+" row "+ids[0]+": unknown_kek"),
+			ContainSubstring("2 value(s) opened, 1 failed."),
+			ContainSubstring("restore the key backup")))
+		Expect(out.String()).NotTo(ContainSubstring("sk-"), "no plaintext is printed")
+	})
+
 	It("warns after the active period and when a value's KEK is missing", func(ctx SpecContext) {
 		ids := seed(ctx, 1)
 		now = now.AddDate(1, 0, 0)

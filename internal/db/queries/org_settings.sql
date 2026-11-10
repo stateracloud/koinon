@@ -23,6 +23,17 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
 RETURNING *;
 
+-- name: SetOrgRunLimits :exec
+-- The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
+-- platform default. It touches only these three columns, so the latency overrides and the other
+-- settings stay.
+INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute)
+VALUES (@org_id, sqlc.narg(max_concurrent_runs), sqlc.narg(trigger_concurrency), sqlc.narg(trigger_rate_per_minute))
+ON CONFLICT (org_id) DO UPDATE
+SET max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+    trigger_concurrency = EXCLUDED.trigger_concurrency,
+    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute;
+
 -- name: SetOrgLeakMatchThreshold :exec
 -- The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
 -- default. It touches only this column, so the latency and limit overrides stay.
