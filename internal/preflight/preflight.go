@@ -45,7 +45,7 @@ const (
 	cnpgCRD    = "clusters.postgresql.cnpg.io"
 
 	agentSandboxInstall = "kubectl apply --server-side -f " +
-		"https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.7/sandbox-with-extensions.yaml"
+		"https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.10/sandbox-with-extensions.yaml"
 )
 
 // AgentgatewayAPIVersion is the agentgateway.dev version Koinon's objects use, and

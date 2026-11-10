@@ -446,7 +446,9 @@ func (p *Pool) work(ctx, runCtx context.Context, owner string) {
 // claim takes over a run whose owner's lease expired, or else claims the oldest claimable
 // run, in some org. Expired runs come first: they were already running.
 func (p *Pool) claim(ctx context.Context, owner string) (store.Run, bool, error) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	// Only the orgs with a claimable or expired run: the poll must not cost a query per org that
+	// ever existed (issue 378: a long test suite's database grows by an org per spec).
+	orgs, err := p.q.ListOrgIDsWithRunWork(ctx)
 	if err != nil {
 		return store.Run{}, false, err
 	}

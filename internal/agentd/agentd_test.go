@@ -412,6 +412,19 @@ var _ = Describe("Pool", func() {
 		Expect(string(taskEvents(ctx, e, t)[1].Payload)).To(ContainSubstring("before the crash resumed"))
 	})
 
+	It("fails a run whose harness writes a line over 10 MiB, without a resume", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		r := e.enqueue(ctx, e.task(ctx, markLongLine))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(30 * time.Second).Should(Equal(store.RunStateFailed))
+
+		final := getRun(ctx, r)
+		Expect(final.OutcomeReason.String).To(ContainSubstring("harness output line too long"))
+		Expect(final.Takeovers).To(BeZero(), "the same line would come again: no resume")
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(HaveLen(1))
+	})
+
 	It("lets another replica take over a killed worker's run, without duplicate events", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		t := e.task(ctx, markHang)

@@ -401,7 +401,7 @@ not wait for that: with bootstrap login off, the revocation and its `org.bootstr
 run in a transaction of their own, right after the refused one. It takes the bootstrap lock and the default
 org's head and no install lock, so the lock order of decision 1.7 holds. The retry then finds no session to
 revoke and writes no second event. This event has no `install_event_id`: the install event of that start
-did not exist when it was written, and the revocation does not depend on it.
+did not exist when it was written, and the revocation does not depend on it. Its summary carries `"installEventDeferred": true` to name this case.
 
 **Keys: not atomic, so checked on start.** Key events are not atomic with the change they record,
 in three ways, and the ADR says so rather than pretending otherwise:

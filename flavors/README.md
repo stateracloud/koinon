@@ -44,7 +44,7 @@ one image). Today the suite runs against OpenCode only.
 
 | | OpenCode |
 | --- | --- |
-| Harness | OpenCode 2.2.0 |
+| Harness | OpenCode 2.2.6 |
 | `session/resume` advertised | yes |
 | Asks permission for | paths outside the session directory |
 | Unknown session on load | `session not found` |

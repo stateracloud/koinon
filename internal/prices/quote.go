@@ -14,10 +14,12 @@ import (
 	"github.com/stateracloud/koinon/pricing"
 )
 
-// This file is the one place that prices a usage record (old issue 373). Ledger ingest, the settler
-// and the agent daemon ask [Resolver.Find] for the model's price at a time and [Quote.Price] for the
-// cost of a usage; none of them calls [Lookup], [Resolver.Resolve] or [pricing.Price.Cost] itself,
-// and the "no price" and "unusable price" cases are told apart once, by [Unpriceable].
+// This file is the one place that prices a usage record (#373). Ledger ingest, the settler and the
+// agent daemon's modelFacts ask [Resolver.Find] for the model's price at a time and [Quote.Price]
+// for the cost of a usage; none of them calls [pricing.Price.Cost] itself. Every caller that has to
+// tell "no price" from "unusable price" (these and the availability checks of the reconciler,
+// agentd's model wait and agentmodel) does it with [Unpriceable]. [Lookup] answers only whether an
+// enabled model of that name exists, which is not a price decision.
 
 // Quote is the model a request used and the price found for it at the request's time. Price turns
 // a usage into a cost. When Find returns an error, Model is still set if the model was found.

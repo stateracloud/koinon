@@ -132,13 +132,13 @@ func Check(ctx context.Context, rv prices.Resolver, q *store.Queries, org pgtype
 		}
 		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, ProviderURL: m.Url, Format: modelformat.Format(m.ModelFormat)}
 		_, err := rv.Resolve(ctx, q, org, pm, at)
-		var bad *prices.BadPriceError
-		switch {
-		case err == nil:
+		if err == nil {
 			return nil
-		case errors.Is(err, prices.ErrUnpriced):
-			return &UnusableError{Model: model, Reason: "unpriced"}
-		case errors.As(err, &bad):
+		}
+		if reason, ok := prices.Unpriceable(err); ok {
+			if reason == prices.ReasonNoPrice {
+				return &UnusableError{Model: model, Reason: "unpriced"}
+			}
 			return &UnusableError{Model: model, Reason: "bad_price", Detail: err}
 		}
 		return err

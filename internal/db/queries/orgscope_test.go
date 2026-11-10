@@ -61,6 +61,7 @@ var crossOrgQueries = map[string]string{
 	"platform_prices.sql:ProviderTypeInUse":             "the price refresh's auto mode: whether any org has a provider of a type, a yes or no only (ADR 0098)",
 	"platform_prices.sql:ListModelsOfProviderType":      "the unpriced-model count: resolves every org's models of a provider type against that org's prices, reported as a count only (ADR 0098)",
 	"prices.sql:ListPendingMigratedPrices":              "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
+	"orgs.sql:ListOrgIDsWithRunWork":                    "the agentd claim loop: finds the live orgs with a claimable or expired-lease run, returning org ids only; every claim query after it is scoped by @org_id",
 	"questions.sql:ListOrgsWithQuestionsToNotify":       "the question notifier: finds every org that has an opened question not yet announced",
 	"questions.sql:ListOrgsWithOpenQuestions":           "the question sweep: finds every org that has an open question, to retarget the orphaned ones",
 	"questions.sql:ListOrgsWithDueQuestions":            "the question timers: finds every org that has an open question with a reminder or an expiry due",

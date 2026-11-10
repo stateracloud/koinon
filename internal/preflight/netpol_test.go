@@ -167,7 +167,7 @@ var _ = Describe("KubeNetPolProber", func() {
 			Client: kube, Namespace: ns, NamePrefix: "koinon-preflight-netpol", Token: "t0k3n",
 			Image: "ghcr.io/stateracloud/koinon/api:0.1.0", ImagePullSecrets: []string{"ghcr"},
 			Labels:  map[string]string{"app.kubernetes.io/instance": "koinon"},
-			Timeout: 300 * time.Millisecond, PollInterval: 10 * time.Millisecond,
+			Timeout: 30 * time.Second, PollInterval: 10 * time.Millisecond,
 			Logs: func(_ context.Context, namespace, name string) (string, error) {
 				Expect(namespace + "/" + name).To(Equal(ns + "/" + clientPd))
 				return log, nil
@@ -188,6 +188,14 @@ var _ = Describe("KubeNetPolProber", func() {
 		kube = fake.NewClientset()
 		created = map[string]runtime.Object{}
 	})
+
+	// stuck is a prober that gives up quickly, for the specs that reach the timeout path. The
+	// success path keeps prober's CI-sized bound: a loaded runner can delay a poll.
+	stuck := func(log string) preflight.KubeNetPolProber {
+		p := prober(log)
+		p.Timeout = 300 * time.Millisecond
+		return p
+	}
 
 	It("passes the check when the policy is enforced, and deletes all three objects", func(ctx SpecContext) {
 		startPods(corev1.PodRunning, corev1.PodSucceeded)
@@ -254,7 +262,7 @@ var _ = Describe("KubeNetPolProber", func() {
 			}}
 			return true, pod, nil
 		})
-		_, err := prober("").Probe(ctx)
+		_, err := stuck("").Probe(ctx)
 		Expect(err).To(MatchError(And(
 			ContainSubstring("probe pod "+server+" still Pending"),
 			ContainSubstring("ImagePullBackOff: pull denied"),
@@ -262,13 +270,13 @@ var _ = Describe("KubeNetPolProber", func() {
 		Expect(created).NotTo(HaveKey(clientPd), "no client without a running server")
 		expectCleanedUp(ctx)
 
-		r := preflight.CheckNetworkPolicy(&preflight.Checker{NetPol: prober("")}, ctx)
+		r := preflight.CheckNetworkPolicy(&preflight.Checker{NetPol: stuck("")}, ctx)
 		Expect(r.Status).To(Equal(preflight.Warn), "a timeout warns, never fails")
 	})
 
 	It("cleans up when the client never finishes", func(ctx SpecContext) {
 		startPods(corev1.PodRunning, corev1.PodRunning)
-		_, err := prober("").Probe(ctx)
+		_, err := stuck("").Probe(ctx)
 		Expect(err).To(MatchError(ContainSubstring("probe pod " + clientPd + " still Running")))
 		expectCleanedUp(ctx)
 	})
