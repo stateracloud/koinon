@@ -86,6 +86,14 @@ spec:
         object.metadata.labels['openshell.ai/boundary-role'] == 'workload'
     - name: supervisorCreator
       expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.supervisorPods | default list)) | quote }}
+    # The Sandbox that controls this pod (ownerReferences, set by the Agent Sandbox controller before
+    # it creates the pod). Empty when no Sandbox controls the pod.
+    - name: owningSandboxes
+      expression: >-
+        !has(object.metadata.ownerReferences) ? [] :
+        object.metadata.ownerReferences.filter(o,
+          o.kind == 'Sandbox' && o.apiVersion.startsWith('agents.x-k8s.io/') &&
+          has(o.controller) && o.controller).map(o, o.name)
   validations:
     - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
       message: ephemeral containers are not allowed on sandbox pods
@@ -118,6 +126,21 @@ spec:
       message: SPIFFE CSI volumes (csi.spiffe.io) are not allowed in sandbox pods
     - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
       message: hostPath volumes are not allowed
+    # Claims (issue 475; ADR 0045 amendment 2026-11-10): a pod rule sees the pod, not the
+    # PersistentVolume behind a claim, so a claim to a hostPath or csi.spiffe.io PV would pass the
+    # volume rules above. A sandbox pod therefore mounts only the claim its own Sandbox made. Agent
+    # Sandbox v1.0.7 names the claim of volumeClaimTemplate T for Sandbox S "T-S" and mounts it as
+    # volume T (sandbox_controller.go:1510-1516); OpenShell 0.1.7 asks for exactly one template,
+    # "workspace" (driver.rs:7562-7590). Any other claim, a generic ephemeral volume, and a claim
+    # on a pod no Sandbox controls are denied.
+    - expression: >-
+        !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.persistentVolumeClaim) ||
+          (size(variables.owningSandboxes) == 1 &&
+            v.persistentVolumeClaim.claimName == v.name + '-' + variables.owningSandboxes[0]))
+      message: sandbox pods may mount only the PersistentVolumeClaim their Sandbox made (volumeClaimTemplate name-sandbox name)
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.ephemeral))"
+      message: generic ephemeral volumes are not allowed in sandbox pods
     - expression: >-
         object.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) &&
         (!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))

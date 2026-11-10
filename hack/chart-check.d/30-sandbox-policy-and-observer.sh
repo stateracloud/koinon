@@ -103,6 +103,14 @@ has "the pods policy refuses the SPIRE agent socket hostPath" "the SPIRE agent s
 has "the pods policy matches the csi.spiffe.io driver" "v.csi.driver != 'csi.spiffe.io'"
 lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
 
+# Old issue 475: a sandbox pod mounts only the PersistentVolumeClaim its own Sandbox made (the
+# controller names it <volumeClaimTemplate name>-<sandbox name>), and no generic ephemeral volume.
+has "the pods policy derives the owning Sandbox from ownerReferences" "o.kind == 'Sandbox'.*startsWith\('agents.x-k8s.io/'\)"
+has "the pods policy checks claimName against volume name and owner" "claimName == v.name .* variables.owningSandboxes\[0\]"
+has "the pods policy refuses foreign claims" "sandbox pods may mount only the PersistentVolumeClaim their Sandbox made"
+has "the pods policy refuses generic ephemeral volumes" "generic ephemeral volumes are not allowed in sandbox pods"
+lacks "no claim rule without the sandbox policy" 'owningSandboxes' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
+
 # Old issue 475: the namespace label policy. The sandbox policies select namespaces by label, so
 # relabelling a namespace would take it out of all of them; only sandboxPolicy.identities.namespaces
 # may change the labels the selectors use. It binds to every namespace UPDATE (a namespaceSelector

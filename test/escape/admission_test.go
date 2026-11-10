@@ -18,6 +18,7 @@ import (
 	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -276,6 +277,39 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		} {
 			denied(createPod(ctx, controllerUser, ns, workload("shape", c.mutate)), c.message)
 		}
+	})
+
+	It("lets sandbox pods mount only the claim their Sandbox made, and no generic ephemeral volume (issue 475)", func(ctx SpecContext) {
+		const claimMessage = "sandbox pods may mount only the PersistentVolumeClaim their Sandbox made"
+		owned := func(sandbox string) metav1.OwnerReference {
+			return metav1.OwnerReference{APIVersion: "agents.x-k8s.io/v1beta1", Kind: "Sandbox", Name: sandbox, UID: "00000000-0000-0000-0000-000000000475", Controller: new(true)}
+		}
+		claim := func(volume, claimName string) corev1.Volume {
+			return corev1.Volume{Name: volume, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}}
+		}
+		with := func(owner []metav1.OwnerReference, v corev1.Volume) func(*corev1.Pod) {
+			return func(p *corev1.Pod) { p.OwnerReferences = owner; p.Spec.Volumes = []corev1.Volume{v} }
+		}
+		By("the claim OpenShell 0.1.7 gets from the controller (workspace-<sandbox>) is admitted (control)")
+		Expect(createPod(ctx, controllerUser, ns, workload("pvc-ok", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-a"))))).To(Succeed())
+		By("another claim, another sandbox's claim, and an unowned pod are denied")
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-foreign", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "admin-data")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-other", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-b")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-volname", with([]metav1.OwnerReference{owned("sb-a")}, claim("data", "workspace-sb-a")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-noowner", with(nil, claim("workspace", "workspace-sb-a")))), claimMessage)
+		notController := owned("sb-a")
+		notController.Controller = nil
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-notctl", with([]metav1.OwnerReference{notController}, claim("workspace", "workspace-sb-a")))), claimMessage)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("pvc-supervisor", func(p *corev1.Pod) {
+			p.Spec.Volumes = append(p.Spec.Volumes, claim("workspace", "admin-data"))
+		})), claimMessage)
+		By("a generic ephemeral volume is denied")
+		ephemeral := corev1.Volume{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+			Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+			},
+		}}}}
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-ephemeral", with([]metav1.OwnerReference{owned("sb-a")}, ephemeral))), "generic ephemeral volumes are not allowed")
 	})
 
 	It("denies the SPIRE agent socket in every sandbox pod: the SPIFFE CSI driver and the socket's hostPath (ADR 0097 decision 11)", func(ctx SpecContext) {
