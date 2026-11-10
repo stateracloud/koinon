@@ -347,6 +347,23 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(good.lastEntry(ctx).CostFlagged).To(BeTrue())
 	})
 
+	It("names the request in the error of a cost that does not fit, and flags it unpriced", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00")
+		e.model(ctx, "openrouter", flash)
+		// A rate that parses and validates, so Find succeeds; only pricing a huge usage overflows.
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'dear', '{"provider":"openrouter","match":{"glob":"acme/*"},"validFrom":"2020-01-01","prices":{"input":"1000000","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+
+		huge := e.usage(time.Now(), flash, 9_000_000_000_000_000, 0, 0, "")
+		res, err := ing.Ingest(ctx, []ledger.Entry{huge})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Recorded).To(Equal(1))
+		b := e.lastEntry(ctx)
+		Expect(b.CostFlagged).To(BeTrue())
+		Expect(string(b.Estimate)).To(ContainSubstring("price_error"))
+		Expect(string(b.Estimate)).To(ContainSubstring("price request " + huge.RequestID))
+	})
+
 	It("caps the bound of an absurd max_tokens, which blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
 		abuser := newEnv(ctx, uniq("org"), "", "10.00")
 		other := newEnv(ctx, uniq("org"), "", "10.00")

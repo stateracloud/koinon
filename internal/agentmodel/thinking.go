@@ -78,7 +78,7 @@ func CapabilityOf(ctx context.Context, q *store.Queries, org pgtype.UUID, model 
 		return thinking.Capability{}, nil
 	}
 	m, err := prices.Lookup(ctx, q, org, model)
-	if errors.Is(err, prices.ErrUnpriced) {
+	if reason, ok := prices.Unpriceable(err); ok && reason == prices.ReasonNoPrice {
 		return thinking.Capability{}, nil
 	} else if err != nil {
 		return thinking.Capability{}, err
