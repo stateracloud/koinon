@@ -2,7 +2,8 @@
 
 Issues and specs for Koinon live as GitHub issues in `stateracloud/koinon`, on the org board
 (https://github.com/orgs/stateracloud/projects/1). Use the `gh` CLI for all operations. Work is
-taken through **claims**, not assignees: see AGENTS.md "Picking up work" and ADR 0082.
+taken through **claims**, not assignees: see AGENTS.md "Picking up work" and ADR 0104. The claim
+assigns your human; the assignee is only a mirror of the claim ref.
 
 ## Conventions
 
@@ -51,7 +52,7 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: the map's open children with no open blocker and no held claim
   (`hack/claim.sh show <n>`); first in map order wins.
 - **Claim**: `hack/claim.sh take <n>`, the session's first write. Never claim by assignee alone: the
-  claim branch is the lock (ADR 0082).
-- **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>` (which releases the
-  claim through the claims workflow), then append a context pointer (gist + link) to the map's
-  Decisions-so-far.
+  claim branch is the lock (ADR 0082, ADR 0104).
+- **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>` and
+  `hack/claim.sh release <n>` (only a merged pull request releases a claim by itself), then append a
+  context pointer (gist + link) to the map's Decisions-so-far.

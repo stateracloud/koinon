@@ -459,6 +459,31 @@ func TestOther(t *testing.T) { otherpkg.Helper(t) }
 		Expect(plainRequireTests(dir)).To(BeEmpty())
 	})
 
+	It("finds RequireT through a method called on a receiver", func() {
+		dir := dirWith(`package x
+import "testing"
+type env struct{}
+func (e *env) need(t *testing.T) { testenv.RequireT(t, testenv.Helm) }
+func TestViaMethod(t *testing.T) { e := &env{}; e.need(t) }
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestViaMethod"}))
+	})
+
+	It("does not take a method for a test, and does not follow a call qualified by an imported package", func() {
+		dir := dirWith(`package x
+import (
+	"testing"
+	"example.com/other"
+)
+type env struct{}
+func (e *env) TestNot(t *testing.T) {}
+func Run(t *testing.T) { RunSpecs(t, "x") }
+func TestQualified(t *testing.T) { testenv.RequireT(t, testenv.Helm); other.Run(t) }
+`)
+		Expect(plainRequireTests(dir)).To(Equal([]string{"TestQualified"}))
+		Expect(runSpecsTests(dir)).To(BeEmpty())
+	})
+
 	It("unions the bodies of a name declared twice (build-tagged variants) instead of letting the last win", func() {
 		dir := dirWith(`package x
 import "testing"

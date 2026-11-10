@@ -7,7 +7,8 @@
 # The rule (docs/dev/ci.md "One verdict per workflow run"):
 #   1. Judge per WORKFLOW RUN, not per check name. For each workflow file (`path`) on the head take the
 #      newest run that counts: by `created_at`, then `run_attempt`. A run titled `ci (draft)` does not
-#      count once the PR is ready. The check runs of every other run of that workflow are dropped, so an
+#      count once the PR is ready: a draft runs nothing heavy and its `go`/`web` are green by skipping, so
+#      until the ready_for_review run exists nothing on the head is evidence. The check runs of every other run of that workflow are dropped, so an
 #      older green can never outvote a newer run that was cancelled, skipped or is still queued.
 #   2. Inside the chosen run, a check name is judged by its newest row: a row that has not finished
 #      (a live re-run attempt) outranks finished ones; otherwise the newest by start time (completion time
@@ -88,6 +89,8 @@ def prv_drop($runs; $draft; $anyok):
   end;
 # The newest run of a workflow (e2e-kind has several by design and is left out) that completed and has no check run at all
 # (startup_failure, a workflow file that failed to parse): nothing would ever arrive, so it is a failure, not a wait.
+# A run that ended success or skipped is not such a case: its jobs ran but are not in the PR's rollup (for
+# example a workflow_dispatch on the head), so it is no part of the verdict and is ignored.
 # Applies to the raw rows (before prv_drop). Prints {id, name, conclusion} objects; none when the runs are unreadable.
 def prv_empty($runs; $draft):
   if $runs == null then [] else
@@ -95,7 +98,7 @@ def prv_empty($runs; $draft):
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
     | [$live[] | select((.id | tostring) as $i | ($cur | index($i)) != null and (.path | startswith(".github/workflows/")) and (.path | endswith("/e2e-kind.yml") | not)
-        and .status == "completed" and ($have | index($i)) == null)
+        and .status == "completed" and ((.conclusion // "") | IN("success", "skipped") | not) and ($have | index($i)) == null)
       | {id: (.id | tostring), name: (.name // "workflow"), conclusion: (.conclusion // "unknown")}]
   end;
 def prv_word: if .done | not then "pending" elif .skipped then "skipped" elif .cancelled then "cancelled" elif .bad then "failure" else "success" end;

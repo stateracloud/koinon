@@ -101,15 +101,16 @@ including how to point Tilt at a remote cluster of your own.
   bypass. Merge with a merge commit (keeps stacked pull requests intact); squash and rebase merges
   are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
   paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
-- A pull request names the issue it closes with `Closes #N`. Claim the issue first, so nobody else
-  starts on it: comment `/claim` on the issue (outside contributors: on issues labelled
-  `good first issue` or `help wanted`, at most 2 at a time, 14 days, renewed by commenting again),
-  or `hack/claim.sh take N` as a maintainer's agent; `/release` gives it back
+- A pull request names the issue it closes with `Closes #N`. A maintainer's agent claims the issue
+  first with `hack/claim.sh take N`, so no other lane starts on it; the claim ends when the pull
+  request merges, or with `hack/claim.sh release N` (or `release-pr <PR>` after a close without a merge)
   ([ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md),
-  [ADR 0094](docs/adr/0094-work-claims-on-the-public-repository.md)). The `claim` check fails only
-  when someone else holds a live claim on an issue the pull request closes, or on the number of an
-  ADR it adds; it names the holder and what to do. With strict checks, keep the branch up to date
-  with `main`; the updater bot also does it for auto-merge pull requests.
+  [ADR 0104](docs/adr/0104-work-claims-reduced-to-the-lock.md)). Outside contributors do not claim:
+  say on the issue that you are working on it. The `claim` check fails only when another person
+  holds a claim on an issue the pull request closes, or reserved the number of an ADR it adds; it
+  names the holder and what to do. There is no updater bot: merge `main` into
+  your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
+  `origin/main` and wait for green first.
 - ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Prints name=true|false lines (for $GITHUB_OUTPUT) saying which CI jobs a change can affect.
+# The path rules are in hack/paths.rules (read through hack/paths-lib.sh); this script adds the
+# flavors suite's `go list` build graph.
 # With no base ref (a push to main) every job runs. Usage: hack/ci-changes.sh [base-ref]
 # `--stdin` in place of the base ref reads the changed paths from stdin (hack/ci-changes-test.sh);
 # `--flavors-dirs` prints the directories the flavors suite builds from.
@@ -36,7 +38,10 @@ if [[ ${1:-} == --flavors-dirs ]]; then
 	exit
 fi
 
-jobs=(go web generate chart chartsmoke docs escape flavors)
+# shellcheck source=/dev/null
+. "$(dirname "$0")/paths-lib.sh" || exit 2
+paths_load || exit 2 # the rules (hack/paths.rules) are the only source; an unreadable file is not "no job"
+mapfile -t jobs < <(paths_jobs)
 base=${1:-}
 if [[ -z $base ]]; then
 	for j in "${jobs[@]}"; do echo "$j=true"; done
@@ -46,79 +51,32 @@ fi
 if [[ $base == --stdin ]]; then
 	files=$(cat) # the changed paths, one per line (hack/ci-changes-test.sh)
 else
-	files=$(git diff --name-only "$(git merge-base "$base" HEAD)" HEAD)
+	files=$(git diff --name-only --no-renames "$(git merge-base "$base" HEAD)" HEAD)
 fi
 
-# Changes to CI itself, the Makefile or the Go module run everything.
-everything='^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|Makefile|go\.mod|go\.sum)$'
-
-# match <extended regexp>: some changed file matches.
-match() { grep -Eq -- "$1" <<<"$files"; }
-
-# pattern <job>: the paths that can affect the job.
-pattern() {
-	case $1 in
-	web) echo '^(web/|api/proto/)' ;;
-	# Every input and output of `make generate` (hack/ci-changes-test.sh derives them from the
-	# Makefile and the generator configs and fails when one is missing here): the protos and
-	# the vendored OpenShell protos, the OpenAPI spec and its config, the sqlc inputs, the
-	# buf and sqlc configs, protoc-gen-es (web/package.json, its lockfile) and the outputs.
-	generate) echo '^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)' ;;
-	# chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh.
-	chart) echo '^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)' ;;
-	# The binaries the chart starts, their flags and everything they import (the Go packages
-	# outside internal/ and cmd/) count too. This list is hand-written and partial: the Jobs
-	# also read hack/versions.env and other files the chart smoke test names; a push to main
-	# runs the job anyway.
-	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
-	# hack/docs-check.sh also reads internal/preflight/preflight.go and hack/versions.env, and
-	# runs the tests of internal/declarative. Its repository-link check reads any file of the repo,
-	# so its inputs cannot be listed: this pattern is partial, and a push to main runs docs anyway.
-	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md|internal/preflight/preflight\.go$|internal/declarative/|hack/versions\.env$)' ;;
-	# The admission specs (the only ones CI runs) read the chart and the testenv helper only; the
-	# reconciler-side cases need kind or the lab (#66), so their packages are not triggers.
-	escape) echo '^(charts/|test/escape/|internal/testing/testenv/)' ;;
-	# The suite's Go imports are added by flavors_graph below.
-	flavors) echo '^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)' ;;
-	esac
-}
-
-# go: any change that is not documentation (*.md, docs/) or a non-Go file of the web app.
-go=false
-if match "$everything"; then
-	go=true
-else
-	while IFS= read -r f; do
-		case $f in
-		*.go) go=true ;;
-		*.md | docs/* | web/*) ;;
-		*) go=true ;;
-		esac
-	done <<<"$files"
-fi
+# A change to CI itself, the Makefile, the Go module or the rules runs everything.
+everything=false
+# An empty change list is not "nothing changed": a diff that failed or an empty file list runs
+# everything (fail closed); the callers that can have no change (ci-skip-heavy.sh) check before.
+[[ -n ${files//[$' \t\n']/} ]] || everything=true
+while IFS= read -r f; do
+	if [[ -n $f ]] && paths_match everything - "$f"; then everything=true; fi
+done <<<"$files"
 
 # flavors_graph: a changed file lies in (or below, for embedded files) the directory of a package
 # the flavors suite builds. Derived, so a new import of the suite is covered without editing a
 # list. If `go list` fails (no toolchain) the job runs: fail closed.
 flavors_graph() {
-	local dirs d f
+	local dirs f
 	dirs=$(flavors_dirs) || return 0
 	while IFS= read -r f; do
-		d=${f%/*}
-		[[ $d != "$f" ]] || continue # a file in the repository root
-		while [[ -n $d ]]; do
-			grep -qxF -- "$d" <<<"$dirs" && return 0
-			[[ $d == */* ]] || break
-			d=${d%/*}
-		done
+		[[ -n $f ]] && paths_in_graph "$dirs" "$f" && return 0
 	done <<<"$files"
 	return 1
 }
 
 for j in "${jobs[@]}"; do
-	if [[ $j == go ]]; then
-		echo "go=$go"
-	elif match "$everything" || match "$(pattern "$j")"; then
+	if [[ $everything == true ]] || paths_job_any "$j" <<<"$files"; then
 		echo "$j=true"
 	elif [[ $j == flavors ]] && flavors_graph; then
 		echo "$j=true"

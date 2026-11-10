@@ -1,6 +1,6 @@
 # 0082. Work claims and the ready queue: a claim branch is the lock, the board is the queue
 
-- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05)
+- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`)
 - Date: 2026-10-30
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
@@ -240,8 +240,9 @@ sentence of ADR 0094.
 - **`claim` check** (`claims.yml`): runs on `pull_request` (same activity types as before, `closed`
   dropped) and `merge_group`. The token is read-only (`contents`, `issues`, `pull-requests`: read),
   there is no secret and no Environment. The job still checks out the base commit
-  (`pull_request.base.sha`) and runs that commit's `hack/claim.sh check-pr`; it never runs the pull
-  request's code.
+  and runs that commit's `hack/claim.sh check-pr`; it never runs the pull request's code. Since ADR
+  0104 that commit is the base branch's tip at run time (`pull_request.base.ref`), not
+  `pull_request.base.sha`, which is the base of the PR's last push and can be far behind.
 - **Release on merge** (`release` job): runs on `push` to `main` from main's own workflow file. It runs
   `hack/claim.sh release-merged <before> <after>`: GitHub links every pushed commit to its pull
   requests, and the claims of each merged one are released as `release-pr` did. Pull requests closed
@@ -257,7 +258,11 @@ sentence of ADR 0094.
   release. A released closed-unmerged pull request
   unassigns the human and returns the issue to Ready, as `release-pr` did. If `release-merged` finds
   no merged pull request (the API lags behind the push), it prints one line and the sweeper or the
-  lease frees the claim later.
+  lease frees the claim later. ADR 0104 (the same day) removes the sweeper and the lease, and with
+  them the grace rule above: a merged pull request still frees its claims through `release-merged`,
+  and a pull request closed without a merge, or a release that `release-merged` missed, is released
+  by its human with `hack/claim.sh release-pr <PR>` (which unassigns on a close without a merge) or
+  `hack/claim.sh release <N>`.
 - **Fork pull requests:** on `pull_request` a first-time contributor's fork pull request gets no
   `claim` run until a maintainer approves its workflows (`pull_request_target` ran without approval).
 - **Updater** (`updater.yml`): the `auto_merge_enabled` trigger is dropped, because it needs

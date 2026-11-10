@@ -165,7 +165,7 @@ $(r 'quick checks' 2026-11-01T10:00:00Z success)"
 run 7 --admin --approved-at 2026-11-04T01:00:00Z
 check "all green (newest run per name) merges" 0 merge
 grep -q '^gh pr merge 7 --merge --admin --match-head-commit abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: admin merge pinned to the head" >&2; fail=1; }
-grep -q '^claim review 647' "$FAKE_DIR/calls" || { echo "FAIL: claim review for the closed issue" >&2; fail=1; }
+grep -q '^claim ' "$FAKE_DIR/calls" && { echo "FAIL: pr-merge calls no claim.sh (ADR 0104: the merge releases the claim)" >&2; fail=1; }
 grep -q '^gh pr comment 7 --body .*read 3 required contexts on head .abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: comment names the SHA and the count" >&2; fail=1; }
 
 setup false "$green"
@@ -246,15 +246,11 @@ run 7
 grep -q 'auto-merge enabled' <<<"$out" || { echo "FAIL: --auto says auto-merge enabled" >&2; fail=1; }
 grep -q 'then auto-merge enabled' "$FAKE_DIR/calls" || { echo "FAIL: comment says auto-merge enabled" >&2; fail=1; }
 
-# 5. the claim's lane is passed to claim.sh review
-setup false "$green"
-printf '#647\tactive\tlease 2026-11-04T12:00:00Z\tpr 0\tme/host/sess#l226\n#648\tactive\tlease x\tpr 0\tme/host/sess\n' >"$FAKE_DIR/mine"
-run 7 --admin
-check "lane claim merges" 0 merge
-grep -q '^claim review 647 --lane l226$' "$FAKE_DIR/calls" || { echo "FAIL: lane read from claim.sh mine" >&2; fail=1; }
+# 5. --lane is gone (ADR 0104): a usage error, nothing merged
 setup false "$green"
 run 7 --admin --lane cloud5
-grep -q '^claim review 647 --lane cloud5$' "$FAKE_DIR/calls" || { echo "FAIL: --lane passed through" >&2; fail=1; }
+check "--lane is a usage error" 64 nomerge
+grep -q -- '--lane is gone' <<<"$out" || { echo "FAIL: --lane names why: $out" >&2; fail=1; }
 
 # 6. a stale PR head
 setup false "$green"
