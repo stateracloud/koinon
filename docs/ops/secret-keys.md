@@ -546,7 +546,7 @@ retried in the background every 30 seconds while the database refuses the instal
 
 The list is the Go table `recordedSettings` in `internal/cmd/koinonapi/settings.go`: the auth and
 session flags, the network and gateway flags, the key and wrapping flags (`kek-*`, `openbao-*`,
-`awskms-*`, the saved-work flags), `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`,
+`awskms-*`, the saved-work flags), `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`,
 `chart-version` (the chart passes `.Chart.Version`) and `image-version`. A flag that names a Secret, a
 file or a directory is recorded by name only: `koinon-api` never opens it, reads its content or hashes
 it. A URL is recorded as `scheme://host[:port]` only: user info, path, query and fragment are dropped,
