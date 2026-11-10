@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -31,6 +32,26 @@ func TestEchoCheckIsRefusedWhileHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := res.(adminapi.CheckProviderEchodefaultJSONResponse)
+	if !ok {
+		t.Fatalf("response = %T", res)
+	}
+	if got.StatusCode != http.StatusConflict || got.Body.Error.Message != restorehold.Message {
+		t.Fatalf("status %d, message %q", got.StatusCode, got.Body.Error.Message)
+	}
+}
+
+// A held install answers an enable of an outward target with 409 and the hold message, before it reads or
+// writes anything; a disable is not refused by the hold (ADR 0110 decision 5).
+func TestEnableOutwardTargetIsRefusedWhileHeld(t *testing.T) {
+	s := adminapi.New(nil, &catalog.Service{}, &tokens.Service{}, nil, pricing.Embedded()).
+		WithOutward(outward.New(nil).WithRestoreHold(restorehold.NewGuard(true)))
+	res, err := s.SetOutwardTargetDisabled(context.Background(), adminapi.SetOutwardTargetDisabledRequestObject{
+		Kind: adminapi.OutwardTargetKindMcpServer, TargetId: openapi_types.UUID{1}, Body: &adminapi.SetOutwardTargetDisabledJSONRequestBody{Disabled: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := res.(adminapi.SetOutwardTargetDisableddefaultJSONResponse)
 	if !ok {
 		t.Fatalf("response = %T", res)
 	}

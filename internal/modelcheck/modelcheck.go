@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -195,6 +196,9 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Result{}, ErrNotFound
 	} else if err != nil {
+		return Result{}, err
+	}
+	if err := outward.Check(p.AdminDisabledAt); err != nil {
 		return Result{}, err
 	}
 	model = strings.TrimSpace(model)

@@ -47,6 +47,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -74,8 +75,10 @@ type Server struct {
 	leakGuard  *orgsettings.Service
 	triggers   TriggerRunner
 	modelCheck *modelcheck.Service
-	log        *slog.Logger
-	limiter    *limiter
+	// outward is the one switch for outward targets (ADR 0110 decision 5).
+	outward *outward.Service
+	log     *slog.Logger
+	limiter *limiter
 	// exportAudit writes an audit export (audit.Export when nil) and exportDone, when set, runs as
 	// the export goroutine ends; tests set both through export_test.go.
 	exportAudit func(ctx context.Context, w io.Writer, sc audit.ExportScope, fromSeq int64) error
@@ -89,7 +92,7 @@ func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), leakGuard: orgsettings.NewService(pool), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), leakGuard: orgsettings.NewService(pool), outward: outward.New(pool), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -279,6 +282,7 @@ func (s *Server) problem(err error) (int, Error) {
 		min  *modelcheck.InvalidError
 		mun  *modelcheck.UnavailableError
 		busy *modelcheck.BusyError
+		oin  *outward.InvalidError
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
@@ -307,6 +311,12 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusNotFound, NotFound, "not found")
 	case errors.Is(err, triggers.ErrTriggerNotFound):
 		return set(http.StatusNotFound, NotFound, err.Error())
+	case errors.As(err, &oin):
+		return set(http.StatusBadRequest, InvalidRequest, oin.Msg)
+	case errors.Is(err, outward.ErrNotFound):
+		return set(http.StatusNotFound, NotFound, "not found")
+	case errors.Is(err, outward.ErrDeclared):
+		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, restorehold.ErrHeld):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, triggers.ErrCannotRun):

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/restorehold"
 
 	"github.com/google/uuid"
@@ -686,6 +687,9 @@ func (s *Service) Test(ctx context.Context, org pgtype.UUID, actor audit.Actor, 
 	}
 	cur, err := s.row(ctx, store.New(s.pool), org, id)
 	if err != nil {
+		return Destination{}, export.Outcome{}, err
+	}
+	if err := outward.Check(cur.AdminDisabledAt); err != nil {
 		return Destination{}, export.Outcome{}, err
 	}
 	if cur.CredentialLostAt.Valid {

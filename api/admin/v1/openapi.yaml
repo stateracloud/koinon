@@ -32,6 +32,7 @@ tags:
   - name: models
   - name: mcp
   - name: leak-guard
+  - name: outward
   - name: org-settings
   - name: tokens
   - name: prices
@@ -656,6 +657,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LeakGuard"
+        default:
+          $ref: "#/components/responses/Error"
+  /outward-targets/{kind}/{targetId}/disabled:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/OutwardTargetKind"}
+      - name: targetId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      tags: [outward]
+      operationId: setOutwardTargetDisabled
+      summary: "Switch one outward target off or on. Audited as outward.disable or outward.enable."
+      description: |
+        The one switch for MCP servers, model providers, code-host connections and trace destinations (ADR
+        0110 decision 5). A disabled target is not called, not probed and not offered to runs; it keeps its
+        bindings and its credential. It works for declared targets too, and it is separate from their
+        system states. Setting the state a target already has changes and audits nothing.
+        Disabling is allowed while the install is held for a restore. Enabling then answers 409. A target whose declaring Secret says `disabled: true`
+        cannot be enabled here (409); remove the field from the Secret.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutwardTargetDisabled"
+      responses:
+        "200":
+          description: The target's switch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutwardTargetState"
         default:
           $ref: "#/components/responses/Error"
   /tokens:
@@ -1461,6 +1498,31 @@ components:
       items:
         type: string
         enum: [untrusted_input, private_data]
+    OutwardTargetKind:
+      type: string
+      enum: [mcp-server, model-provider, connection, trace-destination]
+    OutwardTargetDisabled:
+      type: object
+      required: [disabled]
+      properties:
+        disabled: {type: boolean}
+        note:
+          type: string
+          maxLength: 500
+          description: Why. Kept while the target is disabled.
+    OutwardTargetState:
+      type: object
+      required: [kind, targetId, name, disabled]
+      properties:
+        kind: {$ref: "#/components/schemas/OutwardTargetKind"}
+        targetId: {type: string, format: uuid}
+        name: {type: string}
+        disabled: {type: boolean}
+        disabledAt: {type: string, format: date-time}
+        disabledBy:
+          type: string
+          description: The actor as the audit log reads it, for example `token <id>` or `secret <name>`.
+        note: {type: string}
     McpServerDataClass:
       type: object
       required: [kind, dataClass]

@@ -102,14 +102,14 @@ SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.
        p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
+WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
   AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name;
 
 -- name: ListServedProviders :many
 -- Enabled providers (with or without models), for key delivery; not those whose key was lost.
 SELECT * FROM providers
-WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
+WHERE org_id = @org_id AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name;
 
 -- name: ShadowUIProviders :exec
@@ -199,7 +199,7 @@ FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
 WHERE m.org_id = @org_id AND m.name = @name
-  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
+  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
 LIMIT 1;
 
 -- name: GetGatewayServedKeyFile :one

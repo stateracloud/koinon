@@ -96,3 +96,36 @@ func TestParseProviderCostKey(t *testing.T) {
 		}
 	}
 }
+
+// TestParseDisabled covers the optional disabled key of all three Secret types (ADR 0110 decision 5).
+func TestParseDisabled(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  bool
+		bad   bool
+	}{{"", false, false}, {"false", false, false}, {"true", true, false}, {" true\n", true, false}, {"yes", false, true}, {"True", false, true}} {
+		sec := &corev1.Secret{Data: map[string][]byte{declarative.KeyDisabled: []byte(c.value)}}
+		got, err := declarative.ParseDisabled(sec)
+		if (err != nil) != c.bad || got != c.want {
+			t.Errorf("%q: got %v, %v; want %v, bad=%v", c.value, got, err, c.want, c.bad)
+		}
+	}
+
+	prov := providerSecret("openai", "", "- name: gpt\n")
+	prov.Data[declarative.KeyDisabled] = []byte("maybe")
+	if _, err := declarative.ParseProvider(prov, "v"); err == nil || !strings.Contains(err.Error(), "disabled must be true or false") {
+		t.Errorf("provider: %v", err)
+	}
+	mcp := &corev1.Secret{Data: map[string][]byte{"name": []byte("wiki"), "url": []byte("https://mcp.example.com/mcp"), declarative.KeyDisabled: []byte("maybe")}}
+	if _, err := declarative.ParseMCPServer(mcp, "v"); err == nil || !strings.Contains(err.Error(), "disabled must be true or false") {
+		t.Errorf("mcp server: %v", err)
+	}
+	mcp.Data[declarative.KeyDisabled] = []byte("true")
+	if _, err := declarative.ParseMCPServer(mcp, "v"); err != nil {
+		t.Errorf("mcp server disabled: true: %v", err)
+	}
+	conn := &corev1.Secret{Data: map[string][]byte{"name": []byte("c"), "connector": []byte("gitea"), declarative.KeyDisabled: []byte("maybe")}}
+	if _, err := declarative.ParseConnection(conn, "v"); err == nil || !strings.Contains(err.Error(), "disabled must be true or false") {
+		t.Errorf("connection: %v", err)
+	}
+}

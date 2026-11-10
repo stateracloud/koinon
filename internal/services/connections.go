@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -652,6 +653,9 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection, actor
 		}
 		if errors.Is(err, connections.ErrCredentialLost) {
 			res.Message = "this connection's stored credential was lost with a key-encryption key; " + connections.LostRemedy(row)
+		}
+		if errors.Is(err, outward.ErrDisabled) {
+			res.Message = "this connection is disabled by an admin (outward switch); enable it to test it"
 		}
 		results = []connections.CheckResult{res}
 	} else {

@@ -283,6 +283,30 @@ func (e McpToolTierUpdateTier) Valid() bool {
 	}
 }
 
+// Defines values for OutwardTargetKind.
+const (
+	OutwardTargetKindConnection       OutwardTargetKind = "connection"
+	OutwardTargetKindMcpServer        OutwardTargetKind = "mcp-server"
+	OutwardTargetKindModelProvider    OutwardTargetKind = "model-provider"
+	OutwardTargetKindTraceDestination OutwardTargetKind = "trace-destination"
+)
+
+// Valid indicates whether the value is a known member of the OutwardTargetKind enum.
+func (e OutwardTargetKind) Valid() bool {
+	switch e {
+	case OutwardTargetKindConnection:
+		return true
+	case OutwardTargetKindMcpServer:
+		return true
+	case OutwardTargetKindModelProvider:
+		return true
+	case OutwardTargetKindTraceDestination:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PriceChangeKind.
 const (
 	Added   PriceChangeKind = "added"
@@ -1110,6 +1134,30 @@ type OrgBudgetUpdate struct {
 	MonthlyCapUsd *string `json:"monthlyCapUsd,omitempty"`
 }
 
+// OutwardTargetDisabled defines model for OutwardTargetDisabled.
+type OutwardTargetDisabled struct {
+	Disabled bool `json:"disabled"`
+
+	// Note Why. Kept while the target is disabled.
+	Note *string `json:"note,omitempty"`
+}
+
+// OutwardTargetKind defines model for OutwardTargetKind.
+type OutwardTargetKind string
+
+// OutwardTargetState defines model for OutwardTargetState.
+type OutwardTargetState struct {
+	Disabled   bool       `json:"disabled"`
+	DisabledAt *time.Time `json:"disabledAt,omitempty"`
+
+	// DisabledBy The actor as the audit log reads it, for example `token <id>` or `secret <name>`.
+	DisabledBy *string            `json:"disabledBy,omitempty"`
+	Kind       OutwardTargetKind  `json:"kind"`
+	Name       string             `json:"name"`
+	Note       *string            `json:"note,omitempty"`
+	TargetId   openapi_types.UUID `json:"targetId"`
+}
+
 // PriceChange defines model for PriceChange.
 type PriceChange struct {
 	After     *PriceEntry     `json:"after,omitempty"`
@@ -1637,6 +1685,9 @@ type CreateModelJSONRequestBody = ModelCreate
 // UpdateModelJSONRequestBody defines body for UpdateModel for application/json ContentType.
 type UpdateModelJSONRequestBody = ModelUpdate
 
+// SetOutwardTargetDisabledJSONRequestBody defines body for SetOutwardTargetDisabled for application/json ContentType.
+type SetOutwardTargetDisabledJSONRequestBody = OutwardTargetDisabled
+
 // SetPriceJSONRequestBody defines body for SetPrice for application/json ContentType.
 type SetPriceJSONRequestBody = PriceInput
 
@@ -1770,6 +1821,9 @@ type ServerInterface interface {
 	// UpdateModel Change a model's routing guard. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(w http.ResponseWriter, r *http.Request, modelId ModelId)
+	// SetOutwardTargetDisabled Switch one outward target off or on. Audited as outward.disable or outward.enable.
+	// (PUT /outward-targets/{kind}/{targetId}/disabled)
+	SetOutwardTargetDisabled(w http.ResponseWriter, r *http.Request, kind OutwardTargetKind, targetId openapi_types.UUID)
 	// ListPrices List the org's own prices, every version, newest first per name.
 	// (GET /prices)
 	ListPrices(w http.ResponseWriter, r *http.Request)
@@ -2791,6 +2845,41 @@ func (siw *ServerInterfaceWrapper) UpdateModel(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// SetOutwardTargetDisabled operation middleware
+func (siw *ServerInterfaceWrapper) SetOutwardTargetDisabled(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "kind" -------------
+	var kind OutwardTargetKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "targetId" -------------
+	var targetId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "targetId", r.PathValue("targetId"), &targetId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "targetId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOutwardTargetDisabled(w, r, kind, targetId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPrices operation middleware
 func (siw *ServerInterfaceWrapper) ListPrices(w http.ResponseWriter, r *http.Request) {
 
@@ -3339,6 +3428,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/leak-guard/trusted-hosts/{host}", wrapper.RemoveFetchTrustedHost)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/outward-targets/{kind}/{targetId}/disabled", wrapper.SetOutwardTargetDisabled)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tokens", wrapper.ListTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tokens", wrapper.CreateToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tokens/{tokenId}", wrapper.RevokeToken)
@@ -4795,6 +4885,47 @@ func (response UpdateModeldefaultJSONResponse) VisitUpdateModelResponse(w http.R
 	return err
 }
 
+type SetOutwardTargetDisabledRequestObject struct {
+	Kind     OutwardTargetKind  `json:"kind"`
+	TargetId openapi_types.UUID `json:"targetId"`
+	Body     *SetOutwardTargetDisabledJSONRequestBody
+}
+
+type SetOutwardTargetDisabledResponseObject interface {
+	VisitSetOutwardTargetDisabledResponse(w http.ResponseWriter) error
+}
+
+type SetOutwardTargetDisabled200JSONResponse OutwardTargetState
+
+func (response SetOutwardTargetDisabled200JSONResponse) VisitSetOutwardTargetDisabledResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOutwardTargetDisableddefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetOutwardTargetDisableddefaultJSONResponse) VisitSetOutwardTargetDisabledResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPricesRequestObject struct {
 }
 
@@ -5591,6 +5722,9 @@ type StrictServerInterface interface {
 	// UpdateModel Change a model's routing guard. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(ctx context.Context, request UpdateModelRequestObject) (UpdateModelResponseObject, error)
+	// SetOutwardTargetDisabled Switch one outward target off or on. Audited as outward.disable or outward.enable.
+	// (PUT /outward-targets/{kind}/{targetId}/disabled)
+	SetOutwardTargetDisabled(ctx context.Context, request SetOutwardTargetDisabledRequestObject) (SetOutwardTargetDisabledResponseObject, error)
 	// ListPrices List the org's own prices, every version, newest first per name.
 	// (GET /prices)
 	ListPrices(ctx context.Context, request ListPricesRequestObject) (ListPricesResponseObject, error)
@@ -6713,6 +6847,40 @@ func (sh *strictHandler) UpdateModel(w http.ResponseWriter, r *http.Request, mod
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateModelResponseObject); ok {
 		if err := validResponse.VisitUpdateModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetOutwardTargetDisabled operation middleware
+func (sh *strictHandler) SetOutwardTargetDisabled(w http.ResponseWriter, r *http.Request, kind OutwardTargetKind, targetId openapi_types.UUID) {
+	var request SetOutwardTargetDisabledRequestObject
+
+	request.Kind = kind
+	request.TargetId = targetId
+
+	var body SetOutwardTargetDisabledJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetOutwardTargetDisabled(ctx, request.(SetOutwardTargetDisabledRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetOutwardTargetDisabled")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetOutwardTargetDisabledResponseObject); ok {
+		if err := validResponse.VisitSetOutwardTargetDisabledResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

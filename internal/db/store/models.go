@@ -1735,6 +1735,9 @@ type Connection struct {
 	DeclaredVersion   pgtype.Text
 	RemovedAt         pgtype.Timestamptz
 	CredentialLostAt  pgtype.Timestamptz
+	AdminDisabledAt   pgtype.Timestamptz
+	AdminDisabledBy   pgtype.Text
+	AdminDisabledNote pgtype.Text
 }
 
 type DedupeRecord struct {
@@ -1963,6 +1966,9 @@ type McpServer struct {
 	ExposesPrivateData    bool
 	CodeHostConnectionID  pgtype.UUID
 	CredentialLostAt      pgtype.Timestamptz
+	AdminDisabledAt       pgtype.Timestamptz
+	AdminDisabledBy       pgtype.Text
+	AdminDisabledNote     pgtype.Text
 }
 
 type McpTool struct {
@@ -2179,6 +2185,9 @@ type PlatformTraceDestination struct {
 	UpdatedBy          string
 	UpdatedAt          pgtype.Timestamptz
 	CredentialLostAt   pgtype.Timestamptz
+	AdminDisabledAt    pgtype.Timestamptz
+	AdminDisabledBy    pgtype.Text
+	AdminDisabledNote  pgtype.Text
 }
 
 type PlatformTraceSetting struct {
@@ -2275,6 +2284,9 @@ type Provider struct {
 	CostScope            pgtype.Text
 	CostApiKeyLostAt     pgtype.Timestamptz
 	CostReconcileSince   pgtype.Timestamptz
+	AdminDisabledAt      pgtype.Timestamptz
+	AdminDisabledBy      pgtype.Text
+	AdminDisabledNote    pgtype.Text
 }
 
 type ProviderCostReconciliation struct {
@@ -2599,6 +2611,9 @@ type TraceDestination struct {
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
 	CredentialLostAt   pgtype.Timestamptz
+	AdminDisabledAt    pgtype.Timestamptz
+	AdminDisabledBy    pgtype.Text
+	AdminDisabledNote  pgtype.Text
 }
 
 type User struct {

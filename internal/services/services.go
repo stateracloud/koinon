@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -61,6 +62,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -192,6 +194,8 @@ type Server struct {
 	leakGuard *orgsettings.Service
 	// hold refuses the code-host calls the handlers make themselves (refuseWhileHeld).
 	hold *restorehold.Guard
+	// outward is the one switch for outward targets (ADR 0110 decision 5).
+	outward *outward.Service
 }
 
 // New returns a Server backed by pool.
@@ -225,7 +229,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
-		hold: opts.RestoreHold,
+		hold: opts.RestoreHold, outward: outward.New(pool).WithRestoreHold(opts.RestoreHold),
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
@@ -252,6 +256,7 @@ func (s *Server) Register(server *connect.Server) {
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 	leakguardv1alpha1connect.RegisterLeakGuardServiceHandler(server, s)
+	outwardv1alpha1connect.RegisterOutwardServiceHandler(server, s)
 	orgsettingsv1alpha1connect.RegisterOrgSettingsServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
@@ -270,6 +275,7 @@ var (
 	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
 	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
 	_ leakguardv1alpha1connect.LeakGuardServiceHandler     = (*Server)(nil)
+	_ outwardv1alpha1connect.OutwardServiceHandler         = (*Server)(nil)
 	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)
 	_ auditv1alpha1connect.AuditServiceHandler             = (*Server)(nil)
 )

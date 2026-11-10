@@ -79,6 +79,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
 )
@@ -97,6 +98,8 @@ type Importer struct {
 	Catalog   *catalog.Service
 	// MCP imports mcp-server Secrets (plan item MC1); nil ignores them with a Warning Event.
 	MCP *mcpservers.Service
+	// Outward applies the disabled key of a Secret (ADR 0110 decision 5); nil ignores the key.
+	Outward *outward.Service
 	// URLPolicy decides which hosts a declared connection's base URL may name.
 	URLPolicy catalog.URLPolicy
 	// Sealer seals declared connections' secret fields.
@@ -295,6 +298,9 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		case TypeMCPServer:
 			applyErr = i.applyMCPServer(ctx, org, sec, version)
 		}
+		if applyErr == nil {
+			applyErr = i.syncDisabled(ctx, org, typ, sec)
+		}
 		if applyErr != nil {
 			var ie *invalidError
 			if !errors.As(applyErr, &ie) && !isUserError(applyErr) {
@@ -304,6 +310,26 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		}
 	}
 	return waitingForOrg, i.removeAbsent(ctx, q, seen)
+}
+
+// syncDisabled applies the Secret's disabled key to the items the Secret manages (the outward switch).
+func (i *Importer) syncDisabled(ctx context.Context, org pgtype.UUID, typ string, sec *corev1.Secret) error {
+	if i.Outward == nil {
+		return nil
+	}
+	disabled, err := ParseDisabled(sec)
+	if err != nil {
+		return &invalidError{err}
+	}
+	kind := map[string]outward.Kind{TypeModelProvider: outward.ModelProvider, TypeConnection: outward.CodeHostConnection, TypeMCPServer: outward.MCPServer}[typ]
+	n, err := i.Outward.SyncDeclared(ctx, org, kind, sec.Name, disabled)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		i.log().Info("applied the disabled key of a declarative Secret", "secret", sec.Name, "org", sec.Labels[LabelOrg], "kind", string(kind), "disabled", disabled, "items", n)
+	}
+	return nil
 }
 
 type invalidError struct{ err error }

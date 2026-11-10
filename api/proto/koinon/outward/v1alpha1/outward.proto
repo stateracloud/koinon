@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.outward.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1;outwardv1alpha1";
+
+// OutwardService is the one switch for everything Koinon calls outside the install (ADR 0110 decision 5):
+// MCP servers, model providers, code-host connections and trace destinations. A disabled target is not
+// called, not probed and not offered to runs; it keeps its bindings and its credential. It is the
+// connect-rpc face of the same service layer the admin REST API uses. Every change is audited as
+// outward.disable or outward.enable.
+service OutwardService {
+  // SetOutwardTargetDisabled disables or enables one target. Org admins and owners switch the org's own
+  // targets; the platform trace destination needs a platform admin. Disabling is allowed while the install
+  // is held for a restore; enabling is refused then with FAILED_PRECONDITION. A target whose declaring
+  // Secret says disabled: true cannot be enabled here (FAILED_PRECONDITION). Setting the state a target
+  // already has changes and audits nothing.
+  rpc SetOutwardTargetDisabled(SetOutwardTargetDisabledRequest) returns (SetOutwardTargetDisabledResponse);
+}
+
+// OutwardTargetKind is what kind of target the switch is for.
+enum OutwardTargetKind {
+  OUTWARD_TARGET_KIND_UNSPECIFIED = 0;
+  OUTWARD_TARGET_KIND_MCP_SERVER = 1;
+  OUTWARD_TARGET_KIND_MODEL_PROVIDER = 2;
+  OUTWARD_TARGET_KIND_CONNECTION = 3;
+  OUTWARD_TARGET_KIND_TRACE_DESTINATION = 4;
+  // The platform trace destination has one row: target_id is ignored and org_id names any org.
+  OUTWARD_TARGET_KIND_PLATFORM_TRACE_DESTINATION = 5;
+}
+
+message SetOutwardTargetDisabledRequest {
+  string org_id = 1;
+  OutwardTargetKind kind = 2;
+  string target_id = 3;
+  bool disabled = 4;
+  // note says why, at most 500 characters. Kept while the target is disabled.
+  string note = 5;
+}
+
+message SetOutwardTargetDisabledResponse {
+  OutwardTargetState state = 1;
+}
+
+message OutwardTargetState {
+  OutwardTargetKind kind = 1;
+  string target_id = 2;
+  string name = 3;
+  bool disabled = 4;
+  google.protobuf.Timestamp disabled_at = 5;
+  // disabled_by is the actor as the audit log reads it, for example "user <id>" or "secret <name>".
+  string disabled_by = 6;
+  string note = 7;
+}
