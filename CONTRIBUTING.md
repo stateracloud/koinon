@@ -130,7 +130,8 @@ modules, npm packages (including transitive ones), GitHub Actions, container ima
 binaries, Helm dependencies and the pinned OpenShell and Agent Sandbox versions, major versions
 included. [ADR 0079](docs/adr/0079-dependency-cooldown.md) has the reasoning and the exact rules.
 
-- Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml`, strict) enforce it for the bot and for
+- Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml` and `docs/site/pnpm-workspace.yaml`, strict;
+  `bootConfig` extends it to the pnpm binary that `packageManager` selects) enforce it for the bot and for
   `pnpm add`. The dependency age steps of the `quick checks` CI job (`hack/dep-age-check.sh`) check the rest on every pull
   request. You can run it locally: `hack/dep-age-check.sh origin/main`. Publication dates are a guard
   against accidents, not proof of safety.

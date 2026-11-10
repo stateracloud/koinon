@@ -66,7 +66,8 @@ cooldown (golang/go#76485 is on hold).
 - **pnpm** (`web/pnpm-workspace.yaml`): `minimumReleaseAge: 4320` (3 days), strict, so an install
   fails instead of falling back to a younger version; `trustPolicy: no-downgrade`;
   `minimumReleaseAgeExcludePrune: true`; an exact-version `minimumReleaseAgeExclude` list that is
-  empty unless the fast path is in use.
+  empty unless the fast path is in use. `docs/site/pnpm-workspace.yaml` carries the same policy. See
+  the amendment of 2026-11-10 for the pnpm binary itself.
 - **CI** (`hack/dep-age-check.sh`, job `dependency age` on pull requests): for every version the PR
   adds or changes it asks a public source for the publication time and fails if the version is
   younger than 3 days. Sources: the Go module proxy (`.info` `Time`), GitHub release and commit dates
@@ -176,7 +177,7 @@ new dependencies, and the sandbox's egress limits.
   changes them. _(inferred)_
 - Follow-ups: create the `dependency-age-waiver` label; mark the ADR 0077 pins in
   `release/versions.yaml` with `# dep-age: github=<owner/repo>` when that file lands, so the
-  check reads them; apply the same pnpm settings to `docs/site` and add its Dependabot entry; add the
+  check reads them; add the `docs/site` Dependabot entry (its pnpm settings landed with the 2026-11-10 amendment); add the
   fast-path checklist to the PR template when one exists; CONTRIBUTING.md grows other sections under
   old issue 234.
 
@@ -210,11 +211,41 @@ unchanged. `@ovirandunu` is in `.github/CODEOWNERS` (ADR 0082: an admin with ful
 `MAINTAINERS.md`, so he cannot waive; adding him to the table is a governance decision for the
 project lead (ADR 0038).
 
+## Amendment (2026-11-10): the pnpm binary itself (issue 450)
+
+The `packageManager` pin in `web/package.json` and `docs/site/package.json` selects the pnpm binary,
+which runs before any dependency is installed. Two controls cover it, in different contexts:
+
+1. **pnpm's `bootConfig`** (pnpm 12.15+, [config includes](https://pnpm.io/config-includes)): the
+   release-age and trust policy pnpm uses when it installs the pnpm version from `packageManager` and
+   config dependencies. Both `pnpm-workspace.yaml` files set it explicitly to the same values as the
+   top-level settings (`minimumReleaseAge: 4320`, strict, `trustPolicy: no-downgrade`). Unset keys fall
+   back to the top-level settings unless a config dependency owns them (pnpm source,
+   `crates/config/src/boot_config.rs` at v12.15.0), so the explicit block is defence in depth that
+   keeps working if a config dependency is ever added. It needs pnpm 12.15 or newer; a `packageManager`
+   pin below that does not honour it, so under a pin below 12.15 the date check (control 2) is the only
+   control for the binary. `bootConfig` accepts `minimumReleaseAgeExclude`; an exemption
+   for the pnpm binary follows the fast-path rules above and is listed there.
+2. **The pin is dated at review time**: `hack/dep-age-check.sh` (step 4a) dates the npm release of
+   every `packageManager` pin and every `ARG PNPM_VERSION` default of a Dockerfile that a pull request
+   adds or changes, with the same 3-day minimum and waiver rules. Before this amendment the script
+   skipped `*.json` files and did not read that ARG, so the pin was not dated at all.
+
+In CI, `pnpm/action-setup` installs pnpm outside the workspace, so the workspace `bootConfig` does not
+govern that installation. The date check runs in `quick-checks`, in parallel with the jobs that run
+pnpm, so it can fail after CI has already executed the pinned pnpm. It blocks the merge; it does not
+stop that run.
+
+`docs/site` was the other gap (it had no `pnpm-workspace.yaml`, so its installs had no
+`minimumReleaseAge` or `trustPolicy`); it now has the same policy as `web/`. The e2e toolchain image
+installs pnpm with `npm install -g pnpm@${PNPM_VERSION}`, which `bootConfig` does not cover; the date
+check on `PNPM_VERSION` is its control, and the image's installs of `web/` then run under the web policy.
+
 ## Links
 
 - [0052](0052-opencode-v2-flavor.md), [0077](0077-pinned-openshell-and-installer.md)
 - [CONTRIBUTING.md](../../CONTRIBUTING.md), `.github/dependabot.yml`, `web/pnpm-workspace.yaml`,
-  `hack/dep-age-check.sh`
+  `docs/site/pnpm-workspace.yaml`, `hack/dep-age-check.sh`
 - William Woodruff, "We should all be using dependency cooldowns" (2025-11-21) and "Cooldowns redux"
   (2025-12-13), blog.yossarian.net
 - GitHub, "The case for a cooldown" (2026-07-23) and the Dependabot default cooldown changelog
