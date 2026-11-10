@@ -95,6 +95,12 @@ The policies select sandbox namespaces by label, so three paths could move a san
 - **Gateway ID drift is reported.** The reconciler compares `openshell.gatewayId` with the gateway's
   `gateway_id` (read from OpenShell's gateway ConfigMap) on every pass, the first included, and sets
   `koinon_reconciler_openshell_gateway_id_mismatch`. The preflight still fails the install or upgrade.
-- **PersistentVolumes are not resolved.** A pod rule sees the pod's volumes, not the PersistentVolume
-  behind a claim, and a ValidatingAdmissionPolicy cannot follow the claim. Decision open: see the
-  issue.
+- **PersistentVolumes are accepted, not resolved.** A pod rule sees the pod's volumes, not the
+  PersistentVolume behind a claim, and a ValidatingAdmissionPolicy on pods cannot follow the claim
+  (admission has no object lookup). A PVC bound to a hostPath PV or to a `csi.spiffe.io` PV therefore
+  passes the pod volume rules. We accept this because only a cluster admin can create such a PV, and
+  only the identities in `sandboxPolicy.identities.pods` write sandbox pod specs, so a sandbox
+  cannot reach a PV an admin did not create for it. The question reopens if a non-admin identity
+  gets PV create rights, or if a PV allowlist is wanted for defence in depth. The sustainable
+  guard then is a policy on `persistentvolumes` CREATE and UPDATE that refuses `hostPath` and
+  `csi.driver: csi.spiffe.io`, with an exemption list for admins.
