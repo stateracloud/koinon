@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
@@ -90,7 +91,7 @@ func (s *Server) DeliverDirectMessage(ctx context.Context, in DirectMessage) (Di
 		return DirectMessageResult{}, err
 	}
 	var res DirectMessageResult
-	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
+	err := s.commit(ctx, func(q *store.Queries, _ audit.Batch) ([]durable.Notification, error) {
 		res = DirectMessageResult{}
 		out, err := durable.Once(ctx, q, in.Org, durable.SourceDirectMessage, in.MessageID, func(q *store.Queries) (string, pgtype.UUID, error) {
 			id, err := s.deliverDirectMessage(ctx, q, in, &res)

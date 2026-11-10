@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -146,23 +145,13 @@ func (e *SendError) Error() string { return "durable: send after commit: " + e.E
 func (e *SendError) Unwrap() error { return e.Err }
 
 // Commit runs fn in a transaction on pool. fn returns the notifications that its state changes
-// call for; they are sent only after the transaction committed, never on a rollback. A failed
-// send comes back as a *SendError (and a failed transaction as its own error), so a caller can
-// tell "nothing happened" from "committed, not yet notified". With a Runtime a recorded workflow
-// retries itself; only the start of the workflow can fail here.
-func Commit(ctx context.Context, pool *pgxpool.Pool, send Sender, fn func(q *store.Queries) ([]Notification, error)) error {
-	var notes []Notification
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		var err error
-		notes, err = fn(store.New(tx))
-		return err
-	})
-	return afterCommit(ctx, send, notes, err)
-}
-
-// CommitAudit is Commit for a change that is audited: fn adds its audit events to b, and the audit
-// module writes them in lock order just before the commit (ADR 0100 decision 1.7).
-func CommitAudit(ctx context.Context, pool *pgxpool.Pool, send Sender, fn func(q *store.Queries, b audit.Batch) ([]Notification, error)) error {
+// call for; they are sent only after the transaction committed, never on a rollback. fn also gets
+// the audit batch: it adds the audit events of its change to b, and the audit module writes them in
+// lock order just before the commit (ADR 0100 decision 1.7). A change with nothing to audit leaves
+// b empty. A failed send comes back as a *SendError (and a failed transaction as its own error), so
+// a caller can tell "nothing happened" from "committed, not yet notified". With a Runtime a recorded
+// workflow retries itself; only the start of the workflow can fail here.
+func Commit(ctx context.Context, pool *pgxpool.Pool, send Sender, fn func(q *store.Queries, b audit.Batch) ([]Notification, error)) error {
 	var notes []Notification
 	_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
 		var err error
