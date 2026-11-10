@@ -136,8 +136,11 @@ else
     [[ $IMAGE != *@* ]] || IMAGE=koinon/spike-probe:1
   fi
   echo "== probe image $IMAGE (built from hack/spike/probe)"
-  # KOINON_PROBE_BASE=<image> builds on an image already on this machine (the e2e passes its flavor image);
-  # unset, the base is the digest pin of the OpenCode flavor Dockerfile, the one definition of that base.
+  # KOINON_PROBE_BASE=<image> builds on an image already on this machine. With PROBE_PULL_REPO set the image
+  # carries a content tag that names the pinned base (hack/probe-tag.sh), so the fallback ignores
+  # KOINON_PROBE_BASE: one tag, one image. Unset, the base is the digest pin of the OpenCode flavor
+  # Dockerfile, the one definition of that base.
+  [[ -z ${PROBE_PULL_REPO:-} ]] || KOINON_PROBE_BASE=
   probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/flavors/opencode/Dockerfile" | head -n 1)}
   [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in flavors/opencode/Dockerfile" >&2; exit 1; }
   probe_args=(--build-arg "BASE=$probe_base")

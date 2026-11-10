@@ -1054,14 +1054,17 @@ jobs:
           path: ${{ runner.temp }}/flavor-cache
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - name: Push ghcr.io/<repo>/flavors/opencode:<content tag>
         id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
         run: |
-          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           tag=$(hack/flavor-tag.sh opencode)
           image="ghcr.io/$REPO/flavors/opencode:$tag"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
@@ -1079,9 +1082,17 @@ jobs:
           rm -rf "$RUNNER_TEMP/flavor-cache"
           mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
           echo "cache_written=true" >>"$GITHUB_OUTPUT"
+      # Main saves what its builds wrote: this job builds on every main push that changes the
+      # flavors, also the ones where the flavors job was skipped (#595).
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
       # The escape suite's probe image (#482), pushed under its content tag (hack/probe-tag.sh) so the
       # kind e2e pulls it and runs no apt step. Its base is the OpenCode flavor's pinned BASE.
       - name: Push ghcr.io/<repo>/spike-probe:<content tag>
+        continue-on-error: true # a miss only means the e2e builds the probe itself
         env:
           REPO: ${{ github.repository }}
         run: |
@@ -1093,10 +1104,3 @@ jobs:
           fi
           base=$(sed -n 's/^ARG BASE=//p' flavors/opencode/Dockerfile | head -n 1)
           docker buildx build --push --build-arg "BASE=$base" --tag "$image" hack/spike/probe
-      # Main saves what its builds wrote: this job builds on every main push that changes the
-      # flavors, also the ones where the flavors job was skipped (#595).
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
-        with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}

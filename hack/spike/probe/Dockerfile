@@ -3,8 +3,8 @@
 # policy and escape checks need. Not product code.
 # BASE has no default here: test/escape/kind.sh always passes it, from KOINON_PROBE_BASE or else the
 # digest pin of flavors/opencode/Dockerfile (ARG BASE=), the one place the base is defined. The e2e
-# (test/e2e/escape-openshell.sh) passes the OpenCode flavor image it already has, so the step needs no registry
-# the e2e does not use otherwise; the flavor's USER and ENTRYPOINT are reset below.
+# (test/e2e/escape-openshell.sh) pulls the published probe image (#482, tag from hack/probe-tag.sh) and builds
+# this file only on a miss, on that same pinned base; the flavor's USER and ENTRYPOINT are reset below.
 ARG BASE
 FROM ${BASE}
 USER root
