@@ -406,3 +406,32 @@ var _ = Describe("a burst of updates against a slow handler", func() {
 		Expect(rec.count()).To(Equal(n), "every update reaches the handler")
 	}, SpecTimeout(90*time.Second))
 })
+
+var _ = Describe("session/update lines the SDK rejects", func() {
+	It("do not count as unhandled, so the stream is never held back for them", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		// More than the 512 lag limit of lines whose params the SDK refuses (InvalidParams),
+		// so the handler never sees them; then valid ones.
+		const bad, good = 1500, 20
+		go func() {
+			defer GinkgoRecover()
+			for range bad {
+				if _, err := io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n"); err != nil {
+					return
+				}
+			}
+			for i := range good {
+				if _, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%d"}}}}`+"\n", i); err != nil {
+					return
+				}
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(good))
+	}, SpecTimeout(40*time.Second))
+})

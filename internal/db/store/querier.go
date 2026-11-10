@@ -856,8 +856,8 @@ type Querier interface {
 	ListOrgCodeHostRepos(ctx context.Context, orgID pgtype.UUID) ([]OrgCodeHostRepo, error)
 	// The org's fetch-trusted host list (ADR 0084 decision 5). Empty for a new org.
 	ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUID) ([]OrgFetchTrustedHost, error)
-	// Every live org, for control-plane sweeps and workers that then work org by
-	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
+	// Every live org, for control-plane sweeps and workers that then work org by org. The run
+	// claim loop of koinon-agentd uses ListOrgIDsWithRunWork instead.
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// The live orgs where a worker could claim or take over a run right now: a run that is claimable
 	// (ready_at set, ClaimNextRun) or whose owner's lease expired (TakeOverExpiredRun). agentd polls

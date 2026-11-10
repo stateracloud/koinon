@@ -144,10 +144,16 @@ type Conn struct {
 func NewConn(h Handler, toAgent io.Writer, fromAgent io.Reader) *Conn {
 	t := newTracker()
 	obs, _ := h.(ReadObserver)
-	return &Conn{
+	c := &Conn{
 		c: sdk.NewClientSideConnection(client{h: h, t: t}, toAgent, &countingReader{r: fromAgent, t: t, obs: obs}),
 		t: t,
 	}
+	// When the connection ends for any reason, no handler call will free a blocked reader.
+	go func() {
+		<-c.c.Done()
+		t.abort()
+	}()
+	return c
 }
 
 // Done is closed when the connection has ended.
@@ -339,6 +345,7 @@ type tracker struct {
 	read    int64
 	done    int64
 	eof     bool
+	aborted bool
 	drained chan struct{}
 }
 
@@ -364,11 +371,15 @@ func (t *tracker) update(f func()) {
 
 func (t *tracker) handled() { t.update(func() { t.done++ }) }
 
-// waitLag blocks until fewer than maxUpdateLag updates are waiting for the handler.
+// abort releases a reader held by waitLag: the connection ended, so nothing will be handled.
+func (t *tracker) abort() { t.update(func() { t.aborted = true }) }
+
+// waitLag blocks until fewer than maxUpdateLag updates are waiting for the handler, or the
+// connection has ended.
 func (t *tracker) waitLag() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for t.read-t.done >= maxUpdateLag {
+	for t.read-t.done >= maxUpdateLag && !t.aborted {
 		t.cond.Wait()
 	}
 }
@@ -438,12 +449,21 @@ func (cr *countingReader) next() {
 	cr.out = line
 }
 
+// isUpdate reports whether the SDK will hand line to SessionUpdate: a notification of the
+// session/update method whose params decode and validate as the SDK does. A line it rejects
+// (InvalidParams) is never handled, so counting it would leave the reader waiting for a
+// handler call that never comes.
 func isUpdate(line []byte) bool {
 	var m struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
 	}
-	return json.Unmarshal(line, &m) == nil && m.ID == nil && m.Method == sdk.ClientMethodSessionUpdate
+	if json.Unmarshal(line, &m) != nil || m.ID != nil || m.Method != sdk.ClientMethodSessionUpdate {
+		return false
+	}
+	var n sdk.SessionNotification
+	return json.Unmarshal(m.Params, &n) == nil && n.Validate() == nil
 }
 
 func (c client) RequestPermission(ctx context.Context, req sdk.RequestPermissionRequest) (sdk.RequestPermissionResponse, error) {
