@@ -249,7 +249,7 @@ const tokenTTLEnv = "OPENSHELL_K8S_SA_TOKEN_TTL_SECS"
 // gatewayTokenTTLEnv reads OPENSHELL_K8S_SA_TOKEN_TTL_SECS from the gateway workload (a StatefulSet, or
 // a Deployment) in the OpenShell namespace. It returns the value (0 when the variable is not set or
 // is not a number, which OpenShell ignores in favour of the file) and ok=false when the workload could
-// not be read or the variable comes from a Secret, ConfigMap or field reference, so its value is unknown.
+// not be read, a container has envFrom entries (the variable may come from them), or the variable comes from a Secret, ConfigMap or field reference, so its value is unknown.
 func (c *Checker) gatewayTokenTTLEnv(ctx context.Context) (value int, ok bool) {
 	ns, name := c.Config.OpenShellConfigNamespace, c.Config.OpenShellWorkload
 	if name == "" {
@@ -278,6 +278,10 @@ func (c *Checker) gatewayTokenTTLEnv(ctx context.Context) (value int, ok bool) {
 			}
 			return 0, true
 		}
+		// envFrom (ConfigMap or Secret) may carry the variable; its value is unknown.
+		if len(ct.EnvFrom) > 0 {
+			return 0, false
+		}
 	}
 	return 0, true
 }
@@ -301,7 +305,7 @@ func (c *Checker) tokenTTLResult(ctx context.Context, g gatewayImages) Result {
 	switch {
 	case !observed:
 		r.Status = Warn
-		r.Message = fmt.Sprintf("the gateway workload %s/%s could not be read (or sets %s from a reference), so %s was not checked; "+
+		r.Message = fmt.Sprintf("the gateway workload %s/%s could not be read (or sets %s from a reference or envFrom), so %s was not checked; "+
 			"from its configuration file the supervisor token lifetime is %d seconds against sandboxPolicy.supervisorTokenMaxSeconds=%d. "+
 			"If the environment variable is above the bound, the sandbox admission policy denies every supervisor pod",
 			c.Config.OpenShellConfigNamespace, c.Config.OpenShellWorkload, tokenTTLEnv, tokenTTLEnv, ttl, bound)

@@ -33,7 +33,10 @@ has "supervisorTokenMaxSeconds overrides the bound" 'expirationSeconds <= 7200' 
 has "preflight is told the supervisor token bound" '--supervisor-token-max-seconds=3600' --show-only templates/preflight.yaml
 has "preflight is told an overridden supervisor token bound" '--supervisor-token-max-seconds=7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only templates/preflight.yaml
 has "preflight reads the gateway workload for the token TTL variable" '--openshell-workload=openshell' --show-only templates/preflight.yaml
-has "preflight may get the gateway workload" 'resourceNames: \[openshell\]' --set preflight.openshell.workload=openshell --show-only templates/preflight.yaml
+pf_out=$(render --set preflight.openshell.workload=gw-sts --show-only templates/preflight.yaml)
+grep -A1 -F -- 'resources: [statefulsets, deployments]' <<<"$pf_out" | grep -Fq -- 'resourceNames: [gw-sts]' ||
+	fail "preflight may get only the gateway workload (resourceNames [gw-sts] on the statefulsets/deployments rule)"
+has "the preflight gets the gateway workload flag" '--openshell-workload=gw-sts' --set preflight.openshell.workload=gw-sts --show-only templates/preflight.yaml
 has "an overridden gateway workload reaches the preflight" '--openshell-workload=gw' --set preflight.openshell.workload=gw --show-only templates/preflight.yaml
 lacks "no token bound to check when the policy is off" '--supervisor-token-max-seconds' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --show-only templates/preflight.yaml
 for msg in \

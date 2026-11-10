@@ -200,6 +200,16 @@ var _ = Describe("Sandbox image checks", func() {
 			Expect(find(c.run(ctx), name).Status).To(Equal(preflight.Warn))
 		})
 
+		It("warns when the variable may come from envFrom", func(ctx SpecContext) {
+			c := withConfig(openshellConfig(""), bound(3600))
+			gw := gateway()
+			gw.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}}
+			c.with(gw)
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("envFrom"))
+		})
+
 		It("is not checked when the policy is off (bound 0)", func(ctx SpecContext) {
 			Expect(checks(withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(0)).run(ctx))).NotTo(ContainElement(name))
 		})
