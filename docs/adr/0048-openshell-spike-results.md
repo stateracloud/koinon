@@ -210,7 +210,9 @@ chart's bindings now also select `openshell.ai/gateway-id=<openshell.gatewayId>`
 fails when `openshell.gatewayId` differs from the gateway's `gateway_id` (the policies would bind to no
 namespace of that gateway and the boundary would fail open), and when the key is unset and
 `openshell.gatewayId` is not OpenShell's default `openshell`. Namespaces of a gateway with no Koinon
-release are no longer policed by this release.
+release are no longer policed by this release. A namespace with `openshell.ai/managed-by` but no
+`openshell.ai/gateway-id` label stays covered: each policy has a second binding (`<name>-unlabelled`) for
+namespaces without that label, so no OpenShell namespace is left without a policy.
 
 ## Links
 

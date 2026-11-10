@@ -56,6 +56,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		ns                      = "kw-escape"
 		nsB                     = "kw-escape-b" // a workspace namespace of another gateway (ID prod)
 		plain                   = "koinon-escape-plain"
+		unlabelled              = "kw-escape-unlabelled" // managed-by but no gateway-id: no gateway owns it
 		dryRun                  = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 		dryRunUpdate            = metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}}
 		existingPod, existingSc = "existing", "existing"
@@ -125,9 +126,10 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(err).NotTo(HaveOccurred())
 		}
 		for name, labels := range map[string]map[string]string{
-			ns:    {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"}, // a workspace namespace of this release's gateway
-			nsB:   {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod"},      // one of another release's gateway
-			plain: nil,
+			ns:         {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"}, // a workspace namespace of this release's gateway
+			nsB:        {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod"},      // one of another release's gateway
+			unlabelled: {"openshell.ai/managed-by": "openshell"},
+			plain:      nil,
 		} {
 			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -156,7 +158,9 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 		for _, b := range bindingsB {
 			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
-			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
+			if !strings.HasSuffix(b.Name, "-unlabelled") {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
+			}
 		}
 		// The specs below that inspect `policies` and `bindings` mean release A's; both are applied.
 		for _, p := range append(slices.Clone(policies), policiesB...) {
@@ -210,6 +214,13 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		denied(createPod(ctx, gatewayUser, nsB, supervisor("a-in-b")), "may create pods in sandbox namespaces")
 		_, err = as[gatewayUser].CoreV1().Secrets(nsB).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "a-secret"}}, dryRun)
 		denied(err, "only the OpenShell gateway may write secrets in sandbox namespaces")
+	})
+
+	It("keeps an OpenShell namespace without a gateway-id label deny-by-default", func(ctx SpecContext) {
+		// No release's gateway owns it, so every release's unlabelled binding covers it.
+		denied(createPod(ctx, otherUser, unlabelled, workload("unlabelled-other")), "may create pods in sandbox namespaces")
+		denied(createPod(ctx, gatewayUser, unlabelled, workload("unlabelled-gateway")), "may create pods in sandbox namespaces")
+		Expect(createPod(ctx, controllerUser, unlabelled, workload("unlabelled-controller"))).To(Succeed())
 	})
 
 	It("applies only in sandbox namespaces (control)", func(ctx SpecContext) {
@@ -462,7 +473,13 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
-			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "openshell"), b.Name)
+			if strings.HasSuffix(b.Name, "-unlabelled") {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).NotTo(HaveKey("openshell.ai/gateway-id"), b.Name)
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchExpressions).To(ContainElement(
+					metav1.LabelSelectorRequirement{Key: "openshell.ai/gateway-id", Operator: metav1.LabelSelectorOpDoesNotExist}), b.Name)
+			} else {
+				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "openshell"), b.Name)
+			}
 			// An options object has no labels: an objectSelector would silently match nothing.
 			Expect(b.Spec.MatchResources.ObjectSelector).To(BeNil(), b.Name)
 		}
@@ -671,7 +688,7 @@ func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extra
 		}
 	}
 	Expect(policies).To(HaveLen(3), "the pods, objects and connect policies")
-	Expect(bindings).To(HaveLen(3))
+	Expect(bindings).To(HaveLen(6), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label")
 	return policies, bindings
 }
 

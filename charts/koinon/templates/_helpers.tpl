@@ -978,3 +978,16 @@ keeps the selector as set (every OpenShell namespace).
 {{- end -}}
 {{- toYaml $sel -}}
 {{- end }}
+
+{{/*
+koinon.sandboxUnlabelledSelector is the selector of the extra bindings that keep an OpenShell
+namespace WITHOUT the openshell.ai/gateway-id label deny-by-default while the policies are scoped to
+the gateway: no release's gateway owns such a namespace, so every release covers it. It is
+sandboxPolicy.namespaceSelector plus gateway-id DoesNotExist (old issue 460).
+*/}}
+{{- define "koinon.sandboxUnlabelledSelector" -}}
+{{- $sel := deepCopy .Values.sandboxPolicy.namespaceSelector -}}
+{{- $exprs := $sel.matchExpressions | default list -}}
+{{- $_ := set $sel "matchExpressions" (append $exprs (dict "key" "openshell.ai/gateway-id" "operator" "DoesNotExist")) -}}
+{{- toYaml $sel -}}
+{{- end }}
