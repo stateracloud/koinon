@@ -16,7 +16,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/dep-age-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Only the function: the script itself needs git and the network.
-eval "$(sed -n '/^expand_vars() {/,/^}/p' "$repo/hack/dep-age-check.sh")"
+eval "$(sed -n '/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p' "$repo/hack/dep-age-check.sh")"
 
 fail=0
 # The URLs are assembled from parts so that no release-asset URL literal appears in this file:
@@ -45,6 +45,17 @@ want "two different values stay unexpanded" 'TOOL_VERSION=1.2.3
   TOOL_VERSION: 9.9.9' "$url"
 want "an undefined name stays unexpanded" 'OTHER_VERSION=1.2.3' "$url"
 want "a longer name is not the name" 'MY_TOOL_VERSION: 9.9.9' "$url"
+
+pins() { # pins <name> <line> <expected "package version" or empty>
+	local got
+	got=$(pm_pin "$2")
+	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
+}
+pins "packageManager pin" '  "packageManager": "pnpm@12.18.0",' "pnpm 12.18.0"
+pins "packageManager pin with hash" '  "packageManager": "pnpm@12.18.0+sha512.abc"' "pnpm 12.18.0"
+pins "Dockerfile PNPM_VERSION" 'ARG PNPM_VERSION=12.18.0' "pnpm 12.18.0"
+pins "other ARG is not a pin" 'ARG NODE_VERSION=24.1.0' ""
+pins "unrelated JSON line" '  "version": "0.0.0",' ""
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"

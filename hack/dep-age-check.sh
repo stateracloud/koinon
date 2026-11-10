@@ -353,6 +353,26 @@ while IFS=$'\t' read -r file line; do
 	done
 done < <(added_lines '**/Dockerfile*' 'Dockerfile*' 'hack/*.sh' 'test/e2e/**/*.sh' '.github/workflows/*.yml' '.github/workflows/*.yaml' ':!hack/pinned-download-lint.sh')
 
+# 4a. The pnpm binary (ADR 0079 amendment, issue 450): `"packageManager": "pnpm@X"` in a package.json and the
+# e2e toolchain's `ARG PNPM_VERSION=X` are npm releases of `pnpm`. pnpm's own bootConfig applies the cooldown when
+# pnpm installs itself; this dates the pin at review time, so a hand-written bump is checked as well.
+# pm_pin <line>: prints "<package> <version>" for a packageManager pin or the PNPM_VERSION default.
+pm_pin() {
+	local re_pm='"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+)@([0-9][0-9A-Za-z.-]*)(\+[^"]*)?"'
+	local re_arg='^[[:space:]]*ARG[[:space:]]+PNPM_VERSION=([0-9][0-9A-Za-z.-]*)[[:space:]]*$'
+	if [[ $1 =~ $re_pm ]]; then
+		echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+	elif [[ $1 =~ $re_arg ]]; then
+		echo "pnpm ${BASH_REMATCH[1]}"
+	fi
+}
+while IFS=$'\t' read -r file line; do
+	pin=$(pm_pin "$line")
+	[[ -n $pin ]] || continue
+	read -r pm_name pm_ver <<<"$pin"
+	once "npm $pm_name $pm_ver" && check_npm "$pm_name" "$pm_ver"
+done < <(added_lines '**/package.json' 'package.json' '**/Dockerfile*' 'Dockerfile*')
+
 # 4b. The tool versions of hack/versions.env (old issue 544): the release each <TOOL>_VERSION names. The file
 # is also what the workflows, Dockerfile and CONTRIBUTING copies are checked against
 # (hack/versions-check.sh), so dating it dates the release assets they download.
