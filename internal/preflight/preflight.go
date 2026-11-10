@@ -136,6 +136,9 @@ type Config struct {
 	// (preflight.openshell). An empty ConfigMap skips the sandbox image checks.
 	OpenShellConfigNamespace string
 	OpenShellConfigMap       string
+	// OpenShellWorkload is the name of the gateway's StatefulSet (or Deployment) in OpenShellConfigNamespace,
+	// read for OPENSHELL_K8S_SA_TOKEN_TTL_SECS; empty means the variable is not checked.
+	OpenShellWorkload string
 	// ExpectSandboxPullSecrets is true when global.imagePullSecrets, global.imageRegistry or
 	// global.registryMirrors is set: the gateway should then have sandbox pull secrets.
 	ExpectSandboxPullSecrets bool

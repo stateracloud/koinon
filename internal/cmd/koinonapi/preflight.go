@@ -60,6 +60,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.check.AgentgatewayController, "agentgateway-controller", "agentgateway", "Deployment of agentgateway's controller (kubernetes mode)")
 	fs.StringVar(&c.check.OpenShellConfigNamespace, "openshell-config-namespace", "openshell", "namespace of OpenShell's gateway ConfigMap")
 	fs.StringVar(&c.check.OpenShellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty skips the sandbox image checks")
+	fs.StringVar(&c.check.OpenShellWorkload, "openshell-workload", "", "OpenShell gateway StatefulSet (or Deployment), read for OPENSHELL_K8S_SA_TOKEN_TTL_SECS")
 	fs.BoolVar(&c.check.ExpectSandboxPullSecrets, "expect-sandbox-pull-secrets", false, "the release pulls with credentials or through a mirror: warn when the OpenShell gateway has no sandbox pull secrets")
 	fs.StringVar(&c.check.OpenShellGatewayID, "openshell-gateway-id", "", "openshell.gatewayId: warn when it differs from the OpenShell gateway's gateway_id (the sandbox observer's namespaces)")
 	fs.BoolVar(&c.check.SandboxPolicyScopedToGateway, "sandbox-policy-scoped-to-gateway", false, "the sandbox admission policies bind by openshell.gatewayId: fail when it differs from the OpenShell gateway's gateway_id")

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -226,7 +227,7 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 		results = append(results, r)
 	}
 	if wantTTL {
-		results = append(results, c.tokenTTLResult(g))
+		results = append(results, c.tokenTTLResult(ctx, g))
 	}
 	if wantGatewayID {
 		results = append(results, c.gatewayIDResults(g)...)
@@ -242,27 +243,78 @@ const (
 	openShellMaxSATokenTTL     = 86400
 )
 
+// tokenTTLEnv is the name of the gateway environment variable that overrides sa_token_ttl_secs.
+const tokenTTLEnv = "OPENSHELL_K8S_SA_TOKEN_TTL_SECS"
+
+// gatewayTokenTTLEnv reads OPENSHELL_K8S_SA_TOKEN_TTL_SECS from the gateway workload (a StatefulSet, or
+// a Deployment) in the OpenShell namespace. It returns the value (0 when the variable is not set or
+// is not a number, which OpenShell ignores in favour of the file) and ok=false when the workload could
+// not be read or the variable comes from a Secret, ConfigMap or field reference, so its value is unknown.
+func (c *Checker) gatewayTokenTTLEnv(ctx context.Context) (value int, ok bool) {
+	ns, name := c.Config.OpenShellConfigNamespace, c.Config.OpenShellWorkload
+	if name == "" {
+		return 0, false
+	}
+	cctx, cancel := c.callCtx(ctx)
+	defer cancel()
+	var containers []corev1.Container
+	if sts, err := c.Kube.AppsV1().StatefulSets(ns).Get(cctx, name, metav1.GetOptions{}); err == nil {
+		containers = sts.Spec.Template.Spec.Containers
+	} else if dep, derr := c.Kube.AppsV1().Deployments(ns).Get(cctx, name, metav1.GetOptions{}); derr == nil {
+		containers = dep.Spec.Template.Spec.Containers
+	} else {
+		return 0, false
+	}
+	for _, ct := range containers {
+		for _, e := range ct.Env {
+			if e.Name != tokenTTLEnv {
+				continue
+			}
+			if e.ValueFrom != nil {
+				return 0, false
+			}
+			if n, err := strconv.Atoi(strings.TrimSpace(e.Value)); err == nil {
+				return n, true
+			}
+			return 0, true
+		}
+	}
+	return 0, true
+}
+
 // tokenTTLResult compares the lifetime OpenShell gives the supervisor's ServiceAccount token with
 // sandboxPolicy.supervisorTokenMaxSeconds. The policy denies a supervisor pod whose expirationSeconds is
-// above the bound, so a longer TTL means no sandbox starts. It reads sa_token_ttl_secs from the gateway
-// configuration file; OPENSHELL_K8S_SA_TOKEN_TTL_SECS on the gateway can override it, and the
-// preflight cannot see that.
-func (c *Checker) tokenTTLResult(g gatewayImages) Result {
+// above the bound, so a longer TTL means no sandbox starts. The gateway's OPENSHELL_K8S_SA_TOKEN_TTL_SECS
+// wins over sa_token_ttl_secs in its configuration file, so the check reads both. When the workload
+// cannot be read, the environment variable is unknown and the result is a warning, never a pass.
+func (c *Checker) tokenTTLResult(ctx context.Context, g gatewayImages) Result {
 	ttl, bound := g.saTokenTTL, c.Config.SupervisorTokenMaxSeconds
+	envTTL, observed := c.gatewayTokenTTLEnv(ctx)
+	if envTTL > 0 {
+		ttl = envTTL
+	}
 	if ttl == 0 {
 		ttl = openShellDefaultSATokenTTL
 	}
 	ttl = min(max(ttl, openShellMinSATokenTTL), openShellMaxSATokenTTL)
 	r := Result{Check: checkSATokenTTL}
-	if ttl > bound {
+	switch {
+	case !observed:
+		r.Status = Warn
+		r.Message = fmt.Sprintf("the gateway workload %s/%s could not be read (or sets %s from a reference), so %s was not checked; "+
+			"from its configuration file the supervisor token lifetime is %d seconds against sandboxPolicy.supervisorTokenMaxSeconds=%d. "+
+			"If the environment variable is above the bound, the sandbox admission policy denies every supervisor pod",
+			c.Config.OpenShellConfigNamespace, c.Config.OpenShellWorkload, tokenTTLEnv, tokenTTLEnv, ttl, bound)
+		r.Fix = fmt.Sprintf("check by hand that %s on the OpenShell gateway is at most %d (or unset), or set preflight.openshell.workload to the gateway's StatefulSet", tokenTTLEnv, bound)
+	case ttl > bound:
 		r.Status = Fail
 		r.Message = fmt.Sprintf("the OpenShell gateway gives supervisor ServiceAccount tokens a lifetime of %d seconds, above "+
 			"sandboxPolicy.supervisorTokenMaxSeconds=%d: the sandbox admission policy denies every supervisor pod, so no sandbox starts", ttl, bound)
-		r.Fix = fmt.Sprintf("set sandboxPolicy.supervisorTokenMaxSeconds to at least %d, or lower OPENSHELL_K8S_SA_TOKEN_TTL_SECS (sa_token_ttl_secs) on the OpenShell gateway to at most %d", ttl, bound)
-		return r
+		r.Fix = fmt.Sprintf("set sandboxPolicy.supervisorTokenMaxSeconds to at least %d, or lower %s (sa_token_ttl_secs) on the OpenShell gateway to at most %d", ttl, tokenTTLEnv, bound)
+	default:
+		r.Status = Pass
+		r.Message = fmt.Sprintf("the gateway's supervisor token lifetime (%d seconds, from its configuration and environment) is within sandboxPolicy.supervisorTokenMaxSeconds (%d)", ttl, bound)
 	}
-	r.Status = Pass
-	r.Message = fmt.Sprintf("the gateway's supervisor token lifetime (%d seconds) is within sandboxPolicy.supervisorTokenMaxSeconds (%d)", ttl, bound)
 	return r
 }
 

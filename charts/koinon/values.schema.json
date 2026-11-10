@@ -203,7 +203,8 @@
           "additionalProperties": false,
           "properties": {
             "namespace": {"$ref": "#/definitions/nonEmpty"},
-            "configMap": {"$ref": "#/definitions/nonEmpty"}
+            "configMap": {"$ref": "#/definitions/nonEmpty"},
+            "workload": {"$ref": "#/definitions/nonEmpty"}
           }
         },
         "agentSandbox": {

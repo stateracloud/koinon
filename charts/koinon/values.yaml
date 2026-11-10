@@ -207,6 +207,10 @@ preflight:
   openshell:
     namespace: openshell
     configMap: openshell-config
+    # The gateway's StatefulSet (or Deployment) in that namespace, <openshell fullname>. The preflight reads
+    # its OPENSHELL_K8S_SA_TOKEN_TTL_SECS, which wins over sa_token_ttl_secs in the ConfigMap, and compares
+    # it with sandboxPolicy.supervisorTokenMaxSeconds. Unreadable: the check warns instead of passing.
+    workload: openshell
   # Where the Agent Sandbox controller runs; its image tag must be v1.0.x.
   agentSandbox:
     namespace: agent-sandbox-system

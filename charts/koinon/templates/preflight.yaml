@@ -73,6 +73,11 @@ rules:
     resources: [configmaps]
     resourceNames: [{{ .Values.preflight.openshell.configMap }}]
     verbs: [get]
+  # The gateway workload, for OPENSHELL_K8S_SA_TOKEN_TTL_SECS (it wins over the ConfigMap's sa_token_ttl_secs).
+  - apiGroups: [apps]
+    resources: [statefulsets, deployments]
+    resourceNames: [{{ .Values.preflight.openshell.workload }}]
+    verbs: [get]
   - apiGroups: [node.k8s.io]
     resources: [runtimeclasses]
     resourceNames: [{{ .Values.openshell.runtimeClassName }}]
@@ -187,6 +192,7 @@ spec:
             {{- end }}
             - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
             - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
+            - --openshell-workload={{ .Values.preflight.openshell.workload }}
             - --openshell-gateway-id={{ .Values.openshell.gatewayId }}
             {{- if and .Values.sandboxPolicy.enabled .Values.sandboxPolicy.scopeToGateway }}
             - --sandbox-policy-scoped-to-gateway
