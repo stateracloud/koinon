@@ -50,12 +50,19 @@ repos/o/r/commits/*/check-runs) c=${path#repos/o/r/commits/}; f=checks-${c%%/*}.
 repos/o/r/commits/*/pulls) f=pulls.json ;;
 repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
 repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
+repos/o/r/actions/workflows/ci.yml/runs) f=ci-runs.json ;;
 repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*}.json ;;
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
 # the workflow runs of one commit: none unless a case adds some
 [[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
+# the merge_group ci runs: none unless a case adds some
+if [[ $f == ci-runs.json ]]; then
+	[[ -f $FX/$f ]] || echo '{"workflow_runs":[]}' >"$FX/$f"
+	jq -r "$expr" "$FX/$f"
+	exit
+fi
 # a second page (mg-runs-p2.json) follows the first only when --paginate is given and a case adds one
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
 # the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
@@ -101,6 +108,7 @@ new_case() {
 	set_ruleset go dco "e2e result"
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	echo '{"check_runs":[]}' >"$FX/checks-$pr_head.json"
+	echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"treeS\"}}" >"$FX/commit-$sha.json"
 	echo "[{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"$pr_head\"}}]" >"$FX/pulls.json"
 	run_on "$sha" go success
 	run_on "$sha" quickstart success
@@ -117,6 +125,12 @@ run_on() { # <sha> <name> <conclusion> [started_at] [workflow run id]
 	local f=$FX/checks-$1.json
 	[[ -f $f ]] || echo '{"check_runs":[]}' >"$f"
 	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-1}" "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
+ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merge_group ci run on the tree
+	local f=$FX/ci-runs.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --arg h "$1" --arg t "$2" --arg c "${3:-success}" '.workflow_runs += [{id: 900, head_sha: $h, event: "merge_group", conclusion: $c, head_commit: {id: $h, tree_id: $t}}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 n=0
@@ -196,62 +210,109 @@ echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" go success
 check "quickstart missing on the commit fails" "$(gate_rc)" 1
 
+qh=qqqq333
 new_case
-# old issue 595: main skipped the heavy job because the merge tree is the PR head; the head is the evidence.
+# main skipped the heavy job because the merge queue tested the tree: the queue build is the evidence.
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+ci_queue_run "$qh" treeS
+run_on "$qh" go success
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "a check skipped on main is read from the queue build (green)" "$(gate_rc)" 0
+
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+ci_queue_run "$qh" treeS
+run_on "$qh" go failure
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "a check skipped on main and red in the queue build fails" "$(gate_rc)" 1
+
+new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
 run_on "$pr_head" go success
-check "a check skipped on main is read from the PR head (green)" "$(gate_rc)" 0
+check "a check skipped on main is NOT read from the PR head (no queue run fails)" "$(gate_rc)" 1
+check "...and says why" "$(grep -c 'no successful merge_group ci run has this tree' "$tmp/err")" 1
 
 new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-run_on "$pr_head" go failure
-check "a check skipped on main and red on the PR head fails" "$(gate_rc)" 1
+ci_queue_run "$qh" otherTree
+run_on "$qh" go success
+check "a queue run on another tree does not count" "$(gate_rc)" 1
 
 new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-check "a check skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+ci_queue_run "$qh" treeS failure
+run_on "$qh" go success
+check "a failed queue run does not count" "$(gate_rc)" 1
 
 new_case
 echo '[]' >"$FX/pulls.json"
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-check "a check skipped on main with no merged PR fails" "$(gate_rc)" 1
+check "a check skipped on main with no queue run and no merged PR fails" "$(gate_rc)" 1
 
-# go-test (old issue 610): skipped on main (the merge tree is the PR head), the head decides.
-go_test_case() { # a fresh case in which main skipped go-test, the head's go-test is $1 ("" = no run)
+# Queue commit: dco and e2e result come from the queue build, not the PR head.
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$pr_head.json"
+ci_queue_run "$qh" treeS
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "queue commit: dco and e2e result from the queue build pass without a PR head" "$(gate_rc)" 0
+new_case
+run_on "$pr_head" dco failure "2026-01-01T12:00:00Z"
+ci_queue_run "$qh" treeS
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "queue commit: a PR head's red dco is not read when the queue reported it" "$(gate_rc)" 0
+new_case
+ci_queue_run "$qh" treeS
+run_on "$qh" dco failure
+run_on "$qh" "e2e result" success
+check "queue commit: a red dco in the queue build fails" "$(gate_rc)" 1
+# Admin commit: no queue run; ci contexts on the commit itself, dco and e2e result from the PR head.
+new_case
+check "admin commit: ci from the push run, dco and e2e result from the PR head" "$(gate_rc)" 0
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" go success
+echo '{"workflow_runs":[]}' >"$FX/mg-runs.json"
+check "admin commit: quickstart missing fails with the dispatch hint" "$(gate_rc)" 1
+check "...and says to run e2e-kind" "$(grep -c 'run the e2e-kind workflow' "$tmp/err")" 1
+
+# go-test: skipped on main (the queue ran it), the queue build decides; or the change has no Go.
+go_test_case() { # a fresh case in which main skipped go-test, the queue build's go-test is $1 ("" = no run)
 	new_case
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	run_on "$sha" quickstart success
 	run_on "$sha" go skipped
 	run_on "$sha" go-test skipped
-	run_on "$pr_head" go success
-	[[ -z $1 ]] || run_on "$pr_head" go-test "$1"
+	ci_queue_run "$qh" treeS
+	run_on "$qh" go success
+	run_on "$qh" dco success
+	run_on "$qh" "e2e result" success
+	[[ -z $1 ]] || run_on "$qh" go-test "$1"
 }
-echo '[{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-ok.json"
-echo '[{"state":"failure","context":"go-test-lab"},{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-red.json"
 export GIT_DIFF=internal/x/x.go
 go_test_case success
-check "go-test green on the PR head passes" "$(gate_rc)" 0
+check "go-test green in the queue build passes" "$(gate_rc)" 0
 go_test_case skipped
-cp "$tmp/lab-ok.json" "$FX/statuses-$pr_head.json"
-check "go-test skipped by an external run (green go-test-lab on the PR head) passes" "$(gate_rc)" 0
-check "...and says it passed in an external run" "$(grep -c 'ok: go-test (passed in an external run' "$tmp/out")" 1
+check "go-test skipped in the queue build with Go in the change fails" "$(gate_rc)" 1
+check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped in the merge queue run' "$tmp/err")" 1
 go_test_case skipped
-check "go-test skipped with no go-test-lab status and Go in the change fails" "$(gate_rc)" 1
-check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped on the merged pull request' "$tmp/err")" 1
-go_test_case skipped
-cp "$tmp/lab-red.json" "$FX/statuses-$pr_head.json"
-check "go-test skipped with a red newest go-test-lab status fails" "$(gate_rc)" 1
-go_test_case skipped
-cp "$tmp/lab-ok.json" "$FX/statuses-$sha.json" # a status on the merge commit is not the PR head's
-check "a go-test-lab on another commit does not count" "$(gate_rc)" 1
+echo '[{"state":"success","context":"go-test-lab"}]' >"$FX/statuses-$pr_head.json"
+check "a go-test-lab status on the PR head no longer excuses a skipped go-test" "$(gate_rc)" 1
 go_test_case skipped
 GIT_DIFF=docs/guide.md
 check "go-test skipped with no Go in the change passes" "$(gate_rc)" 0
@@ -259,9 +320,9 @@ GIT_DIFF=
 check "go-test skipped and the change cannot be read fails" "$(gate_rc)" 1
 export GIT_DIFF=internal/x/x.go
 go_test_case failure
-check "go-test red on the PR head fails" "$(gate_rc)" 1
+check "go-test red in the queue build fails" "$(gate_rc)" 1
 go_test_case ""
-check "go-test skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+check "go-test skipped on main and absent in the queue build fails" "$(gate_rc)" 1
 
 # #444 (ADR 0102): the quickstart on a queue-merged commit.
 qs_case() { # a fresh case whose tagged commit has the given quickstart runs only (set by the caller after)
@@ -315,8 +376,9 @@ echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
 check "quickstart: a queue run whose quickstart job was skipped fails" "$(gate_rc)" 1
 qs_case
 mg_run 77 mgsha tree1
+rm -f "$FX/commit-$sha.json"
 check "quickstart: the tagged commit's tree cannot be read fails" "$(gate_rc)" 1
-check "...and says the queue runs could not be read" "$(grep -c 'could not be read' "$tmp/err")" 1
+check "...and says what could not be read" "$(grep -c 'could not be read\|cannot read the tree' "$tmp/err")" 1
 qs_case
 mg_run 77 mgsha tree1
 echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"

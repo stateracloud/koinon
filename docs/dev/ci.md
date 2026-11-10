@@ -318,9 +318,9 @@ derive "affected" from the build graph instead of lists; we take both: one data 
 `changes` reads the commit status `go-test-lab` (an external go-test run that passed on exactly this
 head) for the exact PR head SHA; when it is success the ready run skips `go-test`, which `go` accepts
 (the required name stays `go`; no change to the ruleset). Nothing in this repository posts it and
-nothing waits for a late one: without the status `go-test` runs on the hosted runner. Push to main
-(`ci-skip-heavy.sh decide`) and `hack/release-gate.sh` count a skipped `go-test` only with that
-status or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
+nothing waits for a late one: without the status `go-test` runs on the hosted runner. The merge
+queue's `merge_group` run never uses it (it runs `go-test` in full), and `hack/release-gate.sh` counts a
+skipped `go-test` on main only through the queue build or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
 
 ### Draft pull request (old issue 593)
 
@@ -376,15 +376,15 @@ it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` r
 A pull request head's green never counts (a draft run is green by skipping). Any doubt (an admin or direct push,
 which has no queue run; an API error; no matching run) runs everything. `flavor-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the nightly and
-batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main skipped from the merged PR's
-head (this changes with the release-gate follow-up: it will read the queue build).
+batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main skipped from that same queue
+build (the `merge_group` `ci` run on the tagged commit's tree), never from the PR head.
 
 ## Cache ownership (#147)
 
 A pull request can read its own caches and the default branch's, never another pull request's, so a
 cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-docs`) run on
 every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
-push whose tree already passed as a pull request head, which used to leave main without fresh
+push whose tree the merge queue already tested, which used to leave main without fresh
 entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
 work that fills it, then saves:
 
@@ -457,7 +457,10 @@ When main's kind e2e goes from green to red, `hack/e2e-bisect.sh` opens one `e2e
 naming the merge (or the suspects); it dispatches every candidate with `backup_restore=true`, so a
 nightly that went red in the backup-restore step reproduces: fix forward within 2 hours, otherwise revert it. RC and
 release tags are cut only from a commit whose `quickstart` job concluded success
-(`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it). The gate ignores
+(`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it). The other
+required contexts are read from the tagged commit, then the queue build on the same tree, and only for
+`dco`, `claim`, `e2e result` and the dependency-age half of `quick checks` from the merged PR's head (an admin
+merge has no queue build). The gate ignores
 `skipped` `quickstart` check runs (the push run after a queue merge skips it), does not count a dispatch with
 `inputs.commit` (a bisect candidate: its job is named `quickstart (commit)`, #453; older bisect runs still named
 `quickstart` are dropped by their run title `e2e-kind (<commit>) bisect <id>`; the lookup reads one page of 100 runs and stops if `total_count` is higher, since a bisect run could hide beyond it), reads only the newest
@@ -682,9 +685,9 @@ Cost: one full `ci` run per queue build, plus a `quickstart` of about 12 to 15 m
 the e2e adds latency per entry, not per queue; the throughput limit is the 1-entry-per-group merge. A red group drops
 only its entry and rebuilds the entries behind it. Raise the group size (`max_entries_to_merge`, `min_entries_to_merge`
 with `min_entries_to_merge_wait_minutes`) only after measuring: a batch of n entries costs one e2e, but a red batch
-costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge still runs `decide_push` in `ci.yml`, which skips the heavy jobs
-only when the merge tree equals a green PR head; after a queue build that is rarely true, so those jobs run once
-more (follow-up: accept the queue commit's own green check runs). The kind e2e does not: see above.
+costs n re-queues, and the queue does not bisect (bors and Tide do). The ruleset values above trade throughput against runner minutes. A push to main after a queue merge runs `decide_push` in `ci.yml`, which skips the heavy jobs
+when a successful `merge_group` `ci` run (the queue build) tested the pushed commit's tree, so they do not run
+twice; an admin merge has no queue run and runs everything. The kind e2e has its own rule: see above.
 
 Scripts, with the rule detected at run time (no queue: nothing changes):
 

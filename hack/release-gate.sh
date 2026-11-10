@@ -8,9 +8,14 @@
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
 # (needs checks:read, contents:read, statuses:read and pull-requests:read; the ruleset is read with the implicit
-# metadata permission). The required checks are read from the `main` ruleset; the pull-request-only
-# ones (pr_only below) are read from the head commit of the pull request that merged the tagged
-# commit. Needs gh, git and awk, and a clone with origin/main.
+# metadata permission, and actions:read for the merge queue's runs). The required checks are read from
+# the `main` ruleset, in this order (ADR 0104-era route, docs/dev/releasing.md): the tagged commit itself;
+# where it reports `skipped` (the push skipped its heavy jobs because the merge queue had tested the
+# tree) or, for the pull-request-only contexts (pr_only below), the successful merge_group `ci` run on a
+# commit with the same tree (the queue build); and only when there is no queue run (an admin merge) the
+# head commit of the pull request that merged the tagged commit, for the pull-request-only contexts and
+# the dependency-age half of `quick checks`. A `go`/`web`/other ci job is never read from a PR head: a
+# draft's green is vacuous. Needs gh, git and awk, and a clone with origin/main.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -23,8 +28,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 # The required status checks come from GitHub at run time (required_contexts below), so a check
 # added to or dropped from the ruleset needs no edit here.
 #
-# Required contexts that are not reported by a push to main, read instead from the head commit of
-# the pull request that merged the tagged commit (the newest run that started before the merge):
+# Required contexts that are not reported by a push to main, read instead from the queue build (the
+# merge_group run on the same tree), else from the head commit of the pull request that merged the
+# tagged commit (the newest run that started before the merge; an admin merge has no queue build):
 #   dco                  its workflow runs on pull_request only.
 #   claim                runs on pull_request (hack/claim.sh check-pr, about the PR and its
 #                        claim); on a push to main it is skipped.
@@ -103,21 +109,47 @@ from_pr_heads() {
 	echo "$got"
 }
 
+# queue_ci_head: the head commit of a successful merge_group `ci` run whose commit has SHA's tree (the
+# queue build that tested exactly these files), or empty. Called directly (not in $(...)) so the answer
+# is cached. Reads the newest QUEUE_RUN_LIMIT runs' own head_commit.tree_id: one call, no tree lookups.
+qci_head=
+qci_read=0
+queue_ci_head() {
+	local tree
+	if ((qci_read == 0)); then
+		qci_read=1
+		tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha) || fail "cannot read the tree of $SHA"
+		[[ $tree =~ ^[0-9A-Za-z]+$ ]] || fail "cannot read the tree of $SHA"
+		qci_head=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=merge_group&status=success&per_page=$QUEUE_RUN_LIMIT" \
+			--jq ".workflow_runs[] | select(.conclusion == \"success\" and .head_commit.tree_id == \"$tree\") | .head_sha" | head -n1) ||
+			fail "cannot list the merge_group ci runs"
+	fi
+	return 0
+}
+
 failed=0
 for name in "${required[@]}"; do
+	queue_ci_head
 	if is_pr_only "$name"; then
-		got=$(from_pr_heads "$name")
-		where="on the merged pull request's head"
+		got=
+		[[ -z $qci_head ]] || got=$(conclusion_of "$qci_head" "$name")
+		where="in the merge queue run on this tree ($qci_head)"
+		if [[ -z $got ]]; then
+			got=$(from_pr_heads "$name")
+			where="on the merged pull request's head (no merge queue run reported it: an admin merge)"
+		fi
 	else
 		got=$(conclusion_of "$SHA" "$name")
 		where="on $SHA"
-		# A push to main skips the heavy jobs when the merge tree equals a pull request head whose
-		# required checks passed (hack/ci-skip-heavy.sh, old issue 595); they report `skipped` here. Then the
-		# merged pull request's head is the evidence, and it must have passed (or skipped) them.
+		# A push to main skips the heavy jobs when a merge_group ci run already tested the tree
+		# (hack/ci-skip-heavy.sh); they report `skipped` here. Then that queue build is the evidence, and
+		# it must have passed (or skipped) them. A pull request head is never read for them.
 		if [[ $got == skipped ]]; then
-			got=$(from_pr_heads "$name")
+			got=
+			[[ -z $qci_head ]] || got=$(conclusion_of "$qci_head" "$name")
 			[[ $got == skipped ]] && got=success
-			where="on the merged pull request's head (skipped on $SHA: the merge tree is that head's tree)"
+			where="in the merge queue run on this tree ($qci_head; skipped on $SHA)"
+			[[ -n $qci_head ]] || where="skipped on $SHA and no successful merge_group ci run has this tree"
 		fi
 	fi
 	if [[ $got == success ]] && is_both "$name"; then
@@ -131,42 +163,29 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
-# go-test (old issue 610): the job is skipped when the pull request head had a green external go-test (the commit status
-# go-test-lab), and `go` accepts that. A go-test that was skipped is therefore checked once more: on the
-# merged pull request's head it must have succeeded, or have been skipped with a green go-test-lab status
-# on that head, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is
-# the business of `go` above. Needs statuses:read.
+# go-test: skipped on the tagged commit means the merge queue ran it (a merge_group run never skips it for a
+# lab status, only for a change with no Go in it). It is checked once more: on the queue build it must have
+# succeeded, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is the
+# business of `go` above.
 got=$(conclusion_of "$SHA" go-test)
 if [[ $got == skipped ]]; then
-	from_pr_heads go-test >/dev/null # called directly (not in $(...)) so that pr_heads is filled here
+	queue_ci_head
 	got=
-	lab=
-	while IFS=$'\t' read -r h merged; do
-		[[ -n $h ]] || continue
-		got=$(conclusion_of "$h" go-test "$merged")
-		if [[ -n $got ]]; then
-			[[ $got != skipped ]] || lab=$("$here/go-test-lab.sh" state "$h" 2>/dev/null || true)
-			break
-		fi
-	done <<<"$pr_heads"
+	[[ -z $qci_head ]] || got=$(conclusion_of "$qci_head" go-test)
 	tg=0
 	case $got in
-	success) echo "ok: go-test (on the merged pull request's head)" ;;
-	skipped)
-		if [[ $lab == success ]]; then
-			echo "ok: go-test (passed in an external run: go-test-lab on the merged pull request's head)"
+	success) echo "ok: go-test (in the merge queue run $qci_head)" ;;
+	skipped | "")
+		"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
+		if [[ $tg == 1 ]]; then
+			echo "ok: go-test (skipped: the change touches no Go)"
 		else
-			"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
-			if [[ $tg == 1 ]]; then
-				echo "ok: go-test (skipped: the change touches no Go)"
-			else
-				echo "FAIL: go-test: skipped on the merged pull request's head with no green go-test-lab status (${lab:-none}) and the change may touch Go" >&2
-				failed=1
-			fi
+			echo "FAIL: go-test: ${got:-no check run found} in the merge queue run on this tree and the change may touch Go (skipped on $SHA)" >&2
+			failed=1
 		fi
 		;;
 	*)
-		echo "FAIL: go-test: ${got:-no check run found} on the merged pull request's head (skipped on $SHA)" >&2
+		echo "FAIL: go-test: $got in the merge queue run on this tree (skipped on $SHA)" >&2
 		failed=1
 		;;
 	esac

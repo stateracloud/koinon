@@ -855,7 +855,7 @@ jobs:
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
   # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so
   # this job fills them on every push to main. It is never skipped by `changes`: hack/ci-skip-heavy.sh
-  # skips the heavy jobs on a push whose tree already passed as a pull request head, which used to
+  # skips the heavy jobs on a push whose tree the merge queue already tested, which used to
   # leave main without fresh entries. Per cache: `lookup-only` restore (no download), work and save
   # only on a miss. Advisory: it reports on pushes only, so it cannot gate a pull request.
   # hack/ci-cache-test.sh keeps the keys here and in the restoring jobs identical.
