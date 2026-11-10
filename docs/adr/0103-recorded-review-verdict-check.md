@@ -121,14 +121,26 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      A once with the approval rule and once without it.
    - Case B, an edited `review.yml`: a pull request touches a sensitive path, has no verdict and no
      approval, and edits `review.yml` so that its job always passes.
-   - Case C, a hand-posted status: any account with write access posts a plain commit status
-     `review`=success on the head of a pull request that touches a sensitive path and has no verdict
-     (`gh api repos/<scratch>/statuses/<sha> -f state=success -f context=review`). Run it with the
-     context pinned to the GitHub Actions app (`integration_id: 15368`, as in the owner's step) and, for
-     the record, once unpinned. The poster list guards only `review-verdict`, so the pin is what must
-     block this status.
+   - Case C, a hand-posted status. GitHub requires a check run and a commit status of the same name
+     to both pass ("If a check and a commit status have the same name, both must pass when that name
+     is required", [Troubleshooting required status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
+     So on a head where the real `review` check fails, `BLOCKED` proves nothing about the pin. Case C
+     therefore uses a test head with no `review` check run at all and no other blocker: a pull request
+     in the scratch repository whose `review.yml` does not run on it (for example a path filter that
+     excludes the test file, in the scratch copy only), with the approval rule met or not applying, and
+     every other required context green. Two steps, in this order:
+     - Positive control, ruleset without the pin: the context `review` is required with no
+       `integration_id`. Any account with write access posts `review`=success on the head
+       (`gh api repos/<scratch>/statuses/<sha> -f state=success -f context=review`). The head must
+       become mergeable (`mergeStateStatus` `CLEAN`). If it stays `BLOCKED`, the head has another
+       blocker and the experiment says nothing: fix the head and run the control again.
+     - Pinned: the same head and the same status, with the context pinned to the GitHub Actions app
+       (`integration_id: 15368`, as in the owner's step). The head must be `BLOCKED`, and the merge
+       box must say the check was not set by the expected app. The poster list guards only
+       `review-verdict`, so the pin is what must block this status.
+     Case C is accepted only if both results hold.
    - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives `BLOCKED`
-     for case B, for case C with the pin, and for all three orders of case A with the approval rule, after the runs end. Case A
+     for case B, for case C (positive control `CLEAN`, then pinned `BLOCKED`), and for all three orders of case A with the approval rule, after the runs end. Case A
      without the approval rule is recorded, not required: it shows whether a name-only context can be
      met by a stand-in, which decides whether `.github/**` could ever be dropped without the
      required-workflows rule (it cannot be dropped for case B in any event).
