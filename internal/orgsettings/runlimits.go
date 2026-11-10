@@ -90,8 +90,16 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		} else if err != nil {
 			return err
 		}
+		// Two admins setting at once must each audit the other's result as their before: the row lock
+		// (the row made first, as the fetch-trusted list does) holds the second until the first commits.
+		if err := q.EnsureOrgSettings(ctx, org); err != nil {
+			return err
+		}
+		if _, err := q.LockOrgSettings(ctx, org); err != nil {
+			return err
+		}
 		row, err := q.GetOrgSettings(ctx, org)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		if err != nil {
 			return err
 		}
 		before := runLimitsOf(apply(Defaults(), row))
@@ -120,7 +128,10 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		} else {
 			after.TriggerRatePerMinute = DefaultTriggerRatePerMinute
 		}
-		if before == after {
+		// What changed is the stored row, not the effective limits: NULL (the default) to an explicit
+		// value equal to the default is a change, and the audit trail shows it.
+		if row.MaxConcurrentRuns == next.MaxConcurrentRuns && row.TriggerConcurrency == next.TriggerConcurrency &&
+			row.TriggerRatePerMinute == next.TriggerRatePerMinute {
 			return nil
 		}
 		b.Org(audit.Event{

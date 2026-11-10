@@ -3,6 +3,7 @@
 package orgsettings_test
 
 import (
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -57,6 +58,35 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		got, _ = svc.RunLimits(ctx, org)
 		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 5}))
 		Expect(events(ctx, org)).To(Equal(2))
+	})
+
+	It("audits an explicit value equal to the default, which changes the stored row from NULL", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		def := orgsettings.DefaultMaxConcurrentRuns
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &def})).To(Succeed())
+		Expect(events(ctx, org)).To(Equal(1))
+		By("setting it again changes nothing")
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &def})).To(Succeed())
+		Expect(events(ctx, org)).To(Equal(1))
+	})
+
+	It("audits the right before when two admins set at once", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		var wg sync.WaitGroup
+		for _, n := range []int{3, 4} {
+			wg.Add(1)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &n})).To(Succeed())
+			}()
+		}
+		wg.Wait()
+		// The second writer's before is the first writer's after, never the default both would have read.
+		var firstAfter, secondBefore int
+		Expect(pool.QueryRow(ctx, `SELECT (summary->'after'->>'max_concurrent_runs')::int FROM audit_events WHERE org_id = $1 AND action = 'org.run_limits.set' ORDER BY id LIMIT 1`, org).Scan(&firstAfter)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT (summary->'before'->>'max_concurrent_runs')::int FROM audit_events WHERE org_id = $1 AND action = 'org.run_limits.set' ORDER BY id DESC LIMIT 1`, org).Scan(&secondBefore)).To(Succeed())
+		Expect(secondBefore).To(Equal(firstAfter))
 	})
 
 	It("refuses values outside the table's bounds and an org that does not exist", func(ctx SpecContext) {
