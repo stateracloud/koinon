@@ -38,7 +38,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    main skips its heavy jobs when the merge queue already tested the tree, `hack/ci-skip-heavy.sh`), the
    successful `merge_group` `ci` run on a commit with the same tree (the queue build, found through the
    run's own `head_commit.tree_id` among the newest `QUEUE_RUN_LIMIT`; the result is read from that run's
-   check runs (Actions app, by run id), not as the newest check run on the commit, because a queue merge
+   check runs (Actions app, by run id; `dco`, `claim` and `e2e result` from the other `merge_group` workflow runs on that head), not as the newest check run on the commit, because a queue merge
    fast-forwards main to the queue commit and the push run adds a later `skipped` to the same sha); and, for the three a push to main
    does not report as a result, the queue build first and then the merged pull request's head:
    `dco` (pull requests and the queue only), `claim` (`pull_request`, `merge_group`; skipped on main) and

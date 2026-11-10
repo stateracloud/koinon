@@ -51,12 +51,20 @@ repos/o/r/commits/*/pulls) f=pulls.json ;;
 repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
 repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
 repos/o/r/actions/workflows/ci.yml/runs) f=ci-runs.json ;;
+repos/o/r/actions/runs) f=qruns.json ;;
 repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*}.json ;;
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
 # the workflow runs of one commit: none unless a case adds some
 [[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
+# every merge_group workflow run of one head (qruns.json): none unless a case adds some
+if [[ $f == qruns.json ]]; then
+	[[ -f $FX/$f ]] || echo '{"workflow_runs":[]}' >"$FX/$f"
+	hs=; [[ $query == *head_sha=* ]] && { hs=${query#*head_sha=}; hs=${hs%%&*}; }
+	jq --arg hs "$hs" '.workflow_runs |= map(select(.head_sha == $hs))' "$FX/$f" | jq -r "$expr"
+	exit
+fi
 # the merge_group ci runs: none unless a case adds some
 if [[ $f == ci-runs.json ]]; then
 	[[ -f $FX/$f ]] || echo '{"workflow_runs":[]}' >"$FX/$f"
@@ -122,10 +130,20 @@ set_ruleset() { # <context>...: the rules/branches answer
 	jq -n --argjson ctx "$ctx" \
 		'[{type: "deletion"}, {type: "required_status_checks", ruleset_id: 7, parameters: {required_status_checks: $ctx}}]' >"$FX/rules.json"
 }
+default_run() { # <sha> <name>: ci is run 900; dco, claim and e2e result are their own workflows' runs
+	[[ $1 == "$qh" ]] || { echo 1; return; }
+	case $2 in dco) echo 910 ;; claim) echo 920 ;; "e2e result") echo 930 ;; *) echo 900 ;; esac
+}
+queue_wf_run() { # <id> <head sha>: a merge_group workflow run (any workflow) on that head
+	local f=$FX/qruns.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --argjson i "$1" --arg h "$2" '.workflow_runs += [{id: $i, head_sha: $h, event: "merge_group"}]' "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
 run_on() { # <sha> <name> <conclusion> [started_at] [workflow run id]
 	local f=$FX/checks-$1.json
 	[[ -f $f ]] || echo '{"check_runs":[]}' >"$f"
-	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, app: {id: 15368}, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-$([[ $1 == "$qh" ]] && echo 900 || echo 1)}" "$f" >"$f.new"
+	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, app: {id: 15368}, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-$(default_run "$1" "$2")}" "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merge_group ci run on the tree
@@ -133,6 +151,8 @@ ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merg
 	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
 	jq --arg h "$1" --arg t "$2" --arg c "${3:-success}" '.workflow_runs += [{id: 900, head_sha: $h, event: "merge_group", conclusion: $c, head_commit: {id: $h, tree_id: $t}}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
+	local i
+	for i in 900 910 920 930; do queue_wf_run "$i" "$1"; done
 }
 n=0
 gate_rc() { # TAG env as given: exit code; stderr to $tmp/err, stdout to $tmp/out
@@ -300,9 +320,11 @@ ff_case() { # <go-test conclusion of the merge_group run>
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	run_on "$sha" quickstart success
 	ci_queue_run "$sha" treeS
-	for c in go dco "e2e result"; do run_on "$sha" "$c" success "2026-01-01T00:00:00Z" 900; done
+	run_on "$sha" go success "2026-01-01T00:00:00Z" 900
+	run_on "$sha" dco success "2026-01-01T00:00:00Z" 910
+	run_on "$sha" "e2e result" success "2026-01-01T00:00:00Z" 930
 	run_on "$sha" go-test "$1" "2026-01-01T00:00:00Z" 900
-	for c in go go-test; do run_on "$sha" "$c" skipped "2026-01-01T01:00:00Z" 901; done
+	for c in go go-test dco "e2e result"; do run_on "$sha" "$c" skipped "2026-01-01T01:00:00Z" 901; done
 }
 export GIT_DIFF=internal/x/x.go
 ff_case success
@@ -315,6 +337,20 @@ check "fast-forward queue commit: only the push skipped, no queue result, is ref
 ff_case success
 jq '.check_runs |= map(if .details_url | test("/runs/900/") then .app.id = 1 else . end)' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
 check "fast-forward queue commit: a run not from the Actions app is not read" "$(gate_rc)" 1
+# pr_only contexts on a fast-forward commit: the queue's own dco / e2e result run decides, not the newer push
+# skipped and not the PR head (where they passed).
+for c in dco "e2e result"; do
+	ff_case success
+	run_on "$pr_head" "$c" success
+	jq --arg c "$c" '.check_runs |= map(if .name == $c and (.details_url | test("/runs/(910|930)/")) then .conclusion = "failure" else . end)' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
+	check "fast-forward queue commit: a red queue $c with a green PR head and a newer push skipped is refused" "$(gate_rc)" 1
+done
+ff_case success
+set_ruleset go dco claim "e2e result"
+run_on "$qh" claim failure "2026-01-01T00:00:00Z" 920
+run_on "$qh" claim skipped "2026-01-01T01:00:00Z" 901
+run_on "$pr_head" claim success
+check "fast-forward queue commit: a red queue claim with a newer push skipped is refused" "$(gate_rc)" 1
 sha=aaaa111
 unset GIT_DIFF
 
