@@ -36,7 +36,8 @@ func Flag(fs *pflag.FlagSet, into *bool) {
 }
 
 // Metric registers koinon_restore_hold on reg: 1 while this process holds, 0 otherwise. A fixed
-// label-free gauge (ADR 0023); the chart alert and the runbook read it to see that a release took.
+// label-free gauge (ADR 0023); the chart alert KoinonRestoreHoldOn and the backup-restore guide read it
+// to see that the hold is on and that a release took.
 func Metric(reg prometheus.Registerer, held bool) {
 	g := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "koinon_restore_hold",

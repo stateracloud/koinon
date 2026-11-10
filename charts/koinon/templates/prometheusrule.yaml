@@ -4,6 +4,9 @@ Alerting rules (metrics.prometheusRule.enabled), for prometheus-operator. Off by
 the monitoring.coreos.com/v1 PrometheusRule CRD. The rules are the ones docs/site/.../guides/metrics.md
 documents, for installs that do not write their own.
 
+Restore hold (ADR 0107, issue #462): koinon_restore_hold is 1 on a component that runs in restore-hold
+mode; the group renders always, whatever api.durable.enabled says.
+
 Durable workflows (ADR 0085, decision 11): koinon_durable_workflows_pending is read from the
 database, so every koinon-api replica reports the same value; the rule aggregates with max by
 (version), never sum. A workflow waits for a process of its own version. Older versions are carried
@@ -52,7 +55,19 @@ spec:
             severity: warning
           annotations:
             summary: koinon-api cannot read the durable workflow counts, so the stranded-workflow alert is blind
-    {{- else }}
-    []
     {{- end }}
+    - name: koinon-restore
+      rules:
+        - alert: KoinonRestoreHoldOn
+          expr: max(koinon_restore_hold) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Koinon is held in restore-hold mode, so it does no work
+            description: >-
+              At least one Koinon component runs with restoreHold set: it serves health and reads but fires
+              no schedule, claims no run, converges no sandbox and makes no outward call. Check the keys and the
+              run limits, then release the hold by upgrading with restoreHold=false (see the "Back up and
+              restore" guide).
 {{- end }}

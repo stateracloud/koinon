@@ -12,3 +12,10 @@ hold_count() { render --show-only templates/deployments.yaml --set restoreHold=t
 env_is KOINON_RESTORE_HOLD '"true"' --set restoreHold=true
 # The value is a boolean: a typo fails the render instead of silently releasing the hold.
 if render --set restoreHold=yes-please >/dev/null 2>&1; then fail "restoreHold must be a boolean"; fi
+
+# The held-install alert (issue #462): a PrometheusRule group that renders whether or not durable is on.
+rh=(--set metrics.prometheusRule.enabled=true --api-versions monitoring.coreos.com/v1/PrometheusRule --show-only templates/prometheusrule.yaml)
+has "restore-hold alert renders" 'alert: KoinonRestoreHoldOn$' "${rh[@]}"
+has "restore-hold alert renders without durable" 'alert: KoinonRestoreHoldOn$' "${rh[@]}" --set api.durable.enabled=false
+has "restore-hold alert reads the max of the gauge" 'expr: max\(koinon_restore_hold\) == 1$' "${rh[@]}"
+has "restore-hold alert waits 30m" 'for: 30m$' "${rh[@]}"

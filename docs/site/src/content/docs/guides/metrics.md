@@ -113,6 +113,17 @@ koinon-api, koinon-agentd and koinon-reconciler each export this gauge ([Back up
 | --- | --- | --- | --- |
 | `koinon_restore_hold` | gauge | none | 1 while the process runs in restore-hold mode and acts on nothing (`restoreHold` in the chart), else 0. After a release it is 0 on all three. |
 
+The chart renders an alert on it when `metrics.prometheusRule.enabled` is true; without prometheus-operator,
+load the rule into your own Prometheus:
+
+```yaml
+- alert: KoinonRestoreHoldOn
+  expr: max(koinon_restore_hold) == 1
+  for: 30m
+```
+
+A held install does no work. Release it as the [Back up and restore](/guides/backup-restore/) guide describes.
+
 ### Durable workflows
 
 With `api.durable.enabled`, koinon-api runs its timers and triggers as durable (DBOS) workflows. A
