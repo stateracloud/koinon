@@ -3,12 +3,13 @@ title: Back up and restore
 description: Back up the database and the encryption keys by hand, restore them into a stopped install, and check the result.
 ---
 
-A Koinon install has three parts that must agree after a restore:
+A Koinon install has four parts that must agree after a restore:
 
 | Part | Where it lives | What loses it |
 | --- | --- | --- |
 | The database | Postgres: runs, tasks, the ledger, the `dbos` schema (pending workflows and schedules), and every stored credential as ciphertext | A lost volume, a bad upgrade, a dropped table |
 | The encryption keys | The Secret `koinon-kek` (or `secrets.kek.existingSecret`), or your KMS | A deleted namespace, a new cluster |
+| The install mark | The Secret `koinon-install-mark` (key `token`), made once by the chart's hook Job: it marks the OpenShell objects this install made, so another install on the same gateway leaves them alone | A deleted namespace |
 | The checkpoint bucket | Your S3 bucket: the agents' homes | Nothing in this procedure touches it |
 
 The database alone is not a backup. Provider keys, connection secrets, MCP credentials, trace
@@ -72,6 +73,17 @@ fails on a truncated file:
 ```sh e1=verify-dump
 PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name)
 kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --list < koinon.dump > /dev/null
+```
+
+### 3. The install mark
+
+Export the Secret without its namespace and cluster metadata, so it can be applied elsewhere. It holds
+a random token that is not in the database. You need it only to restore as a replacement (see
+[Restore into a new install](#restore-into-a-new-install)), but it is small and cheap to keep:
+
+```sh
+kubectl -n koinon get secret koinon-install-mark -o json \
+  | jq '{apiVersion, kind, type, metadata: {name: .metadata.name}, data}' > koinon-install-mark-backup.json
 ```
 
 Note the chart version (`helm -n koinon list`). Restore with that version. To restore onto a newer
@@ -176,7 +188,19 @@ To restore into another cluster or namespace, create the namespace and the OpenS
 certificate and install the same chart version with your values, as in the
 [Quickstart](/quickstart/#2-install). Then follow the Restore steps above from step 1. Apply the key
 backup before the first start, if you can: a new install makes its own key Secret on first start,
-and step 3 replaces it with yours. Use the same `postgres.mode`; a `cnpg` install cannot be pointed at
+and step 3 replaces it with yours.
+
+Then decide about the install mark. If the new install **replaces** the old one on the same OpenShell
+gateway (the old install is gone or will be uninstalled), apply the mark backup before the first
+start, so the new install owns the sandboxes, providers and workspaces the old one made:
+
+```sh
+kubectl -n koinon apply -f koinon-install-mark-backup.json
+```
+
+If you restore a **copy next to the live install** (a drill), do not apply it. The copy keeps the
+mark its own chart install made, and then it cannot touch the live install's objects. With the live
+mark, the copy would own them and could stop and delete them. Use the same `postgres.mode`; a `cnpg` install cannot be pointed at
 a database restored somewhere else.
 
 ### Two installs on one OpenShell gateway
@@ -193,7 +217,8 @@ install is not touched. The copy cannot run those agents on that gateway: give i
 drill that needs running sandboxes.
 
 The Secret outlives `helm uninstall` and upgrades. If it is lost (the namespace is deleted), the install
-no longer owns its objects. To take them back, create `koinon-install-mark` again with the old `token`
+no longer owns its objects. To take them back, apply the mark you backed up (step 3 of Back up), or
+create `koinon-install-mark` again with the old `token`
 (`installMark.existingSecret` names a Secret you manage), or delete the install's sandboxes, providers
 and workspaces on the gateway so that the reconciler makes them again with the new mark.
 
