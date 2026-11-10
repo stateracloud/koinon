@@ -221,6 +221,20 @@ Read from clones of NVIDIA/OpenShell (v0.1.5, v0.1.6, main d4e32263) and kuberne
 - Not captured: the exact `ReconcilerError` text. The tests build it from Agent Sandbox's format string and
   from the captured policy denial, and say so.
 
+## Amendment (2026-11-10): the admission policies cover their own gateway's namespaces, old issue 460
+
+Decision 5's `openshell.ai/managed-by` selector matched every OpenShell namespace on the cluster, so a
+second Koinon release with another gateway ID was policed by the first release's identity lists. The
+admission policies' bindings now also select `openshell.ai/gateway-id=<openshell.gatewayId>` by default,
+plus a second binding per policy for namespaces without that label;
+`sandboxPolicy.scopeToGateway=false` restores the old scope (every OpenShell namespace). The observer's
+own binding policy (decision 5) keeps the unscoped selector: it checks the gateway ID itself and another
+release binds a differently named role. The preflight fails when `openshell.gatewayId` differs from the
+gateway's `gateway_id` (the policies would bind to no namespace of that gateway and the boundary would
+fail open), and when the key is unset and `openshell.gatewayId` is not OpenShell's default `openshell`.
+Namespaces of a gateway with no Koinon release are no longer policed by the sandbox pod, object and
+CONNECT policies of this release.
+
 ## Links
 
 - [0048](0048-openshell-spike-results.md), [0066](0066-triggers-and-scheduling.md), [0045](0045-openshell-hardening-defaults.md),

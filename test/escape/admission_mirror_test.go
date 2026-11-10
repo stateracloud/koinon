@@ -55,7 +55,7 @@ var _ = Describe("Sandbox admission policy with a registry mirror", Label("escap
 		gateway = kubernetes.NewForConfigOrDie(c)
 
 		_, err = admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"openshell.ai/managed-by": "openshell"}},
+			ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"}},
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		// No controller manager in envtest: the ServiceAccount admission plugin needs it.

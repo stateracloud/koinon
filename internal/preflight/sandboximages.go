@@ -208,6 +208,12 @@ func (c *Checker) checkSandboxImages(ctx context.Context) []Result {
 	return results
 }
 
+// openShellDefaultGatewayID is the gateway_id OpenShell uses when gateway.toml sets none: the
+// default of its server config (NVIDIA/OpenShell crates/openshell-server/src/defaults.rs,
+// gateway_id: "openshell") and of the Kubernetes driver's OPENSHELL_GATEWAY_ID
+// (DEFAULT_GATEWAY_ID); ADR 0078 decision 3 records the same default.
+const openShellDefaultGatewayID = "openshell"
+
 // gatewayIDResults compares openshell.gatewayId with the gateway's gateway_id and checks the workspace
 // mode: the sandbox observer finds a workspace's namespace as openshell-<gateway_id>-<workspace>, and
 // the chart's policy admits its RoleBinding only in namespaces labelled with that gateway ID (ADR 0078).
@@ -219,10 +225,30 @@ func (c *Checker) gatewayIDResults(g gatewayImages) []Result {
 		r.Status = Warn
 		r.Message = fmt.Sprintf("the OpenShell gateway configuration does not set gateway_id under [%s], so it is not compared with openshell.gatewayId=%s", kubernetesDriverTable, want)
 		r.Fix = "check by hand that the OpenShell release's gatewayId equals openshell.gatewayId"
+		if c.Config.SandboxPolicyScopedToGateway {
+			// The gateway falls back to its default gateway_id, so an unset key is a match only when
+			// openshell.gatewayId is that default. Otherwise the policies bind to namespaces that carry
+			// another ID and cover none of this gateway's sandboxes.
+			if want == openShellDefaultGatewayID {
+				r.Message += fmt.Sprintf("; openshell.gatewayId is OpenShell's default gateway_id (%s), which the gateway uses when the key is unset", openShellDefaultGatewayID)
+			} else {
+				r.Status = Fail
+				r.Message = fmt.Sprintf("the OpenShell gateway configuration does not set gateway_id under [%s], so the gateway uses OpenShell's default (%q), but openshell.gatewayId is %q: "+
+					"the sandbox admission policies bind only to namespaces labelled openshell.ai/gateway-id=%s, so they would apply to none of this gateway's sandboxes and the sandbox boundary would fail open",
+					kubernetesDriverTable, openShellDefaultGatewayID, want, want)
+				r.Fix = "set openshell.gatewayId=" + openShellDefaultGatewayID + " on the Koinon release, or set gatewayId=" + want + " on the OpenShell release"
+			}
+		}
 	case g.gatewayID != want:
 		r.Status = Warn
 		r.Message = fmt.Sprintf("the OpenShell gateway's gateway_id is %q but openshell.gatewayId is %q: the sandbox observer would look for "+
 			"sandbox pods in the wrong namespaces, and the sandbox policy would refuse its RoleBinding there", g.gatewayID, want)
+		if c.Config.SandboxPolicyScopedToGateway {
+			r.Status = Fail
+			r.Message = fmt.Sprintf("the OpenShell gateway's gateway_id is %q but openshell.gatewayId is %q: the sandbox admission policies bind only to "+
+				"namespaces labelled openshell.ai/gateway-id=%s, so they would apply to none of this gateway's sandboxes and the sandbox boundary would "+
+				"fail open (the sandbox observer would also look in the wrong namespaces)", g.gatewayID, want, want)
+		}
 		r.Fix = "set openshell.gatewayId=" + g.gatewayID + " on the Koinon release (or the OpenShell release's gatewayId to " + want + ")"
 	default:
 		r.Status = Pass
