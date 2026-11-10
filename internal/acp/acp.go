@@ -135,8 +135,9 @@ type ReadObserver interface {
 
 // Conn is an ACP client connection to one harness process.
 type Conn struct {
-	c *sdk.ClientSideConnection
-	t *tracker
+	c   *sdk.ClientSideConnection
+	t   *tracker
+	log atomic.Pointer[slog.Logger] // the logger [Conn.SetLogger] gave the SDK; nil is slog.Default
 }
 
 // NewConn starts a client connection that writes requests to toAgent (the harness's stdin)
@@ -159,8 +160,27 @@ func NewConn(ctx context.Context, h Handler, toAgent io.Writer, fromAgent io.Rea
 		case <-c.c.Done():
 		}
 		t.abort()
+		c.logDropped()
 	}()
 	return c
+}
+
+// logDropped reports the dropped notifications once, when the connection ends: a line per drop
+// would make the dispatcher slow again, which is what the drop avoids. It names the method and
+// class of the first drop and never the content of a line, which can hold user data.
+func (c *Conn) logDropped() {
+	n := c.t.dropped.Load()
+	if n == 0 {
+		return
+	}
+	l := c.log.Load()
+	if l == nil {
+		l = slog.Default()
+	}
+	c.t.mu.Lock()
+	first := c.t.firstDrop
+	c.t.mu.Unlock()
+	l.Warn("acp: dropped notifications that no handler acts on", "count", n, "first_method", first.method, "first_class", first.class)
 }
 
 // ReadErr returns [ErrLineTooLong] if the connection ended because the agent wrote a line
@@ -198,7 +218,10 @@ func (c *Conn) WaitUpdates(ctx context.Context) bool {
 }
 
 // SetLogger sets the logger for protocol-level events, such as the connection closing.
-func (c *Conn) SetLogger(l *slog.Logger) { c.c.SetLogger(l) }
+func (c *Conn) SetLogger(l *slog.Logger) {
+	c.log.Store(l)
+	c.c.SetLogger(l)
+}
 
 // Initialize negotiates the protocol version and returns the agent's capabilities.
 func (c *Conn) Initialize(ctx context.Context) (InitializeResponse, error) {
@@ -383,6 +406,28 @@ type tracker struct {
 	aborted bool
 	drained chan struct{}
 	dropped atomic.Int64 // notifications the reader did not pass on (see notifOther)
+
+	firstDrop dropInfo // the first dropped line, for the one log line at the end; guarded by mu
+}
+
+// dropInfo says what the first dropped line was. It holds the method name only, never content.
+type dropInfo struct{ method, class string }
+
+func (t *tracker) noteFirstDrop(line []byte) {
+	var m struct {
+		Method string `json:"method"`
+	}
+	_ = json.Unmarshal(line, &m)
+	d := dropInfo{method: m.Method, class: "unhandled method"}
+	if len(d.method) > 100 {
+		d.method = d.method[:100]
+	}
+	if m.Method == sdk.ClientMethodSessionUpdate {
+		d.class = "rejected session/update"
+	}
+	t.mu.Lock()
+	t.firstDrop = d
+	t.mu.Unlock()
 }
 
 func newTracker() *tracker {
@@ -463,7 +508,9 @@ func (cr *countingReader) counted(line []byte, kind notificationKind) bool {
 	case notifNone:
 		return true
 	case notifOther:
-		cr.t.dropped.Add(1)
+		if cr.t.dropped.Add(1) == 1 {
+			cr.t.noteFirstDrop(line)
+		}
 		return false
 	}
 	if cr.obs != nil {

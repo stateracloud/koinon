@@ -468,10 +468,81 @@ var _ = Describe("notifications that no handler acts on", func() {
 		flood(ctx, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n", 3000)
 	}, SpecTimeout(60*time.Second))
 
-	It("unknown and extension methods never reach its queue", func(ctx SpecContext) {
-		flood(ctx, `{"jsonrpc":"2.0","method":"_ext/ping","params":{}}`+"\n", 3000)
+	It("unknown methods never reach its queue", func(ctx SpecContext) {
+		// Not an extension method (no leading underscore): the SDK logs "failed to handle
+		// notification" for it, which is what stalls the dispatcher here.
+		flood(ctx, `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}`+"\n", 3000)
+	}, SpecTimeout(60*time.Second))
+
+	// The SDK ignores an unhandled "_" method without a log line, so the stalled logger never
+	// stops the dispatcher here: this spec checks the drop count only, not the queue.
+	It("extension methods are dropped and counted (does not stall the dispatcher)", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		go func() {
+			for range 50 {
+				_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"_ext/ping","params":{}}`+"\n")
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.Dropped()).To(BeEquivalentTo(50))
+	}, SpecTimeout(60*time.Second))
+
+	It("reports the drops once, when the connection ends, without line content", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":"koinon_test_secret_text"}`+"\n")
+			for range 4 {
+				_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"_ext/ping","params":{"x":"koinon_test_secret_text"}}`+"\n")
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring("dropped notifications"))
+		out := buf.String()
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1))
+		Expect(out).To(ContainSubstring("count=5"))
+		Expect(out).To(ContainSubstring("first_method=session/update"))
+		Expect(out).To(ContainSubstring(`first_class="rejected session/update"`))
+		Expect(out).NotTo(ContainSubstring("koinon_test_secret_text"))
+	}, SpecTimeout(60*time.Second))
+
+	It("logs nothing when nothing was dropped", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		go func() {
+			_, _ = io.WriteString(fromAgentW, updateLine("a"))
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Consistently(buf.String).WithTimeout(200 * time.Millisecond).ShouldNot(ContainSubstring("dropped"))
 	}, SpecTimeout(60*time.Second))
 })
+
+// syncBuffer is a bytes.Buffer safe for a logger goroutine and the spec to share.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
 
 // updateLine is a valid session/update notification with the given text.
 func updateLine(text string) string {
