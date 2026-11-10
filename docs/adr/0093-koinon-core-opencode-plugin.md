@@ -7,7 +7,7 @@
 
 ## Context
 
-OpenCode is Koinon's only v0.1 harness (ADR 0059), pinned at 2.2.0 (ADR 0052, amendment
+OpenCode is Koinon's only v0.1 harness (ADR 0059), pinned at 2.2.6 (ADR 0052, amendment
 2026-10-28). Koinon changes its behaviour today in three ways: the read-only global config
 (`/etc/koinon/opencode/opencode.jsonc`), the entry script (`flavors/opencode/koinon-opencode`), and
 one plugin, `koinon.retry` (`flavors/opencode/plugins/koinon-retry/index.js`, ADR 0056 amendment
@@ -198,6 +198,8 @@ external effects are MCP tools behind agentgateway.
 - **Pin: OpenCode 2.2.5**, as part of the first slice. The image is on 2.2.0 today; the first slice
   re-pins it and ADR 0052 gets an amendment with the re-pin (at least 3 days old per ADR 0079).
   In 2.2.5 the shell tool is named `shell`; matching still accepts `bash` and `shell` (below).
+  2026-11-10: the image is now pinned to 2.2.6 (#422, release notes 2.2.1 to 2.2.6 read), which
+  supersedes the 2.2.0 "today" above; the 2.2.5 decision text stays as written.
 - `koinon.core` targets **the pinned OpenCode release only**. A hook it needs that is missing makes
   `setup` throw, so the start fails rather than the behaviour quietly vanishing.
 - **Tool names.** Every match on the shell tool takes `bash` and `shell` (2.2.5 #60687), in

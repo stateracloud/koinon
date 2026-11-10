@@ -1,6 +1,6 @@
 # OpenCode flavor
 
-[OpenCode](https://github.com/anomalyco/opencode) 2.2.0 driven over ACP (`opencode acp`) by
+[OpenCode](https://github.com/anomalyco/opencode) 2.2.6 driven over ACP (`opencode acp`) by
 `koinon-agentd` through OpenShell's non-TTY exec (ADR 0035, 0048, 0049, 0052). The image holds no
 Koinon binary.
 
