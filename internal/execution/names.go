@@ -14,12 +14,17 @@ import (
 // the label existed and counts as this install's (issue 461).
 var LabelInstall = project.Domain + "/install"
 
-// OwnerID is the value of [LabelInstall]: 16 hex characters of a hash of the install ID (the
-// database's, which travels with a restore) and the namespace Koinon runs in. The install ID alone
-// is not enough: a database restored next to the live install carries the same one. The namespace
-// tells the two apart on one gateway, and stays the same across upgrades and reinstalls into it.
-func OwnerID(installID, namespace string) string {
-	return shortHash("owner", installID, namespace)
+// OwnerID is the value of [LabelInstall]: 16 hex characters of a hash of the install mark. The mark
+// is a random value the chart's ensure-secrets hook Job writes once into a Secret of the install's
+// namespace (koinon-install-mark). It is not in Postgres, so it does not travel with a backup:
+// a database restored next to the live install, in the same namespace name on another cluster too,
+// gets its own mark and so its own owner, and cannot touch the live install's objects. The Secret
+// outlives an upgrade and a helm uninstall; an install that loses it (the namespace is deleted)
+// no longer owns its objects, and an operator takes them back by creating the Secret again with the
+// old token or by deleting the install's sandboxes and providers on the gateway so the reconciler
+// makes them again. See the backup and restore guide.
+func OwnerID(mark string) string {
+	return shortHash("owner", mark)
 }
 
 // Names of the OpenShell objects Koinon owns. The reconciler derives them when it first

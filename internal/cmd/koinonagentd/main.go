@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
@@ -47,6 +48,7 @@ type config struct {
 	databaseURL      string
 	openshellAddr    string
 	openshellTLSDir  string
+	installMark      string
 	openshellName    string
 	savedWorkKeyFile string
 	metricsAddr      string
@@ -74,6 +76,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.openshellAddr, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
+	fs.StringVar(&c.installMark, "install-mark", "", "this install's random mark (the chart's koinon-install-mark Secret); agentd then refuses to exec in or upload to a sandbox another install owns")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready while the database schema is outside the supported goose range, ADR 0085); empty disables it")
@@ -220,6 +223,11 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	defer func() { _ = backend.Close() }()
+	if cfg.installMark != "" {
+		backend.WithOwner(execution.OwnerID(cfg.installMark))
+	} else {
+		slog.Warn("no install mark: agentd does not check who owns a sandbox (set --install-mark)")
+	}
 
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) }

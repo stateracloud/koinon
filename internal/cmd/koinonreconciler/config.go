@@ -92,6 +92,7 @@ type config struct {
 
 	openshellAddress string
 	openshellTLSDir  string
+	installMark      string
 	runtimeClass     string
 	openshellGateway string
 

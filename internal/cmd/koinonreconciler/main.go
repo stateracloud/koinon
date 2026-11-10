@@ -99,15 +99,13 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	defer func() { _ = backend.Close() }()
 	// The backend owns what it makes (issue 461): objects carry this install's mark, and an object
-	// that carries another install's is never adopted, changed or deleted. The mark is the install
-	// ID with the namespace, since a database restored next to this install has the same install ID.
-	installWaitCtx, installWaitCancel := context.WithTimeout(ctx, 2*time.Minute)
-	install, err := installid.Wait(installWaitCtx, pool, 2*time.Second)
-	installWaitCancel()
-	if err != nil {
-		return fmt.Errorf("read the install ID: %w", err)
+	// that carries another install's is never adopted, changed or deleted. The mark is a random
+	// value the chart keeps in a Secret, not in Postgres, so a restored database does not share it.
+	if cfg.installMark == "" {
+		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
+	} else {
+		backend.WithOwner(execution.OwnerID(cfg.installMark))
 	}
-	backend.WithOwner(execution.OwnerID(install, cfg.namespace))
 
 	driver, err := newGatewayDriver(cfg, kube, log)
 	if err != nil {

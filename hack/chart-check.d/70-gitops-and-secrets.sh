@@ -46,7 +46,7 @@ has "an existing session key Secret is referenced" 'name: mine-session$' --set g
 lacks "an existing session key Secret is not ensured" 'gateway-session-key' --set gateway.standalone.sessionKey.existingSecret=mine-session --show-only templates/ensure-secrets.yaml
 # (d) With every Secret supplied there is no hook Job, and the given names are referenced.
 own=(--set gateway.standalone.sessionKey.existingSecret=mine-session --set bootstrapAdmin.existingSecret=mine-admin
-	--set api.otlpToken.existingSecret=mine-otlp
+	--set api.otlpToken.existingSecret=mine-otlp --set installMark.existingSecret=mine-mark
 	--set postgres.cnpg.existingSecrets.migrate=mine-migrate --set postgres.cnpg.existingSecrets.api=mine-api
 	--set postgres.cnpg.existingSecrets.reconciler=mine-reconciler --set postgres.cnpg.existingSecrets.agentd=mine-agentd)
 if render "${own[@]}" --show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
@@ -76,7 +76,7 @@ lacks "the hook leaves out a supplied role" 'koinon-db-api' --set postgres.cnpg.
 has "the hook still ensures the others" 'koinon-db-migrate' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
 # External Postgres with a given admin Secret: no Job either.
 if render --set postgres.mode=external --set postgres.external.secretName=dsns --set bootstrapAdmin.existingSecret=mine-admin \
-	--set gateway.standalone.sessionKey.existingSecret=mine-session --set api.otlpToken.existingSecret=mine-otlp \
+	--set gateway.standalone.sessionKey.existingSecret=mine-session --set api.otlpToken.existingSecret=mine-otlp --set installMark.existingSecret=mine-mark \
 	--show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
 	fail "the ensure-secrets hook renders in external mode with an existing admin Secret"
 fi
@@ -125,3 +125,14 @@ has "the standalone reconciler may read the gateway pods' logs (agentgateway's r
 has "the standalone reconciler may list the gateway pods" 'resources: \[pods\]' --set gateway.mode=standalone --show-only templates/rbac.yaml
 lacks "the kubernetes-mode reconciler reads no pod logs" 'pods/log' "${k8s[@]}" --show-only templates/rbac.yaml
 has "the reconciler is told the gateway Deployment" 'deployment: koinon-gateway$' --set gateway.mode=standalone --show-only templates/config.yaml
+
+# The install mark (issue 461): a random value the hook Job generates once, in a Secret and not in Postgres.
+# koinon-reconciler and koinon-agentd read it from the environment; koinon-api does not need it.
+has "the hook ensures koinon-install-mark" 'koinon-install-mark' --show-only templates/ensure-secrets.yaml
+n=$(render --show-only templates/deployments.yaml | grep -c 'name: KOINON_INSTALL_MARK$' || true)
+[ "$n" = 2 ] || fail "$n components get KOINON_INSTALL_MARK, want 2 (reconciler and agentd)"
+n=$(render --show-only templates/deployments.yaml | grep -A4 'name: KOINON_INSTALL_MARK$' | grep -c 'name: koinon-install-mark$' || true)
+[ "$n" = 2 ] || fail "$n install mark references read koinon-install-mark, want 2"
+lacks "the install mark never reaches a ConfigMap" 'install-mark' --show-only templates/config.yaml
+lacks "an existing install mark Secret is not ensured" 'koinon-install-mark' --set installMark.existingSecret=mine-mark --show-only templates/ensure-secrets.yaml
+has "an existing install mark Secret is read" 'name: mine-mark$' --set installMark.existingSecret=mine-mark --show-only templates/deployments.yaml

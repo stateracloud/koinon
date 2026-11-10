@@ -19,8 +19,9 @@ import (
 //
 // An object without the label was made before it existed and counts as this install's; OpenShell
 // keeps labels immutable, so it gets the label when the reconciler recreates it. An empty id turns
-// the checks off (agentd, which only reads and execs in sandboxes the reconciler recorded). It
-// returns b.
+// the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
+// set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
+// "ready" rows. It returns b.
 func (b *Backend) WithOwner(id string) *Backend {
 	b.owner = id
 	return b
@@ -51,16 +52,13 @@ func (b *Backend) check(op, kind, name string, labels map[string]string) error {
 
 // guardSandbox refuses a sandbox another install owns. A missing sandbox passes: the operation
 // itself reports it, or, for a delete, treats it as done.
-func (b *Backend) guardSandbox(ctx context.Context, op, workspace, name string) error {
+func (b *Backend) guardSandbox(ctx context.Context, workspace, name string) error {
 	if b.owner == "" {
 		return nil
 	}
-	sb, err := b.GetSandbox(ctx, workspace, name)
+	_, err := b.GetSandbox(ctx, workspace, name) // refuses a foreign sandbox with ErrForeign
 	if errors.Is(err, execution.ErrNotFound) {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	return b.check(op, "sandbox", name, sb.Labels)
+	return err
 }

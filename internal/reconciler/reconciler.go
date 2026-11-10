@@ -663,7 +663,11 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 				if err != nil {
 					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
-					r.recordMessage(ctx, w, err)
+					if errors.Is(err, execution.ErrForeign) {
+						r.recordForeign(ctx, w, err)
+					} else {
+						r.recordMessage(ctx, w, err)
+					}
 					j.mu.Lock()
 					j.errs = append(j.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 					j.mu.Unlock()
@@ -1298,6 +1302,18 @@ func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.Sandbox
 	}
 	w.sb = sb
 	return nil
+}
+
+// ForeignReason is the reason recorded on an agent whose sandbox, workspace or provider another install
+// owns (issue 461).
+const ForeignReason = "OwnedByAnotherInstall"
+
+// recordForeign moves the row out of ready and into error when an object of the agent belongs to
+// another install. A database restored next to the live install still holds the live install's
+// "ready" rows; koinon-agentd trusts a ready row, so without this it would run in the other
+// install's sandbox. In error, agentd fails the run with sandbox-unavailable and does not exec.
+func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
+	_ = r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "")
 }
 
 // recordMessage stores a reconcile error on the row for operators, keeping the state.

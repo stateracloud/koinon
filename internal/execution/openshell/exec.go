@@ -32,6 +32,9 @@ func (b *Backend) Exec(ctx context.Context, workspace, sandbox string, req execu
 	if len(req.Command) == 0 {
 		return nil, &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: errors.New("exec needs a command")}
 	}
+	if err := b.guardSandbox(ctx, workspace, sandbox); err != nil {
+		return nil, err
+	}
 	start := &openshellv1.ExecSandboxRequest{
 		WorkspaceScope: scope(workspace),
 		Sandbox:        sandbox,

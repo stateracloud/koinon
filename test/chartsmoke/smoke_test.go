@@ -180,6 +180,9 @@ func describeMode(name, valuesFile string) {
 				// What the chart expects from it.
 				Expect(cl.Secret(ctx, "koinon-otlp-token")).NotTo(BeNil())
 				Expect(cl.Secret(ctx, "koinon-otlp-token").Data).To(HaveKey("token"))
+				// koinon-reconciler and koinon-agentd read the install mark from this Secret (issue 461).
+				Expect(cl.Secret(ctx, "koinon-install-mark")).NotTo(BeNil())
+				Expect(cl.Secret(ctx, "koinon-install-mark").Data).To(HaveKey("token"))
 			}
 		}, SpecTimeout(5*time.Minute))
 

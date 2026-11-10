@@ -183,13 +183,24 @@ a database restored somewhere else.
 
 A restored copy that runs next to the live install on the same gateway computes the same sandbox,
 provider and workspace names, because the org and agent IDs are the same. Every OpenShell object Koinon
-makes carries an install mark: a hash of the install ID and the namespace Koinon runs in. A Koinon
-install does not adopt, stop, change or delete an object that has another install's mark; the
-reconcile of that agent fails with "owned by another install" and the live install is not touched. The
-copy cannot run those agents on that gateway: give it its own gateway for a drill that needs running
-sandboxes. Objects made before this mark existed have none and count as the install's own, so a
-restored copy next to a live install that has never recreated them can still take them over. A sandbox
-gets the mark when it is recreated (an image or spec change does that).
+makes carries an install mark: a hash of a random token in the Secret `koinon-install-mark`, which the
+chart's hook Job creates once. The token is not in Postgres, so a restored database does not bring it:
+the copy gets its own, whatever its namespace is called and on whatever cluster it runs. A Koinon
+install does not adopt, stop, change, exec in or delete an object that has another install's mark. The
+reconcile of that agent fails with "owned by another install", the agent's row goes to `error` (so
+`koinon-agentd` fails its runs and does not run them in the other install's sandbox), and the live
+install is not touched. The copy cannot run those agents on that gateway: give it its own gateway for a
+drill that needs running sandboxes.
+
+The Secret outlives `helm uninstall` and upgrades. If it is lost (the namespace is deleted), the install
+no longer owns its objects. To take them back, create `koinon-install-mark` again with the old `token`
+(`installMark.existingSecret` names a Secret you manage), or delete the install's sandboxes, providers
+and workspaces on the gateway so that the reconciler makes them again with the new mark.
+
+Objects made before this mark existed have none and count as the install's own, so a restored copy next
+to a live install that has never recreated them can still take them over. A sandbox gets the mark when
+it is recreated (an image or spec change does that). Upgrading to this release adds the mark Secret
+and the mark on objects the reconciler makes from then on; existing sandboxes keep working.
 
 ## What to automate, and what is not covered
 

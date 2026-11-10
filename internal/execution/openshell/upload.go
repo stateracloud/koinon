@@ -114,6 +114,9 @@ func (b *Backend) Upload(ctx context.Context, workspace, sandbox, destDir string
 	if err != nil {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}
 	}
+	if err := b.guardSandbox(ctx, workspace, sandbox); err != nil {
+		return err
+	}
 	// There is no timeout of the backend's own: the caller's context bounds the upload, so the
 	// checkpoint timeout (Checkpoints.Timeout in agentd) is the only limit and nothing caps it
 	// silently.

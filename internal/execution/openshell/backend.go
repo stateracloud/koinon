@@ -181,27 +181,29 @@ func (b *Backend) CreateSandbox(ctx context.Context, workspace string, spec exec
 		return sandboxFromProto(resp.GetSandbox()), nil
 	}
 	if errors.Is(wrap(op, err), execution.ErrAlreadyExists) {
-		sb, err := b.GetSandbox(ctx, workspace, spec.Name)
-		if err != nil {
-			return sb, err
-		}
-		return sb, b.check(op, "sandbox", spec.Name, sb.Labels)
+		// GetSandbox refuses a sandbox another install owns.
+		return b.GetSandbox(ctx, workspace, spec.Name)
 	}
 	return execution.Sandbox{}, wrap(op, err)
 }
 
-// GetSandbox implements execution.Backend.
+// GetSandbox implements execution.Backend. A sandbox another install owns is refused with
+// [execution.ErrForeign] (see [Backend.WithOwner]), so no caller records or trusts it.
 func (b *Backend) GetSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
 	resp, err := b.c.GetSandbox(ctx, &openshellv1.GetSandboxRequest{WorkspaceScope: scope(workspace), Name: name})
 	if err != nil {
 		return execution.Sandbox{}, wrap("GetSandbox", err)
 	}
-	return sandboxFromProto(resp.GetSandbox()), nil
+	sb := sandboxFromProto(resp.GetSandbox())
+	if err := b.check("GetSandbox", "sandbox", name, sb.Labels); err != nil {
+		return execution.Sandbox{}, err
+	}
+	return sb, nil
 }
 
 // StartSandbox implements execution.Backend.
 func (b *Backend) StartSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
-	if err := b.guardSandbox(ctx, "StartSandbox", workspace, name); err != nil {
+	if err := b.guardSandbox(ctx, workspace, name); err != nil {
 		return execution.Sandbox{}, err
 	}
 	resp, err := b.c.StartSandbox(ctx, &openshellv1.StartSandboxRequest{WorkspaceScope: scope(workspace), Name: name})
@@ -214,7 +216,7 @@ func (b *Backend) StartSandbox(ctx context.Context, workspace, name string) (exe
 
 // StopSandbox implements execution.Backend.
 func (b *Backend) StopSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
-	if err := b.guardSandbox(ctx, "StopSandbox", workspace, name); err != nil {
+	if err := b.guardSandbox(ctx, workspace, name); err != nil {
 		return execution.Sandbox{}, err
 	}
 	resp, err := b.c.StopSandbox(ctx, &openshellv1.StopSandboxRequest{WorkspaceScope: scope(workspace), Name: name})
@@ -246,7 +248,7 @@ func (b *Backend) settle(ctx context.Context, op, workspace, name string, err er
 
 // DeleteSandbox implements execution.Backend.
 func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) error {
-	if err := b.guardSandbox(ctx, "DeleteSandbox", workspace, name); err != nil {
+	if err := b.guardSandbox(ctx, workspace, name); err != nil {
 		return err
 	}
 	_, err := b.c.DeleteSandbox(ctx, &openshellv1.DeleteSandboxRequest{
@@ -259,7 +261,7 @@ func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) err
 // canonical hash matches the latest revision, so an unchanged policy keeps its version.
 func (b *Backend) EnsurePolicy(ctx context.Context, workspace, sandbox string, p execution.Policy) (uint32, error) {
 	const op = "EnsurePolicy"
-	if err := b.guardSandbox(ctx, op, workspace, sandbox); err != nil {
+	if err := b.guardSandbox(ctx, workspace, sandbox); err != nil {
 		return 0, err
 	}
 	policy, err := renderPolicy(p)

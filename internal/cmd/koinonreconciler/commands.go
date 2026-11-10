@@ -177,6 +177,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.logLevel, "log-level", "info", "debug, info, warn or error")
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
+	fs.StringVar(&c.installMark, "install-mark", "", "this install's random mark (the chart's koinon-install-mark Secret), which labels the OpenShell objects it makes; empty turns the ownership checks off")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
 	fs.StringVar(&c.openshellGateway, "openshell-gateway-id", execution.DefaultGatewayID, "OpenShell's gateway_id, which names the workspace namespaces")
 	fs.BoolVar(&c.sandboxObserver, "sandbox-observer", false, "read the pods of sandboxes that never became ready, to say why (ADR 0078); needs the chart's observer ClusterRole")
