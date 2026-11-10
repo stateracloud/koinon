@@ -15,7 +15,7 @@
 #
 # Scope: every *.sh file under the root whose first line is `#!/usr/bin/env bash`. Not in scope, by
 # design (see ADR 0090): files without a bash shebang (libraries that are only sourced, such as
-# hack/chart-check.d/*.sh and test/e2e/quickstart.golden.sh, which a guarded script
+# hack/chart-check.d/*.sh, which a guarded script
 # loads) and scripts with a #!/bin/sh shebang (they run in container images with no bash).
 #
 # Usage: hack/bash5-lint.sh [root]    (default: the repository root)
@@ -65,7 +65,7 @@ done < <(
 		else
 			find "$root" \( -name .git -o -name node_modules \) -prune -o -name '*.sh' -type f -print
 		fi
-	} | grep -v '\.golden\.sh$' | sort
+	} | sort
 )
 
 if ((fail)); then

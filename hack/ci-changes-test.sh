@@ -138,8 +138,8 @@ expect "go chartsmoke" internal/zzz-not-imported/x.go
 expect "go chartsmoke docs" internal/preflight/preflight.go
 expect "go docs" internal/declarative/docs_test.go # a test file of another package is not in the smoke build
 expect "docs" hack/docs-check.sh
-expect "go docs" test/e2e/run.sh # docs-check.sh compares its e1 blocks to the quickstart
-expect "go docs" test/e2e/quickstart.golden.sh
+expect "go docs" test/e2e/run.sh # docs-check.sh compares its e1 blocks to the command file
+expect "go docs" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
 all="chart chartsmoke docs escape flavors generate go web"

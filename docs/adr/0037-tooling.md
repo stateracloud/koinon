@@ -1,6 +1,6 @@
 # 0037. Tooling: goose, Starlight, ACP Go SDK, Tilt
 
-- Status: Accepted
+- Status: Accepted; the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md)
 - Date: 2026-10-21
 - Decision: [design.md#37](../design.md)
 
@@ -26,7 +26,8 @@ read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)
   - File names are **zero-padded sequence numbers** (`00001_orgs.sql`). sqlc reads migration files
     in lexicographic order, and goose versions must sort correctly.
   - sqlc reads the same directory as its schema and ignores goose's down sections.
-- **Docs site: Astro Starlight**, in `docs/site/`.
+- **Docs site: Astro Starlight**, in `docs/site/`. _(Superseded in part by [0108](0108-docs-site-in-its-own-repository.md):
+  Starlight stays, the site moves to its own repository.)_
 - **ACP client:** `agentd` uses the community Go SDK **`github.com/coder/acp-go-sdk`**
   (Apache-2.0). It is pre-1.0 (v0.13.5, tags only). ACP has no official Go SDK, so the design's
   "the Go SDK" means this one. Koinon wraps it behind a small internal `acp` package so that a

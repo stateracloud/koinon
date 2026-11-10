@@ -11,8 +11,8 @@ Instructions for coding agents working on Koinon.
   no database, fixed port or fixed path between processes. `test/flavors`: `make test-flavors`.
   Details: `docs/dev/ci.md#go-test-suites`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
-- Docs site: `make docs` · `make docs-check`. The quickstart's `sh e1=<name>` blocks are what
-  `test/e2e/run.sh` runs; after changing one, run `hack/docs-check.sh --update`.
+- Docs site: `make docs` · `make docs-check`. The commands live in `test/e2e/commands/*.e1`
+  (ADR 0108); `test/e2e` runs them. Edit the file, then make the page's `sh e1=<name>` blocks match.
 - After changing `.proto` files or `internal/db/queries/*.sql`, run `make generate` and commit the
   output. CI fails if generated code is stale.
 - Chart: `hack/chart-check.sh`. Add an assertion for every chart behaviour you change, in the matching

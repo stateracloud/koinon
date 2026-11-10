@@ -6,16 +6,16 @@
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
 #      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
-#   3. the quickstart's shell commands (plan item DOC1): the blocks marked `sh e1=<name>` in
-#      docs/site/src/content/docs/quickstart.md, run by name through hack/docs-e1.sh, so the docs
-#      cannot drift from this test. They create the namespace, copy the OpenShell client
+#   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
+#      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site shows the
+#      same commands and is checked against that file, so the docs cannot drift from this test. They create the namespace, copy the OpenShell client
 #      certificate, (SUITE=go) declare the model provider with a labelled Secret and `helm install`
 #      charts/koinon (runc, CNPG, the fakes as model and GitHub). SUITE=web adds the provider through
 #      the Providers page instead, as quickstart step 4 does. Only three things differ from a
 #      reader's run: values.yaml is test/e2e/kind/koinon-values.yaml, model-provider.yaml is
 #      test/e2e/kind/model-provider.yaml (the fake model), and kubectl/helm are wrappers that add
 #      the kind context;
-#      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
+#      hack/docs-check.sh (make docs-check) fails when this script, the file and the docs page disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
 #      SUITE=web: Playwright (web/e2e-real, old issue 50) drives the same install through the
@@ -29,9 +29,9 @@
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
 #   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
 #   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
-#   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the guide
-#   docs/site/src/content/docs/guides/backup-restore.md backs up the keys and the database, the install is
-#   changed, then the guide restores both and the script checks the install is the one that was backed up
+#   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
+#   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
+#   changed, then the file restores both and the script checks the install is the one that was backed up
 #   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
@@ -102,7 +102,7 @@ cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
-e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart")
+e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart" "E1_FILE=$root/test/e2e/commands/quickstart.e1")
 e1() { "${e1_env[@]}" "$root/hack/docs-e1.sh" run "$1"; }
 
 pids=()
@@ -223,7 +223,7 @@ step "fakes ($FAKES)"
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
 done_step "Fakes deployed"
 
-# The quickstart blocks, as the docs show them (quickstart.md). The Go suite declares the model
+# The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
 # provider with a labelled Secret (the docs' GitOps alternative): model-provider.yaml declares the
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
 step "quickstart: namespace, OpenShell client certificate, model provider"
@@ -316,7 +316,7 @@ fi
 
 if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
-  step "backup and restore (guides/backup-restore.md)"
+  step "backup and restore (commands/backup-restore.e1)"
   OUT="$OUT" "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
   done_step "Backup, keys export, restore and verify"
   cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"

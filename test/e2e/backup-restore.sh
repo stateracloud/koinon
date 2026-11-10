@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Backup, restore and verify on the install that test/e2e/run.sh just exercised (ADR 0085 decision 18,
-# issue #90). It runs the shell blocks of docs/site/src/content/docs/guides/backup-restore.md (the
-# `sh e1=<name>` blocks, through hack/docs-e1.sh) as written, so the guide is the thing under test:
+# issue #90). It runs the blocks of test/e2e/commands/backup-restore.e1 (through hack/docs-e1.sh) as
+# written; the guide on the docs site shows the same commands (hack/docs-check.sh and the koinon-docs CI
+# compare them, ADR 0108), so the guide is the thing under test:
 #
 #   1. note the install: the install ID, the number of tasks and runs, the keys and what they wrap;
 #   2. back up the keys and the database (the guide's backup blocks) and read the dump back;
@@ -25,7 +26,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT=${OUT:?OUT is the directory run.sh logs to; its bin/kubectl pins the kind context}
 NS=koinon
-GUIDE=$root/docs/site/src/content/docs/guides/backup-restore.md
+COMMANDS=$root/test/e2e/commands/backup-restore.e1
 work="$OUT/backup-restore"
 mkdir -p "$work"
 K=("$OUT/bin/kubectl")
@@ -35,11 +36,11 @@ t_start=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) backup/restore: $*"; }
 fail() { echo "backup/restore FAILED: $*" >&2; exit 1; }
 
-# blk runs one block of the guide, as the guide shows it, in the working directory that holds the
+# blk runs one block of the command file, as the guide shows it, in the working directory that holds the
 # dump and the key backup.
 blk() {
   echo "-- guide block $1"
-  E1_DOC=$GUIDE E1_WORKDIR=$work PATH="$OUT/bin:$PATH" "$root/hack/docs-e1.sh" run "$1"
+  E1_FILE=$COMMANDS E1_WORKDIR=$work PATH="$OUT/bin:$PATH" "$root/hack/docs-e1.sh" run "$1"
 }
 
 primary() { "${K[@]}" -n "$NS" get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name; }
@@ -129,6 +130,6 @@ sql "SET ROLE koinon_migrate; CREATE TABLE public.e2e_migrate_probe (); DROP TAB
 "${K[@]}" -n "$NS" get deploy koinon-api koinon-reconciler koinon-agentd
 
 {
-  echo "Backup and restore (guides/backup-restore.md blocks, kind, cnpg): restore took $(( t_done - t_restore )) s, whole step $(( t_done - t_start )) s."
+  echo "Backup and restore (test/e2e/commands/backup-restore.e1 blocks, kind, cnpg): restore took $(( t_done - t_restore )) s, whole step $(( t_done - t_start )) s."
 } | tee "$work/timings.md"
 echo "backup/restore passed"

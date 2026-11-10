@@ -362,20 +362,21 @@ the images straight into kind, and its browser suite goes through the Vite dev s
 ## How these steps are tested
 
 The end-to-end test, [`test/e2e/run.sh`](https://github.com/stateracloud/koinon/blob/main/test/e2e/run.sh),
-builds a kind cluster and then runs the `e1` blocks above, by name, through
-[`hack/docs-e1.sh`](https://github.com/stateracloud/koinon/blob/main/hack/docs-e1.sh). It does not
-keep its own copy of the commands. Its `kubectl` and `helm` are wrappers that add the kind context.
+builds a kind cluster and then runs the blocks of
+[`test/e2e/commands/quickstart.e1`](https://github.com/stateracloud/koinon/blob/main/test/e2e/commands/quickstart.e1),
+by name, through [`hack/docs-e1.sh`](https://github.com/stateracloud/koinon/blob/main/hack/docs-e1.sh).
+The page shows the same commands; `make docs-check` compares them.
 Three things differ: `values.yaml` holds the kind values with the fake GitHub instead of github.com,
 the provider is the fake model server instead of OpenRouter (the Go suite declares it with
-`model-provider.yaml`; the browser suite adds it on the Providers page, as step 4 does), and the
-wrappers add the kind context.
+`model-provider.yaml`; the browser suite adds it on the Providers page, as step 4 does), and in the
+end-to-end test `kubectl` and `helm` are wrappers that add the kind context.
 
 `make docs-check` runs on every pull request. It fails when:
 
 - the `e1` blocks differ from
-  [`test/e2e/quickstart.golden.sh`](https://github.com/stateracloud/koinon/blob/main/test/e2e/quickstart.golden.sh),
-  the commands the test runs. Change a command and the check shows the difference. Update the golden
-  file in the same pull request;
+  [`test/e2e/commands/quickstart.e1`](https://github.com/stateracloud/koinon/blob/main/test/e2e/commands/quickstart.e1),
+  the commands the test runs. The file is the source: change a command there, then make the page
+  show the same, in the same pull request;
 - `run.sh` does not run an `e1` block, or runs one that does not exist;
 - a `chart-values` block is not valid chart values;
 - a bold label in the browser steps is missing from the Playwright spec;

@@ -18,8 +18,9 @@ Pages are in `src/content/docs/`.
 ## Keeping the quickstart true
 
 A shell block marked `sh e1=<name>` in `quickstart.md` is a command the end-to-end test runs.
-`test/e2e/run.sh` runs these blocks by name through `hack/docs-e1.sh` and has no copy of them.
-`make docs-check` compares them with `test/e2e/quickstart.golden.sh`. After you change one on
-purpose, run `hack/docs-check.sh --update` and look at the diff. A `yaml chart-values` block must be
+The end-to-end test runs `test/e2e/commands/quickstart.e1` (and, for the backup guide,
+`backup-restore.e1`) through `hack/docs-e1.sh`. Those files own the commands (ADR 0108). The page must
+equal the file. Change a command in the file first, then make the page show the same.
+`hack/docs-check.sh` (`make docs-check`) fails on a difference and prints it. A `yaml chart-values` block must be
 valid chart values. A bold label in the quickstart's browser steps must appear in
 `web/e2e-real/*.spec.ts`.

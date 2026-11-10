@@ -56,7 +56,7 @@ are in [0046](0046-adr-conventions.md).
 | [0034](0034-project-identity.md) | Repository, module path, domain and API groups | Accepted; amended 2026-10-26 (below) |
 | [0035](0035-v01-flavors.md) | v0.1 flavors: OpenCode, Hermes and pi over ACP | Accepted; amended by [0059](0059-v01-opencode-only.md) |
 | [0036](0036-v01-demo.md) | v0.1 demo: a 15-minute quickstart ending in one approved GitHub action | Accepted |
-| [0037](0037-tooling.md) | Tooling: goose, Starlight, ACP Go SDK, Tilt | Accepted |
+| [0037](0037-tooling.md) | Tooling: goose, Starlight, ACP Go SDK, Tilt | Accepted; the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md) |
 | [0038](0038-governance.md) | Governance: BDFL with a written path to maintainership | Accepted |
 | [0039](0039-development-setup.md) | Development setup: a maintainer's Mac plus a Talos+Kata cluster | Accepted |
 | [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below) |
@@ -125,3 +125,4 @@ are in [0046](0046-adr-conventions.md).
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Proposed |
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
+| [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |

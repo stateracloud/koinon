@@ -277,7 +277,7 @@ g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {
 	local files
-	files=$(existing '\.sh$' | grep -v '\.golden\.sh$' || true) # the golden file is generated (hack/docs-check.sh)
+	files=$(existing '\.sh$' || true)
 	[[ -n $files ]] || { echo "no existing shell files"; return 0; }
 	# shellcheck disable=SC2086
 	shellcheck $files
