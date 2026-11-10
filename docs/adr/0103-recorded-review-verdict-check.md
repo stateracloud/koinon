@@ -121,8 +121,14 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
      A once with the approval rule and once without it.
    - Case B, an edited `review.yml`: a pull request touches a sensitive path, has no verdict and no
      approval, and edits `review.yml` so that its job always passes.
+   - Case C, a hand-posted status: any account with write access posts a plain commit status
+     `review`=success on the head of a pull request that touches a sensitive path and has no verdict
+     (`gh api repos/<scratch>/statuses/<sha> -f state=success -f context=review`). Run it with the
+     context pinned to the GitHub Actions app (`integration_id: 15368`, as in the owner's step) and, for
+     the record, once unpinned. The poster list guards only `review-verdict`, so the pin is what must
+     block this status.
    - Result: the precondition is met only if `gh pr view <N> --json mergeStateStatus` gives `BLOCKED`
-     for case B and for all three orders of case A with the approval rule, after the runs end. Case A
+     for case B, for case C with the pin, and for all three orders of case A with the approval rule, after the runs end. Case A
      without the approval rule is recorded, not required: it shows whether a name-only context can be
      met by a stand-in, which decides whether `.github/**` could ever be dropped without the
      required-workflows rule (it cannot be dropped for case B in any event).
@@ -145,9 +151,13 @@ head. Its verdict lives only in a session log; GitHub cannot see it or require i
    - Before it: every open pull request needs a `review` run on its head (a push, or "Re-run" of the
      review workflow), or the merge box shows `review` as "Expected" and blocks it.
    - One `PUT repos/stateracloud/koinon/rulesets/26610739` that, in the same body, adds the context
-     `review` (the name stays `review`) to `required_status_checks` and changes the `pull_request`
+     `review` (the name stays `review`), pinned to the GitHub Actions app (`integration_id: 15368`), to
+     `required_status_checks` and changes the `pull_request`
      rule's `required_reviewers` entry to the one pattern `.github/**` (same reviewer team, 1 approval).
      One PUT, so there is no window with both rules in full or with neither.
+   - The pin matters: without it, any account with write access could post a plain commit status
+     `review`=success and pass the check without the gate. With `integration_id` set, GitHub accepts
+     only the Actions app for that context, so statuses posted by users are blocked (case C).
    - Move the `review` line of `hack/ci-required.txt` to `external review`.
    - `require_extra_approval_for_unattributed_changes` stays as it is (see Open questions; not verified).
    - Drift to know about, and the list for a rollback that restores the full `required_reviewers`: the live
@@ -209,7 +219,7 @@ conditions docs, GitHub's ruleset docs.
 - **`require_extra_approval_for_unattributed_changes: true`** stays in the `pull_request` rule. Whether
   it asks for an approval outside `.github/**` once `required_reviewers` is cut to that pattern (for example on a commit GitHub cannot
   attribute) is not verified; check it on the first queued sensitive-path pull request after the step.
-- Pin `review` to an App (`integration_id`) together with old issue 568.
+- A dedicated App for `review` (instead of the Actions pin) together with old issue 568.
 
 ## Upstream verification
 

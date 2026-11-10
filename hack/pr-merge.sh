@@ -219,7 +219,7 @@ if [ "$admin" != 0 ]; then
     fi
   fi
   grc=0
-  gate_out=$(EVENT=pull_request PR="$pr" SHA="$sha" GH_REPO="$repo" "$review_gate" 2>&1) || grc=$?
+  gate_out=$(env -u CLAIM -u CODEOWNERS -u KOINON_CLAIM_CODEOWNERS EVENT=pull_request PR="$pr" SHA="$sha" GH_REPO="$repo" "$review_gate" 2>&1) || grc=$?
   if [ "$grc" != 0 ]; then
     printf '%s\n' "$gate_out" >&2
     echo "pr-merge: --admin: the review gate (hack/review-gate.sh) fails on ${sha:0:7}; record the independent review with hack/review-verdict.sh $pr ready <reviewer> $sha, then run this again; not merging" >&2

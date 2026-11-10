@@ -748,7 +748,8 @@ that run is still going, use "Re-run all jobs" when it ends.
 - A listed owner posts the status, so it records a review; it is no separation of duties.
 
 The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
-PUT adds the context `review` and cuts `required_reviewers` to `.github/**`, and `review` moves to
+PUT adds the context `review`, pinned to the GitHub Actions app (`integration_id: 15368`, so a status
+posted by a user cannot satisfy it), and cuts `required_reviewers` to `.github/**`, and `review` moves to
 `external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
 
 ### Review threads (#187)

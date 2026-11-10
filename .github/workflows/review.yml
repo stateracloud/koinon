@@ -70,6 +70,9 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # BOOTSTRAP ONLY, untested on purpose: this fallback exists for the one pull request that adds
+          # hack/review-gate.sh (main has no gate yet). Exit condition: remove it, so a missing gate always
+          # fails, after that pull request merges. TODO(#review-bootstrap)
           # No gate in the checkout: pass only while main's tip has none either (the pull request that
           # adds the gate). Once main has it, a checkout without it is wrong: fail.
           if [[ ! -f hack/review-gate.sh ]]; then
