@@ -431,7 +431,7 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 		verdict := pricefetch.Classify(pricefetch.Facts{
 			Origin: origin, Source: snap.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: entry,
 			Agreeing: []string{snap.Source}, Stable: stable,
-		}, r.bounds)
+		}, bounds)
 		if noMaxOutput {
 			// Never auto: a person supplies the output limit when accepting.
 			verdict.Failed = append([]string{pricefetch.ErrNoMaxOutput.Error()}, verdict.Failed...)

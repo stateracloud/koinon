@@ -216,6 +216,7 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 	effective() // says at the start which schedule the first tick will run
 	tick := time.NewTimer(time.Minute)
 	defer tick.Stop()
+	every := interval // the effective interval of the last good read; the configured one before any
 	for {
 		select {
 		case <-ctx.Done():
@@ -223,12 +224,13 @@ func (r *Refresher) Loop(ctx context.Context, mode RefreshMode, interval time.Du
 		case <-tick.C:
 		}
 		if eff, ok := effective(); ok {
+			every = eff.Interval
 			if _, err := r.runSchedule(ctx, eff); err != nil && ctx.Err() == nil {
 				r.log.Warn("scheduled price refresh", "err", err)
 			}
 		}
 		// Off accepts any interval, zero included: never spin.
-		tick.Reset(min(max(interval, time.Minute), time.Hour))
+		tick.Reset(min(max(every, time.Minute), time.Hour))
 	}
 }
 
