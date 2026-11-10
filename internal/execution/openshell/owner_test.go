@@ -128,14 +128,29 @@ var _ = Describe("Backend ownership", func() {
 		Expect(live.DeleteSandbox(ctx, ws, "ka-old")).To(Succeed())
 	})
 
-	It("claims a provider and profile made before the label existed on one reconcile", func(ctx SpecContext) {
+	It("takes an unlabeled provider as its own while a sandbox attaches it, and claims it after", func(ctx SpecContext) {
 		p := agentgatewayProvider("1")
 		p.Name = "kp-legacy0123456789"
 		Expect(legacy.EnsureProvider(ctx, ws, p)).To(Succeed())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
+		_, err := legacy.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "ka-old", Image: "img", Providers: []string{p.Name}})
+		Expect(err).NotTo(HaveOccurred())
 
-		// Before the live install has reconciled, the copy cannot tell it from its own.
+		// A live legacy sandbox keeps its provider: the pass neither deletes nor recreates it.
 		Expect(live.EnsureProvider(ctx, ws, p)).To(Succeed())
+		Expect(gw.Calls("DeleteProvider")).To(BeZero())
+		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
+		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
+
+		// OpenShell (assumed) refuses to delete an attached provider, so a claim then fails loudly.
+		claim := p
+		claim.ClaimLegacy = true
+		Expect(live.EnsureProvider(ctx, ws, claim)).NotTo(Succeed())
+		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
+
+		// After the sandbox is gone the claim recreates it with the label.
+		Expect(live.DeleteSandbox(ctx, ws, "ka-old")).To(Succeed())
+		Expect(live.EnsureProvider(ctx, ws, claim)).To(Succeed())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 
 		Expect(restore.EnsureProvider(ctx, ws, p)).To(MatchError(execution.ErrForeign))

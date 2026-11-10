@@ -32,6 +32,7 @@ import (
 	"maps"
 	"net"
 	"regexp"
+	"slices"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -501,6 +502,17 @@ func (g *Gateway) DeleteProvider(_ context.Context, req *openshellv1.DeleteProvi
 			return &openshellv1.DeleteProviderResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_ALREADY_ABSENT}, nil
 		}
 		return nil, status.Errorf(codes.NotFound, "provider %q not found", req.GetName())
+	}
+	// ASSUMPTION, to confirm against real OpenShell: it refuses to delete a provider that a
+	// sandbox still attaches (like a profile a provider uses). Koinon must not depend on the
+	// opposite, so the fake refuses.
+	for sk, sb := range g.sandboxes {
+		if sk.workspace != k.workspace {
+			continue
+		}
+		if slices.Contains(sb.GetSpec().GetProviders(), req.GetName()) {
+			return nil, status.Errorf(codes.FailedPrecondition, "provider %q is attached to sandbox %q", req.GetName(), sk.name)
+		}
 	}
 	delete(g.providers, k)
 	return &openshellv1.DeleteProviderResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED}, nil

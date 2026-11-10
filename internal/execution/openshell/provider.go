@@ -81,9 +81,10 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 	if err := b.check(op, "provider", p.Name, existing.GetMetadata().GetLabels()); err != nil {
 		return err
 	}
-	if b.unlabeled(existing.GetMetadata().GetLabels()) {
+	if p.ClaimLegacy && b.unlabeled(existing.GetMetadata().GetLabels()) {
 		// Made before the install label existed (issue 461). Labels are immutable, so claim it by
-		// recreating it with the label and the credentials of this pass.
+		// recreating it with the label and the credentials of this pass. The caller sets ClaimLegacy
+		// only while no sandbox attaches it; until then the record is taken as this install's.
 		if _, err := b.c.DeleteProvider(ctx, &openshellv1.DeleteProviderRequest{
 			WorkspaceScope: scope(workspace), Name: p.Name, AllowMissing: true,
 		}); err != nil {

@@ -20,7 +20,8 @@ import (
 // An object without the label was made before it existed. check lets it pass (a gateway may hold
 // such objects from before the upgrade), but the live install claims them on its first reconcile:
 // OpenShell keeps labels immutable, so the reconciler recreates an unlabeled sandbox (see [Backend.Owner]),
-// EnsureProvider deletes and recreates an unlabeled provider, and a profile's owner is part of its spec
+// and, once no sandbox attaches it, EnsureProvider deletes and recreates an unlabeled provider when
+// [execution.Provider.ClaimLegacy] is set (until then it is taken as this install's), and a profile's owner is part of its spec
 // hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
 // and homes, are not recreated, and stay unmarked (they are shared, idempotent records). Until the
 // live install has reconciled once, a second install on the gateway can still touch its unlabeled

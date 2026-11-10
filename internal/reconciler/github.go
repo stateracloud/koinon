@@ -234,8 +234,9 @@ func (r *Reconciler) githubBinaries(f Flavor) []string {
 	return out
 }
 
-// ensureGitHub mints (or reuses) the agent's token and ensures its profile and provider record.
-func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names execution.AgentNames, f Flavor, read GitHubRead) error {
+// ensureGitHub mints (or reuses) the agent's token and ensures its profile and provider record. claim
+// lets it recreate a record made before the install label existed (execution.Provider.ClaimLegacy).
+func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names execution.AgentNames, f Flavor, read GitHubRead, claim bool) error {
 	if r.cfg.GitHub == nil {
 		return errors.New("the agent has a GitHub read grant, but no GitHub token minter is configured")
 	}
@@ -272,6 +273,7 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 		Credentials:        creds,
 		CredentialRevision: rev,
 		Labels:             ownerLabels(w.org.ID, w.agent.ID),
+		ClaimLegacy:        claim,
 	}); err != nil {
 		return err
 	}

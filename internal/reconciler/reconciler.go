@@ -919,13 +919,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names := w.names()
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
-	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
-		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Flavor, flavor),
-		Credentials:        map[string]string{keyEnvVar: w.material},
-		CredentialRevision: w.key.ID,
-		Labels:             ownerLabels(w.org.ID, w.agent.ID),
-	}); err != nil {
+	ensureKey := func(claim bool) error {
+		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
+			Name:               names.Provider,
+			Profile:            r.profile(w.agent.Flavor, flavor),
+			Credentials:        map[string]string{keyEnvVar: w.material},
+			CredentialRevision: w.key.ID,
+			Labels:             ownerLabels(w.org.ID, w.agent.ID),
+			ClaimLegacy:        claim,
+		})
+	}
+	if err := ensureKey(false); err != nil {
 		return err
 	}
 
@@ -941,7 +945,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, false); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
@@ -969,6 +973,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
+		if r.owns() {
+			// No sandbox attaches the providers now, so the ones made before the install label
+			// existed can be claimed (deleted and made again with the label), issue 461. While the
+			// sandbox lived they were taken as this install's, because OpenShell may refuse to delete
+			// an attached provider and a delete must not strip a live sandbox of it.
+			if err := ensureKey(true); err != nil {
+				return err
+			}
+			if hasRead {
+				if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, true); err != nil {
+					return err
+				}
+			}
+		}
 		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
 			// Nothing wants the agent, so no sandbox is created: it starts on demand (old issue 315). A
 			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
@@ -1095,8 +1113,13 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 // with the label, like any spec change. A sandbox labeled for another install never gets here:
 // GetSandbox refuses it.
 func (r *Reconciler) unmarked(sb execution.Sandbox) bool {
+	return r.owns() && sb.Labels[execution.LabelInstall] == ""
+}
+
+// owns reports whether the backend owns what it makes (an install mark is set).
+func (r *Reconciler) owns() bool {
 	o, ok := r.backend.(interface{ Owner() string })
-	return ok && o.Owner() != "" && sb.Labels[execution.LabelInstall] == ""
+	return ok && o.Owner() != ""
 }
 
 // maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours, stuck and failed
