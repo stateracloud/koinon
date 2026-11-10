@@ -2,7 +2,8 @@
 #
 # The route guard (ADR 0105): a fast in-repo signal when a commit reaches main without a merge queue build
 # (an admin merge, a break-glass merge, a direct push). hack/route-guard.sh opens or comments on an issue keyed by
-# the sha, labelled `admin:github` for a `.github/**` pull request and `break-glass` otherwise. The job always ends
+# the sha, labelled `break-glass`. An `--admin` merge of a `.github/**` pull request whose required checks were green is the
+# expected route and gets no issue. The job always ends
 # green: a red job on main is noise and cannot undo the merge. The real alarm is the overnight report that reads
 # GitHub's rule-suites record of every bypass.
 #
@@ -25,7 +26,7 @@ jobs:
   guard:
     name: route guard
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20 # polls an in-progress queue build for up to 10 minutes
     permissions:
       contents: read
       actions: read # the merge_group runs of ci

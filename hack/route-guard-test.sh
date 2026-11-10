@@ -41,27 +41,43 @@ done
 case $path in
 repos/o/r/git/commits/*) f=$FAKE_DIR/commit.json ;;
 repos/o/r/actions/workflows/ci.yml/runs*) [[ ${FAKE_FAIL_RUNS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/mq-runs.json ;;
+repos/o/r/actions/runs/*/jobs*)
+	n=$(($(cat "$FAKE_DIR/jobs-n" 2>/dev/null || echo 0) + 1)); echo "$n" >"$FAKE_DIR/jobs-n"
+	f=$FAKE_DIR/jobs.json
+	[[ $n -lt 3 || ! -f $FAKE_DIR/jobs-later.json ]] || f=$FAKE_DIR/jobs-later.json ;;
 repos/o/r/commits/*/pulls*) [[ ${FAKE_FAIL_PULLS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/pulls.json ;;
+repos/o/r/commits/*/check-runs*) f=$FAKE_DIR/checks.json ;;
 repos/o/r/pulls/*/files*) f=$FAKE_DIR/files.json ;;
+repos/o/r/pulls/*) f=$FAKE_DIR/pull.json ;;
 *) echo "fake gh: unknown $path" >&2; exit 1 ;;
 esac
 jq -r "$jq_expr" "$f"
 EOF2
 chmod +x "$tmp/bin/gh"
-export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+printf '# c\naggregator go\nquick checks\nchart\nexternal dco\nexternal e2e result\nadvisory flavors\n' >"$tmp/required.txt"
+export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa REQUIRED="$tmp/required.txt" POLL_SLEEP=0 POLL_MAX=0
 
 fails=0
+job() { printf '{"name":"%s","status":"%s","conclusion":%s}' "$1" "${3:-completed}" "$([[ ${2:-success} == null ]] && echo null || echo "\"${2:-success}\"")"; }
+jobs_file() { local IFS=,; printf '{"jobs":[%s]}' "$*" >"$tmp/${F:-jobs.json}"; }
+all_green_jobs() { jobs_file "$(job go)" "$(job 'quick checks')" "$(job chart skipped)" "$(job flavors failure)"; }
+chk() { printf '{"id":%s,"name":"%s","status":"completed","conclusion":"%s"}' "$1" "$2" "$3"; }
+checks_file() { local IFS=,; printf '{"check_runs":[%s]}' "$*" >"$tmp/checks.json"; }
+green_checks() { checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)"; }
 reset() {
-	rm -f "$tmp"/calls "$tmp"/open-issue
+	rm -f "$tmp"/calls "$tmp"/open-issue "$tmp"/jobs-later.json "$tmp"/jobs-n
 	unset FAKE_FAIL FAKE_FAIL_RUNS FAKE_FAIL_PULLS FAKE_LABEL_FAILS FAKE_ISSUE_FAILS
 	: >"$tmp/calls"
 	echo '{"tree":{"sha":"tree1"}}' >"$tmp/commit.json"
 	echo '{"workflow_runs":[]}' >"$tmp/mq-runs.json"
 	echo '[{"number":42}]' >"$tmp/pulls.json"
+	echo '{"head":{"sha":"headsha"}}' >"$tmp/pull.json"
 	echo '[{"filename":"hack/x.sh"}]' >"$tmp/files.json"
+	all_green_jobs
+	green_checks
 }
-mq_run_on() { # <tree>: a successful merge_group ci run on that tree
-	jq -n --arg t "$1" '{workflow_runs:[{conclusion:"success", head_sha:"bbbb", head_commit:{tree_id:$t}}]}' >"$tmp/mq-runs.json"
+mq_run_on() { # <tree> [status]: a merge_group ci run on that tree
+	jq -n --arg t "$1" --arg s "${2:-completed}" '{workflow_runs:[{id:9, status:$s, head_sha:"bbbb", head_commit:{tree_id:$t}}]}' >"$tmp/mq-runs.json"
 }
 run() { # sets rc; the output is in $tmp/out
 	rc=0
@@ -73,22 +89,86 @@ has() { if grep -q -- "$2" "$tmp/calls"; then ok "$1"; else bad "$1 (no /$2/ in 
 hasnt() { if grep -q -- "$2" "$tmp/calls"; then bad "$1 (found /$2/)"; else ok "$1"; fi; }
 exit0() { if [[ $rc == 0 ]]; then ok "$1: exit 0"; else bad "$1: exit $rc"; fi; }
 
-# 1. a queue merge: a successful merge_group ci run on the pushed tree. No issue.
+# 1. a queue merge: the required jobs passed on a merge_group run of the pushed tree (flavors red, advisory). No issue.
 reset
 mq_run_on tree1
 run
-exit0 "queue merge"
-hasnt "queue merge: no issue" 'issue create\|issue comment'
+exit0 "queue merge, flavors red"
+hasnt "queue merge, flavors red: no issue" 'issue create\|issue comment'
 hasnt "queue merge: no pull request lookup" 'commits/.*/pulls'
 
-# 2. a .github/** admin merge: no queue run, the merged PR changed a .github/ path
+# 1b. the run is still in progress but the required jobs are done (the queue merged on them): no issue
+reset
+mq_run_on tree1 in_progress
+run
+exit0 "run in progress, required jobs green"
+hasnt "run in progress, required jobs green: no issue" 'issue create'
+
+# 1c. required jobs still running, then green after a poll: no issue
+reset
+mq_run_on tree1 in_progress
+jobs_file "$(job go null in_progress)" "$(job 'quick checks')" "$(job chart skipped)"
+F=jobs-later.json all_green_jobs
+POLL_MAX=60 POLL_SLEEP=1 run
+exit0 "pending then green"
+hasnt "pending then green: no issue" 'issue create'
+if [[ $(grep -c 'actions/runs/9/jobs' "$tmp/calls") -ge 3 ]]; then ok "pending then green: it polled"; else bad "pending then green: it did not poll"; fi
+
+# 1d. required jobs never finish within the poll window: treated as not queue-built
+reset
+mq_run_on tree1 in_progress
+jobs_file "$(job go null in_progress)" "$(job 'quick checks')" "$(job chart skipped)"
+run
+exit0 "pending forever"
+has "pending forever: issue" 'issue create'
+
+# 1e. a required job red: issue
+reset
+mq_run_on tree1
+jobs_file "$(job go failure)" "$(job 'quick checks')" "$(job chart skipped)"
+run
+exit0 "required job red"
+has "required job red: issue" 'issue create'
+has "required job red: break-glass" '--label break-glass'
+
+# 1f. a required job missing from the run: not proof (pending, then none)
+reset
+mq_run_on tree1
+jobs_file "$(job go)" "$(job 'quick checks')"
+run
+has "required job missing: issue" 'issue create'
+
+# 2. a .github/** admin merge: no queue run; the PR changes .github/ and every required check and review were green: NO issue
 reset
 echo '[{"filename":"hack/x.sh"},{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
 run
-exit0 "github admin merge"
-has "github admin merge: issue created" 'issue create'
-has "github admin merge: labelled admin:github" '--label admin:github'
-has "github admin merge: keyed by the sha" 'aaaaaaaaaaaa'
+exit0 "github admin merge, green"
+hasnt "github admin merge, green: no issue" 'issue create\|issue comment'
+
+# 2b. the same, but review was not green on the head: issue, labelled break-glass (not admin:github)
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review failure)"
+run
+exit0 "github admin merge, review red"
+has "github admin merge, review red: issue" 'issue create'
+has "github admin merge, review red: break-glass" '--label break-glass'
+hasnt "never admin:github" 'admin:github'
+has "names the check" "check 'review' was not green"
+
+# 2c. a required check missing on the head
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success)" "$(chk 6 review success)"
+run
+has "github admin merge, checks missing: issue" 'issue create'
+
+# 2d. a newer red re-run of a check outvotes an older green one
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)" "$(chk 7 go failure)"
+run
+has "newest row per check wins: issue" 'issue create'
 
 # 3. any other admin merge: break-glass
 reset
@@ -97,7 +177,6 @@ run
 exit0 "other admin merge"
 has "other admin merge: issue created" 'issue create'
 has "other admin merge: labelled break-glass" '--label break-glass'
-hasnt "other admin merge: not labelled admin:github" 'admin:github'
 
 # 4. a path that only contains .github/ is not under .github/
 reset
@@ -105,7 +184,17 @@ echo '[{"filename":"docs/.github/x.md"}]' >"$tmp/files.json"
 run
 has "nested .github is break-glass" '--label break-glass'
 
-# 5. an API error (the runs cannot be listed): an issue "could not verify", exit 0
+# 4b. a direct push (no pull request): a real hit, said so
+reset
+echo '[]' >"$tmp/pulls.json"
+run
+exit0 "direct push"
+has "direct push: issue" 'issue create'
+has "direct push: title says direct push" 'reached main by a direct push'
+has "direct push: a real hit" 'a real hit, not a false alarm'
+hasnt "direct push: not called a false alarm" 'may be a false alarm'
+
+# 5. an API error: an issue "could not verify", exit 0
 reset
 FAKE_FAIL_RUNS=1 run
 exit0 "runs unreadable"
