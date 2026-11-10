@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	sdk "github.com/coder/acp-go-sdk"
 
@@ -135,9 +136,8 @@ type ReadObserver interface {
 
 // Conn is an ACP client connection to one harness process.
 type Conn struct {
-	c   *sdk.ClientSideConnection
-	t   *tracker
-	log atomic.Pointer[slog.Logger] // the logger [Conn.SetLogger] gave the SDK; nil is slog.Default
+	c *sdk.ClientSideConnection
+	t *tracker
 }
 
 // NewConn starts a client connection that writes requests to toAgent (the harness's stdin)
@@ -160,27 +160,13 @@ func NewConn(ctx context.Context, h Handler, toAgent io.Writer, fromAgent io.Rea
 		case <-c.c.Done():
 		}
 		t.abort()
-		c.logDropped()
+		// The reader may still read and drop lines until the stream ends: report the total at
+		// the end of the connection, not at the cancel. Waiting here cannot deadlock: nothing
+		// else waits for this goroutine, and abort has released the reader.
+		<-c.c.Done()
+		t.reportDropped("acp: dropped notifications that no handler acts on")
 	}()
 	return c
-}
-
-// logDropped reports the dropped notifications once, when the connection ends: a line per drop
-// would make the dispatcher slow again, which is what the drop avoids. It names the method and
-// class of the first drop and never the content of a line, which can hold user data.
-func (c *Conn) logDropped() {
-	n := c.t.dropped.Load()
-	if n == 0 {
-		return
-	}
-	l := c.log.Load()
-	if l == nil {
-		l = slog.Default()
-	}
-	c.t.mu.Lock()
-	first := c.t.firstDrop
-	c.t.mu.Unlock()
-	l.Warn("acp: dropped notifications that no handler acts on", "count", n, "first_method", first.method, "first_class", first.class)
 }
 
 // ReadErr returns [ErrLineTooLong] if the connection ended because the agent wrote a line
@@ -195,10 +181,13 @@ func (c *Conn) ReadErr() error {
 // connection by itself: that happens when the agent's stream ends.
 func (c *Conn) Close() { c.t.abort() }
 
-// Dropped returns how many notifications the reader did not pass on to the SDK: extension and
-// unknown methods, and session/update lines the SDK would reject. None of them has an effect, and
-// the SDK queues each one like an update, so passing them on would let a flood of them overflow its
-// queue with no handler call to pace the reader by.
+// Dropped returns how many lines the reader did not pass on to the SDK. The rule: every message
+// without an id, except a valid session/update, is dropped. That covers extension and unknown
+// methods, session/update lines the SDK would reject, and request methods sent without an id
+// (such as session/request_permission): a message without an id can get no answer. Before the
+// drop, such a permission line reached the handler; now it is only counted here and reported in
+// the log when the connection ends. The SDK queues each such line like an update, so passing
+// them on would let a flood of them overflow its queue with no handler call to pace the reader by.
 func (c *Conn) Dropped() int64 { return c.t.dropped.Load() }
 
 // Done is closed when the connection has ended.
@@ -219,7 +208,7 @@ func (c *Conn) WaitUpdates(ctx context.Context) bool {
 
 // SetLogger sets the logger for protocol-level events, such as the connection closing.
 func (c *Conn) SetLogger(l *slog.Logger) {
-	c.log.Store(l)
+	c.t.log.Store(l)
 	c.c.SetLogger(l)
 }
 
@@ -407,7 +396,61 @@ type tracker struct {
 	drained chan struct{}
 	dropped atomic.Int64 // notifications the reader did not pass on (see notifOther)
 
-	firstDrop dropInfo // the first dropped line, for the one log line at the end; guarded by mu
+	firstDrop dropInfo // the first dropped line, for the log lines; guarded by mu
+
+	log atomic.Pointer[slog.Logger] // the logger [Conn.SetLogger] gave the SDK; nil is slog.Default
+}
+
+// dropWarnThreshold is the SDK's notification queue size. The reader logs once, mid-run, when
+// the drops reach it: a harness that floods without limit would otherwise show only in the log
+// line at the end of the connection.
+const dropWarnThreshold = 1024
+
+// maxDropMethodBytes caps the method name in the drop log.
+const maxDropMethodBytes = 100
+
+// reportDropped logs the drop count with the first drop's method and class. It never logs line
+// content, which can hold user data, and it does not hold t.mu while it logs.
+func (t *tracker) reportDropped(msg string) {
+	n := t.dropped.Load()
+	if n == 0 {
+		return
+	}
+	t.mu.Lock()
+	first := t.firstDrop
+	t.mu.Unlock()
+	l := t.log.Load()
+	if l == nil {
+		l = slog.Default()
+	}
+	l.Warn(msg, "count", n, "first_method", first.method, "first_class", first.class)
+}
+
+// clientRequestMethods are the SDK's client-side methods that are requests: they need an id to
+// be answered. Sent without one they are protocol breaks, and the reader drops them.
+var clientRequestMethods = map[string]bool{
+	sdk.ClientMethodSessionRequestPermission: true,
+	sdk.ClientMethodFsReadTextFile:           true,
+	sdk.ClientMethodFsWriteTextFile:          true,
+	sdk.ClientMethodTerminalCreate:           true,
+	sdk.ClientMethodTerminalKill:             true,
+	sdk.ClientMethodTerminalOutput:           true,
+	sdk.ClientMethodTerminalRelease:          true,
+	sdk.ClientMethodTerminalWaitForExit:      true,
+	sdk.ClientMethodElicitationCreate:        true,
+	sdk.ClientMethodMcpConnect:               true,
+	sdk.ClientMethodMcpDisconnect:            true,
+}
+
+// truncateMethod cuts s to at most n bytes at a rune boundary.
+func truncateMethod(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // dropInfo says what the first dropped line was. It holds the method name only, never content.
@@ -418,12 +461,12 @@ func (t *tracker) noteFirstDrop(line []byte) {
 		Method string `json:"method"`
 	}
 	_ = json.Unmarshal(line, &m)
-	d := dropInfo{method: m.Method, class: "unhandled method"}
-	if len(d.method) > 100 {
-		d.method = d.method[:100]
-	}
-	if m.Method == sdk.ClientMethodSessionUpdate {
+	d := dropInfo{method: truncateMethod(m.Method, maxDropMethodBytes), class: "unhandled method"}
+	switch {
+	case m.Method == sdk.ClientMethodSessionUpdate:
 		d.class = "rejected session/update"
+	case clientRequestMethods[m.Method]:
+		d.class = "request without id"
 	}
 	t.mu.Lock()
 	t.firstDrop = d
@@ -508,8 +551,12 @@ func (cr *countingReader) counted(line []byte, kind notificationKind) bool {
 	case notifNone:
 		return true
 	case notifOther:
-		if cr.t.dropped.Add(1) == 1 {
+		// The reader is the only writer of the counter: record the first drop before it counts.
+		if cr.t.dropped.Load() == 0 {
 			cr.t.noteFirstDrop(line)
+		}
+		if cr.t.dropped.Add(1) == dropWarnThreshold {
+			cr.t.reportDropped("acp: dropping notifications that no handler acts on")
 		}
 		return false
 	}
@@ -590,7 +637,7 @@ type notificationKind int
 
 const (
 	notifNone   notificationKind = iota // not queued by the SDK: a response, a request, a cancel or garbage
-	notifOther                          // would be queued, then ignored or rejected without the handler
+	notifOther                          // no id and not a valid session/update: dropped (a request method without an id can get no answer)
 	notifUpdate                         // queued, and handed to SessionUpdate
 )
 
@@ -600,6 +647,14 @@ const (
 // handled at once. A session/update whose params fail to decode or validate is answered with
 // InvalidParams and never reaches the handler, so it counts as other: waiting for a handler
 // call that never comes would hold the reader forever.
+//
+// Every other message without an id is dropped. The SDK would hand such a line to a client method
+// (it does not check for an id): a request method sent without an id, such as
+// session/request_permission, would run the handler, but no answer can go back, and the dispatcher
+// waits for the handler. For notifications the drop is right only while [client] implements
+// neither sdk.ExtensionMethodHandler nor UnstableCompleteElicitation;
+// TestClientImplementsNoNotificationHandler (acp_internal_test.go) fails when someone adds one.
+// Add the method to the session/update case here when you do.
 func classify(line []byte) notificationKind {
 	var m struct {
 		JSONRPC string            `json:"jsonrpc"`

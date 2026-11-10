@@ -3,6 +3,7 @@
 package acp_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -415,7 +416,12 @@ var _ = Describe("a burst of updates against a slow handler", func() {
 type stallLogger struct{ release chan struct{} }
 
 func (l stallLogger) Enabled(context.Context, slog.Level) bool { return true }
-func (l stallLogger) Handle(context.Context, slog.Record) error {
+func (l stallLogger) Handle(_ context.Context, r slog.Record) error {
+	// Only the SDK's records stall; the drop reports of Conn itself pass, so that the one
+	// mid-run report does not hold the reader.
+	if strings.HasPrefix(r.Message, "acp: ") {
+		return nil
+	}
 	<-l.release
 	return nil
 }
@@ -454,7 +460,8 @@ var _ = Describe("notifications that no handler acts on", func() {
 		}()
 		// The reader takes every line while the dispatcher is stopped: the lines that
 		// reach the handler (the valid ones) are far below the SDK's queue.
-		Eventually(written).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(written).WithTimeout(20*time.Second).Should(BeClosed(),
+			"the reader stopped: did the SDK notification queue overflow and close the connection?")
 		Expect(conn.Dropped()).To(BeEquivalentTo(bad))
 		Expect(conn.Done()).NotTo(BeClosed(), "the SDK's queue did not overflow")
 		unstall()
@@ -511,6 +518,92 @@ var _ = Describe("notifications that no handler acts on", func() {
 		Expect(out).NotTo(ContainSubstring("koinon_test_secret_text"))
 	}, SpecTimeout(60*time.Second))
 
+	It("reports a flood once while it runs and once at the end, and a small number only at the end", func(ctx SpecContext) {
+		run := func(drops int) string {
+			fromAgentR, fromAgentW := io.Pipe()
+			conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+			var buf syncBuffer
+			conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+			go func() {
+				for range drops {
+					_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}`+"\n")
+				}
+				_ = fromAgentW.Close()
+			}()
+			Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+			Eventually(buf.String).Should(ContainSubstring("dropped notifications"))
+			return buf.String()
+		}
+		out := run(1030)
+		Expect(strings.Count(out, "dropping notifications")).To(Equal(1), out)
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1), out)
+		Expect(out).To(ContainSubstring("count=1024"))
+		Expect(out).To(ContainSubstring("count=1030"))
+		Expect(out).To(ContainSubstring("first_method=session/no_such_notification"))
+
+		out = run(1023)
+		Expect(out).NotTo(ContainSubstring("dropping notifications"))
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1), out)
+		Expect(out).To(ContainSubstring("count=1023"))
+	}, SpecTimeout(60*time.Second))
+
+	It("after a cancel, reports the total when the stream ends and not at the cancel", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		cctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		conn := acp.NewConn(cctx, &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		drop := `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}` + "\n"
+		for range 3 {
+			_, err := io.WriteString(fromAgentW, drop)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		cancel()
+		Consistently(buf.String).WithTimeout(200 * time.Millisecond).ShouldNot(ContainSubstring("dropped"))
+		for range 2 {
+			_, err := io.WriteString(fromAgentW, drop)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring("count=5"))
+		Expect(strings.Count(buf.String(), "dropped notifications")).To(Equal(1))
+		Expect(buf.String()).To(ContainSubstring("first_method=session/no_such_notification"))
+	}, SpecTimeout(60*time.Second))
+
+	It("drops a request method sent without an id: the handler is not called, later traffic still works", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		toAgentR, toAgentW := io.Pipe()
+		DeferCleanup(func() { _ = fromAgentW.Close(); _ = toAgentW.Close() })
+		h := &permCounter{}
+		conn := acp.NewConn(context.Background(), h, toAgentW, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		params := `{"sessionId":"s1","toolCall":{"toolCallId":"t1"},"options":[{"optionId":"yes","name":"Allow","kind":"allow_once"}]}`
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/request_permission","params":`+params+`}`+"\n")
+			_, _ = io.WriteString(fromAgentW, updateLine("after"))
+		}()
+		Eventually(h.updates.Load).Should(BeEquivalentTo(1))
+		Expect(h.perms.Load()).To(BeZero(), "a request without an id must not reach the handler")
+		Expect(conn.Dropped()).To(BeEquivalentTo(1))
+		// A real request with an id is still answered.
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":`+params+`}`+"\n")
+		}()
+		resp, err := bufio.NewReader(toAgentR).ReadString('\n')
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp).To(ContainSubstring(`"id":9`))
+		Expect(resp).To(ContainSubstring(`"yes"`))
+		Expect(h.perms.Load()).To(BeEquivalentTo(1))
+		Expect(conn.Dropped()).To(BeEquivalentTo(1))
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring(`first_class="request without id"`))
+		Expect(buf.String()).To(ContainSubstring("first_method=session/request_permission"))
+	}, SpecTimeout(60*time.Second))
+
 	It("logs nothing when nothing was dropped", func(ctx SpecContext) {
 		fromAgentR, fromAgentW := io.Pipe()
 		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
@@ -525,6 +618,19 @@ var _ = Describe("notifications that no handler acts on", func() {
 		Consistently(buf.String).WithTimeout(200 * time.Millisecond).ShouldNot(ContainSubstring("dropped"))
 	}, SpecTimeout(60*time.Second))
 })
+
+// permCounter counts the calls that reach the handler and answers every permission request.
+type permCounter struct{ updates, perms atomic.Int64 }
+
+func (p *permCounter) SessionUpdate(context.Context, acp.SessionNotification) error {
+	p.updates.Add(1)
+	return nil
+}
+
+func (p *permCounter) RequestPermission(context.Context, acp.PermissionRequest) (acp.Decision, error) {
+	p.perms.Add(1)
+	return acp.Decision{OptionID: "yes"}, nil
+}
 
 // syncBuffer is a bytes.Buffer safe for a logger goroutine and the spec to share.
 type syncBuffer struct {
