@@ -331,7 +331,9 @@ one-shot request object.
     row stays for the audit trail;
   - `reset-password`: a one-time password with a forced change at the next login; all the user's sessions revoked;
   - `adopt-restore`: rewrites `install_binding` with this install's mark and targets (state `same`), and re-enables
-    every refused token that is not revoked or expired (`token.rebind`). It lists the isolation conflicts it clears
+    every refused token that is not revoked or expired (`token.rebind`). It does not need to set `released_by`: the
+    state is `same` after it, so the `copy` clause of decision 1 no longer applies. It sets it anyway, to this
+    install's `OwnerID`, so the row never names another install as the releaser. It lists the isolation conflicts it clears
     (decision 4: checkpoints, public-url, oidc-redirect, each with the old and the new value as `kindURL`) in the
     audit event and in the CR status, so the operator sees what the adopt turned back on.
 - **Audit.** Each action is one install audit chain event (`recovery.<action>`), actor
@@ -437,7 +439,10 @@ picture).
   restore-only (no new snapshots) and OIDC login is off, until a platform admin runs `adopt-restore` or applies the
   mark backup. The alerts `KoinonRestoreIsolationConflict` (decision 4) and the `koinon_install_binding{state="copy"}`
   gauge make this visible within minutes; it also runs the release step once (decision 1), which signs everyone
-  out. It stays upgradable throughout. The backup and restore guide gets a "lost mark Secret" section.
+  out. It stays upgradable throughout. The backup and restore guide gets a "lost mark Secret" section, which also
+  says: because the install is pending once, its importer queues the declarative removals of that pass as
+  `waiting`, and the `restore-release-check` Job then fails each later `helm upgrade` whose plan holds one of them,
+  until `restore.acceptImporterDeletions` is set (or the Secret is restored).
 - Negative: every release signs everyone out, also a release with no data loss (a hold kept only for a check).
 - Negative: an operator on a copy cannot use a source API token; automation against a copy needs a new token.
 - **CRD.** The chart ships its first CustomResourceDefinition (`PlatformAdminRecovery`), in `crds/`. A CRD is
