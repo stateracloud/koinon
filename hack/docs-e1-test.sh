@@ -68,7 +68,7 @@ printf '# e1=h\ncat <<EOF\n# e1=inner\nEOF\n' >"$work/heredoc.e1"
 is "a marker line inside a heredoc starts a block (documented limit)" "h inner" "$(E1_FILE=$work/heredoc.e1 "$e1" names | tr '\n' ' ' | sed 's/ $//')"
 if grep -q 'also inside a heredoc body' "$e1"; then ok "the limit is written in the script header"; else bad "the limit is not written in the script header"; fi
 # A line that starts with '# e1=' but is not a valid marker is an error.
-for bad_marker in '# e1=Bad' '# e1=' '# e1=a b'; do
+for bad_marker in '# e1=Bad' '# e1=' '# e1=a b' '#e1=nospace'; do
   printf '# e1=a\necho 1\n%s\necho 2\n' "$bad_marker" >"$work/badmark.e1"
   rc=0; err=$(E1_FILE=$work/badmark.e1 "$e1" names 2>&1 >/dev/null) || rc=$?
   if [ "$rc" = 2 ] && [[ $err == *"badmark.e1:3: invalid e1 marker"* ]]; then ok "invalid marker '$bad_marker' exits 2 with file:line"; else bad "invalid marker '$bad_marker': rc=$rc err=$err"; fi
