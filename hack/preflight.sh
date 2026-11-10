@@ -138,7 +138,7 @@ reason() {
 	actionlint) echo "workflows or the actionlint config changed" ;;
 	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
-	mktemp) echo "shell scripts, the Makefile or workflows changed" ;;
+	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
 	audit) echo "Go code, sqlc queries or the audit batch lint changed" ;;
 	versions) echo "the versions file or a copy of one changed" ;;
 	scripts) echo "tooling the CI script checks cover changed" ;;
