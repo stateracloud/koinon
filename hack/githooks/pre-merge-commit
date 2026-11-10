@@ -2,4 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Refuses a merge commit (git merge origin/main) under an identity outside hack/git-identities.allowed
 # (koinon#320). A fast-forward writes no commit and never runs this.
-exec "$(dirname "${BASH_SOURCE[0]}")/../git-identity-check.sh" commit
+here=$(dirname "${BASH_SOURCE[0]}")
+"$here/../git-identity-check.sh" commit || exit $?
+# core.hooksPath replaces .git/hooks, so chain to a personal hook of the same name there (koinon#350).
+personal=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/hooks/pre-merge-commit
+[ -x "$personal" ] && exec "$personal" "$@"
+exit 0
