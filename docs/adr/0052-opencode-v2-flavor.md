@@ -241,3 +241,11 @@ Verification: `make flavor-opencode` and the flavor contract suite against the n
 recorded in the pull request.
 
 Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.
+
+## Amendment 2026-11-10: re-pin to 2.2.6 (#422)
+
+The OpenCode flavor moves from 2.2.0 to **2.2.6** (`@opencode/cli-linux-x64` and `-arm64` from
+`registry.npmjs.org`, sha256 in `flavors/opencode/Dockerfile`). Release notes 2.2.1 to 2.2.6 were
+read; nothing in them changes a decision above. The workarounds and source references in this ADR
+and in `flavors/opencode/README.md` were measured on 2.2.0 and stay worded as 2.2.0 until the flavor
+e2e (`test/flavors`) has re-measured them.
