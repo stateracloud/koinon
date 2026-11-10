@@ -17,14 +17,30 @@ import (
 // value. Two installs on one gateway then cannot touch each other's objects even when their org and
 // agent IDs, and so their object names, are the same (a restore next to the live install).
 //
-// An object without the label was made before it existed and counts as this install's; OpenShell
-// keeps labels immutable, so it gets the label when the reconciler recreates it. An empty id turns
+// An object without the label was made before it existed. check lets it pass (a gateway may hold
+// such objects from before the upgrade), but the live install claims them on its first reconcile:
+// OpenShell keeps labels immutable, so the reconciler recreates an unlabeled sandbox (see [Backend.Owner]),
+// EnsureProvider deletes and recreates an unlabeled provider, and a profile's owner is part of its spec
+// hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
+// and homes, are not recreated, and stay unmarked (they are shared, idempotent records). Until the
+// live install has reconciled once, a second install on the gateway can still touch its unlabeled
+// objects; docs/site guides/upgrading.md says so. An empty id turns
 // the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
 // set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
 // "ready" rows. It returns b.
 func (b *Backend) WithOwner(id string) *Backend {
 	b.owner = id
 	return b
+}
+
+// Owner returns the id WithOwner set ("" when ownership is off). The reconciler treats a sandbox
+// whose [execution.LabelInstall] differs from it as spec drift and recreates it with the label.
+func (b *Backend) Owner() string { return b.owner }
+
+// unlabeled reports whether an object made before the install label existed: ownership is on and
+// the object carries no install label.
+func (b *Backend) unlabeled(labels map[string]string) bool {
+	return b.owner != "" && labels[execution.LabelInstall] == ""
 }
 
 // stamp returns labels with the owner label added.

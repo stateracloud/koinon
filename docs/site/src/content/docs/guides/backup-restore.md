@@ -197,10 +197,10 @@ no longer owns its objects. To take them back, create `koinon-install-mark` agai
 (`installMark.existingSecret` names a Secret you manage), or delete the install's sandboxes, providers
 and workspaces on the gateway so that the reconciler makes them again with the new mark.
 
-Objects made before this mark existed have none and count as the install's own, so a restored copy next
-to a live install that has never recreated them can still take them over. A sandbox gets the mark when
-it is recreated (an image or spec change does that). Upgrading to this release adds the mark Secret
-and the mark on objects the reconciler makes from then on; existing sandboxes keep working.
+Objects made before this mark existed have none. The live install marks them itself on its first
+reconcile after the upgrade (see [Upgrading](../upgrading/)). Do not run a restored copy on the same
+gateway until the live install has reconciled once on this release: before that, the copy cannot tell
+the unmarked objects from its own.
 
 ## What to automate, and what is not covered
 

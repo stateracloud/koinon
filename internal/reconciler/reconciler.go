@@ -1030,7 +1030,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) {
+	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1088,6 +1088,15 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// unmarked reports a sandbox without the install label while the backend owns what it makes: it
+// was made before the label existed (issue 461). Labels are immutable, so the sandbox is recreated
+// with the label, like any spec change. A sandbox labeled for another install never gets here:
+// GetSandbox refuses it.
+func (r *Reconciler) unmarked(sb execution.Sandbox) bool {
+	o, ok := r.backend.(interface{ Owner() string })
+	return ok && o.Owner() != "" && sb.Labels[execution.LabelInstall] == ""
 }
 
 // maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours, stuck and failed

@@ -127,4 +127,27 @@ var _ = Describe("Backend ownership", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(live.DeleteSandbox(ctx, ws, "ka-old")).To(Succeed())
 	})
+
+	It("claims a provider and profile made before the label existed on one reconcile", func(ctx SpecContext) {
+		p := agentgatewayProvider("1")
+		p.Name = "kp-legacy0123456789"
+		Expect(legacy.EnsureProvider(ctx, ws, p)).To(Succeed())
+		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
+
+		// Before the live install has reconciled, the copy cannot tell it from its own.
+		Expect(live.EnsureProvider(ctx, ws, p)).To(Succeed())
+		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
+
+		Expect(restore.EnsureProvider(ctx, ws, p)).To(MatchError(execution.ErrForeign))
+		Expect(restore.DeleteProvider(ctx, ws, p.Name)).To(MatchError(execution.ErrForeign))
+		Expect(restore.DeleteProviderProfile(ctx, ws, p.Profile.ID)).To(MatchError(execution.ErrForeign), "the profile is stamped too")
+	})
+
+	It("reports the owner so the reconciler can see an unlabeled sandbox", func(ctx SpecContext) {
+		Expect(live.Owner()).To(Equal(execution.OwnerID("mark-live")))
+		sb, err := legacy.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "ka-old", Image: "img"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sb.Labels).NotTo(HaveKey(execution.LabelInstall))
+		Expect(legacy.Owner()).To(BeEmpty())
+	})
 })

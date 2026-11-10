@@ -83,6 +83,24 @@ encryption keys is `<name>-kek`, or the Secret you set in `secrets.kek.existingS
    kubectl -n koinon get pods
    ```
 
+## Upgrading to install-marked OpenShell objects (issue 461)
+
+The release that adds the install mark (Secret `koinon-install-mark`) makes every OpenShell object
+carry the mark of the install that made it, so two installs on one gateway do not touch each other's
+objects. OpenShell keeps labels immutable, so on the first reconcile after the upgrade the live install
+claims what it made before:
+
+- Each sandbox without the mark is recreated, like after a spec change: not while a run holds the
+  agent, at most the per-pass recreate cap, and after the home backup. The recreation replaces the
+  sandbox's home volume (it is restored from the backup).
+- Each provider without the mark is deleted and made again with the credentials of that pass, and
+  each provider profile is imported again with the mark.
+- Workspaces are not recreated. They stay without the mark; they only group sandboxes and a second
+  install that ensures one changes nothing in it.
+
+Sandbox and provider names do not change. A restored copy of the database must not share the
+gateway with the live install until the live install has reconciled once on the new release.
+
 ## Upgrading to the install audit chain (ADR 0100)
 
 The release that adds the install audit chain (migration 00066) needs a `NOLOGIN` group role,
