@@ -111,10 +111,8 @@ scaled to 0, so nothing restarts):
 kubectl -n koinon set env deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd KOINON_RESTORE_HOLD=true
 ```
 
-If you manage the install with Helm or GitOps, set the chart value `restoreHold: true` and apply it
-instead (the Deployments then scale up on that apply, held), and set it back to `false` to release.
-Do not mix the two ways: a variable set with `kubectl set env` is not in the chart, so a Helm upgrade
-neither adds nor removes it.
+With Helm or GitOps, skip this command: the hold goes in with the chart value in step 4, after the
+database and the keys are back.
 
 ### 2. Restore the database
 
@@ -162,6 +160,13 @@ kubectl -n koinon rollout status deployment/koinon-api deployment/koinon-reconci
 kubectl -n koinon scale deployment/koinon-agentd --replicas=1
 kubectl -n koinon rollout status deployment/koinon-agentd --timeout=5m
 ```
+
+With Helm or GitOps, do not run `kubectl scale` or the `set env` command from step 1. Set the chart
+value `restoreHold: true` and upgrade. That starts the three Deployments held, after the database and
+the keys are back (an upgrade earlier would start them against a database that step 2 replaces), and
+a GitOps controller with self-heal would undo a `kubectl scale`. Set it back to `false` to release. Do
+not mix the two ways: a variable set with `kubectl set env` is not in the chart, so a Helm upgrade
+neither adds nor removes it.
 
 Starting the API again is also what makes it read the restored install ID. Ready means the process
 is up and its schema is supported; a held install is Ready and does nothing.
