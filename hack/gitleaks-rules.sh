@@ -44,14 +44,19 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+# Go settings that could weaken verification (a workspace, a private or sum-less module, a disabled sumdb).
+goenv=(GOWORK=off GONOSUMDB= GONOSUMCHECK= GOPRIVATE= GOINSECURE= GOSUMDB=sum.golang.org)
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/gitleaks-rules.XXXXXX")
 trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 
 if [[ -z $src ]]; then
 	mod=github.com/gitleaks/gitleaks/v8@v${GITLEAKS_VERSION}
-	info=$(cd "$work" && GOFLAGS='' go mod download -json "$mod") || { echo "go mod download $mod failed" >&2; exit 1; }
+	# Fresh module cache per run: the zip is downloaded and hashed every time, not trusted from a cached .ziphash.
+	info=$(cd "$work" && env "${goenv[@]}" GOFLAGS='' GOMODCACHE="$work/modcache" go mod download -json "$mod") || { echo "go mod download $mod failed" >&2; exit 1; }
 	got=$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*"Sum": "\(.*\)",\{0,1\}$/\1/p')
 	dir=$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*"Dir": "\(.*\)",\{0,1\}$/\1/p')
+	[[ -n $dir && -f $dir/go.mod ]] || { echo "go mod download $mod: no Dir" >&2; exit 1; }
 	[[ $got == "$GITLEAKS_MODULE_SUM" ]] || { echo "gitleaks $GITLEAKS_VERSION: module hash $got, pinned $GITLEAKS_MODULE_SUM" >&2; exit 1; }
 	cp -R "$dir"/. "$work"/
 	chmod -R u+w "$work"
@@ -70,7 +75,7 @@ mv "$work/main.go.new" "$gen/config/main.go"
 cp "$root/hack/gitleaks-rules/export.go.txt" "$gen/config/export.go"
 
 mkdir -p "$work/out" "$root/internal/tracing/scrub/gitleaksrules"
-(cd "$work" && GOFLAGS=-mod=mod go run ./cmd/generate/config "$work/out")
+(cd "$work" && env "${goenv[@]}" GOFLAGS=-mod=readonly go run ./cmd/generate/config "$work/out")
 
 cp "$work/out/rules.json" "$root/internal/tracing/scrub/gitleaksrules/rules.json"
 cp "$work/LICENSE" "$root/internal/tracing/scrub/gitleaksrules/LICENSE-gitleaks"

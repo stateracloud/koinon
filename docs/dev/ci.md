@@ -450,7 +450,7 @@ untrusted ref passes `save: 'false'` and takes the action from a trusted checkou
 bypasses the helper. GitHub does not promise byte-stable tag archives, so a pin on one can break with
 no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks source from the Go
 module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
-`go mod download` also checks against sum.golang.org; `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
+`go mod download` also checks against sum.golang.org (unless GOSUMDB is off; the pin holds either way); `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
 The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
