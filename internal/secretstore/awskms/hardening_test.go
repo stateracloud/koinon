@@ -608,7 +608,10 @@ var _ = Describe("pod identity", func() {
 		// fakeAgent serves credentials to the pod that presents the current token.
 		fakeAgent := func(clk *clock, want *atomic.Value, seen *atomic.Int64) string {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				seen.Add(1)
+				// Counted when the handler returns, not when it starts: the response is only sent then, so
+				// a test that waits for seen has seen the token checked against the current want, and
+				// cannot change want or the clock under a request that is still being served.
+				defer seen.Add(1)
 				if r.Method != http.MethodGet || r.Header.Get("Authorization") != want.Load().(string) {
 					w.WriteHeader(http.StatusBadRequest)
 					_, _ = w.Write([]byte(`{"code":"InvalidTokenException","message":"Service account token cannot be empty or invalid"}`))

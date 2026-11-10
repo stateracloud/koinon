@@ -465,6 +465,11 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// maxLineBytes is the longest line the SDK reads (maxBufSize of its receive loop in connection.go).
+const maxLineBytes = 10 << 20
+
+var errLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
+
 // next reads one line (or what is left at the end of the stream) into cr.out.
 func (cr *countingReader) next() {
 	if cr.br == nil {
@@ -475,6 +480,13 @@ func (cr *countingReader) next() {
 		chunk, err := cr.br.ReadSlice('\n')
 		line = append(line, chunk...)
 		if errors.Is(err, bufio.ErrBufferFull) {
+			if len(line) >= maxLineBytes {
+				// The SDK would refuse the line at the same size (ErrTooLong); stop before the
+				// harness makes agentd buffer more than that.
+				cr.fail = errLineTooLong
+				cr.t.update(func() { cr.t.eof = true })
+				return
+			}
 			continue
 		}
 		if err != nil {

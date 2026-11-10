@@ -570,3 +570,21 @@ var _ = Describe("a burst of mixed notifications against a slow handler", func()
 		Expect(rec.count()).To(Equal(n))
 	}, SpecTimeout(90*time.Second))
 })
+
+var _ = Describe("a line without a newline", func() {
+	It("ends the connection at the SDK's size limit instead of buffering without bound", func() {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		go func() {
+			chunk := []byte(strings.Repeat("a", 1<<20))
+			for range 12 {
+				if _, err := fromAgentW.Write(chunk); err != nil {
+					return
+				}
+			}
+		}()
+		DeferCleanup(fromAgentW.Close)
+		Eventually(conn.Done()).WithTimeout(10 * time.Second).Should(BeClosed())
+	})
+})
