@@ -208,7 +208,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			// The bound the gateway key holds back while the provider's figure is pending; never charged.
 			bound, err := qt.Price(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
 			if err != nil {
-				return p, err
+				return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
 			}
 			p.reserve = bound.Cost // the charge is subtracted below, once it is known
 		}
@@ -224,7 +224,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if bound > p.totalOut() {
 			b, err := qt.Price(p.usage(max(bound-p.reasoning, 0)))
 			if err != nil {
-				return p, err
+				return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
 			}
 			p.reserve = b.Cost
 		}
@@ -232,7 +232,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 	u := p.usage(p.output)
 	charged, err := qt.Price(u)
 	if err != nil {
-		return p, err
+		return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
 	}
 	cost := charged.Cost
 	p.cost = cost

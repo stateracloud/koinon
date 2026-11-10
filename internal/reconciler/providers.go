@@ -188,16 +188,17 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			// The price valid now: the org's price entries, else the default list (plan item PV2).
 			// A model with no price is not served.
 			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType, ProviderURL: row.Url, Format: modelformat.Format(row.ModelFormat)}
-			var badPrice *prices.BadPriceError
-			switch res, err := r.cfg.Prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
+			res, err := r.cfg.Prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now())
+			reason, unpriceable := prices.Unpriceable(err)
+			switch {
 			case err == nil:
 				gp := res.Price.Gateway()
 				m.Price = &gp
-			case errors.As(err, &badPrice):
+			case unpriceable && reason == prices.ReasonUnusablePrice:
 				// One org's unusable price skips that model, reported, and stops nothing else.
 				errs = append(errs, fmt.Errorf("model %s/%s not served: %w", org.Slug, row.ModelName, err))
 				continue
-			case !errors.Is(err, prices.ErrUnpriced):
+			case !unpriceable:
 				return out, errs, fmt.Errorf("reconciler: price of model %s/%s: %w", org.Slug, row.ModelName, err)
 			}
 			p.Models = append(p.Models, m)

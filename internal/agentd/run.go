@@ -456,6 +456,9 @@ func (r *runner) execute(ctx context.Context) error {
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	facts, err := r.modelFacts(fctx, model)
 	if err != nil {
+		// Intended: a database error here fails the run start (and is retried by dbErr's rules)
+		// instead of running without the model's format and prompt-cache mode, which would quietly
+		// turn prompt caching off (ADR 0068, #398). A missing or unusable price is not an error here.
 		return r.dbErr(ctx, "look up the model", err)
 	}
 	r.log.Info("the run's model", "model", model, "source", string(source), "format", string(facts.Format))
