@@ -93,9 +93,11 @@ blk resync
 # Held: every component says so, and the schedule and run machinery is off. The restored install has a
 # due-schedule and run backlog that must not move before the release.
 for c in koinon-api koinon-reconciler koinon-agentd; do
-  "${K[@]}" -n "$NS" logs "deploy/$c" | grep -q 'restore-hold' || fail "$c did not log that it is in restore-hold mode"
+  logs=$("${K[@]}" -n "$NS" logs "deploy/$c")
+  grep -q 'restore-hold' <<<"$logs" || fail "$c did not log that it is in restore-hold mode"
 done
-if "${K[@]}" -n "$NS" logs deploy/koinon-api | grep -q 'DBOS runtime started'; then
+api_logs=$("${K[@]}" -n "$NS" logs deploy/koinon-api)
+if grep -q 'DBOS runtime started' <<<"$api_logs"; then
   fail "koinon-api started the DBOS runtime while held"
 fi
 claimed=$(sql "SELECT count(*) FROM runs WHERE owner_id IS NOT NULL AND state IN ('starting', 'running') AND lease_expires_at > now()")
@@ -103,7 +105,8 @@ claimed=$(sql "SELECT count(*) FROM runs WHERE owner_id IS NOT NULL AND state IN
 blk verify-keys
 blk release
 for c in koinon-api koinon-reconciler koinon-agentd; do
-  if "${K[@]}" -n "$NS" get "deploy/$c" -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' | grep -q 'KOINON_RESTORE_HOLD'; then
+  envs=$("${K[@]}" -n "$NS" get "deploy/$c" -o jsonpath='{.spec.template.spec.containers[0].env[*].name}')
+  if grep -q 'KOINON_RESTORE_HOLD' <<<"$envs"; then
     fail "$c still has KOINON_RESTORE_HOLD after the release"
   fi
 done
@@ -115,8 +118,9 @@ step "verify"
 "${K[@]}" -n "$NS" get secret koinon-kek >/dev/null || fail "the KEK Secret is not back"
 state | tee "$work/state.after"
 diff -u "$work/state.before" "$work/state.after" || fail "the restored install differs from the one that was backed up"
-if keys_status | grep -qiE 'warning|missing'; then
-  keys_status >&2
+ks=$(keys_status)
+if grep -qiE 'warning|missing' <<<"$ks"; then
+  printf '%s\n' "$ks" >&2
   fail "keys status warns after the restore"
 fi
 # The migration role must still own its schema: this is what the next helm upgrade Job runs as.
