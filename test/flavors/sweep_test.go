@@ -94,7 +94,9 @@ var _ = Describe("koinon-agentd's sandbox sweep", func() {
 		Expect(err).NotTo(HaveOccurred())
 		out, stderr, code := tryExec(ctx, name, append([]string{"/bin/sh", "-c", string(procinfo), "procinfo"}, survivors...)...)
 		Expect(code).To(BeZero(), stderr)
-		Expect(out).To(MatchRegexp(`(?m)^` + job + `\|[SR]\|sh\|`)) // state, comm, wchan of the real /proc entry
+		// State, comm, wchan of the real /proc entry. The job is a shell waiting for its child; some
+		// kernels report that wait (wchan do_wait) as D, so D is as valid as S and R here.
+		Expect(out).To(MatchRegexp(`(?m)^` + job + `\|[SRD]\|sh\|`))
 
 		By("a reused PID (another start time) is not reported")
 		out, _, _ = tryExec(ctx, name, "/bin/sh", "-c", string(procinfo), "procinfo", job+":1")
