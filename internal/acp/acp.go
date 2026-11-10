@@ -162,6 +162,14 @@ func NewConn(ctx context.Context, h Handler, toAgent io.Writer, fromAgent io.Rea
 	return c
 }
 
+// ReadErr returns [ErrLineTooLong] if the connection ended because the agent wrote a line
+// that is too long, and nil otherwise.
+func (c *Conn) ReadErr() error {
+	c.t.mu.Lock()
+	defer c.t.mu.Unlock()
+	return c.t.readErr
+}
+
 // Close releases the reader if it is held back for a handler that lags. It does not end the
 // connection by itself: that happens when the agent's stream ends.
 func (c *Conn) Close() { c.t.abort() }
@@ -363,6 +371,7 @@ type tracker struct {
 	read    int64   // session/updates the SDK will dispatch
 	done    int64   // session/updates handled
 	eof     bool
+	readErr error // set when the reader ended the stream itself, not the agent
 	aborted bool
 	drained chan struct{}
 }
@@ -468,7 +477,10 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 // maxLineBytes is the longest line the SDK reads (maxBufSize of its receive loop in connection.go).
 const maxLineBytes = 10 << 20
 
-var errLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
+// ErrLineTooLong is what [Conn.ReadErr] returns when the agent wrote a line longer than the SDK
+// reads (10 MiB). The SDK then sees a failed stream and reports the peer as disconnected, so the
+// caller asks ReadErr to tell that apart from a harness that exited.
+var ErrLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
 
 // next reads one line (or what is left at the end of the stream) into cr.out.
 func (cr *countingReader) next() {
@@ -483,8 +495,8 @@ func (cr *countingReader) next() {
 			if len(line) >= maxLineBytes {
 				// The SDK would refuse the line at the same size (ErrTooLong); stop before the
 				// harness makes agentd buffer more than that.
-				cr.fail = errLineTooLong
-				cr.t.update(func() { cr.t.eof = true })
+				cr.fail = ErrLineTooLong
+				cr.t.update(func() { cr.t.eof = true; cr.t.readErr = ErrLineTooLong })
 				return
 			}
 			continue

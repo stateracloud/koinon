@@ -586,5 +586,35 @@ var _ = Describe("a line without a newline", func() {
 		}()
 		DeferCleanup(fromAgentW.Close)
 		Eventually(conn.Done()).WithTimeout(10 * time.Second).Should(BeClosed())
+		Expect(conn.ReadErr()).To(MatchError(acp.ErrLineTooLong))
 	})
+
+	It("passes a line of 10 MiB minus the newline's byte to the handler", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &lenRecorder{}
+		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		const limit = 10 << 20
+		pad := limit - 1 - len(strings.TrimSuffix(updateLine(""), "\n"))
+		go func() {
+			_, _ = io.WriteString(fromAgentW, updateLine(strings.Repeat("a", pad)))
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(conn.ReadErr()).To(BeNil())
+		Expect(rec.n.Load()).To(BeEquivalentTo(pad))
+	}, SpecTimeout(40*time.Second))
 })
+
+// lenRecorder remembers the length of the last update's text.
+type lenRecorder struct{ n atomic.Int64 }
+
+func (r *lenRecorder) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
+	r.n.Store(int64(len(acp.Flatten(n).Text)))
+	return nil
+}
+
+func (r *lenRecorder) RequestPermission(context.Context, acp.PermissionRequest) (acp.Decision, error) {
+	return acp.Decision{}, nil
+}

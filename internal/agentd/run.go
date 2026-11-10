@@ -826,7 +826,18 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 		r.log.Warn("not every session update was delivered before the connection ended")
 	}
 	cancel()
-	code, werr := proc.Wait()
+	if errors.Is(conn.ReadErr(), acp.ErrLineTooLong) {
+		// The harness wrote a line the protocol reader refuses. It is still blocked writing to a
+		// pipe nobody reads, and a resumed harness would write the same line: end it, and fail.
+		closeProcess(proc)
+		r.own.FlushItems(ctx, true)
+		return &failure{
+			reason: "harness output line too long: the harness wrote a line of more than 10 MiB without a newline: " +
+				strings.TrimSpace(stderr.String()),
+			class: classFatal,
+		}
+	}
+	code, werr := waitProcess(proc, harnessExitWait)
 	if werr == nil && permanentExit[code] {
 		return &failure{reason: fmt.Sprintf("the harness exited with code %d: %s", code, strings.TrimSpace(stderr.String()))}
 	}
@@ -839,6 +850,40 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 	}
 	r.interrupted(ctx, reason, exit, stderr.String())
 	return errDropped
+}
+
+// harnessExitWait is how long agentd waits for a harness to exit after its connection ended
+// before it closes the exec stream.
+const harnessExitWait = 10 * time.Second
+
+// waitProcess waits for proc to exit, at most d. A harness that does not exit (it can be blocked
+// writing to a pipe nobody reads) has its stream closed, which ends the command; then the wait
+// is bounded once more. The error says so when the process never reported an exit.
+func waitProcess(proc execution.Process, d time.Duration) (int, error) {
+	type result struct {
+		code int
+		err  error
+	}
+	res := make(chan result, 1)
+	go func() {
+		code, err := proc.Wait()
+		res <- result{code, err}
+	}()
+	select {
+	case r := <-res:
+		return r.code, r.err
+	case <-time.After(d):
+	}
+	_ = proc.Close()
+	select {
+	case r := <-res:
+		if r.err == nil {
+			r.err = errors.New("the harness did not exit after its connection ended; its stream was closed")
+		}
+		return r.code, r.err
+	case <-time.After(d):
+		return 0, errors.New("the harness did not exit after its connection ended, and closing its stream did not end it")
+	}
 }
 
 // interrupted records why the harness connection was lost, for the run's timeline.

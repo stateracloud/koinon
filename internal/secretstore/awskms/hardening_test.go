@@ -608,9 +608,7 @@ var _ = Describe("pod identity", func() {
 		// fakeAgent serves credentials to the pod that presents the current token.
 		fakeAgent := func(clk *clock, want *atomic.Value, seen *atomic.Int64) string {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Counted when the handler returns, not when it starts: the response is only sent then, so
-				// a test that waits for seen has seen the token checked against the current want, and
-				// cannot change want or the clock under a request that is still being served.
+				// Counted when the handler returns, not when it starts, so the token was checked first.
 				defer seen.Add(1)
 				if r.Method != http.MethodGet || r.Header.Get("Authorization") != want.Load().(string) {
 					w.WriteHeader(http.StatusBadRequest)
@@ -649,6 +647,8 @@ var _ = Describe("pod identity", func() {
 			advance(clk, 5*time.Hour) // past 4/5 of six hours: refreshed in the background
 			Expect(w.Probe(ctx)).To(Succeed())
 			Eventually(seen.Load).WithTimeout(refreshWait).Should(BeEquivalentTo(2))
+			// The agent has answered; the wrapper has not necessarily installed the answer yet.
+			Eventually(w.RefreshIdle).WithTimeout(refreshWait).Should(BeTrue())
 			Expect(w.Probe(ctx)).To(Succeed())
 
 			// The agent now refuses the token: the call after the 4/5 mark fails only once the
@@ -659,6 +659,7 @@ var _ = Describe("pod identity", func() {
 			advance(clk, 5*time.Hour) // 10 h: past 4/5 of the credentials of 5 h, which expire at 11 h
 			Expect(w.Probe(ctx)).To(Succeed(), "a failed refresh leaves the current credentials in use")
 			Eventually(logged.String).WithTimeout(refreshWait).Should(ContainSubstring("credential refresh failed"))
+			Eventually(w.RefreshIdle).WithTimeout(refreshWait).Should(BeTrue())
 			Expect(logged.String()).To(ContainSubstring("InvalidTokenException"))
 			Expect(logged.String()).NotTo(ContainSubstring("not-a-real"))
 			Expect(w.Probe(ctx)).To(Succeed())

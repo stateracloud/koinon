@@ -136,3 +136,6 @@ func FeedCounts(line []byte) (read, handled bool) {
 	_ = json.Unmarshal(line, &m)
 	return lineFinishesTool(line), finishesTool(m.Params.Update)
 }
+
+// WaitProcess is the bounded wait for a harness that was disconnected.
+var WaitProcess = waitProcess
