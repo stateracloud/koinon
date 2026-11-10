@@ -46,6 +46,11 @@ fail() { echo "release gate: $*" >&2; exit 1; }
 [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]] ||
 	fail "tag '$TAG' is not vX.Y.Z or vX.Y.Z-rc.N"
 
+# How many merge queue runs the quickstart fallback reads: the per_page of one call, so 1..100 (no paging).
+QUEUE_RUN_LIMIT=${QUEUE_RUN_LIMIT:-30}
+[[ $QUEUE_RUN_LIMIT =~ ^([1-9][0-9]?|100)$ ]] ||
+	fail "QUEUE_RUN_LIMIT '$QUEUE_RUN_LIMIT' is not an integer from 1 to 100"
+
 git fetch --no-tags --quiet origin main
 git merge-base --is-ancestor "$SHA" origin/main ||
 	fail "$SHA is not an ancestor of origin/main; release from a commit that has been merged"
@@ -173,25 +178,59 @@ fi
 #     queue commit, whose merge_group run passed, and the push run then adds a skipped quickstart
 #     (hack/e2e-decide.sh, the push skip). The newest run that is not skipped decides; a failure or a
 #     cancellation there fails the gate.
+#   - A dispatch with `inputs.commit` (hack/e2e-bisect.sh) tests another commit than the one its check run
+#     attaches to; e2e-kind.yml names that job `quickstart (commit)`, so it never matches `quickstart` here (#453).
+#     Older bisect dispatches still carry the name `quickstart`: their workflow run is titled
+#     `e2e-kind (<commit>) bisect <id>` and quickstart_conclusion drops check runs of such runs.
 #   - With no such run on the commit, a green merge_group `quickstart` job whose head commit has the same
 #     tree as the tagged commit is the evidence (the tree is what the e2e tested).
 # If neither exists, dispatch e2e-kind on the commit first.
 quickstart_conclusion() { # the newest check run named quickstart on SHA that is not skipped, or empty
-	gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" 		--jq '.check_runs[] | [.name, .started_at, (.conclusion // "pending")] | @tsv' |
-		awk -F'\t' '$1 == "quickstart" && $3 != "skipped" && $2 >= t { t = $2; c = $3 } END { print c }'
+	# Check runs from before #453 (bisect dispatches on older heads) are still named `quickstart`, so the
+	# workflow runs on SHA are read (all pages) and a check run whose run is titled like a bisect
+	# dispatch (`e2e-kind (<commit>) bisect <id>`, the run-name of e2e-kind.yml) is dropped as well.
+	# GitHub returns at most 1,000 results for a filtered workflow-run list: at that size a bisect run
+	# could hide beyond the cap, so the gate fails closed.
+	local bisect total n
+	# Per page, a first line `C total_count`, then `R id` per run and `B id` per bisect run.
+	bisect=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?head_sha=$SHA&per_page=100" \
+		--jq '"C \(.total_count // 0)", (.workflow_runs[] | "R \(.id)", (select((.display_title // "") | test("^e2e-kind \\(.+\\) bisect ")) | "B \(.id)"))') || return 2
+	# n counts distinct run ids: a run that moved between pages while paging is read twice, not two runs.
+	read -r total n < <(awk '$1 == "C" { if ($2 > t) t = $2 } $1 == "R" && !($2 in seen) { seen[$2] = 1; c++ } END { print t + 0, c + 0 }' <<<"$bisect")
+	if ((total >= 1000 || n >= 1000)); then
+		echo "release gate: $SHA has 1000 or more e2e-kind runs (GitHub's cap for a filtered run list): cannot rule out a bisect run" >&2
+		return 2
+	fi
+	if ((total > n)); then
+		echo "release gate: read $n of $total e2e-kind runs on $SHA: cannot rule out a bisect run" >&2
+		return 2
+	fi
+	bisect=$(awk '$1 == "B" { print $2 }' <<<"$bisect")
+	gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+		--jq '.check_runs[] | [.name, .started_at, (.conclusion // "pending"), ((.details_url // "") | capture("/runs/(?<r>[0-9]+)") | .r) // ""] | @tsv' |
+		awk -F'\t' -v ids="$(tr '\n' ' ' <<<"$bisect")" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) skip[a[i]] = 1 }
+			$1 == "quickstart" && $3 != "skipped" && !($4 in skip) && $2 >= t { t = $2; c = $3 } END { print c }'
 }
 # queue_quickstart_run: prints the id of a green merge_group e2e run whose quickstart job succeeded on a
-# commit with SHA's tree. Exit 0 found, 1 none, 2 an API call failed.
+# commit with SHA's tree. Exit 0 found, 1 none, 2 an API call failed. It looks at the newest
+# QUEUE_RUN_LIMIT (default 30, an integer 1..100: it is the per_page of one call, with no paging) green
+# merge_group runs only, one git/commits call each at most, so a queue commit older than that is not
+# found (dispatch e2e-kind on the commit instead).
 queue_quickstart_run() {
-	local tree runs id head htree ok
+	local tree runs id head htree ok n=0
 	tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha) || return 2
 	[[ -n $tree ]] || return 2
-	runs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?event=merge_group&status=success&per_page=30" \
+	runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-kind.yml/runs?event=merge_group&status=success&per_page=$QUEUE_RUN_LIMIT" \
 		--jq '.workflow_runs[] | [.id, .head_sha] | @tsv') || return 2
 	while IFS=$'\t' read -r id head; do
 		[[ -n ${id:-} ]] || continue
-		htree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq .tree.sha) || return 2
-		[[ $htree == "$tree" ]] || continue
+		n=$((n + 1))
+		((n <= QUEUE_RUN_LIMIT)) || break
+		# the tagged commit itself is a queue commit (fast-forward merge): no tree lookup needed
+		if [[ $head != "$SHA" ]]; then
+			htree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq .tree.sha) || return 2
+			[[ $htree == "$tree" ]] || continue
+		fi
 		ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
 			--jq '.jobs[] | select(.name == "quickstart" and .conclusion == "success") | .id') || return 2
 		if [[ -n $ok ]]; then
@@ -201,7 +240,7 @@ queue_quickstart_run() {
 	done <<<"$runs"
 	return 1
 }
-got=$(quickstart_conclusion)
+got=$(quickstart_conclusion) || fail "the e2e-kind workflow runs on $SHA could not be read"
 if [[ $got == success ]]; then
 	echo "ok: kind e2e (quickstart)"
 elif [[ -z $got ]]; then
@@ -210,11 +249,11 @@ elif [[ -z $got ]]; then
 	case $qrc in
 	0) echo "ok: kind e2e (quickstart passed in merge queue run $qrun on a commit with this commit's tree)" ;;
 	2)
-		echo "FAIL: kind e2e (quickstart job): no run on this commit, and the merge queue runs could not be read" >&2
+		echo "FAIL: kind e2e (quickstart job): no run on this commit, and the merge queue runs could not be read (an API error or a rate limit; only the newest $QUEUE_RUN_LIMIT are looked at)" >&2
 		failed=1
 		;;
 	*)
-		echo "FAIL: kind e2e (quickstart job): no run on this commit and no green merge queue run on its tree; run the e2e-kind workflow on $SHA" >&2
+		echo "FAIL: kind e2e (quickstart job): no run on this commit and no green merge queue run on its tree among the newest $QUEUE_RUN_LIMIT; run the e2e-kind workflow on $SHA" >&2
 		failed=1
 		;;
 	esac
