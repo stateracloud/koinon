@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -126,3 +127,22 @@ const GapPrefix = "known gap: "
 
 // GapMessage is the failure message of a spec that fails on a declared gap.
 func GapMessage(issue, what string) string { return fmt.Sprintf("%s%s: %s", GapPrefix, issue, what) }
+
+// GapLabel marks a spec that may fail on a declared gap.
+const GapLabel = "known-gap"
+
+var gapRE = regexp.MustCompile(`^known gap: (#\d+)`)
+
+// ClassifyFailure is the verdict of a failed spec: a known gap only when the spec carries the
+// known-gap label AND its message starts "known gap: #N". Any other failure, a labelled spec that
+// failed early on something unrelated included, is a fail.
+func ClassifyFailure(labels []string, message string) (verdict, issue string) {
+	for _, l := range labels {
+		if l == GapLabel {
+			if m := gapRE.FindStringSubmatch(message); m != nil {
+				return KnownGap, m[1]
+			}
+		}
+	}
+	return Fail, ""
+}

@@ -50,6 +50,7 @@ advisory warm-caches-web
 # listens to merge_group (checked like the required ones); it moves to `external` above when the
 # ruleset requires it:
 #   review           .github/workflows/review.yml
-# The `drill` job of e2e-kind.yml (ADR 0109, #514) is advisory too, and is not a pull request or merge queue
-# check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on a dispatch with suite=drill,
-# so it can never be required (a required name must report on every PR, push and merge_group build).
+# The `drill` job of .github/workflows/drill.yml (ADR 0109, #514) is advisory too, and is not a pull request or
+# merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
+# required (a required name must report on every PR, push and merge_group build). It has its own workflow so a red
+# drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.

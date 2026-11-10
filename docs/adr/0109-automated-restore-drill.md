@@ -74,7 +74,7 @@ production.
    (ADR 0106). CI deletes the kind cluster in an `always()` step.
 7. **Report files.** The suite runs with `--junit-report` and `--json-report`; `test/e2e/run.sh` gets the
    same flags for the quickstart, and the workflows upload them.
-8. **Gate wiring.** A `drill` job in `e2e-kind.yml` runs on the nightly schedule, on rc tags and on
+8. **Gate wiring.** A `drill` job in its own workflow, `drill.yml` (not `e2e-kind.yml`: a red advisory drill would turn that run red, and `hack/e2e-bisect.sh` reads its conclusion), runs on the nightly schedule, on rc tags and on
    dispatch. It is **advisory**: listed in `hack/ci-required.txt` as a job of another workflow, never a
    per-PR check and never in the merge queue (ADR 0105 keeps the quickstart as the one merge proof; the
    drill is too heavy for it). `hack/release-gate.sh` reads the drill result for a tag (a later phase,

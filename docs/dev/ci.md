@@ -224,7 +224,7 @@ seeds a source install, backs it up with the guide's commands, declares it lost,
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
 kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
-`e2e-kind.yml`: nightly, on rc tags (`v*-rc.*`) and on a dispatch with `suite: drill`; never a pull request or
+`drill.yml` (its own workflow, so a red drill never changes an `e2e-kind.yml` run that `hack/e2e-bisect.sh` reads): nightly, on rc tags (`v*-rc.*`) and on dispatch; never a pull request or
 merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with

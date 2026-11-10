@@ -87,13 +87,19 @@ func readFile(path string) string {
 	return string(b)
 }
 
+// cleanups run once, from the AfterAll of the Ordered container. DeferCleanup inside an It would run
+// after that spec (Ginkgo makes it a cleanup-after-each), tearing the install down after its own step.
+var cleanups []func(context.Context)
+
+func onSuiteEnd(f func(context.Context)) { cleanups = append(cleanups, f) }
+
 // ensureNamespace creates a namespace carrying the run label, and removes it at the end of the suite.
 func ensureNamespace(ctx context.Context, ns string) {
 	GinkgoHelper()
 	must(drill.CheckNamespace(ns), ns)
 	_, err := kube.KubectlStdin(ctx, fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: %s\n", ns, drill.RunLabel, runID), "apply", "-f", "-")
 	must(err, "create namespace "+ns)
-	DeferCleanup(func(ctx context.Context) {
+	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") == "1" {
 			return
 		}
@@ -108,7 +114,7 @@ func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, top.GatewayChart, "--version", top.GatewayVersion,
 		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
 	must(err, "install the OpenShell gateway "+in.GatewayRelease)
-	DeferCleanup(func(ctx context.Context) {
+	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
 			_, _ = kube.Helm(ctx, "uninstall", in.GatewayRelease, "--namespace", in.GatewayNamespace, "--wait=false")
 		}
@@ -141,7 +147,7 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 	_, err = kube.Helm(ctx, "install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
 		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--wait", "--timeout", "12m")
 	must(err, "helm install "+in.Release)
-	DeferCleanup(func(ctx context.Context) {
+	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
 			_, _ = kube.Helm(ctx, "uninstall", in.Release, "--namespace", in.Namespace, "--wait=false")
 		}
@@ -263,6 +269,12 @@ func knownGap(issue, what string, probe func() (finding string)) {
 
 var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 	marks := &res.Marks
+
+	AfterAll(func(ctx SpecContext) {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i](ctx)
+		}
+	}, NodeTimeout(15*time.Minute))
 
 	step("fakes: the drill's fake model server", func(ctx SpecContext) {
 		ensureNamespace(ctx, top.FakesNamespace)
@@ -637,6 +649,9 @@ stringData:
 
 		It("keeps the source's sandboxes and providers as they were", Label("isolation"), func(ctx SpecContext) {
 			needs("backup", "release")
+			// Self-check: the cleanups run at the end of the container, so the gateway is still there.
+			_, err := kube.Kubectl(ctx, "get", "namespace", src.gw.Namespace)
+			must(err, "the source gateway's namespace is gone before the isolation check: cleanup ran too early")
 			after, err := drill.SnapshotGateway(ctx, kube, src.gw, os.Getenv("KOINON_DRILL_OPENSHELL_SERVERNAME"))
 			must(err, "snapshot the source gateway again")
 			Expect(drill.DiffObjects(baseline, after)).To(BeEmpty(), "the target changed objects of the source's gateway")

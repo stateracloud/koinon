@@ -67,6 +67,19 @@ func TestVerdictPassesOnKnownGapsAndFailsOnAnythingElse(t *testing.T) {
 	}
 }
 
+func TestClassifyFailureNeedsTheLabelAndTheMessage(t *testing.T) {
+	gap := drill.GapMessage("#516", "x")
+	if v, i := drill.ClassifyFailure([]string{"known-gap", "importer"}, gap); v != drill.KnownGap || i != "#516" {
+		t.Fatalf("%s %s", v, i)
+	}
+	if v, _ := drill.ClassifyFailure([]string{"known-gap", "importer"}, "port-forward: connection refused"); v != drill.Fail {
+		t.Fatal("a labelled spec that fails on something unrelated is a fail")
+	}
+	if v, _ := drill.ClassifyFailure([]string{"signin"}, gap); v != drill.Fail {
+		t.Fatal("a gap message without the label is a fail")
+	}
+}
+
 func TestResultFileIsWritten(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "drill-result.json")
 	r := drill.Result{RunID: "a1b2c3", Checks: []drill.Check{{Name: "signin", Verdict: drill.Pass}}}

@@ -122,8 +122,6 @@ ATOMS = [
     (r"github\.event_name\s*==\s*'([a-z_]+)'", lambda g: g == "merge_group"),
     (r"github\.event_name\s*!=\s*'([a-z_]+)'", lambda g: g != "merge_group"),
     (r"github\.event\.pull_request\.draft", lambda: False),
-    (r"github\.ref_type\s*!=\s*'tag'", lambda: True),  # a merge queue build runs on a gh-readonly-queue branch
-    (r"inputs\.suite\s*!=\s*'drill'", lambda: True),  # inputs are empty outside workflow_dispatch
     (r"always\(\)", lambda: True),
     (r"!cancelled\(\)", lambda: True),
     # conditional on an upstream output or result: a skip still reports, so it counts as running
@@ -236,10 +234,7 @@ for name in review claim dco gitleaks 'e2e result'; do
 done
 # `e2e result` reads `decide`; a skipped decide on a queue build would hand the gate an empty output.
 decide_if=$(awk '/^  decide:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/e2e-kind.yml")
-check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || !github.event.pull_request.draft) && github.ref_type != 'tag' && inputs.suite != 'drill'"
-# A tag push (the rc drill) must not share the e2e-main group: a newer main push would replace it as pending.
-check "e2e-kind.yml: a tag push never shares the e2e-main concurrency group" bash -c '
-	g=$(grep -E "^  group:" "$1"); [[ $g == *"github.ref_type == '"'"'tag'"'"'"* && ${g%%e2e-main*} == *"github.ref_type == '"'"'tag'"'"'"* ]]' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
 check "e2e-kind.yml: result runs under always()" bash -c 'awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if: always\(\)/ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/e2e-kind.yml"
 # The checker itself: a workflow without merge_group, an upstream gated on pull_request, and an unknown form are caught.
 mgtmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-mg-eval.XXXXXX") || exit 1

@@ -82,8 +82,6 @@ var _ = BeforeSuite(func() {
 	AddReportEntry("topology", top.Name)
 })
 
-var gapRE = regexp.MustCompile(`^known gap: (#\d+)`)
-
 // The result file is written from the spec reports, so it exists after a red run too.
 var _ = ReportAfterSuite("drill-result.json", func(report Report) {
 	if top == nil {
@@ -98,10 +96,8 @@ var _ = ReportAfterSuite("drill-result.json", func(report Report) {
 		case sr.State.Is(types.SpecStatePassed):
 			c.Verdict = drill.Pass
 		case sr.State.Is(types.SpecStateFailureStates):
-			c.Verdict, c.Message = drill.Fail, sr.Failure.Message
-			if m := gapRE.FindStringSubmatch(sr.Failure.Message); m != nil {
-				c.Verdict, c.Issue = drill.KnownGap, m[1]
-			}
+			c.Message = sr.Failure.Message
+			c.Verdict, c.Issue = drill.ClassifyFailure(sr.Labels(), sr.Failure.Message)
 		default:
 			c.Verdict = drill.NotRun
 		}

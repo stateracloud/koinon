@@ -106,7 +106,8 @@ set -e
 [[ -s $OUT/drill-result.json ]] || { echo "the suite wrote no drill-result.json (exit $suite_rc)" >&2; exit 1; }
 
 # The suite exits non-zero when a known-gap spec fails, and that is the point of a known gap: it is red
-# in the report and does not make the job red. Anything else that failed does.
+# in the report and does not make the job red. The exit code follows drill-result.json, whose verdict
+# counts a known gap only for a spec with the known-gap label AND a "known gap: #N" message.
 unexpected=$(jq '[.[].SpecReports[]
   | select(.LeafNodeType == "It")
   | select(.State == "failed" or .State == "panicked" or .State == "timedout" or .State == "interrupted" or .State == "aborted")
@@ -117,5 +118,7 @@ echo
 echo "drill: $ran spec(s) passed, $unexpected failed outside the known gaps; known gaps failing: ${gaps:-none}"
 jq -r '.checks[] | "  \(.verdict)\t\(.name)\t\(.issue // "")"' "$OUT/drill-result.json"
 jq -r '"RTO \(.timings.rtoSeconds) s, RPO \(.timings.rpoSeconds) s (recorded, no targets)"' "$OUT/drill-result.json"
-if (( unexpected > 0 || ran == 0 )); then exit 1; fi
+verdict=$(jq -r '.verdict' "$OUT/drill-result.json")
+echo "verdict: $verdict"
+if [[ $verdict != pass ]] || (( unexpected > 0 || ran == 0 )); then exit 1; fi
 status=0
