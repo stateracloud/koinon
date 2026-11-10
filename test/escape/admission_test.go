@@ -291,7 +291,9 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			return func(p *corev1.Pod) { p.OwnerReferences = owner; p.Spec.Volumes = []corev1.Volume{v} }
 		}
 		By("the claim OpenShell 0.1.7 gets from the controller (workspace-<sandbox>) is admitted (control)")
-		Expect(createPod(ctx, controllerUser, ns, workload("pvc-ok", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-a"))))).To(Succeed())
+		// Created for real: the orphan-update check below reads it back (createPod is a dry run).
+		_, err := as[controllerUser].CoreV1().Pods(ns).Create(ctx, workload("pvc-ok", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-a"))), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
 		By("another claim, another sandbox's claim, and an unowned pod are denied")
 		denied(createPod(ctx, controllerUser, ns, workload("pvc-foreign", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "admin-data")))), claimMessage)
 		denied(createPod(ctx, controllerUser, ns, workload("pvc-other", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-b")))), claimMessage)
@@ -315,8 +317,9 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 		By("a generic ephemeral volume is denied")
 		ephemeral := corev1.Volume{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-			Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-				Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
 			},
 		}}}}
 		denied(createPod(ctx, controllerUser, ns, workload("pvc-ephemeral", with([]metav1.OwnerReference{owned("sb-a")}, ephemeral))), "generic ephemeral volumes are not allowed")
