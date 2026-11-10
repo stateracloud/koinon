@@ -93,6 +93,44 @@ var _ = Describe("Backend.CountUnmarked", func() {
 		Expect(counts).To(Equal(map[string]int{"sandbox": 0, "provider": 0, "profile": 0}))
 	})
 
+	It("does not count the platform and built-in profiles a workspace listing returns", func(ctx SpecContext) {
+		_, err := legacy.EnsureWorkspace(ctx, mine, nil)
+		Expect(err).NotTo(HaveOccurred())
+		gw.AddPlatformProfile("claude-code")
+		counts, err := live.CountUnmarked(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(counts["profile"]).To(Equal(0))
+
+		old := agentgatewayProvider("1")
+		old.Name = "kp-old"
+		old.Profile.ID = "koinon-old"
+		Expect(legacy.EnsureProvider(ctx, mine, old)).To(Succeed())
+		counts, err = live.CountUnmarked(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(counts["profile"]).To(Equal(1), "only the workspace's own unmarked profile")
+	})
+
+	It("follows every page of every list", func(ctx SpecContext) {
+		gw.ListPageSize = 2
+		for _, ws := range []string{mine, execution.WorkspaceName([16]byte{3}), execution.WorkspaceName([16]byte{4})} {
+			_, err := legacy.EnsureWorkspace(ctx, ws, nil)
+			Expect(err).NotTo(HaveOccurred())
+			for _, name := range []string{"ka-a", "ka-b", "ka-c"} {
+				_, err = legacy.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: name, Image: "img"})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			for _, name := range []string{"kp-a", "kp-b", "kp-c"} {
+				p := agentgatewayProvider("1")
+				p.Name = name
+				p.Profile.ID = "koinon-" + name
+				Expect(legacy.EnsureProvider(ctx, ws, p)).To(Succeed())
+			}
+		}
+		counts, err := live.CountUnmarked(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(counts).To(Equal(map[string]int{"sandbox": 9, "provider": 9, "profile": 9}))
+	})
+
 	It("needs an install mark", func(ctx SpecContext) {
 		_, err := legacy.CountUnmarked(ctx)
 		Expect(err).To(HaveOccurred())

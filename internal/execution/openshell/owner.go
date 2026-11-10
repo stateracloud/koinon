@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	datamodelv1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
@@ -54,7 +55,10 @@ var UnmarkedKinds = []string{"sandbox", "provider", "profile"}
 // This install's workspaces are the ones named like [execution.WorkspaceName] whose mark is empty
 // or its own; a workspace marked by another install is left out, and so are the objects in it.
 // Inside them an object with another install's mark is not counted either: it is not this install's
-// to claim. It lists workspaces, then each workspace's sandboxes, providers and profiles, to the
+// to claim. Sandboxes and providers come from one all-workspaces list each, filtered to those
+// workspaces by their metadata; profiles are listed per workspace (the API has no all-workspaces
+// selector for them) and only the workspace's own custom profiles count: the platform and built-in
+// profiles a workspace listing also returns carry no mark and are not Koinon's. Every list runs to the
 // last page. Any failed list returns an error and no counts, so a caller never publishes a partial
 // number. Without an owner nothing is stamped, and it returns an error.
 func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
@@ -67,7 +71,7 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 	}
 	unmarked := func(labels map[string]string) bool { return labels[execution.LabelInstall] == "" }
 
-	var workspaces []string
+	workspaces := map[string]bool{}
 	token := ""
 	for {
 		resp, err := b.c.ListWorkspaces(ctx, &openshellv1.ListWorkspacesRequest{PageSize: 1000, PageToken: token})
@@ -76,7 +80,7 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 		}
 		for _, w := range resp.GetWorkspaces() {
 			if strings.HasPrefix(w.GetMetadata().GetName(), execution.WorkspacePrefix) && mine(w.GetMetadata().GetLabels()) {
-				workspaces = append(workspaces, w.GetMetadata().GetName())
+				workspaces[w.GetMetadata().GetName()] = true
 			}
 		}
 		if token = resp.GetNextPageToken(); token == "" {
@@ -88,43 +92,43 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 	for _, k := range UnmarkedKinds {
 		counts[k] = 0
 	}
-	for _, ws := range workspaces {
-		token = ""
-		for {
-			resp, err := b.c.ListSandboxes(ctx, &openshellv1.ListSandboxesRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
-			if err != nil {
-				return nil, wrap(op, err)
-			}
-			for _, s := range resp.GetSandboxes() {
-				if unmarked(s.GetMetadata().GetLabels()) {
-					counts["sandbox"]++
-				}
-			}
-			if token = resp.GetNextPageToken(); token == "" {
-				break
+	all := &datamodelv1.WorkspaceSelector{Selection: &datamodelv1.WorkspaceSelector_AllWorkspaces{AllWorkspaces: &datamodelv1.AllWorkspaces{}}}
+	for {
+		resp, err := b.c.ListSandboxes(ctx, &openshellv1.ListSandboxesRequest{WorkspaceScope: all, PageSize: 1000, PageToken: token})
+		if err != nil {
+			return nil, wrap(op, err)
+		}
+		for _, s := range resp.GetSandboxes() {
+			if workspaces[s.GetMetadata().GetWorkspace()] && unmarked(s.GetMetadata().GetLabels()) {
+				counts["sandbox"]++
 			}
 		}
-		for {
-			resp, err := b.c.ListProviders(ctx, &openshellv1.ListProvidersRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
-			if err != nil {
-				return nil, wrap(op, err)
-			}
-			for _, p := range resp.GetProviders() {
-				if unmarked(p.GetMetadata().GetLabels()) {
-					counts["provider"]++
-				}
-			}
-			if token = resp.GetNextPageToken(); token == "" {
-				break
+		if token = resp.GetNextPageToken(); token == "" {
+			break
+		}
+	}
+	for {
+		resp, err := b.c.ListProviders(ctx, &openshellv1.ListProvidersRequest{WorkspaceScope: all, PageSize: 1000, PageToken: token})
+		if err != nil {
+			return nil, wrap(op, err)
+		}
+		for _, p := range resp.GetProviders() {
+			if workspaces[p.GetMetadata().GetWorkspace()] && unmarked(p.GetMetadata().GetLabels()) {
+				counts["provider"]++
 			}
 		}
+		if token = resp.GetNextPageToken(); token == "" {
+			break
+		}
+	}
+	for ws := range workspaces {
 		for {
 			resp, err := b.c.ListProviderProfiles(ctx, &openshellv1.ListProviderProfilesRequest{WorkspaceScope: scope(ws), PageSize: 1000, PageToken: token})
 			if err != nil {
 				return nil, wrap(op, err)
 			}
 			for _, p := range resp.GetProfiles() {
-				if unmarked(p.GetAnnotations()) {
+				if p.GetScope() == "workspace" && p.GetSource() != "builtin" && unmarked(p.GetAnnotations()) {
 					counts["profile"]++
 				}
 			}

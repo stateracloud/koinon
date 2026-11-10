@@ -33,6 +33,7 @@ import (
 	"net"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -69,6 +70,10 @@ type Gateway struct {
 	// NoStablePlaceholder makes the gateway behave like one that predates
 	// stable_placeholder: lint reports no support and imports drop the field.
 	NoStablePlaceholder bool
+
+	// ListPageSize, when above zero, caps every list at that many items and returns a
+	// next_page_token, so a client's paging loop runs more than once. Zero returns one page.
+	ListPageSize int
 
 	mu         sync.Mutex
 	seq        int
@@ -244,61 +249,118 @@ func workspaceOf(sel *datamodelv1.WorkspaceSelector) (string, error) {
 	return ws, nil
 }
 
-// ListWorkspaces implements openshellv1.OpenShellServer. It returns everything in one page.
-func (g *Gateway) ListWorkspaces(_ context.Context, _ *openshellv1.ListWorkspacesRequest) (*openshellv1.ListWorkspacesResponse, error) {
+// workspaceFilter turns a request's selector into a match on an object's workspace. The
+// all-workspaces selector matches every workspace.
+func workspaceFilter(sel *datamodelv1.WorkspaceSelector) (func(string) bool, error) {
+	if sel.GetAllWorkspaces() != nil {
+		return func(string) bool { return true }, nil
+	}
+	ws, err := workspaceOf(sel)
+	if err != nil {
+		return nil, err
+	}
+	return func(w string) bool { return w == ws }, nil
+}
+
+// page returns the part of items a request with pageSize and token asks for, and the next token.
+// The gateway's ListPageSize caps it. The token is the offset of the next item.
+func page[T any](g *Gateway, items []T, token string) ([]T, string, error) {
+	if g.ListPageSize <= 0 {
+		return items, "", nil
+	}
+	start := 0
+	if token != "" {
+		n, err := strconv.Atoi(token)
+		if err != nil || n < 0 {
+			return nil, "", status.Error(codes.InvalidArgument, "bad page token")
+		}
+		start = n
+	}
+	start = min(start, len(items))
+	end := min(start+g.ListPageSize, len(items))
+	next := ""
+	if end < len(items) {
+		next = strconv.Itoa(end)
+	}
+	return items[start:end], next, nil
+}
+
+// ListWorkspaces implements openshellv1.OpenShellServer.
+func (g *Gateway) ListWorkspaces(_ context.Context, req *openshellv1.ListWorkspacesRequest) (*openshellv1.ListWorkspacesResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.enter("ListWorkspaces"); err != nil {
 		return nil, err
 	}
-	out := &openshellv1.ListWorkspacesResponse{}
+	var all []*datamodelv1.Workspace
 	for _, name := range slices.Sorted(maps.Keys(g.workspaces)) {
-		out.Workspaces = append(out.Workspaces, clone(g.workspaces[name]))
+		all = append(all, clone(g.workspaces[name]))
 	}
-	return out, nil
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListWorkspacesResponse{Workspaces: items, NextPageToken: next}, nil
 }
 
-// ListSandboxes implements openshellv1.OpenShellServer. It returns one workspace in one page.
+// ListSandboxes implements openshellv1.OpenShellServer. It takes one workspace or all of them.
 func (g *Gateway) ListSandboxes(_ context.Context, req *openshellv1.ListSandboxesRequest) (*openshellv1.ListSandboxesResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.enter("ListSandboxes"); err != nil {
 		return nil, err
 	}
-	ws, err := workspaceOf(req.GetWorkspaceScope())
+	match, err := workspaceFilter(req.GetWorkspaceScope())
 	if err != nil {
 		return nil, err
 	}
-	out := &openshellv1.ListSandboxesResponse{}
+	var all []*openshellv1.Sandbox
 	for _, k := range sortedKeys(g.sandboxes) {
-		if k.workspace == ws {
-			out.Sandboxes = append(out.Sandboxes, clone(g.sandboxes[k]))
+		if match(k.workspace) {
+			all = append(all, clone(g.sandboxes[k]))
 		}
 	}
-	return out, nil
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListSandboxesResponse{Sandboxes: items, NextPageToken: next}, nil
 }
 
-// ListProviders implements openshellv1.OpenShellServer. It returns one workspace in one page.
+// ListProviders implements openshellv1.OpenShellServer. It takes one workspace or all of them.
 func (g *Gateway) ListProviders(_ context.Context, req *openshellv1.ListProvidersRequest) (*openshellv1.ListProvidersResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.enter("ListProviders"); err != nil {
 		return nil, err
 	}
-	ws, err := workspaceOf(req.GetWorkspaceScope())
+	match, err := workspaceFilter(req.GetWorkspaceScope())
 	if err != nil {
 		return nil, err
 	}
-	out := &openshellv1.ListProvidersResponse{}
+	var all []*datamodelv1.Provider
 	for _, k := range sortedKeys(g.providers) {
-		if k.workspace == ws {
-			out.Providers = append(out.Providers, redacted(g.providers[k]))
+		if match(k.workspace) {
+			all = append(all, redacted(g.providers[k]))
 		}
 	}
-	return out, nil
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListProvidersResponse{Providers: items, NextPageToken: next}, nil
 }
 
-// ListProviderProfiles implements openshellv1.OpenShellServer. It returns one workspace in one page.
+// AddPlatformProfile adds a built-in platform profile, the kind a real gateway returns next to the
+// workspace's own when it lists a workspace's profiles. It has no install annotation.
+func (g *Gateway) AddPlatformProfile(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.profiles[key{"", id}] = &openshellv1.ProviderProfile{Id: id, Source: "builtin", Scope: "platform"}
+}
+
+// ListProviderProfiles implements openshellv1.OpenShellServer. For a workspace it returns the
+// workspace's profiles and the platform ones, as a real gateway does.
 func (g *Gateway) ListProviderProfiles(_ context.Context, req *openshellv1.ListProviderProfilesRequest) (*openshellv1.ListProviderProfilesResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -309,13 +371,17 @@ func (g *Gateway) ListProviderProfiles(_ context.Context, req *openshellv1.ListP
 	if err != nil {
 		return nil, err
 	}
-	out := &openshellv1.ListProviderProfilesResponse{}
+	var all []*openshellv1.ProviderProfile
 	for _, k := range sortedKeys(g.profiles) {
-		if k.workspace == ws {
-			out.Profiles = append(out.Profiles, clone(g.profiles[k]))
+		if k.workspace == ws || k.workspace == "" {
+			all = append(all, clone(g.profiles[k]))
 		}
 	}
-	return out, nil
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListProviderProfilesResponse{Profiles: items, NextPageToken: next}, nil
 }
 
 func sortedKeys[V any](m map[key]V) []key {
