@@ -143,6 +143,15 @@ check "identity refusal is named" has "identity" "$tmp/o1"
 check "identity refusal names the address" has "t@example.invalid" "$tmp/o1"
 check "identity refusal commits nothing" eq "$(git rev-list --count origin/main..HEAD)" 0
 check "identity refusal pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+# ship ignores the local escape hatches: a disallowed identity stays refused with both set
+reset_state
+w=$(newwork); cd "$w"
+git config user.email t@example.invalid
+echo one >f.txt
+rc=$(KOINON_SKIP_IDENTITY_CHECK=1 KOINON_ALLOWED_IDENTITIES='Other <other@example.invalid>' run "$tmp/o1b" -m "feat: x")
+check "identity override ignored: exit 1" eq "$rc" 1
+check "identity override ignored: refusal names the address" has "t@example.invalid" "$tmp/o1b"
+check "identity override ignored: nothing committed" eq "$(git rev-list --count origin/main..HEAD)" 0
 
 # 2. sign-off, footer, push, any-email notice
 reset_state

@@ -18,7 +18,9 @@
 # own list; a new contributor adds their line in a pull request and it counts from the next one on (or
 # sets KOINON_ALLOWED_IDENTITIES locally for the hook). Exit 0 when every
 # identity is allowed, 1 when one is not, 2 on misuse or when the commits cannot be listed (fails closed).
-# KOINON_SKIP_IDENTITY_CHECK=1 turns the hook off for one command (CI ignores it).
+# KOINON_SKIP_IDENTITY_CHECK=1 turns the hook off for one command (CI and hack/ship.sh ignore it).
+# The hooks chain to a personal hook of the same name in the common .git/hooks (core.hooksPath replaces it).
+# They do not run on --no-verify, rebase or cherry-pick; CI checks every commit of a pull request.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -89,7 +91,9 @@ if [[ $mode == range ]]; then
 	# CI: the list comes from the pull request's BASE commit, so a pull request cannot widen the list it
 	# is checked against (a new contributor's line counts from the next pull request on). The one
 	# exception: when the base has no list at all and the head adds the file, the head's list is used
-	# (the pull request that introduces the list). KOINON_ALLOWED_IDENTITIES is not honoured here.
+	# (the pull request that introduces the list). That fallback is only for a base that does not have the file
+	# (e.g. a release/* cut before #320); a base that has the file always wins.
+	# KOINON_ALLOWED_IDENTITIES is not honoured here.
 	[[ $# -eq 3 ]] || usage
 	base=$2 head=$3
 	if ! commits=$(git rev-list "$base..$head"); then
