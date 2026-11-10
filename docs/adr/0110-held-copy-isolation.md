@@ -60,8 +60,23 @@ own mark with the row:
 | Row | Mark | State | Effect |
 |---|---|---|---|
 | present | equal | `same` | Normal. An unheld start refreshes the outward targets. |
-| present | different | `copy` | Decisions 3 and 4 apply. The row is never overwritten automatically. |
-| absent | any | `unknown` | Held: treated as `copy` (fail safe; a dump taken before this ADR). Unheld: an upgrade of a live install; it writes the row (claim, as ADR 0106 decision 4). |
+| present | different, or no mark (unbound) | `copy` | Decisions 3 and 4 apply. The row is never overwritten automatically. |
+| absent | any | `unknown` | Held: the process writes an **unbound** row (mark NULL), so the state becomes `copy` and stays `copy` after the release. Unheld: an upgrade of a live install; it claims the row (as ADR 0106 decision 4). |
+
+- **Held processes re-assert the hold.** A held process checks the row at start and on every pass (the importer's
+  pass in koinon-api, the resync interval in agentd and the reconciler), not only at start, because the restore
+  guide starts the chart held and then loads the dump, which replaces the table. On each check it writes the
+  unbound row when the row is absent, and sets `install_binding.held_since` when it is NULL. Only the release step
+  (decision 1) clears `held_since`. So a hold record survives a dump loaded after the held pods started, at the
+  latest one pass later. The release check (decision 1) refuses while a held pod has not yet re-asserted after the
+  load (`held_since` NULL with no `restore.release` after the newest `restore-hold=true` record).
+- **Who writes what.** Each binary writes only its own columns: koinon-api the public URL and the OIDC redirect
+  URL, agentd the checkpoint endpoint and bucket; any binary the mark (only by the claim) and `held_since`. Every
+  write is guarded by the state: the targets are refreshed only in state `same`. The claim is
+  `INSERT … ON CONFLICT DO NOTHING` followed by a re-read, so two processes that start at once agree on one row and
+  compute the state from what is stored, not from what they tried to write.
+- A dump taken before this ADR and restored **unheld** is still claimed silently (state `unknown`, unheld). The
+  runbook starts every restore held, and a held start makes the row unbound.
 
 The `adopt-restore` recovery action (decision 6) is the one way to move a `copy` to `same`. The state is exported as
 `koinon_install_binding{state}` (fixed set: same, copy, unknown; ADR 0023).
@@ -77,22 +92,44 @@ operator accepts them, audited.**
   one Kubernetes Event per Secret (reason `HeldNotApplied`), and exports
   `koinon_declarative_held_changes{kind,action}` (kinds: model-provider, mcp-server, connection; actions: apply,
   remove). `restore status` (decision 5) prints the plan.
-- **The release check.** A release is still a rollout (ADR 0107 decision 3). The chart adds a `pre-upgrade` hook
-  Job, `restore-release-check`, that runs whenever `restoreHold` is false. It reads the database: when the last
-  recorded settings say `restore-hold=true` (ADR 0100), this upgrade is a release; otherwise the Job exits at once.
-  On a release it computes the importer plan. When the plan holds a removal and the chart value
-  `restore.acceptImporterDeletions` is not true, the Job fails with the list of removals, Helm stops the upgrade
-  before any Deployment changes, and the install stays held. With the value set, the Job records
-  `restore.release` in the install audit chain with the accepted plan (its hash and the counts per kind and
-  action), and the upgrade goes on. The value is read only by this Job and only on a release, so leaving it set
-  does nothing later; the chart NOTES say to remove it.
+- **A release is pending** while `install_binding.held_since` is set, or the binding state is not `same`, or a
+  `restore-hold=true` settings record (ADR 0100) is newer than the newest `restore.release` event. A live install
+  has none of these, so a normal upgrade is never blocked and its plan is applied as today.
+- **The importer is the gate.** While a release is pending, the importer stays plan-only **for removals**, also in
+  an unheld process; it applies the other changes once unheld. Removals are applied only after the **release
+  step** has run and only for the items in the accepted plan.
+- **The release step** runs in koinon-api at its first unheld start while a release is pending (one replica wins:
+  the step is a row lock on `install_binding`). It computes the plan. When the plan has no removal, or when
+  `restore.acceptImporterDeletions` is true (a chart value passed to koinon-api and to the Job), it records
+  `restore.release` in the install audit chain with the accepted plan (its hash and the list of removals, per kind),
+  revokes every session (decision 2), clears `held_since` and stores the plan hash. When the plan has a removal and
+  the value is not true, it writes nothing, the removals stay planned, and koinon-api logs the list and exports
+  `koinon_restore_release_pending 1`; the chart alert `KoinonRestoreReleasePending` fires after 15 minutes.
+- **No change after the accept (TOCTOU).** The importer applies only the removals listed in the accepted plan. A
+  removal that appears later (a Secret deleted after the accept) stays plan-only, is logged
+  (`held: removal of <kind> <name> not in the accepted plan`) and is shown in `restore status`; it is applied on
+  the next accept (a new release step through the same value, or the next pass after the operator restores the
+  Secret, which removes it from the plan).
+- **The `restore-release-check` Job is a preview and an early stop.** The chart renders it whenever `restoreHold` is
+  false. Under Helm it is a `pre-upgrade` hook with `helm.sh/hook-weight: "10"`, after the migrate Job
+  (`charts/koinon/templates/migrate-job.yaml`, weight `"0"`). Under Argo CD it carries `argocd.argoproj.io/hook:
+  Sync` and `argocd.argoproj.io/sync-wave: "2"`, after the migrate Job's wave `"1"`. It exits 0 when the schema or
+  the audit table does not exist yet (a first install; Argo CD's hooks run then too) and when no release is pending.
+  On a pending release it prints the plan and the `restore status` report and fails when the plan has a removal and
+  the value is not true, so `helm upgrade` stops before any Deployment changes and the install stays held. Under
+  Argo CD the Deployments (wave 0) are applied before wave 2, so there the Job is only a preview; with
+  `--no-hooks` or a plain `kubectl apply` it does not run at all. The importer gate above holds in every case.
+- The value is read only on a pending release, so leaving it set does nothing later; the chart NOTES say to remove
+  it.
 - The drill sets `restore.acceptImporterDeletions: true` on purpose on its fresh copy, and has one spec that a
-  release without it fails and leaves the hold on.
+  release without it fails under Helm, leaves the hold on, and that the removals stay planned when the Job is
+  skipped (`--no-hooks`).
 
 Alternatives: apply additive changes and skip only removals while held (the copy still writes, so the drill cannot
-assert "no write while held"); not run the importer while held (the operator does not see the removals coming); a
-check inside koinon-api at its first unheld start (too late: agentd and the reconciler are already released while
-koinon-api refuses).
+assert "no write while held"); not run the importer while held (the operator does not see the removals coming); the
+hook Job as the only gate (it is skipped by `--no-hooks` and `kubectl apply`, and under Argo CD it runs after the
+Deployments, so it can only preview; the importer gate holds in every case); keeping koinon-api held until the
+accept (agentd and the reconciler would already be released, so the install would be half released).
 
 In place: the Secrets are there and the plan is usually empty, so the check passes without the value. Fresh copy:
 the plan lists every source Secret as a removal; the operator applies the Secrets (DR) or accepts the removals (drill,
@@ -101,12 +138,16 @@ staging).
 ### 2. The release of an in-place restore signs everyone out
 
 **Decided (procoduck, 2026-11-10).** A session or token revoked after the dump time is valid again after an
-in-place restore, because the revocation was in the lost data. The release check Job (decision 1) therefore
-revokes every session on every release, audited as `restore.sessions_revoked` with the count. On a copy the
+in-place restore, because the revocation was in the lost data. The release step (decision 1, in koinon-api, so
+also under Argo CD and `--no-hooks`) therefore revokes every session on every release, audited as
+`restore.sessions_revoked` with the count. On a copy the
 sessions are already refused (decision 3); the revoke makes that permanent. Users log in again.
 
 API tokens are **not** revoked by the release. `restore status` lists the tokens that were active at the dump time
-(not revoked, not expired, with `last_used_at` and creator). They are **not** refused (procoduck, 2026-11-10). A
+(not revoked, not expired, with `last_used_at` and creator). The **dump time** is the timestamp of the newest audit
+or install chain event that is older than the first held record (`install_binding.held_since`, or the oldest
+`restore-hold=true` settings record after the newest `restore.release`); it is an upper bound, since the data can
+be a little older than its last event. They are **not** refused (procoduck, 2026-11-10). A
 platform admin re-checks the list, and the runbook says to revoke each token that was revoked or reported lost since
 the dump.
 
@@ -152,6 +193,9 @@ targets (decision 0).
   OIDC redirect URL turns OIDC login off (`/auth/oidc/*` answers 409 with the reason; password login stays). Each
   conflict is logged once and exported as `koinon_restore_isolation_conflict{target}` (target: checkpoints,
   public-url, oidc-redirect). Held or released, the guard holds until the value changes or `adopt-restore` runs.
+- **Alert.** The chart rule `KoinonRestoreIsolationConflict` fires when `max(koinon_restore_isolation_conflict) ==
+  1` for 10 minutes (severity warning). It also catches the case below, where a live install that lost its mark
+  Secret turns the guards on against itself.
 - **Chart switch.** A chart value `checkpoints.readOnly` (default false) sets restore-only mode on agentd for any
   install, and NOTES.txt warns when `restoreHold` is true with checkpoints on and `readOnly` false. A new
   `hack/chart-check.d` file asserts both.
@@ -169,7 +213,9 @@ the guard off); runtime only (no way to choose read-only before the first start)
 
 - The outward targets are: MCP servers, model providers, code-host connections, trace destinations and
   notification targets. Each table (`mcp_servers`, `providers`, `connections`, `trace_destinations`,
-  `platform_trace_destination`, and the notification target rows) gets the same columns: `admin_disabled_at`,
+  `platform_trace_destination`) gets the same columns. Koinon has no outward notification target yet:
+  `notifications` is the in-app inbox (`00013_prices_and_budgets.sql`), which reaches nothing outside. A future outward sink (Slack, a
+  webhook) uses this switch from its first migration. The columns are: `admin_disabled_at`,
   `admin_disabled_by`, `admin_disabled_note`. They are separate from system states such as `disabled_reason` or
   `removed_at`, so re-declaring or un-shadowing an item never clears an admin's disable.
 - One Go package (`internal/outward`) owns the switch: a `Target` kind enum, one `SetDisabled(kind, id, disabled,
@@ -201,7 +247,12 @@ one-shot request object.
     bootstrap admin);
   - `requester` (the Kubernetes username) and `requesterGroups`;
   - `nonce` (16 to 64 characters, chosen by the requester);
-  - `ttl` (at most 1 h; default 15 min).
+  - `ttl` (at most 1 h; default 15 min), measured from `metadata.creationTimestamp` only (the API server sets it;
+    nothing in `spec` or `status` moves it);
+  - `recipientPublicKey`: an age X25519 recipient (`age1…`) the requester made for this request; required for the
+    actions with a secret result (`mint-admin-token`, `reset-password`).
+
+  The CRD has a `status` subresource, so the reconciler's status writes do not go through the spec rule below.
 - **Who may run it.** Kubernetes RBAC decides: `create` on `platformadminrecoveries` in the namespace. The chart
   renders a Role `<fullname>-platform-recovery` and binds it to nobody (`recovery.subjects` in values, empty by
   default). Nothing in the Koinon database grants the right.
@@ -210,30 +261,46 @@ one-shot request object.
   `request.userInfo.groups`, and refuses every UPDATE of `spec`. So the identity in the object is the one the API
   server authenticated, recorded at admission; a requester cannot name someone else. The Kubernetes API server audit
   log is a second record but is not required. (A MutatingAdmissionPolicy could stamp the field instead, but it is
-  not GA on every supported Kubernetes version; validation needs only VAP.)
-- **What the reconciler does.** It watches the CRD in its own namespace. It refuses an object older than its `ttl`
-  or whose `nonce` is already in the new table `recovery_requests` (nonce, CR UID, action, requester, result), so a
-  re-applied manifest (a GitOps sync, a copy-paste) does nothing. It then runs the action with the functions of
-  #512 (`internal/auth/reset.go`, `internal/cmd/koinonapi/operatoraccess.go`), which move into a shared package
-  (`internal/recovery`) as internal actions and are no longer a pod-exec command:
+  not GA on every supported Kubernetes version; validation needs only VAP.) The policy also refuses a `ttl` over
+  1 h, a missing `nonce`, and a secret-result action without `recipientPublicKey`.
+- **The policy must be in force, or nothing runs.** A VAP fails open when its binding is missing or changed, and it
+  does not judge objects made before the binding. So before each request the reconciler reads the policy and its
+  binding (it holds `get` on these two named objects only) and refuses the request when either is missing, when the
+  binding's `validationActions` is not exactly `[Deny]`, when the policy's `failurePolicy` is not `Fail`, or when
+  the CR's `creationTimestamp` is older than the binding's. The refusal reason names the failed check.
+- **What the reconciler does.** It watches the CRD in its own namespace. It refuses an object whose
+  `creationTimestamp` plus `ttl` has passed or whose `nonce` is already in the new table `recovery_requests` (nonce,
+  CR UID, action, requester, result), so a re-applied manifest (a GitOps sync, a copy-paste) does nothing. It then
+  runs the action with the functions #512 adds for its CLI (password reset and token creation), which move into a
+  shared package (`internal/recovery`) as internal actions and are no longer a pod-exec command:
   - `mint-admin-token`: a platform admin API token, TTL at most 24 h, bound to the current mark. When no platform
     admin user is left (deleted, or OIDC-only with no admin group member), it creates a **temporary platform admin**
-    user (the Keycloak pattern; procoduck, 2026-11-10). The user row carries `temporary_until` (default now + 24 h,
-    `spec.temporaryFor` at most 72 h); the UI shows a "temporary" badge on it and a banner to every platform admin,
-    and every audit event of that user carries `temporary: true`. At `temporary_until` the reconciler disables the
-    user and revokes its tokens and sessions (`recovery.temporary_admin_expired`), unless another platform admin who
-    is not temporary exists by then; then the temporary user is disabled at once;
+    (the Keycloak pattern; procoduck, 2026-11-10). Users have no disable state (`00001_initial.sql`), so the
+    temporary part is the grant, not the user: a new user `recovery-<nonce prefix>` and a `platform_admins` row with
+    the new source value `recovery` (enum `platform_admin_source`, `00018`) and a new nullable `expires_at` (default
+    now + 24 h, `spec.temporaryFor` at most 72 h). The UI shows a "temporary" badge on that admin and a banner to
+    every platform admin, and every audit event of that user carries `temporary: true`. The grant ends at
+    `expires_at`, or at once when a platform admin whose grant is not `recovery` exists. Then the reconciler
+    deletes the grant and revokes that user's tokens and sessions (`recovery.temporary_admin_expired`); the user
+    row stays for the audit trail;
   - `reset-password`: a one-time password with a forced change at the next login; all the user's sessions revoked;
   - `adopt-restore`: rewrites `install_binding` with this install's mark and targets (state `same`), and re-enables
-    every refused token that is not revoked or expired (`token.rebind`).
+    every refused token that is not revoked or expired (`token.rebind`). It lists the isolation conflicts it clears
+    (decision 4: checkpoints, public-url, oidc-redirect, each with the old and the new value as `kindURL`) in the
+    audit event and in the CR status, so the operator sees what the adopt turned back on.
 - **Audit.** Each action is one install audit chain event (`recovery.<action>`), actor
   `kubernetes:<requester>` with the groups, the CR UID and the nonce; the token or password itself is never in the
   event.
-- **The result.** A secret result goes into a Secret `<cr-name>-result` with an owner reference to the CR, plus a
-  Role and RoleBinding that give `get` on that one Secret (`resourceNames`) to the requester's username only. The
-  reconciler's own RBAC grows by `create` and `delete` on Secrets, Roles and RoleBindings in its namespace and the
-  `get` it grants (RBAC escalation rules: it can grant only what it holds). The status says `Done` or `Refused` with
-  the reason. The reconciler deletes the CR, the Secret and the Role after the `ttl`.
+- **The result: only the requester can read it.** This is how procoduck's decision ("a Secret only the requester
+  can read") is carried out. A namespaced Secret does not do it: anyone with `get secrets` in the namespace reads
+  it, and Roles that the reconciler makes on the fly would be a new escalation path (it already holds create, get,
+  update and delete on every Secret, `charts/koinon/templates/rbac.yaml`). So the reconciler seals the token or
+  password to `spec.recipientPublicKey` (age, X25519) and writes the armored ciphertext to `status.sealedResult`. Only
+  the holder of the private key, which never leaves the requester's machine, can open it; the guide shows
+  `age-keygen` and `age -d`. This is the Vault `generate-root` pattern (the result is encrypted to a key or a
+  one-time pad the requester holds). No Secret, Role or RoleBinding is created, and the reconciler gets no RBAC
+  beyond the CR, its status and the `get` on the policy and binding. The status says `Done` or `Refused` with the
+  reason. The reconciler deletes the CR after its `ttl`.
 - **Not in Git.** The guide says to apply it with `kubectl create`, never from a Git repository; the nonce and the
   TTL make a synced copy inert, and the VAP refuses an object without `requester` equal to the creating user, which
   a GitOps controller's service account would fail unless it is bound to the Role.
@@ -252,7 +319,8 @@ is not one-shot); an org-owner API call (an org role must not take over the inst
 ### 7. `restore status` shows what the release will do
 
 One status function behind a platform admin REST endpoint (`GET /admin/v1/restore/status`, JSON for the drill) and
-the CLI. It reads only the database and the cluster, never outward. It also works without the API: the
+the CLI. It reads only the database and the cluster, never outward. It also shows whether a release is pending, the
+accepted plan hash, and the removals that are not in the accepted plan (decision 1). It also works without the API: the
 `restore-release-check` Job prints the same report in its log. Sections:
 
 - the binding state and its reason; refused token and session counts;
@@ -278,7 +346,7 @@ picture).
 | 0 | `mark` | `koinon_install_binding{state="copy"}` is 1 on the copy and `same` on an in-place restore. |
 | 4 | `isolation` | With the source's checkpoint values, the copy reports a checkpoints conflict, and the source's snapshot list is unchanged after release (phase 2, needs the kind S3); with the source's public URL, OIDC login is refused. |
 | 5 | `isolation` | Each outward kind disabled while held is not called after the release (the fake sinks get no request); enable while held is refused. |
-| 6 | `isolation` | A `PlatformAdminRecovery` with another user's name in `requester` is refused at admission; `mint-admin-token` works while held and with koinon-api scaled to 0; a re-applied nonce does nothing; the result Secret is readable only by the requester. |
+| 6 | `isolation` | A `PlatformAdminRecovery` with another user's name in `requester` is refused at admission; `mint-admin-token` works while held and with koinon-api scaled to 0; a re-applied nonce does nothing; the result opens only with the requester's age key; with the policy binding deleted, the reconciler refuses the request. |
 | 7 | `hold` | `restore status` lists the seeded targets, the due catch-up fire and the N-1 queued runs, and these match what happens after the release. |
 
 ## Prior art
@@ -318,6 +386,11 @@ picture).
   gap.
 - Negative: koinon-api gets a new startup input (the mark), so a lost mark Secret now also refuses tokens and
   sessions on the live install until `adopt-restore`. The mark backup (ADR 0106) becomes more important.
+- Negative: **a live install that lost its mark Secret turns the guards on against itself.** Its new mark differs
+  from the bound one, so the state is `copy`: its own targets equal the recorded ones, so checkpoints go
+  restore-only (no new snapshots) and OIDC login is off, until a platform admin runs `adopt-restore` or applies the
+  mark backup. The alerts `KoinonRestoreIsolationConflict` (decision 4) and the `koinon_install_binding{state="copy"}`
+  gauge make this visible within minutes; the backup and restore guide gets a "lost mark Secret" section.
 - Negative: every release signs everyone out, also a release with no data loss (a hold kept only for a check).
 - Negative: an operator on a copy cannot use a source API token; automation against a copy needs a new token.
 - **CRD.** The chart ships its first CustomResourceDefinition (`PlatformAdminRecovery`). Helm does not upgrade
@@ -326,25 +399,29 @@ picture).
   within a patch line). Uninstall leaves the CRD; the guide says how to delete it.
 - **RBAC.** The chart renders the Role `<fullname>-platform-recovery` (`create`, `get`, `list`, `delete` on
   `platformadminrecoveries`) bound to the subjects in `recovery.subjects` only (empty by default). The reconciler's
-  Role gains `get`, `list`, `watch`, `update` on the CR and its status, and `create`, `delete` on Secrets, Roles
-  and RoleBindings in the release namespace, plus the `get` on Secrets it grants (escalation rule). rbac.yaml stays
-  free of ClusterRoles; the CRD and the ValidatingAdmissionPolicy and its binding are the only cluster-scoped objects
-  it adds. `hack/chart-check.d` gets `99-platform-recovery.sh` and `99-restore-release.sh`.
+  Role gains `get`, `list`, `watch`, `update`, `delete` on `platformadminrecoveries`, `update` on their `status`,
+  and a cluster-scoped `get` on the one named ValidatingAdmissionPolicy and its binding (`resourceNames`; a
+  ClusterRole of two names, like `reconciler-openshell-config.yaml`). It gets no new RBAC on Secrets, Roles or
+  RoleBindings: the sealed result (decision 6) needs none, and the reconciler never makes RBAC objects. The CRD, the
+  ValidatingAdmissionPolicy and its binding are the cluster-scoped objects the chart adds. `hack/chart-check.d` gets
+  `99-platform-recovery.sh` and `99-restore-release.sh` (hook weight and Argo CD wave of the Job included).
 - **Chart smoke.** New startup inputs: `KOINON_INSTALL_MARK` on koinon-api, the CRD the reconciler watches, and the
-  `restore-release-check` hook Job. `make test-chart-smoke` asserts koinon-api starts with the mark, the reconciler
-  starts with the CRD present and refuses to start without it when `recovery.enabled` is true, and the hook Job
-  passes on a plain upgrade.
-- **Admission.** The ValidatingAdmissionPolicy is native (never Kyverno). `make test-admission` gets cases: a create
-  with another user's `requester` or groups is refused, an update of `spec` is refused, a create with a `ttl` over
-  1 h or no `nonce` is refused, and a valid create is admitted.
-- Schema: new tables `install_binding` and `recovery_requests`, a nullable `temporary_until` on users, and nullable
-  columns elsewhere only (expand-only; allowed in a patch line, ADR 0085).
-- ADR 0107 is amended: the importer no longer writes while held (only the purger and the audit anchor do); the
-  reconciler serves recovery requests while held; a release runs the `restore-release-check` Job; the release of a
-  copy keeps the guards of decisions 3 and 4 until `adopt-restore`.
-- #512 changes shape: its CLI functions become the internal actions of decision 6.
-- A dump taken before this ADR, restored unheld, is claimed silently (state `unknown`, unheld). The runbook already
-  starts every restore held.
+  `restore-release-check` Job. `make test-chart-smoke` asserts koinon-api starts with the mark, the reconciler
+  starts with the CRD present and refuses to start without it when `recovery.enabled` is true, and the Job exits 0
+  on a first install (no schema yet) and on a plain upgrade.
+- **Admission.** The ValidatingAdmissionPolicy is native (never Kyverno), `failurePolicy: Fail`, binding
+  `validationActions: [Deny]`. `make test-admission` gets cases: a create with another user's `requester` or groups
+  is refused; an update of `spec` is refused while a status update passes; a create with a `ttl` over 1 h, with no
+  `nonce`, or a secret-result action with no `recipientPublicKey` is refused; a valid create is admitted. The
+  reconciler-side check (policy and binding present and strict, CR newer than the binding) gets a unit test.
+- Schema: new tables `install_binding` and `recovery_requests`, the enum value `recovery` on
+  `platform_admin_source`, a nullable `expires_at` on `platform_admins`, and nullable columns elsewhere only
+  (expand-only; allowed in a patch line, ADR 0085).
+- ADR 0107 is amended: the importer no longer writes while held (only the purger, the audit anchor and the hold
+  re-assert of decision 0 do) and keeps removals planned until the release step; the reconciler serves recovery
+  requests while held; a release runs the release step in koinon-api and, under Helm, the `restore-release-check`
+  Job first; the release of a copy keeps the guards of decisions 3 and 4 until `adopt-restore`.
+- #512 changes shape: the functions it adds for its CLI become the internal actions of decision 6.
 
 ## Implementation
 
@@ -353,21 +430,25 @@ Each part is one pull request. The drill specs of its decisions move from known 
 - **(a) Outward disable switch** (decision 5). `internal/outward`, the `admin_disabled_*` columns on the five
   target kinds, `SetOutwardTargetDisabled` (REST and Connect), the UI switch, the declarative `disabled: true`, the
   hold rule (disable yes, enable no). Depends on nothing.
-- **(b) Install binding, token and session refusal, adopt and rebind** (decisions 0, 3, 4). `install_binding`, the
-  mark on koinon-api (chart smoke), `install_mark` on tokens and sessions, the refusal reason and metric,
-  `RebindToken`, the internal `adopt-restore` function, the runtime guards (restore-only checkpoints, OIDC off) and
-  `checkpoints.readOnly`. Depends on nothing; (d) calls its adopt function.
-- **(c) Importer plan-only and the `restore-release-check` Job** (decisions 1, 2). The dry-run mode of the importer,
-  the `HeldNotApplied` Event and metric, the pre-upgrade hook Job with `restore.acceptImporterDeletions`, the
-  session revoke on release, the `restore.release` audit event, and the drill's accept flag. Depends on nothing; it
-  revokes sessions with (b)'s columns present or not.
-- **(d) `PlatformAdminRecovery`** (decision 6). The CRD, the ValidatingAdmissionPolicy, the Roles, the reconciler
-  handler (also while held), `recovery_requests`, the result Secret and its Role, the temporary platform admin and
-  its expiry, and the admission and chart-smoke cases. Built on #512's functions from `/private/tmp/kw/l512`
-  commit ea8a4b153 (`internal/auth/reset.go`, `internal/cmd/koinonapi/operatoraccess.go`), moved into
-  `internal/recovery`. Depends on #512 merged and on (b) for `adopt-restore`.
+- **(b1) Install binding, token and session refusal, rebind and adopt** (decisions 0, 3). `install_binding` with
+  the claim, the unbound row and the hold re-assert (`held_since`), the mark on koinon-api (chart smoke),
+  `install_mark` on tokens and sessions, the refusal reason and metric, `RebindToken`, and the internal
+  `adopt-restore` function. Depends on nothing.
+- **(b2) Runtime guards** (decision 4). The target comparison in koinon-api and agentd, restore-only checkpoints,
+  OIDC off, `koinon_restore_isolation_conflict` and its alert, `checkpoints.readOnly` and the NOTES warning.
+  Depends on (b1).
+- **(c) Importer gate, release step and `restore-release-check` Job** (decisions 1, 2). The dry-run mode of the
+  importer, the `HeldNotApplied` Event and metric, the "release pending" rule, the release step in koinon-api (plan
+  hash, session revoke, `restore.release`, `koinon_restore_release_pending` and its alert), the Job (Helm weight
+  10, Argo CD wave 2, exit 0 without a schema), `restore.acceptImporterDeletions`, and the drill's accept flag.
+  Depends on (b1) (`held_since`, the binding state).
+- **(d) `PlatformAdminRecovery`** (decision 6). The CRD with its status subresource, the ValidatingAdmissionPolicy
+  and the reconciler's check that it is in force, the Roles, the reconciler handler (also while held),
+  `recovery_requests`, the sealed result, the temporary platform admin grant and its expiry, and the admission and
+  chart-smoke cases. Built on the password-reset and token functions of #512, moved into `internal/recovery`.
+  Depends on #512 and on (b1) for `adopt-restore`.
 - **(e) `restore status`** (decision 7). The status function, `GET /admin/v1/restore/status`, the report in the
-  release-check Job's log, the tokens-at-dump list. Depends on (a), (b) and (c) for its sections; it can land
+  release-check Job's log, the tokens-at-dump list. Depends on (a), (b1), (b2) and (c) for its sections; it can land
   first with those sections empty and fill them as they merge.
 
 ## Open questions
@@ -380,4 +461,5 @@ None. procoduck answered the last two on 2026-11-10 (decisions 2 and 6).
 - `internal/declarative/declarative.go`, `internal/mcpservers/declared.go`, `internal/tokens/tokens.go`,
   `internal/auth/session.go`, `internal/restorehold/restorehold.go`, `internal/execution/names.go`,
   `charts/koinon/values.yaml` (checkpoints, publicUrl, installMark, restoreHold, oidc),
-  `charts/koinon/templates/key-admin.yaml` (the Job pattern for the release check)
+  `charts/koinon/templates/migrate-job.yaml` (the hook weight and Argo CD wave the release check follows),
+  `charts/koinon/templates/rbac.yaml`, `internal/db/migrations/00018_*.sql` (`platform_admin_source`)
