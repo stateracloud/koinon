@@ -334,7 +334,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	It("has no SPIFFE or SPIRE agent socket reachable (ADR 0097 decision 11)", func(ctx SpecContext) {
 		res := probe(ctx,
 			check{"id": "mounts", "op": "mounts", "contains": []string{"spire", "spiffe"}},
-			check{"id": "files", "op": "find", "roots": scanRoots(), "contains": []string{"spire", "spiffe", "agent.sock"}},
+			check{"id": "files", "op": "find", "roots": scanRoots(), "segments": []string{"spire", "spiffe", "spire-agent", "agent.sock"}},
 			check{"id": "run", "op": "read", "path": "/run/spire"},
 			check{"id": "var run", "op": "read", "path": "/var/run/spire"},
 			check{"id": "tmp", "op": "read", "path": "/tmp/spire-agent"},

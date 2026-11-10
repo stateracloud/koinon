@@ -73,11 +73,14 @@ rules:
     resources: [configmaps]
     resourceNames: [{{ .Values.preflight.openshell.configMap }}]
     verbs: [get]
+  {{- if .Values.sandboxPolicy.enabled }}
   # The gateway workload, for OPENSHELL_K8S_SA_TOKEN_TTL_SECS (it wins over the ConfigMap's sa_token_ttl_secs).
+  # Only the token-lifetime check reads it, and that runs only with the sandbox policy.
   - apiGroups: [apps]
     resources: [statefulsets, deployments]
     resourceNames: [{{ .Values.preflight.openshell.workload }}]
     verbs: [get]
+  {{- end }}
   - apiGroups: [node.k8s.io]
     resources: [runtimeclasses]
     resourceNames: [{{ .Values.openshell.runtimeClassName }}]
@@ -192,7 +195,6 @@ spec:
             {{- end }}
             - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
             - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
-            - --openshell-workload={{ .Values.preflight.openshell.workload }}
             - --openshell-gateway-id={{ .Values.openshell.gatewayId }}
             {{- if and .Values.sandboxPolicy.enabled .Values.sandboxPolicy.scopeToGateway }}
             - --sandbox-policy-scoped-to-gateway
@@ -206,6 +208,7 @@ spec:
             {{- if .Values.sandboxPolicy.enabled }}
             - --supervisor-images={{ join "," (include "koinon.supervisorImages" . | fromJsonArray) }}
             - --supervisor-token-max-seconds={{ int .Values.sandboxPolicy.supervisorTokenMaxSeconds }}
+            - --openshell-workload={{ .Values.preflight.openshell.workload }}
             {{- end }}
             - --agent-sandbox-namespace={{ .Values.preflight.agentSandbox.namespace }}
             - --agent-sandbox-controller={{ .Values.preflight.agentSandbox.controller }}

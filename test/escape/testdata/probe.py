@@ -128,6 +128,7 @@ def find(c):
     """Paths under the roots (outside /proc, /sys and /dev) with any of the substrings in them,
     and how many entries were visited (a walk that cannot read a directory skips it silently)."""
     found, visited = [], 0
+    segs = set(c.get("segments", ()))  # whole path components, so "aspire" does not match "spire"
     for top in c["roots"]:
         if top in SKIP_FIND:
             continue
@@ -136,7 +137,8 @@ def find(c):
             for name in dirs + names:
                 visited += 1
                 path = os.path.join(root, name)
-                if any(s in path for s in c["contains"]):
+                if any(s in path for s in c.get("contains", ())) or (
+                        segs and (name in segs or any(p in segs for p in path.split(os.sep)))):
                     found.append(path)
     return {"found": sorted(found), "visited": visited}
 
