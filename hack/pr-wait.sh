@@ -34,12 +34,13 @@
 #              a workflow run that is still queued has no jobs yet, so its required checks are missing
 #              from the rollup (`waiting for required checks not on the head yet: ci,...`, old issue 562).
 #              A draft PR is never green (old issue 647): with --checks, `isDraft` exits 5 with `DRAFT` (a draft runs
-#              almost nothing, and `go`/`web` are red on purpose). A PR that is not a draft ignores the check
+#              nothing heavy; its `go`/`web` report success with "draft: not run", which is NOT evidence). A PR that is not a draft ignores the check
 #              runs of its draft-era `ci` runs (#218, #133), in every mode: a run whose display title is `ci (draft)`
 #              (the run-name of ci.yml when the event payload says draft), matched by run id. There is no time
 #              window, and a by-hand re-run of a draft run is ignored too. A non-draft run is never dropped: red
 #              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
-#              exist. dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
+#              exist (between `gh pr ready` and that run the draft run is the only `ci` run on the head, and its
+#              vacuous green must never decide). dco, gitleaks, claim and commit statuses (e2e-lab) keep their result. When gh cannot list
 #              the runs, nothing is dropped.
 #              A stale PR head (old issue 661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub
@@ -55,7 +56,7 @@
 #   --interval 20 seconds by default
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
-# `needs-update`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
+# `conflict: merge origin/main`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
 # Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
@@ -391,7 +392,7 @@ while :; do
       exit 1
     fi
     if [ "$mstate" = DIRTY ]; then
-      echo "needs-update"
+      echo "conflict: merge origin/main into the branch, resolve it and push"
       exit 4
     fi
     # Required contexts of the ruleset that have no check on the head yet (a queued workflow run).

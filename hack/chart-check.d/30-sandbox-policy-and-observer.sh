@@ -48,6 +48,16 @@ has "the observer policy covers RoleBinding create and update" 'operations: \[CR
 has "the observer policy binding denies" 'validationActions: \["Deny"\]' --show-only "$obs"
 has "the observer policy keys on the reconciler identity" 'system:serviceaccount:koinon:koinon-reconciler' --show-only "$obs"
 has "the observer policy limits bindings to the configured gateway ID" "openshell.ai/gateway-id'\] == \"prod\"" --set openshell.gatewayId=prod --show-only "$obs"
+# Old issue 460: the policy bindings cover the release's own gateway's namespaces only.
+bindings=$(render | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/')
+[[ $(grep -c -- '^  name: .*-sandbox-\(pods\|objects\|connect\)\(-unlabelled\)\{0,1\}$' <<<"$bindings") == 6 ]] || fail "6 sandbox policy bindings: 3 for the gateway's namespaces, 3 for namespaces without a gateway-id label"
+[[ $(grep -c -- 'openshell.ai/gateway-id: openshell$' <<<"$bindings") == 3 ]] || fail "all 3 sandbox policy bindings select openshell.ai/gateway-id=openshell by default"
+[[ $(render --set openshell.gatewayId=prod | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/' | grep -c -- 'openshell.ai/gateway-id: prod$') == 3 ]] || fail "the bindings follow openshell.gatewayId"
+[[ $(render --set sandboxPolicy.scopeToGateway=false | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/' | grep -c -- 'gateway-id') == 0 ]] || fail "sandboxPolicy.scopeToGateway=false keeps the old scope (no gateway-id label)"
+[[ $(grep -c -- '^  name: .*-sandbox-\(pods\|objects\|connect\)-unlabelled$' <<<"$bindings") == 3 ]] || fail "each sandbox policy has an -unlabelled binding while scoped to the gateway"
+[[ $(grep -c -- 'operator: DoesNotExist$' <<<"$bindings") == 3 ]] || fail "the unlabelled bindings select namespaces without openshell.ai/gateway-id"
+[[ $(render --set sandboxPolicy.scopeToGateway=false | grep -c -- '-sandbox-.*-unlabelled$') == 0 ]] || fail "sandboxPolicy.scopeToGateway=false renders no unlabelled bindings"
+[[ $(grep -c -- 'openshell.ai/managed-by: openshell$' <<<"$bindings") == 6 ]] || fail "the bindings keep the managed-by label"
 has "the observer policy takes the sandbox namespaces from sandboxPolicy.namespaceSelector" 'variables.labels\[\\"openshell.ai/managed-by\\"\] == \\"openshell\\"' --show-only "$obs"
 has "a label added to sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"team\\"\] == \\"sandboxes\\"' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$obs"
 has "a matchExpression of sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"tier\\"\] in \[\\"a\\",\\"b\\"\]' \
@@ -74,6 +84,8 @@ lacks "sandboxObserver.enabled=false names no ClusterRole to the reconciler" 'cl
 has "sandboxObserver.enabled=false keeps the sandbox policies" 'name: koinon-koinon-sandbox-pods' "${off[@]}"
 has "the preflight compares the gateway ID" '--openshell-gateway-id=prod' --set openshell.gatewayId=prod --show-only templates/preflight.yaml
 has "the preflight defaults the gateway ID to OpenShell's" '--openshell-gateway-id=openshell' --show-only templates/preflight.yaml
+has "the preflight fails a gateway ID mismatch while the policies are scoped to the gateway" '--sandbox-policy-scoped-to-gateway' --show-only templates/preflight.yaml
+lacks "the preflight does not fail a gateway ID mismatch when scopeToGateway is off" '--sandbox-policy-scoped-to-gateway' --set sandboxPolicy.scopeToGateway=false --show-only templates/preflight.yaml
 lacks "the preflight does not warn about the observer when it is on" 'sandbox-observer-disabled' --show-only templates/preflight.yaml
 has "the preflight warns when the observer is off" '--sandbox-observer-disabled' "${off[@]}" --show-only templates/preflight.yaml
 if render --set sandboxPolicy.enabled=false >/dev/null 2>"$out/obs.err"; then fail "the observer without sandboxPolicy must not render"; fi
@@ -83,3 +95,10 @@ if render --set 'sandboxPolicy.validationActions={Warn}' >/dev/null 2>&1; then f
 render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" >/dev/null 2>&1 || fail "validation actions without Deny and the observer off must render"
 if render --set openshell.gatewayId=Not_Valid >/dev/null 2>&1; then fail "an invalid openshell.gatewayId must not render"; fi
 
+
+# The SPIRE agent socket never reaches a sandbox (ADR 0097 decision 11.2, old issue 282): the pods policy
+# refuses the SPIFFE CSI driver and a hostPath naming the socket, with its own messages.
+has "the pods policy refuses SPIFFE CSI volumes" "SPIFFE CSI volumes \(csi.spiffe.io\) are not allowed in sandbox pods"
+has "the pods policy refuses the SPIRE agent socket hostPath" "the SPIRE agent socket must not be mounted in sandbox pods"
+has "the pods policy matches the csi.spiffe.io driver" "v.csi.driver != 'csi.spiffe.io'"
+lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false

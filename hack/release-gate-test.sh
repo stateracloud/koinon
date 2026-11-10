@@ -31,15 +31,17 @@ EOF
 cat >"$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 shift # api
-path= expr=.
+path= expr=. pag=
 while (($#)); do
 	case $1 in
-	--paginate) ;;
+	--paginate) pag=1 ;;
 	--jq) expr=$2; shift ;;
 	*) path=$1 ;;
 	esac
 	shift
 done
+query=
+[[ $path == *\?* ]] && query=${path#*\?}
 path=${path%%\?*}
 case $path in
 repos/o/r) f=repo.json ;;
@@ -48,11 +50,36 @@ repos/o/r/commits/*/check-runs) c=${path#repos/o/r/commits/}; f=checks-${c%%/*}.
 repos/o/r/commits/*/pulls) f=pulls.json ;;
 repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
 repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
+repos/o/r/actions/workflows/ci.yml/runs) f=ci-runs.json ;;
 repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*}.json ;;
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
 esac
+# the workflow runs of one commit: none unless a case adds some
+[[ $f == mg-runs.json && $query == *head_sha=* && ! -f $FX/$f ]] && { echo '{"workflow_runs":[]}' | jq -r "$expr"; exit; }
+# the merge_group ci runs: none unless a case adds some
+if [[ $f == ci-runs.json ]]; then
+	[[ -f $FX/$f ]] || echo '{"workflow_runs":[]}' >"$FX/$f"
+	jq -r "$expr" "$FX/$f"
+	exit
+fi
+# a second page (mg-runs-p2.json) follows the first only when --paginate is given and a case adds one
 [[ -f $FX/$f ]] || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }
+# the runs endpoint honours event= and status= like GitHub (status=success is a run's conclusion here)
+if [[ $f == mg-runs.json ]]; then
+	ev= st= hs=
+	IFS='&' read -ra kv <<<"$query"
+	for p in "${kv[@]}"; do
+		case $p in event=*) ev=${p#event=} ;; status=*) st=${p#status=} ;; head_sha=*) hs=${p#head_sha=} ;; esac
+	done
+	for pg in "$FX/$f" "$FX/mg-runs-p2.json"; do
+		[[ -f $pg ]] || continue
+		[[ $pg == */mg-runs-p2.json && -z $pag ]] && continue
+		jq --arg ev "$ev" --arg st "$st" --arg hs "$hs" '.workflow_runs |= map(select(($ev == "" or .event == $ev) and ($st == "" or .conclusion == $st) and ($hs == "" or .head_sha == $hs)))' "$pg" |
+			jq '.total_count //= (.workflow_runs | length)' | jq -r "$expr"
+	done
+	exit
+fi
 exec jq -r "$expr" "$FX/$f"
 EOF
 chmod +x "$tmp/bin/git" "$tmp/bin/gh"
@@ -81,6 +108,7 @@ new_case() {
 	set_ruleset go dco "e2e result"
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	echo '{"check_runs":[]}' >"$FX/checks-$pr_head.json"
+	echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"treeS\"}}" >"$FX/commit-$sha.json"
 	echo "[{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"$pr_head\"}}]" >"$FX/pulls.json"
 	run_on "$sha" go success
 	run_on "$sha" quickstart success
@@ -93,10 +121,16 @@ set_ruleset() { # <context>...: the rules/branches answer
 	jq -n --argjson ctx "$ctx" \
 		'[{type: "deletion"}, {type: "required_status_checks", ruleset_id: 7, parameters: {required_status_checks: $ctx}}]' >"$FX/rules.json"
 }
-run_on() { # <sha> <name> <conclusion> [started_at]
+run_on() { # <sha> <name> <conclusion> [started_at] [workflow run id]
 	local f=$FX/checks-$1.json
 	[[ -f $f ]] || echo '{"check_runs":[]}' >"$f"
-	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c}]' "$f" >"$f.new"
+	jq --arg n "$2" --arg c "$3" --arg t "${4:-2026-01-01T00:00:00Z}" '.check_runs += [{name: $n, started_at: $t, conclusion: $c, details_url: ("https://github.com/o/r/actions/runs/" + ($r | tostring) + "/job/1")}]' --argjson r "${5:-1}" "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
+ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merge_group ci run on the tree
+	local f=$FX/ci-runs.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --arg h "$1" --arg t "$2" --arg c "${3:-success}" '.workflow_runs += [{id: 900, head_sha: $h, event: "merge_group", conclusion: $c, head_commit: {id: $h, tree_id: $t}}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 n=0
@@ -176,62 +210,109 @@ echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" go success
 check "quickstart missing on the commit fails" "$(gate_rc)" 1
 
+qh=qqqq333
 new_case
-# old issue 595: main skipped the heavy job because the merge tree is the PR head; the head is the evidence.
+# main skipped the heavy job because the merge queue tested the tree: the queue build is the evidence.
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+ci_queue_run "$qh" treeS
+run_on "$qh" go success
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "a check skipped on main is read from the queue build (green)" "$(gate_rc)" 0
+
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" quickstart success
+run_on "$sha" go skipped
+ci_queue_run "$qh" treeS
+run_on "$qh" go failure
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "a check skipped on main and red in the queue build fails" "$(gate_rc)" 1
+
+new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
 run_on "$pr_head" go success
-check "a check skipped on main is read from the PR head (green)" "$(gate_rc)" 0
+check "a check skipped on main is NOT read from the PR head (no queue run fails)" "$(gate_rc)" 1
+check "...and says why" "$(grep -c 'no successful merge_group ci run has this tree' "$tmp/err")" 1
 
 new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-run_on "$pr_head" go failure
-check "a check skipped on main and red on the PR head fails" "$(gate_rc)" 1
+ci_queue_run "$qh" otherTree
+run_on "$qh" go success
+check "a queue run on another tree does not count" "$(gate_rc)" 1
 
 new_case
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-check "a check skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+ci_queue_run "$qh" treeS failure
+run_on "$qh" go success
+check "a failed queue run does not count" "$(gate_rc)" 1
 
 new_case
 echo '[]' >"$FX/pulls.json"
 echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 run_on "$sha" quickstart success
 run_on "$sha" go skipped
-check "a check skipped on main with no merged PR fails" "$(gate_rc)" 1
+check "a check skipped on main with no queue run and no merged PR fails" "$(gate_rc)" 1
 
-# go-test (old issue 610): skipped on main (the merge tree is the PR head), the head decides.
-go_test_case() { # a fresh case in which main skipped go-test, the head's go-test is $1 ("" = no run)
+# Queue commit: dco and e2e result come from the queue build, not the PR head.
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$pr_head.json"
+ci_queue_run "$qh" treeS
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "queue commit: dco and e2e result from the queue build pass without a PR head" "$(gate_rc)" 0
+new_case
+run_on "$pr_head" dco failure "2026-01-01T12:00:00Z"
+ci_queue_run "$qh" treeS
+run_on "$qh" dco success
+run_on "$qh" "e2e result" success
+check "queue commit: a PR head's red dco is not read when the queue reported it" "$(gate_rc)" 0
+new_case
+ci_queue_run "$qh" treeS
+run_on "$qh" dco failure
+run_on "$qh" "e2e result" success
+check "queue commit: a red dco in the queue build fails" "$(gate_rc)" 1
+# Admin commit: no queue run; ci contexts on the commit itself, dco and e2e result from the PR head.
+new_case
+check "admin commit: ci from the push run, dco and e2e result from the PR head" "$(gate_rc)" 0
+new_case
+echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
+run_on "$sha" go success
+echo '{"workflow_runs":[]}' >"$FX/mg-runs.json"
+check "admin commit: quickstart missing fails with the dispatch hint" "$(gate_rc)" 1
+check "...and says to run e2e-kind" "$(grep -c 'run the e2e-kind workflow' "$tmp/err")" 1
+
+# go-test: skipped on main (the queue ran it), the queue build decides; or the change has no Go.
+go_test_case() { # a fresh case in which main skipped go-test, the queue build's go-test is $1 ("" = no run)
 	new_case
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	run_on "$sha" quickstart success
 	run_on "$sha" go skipped
 	run_on "$sha" go-test skipped
-	run_on "$pr_head" go success
-	[[ -z $1 ]] || run_on "$pr_head" go-test "$1"
+	ci_queue_run "$qh" treeS
+	run_on "$qh" go success
+	run_on "$qh" dco success
+	run_on "$qh" "e2e result" success
+	[[ -z $1 ]] || run_on "$qh" go-test "$1"
 }
-echo '[{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-ok.json"
-echo '[{"state":"failure","context":"go-test-lab"},{"state":"success","context":"go-test-lab"}]' >"$tmp/lab-red.json"
 export GIT_DIFF=internal/x/x.go
 go_test_case success
-check "go-test green on the PR head passes" "$(gate_rc)" 0
+check "go-test green in the queue build passes" "$(gate_rc)" 0
 go_test_case skipped
-cp "$tmp/lab-ok.json" "$FX/statuses-$pr_head.json"
-check "go-test skipped by an external run (green go-test-lab on the PR head) passes" "$(gate_rc)" 0
-check "...and says it passed in an external run" "$(grep -c 'ok: go-test (passed in an external run' "$tmp/out")" 1
+check "go-test skipped in the queue build with Go in the change fails" "$(gate_rc)" 1
+check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped in the merge queue run' "$tmp/err")" 1
 go_test_case skipped
-check "go-test skipped with no go-test-lab status and Go in the change fails" "$(gate_rc)" 1
-check "...and names go-test" "$(grep -c 'FAIL: go-test: skipped on the merged pull request' "$tmp/err")" 1
-go_test_case skipped
-cp "$tmp/lab-red.json" "$FX/statuses-$pr_head.json"
-check "go-test skipped with a red newest go-test-lab status fails" "$(gate_rc)" 1
-go_test_case skipped
-cp "$tmp/lab-ok.json" "$FX/statuses-$sha.json" # a status on the merge commit is not the PR head's
-check "a go-test-lab on another commit does not count" "$(gate_rc)" 1
+echo '[{"state":"success","context":"go-test-lab"}]' >"$FX/statuses-$pr_head.json"
+check "a go-test-lab status on the PR head no longer excuses a skipped go-test" "$(gate_rc)" 1
 go_test_case skipped
 GIT_DIFF=docs/guide.md
 check "go-test skipped with no Go in the change passes" "$(gate_rc)" 0
@@ -239,9 +320,9 @@ GIT_DIFF=
 check "go-test skipped and the change cannot be read fails" "$(gate_rc)" 1
 export GIT_DIFF=internal/x/x.go
 go_test_case failure
-check "go-test red on the PR head fails" "$(gate_rc)" 1
+check "go-test red in the queue build fails" "$(gate_rc)" 1
 go_test_case ""
-check "go-test skipped on main and absent on the PR head fails" "$(gate_rc)" 1
+check "go-test skipped on main and absent in the queue build fails" "$(gate_rc)" 1
 
 # #444 (ADR 0102): the quickstart on a queue-merged commit.
 qs_case() { # a fresh case whose tagged commit has the given quickstart runs only (set by the caller after)
@@ -249,10 +330,10 @@ qs_case() { # a fresh case whose tagged commit has the given quickstart runs onl
 	echo '{"check_runs":[]}' >"$FX/checks-$sha.json"
 	run_on "$sha" go success
 }
-mg_run() { # <run id> <head sha> <tree of that head> [quickstart conclusion]: a green merge_group run
+mg_run() { # <run id> <head sha> <tree of that head> [quickstart conclusion] [event] [run conclusion]: a merge_group run, green by default
 	local f=$FX/mg-runs.json
 	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
-	jq --argjson i "$1" --arg h "$2" '.workflow_runs += [{id: $i, head_sha: $h, event: "merge_group", conclusion: "success"}]' "$f" >"$f.new"
+	jq --argjson i "$1" --arg h "$2" --arg e "${5:-merge_group}" --arg c "${6:-success}" '.workflow_runs += [{id: $i, head_sha: $h, event: $e, conclusion: $c}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
 	echo "{\"sha\":\"$2\",\"tree\":{\"sha\":\"$3\"}}" >"$FX/commit-$2.json"
 	echo "{\"jobs\":[{\"id\":1,\"name\":\"decide\",\"conclusion\":\"success\"},{\"id\":2,\"name\":\"quickstart\",\"conclusion\":\"${4:-success}\"}]}" >"$FX/jobs-$1.json"
@@ -295,8 +376,9 @@ echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
 check "quickstart: a queue run whose quickstart job was skipped fails" "$(gate_rc)" 1
 qs_case
 mg_run 77 mgsha tree1
+rm -f "$FX/commit-$sha.json"
 check "quickstart: the tagged commit's tree cannot be read fails" "$(gate_rc)" 1
-check "...and says the queue runs could not be read" "$(grep -c 'could not be read' "$tmp/err")" 1
+check "...and says what could not be read" "$(grep -c 'could not be read\|cannot read the tree' "$tmp/err")" 1
 qs_case
 mg_run 77 mgsha tree1
 echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
@@ -307,6 +389,107 @@ mg_run 77 mgsha tree1
 echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
 rm "$FX/jobs-77.json"
 check "quickstart: a queue run whose jobs cannot be read fails" "$(gate_rc)" 1
+
+# the query parameters are honoured: a failed run and a run of another event are not queue evidence
+qs_case
+mg_run 77 mgsha tree1 success merge_group failure
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a failed merge_group run on the same tree fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1 success workflow_dispatch
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a green run of another event on the same tree fails" "$(gate_rc)" 1
+qs_case
+mg_run 77 mgsha tree1 success workflow_dispatch
+mg_run 78 mgsha2 tree1 success merge_group failure
+mg_run 79 mgsha3 tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a good run among filtered-out ones passes" "$(gate_rc)" 0
+check "...and names the good run" "$(grep -c 'merge queue run 79' "$tmp/out")" 1
+# the bound: only the newest QUEUE_RUN_LIMIT runs are read
+qs_case
+mg_run 80 mgsha4 tree2
+mg_run 81 mgsha5 tree1
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"tree1\"}}" >"$FX/commit-$sha.json"
+check "quickstart: a queue run beyond the limit is not looked at" "$(QUEUE_RUN_LIMIT=1 gate_rc)" 1
+# #453: a bisect dispatch (inputs.commit) is named `quickstart (commit)` and is no evidence for the head
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z
+run_on "$sha" "quickstart (commit)" success 2026-01-03T01:00:00Z
+check "quickstart: a green bisect dispatch does not excuse a red main head" "$(gate_rc)" 1
+qs_case
+run_on "$sha" "quickstart (commit)" success
+check "quickstart: only a bisect dispatch is no evidence" "$(gate_rc)" 1
+# the head_sha == SHA shortcut: the tagged commit is itself the queue commit, so no commit lookup is needed
+qs_case
+mg_run 90 "$sha" tree1 # writes commit-$sha.json too; the loop itself needs no lookup for a head equal to SHA
+check "quickstart: a green queue run on the tagged commit itself passes" "$(gate_rc)" 0
+check "...and names that queue run" "$(grep -c 'merge queue run 90' "$tmp/out")" 1
+# QUEUE_RUN_LIMIT is a per_page: 1..100 only
+for bad in 0 101 abc -1 3.5; do
+	qs_case
+	check "QUEUE_RUN_LIMIT '$bad' fails closed" "$(QUEUE_RUN_LIMIT=$bad gate_rc)" 1
+	check "...with a clear message ('$bad')" "$(grep -c 'QUEUE_RUN_LIMIT .* is not an integer from 1 to 100' "$tmp/err")" 1
+done
+for ok in 1 30 100; do
+	qs_case
+	run_on "$sha" quickstart success
+	check "QUEUE_RUN_LIMIT $ok is accepted" "$(QUEUE_RUN_LIMIT=$ok gate_rc)" 0
+done
+# #453: runs from before the fix still carry the name `quickstart`; their workflow run is titled as a bisect
+bisect_run() { # <run id> <sha> <display title>
+	local f=$FX/mg-runs.json
+	[[ -f $f ]] || echo '{"workflow_runs":[]}' >"$f"
+	jq --argjson i "$1" --arg h "$2" --arg t "$3" '.workflow_runs += [{id: $i, head_sha: $h, event: "workflow_dispatch", conclusion: "success", display_title: $t}]' "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
+qs_case
+run_on "$sha" quickstart failure 2026-01-03T00:00:00Z 10
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+bisect_run 11 "$sha" "e2e-kind (bbbb222) bisect 7"
+check "quickstart: an old-style green bisect run does not excuse a red head" "$(gate_rc)" 1
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+bisect_run 11 "$sha" "e2e-kind (bbbb222) bisect 7"
+check "quickstart: only an old-style bisect run is no evidence" "$(gate_rc)" 1
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 12
+bisect_run 12 "$sha" "e2e-kind"
+check "quickstart: a plainly titled run still counts" "$(gate_rc)" 0
+# more runs on the commit than one page holds: a bisect run could hide beyond it, so fail closed
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+check "quickstart: total_count 101 with 100 runs fails closed" "$(gate_rc)" 1
+check "...with a clear message" "$(grep -c 'read 100 of 101 e2e-kind runs on .*: cannot rule out a bisect run' "$tmp/err")" 1
+jq '.total_count = 100' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
+check "quickstart: total_count equal to the runs returned passes" "$(gate_rc)" 0
+# the only bisect run is on the second page: it is found, so its newer red check run is dropped and the
+# older green one passes the gate (a lookup that reads only page 1 fails closed instead)
+qs_case
+run_on "$sha" quickstart success 2026-01-03T00:00:00Z 10
+run_on "$sha" quickstart failure 2026-01-03T01:00:00Z 1100
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+jq --arg h "$sha" '.total_count = 101 | .workflow_runs = [{id: 1100, head_sha: $h, event: "workflow_dispatch", conclusion: "success", display_title: "e2e-kind (bbbb222) bisect 7"}]' <<<'{}' >"$FX/mg-runs-p2.json"
+check "quickstart: a bisect run on the second page is found and dropped" "$(gate_rc)" 0
+# GitHub's cap for a filtered run list (1000 results): fail closed
+jq '.total_count = 1000' "$FX/mg-runs.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs.json"
+jq '.total_count = 1000' "$FX/mg-runs-p2.json" >"$FX/mg-runs.new" && mv "$FX/mg-runs.new" "$FX/mg-runs-p2.json"
+check "quickstart: total_count at GitHub's 1000 cap fails closed" "$(gate_rc)" 1
+check "...with a clear message (cap)" "$(grep -c '1000 or more e2e-kind runs' "$tmp/err")" 1
+# the runs read equal total_count = 1000: only the cap check can stop it
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 1000 | .workflow_runs = [range(1000) as $i | {id: (2000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+check "quickstart: 1000 runs read, total_count 1000 fails closed" "$(gate_rc)" 1
+check "...with the cap message" "$(grep -c '1000 or more e2e-kind runs' "$tmp/err")" 1
+# a run inserted while paging repeats on page 2: the distinct ids read stay below total_count, so one run went unread
+qs_case
+run_on "$sha" quickstart success 2026-01-03T01:00:00Z 11
+jq --arg h "$sha" '.total_count = 102 | .workflow_runs = [range(100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs.json"
+jq --arg h "$sha" '.total_count = 102 | .workflow_runs = [range(98; 100) as $i | {id: (1000 + $i), head_sha: $h, event: "push", conclusion: "success", display_title: "e2e-kind"}]' <<<'{}' >"$FX/mg-runs-p2.json"
+check "quickstart: a duplicate across pages does not count as a run read" "$(gate_rc)" 1
+check "...with the unread message" "$(grep -c 'read 100 of 102 e2e-kind runs' "$tmp/err")" 1
 
 new_case
 rm "$FX/rules.json"

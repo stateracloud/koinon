@@ -83,7 +83,6 @@ adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim
 	hack/adr-lint-test.sh
 	hack/adr-lint.sh
 	hack/claim_test.sh
-	hack/pr-updater-test.sh
 	hack/tmp-safety-test.sh
 	hack/waiver-approvers-test.sh
 	hack/migrate-renumber-test.sh

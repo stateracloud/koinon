@@ -34,19 +34,27 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `rules/branches/<default>` (every active repository and organization rule for the branch, branch
    patterns resolved by GitHub), so adding or removing a required check needs no edit to
    `hack/release-gate.sh`; if it cannot read the rules, or finds no required checks, it fails closed.
-   Each context must have succeeded on the tagged commit itself, except three that a push to main does
-   not report as a result: `dco` (pull requests only), `claim` (`pull_request`; skipped on main) and
-   `e2e result` (a composite that also passes when the e2e was skipped on main; on a pull request it
-   fails when the change needs the e2e and the head has none, old issue 562; its real subject, the kind
-   e2e, the gate asks for through the `quickstart` rule below). `quick checks` (proto, migrations, adr-lint, claim-tests and the dependency age
-   steps, which run on pull requests only) must succeed on the tagged commit and also on the merged
-   pull request's head (`both` in the script). The three above are listed in the script
-   (`pr_only`) and read from the head commit of the pull request that merged the tag's commit: the
-   newest run that started before the merge (the `closed` event reruns some of them as skipped). A
-   commit that was not merged through a pull request therefore fails the gate. They are listed
-   rather than inferred from "no run on the commit", so a new push-triggered required check that is
-   missing or red on the commit cannot be excused by a pull request run. When a workflow gains or
-   loses a `push` trigger, move its context in or out of `pr_only`.
+   Each context is read in this order: the tagged commit itself; where it reports `skipped` (the push to
+   main skips its heavy jobs when the merge queue already tested the tree, `hack/ci-skip-heavy.sh`), the
+   successful `merge_group` `ci` run on a commit with the same tree (the queue build, found through the
+   run's own `head_commit.tree_id` among the newest `QUEUE_RUN_LIMIT`); and, for the three a push to main
+   does not report as a result, the queue build first and then the merged pull request's head:
+   `dco` (pull requests and the queue only), `claim` (`pull_request`, `merge_group`; skipped on main) and
+   `e2e result` (a composite that also passes when the e2e was skipped on main; its real subject, the kind
+   e2e, the gate asks for through the `quickstart` rule below). `go`, `web` and every other `ci` job are
+   never read from a PR head: a draft's green is vacuous. `quick checks` (proto, migrations, adr-lint,
+   claim-tests and the dependency age steps, which run on pull requests only) must succeed on the tagged
+   commit and also on the merged pull request's head (`both` in the script). The three above are listed in
+   the script (`pr_only`); the pull request head is the newest run that started before the merge (the
+   `closed` event reruns some of them as skipped). They are listed rather than inferred from "no run on the
+   commit", so a new push-triggered required check that is missing or red on the commit cannot be excused.
+   When a workflow gains or loses a `push` trigger, move its context in or out of `pr_only`.
+   An admin-merged commit has no queue build: its `ci` jobs ran in its own push run, `dco`, `claim` and
+   `e2e result` come from the PR head, and the `quickstart` rule fails with a dispatch hint unless the
+   batched push run ran it. A skipped `go-test` needs the queue build's `go-test` to be green, or a change
+   with no Go (the lab status `go-test-lab` is a pull-request-only shortcut and no longer excuses it).
+   A queue run older than the newest `QUEUE_RUN_LIMIT` (90 days of API retention at most) is not found and
+   the gate fails closed.
    The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
 

@@ -122,7 +122,11 @@ if the KEK was restored meanwhile it changes nothing, in no org. It holds that l
 finished, so `keys add`, `keys activate`, `keys retire`, the key-admin Job and the start-up check of
 a starting `koinon-api` wait for the whole run (one transaction per org that holds a value sealed with
 the KEK). The keys `koinon-api` creates itself do not wait: after 10 s it creates them without the
-lock and records them afterwards. Then:
+lock and records them afterwards. It needs a database pool of at least 2 connections (one stays with
+the lock, each org needs another) and refuses a smaller one, such as `pool_max_conns=1` in the
+database URL, before it asks anything. It also switches off the server's
+`idle_in_transaction_session_timeout` for the lock's transaction, so a short server timeout does not
+end the run. Then:
 
 - Provider keys and cost keys, connection secrets, MCP server and trace destination credentials sealed
   with it are marked lost. Their pages say "credential lost" and ask for the value again (an MCP

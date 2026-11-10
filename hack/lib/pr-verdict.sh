@@ -7,7 +7,8 @@
 # The rule (docs/dev/ci.md "One verdict per workflow run"):
 #   1. Judge per WORKFLOW RUN, not per check name. For each workflow file (`path`) on the head take the
 #      newest run that counts: by `created_at`, then `run_attempt`. A run titled `ci (draft)` does not
-#      count once the PR is ready. The check runs of every other run of that workflow are dropped, so an
+#      count once the PR is ready: a draft runs nothing heavy and its `go`/`web` are green by skipping, so
+#      until the ready_for_review run exists nothing on the head is evidence. The check runs of every other run of that workflow are dropped, so an
 #      older green can never outvote a newer run that was cancelled, skipped or is still queued.
 #   2. Inside the chosen run, a check name is judged by its newest row: a row that has not finished
 #      (a live re-run attempt) outranks finished ones; otherwise the newest by start time (completion time

@@ -748,9 +748,19 @@ sandbox:
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:
   enabled: true
+  # Which namespaces the policies bind to. The chart adds openshell.ai/gateway-id=<openshell.gatewayId>
+  # (scopeToGateway), so a release's policies cover only its own gateway's workspace namespaces: two
+  # Koinon releases with their own gateways on one cluster do not block each other's sandboxes
+  # (old issue 460).
   namespaceSelector:
     matchLabels:
       openshell.ai/managed-by: openshell
+  # false binds to namespaceSelector as written, so every OpenShell gateway's namespaces (the scope
+  # before this setting existed). Upgrade note: a single install changes nothing, provided
+  # openshell.gatewayId equals the gateway's gateway_id, because its workspace namespaces carry the
+  # gateway-id label OpenShell sets. If they differ, every sandbox policy matches no namespace; the
+  # preflight fails the install on that mismatch while scopeToGateway is true.
+  scopeToGateway: true
   # Runtime classes allowed for sandbox workload pods (the vm tier, ADR 0075). Any class not
   # listed here is refused by the policy. kata-qemu-runtime-rs is the Rust runtime that Kata 4.x's
   # kata-deploy (4.3.1) creates by default; it marks the Go-runtime kata-qemu deprecated (old issue 442).
