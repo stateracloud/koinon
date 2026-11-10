@@ -3,6 +3,7 @@
 package acp_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -409,34 +410,245 @@ var _ = Describe("a burst of updates against a slow handler", func() {
 	}, SpecTimeout(90*time.Second))
 })
 
-var _ = Describe("session/update lines the SDK rejects", func() {
-	It("do not count as unhandled, so the stream is never held back for them", func(ctx SpecContext) {
+// stallLogger is a slog handler whose records wait until release is closed. The SDK logs every
+// notification it rejects from its dispatching goroutine, so a stalled logger stalls the
+// dispatcher at a point the test controls, instead of one that depends on scheduling.
+type stallLogger struct{ release chan struct{} }
+
+func (l stallLogger) Enabled(context.Context, slog.Level) bool { return true }
+func (l stallLogger) Handle(_ context.Context, r slog.Record) error {
+	// Only the SDK's records stall; the drop reports of Conn itself pass, so that the one
+	// mid-run report does not hold the reader.
+	if strings.HasPrefix(r.Message, "acp: ") {
+		return nil
+	}
+	<-l.release
+	return nil
+}
+func (l stallLogger) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l stallLogger) WithGroup(string) slog.Handler      { return l }
+
+var _ = Describe("notifications that no handler acts on", func() {
+	// The SDK queues 1024 notifications for one dispatcher and closes the connection when a
+	// burst overflows it. Here the dispatcher is stopped for the whole burst, so nothing the
+	// reader passes on is dispatched: the burst overflows the queue unless the reader keeps
+	// these lines out of it (issue 501: the same happened by chance on a loaded CI runner).
+	flood := func(ctx SpecContext, line string, bad int) {
 		fromAgentR, fromAgentW := io.Pipe()
 		rec := &slowRecorder{}
 		conn := acp.NewConn(context.Background(), rec, io.Discard, fromAgentR)
-		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
-		// More than the 512 lag limit of lines whose params the SDK refuses (InvalidParams),
-		// so the handler never sees them; then valid ones.
-		const bad, good = 1500, 20
+		release := make(chan struct{})
+		var once sync.Once
+		unstall := func() { once.Do(func() { close(release) }) }
+		DeferCleanup(unstall)
+		conn.SetLogger(slog.New(stallLogger{release: release}))
+		const good = 20
+		written := make(chan struct{})
 		go func() {
 			defer GinkgoRecover()
+			defer close(written)
 			for range bad {
-				if _, err := io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n"); err != nil {
+				if _, err := io.WriteString(fromAgentW, line); err != nil {
 					return
 				}
 			}
 			for i := range good {
-				if _, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%d"}}}}`+"\n", i); err != nil {
+				if _, err := io.WriteString(fromAgentW, updateLine(fmt.Sprint(i))); err != nil {
 					return
 				}
+			}
+		}()
+		// The reader takes every line while the dispatcher is stopped: the lines that
+		// reach the handler (the valid ones) are far below the SDK's queue.
+		Eventually(written).WithTimeout(20*time.Second).Should(BeClosed(),
+			"the reader stopped: did the SDK notification queue overflow and close the connection?")
+		Expect(conn.Dropped()).To(BeEquivalentTo(bad))
+		Expect(conn.Done()).NotTo(BeClosed(), "the SDK's queue did not overflow")
+		unstall()
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(good))
+	}
+
+	It("session/update lines the SDK rejects never reach its queue", func(ctx SpecContext) {
+		flood(ctx, `{"jsonrpc":"2.0","method":"session/update","params":"not an object"}`+"\n", 3000)
+	}, SpecTimeout(60*time.Second))
+
+	It("unknown methods never reach its queue", func(ctx SpecContext) {
+		// Not an extension method (no leading underscore): the SDK logs "failed to handle
+		// notification" for it, which is what stalls the dispatcher here.
+		flood(ctx, `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}`+"\n", 3000)
+	}, SpecTimeout(60*time.Second))
+
+	// The SDK ignores an unhandled "_" method without a log line, so the stalled logger never
+	// stops the dispatcher here: this spec checks the drop count only, not the queue.
+	It("extension methods are dropped and counted (does not stall the dispatcher)", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		go func() {
+			for range 50 {
+				_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"_ext/ping","params":{}}`+"\n")
 			}
 			_ = fromAgentW.Close()
 		}()
 		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Expect(conn.Dropped()).To(BeEquivalentTo(50))
+	}, SpecTimeout(60*time.Second))
+
+	It("reports the drops once, when the connection ends, without line content", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":"koinon_test_secret_text"}`+"\n")
+			for range 4 {
+				_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"_ext/ping","params":{"x":"koinon_test_secret_text"}}`+"\n")
+			}
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring("dropped notifications"))
+		out := buf.String()
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1))
+		Expect(out).To(ContainSubstring("count=5"))
+		Expect(out).To(ContainSubstring("first_method=session/update"))
+		Expect(out).To(ContainSubstring(`first_class="rejected session/update"`))
+		Expect(out).NotTo(ContainSubstring("koinon_test_secret_text"))
+	}, SpecTimeout(60*time.Second))
+
+	It("reports a flood once while it runs and once at the end, and a small number only at the end", func(ctx SpecContext) {
+		run := func(drops int) string {
+			fromAgentR, fromAgentW := io.Pipe()
+			conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+			var buf syncBuffer
+			conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+			go func() {
+				for range drops {
+					_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}`+"\n")
+				}
+				_ = fromAgentW.Close()
+			}()
+			Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+			Eventually(buf.String).Should(ContainSubstring("dropped notifications"))
+			return buf.String()
+		}
+		out := run(1030)
+		Expect(strings.Count(out, "dropping notifications")).To(Equal(1), out)
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1), out)
+		Expect(out).To(ContainSubstring("count=1024"))
+		Expect(out).To(ContainSubstring("count=1030"))
+		Expect(out).To(ContainSubstring("first_method=session/no_such_notification"))
+
+		out = run(1023)
+		Expect(out).NotTo(ContainSubstring("dropping notifications"))
+		Expect(strings.Count(out, "dropped notifications")).To(Equal(1), out)
+		Expect(out).To(ContainSubstring("count=1023"))
+	}, SpecTimeout(60*time.Second))
+
+	It("after a cancel, reports the total when the stream ends and not at the cancel", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		cctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		conn := acp.NewConn(cctx, &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		drop := `{"jsonrpc":"2.0","method":"session/no_such_notification","params":{}}` + "\n"
+		for range 3 {
+			_, err := io.WriteString(fromAgentW, drop)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		cancel()
+		Consistently(buf.String).WithTimeout(200 * time.Millisecond).ShouldNot(ContainSubstring("dropped"))
+		for range 2 {
+			_, err := io.WriteString(fromAgentW, drop)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring("count=5"))
+		Expect(strings.Count(buf.String(), "dropped notifications")).To(Equal(1))
+		Expect(buf.String()).To(ContainSubstring("first_method=session/no_such_notification"))
+	}, SpecTimeout(60*time.Second))
+
+	It("drops a request method sent without an id: the handler is not called, later traffic still works", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		toAgentR, toAgentW := io.Pipe()
+		DeferCleanup(func() { _ = fromAgentW.Close(); _ = toAgentW.Close() })
+		h := &permCounter{}
+		conn := acp.NewConn(context.Background(), h, toAgentW, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		params := `{"sessionId":"s1","toolCall":{"toolCallId":"t1"},"options":[{"optionId":"yes","name":"Allow","kind":"allow_once"}]}`
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","method":"session/request_permission","params":`+params+`}`+"\n")
+			_, _ = io.WriteString(fromAgentW, updateLine("after"))
+		}()
+		Eventually(h.updates.Load).Should(BeEquivalentTo(1))
+		Expect(h.perms.Load()).To(BeZero(), "a request without an id must not reach the handler")
+		Expect(conn.Dropped()).To(BeEquivalentTo(1))
+		// A real request with an id is still answered.
+		go func() {
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":`+params+`}`+"\n")
+		}()
+		resp, err := bufio.NewReader(toAgentR).ReadString('\n')
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp).To(ContainSubstring(`"id":9`))
+		Expect(resp).To(ContainSubstring(`"yes"`))
+		Expect(h.perms.Load()).To(BeEquivalentTo(1))
+		Expect(conn.Dropped()).To(BeEquivalentTo(1))
+		_ = fromAgentW.Close()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(buf.String).Should(ContainSubstring(`first_class="request without id"`))
+		Expect(buf.String()).To(ContainSubstring("first_method=session/request_permission"))
+	}, SpecTimeout(60*time.Second))
+
+	It("logs nothing when nothing was dropped", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		conn := acp.NewConn(context.Background(), &slowRecorder{}, io.Discard, fromAgentR)
+		var buf syncBuffer
+		conn.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+		go func() {
+			_, _ = io.WriteString(fromAgentW, updateLine("a"))
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).WithTimeout(20 * time.Second).Should(BeClosed())
 		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
-		Expect(rec.count()).To(Equal(good))
-	}, SpecTimeout(40*time.Second))
+		Consistently(buf.String).WithTimeout(200 * time.Millisecond).ShouldNot(ContainSubstring("dropped"))
+	}, SpecTimeout(60*time.Second))
 })
+
+// permCounter counts the calls that reach the handler and answers every permission request.
+type permCounter struct{ updates, perms atomic.Int64 }
+
+func (p *permCounter) SessionUpdate(context.Context, acp.SessionNotification) error {
+	p.updates.Add(1)
+	return nil
+}
+
+func (p *permCounter) RequestPermission(context.Context, acp.PermissionRequest) (acp.Decision, error) {
+	p.perms.Add(1)
+	return acp.Decision{OptionID: "yes"}, nil
+}
+
+// syncBuffer is a bytes.Buffer safe for a logger goroutine and the spec to share.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
 
 // updateLine is a valid session/update notification with the given text.
 func updateLine(text string) string {

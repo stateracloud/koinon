@@ -23,6 +23,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"unicode/utf8"
 
 	sdk "github.com/coder/acp-go-sdk"
 
@@ -158,6 +160,11 @@ func NewConn(ctx context.Context, h Handler, toAgent io.Writer, fromAgent io.Rea
 		case <-c.c.Done():
 		}
 		t.abort()
+		// The reader may still read and drop lines until the stream ends: report the total at
+		// the end of the connection, not at the cancel. Waiting here cannot deadlock: nothing
+		// else waits for this goroutine, and abort has released the reader.
+		<-c.c.Done()
+		t.reportDropped("acp: dropped notifications that no handler acts on")
 	}()
 	return c
 }
@@ -173,6 +180,15 @@ func (c *Conn) ReadErr() error {
 // Close releases the reader if it is held back for a handler that lags. It does not end the
 // connection by itself: that happens when the agent's stream ends.
 func (c *Conn) Close() { c.t.abort() }
+
+// Dropped returns how many lines the reader did not pass on to the SDK. The rule: every message
+// without an id, except a valid session/update, is dropped. That covers extension and unknown
+// methods, session/update lines the SDK would reject, and request methods sent without an id
+// (such as session/request_permission): a message without an id can get no answer. Before the
+// drop, such a permission line reached the handler; now it is only counted here and reported in
+// the log when the connection ends. The SDK queues each such line like an update, so passing
+// them on would let a flood of them overflow its queue with no handler call to pace the reader by.
+func (c *Conn) Dropped() int64 { return c.t.dropped.Load() }
 
 // Done is closed when the connection has ended.
 func (c *Conn) Done() <-chan struct{} { return c.c.Done() }
@@ -191,7 +207,10 @@ func (c *Conn) WaitUpdates(ctx context.Context) bool {
 }
 
 // SetLogger sets the logger for protocol-level events, such as the connection closing.
-func (c *Conn) SetLogger(l *slog.Logger) { c.c.SetLogger(l) }
+func (c *Conn) SetLogger(l *slog.Logger) {
+	c.t.log.Store(l)
+	c.c.SetLogger(l)
+}
 
 // Initialize negotiates the protocol version and returns the agent's capabilities.
 func (c *Conn) Initialize(ctx context.Context) (InitializeResponse, error) {
@@ -361,8 +380,9 @@ const maxNotificationLag = 512
 //
 // The SDK dispatches notifications in order, so the oldest unhandled session/update marks the
 // head of the SDK's queue: every notification read after it is still queued, and everything
-// before it is done. Only session/update runs the handler; other notifications cost the SDK
-// next to nothing, so with no update pending nothing is queued for long.
+// before it is done. Only session/update runs the handler; every other notification does
+// nothing, and the reader drops it (see notifOther) so that it never takes a queue slot. The
+// queue then holds updates only, and each one is tracked.
 type tracker struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -374,6 +394,83 @@ type tracker struct {
 	readErr error // set when the reader ended the stream itself, not the agent
 	aborted bool
 	drained chan struct{}
+	dropped atomic.Int64 // notifications the reader did not pass on (see notifOther)
+
+	firstDrop dropInfo // the first dropped line, for the log lines; guarded by mu
+
+	log atomic.Pointer[slog.Logger] // the logger [Conn.SetLogger] gave the SDK; nil is slog.Default
+}
+
+// dropWarnThreshold is the SDK's notification queue size. The reader logs once, mid-run, when
+// the drops reach it: a harness that floods without limit would otherwise show only in the log
+// line at the end of the connection.
+const dropWarnThreshold = 1024
+
+// maxDropMethodBytes caps the method name in the drop log.
+const maxDropMethodBytes = 100
+
+// reportDropped logs the drop count with the first drop's method and class. It never logs line
+// content, which can hold user data, and it does not hold t.mu while it logs.
+func (t *tracker) reportDropped(msg string) {
+	n := t.dropped.Load()
+	if n == 0 {
+		return
+	}
+	t.mu.Lock()
+	first := t.firstDrop
+	t.mu.Unlock()
+	l := t.log.Load()
+	if l == nil {
+		l = slog.Default()
+	}
+	l.Warn(msg, "count", n, "first_method", first.method, "first_class", first.class)
+}
+
+// clientRequestMethods are the SDK's client-side methods that are requests: they need an id to
+// be answered. Sent without one they are protocol breaks, and the reader drops them.
+var clientRequestMethods = map[string]bool{
+	sdk.ClientMethodSessionRequestPermission: true,
+	sdk.ClientMethodFsReadTextFile:           true,
+	sdk.ClientMethodFsWriteTextFile:          true,
+	sdk.ClientMethodTerminalCreate:           true,
+	sdk.ClientMethodTerminalKill:             true,
+	sdk.ClientMethodTerminalOutput:           true,
+	sdk.ClientMethodTerminalRelease:          true,
+	sdk.ClientMethodTerminalWaitForExit:      true,
+	sdk.ClientMethodElicitationCreate:        true,
+	sdk.ClientMethodMcpConnect:               true,
+	sdk.ClientMethodMcpDisconnect:            true,
+}
+
+// truncateMethod cuts s to at most n bytes at a rune boundary.
+func truncateMethod(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// dropInfo says what the first dropped line was. It holds the method name only, never content.
+type dropInfo struct{ method, class string }
+
+func (t *tracker) noteFirstDrop(line []byte) {
+	var m struct {
+		Method string `json:"method"`
+	}
+	_ = json.Unmarshal(line, &m)
+	d := dropInfo{method: truncateMethod(m.Method, maxDropMethodBytes), class: "unhandled method"}
+	switch {
+	case m.Method == sdk.ClientMethodSessionUpdate:
+		d.class = "rejected session/update"
+	case clientRequestMethods[m.Method]:
+		d.class = "request without id"
+	}
+	t.mu.Lock()
+	t.firstDrop = d
+	t.mu.Unlock()
 }
 
 func newTracker() *tracker {
@@ -445,18 +542,30 @@ type countingReader struct {
 	fail error  // the error to return once out is empty
 }
 
-// counted accounts for one notification line. The observer runs before the wait, so the number
-// of updates it has seen ahead of the handler does not grow with the lag: the leak guard counts
-// them against what the gateway has reported (taint.go).
-func (cr *countingReader) counted(line []byte, kind notificationKind) {
-	if kind == notifNone {
-		return
+// counted accounts for one notification line and reports whether the line goes on to the SDK.
+// The observer runs before the wait, so the number of updates it has seen ahead of the handler
+// does not grow with the lag: the leak guard counts them against what the gateway has reported
+// (taint.go).
+func (cr *countingReader) counted(line []byte, kind notificationKind) bool {
+	switch kind {
+	case notifNone:
+		return true
+	case notifOther:
+		// The reader is the only writer of the counter: record the first drop before it counts.
+		if cr.t.dropped.Load() == 0 {
+			cr.t.noteFirstDrop(line)
+		}
+		if cr.t.dropped.Add(1) == dropWarnThreshold {
+			cr.t.reportDropped("acp: dropping notifications that no handler acts on")
+		}
+		return false
 	}
-	if kind == notifUpdate && cr.obs != nil {
+	if cr.obs != nil {
 		cr.obs.UpdateRead(line)
 	}
 	cr.t.waitLag()
-	cr.t.notified(kind == notifUpdate)
+	cr.t.notified(true)
+	return true
 }
 
 func (cr *countingReader) Read(p []byte) (int, error) {
@@ -482,11 +591,20 @@ const maxLineBytes = 10 << 20
 // caller asks ReadErr to tell that apart from a harness that exited.
 var ErrLineTooLong = errors.New("acp: a line from the agent exceeds the size limit")
 
-// next reads one line (or what is left at the end of the stream) into cr.out.
+// next reads one line (or what is left at the end of the stream) into cr.out. A notification
+// that no handler would act on is dropped here and the next line is read instead (see
+// [notifOther]), so cr.out is empty only when cr.fail is set.
 func (cr *countingReader) next() {
 	if cr.br == nil {
 		cr.br = bufio.NewReaderSize(cr.r, 64<<10)
 	}
+	for len(cr.out) == 0 && cr.fail == nil {
+		cr.readLine()
+	}
+}
+
+// readLine reads one line into cr.out, or leaves cr.out empty when it dropped the line.
+func (cr *countingReader) readLine() {
 	var line []byte
 	for {
 		chunk, err := cr.br.ReadSlice('\n')
@@ -503,12 +621,12 @@ func (cr *countingReader) next() {
 		}
 		if err != nil {
 			cr.fail = err
-			if len(line) > 0 {
-				cr.counted(line, classify(line))
+			if len(line) > 0 && !cr.counted(line, classify(line)) {
+				line = nil
 			}
 			cr.t.update(func() { cr.t.eof = true })
-		} else {
-			cr.counted(line[:len(line)-1], classify(line))
+		} else if !cr.counted(line[:len(line)-1], classify(line)) {
+			line = nil
 		}
 		break
 	}
@@ -519,7 +637,7 @@ type notificationKind int
 
 const (
 	notifNone   notificationKind = iota // not queued by the SDK: a response, a request, a cancel or garbage
-	notifOther                          // queued, and answered without the handler
+	notifOther                          // no id and not a valid session/update: dropped (a request method without an id can get no answer)
 	notifUpdate                         // queued, and handed to SessionUpdate
 )
 
@@ -529,6 +647,14 @@ const (
 // handled at once. A session/update whose params fail to decode or validate is answered with
 // InvalidParams and never reaches the handler, so it counts as other: waiting for a handler
 // call that never comes would hold the reader forever.
+//
+// Every other message without an id is dropped. The SDK would hand such a line to a client method
+// (it does not check for an id): a request method sent without an id, such as
+// session/request_permission, would run the handler, but no answer can go back, and the dispatcher
+// waits for the handler. For notifications the drop is right only while [client] implements
+// neither sdk.ExtensionMethodHandler nor UnstableCompleteElicitation;
+// TestClientImplementsNoNotificationHandler (acp_internal_test.go) fails when someone adds one.
+// Add the method to the session/update case here when you do.
 func classify(line []byte) notificationKind {
 	var m struct {
 		JSONRPC string            `json:"jsonrpc"`
