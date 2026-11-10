@@ -44,7 +44,7 @@ are in [0046](0046-adr-conventions.md).
 | [0022](0022-frontend-architecture.md) | React SPA served by the Go API over connect-rpc | Accepted |
 | [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
 | [0024](0024-roadmap.md) | Release roadmap from v0.1 to v1.0 | Accepted |
-| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below) |
+| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md) |
 | [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted; amended 2026-11-02 (below) |
 | [0027](0027-repo-and-versioning.md) | Monorepo, one version, supply-chain hygiene | Accepted; amended 2026-10-25 (below) |
 | [0028](0028-name-koinon.md) | Name the project Koinon | Accepted |
@@ -120,6 +120,7 @@ are in [0046](0046-adr-conventions.md).
 | [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Accepted (maintainer decision 2026-11-07) |
 | [0100](0100-install-audit-chain.md) | An install-level audit chain for platform actions | Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1) |
 | [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Accepted (maintainer decision 2026-11-04) |
-| [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09) |
+| [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md) |
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Accepted (direction by procoduck, 2026-11-09; details by the implementing lane) |
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
+| [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Proposed |

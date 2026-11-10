@@ -1,6 +1,6 @@
 # 0102. The merge queue runs the kind e2e on the queue commit
 
-- Status: Accepted (procoduck, 2026-11-09)
+- Status: Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md)
 - Date: 2026-11-09
 - Amends: [0094](0094-work-claims-on-the-public-repository.md) decision 4 (no kind e2e in the queue)
 - Relates to: [0046](0046-adr-conventions.md)
@@ -65,3 +65,10 @@ Quick check from the sources ADR 0094 pins plus general knowledge; the sources w
 - Main stops needing a second e2e run when it moves during the first.
 - The queue is slower for e2e-relevant entries; non-relevant entries are unchanged.
 - The lab result no longer counts at merge time; it is confidence only.
+
+## Amendment (2026-11-10, [0105](0105-merge-queue-route.md))
+
+Decisions 2, 3 and 6 are superseded in part: the PR-head gate and `e2e-lab` no longer decide whether a pull
+request can be enqueued (the queue's `quickstart` is the only proof), the admin flow gives way to `--jump`,
+`--break-glass` and `--admin` for `.github/**` only, and the bootstrap shim is removed (#452). Decisions 1, 4 and
+5 stay.
