@@ -270,10 +270,38 @@ func parallelPlainWhy(tests []string) string {
 		strings.Join(tests, ", ") + " (fix: make them Ginkgo specs, or take the package off PARALLEL_SUITES in hack/go-test.sh)"
 }
 
-// pkgFuncs is the package-level (receiver-less) functions of one package directory.
+// fnBody is one function or method body and the package names its file imports, so a qualified call
+// (`otherpkg.Run(t)`) can be told from a method call (`e.Run(t)`).
+type fnBody struct {
+	body *ast.BlockStmt
+	pkgs map[string]bool
+}
+
+// pkgFuncs is the functions and methods of one package directory.
 type pkgFuncs struct {
-	tests  []string                    // names of the func TestX declarations of the *_test.go files, sorted
-	bodies map[string][]*ast.BlockStmt // every receiver-less function with a body, by name (test and non-test files)
+	tests  []string            // names of the func TestX declarations of the *_test.go files, sorted
+	bodies map[string][]fnBody // every function and method with a body, by name (test and non-test files)
+}
+
+// importNames returns the names a file's imports bind: the alias, else the last path element (a
+// /vN suffix is skipped). Dot and blank imports bind none.
+func importNames(af *ast.File) map[string]bool {
+	out := map[string]bool{}
+	for _, im := range af.Imports {
+		if im.Name != nil {
+			if im.Name.Name != "." && im.Name.Name != "_" {
+				out[im.Name.Name] = true
+			}
+			continue
+		}
+		parts := strings.Split(strings.Trim(im.Path.Value, `"`), "/")
+		n := parts[len(parts)-1]
+		if len(parts) > 1 && len(n) > 1 && n[0] == 'v' && strings.Trim(n[1:], "0123456789") == "" {
+			n = parts[len(parts)-2]
+		}
+		out[n] = true
+	}
+	return out
 }
 
 // parsePkgFuncs parses the .go files of dir: the *_test.go files give the tests, all of them (test and
@@ -285,7 +313,9 @@ type pkgFuncs struct {
 // the same function), and a walk takes the union of their calls. A name clash can therefore only add
 // calls: a RequireT that exists in one variant is still found (a false FAIL at worst), and a RunSpecs in
 // one variant makes the test count as a suite (its pass is not counted as a plain pass, which can only
-// lower the verdict), never the other way round.
+// lower the verdict), never the other way round. The same holds for one Test name in two tag-exclusive
+// files where only one variant calls RunSpecs: the name is a suite in both. Methods are stored under
+// their method name too, so `e.need(t)` finds the body of `func (e *env) need`; that only adds calls.
 func parsePkgFuncs(dir string) (*pkgFuncs, error) {
 	tests, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 	if err != nil {
@@ -298,7 +328,7 @@ func parsePkgFuncs(dir string) (*pkgFuncs, error) {
 	if err != nil {
 		return nil, err
 	}
-	pf := &pkgFuncs{bodies: map[string][]*ast.BlockStmt{}}
+	pf := &pkgFuncs{bodies: map[string][]fnBody{}}
 	seen := map[string]bool{}
 	fset := token.NewFileSet()
 	for _, f := range files {
@@ -307,14 +337,15 @@ func parsePkgFuncs(dir string) (*pkgFuncs, error) {
 			return nil, err
 		}
 		isTest := strings.HasSuffix(f, "_test.go")
+		pkgs := importNames(af)
 		for _, d := range af.Decls {
 			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Body == nil {
+			if !ok || fn.Body == nil {
 				continue
 			}
 			name := fn.Name.Name
-			pf.bodies[name] = append(pf.bodies[name], fn.Body)
-			if isTest && strings.HasPrefix(name, "Test") && !seen[name] {
+			pf.bodies[name] = append(pf.bodies[name], fnBody{fn.Body, pkgs})
+			if fn.Recv == nil && isTest && strings.HasPrefix(name, "Test") && !seen[name] {
 				seen[name] = true
 				pf.tests = append(pf.tests, name)
 			}
@@ -324,25 +355,31 @@ func parsePkgFuncs(dir string) (*pkgFuncs, error) {
 	return pf, nil
 }
 
-// callees returns the names a function body calls (`F(...)` and `x.F(...)` both give "F").
-func callees(body *ast.BlockStmt) map[string]bool {
-	out := map[string]bool{}
-	ast.Inspect(body, func(n ast.Node) bool {
+// callees returns the names a function body calls (`F(...)` and `x.F(...)` both give "F") and, of
+// those, the ones a walk may follow into package-local bodies: a call qualified by an imported package
+// name (`otherpkg.Run(t)`) is another package's function, never the local `Run`.
+func callees(fb fnBody) (all, follow map[string]bool) {
+	all, follow = map[string]bool{}, map[string]bool{}
+	ast.Inspect(fb.body, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
 			switch fun := c.Fun.(type) {
 			case *ast.SelectorExpr:
-				out[fun.Sel.Name] = true
+				all[fun.Sel.Name] = true
+				if x, ok := fun.X.(*ast.Ident); !ok || !fb.pkgs[x.Name] {
+					follow[fun.Sel.Name] = true
+				}
 			case *ast.Ident:
-				out[fun.Name] = true
+				all[fun.Name] = true
+				follow[fun.Name] = true
 			}
 		}
 		return true
 	})
-	return out
+	return all, follow
 }
 
 // reaches reports whether the function name calls target, directly or through any chain of
-// package-local functions (receiver-less, in the test or non-test files of the directory). A visited
+// package-local functions (or method, in the test or non-test files of the directory). A visited
 // set ends recursion. The walk does not leave the package: a helper in another package that calls
 // target is not followed.
 func (pf *pkgFuncs) reaches(name, target string) bool {
@@ -354,11 +391,11 @@ func (pf *pkgFuncs) reaches(name, target string) bool {
 		}
 		visited[n] = true
 		for _, body := range pf.bodies[n] {
-			calls := callees(body)
+			calls, follow := callees(body)
 			if calls[target] {
 				return true
 			}
-			for c := range calls {
+			for c := range follow {
 				if _, local := pf.bodies[c]; local && walk(c) {
 					return true
 				}
@@ -389,7 +426,7 @@ func runSpecsTests(dir string) (map[string]bool, error) {
 // plainRequireTests returns the plain tests (func TestX(t *testing.T) that do not run a Ginkgo suite)
 // of the package in dir that call RequireT, directly or through any chain of package-local functions
 // declared in its test or non-test files. A plain test that never reaches RequireT is not reported.
-// The remaining limit: only the package's own receiver-less functions are followed, so a helper in
+// The remaining limit: only the package's own functions and methods are followed, so a helper in
 // another package that calls RequireT is missed (the call is not visible in this directory). A
 // directory without test files gives none.
 func plainRequireTests(dir string) ([]string, error) {

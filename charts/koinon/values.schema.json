@@ -680,6 +680,7 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
+        "scopeToGateway": {"type": "boolean", "description": "Add openshell.ai/gateway-id=<openshell.gatewayId> to the namespace selector."},
         "namespaceSelector": {
           "description": "LabelSelector for OpenShell sandbox namespaces.",
           "type": "object",

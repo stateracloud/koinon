@@ -144,6 +144,10 @@ type Config struct {
 	// OpenShellGatewayID is openshell.gatewayId: compared with the gateway's gateway_id, because the
 	// sandbox observer derives the workspace namespaces from it (ADR 0078). Empty skips the check.
 	OpenShellGatewayID string
+	// SandboxPolicyScopedToGateway is sandboxPolicy.enabled with scopeToGateway: the admission policies
+	// bind only to namespaces labelled openshell.ai/gateway-id=<openshell.gatewayId>, so a mismatch with
+	// the gateway's gateway_id is a Fail (the policies would match no sandbox namespace).
+	SandboxPolicyScopedToGateway bool
 	// SandboxObserverDisabled is sandboxObserver.enabled=false: the preflight warns that a sandbox that
 	// cannot pull its image will show an unknown cause.
 	SandboxObserverDisabled bool

@@ -1,6 +1,6 @@
 # 0025. Deterministic, free CI with a continuous sandbox escape suite
 
-- Status: Accepted; amended 2026-11-02 (below)
+- Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md)
 - Date: 2026-10-21
 - Decision: [design.md#25](../design.md)
 - Verification: escape suite design depends on the OpenShell spike (old issue 3)
@@ -145,6 +145,7 @@ the workflows now run on GitHub-hosted runners, which cost nothing on a public r
 decisions stand; only the cost reasoning changed. What runs where: CI runs the admission half of the
 escape suite (`escape (admission)`, only the admission-labelled cases, path-gated by `hack/ci-changes.sh`); the OpenShell cases run on kind (`make test-escape-kind`) and
 on the maintainers' lab, where the Kata tier can be tested. The leak guard exfiltration case (label `leakguard`) runs from a sandbox inside the kind e2e (`e2e-kind`, #348).
+Update (2026-11-09, #109): the OpenShell cases also run in the kind e2e (`test/e2e/escape-openshell.sh`, after the Go driver) against the chart's real sandbox admission policy, and a skip there is a failure; `make test-escape-kind` and the lab remain.
 
 ## Links
 
@@ -160,3 +161,8 @@ is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run
 says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
 still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
 on a commit.
+
+## Amendment (2026-11-10, [0105](0105-merge-queue-route.md)): the lab is not merge evidence
+
+The `e2e-lab` commit status no longer counts toward a merge. The merge queue's hosted `quickstart` is the one e2e
+proof; the lab stays for the dev loop and real-model runs. The optional lab lane above keeps its other uses.

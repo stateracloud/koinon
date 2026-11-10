@@ -143,6 +143,27 @@ out=$(hack/git-identity-check.sh range "$base" nope 2>&1); check "range: an unkn
 out=$(hack/git-identity-check.sh range 2>&1); check "range: misuse exits 2" 2 $? "$out"
 out=$(hack/git-identity-check.sh bogus 2>&1); check "unknown mode exits 2" 2 $? "$out"
 
+# personal hooks: core.hooksPath replaces .git/hooks, so the guard hooks chain to the common dir's hook
+hack/git-identity-check.sh install >/dev/null 2>&1 # the range section above unset core.hooksPath on purpose; turn the hooks back on
+mkdir -p .git/hooks
+printf '#!/bin/sh\necho ran >> "%s/personal-pre-commit"\n' "$tmp" >.git/hooks/pre-commit
+printf '#!/bin/sh\necho ran >> "%s/personal-pre-merge-commit"\nexit 1\n' "$tmp" >.git/hooks/pre-merge-commit
+chmod +x .git/hooks/pre-commit .git/hooks/pre-merge-commit
+setid procoduck coder@procodus.dev
+out=$(git commit -q --allow-empty -m "feat: chained" 2>&1); check "chain: a commit still succeeds with a personal pre-commit" 0 $? "$out"
+[[ -f $tmp/personal-pre-commit ]] || { echo "FAIL chain: the personal pre-commit hook did not run"; fail=1; }
+rm -f "$tmp/personal-pre-commit"
+setid "Other Person" other.person@example.invalid
+out=$(git commit -q --allow-empty -m "feat: bad chained" 2>&1); check "chain: a refused identity still fails" 1 $? "$out"
+[[ ! -f $tmp/personal-pre-commit ]] || { echo "FAIL chain: the personal hook ran after a refusal"; fail=1; }
+setid procoduck coder@procodus.dev
+git checkout -q -b chainside && git commit -q --allow-empty --no-verify -m "feat: side" && git checkout -q main
+git commit -q --allow-empty --no-verify -m "feat: main side"
+out=$(git merge --no-ff -m "merge: chained" chainside 2>&1); check "chain: a failing personal pre-merge-commit hook blocks the merge" 1 $? "$out"
+[[ -f $tmp/personal-pre-merge-commit ]] || { echo "FAIL chain: the personal pre-merge-commit hook did not run"; fail=1; }
+git merge --abort 2>/dev/null; git reset -q --hard HEAD
+rm -f .git/hooks/pre-commit .git/hooks/pre-merge-commit
+
 # the shipped list keeps the project identity and the GitHub lines, and no scratch identity; extra lines
 # (a contributor's own, added in their first pull request) are allowed
 got=$(grep -vE '^[[:space:]]*(#|$)' "$repo/hack/git-identities.allowed")

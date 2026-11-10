@@ -1,6 +1,6 @@
 # 0082. Work claims and the ready queue: a claim branch is the lock, the board is the queue
 
-- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05)
+- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`); decision 9 (approval on sensitive paths) amended by [0103](0103-recorded-review-verdict-check.md) once the owner's ruleset step is done
 - Date: 2026-10-30
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
@@ -223,3 +223,61 @@ changes the rest as follows. Where the two differ, 0094 wins.
   released is dropped silently instead of being reported as lost.
 - The Context line "merge queue is not available" and the Alternatives entry "Merge queue" no longer
   hold.
+
+## Amendment: no pull_request_target (2026-11-09, procoduck, #463)
+
+GitHub blocks `pull_request_target` by default for public repositories: a scheduled brownout began
+2026-11-09 (further windows on 2026-11-16), and the block is permanent from 2026-12-02. During a
+window every `claims` run ended in `startup_failure` with no jobs, and `claim` is a required check, so
+nothing could merge. Sources: the
+[GitHub changelog, 2026-11-02](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2)
+and [Securely using pull_request_target](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target).
+The maintainer decision is to follow GitHub's recommendation and keep the default block: no admin
+Actions event policy exception, and no `pull_request_target` workflow in the repository. This replaces
+the trigger sentence of decision 7 ("The check runs from `pull_request_target`") and the matching
+sentence of ADR 0094.
+
+- **`claim` check** (`claims.yml`): runs on `pull_request` (same activity types as before, `closed`
+  dropped) and `merge_group`. The token is read-only (`contents`, `issues`, `pull-requests`: read),
+  there is no secret and no Environment. The job still checks out the base commit
+  and runs that commit's `hack/claim.sh check-pr`; it never runs the pull request's code. Since ADR
+  0104 that commit is the base branch's tip at run time (`pull_request.base.ref`), not
+  `pull_request.base.sha`, which is the base of the PR's last push and can be far behind.
+- **Release on merge** (`release` job): runs on `push` to `main` from main's own workflow file. It runs
+  `hack/claim.sh release-merged <before> <after>`: GitHub links every pushed commit to its pull
+  requests, and the claims of each merged one are released as `release-pr` did. Pull requests closed
+  without a merge are freed by the sweeper (30 minutes): `claim_liveness` finds the claim's open or
+  linked pull request, or else a pull request of the claim's human that closes the issue and closed
+  since the claim was last renewed, and `sweep_one` releases it. A merged pull request frees the
+  claim at once. A pull request closed without a merge frees an agent claim only when it closed at or
+  after the lease start (a beat moves the lease start) and the server time is at least
+  `CLOSED_GRACE` (45 minutes: the 30-minute agent beat period plus 15 minutes of slack) after the
+  close, so a holder that closes PR X and opens PR Y keeps the claim; the `claim` check and the
+  merge queue use the same rule. A person claim (`--human`) ignores a closed-unmerged pull request and
+  waits for its lease. The closed-pull-request search reads the newest 50; a miss only delays the
+  release. A released closed-unmerged pull request
+  unassigns the human and returns the issue to Ready, as `release-pr` did. If `release-merged` finds
+  no merged pull request (the API lags behind the push), it prints one line and the sweeper or the
+  lease frees the claim later. ADR 0104 (the same day) removes the sweeper and the lease, and with
+  them the grace rule above: a merged pull request still frees its claims through `release-merged`,
+  and a pull request closed without a merge, or a release that `release-merged` missed, is released
+  by its human with `hack/claim.sh release-pr <PR>` (which unassigns on a close without a merge) or
+  `hack/claim.sh release <N>`.
+- **Fork pull requests:** on `pull_request` a first-time contributor's fork pull request gets no
+  `claim` run until a maintainer approves its workflows (`pull_request_target` ran without approval).
+- **Updater** (`updater.yml`): the `auto_merge_enabled` trigger is dropped, because it needs
+  `pull_request_target` and an Environment secret. The `push`, `workflow_run` and `schedule` triggers
+  remain, so a new auto-merge pull request waits up to one schedule period (30 minutes) at most. The
+  merge queue (ADR 0094 decision 8) replaces the updater anyway.
+- **Lint**: `hack/runner-lint.sh` (CI `scripts` job and preflight's `runnerlint` gate) fails
+  on `pull_request_target` in any workflow. Bringing it back needs an ADR.
+
+Trade-off, stated: with `pull_request` the workflow file comes from the pull request's head, so a pull
+request can edit `claims.yml` and make its own `claim` check pass (before, the base's file ran). The
+exposure is small: the check is a coordination check (two agents on one issue), not a security
+boundary; `.github/**` is a CODEOWNERS path and needs a review; the token is read-only and holds no
+secret, so a changed workflow gains nothing beyond its own status. A ruleset "required workflow"
+(Actions > "Require workflows to pass before merging", which runs a workflow from a fixed ref of a
+chosen repository, not from the pull request) could close the gap: the base's `claims.yml` would run
+whatever the head contains. It is a repository or organization setting, not configured here; revisit it
+if the check ever guards something that matters.

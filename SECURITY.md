@@ -10,8 +10,10 @@ seriously. A sandbox escape suite covers the isolation promises (ADR 0025). What
   (`hack/ci-changes.sh`).
 - The OpenShell cases (no direct egress, no cloud metadata, no service account token, no secrets on
   disk, and the gitea and github read and live admission cases) run only on kind
-  (`make test-escape-kind`) and on a maintainer's Kata cluster. No CI job runs them on pull requests
-  yet: the escape-kind job on GitHub-hosted runners that #66 listed is tracked in #109.
+  (`make test-escape-kind`), in the kind e2e against the chart install with its sandbox admission policy
+  live (`test/e2e/escape-openshell.sh`, #109; the Gitea cases excepted), and on a maintainer's Kata
+  cluster. The e2e runs on every pull request that needs it (`hack/needs-e2e.sh`) and on every push to
+  main.
 - The leak guard escape case (`exfil_test.go`, label `leakguard`) runs from a real sandbox in the
   kind e2e (`e2e-kind`): on every pull request that needs the kind e2e (`hack/needs-e2e.sh`, which
   includes changes under `test/escape/`) and on every push to main. `e2e-kind.yml` sets `ESCAPE_MCP=1`

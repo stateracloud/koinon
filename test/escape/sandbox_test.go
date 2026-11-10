@@ -364,6 +364,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			ns, name, _ := strings.Cut(nsName, "/")
 			svc, err := cs.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
+				// The e2e lists the install's own Services, which must exist (KOINON_ESCAPE_POLICY_REQUIRED=1).
+				Expect(os.Getenv("KOINON_ESCAPE_POLICY_REQUIRED")).NotTo(Equal("1"), "listed platform Service %s cannot be read: %v", nsName, err)
 				GinkgoWriter.Printf("service %s: %v\n", nsName, err)
 				continue
 			}
@@ -376,6 +378,13 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		}
 		deniedAtConnect(ctx, ts)
 	}, NodeTimeout(2*time.Minute))
+
+	It("runs on pods of the shape the sandbox admission policy selects and expects (#109)", func(ctx SpecContext) {
+		// The admission specs dry-run copies; this looks at the pods OpenShell and the Agent Sandbox
+		// controller really made for the sandbox above.
+		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE"))
+		realPods(ctx, kubeClient(), os.Getenv("KOINON_ESCAPE_NAMESPACE"))
+	}, NodeTimeout(time.Minute))
 
 	It("cannot reach another sandbox in the workspace", func(ctx SpecContext) {
 		// Spike 8.6. The second sandbox listens on 8099; its pod IP is what it reports for its

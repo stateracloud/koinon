@@ -193,7 +193,7 @@ WHERE org_id = @org_id AND model_id <> ALL (@model_ids::uuid[]);
 -- provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
 -- names in an org (a declared one disables a UI one of the same name), so there is one at most.
 -- credential_lost: the provider's key was lost (#85), so it is not served until entered again.
-SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url AS provider_url,
        (s.model_id IS NOT NULL)::boolean AS served, (p.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id

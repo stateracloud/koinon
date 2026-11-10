@@ -204,3 +204,49 @@ entries:
 		t.Fatalf("embedded source answers %s, the default list is %s", got.Version, def.Version)
 	}
 }
+
+// Issue 310: the default price of a type that is free on the org's own hardware does not follow
+// the type to a paid cloud endpoint.
+func TestOllamaCloudIsNotPricedAsFree(t *testing.T) {
+	_, rs := pricing.Default()
+	at := time.Now()
+	for _, c := range []struct {
+		url    string
+		priced bool
+	}{
+		{"http://ollama.internal:11434", true},
+		{"http://127.0.0.1:11434/v1", true},
+		{"https://notollama.com", true},
+		{"https://ollama.com", false},
+		{"https://OLLAMA.com:443/v1", false},
+		{"https://api.ollama.com/v1", false},
+		{"https://ollama.com./", false},
+	} {
+		_, ok := pricing.SelectHost(rs, "ollama", pricing.HostOf(c.url), "gpt-oss:120b-cloud", at)
+		if ok != c.priced {
+			t.Errorf("%s: priced by the default list = %v, want %v", c.url, ok, c.priced)
+		}
+	}
+	// A view by type, which knows no URL, still sees the local entry.
+	if _, ok := pricing.Select(rs, "ollama", "llama3", at); !ok {
+		t.Error("Select by type alone should still find the local entry")
+	}
+}
+
+func TestNotHostsValidation(t *testing.T) {
+	e := pricing.Entry{
+		ID: "x", Provider: "ollama", Match: pricing.Match{Glob: "*"}, ValidFrom: "2000-01-01",
+		Spec:      pricing.Spec{Prices: pricing.Wire{Input: "0", Output: "0"}},
+		Tokenizer: "bytes", Ratio: "3.0",
+	}
+	for _, h := range []string{"https://ollama.com", "ollama.com:443", "Ollama.com", "ollama", ""} {
+		e.NotHosts = []string{h}
+		if _, err := e.Resolve(true); err == nil {
+			t.Errorf("not_hosts %q accepted", h)
+		}
+	}
+	e.NotHosts = []string{"ollama.com"}
+	if _, err := e.Resolve(true); err != nil {
+		t.Error(err)
+	}
+}

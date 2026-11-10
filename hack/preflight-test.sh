@@ -30,6 +30,7 @@ stub() { # <name> <body>: a stub that logs its call (with KUBECONFIG) and then r
 stub go 'case "$1 $2" in
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
 "list ./...") echo example.com/m/a; echo example.com/m/test/flavors ;;
+"list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/flavors" ;; # go list -f {{.Dir}} ./...: absolute directories
 "test "*) [[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"; exit "${FAKE_GO_TEST_RC:-0}" ;;
 "run mvdan.cc/gofumpt@v0.12.0") [[ -z ${FAKE_GOFUMPT_OUT:-} ]] || echo "$FAKE_GOFUMPT_OUT" ;;
 esac
@@ -43,13 +44,17 @@ stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
 
+# The real path rules, but the `scripts` gate runs one stub (the real checks are the repository's own).
+{ grep -v '^script-check ' "$repo/hack/paths.rules"; echo 'script-check - hack/script-check-fake.sh @BASE@ HEAD'; } >"$tmp/paths.rules"
+export HACK_PATHS_RULES=$tmp/paths.rules
+
 git init -q --bare -b main "$tmp/origin.git"
 seed=$tmp/seed
 git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check mktemp-lint mktemp-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test docs-check chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -85,7 +90,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC || true; rm -rf "$tmp/tmpdir"/*; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
 check() { # <description> <command...>
@@ -145,12 +150,23 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects runnerlint" has '^runnerlint:' "$tmp/l3"
+check "go change does not select runnerlint" hasnt '^runnerlint:' "$tmp/l1"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
 check "go change does not select versions" hasnt '^versions:' "$tmp/l1"
 check "go change selects audit" has '^audit:' "$tmp/l1"
 
 check "workflow change does not select shell" hasnt '^shell:' "$tmp/l3"
 check "workflow change does not select bash5" hasnt '^bash5:' "$tmp/l3"
+
+# a change to the runner lint alone selects its gate, not actionlint
+reset_state
+w=$(fresh); cd "$w"
+printf '#!/bin/sh\n' >hack/runner-lint-test.sh
+commit_all
+pf "$tmp/l3b" --list >/dev/null
+check "runner-lint script change selects runnerlint" has '^runnerlint:' "$tmp/l3b"
+check "runner-lint script change does not select actionlint" hasnt '^actionlint:' "$tmp/l3b"
 
 # uncommitted and untracked changes count
 reset_state
@@ -204,6 +220,18 @@ check "no golangci-lint: exit 0" eq "$rc" 0
 check "falls back to gofumpt" has '^go run mvdan.cc/gofumpt@v0.12.0 -l internal/foo/a.go' "$FAKE_LOG"
 check "falls back to go vet" has '^go vet ./internal/foo ' "$FAKE_LOG"
 check "no golangci-lint call" hasnt '^golangci-lint' "$FAKE_LOG"
+
+# 3b. no Go file changed (--only go): golangci-lint and go-test.sh get ./-relative directories, never
+# import paths (golangci-lint reads each as a directory: "directory not found"), and not test/flavors
+reset_state
+w=$(fresh); cd "$w"
+echo "x" >>README.txt; commit_all
+: >"$FAKE_LOG"
+check "no Go file: go gate exit 0" eq "$(pf "$tmp/r3b" --only go)" 0
+check "no Go file: lint gets directories" has '^golangci-lint run [.] [.]/internal/foo ' "$FAKE_LOG"
+check "no Go file: no import path" hasnt 'example[.]com/m' "$FAKE_LOG"
+check "no Go file: no test/flavors" hasnt 'test/flavors' "$FAKE_LOG"
+check "no Go file: go-test.sh gets the same directories" has '^go-test.sh [.] [.]/internal/foo ' "$FAKE_LOG"
 
 # 4. failures: exit 1, the gate is named, the log path is shown, at most 5 error lines, other gates still run
 reset_state
@@ -293,6 +321,7 @@ check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"
 check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
+check "runner-lint (with the trigger rule) ran" has '^runner-lint.sh' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
 check "pinned-download-lint ran" has '^pinned-download-lint.sh' "$FAKE_LOG"
@@ -363,5 +392,26 @@ check "no buf: skip line" has '^proto skip' "$tmp/d5"
 
 check "mktemp failure: fresh() fails" test "$mktemp_fail_rc" -ne 0
 check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep
+# 15. The scripts gate: seconds-long CI script checks run when tooling changes (hack/paths.rules).
+reset_state
+w=$(fresh); cd "$w"
+printf '#!/bin/sh\n' >hack/newtool.sh; commit_all
+pf "$tmp/s0" --list >/dev/null
+check "tooling change selects scripts" has '^scripts:' "$tmp/s0"
+rc=$(pf "$tmp/s1")
+check "scripts gate passes: exit 0" eq "$rc" 0
+check "scripts ok line" has '^scripts ok' "$tmp/s1"
+check "scripts check got the merge base and HEAD" has '^script-check-fake.sh [0-9a-f]\{40\} HEAD' "$FAKE_LOG"
+export FAKE_SCRIPT_CHECK_FAKE_RC=1
+rc=$(pf "$tmp/s2")
+check "a failing script check fails preflight: exit 1" eq "$rc" 1
+check "scripts FAIL line" has '^scripts FAIL' "$tmp/s2"
+unset FAKE_SCRIPT_CHECK_FAKE_RC
+reset_state
+w=$(fresh); cd "$w"
+echo "package foo // y" >>internal/foo/a.go; commit_all
+pf "$tmp/s3" --list >/dev/null
+check "a Go-only change does not select scripts" hasnt '^scripts:' "$tmp/s3"
+
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

@@ -124,6 +124,9 @@ func (t *Tool) Forget(ctx context.Context, id string) error {
 	if err := checkLostRules(); err != nil {
 		return err
 	}
+	if err := t.checkForgetPool(); err != nil {
+		return err
+	}
 	if err := t.confirmForget(ctx, id, n); err != nil {
 		return err
 	}
@@ -152,6 +155,12 @@ func (t *Tool) beginForget(ctx context.Context, id string) (*Change, *secretstor
 	if c == nil {
 		return nil, nil, errors.New("keys forget needs the install audit chain")
 	}
+	// The lock's transaction sits idle while the orgs change, for as long as the run takes. A server
+	// idle_in_transaction_session_timeout shorter than that would end it and the final Commit would
+	// fail after the orgs had changed. SET LOCAL ends with this transaction.
+	if _, err := c.tx.Exec(ctx, `SET LOCAL idle_in_transaction_session_timeout = 0`); err != nil {
+		return nil, nil, errors.Join(err, c.Commit(ctx))
+	}
 	if _, ok := ks.Keys[id]; ok {
 		// Restored (keys add) after the check without the lock: the KEK is not lost. A keys.observed
 		// this command found is still written.
@@ -162,6 +171,19 @@ func (t *Tool) beginForget(ctx context.Context, id string) (*Change, *secretstor
 		return nil, nil, errors.Join(err, c.Commit(ctx))
 	}
 	return c, ring, nil
+}
+
+// forgetMinConns is the pool size keys forget needs: the Change keeps one connection for the whole
+// run (the lock's transaction, idle between the orgs) and each org's transaction needs a second one.
+const forgetMinConns = 2
+
+// checkForgetPool refuses a pool that is too small, before the question and before the lock: with one
+// connection the Change holds it and the first org's transaction waits for it forever.
+func (t *Tool) checkForgetPool() error {
+	if n := t.Pool.Config().MaxConns; n < forgetMinConns {
+		return fmt.Errorf("keys forget needs a database pool of at least %d connections, and this one allows %d: remove pool_max_conns=%d from the database URL or raise it", forgetMinConns, n, n)
+	}
+	return nil
 }
 
 // errKEKRestored is the refusal when the KEK to forget is in the key set after all. It is returned

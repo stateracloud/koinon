@@ -116,6 +116,22 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		Expect(e.gw.Execs()).To(BeEmpty())
 	})
 
+	It("fails at once for an ollama-type model pointed at Ollama cloud, which the default list does not price at zero", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		var providerID pgtype.UUID
+		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, 'ollama-cloud', 'ollama', 'https://ollama.com') RETURNING id`,
+			e.org).Scan(&providerID)).To(Succeed())
+		_, err := db.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, e.org, providerID, model)
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the model "` + model + `" has no price, so the gateway does not serve it; ` +
+			"add a price for it on the Prices page and run the task again"))
+		Expect(waitEvents(ctx, r)()).To(BeEmpty())
+		Expect(e.gw.Execs()).To(BeEmpty())
+	})
+
 	It("fails at once when the provider's key was lost, even while the gateway still serves it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		id := addModel(ctx, e, "lost-upstream")

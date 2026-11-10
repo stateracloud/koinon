@@ -157,6 +157,19 @@ kid_path = "/etc/openshell-jwt/kid"
 			Expect(r.Fix).To(ContainSubstring("openshell.gatewayId=prod"))
 		})
 
+		It("fails on a mismatch when the admission policies are scoped to the gateway", func(ctx SpecContext) {
+			cm := gatewayToml("prod", "prod", "managed")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "openshell"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("admission policies"))
+			Expect(r.Message).To(ContainSubstring("fail open"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		})
+
 		It("warns, without failing, when gateway_id is missing from the driver table", func(ctx SpecContext) {
 			cm := openshellConfig("")
 			cm.Data["gateway.toml"] += "[openshell.gateway.gateway_jwt]\ngateway_id = \"openshell\"\n"
@@ -164,6 +177,31 @@ kid_path = "/etc/openshell-jwt/kid"
 			Expect(find(results, "OpenShell gateway ID").Status).To(Equal(preflight.Warn))
 			Expect(find(results, "OpenShell gateway ID").Message).To(ContainSubstring("does not set gateway_id"))
 			Expect(preflight.Write(&discard{}, results)).To(BeZero())
+		})
+
+		It("warns on an unset gateway_id when the policies are scoped and openshell.gatewayId is OpenShell's default", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "openshell"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("default"))
+			Expect(preflight.Write(&discard{}, results)).To(BeZero())
+		})
+
+		It("fails on an unset gateway_id when the policies are scoped and openshell.gatewayId is not OpenShell's default", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			results := withConfig(cm, func(c *preflight.Config) {
+				c.OpenShellGatewayID = "prod"
+				c.SandboxPolicyScopedToGateway = true
+			}).run(ctx)
+			r := find(results, "OpenShell gateway ID")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(And(ContainSubstring("default"), ContainSubstring("fail open")))
+			Expect(r.Fix).To(ContainSubstring("openshell.gatewayId"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
 		})
 
 		It("warns when the workspace mode is not managed", func(ctx SpecContext) {

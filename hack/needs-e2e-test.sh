@@ -90,6 +90,7 @@ expect 0 Makefile
 expect 0 go.work
 expect 1 hack/chart-check.sh
 expect 1 hack/needs-e2e.sh
+expect 1 hack/paths.rules                          # the rules themselves are not an e2e input (ci-changes runs everything for them)
 expect 1 .github/workflows/ci.yml
 expect 1 internal/zzz-new-package/x.go            # a package no binary imports
 expect 1 internal/auth/testdata/fixture.json
@@ -98,8 +99,8 @@ expect 1 # empty change
 
 # The binaries listed in the rule are the ones run.sh builds.
 want=$(grep -oE '\./cmd/koinon-[a-z]+' test/e2e/run.sh | sort -u | tr '\n' ' ')
-have=$(sed -n '/^BINARIES=(/,/^)/p' hack/needs-e2e.sh | grep -oE '\./cmd/koinon-[a-z]+' | sort -u | tr '\n' ' ')
-[[ $want == "$have" ]] || { echo "FAIL: BINARIES ($have) differ from run.sh's ko build ($want)" >&2; fail=1; }
+have=$(grep -E '^e2e-binary ' hack/paths.rules | grep -oE '\./cmd/koinon-[a-z]+' | sort -u | tr '\n' ' ')
+[[ $want == "$have" ]] || { echo "FAIL: BINARIES in hack/paths.rules ($have) differ from run.sh's ko build ($want)" >&2; fail=1; }
 
 # Every hack/ path run.sh calls must be matched.
 while IFS= read -r p; do
@@ -116,7 +117,7 @@ while IFS= read -r p; do
 done < <(awk '/^  quickstart:/ {on=1; next} /^  [a-z][a-z-]*:/ {on=0} on' .github/workflows/e2e-kind.yml |
   grep -v '^ *#' | grep -oE 'hack/[A-Za-z0-9_.-]+\.(sh|env)' | sort -u)
 for p in hack/versions.env hack/e2e-toolchain/*; do expect 0 "$p"; done
-expect 0 test/escape/kind.sh test/escape/exfil_test.go   # run.sh runs them through test/e2e/escape-mcp.sh
+expect 0 test/escape/kind.sh test/escape/exfil_test.go   # run.sh runs them through test/e2e/escape-openshell.sh and escape-mcp.sh
 
 # Against git, in a scratch module shaped like the repository: the six binaries and the driver.
 g() { git -C "$tmp" -c user.name=t -c user.email=t@example.invalid "$@"; }
@@ -125,7 +126,7 @@ printf 'module example.invalid/m\n\ngo 1.21\n' >"$tmp/go.mod"
 while read -r b; do
   mkdir -p "$tmp/cmd/$b"
   printf 'package main\n\nfunc main() {}\n' >"$tmp/cmd/$b/main.go"
-done < <(sed -n '/^BINARIES=(/,/^)/p' hack/needs-e2e.sh | grep -oE 'koinon-[a-z]+')
+done < <(grep -E '^e2e-binary ' hack/paths.rules | grep -oE 'koinon-[a-z]+')
 mkdir -p "$tmp/test/e2e" "$tmp/charts/k/templates" "$tmp/docs"
 printf 'package e2e\n' >"$tmp/test/e2e/e2e.go"
 echo a >"$tmp/charts/k/templates/job.yaml"
@@ -148,6 +149,46 @@ g mv cmd/koinon-api cmd/koinon-apiserver && g commit -q -m rename-binary
 rc=0
 (cd "$tmp" && "$OLDPWD/hack/needs-e2e.sh" HEAD~1 >/dev/null 2>&1) || rc=$?
 [[ $rc -eq 2 ]] || { echo "FAIL: broken go list exited $rc, want 2" >&2; fail=1; }
+
+# Run as e2e-kind.yml's decide job does: the scripts copied alone into a temp dir. With paths-lib.sh and
+# paths.rules the answers are right; without them the exit code must be one e2e-decide.sh turns into "run
+# the e2e" (>= 2), never 1 ("not needed").
+cp_dir="$tmp/copy"
+mkdir "$cp_dir"
+cp hack/needs-e2e.sh hack/paths-lib.sh hack/paths.rules "$cp_dir/"
+got=0
+printf '%s\n' cmd/koinon-api/main.go | "$cp_dir/needs-e2e.sh" --stdin >/dev/null || got=$?
+[[ $got -eq 0 ]] || { echo "FAIL: copied script with its files: want 0 for a binary change, got $got" >&2; fail=1; }
+got=0
+printf '%s\n' docs/dev/ci.md | "$cp_dir/needs-e2e.sh" --stdin >/dev/null 2>&1 || got=$?
+[[ $got -eq 1 ]] || { echo "FAIL: copied script with its files: want 1 for a docs change, got $got" >&2; fail=1; }
+rm "$cp_dir/paths-lib.sh" "$cp_dir/paths.rules"
+got=0
+printf '%s\n' cmd/koinon-api/main.go | "$cp_dir/needs-e2e.sh" --stdin >/dev/null 2>&1 || got=$?
+[[ $got -ge 2 ]] || { echo "FAIL: copied script without paths-lib.sh exited $got, want >= 2 (e2e-decide.sh runs the e2e)" >&2; fail=1; }
+
+# The decide step's copy loop, taken from the workflow text and run as the workflow runs it (bash -e),
+# against a base ref with and without paths-lib.sh and paths.rules.
+loop=$(awk '/for f in needs-e2e.sh e2e-decide.sh paths-lib.sh paths.rules; do/ {on=1} on {print} on && /^ +done$/ {exit}' .github/workflows/e2e-kind.yml)
+[[ -n $loop ]] || { echo "FAIL: copy loop not found in e2e-kind.yml" >&2; fail=1; }
+for withlib in yes no; do
+  r="$tmp/decide-$withlib"
+  mkdir -p "$r/hack" "$r/tmpdir"
+  printf '#!/bin/sh\n' >"$r/hack/needs-e2e.sh"; cp "$r/hack/needs-e2e.sh" "$r/hack/e2e-decide.sh"
+  if [[ $withlib == yes ]]; then echo '# lib' >"$r/hack/paths-lib.sh"; echo '# rules' >"$r/hack/paths.rules"; fi
+  git -C "$r" init -q -b main
+  git -C "$r" -c user.name=t -c user.email=t@example.invalid add -A
+  git -C "$r" -c user.name=t -c user.email=t@example.invalid commit -q -m base
+  git -C "$r" update-ref refs/remotes/origin/main HEAD
+  # the PR checkout carries both new files; the base may not
+  echo '# lib' >"$r/hack/paths-lib.sh"; echo '# rules' >"$r/hack/paths.rules"
+  got=0
+  (cd "$r" && ref=origin/main RUNNER_TEMP="$r/tmpdir" bash -e -c "$loop" >/dev/null 2>&1) || got=$?
+  copied=$(cd "$r/tmpdir" && printf '%s ' * | sed 's/ $//')
+  want="e2e-decide.sh needs-e2e.sh"; [[ $withlib == yes ]] && want="e2e-decide.sh needs-e2e.sh paths-lib.sh paths.rules"
+  [[ $got -eq 0 ]] || { echo "FAIL: decide copy loop (base with lib: $withlib) exited $got" >&2; fail=1; }
+  [[ $copied == "$want" ]] || { echo "FAIL: decide copy loop (base with lib: $withlib) copied [$copied], want [$want]" >&2; fail=1; }
+done
 
 [[ $fail -eq 0 ]] && echo "needs-e2e tests passed"
 exit "$fail"
