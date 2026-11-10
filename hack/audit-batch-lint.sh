@@ -10,13 +10,13 @@
 # This lint covers what the compiler cannot see. It fails when Go code, tests included, does any of
 # this outside internal/audit and internal/db/store:
 #   1. writes the audit tables with SQL (INSERT INTO, UPDATE, DELETE FROM, TRUNCATE, COPY, MERGE INTO
-#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, install_audit_anchor_heads, bare,
-#      schema-qualified or quoted), in a Go file or in a sqlc query file of internal/db/queries (the
-#      store's queries only read the audit tables);
-#   2. has a Go string literal whose whole value is one of those table names, bare, schema-qualified
-#      ("public.audit_events") or quoted: the SQL of rule 1 built at run time ("INSERT INTO " + t,
-#      fmt.Sprintf, pgx.Identifier{"audit_events"} for CopyFrom). A longer string that merely contains
-#      the name is left to rule 1;
+#      on audit_events, audit_chain_heads, install_audit_events, install_audit_chain_head, install_audit_anchor_heads,
+#      names in any case, bare, schema-qualified or quoted; a TRUNCATE list is checked item by item,
+#      with ONLY and a trailing * accepted), in a Go file or in a sqlc query file of internal/db/queries
+#      (the store's queries only read the audit tables);
+#   2. has a Go string literal that is, or starts with, an audit table name (any case, optionally
+#      schema-qualified or quoted, e.g. "public.audit_events"): the SQL of rule 1 built at run time
+#      ("INSERT INTO " + t, fmt.Sprintf, pgx.Identifier{"audit_events"} for CopyFrom);
 #   3. uses WriteInTx anywhere but internal/keyscli (the one caller whose transaction outlives a
 #      function, see the doc comment of audit.WriteInTx), matched as an identifier so an aliased or
 #      dot import is caught too.
@@ -27,7 +27,7 @@
 #   - one statement in a _test.go file, marked on the line directly above the line the hit is
 #     reported on (the line of the SQL verb, or of the literal) with a comment line of its own:
 #         // audit-lint:allow <reason>
-#     The reason is required. Use it only for a test that proves the database refuses or detects a
+#     The reason is required: at least two words and 10 characters. Use it only for a test that proves the database refuses or detects a
 #     write the module would never make (a tamper test, a test of the database's own grants). A
 #     marker with no reason, a marker outside a _test.go file, a marker that is not on a line of its
 #     own and a marker whose next line has no hit all fail the lint, so a marker cannot drift away
@@ -76,7 +76,8 @@ my $q = qr/\\?"/;                                      # a double quote, escaped
 my $tbl = qr/(?i:audit_events|audit_chain_heads|install_audit_events|install_audit_chain_head|install_audit_anchor_heads)/;
 my $name = qr/(?:$q$tbl$q|\b$tbl\b)/;                  # bare or quoted table name
 my $schema = qr/(?:$q\w+$q|\b\w+)\s*\.\s*/;            # optional schema qualifier, bare or quoted
-my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?(?:\s+only)?\s+(?:[\w."]+\s*,\s*)*|copy|merge\s+into)\s*(?:only\s+)?/i;
+my $item = qr/(?:only\s+)?(?:$schema)?(?:$q\w+$q|\w+)\s*\*?\s*/i;  # one TRUNCATE list item
+my $verb = qr/\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?\s+(?:$item,\s*)*|copy|merge\s+into)\s*(?:only\s+)?/i;
 my $sqlre = qr/$verb(?:$schema)?$name/i;
 # Rule 2: the Go tokens a quote can open or hide in (comments, raw and interpreted strings, runes),
 # and the value of a string literal that is a table name, optionally qualified and quoted.
