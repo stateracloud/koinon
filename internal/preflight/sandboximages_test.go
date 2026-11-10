@@ -5,6 +5,7 @@ package preflight_test
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -25,6 +26,16 @@ namespace = "openshell-sandboxes"
 	}
 }
 
+// gateway is OpenShell's gateway StatefulSet with the given environment.
+func gateway(env ...corev1.EnvVar) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "openshell", Namespace: "openshell"},
+		Spec: appsv1.StatefulSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "openshell", Env: env}},
+		}}},
+	}
+}
+
 const (
 	supervisor = "ghcr.io/nvidia/openshell/supervisor:0.1.7"
 	mirrored   = "art.example.com/ghcr-remote/nvidia/openshell/supervisor:0.1.7"
@@ -34,7 +45,9 @@ var _ = Describe("Sandbox image checks", func() {
 	withConfig := func(cm *corev1.ConfigMap, mutate func(*preflight.Config)) *cluster {
 		c := healthyCluster()
 		c.config.OpenShellConfigNamespace, c.config.OpenShellConfigMap = "openshell", "openshell-config"
+		c.config.OpenShellWorkload = "openshell"
 		mutate(&c.config)
+		c.add(gateway())
 		if cm != nil {
 			c.add(cm)
 		}
@@ -116,6 +129,107 @@ var _ = Describe("Sandbox image checks", func() {
 		Entry("forbidden", openshellConfig(""), "configmaps"),
 		Entry("no gateway.toml", &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "openshell-config", Namespace: "openshell"}}, ""),
 	)
+
+	Describe("the supervisor token lifetime (old issue 419)", func() {
+		bound := func(n int) func(*preflight.Config) {
+			return func(c *preflight.Config) { c.SupervisorTokenMaxSeconds = n }
+		}
+		const name = "Sandbox supervisor token lifetime"
+
+		It("passes on OpenShell's default of 3600 seconds when the bound is the default", func(ctx SpecContext) {
+			r := find(withConfig(openshellConfig(""), bound(3600)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Pass))
+		})
+
+		It("fails when sa_token_ttl_secs is above the bound, naming both values", func(ctx SpecContext) {
+			results := withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(3600)).run(ctx)
+			r := find(results, name)
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("7200"))
+			Expect(r.Message).To(ContainSubstring("supervisorTokenMaxSeconds=3600"))
+			Expect(r.Fix).To(ContainSubstring("at least 7200"))
+			Expect(preflight.Write(&discard{}, results)).NotTo(BeZero())
+		})
+
+		It("passes when the bound is raised to match", func(ctx SpecContext) {
+			r := find(withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(7200)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Pass))
+		})
+
+		It("applies OpenShell's clamp to 600-86400", func(ctx SpecContext) {
+			Expect(find(withConfig(openshellConfig("sa_token_ttl_secs = 5\n"), bound(600)).run(ctx), name).Status).To(Equal(preflight.Pass))
+			r := find(withConfig(openshellConfig("sa_token_ttl_secs = 999999\n"), bound(86399)).run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("86400"))
+		})
+
+		It("reads only the Kubernetes driver's table", func(ctx SpecContext) {
+			cm := openshellConfig("")
+			cm.Data["gateway.toml"] += "\n[other]\nsa_token_ttl_secs = 9000\n"
+			Expect(find(withConfig(cm, bound(3600)).run(ctx), name).Status).To(Equal(preflight.Pass))
+		})
+
+		It("fails when only OPENSHELL_K8S_SA_TOKEN_TTL_SECS is above the bound", func(ctx SpecContext) {
+			c := withConfig(openshellConfig(""), bound(3600))
+			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", Value: "7200"}))
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("7200"))
+		})
+
+		It("lets the environment variable win over the file", func(ctx SpecContext) {
+			c := withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(3600))
+			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", Value: "1800"}))
+			Expect(find(c.run(ctx), name).Status).To(Equal(preflight.Pass))
+		})
+
+		It("warns, never passes, when the gateway workload cannot be read", func(ctx SpecContext) {
+			c := withConfig(openshellConfig(""), bound(3600))
+			c.without("openshell")
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("OPENSHELL_K8S_SA_TOKEN_TTL_SECS"))
+			Expect(r.Message).To(ContainSubstring("not checked"))
+		})
+
+		It("still fails on the environment variable when the gateway ConfigMap is missing", func(ctx SpecContext) {
+			c := withConfig(nil, bound(3600))
+			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", Value: "7200"}))
+			results := c.run(ctx)
+			Expect(find(results, name).Status).To(Equal(preflight.Fail))
+			Expect(find(results, "OpenShell gateway configuration").Message).To(ContainSubstring("token lifetime"))
+		})
+
+		It("warns that the lifetime was not checked when the ConfigMap is missing and no variable is set", func(ctx SpecContext) {
+			c := withConfig(nil, bound(3600))
+			c.with(gateway())
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("lifetime was not checked"))
+		})
+
+		It("warns when the variable comes from a reference", func(ctx SpecContext) {
+			c := withConfig(openshellConfig(""), bound(3600))
+			c.with(gateway(corev1.EnvVar{Name: "OPENSHELL_K8S_SA_TOKEN_TTL_SECS", ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}, Key: "ttl"},
+			}}))
+			Expect(find(c.run(ctx), name).Status).To(Equal(preflight.Warn))
+		})
+
+		It("warns when the variable may come from envFrom", func(ctx SpecContext) {
+			c := withConfig(openshellConfig(""), bound(3600))
+			gw := gateway()
+			gw.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}}
+			c.with(gw)
+			r := find(c.run(ctx), name)
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("envFrom"))
+		})
+
+		It("is not checked when the policy is off (bound 0)", func(ctx SpecContext) {
+			Expect(checks(withConfig(openshellConfig("sa_token_ttl_secs = 7200\n"), bound(0)).run(ctx))).NotTo(ContainElement(name))
+		})
+	})
 
 	Describe("the gateway ID (ADR 0078)", func() {
 		// OpenShell 0.1.5 on kind: gateway_id appears twice, under the Kubernetes driver and under

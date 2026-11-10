@@ -136,11 +136,17 @@ type Config struct {
 	// (preflight.openshell). An empty ConfigMap skips the sandbox image checks.
 	OpenShellConfigNamespace string
 	OpenShellConfigMap       string
+	// OpenShellWorkload is the name of the gateway's StatefulSet (or Deployment) in OpenShellConfigNamespace,
+	// read for OPENSHELL_K8S_SA_TOKEN_TTL_SECS; empty means the variable is not checked.
+	OpenShellWorkload string
 	// ExpectSandboxPullSecrets is true when global.imagePullSecrets, global.imageRegistry or
 	// global.registryMirrors is set: the gateway should then have sandbox pull secrets.
 	ExpectSandboxPullSecrets bool
 	// SupervisorImages is the effective sandboxPolicy.supervisorImages; empty when the policy is off.
 	SupervisorImages []string
+	// SupervisorTokenMaxSeconds is sandboxPolicy.supervisorTokenMaxSeconds; 0 when the policy is off. The
+	// gateway's supervisor token lifetime above it fails the preflight (every supervisor pod is denied).
+	SupervisorTokenMaxSeconds int
 	// OpenShellGatewayID is openshell.gatewayId: compared with the gateway's gateway_id, because the
 	// sandbox observer derives the workspace namespaces from it (ADR 0078). Empty skips the check.
 	OpenShellGatewayID string
