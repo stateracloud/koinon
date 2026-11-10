@@ -214,7 +214,7 @@ project lead (ADR 0038).
 ## Amendment (2026-11-10): the pnpm binary itself (issue 450)
 
 The `packageManager` pin in `web/package.json` and `docs/site/package.json` selects the pnpm binary,
-which runs before any dependency is installed. Two controls cover it, so the binary is not a gap:
+which runs before any dependency is installed. Two controls cover it, in different contexts:
 
 1. **pnpm's `bootConfig`** (pnpm 12.15+, [config includes](https://pnpm.io/config-includes)): the
    release-age and trust policy pnpm uses when it installs the pnpm version from `packageManager` and
@@ -230,6 +230,11 @@ which runs before any dependency is installed. Two controls cover it, so the bin
    every `packageManager` pin and every `ARG PNPM_VERSION` default of a Dockerfile that a pull request
    adds or changes, with the same 3-day minimum and waiver rules. Before this amendment the script
    skipped `*.json` files and did not read that ARG, so the pin was not dated at all.
+
+In CI, `pnpm/action-setup` installs pnpm outside the workspace, so the workspace `bootConfig` does not
+govern that installation. The date check runs in `quick-checks`, in parallel with the jobs that run
+pnpm, so it can fail after CI has already executed the pinned pnpm. It blocks the merge; it does not
+stop that run.
 
 `docs/site` was the other gap (it had no `pnpm-workspace.yaml`, so its installs had no
 `minimumReleaseAge` or `trustPolicy`); it now has the same policy as `web/`. The e2e toolchain image
