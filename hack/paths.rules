@@ -131,6 +131,7 @@ gate pinned ^\.github/actions/
 gate mktemp \.sh$
 gate mktemp ^Makefile$
 gate mktemp ^\.github/workflows/[^/]*\.yml$
+gate mktemp ^internal/.*\.go$
 gate bash5 \.sh$
 gate audit \.go$
 gate audit ^internal/db/queries/.*\.sql$

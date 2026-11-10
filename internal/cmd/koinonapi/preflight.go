@@ -62,6 +62,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.check.OpenShellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty skips the sandbox image checks")
 	fs.BoolVar(&c.check.ExpectSandboxPullSecrets, "expect-sandbox-pull-secrets", false, "the release pulls with credentials or through a mirror: warn when the OpenShell gateway has no sandbox pull secrets")
 	fs.StringVar(&c.check.OpenShellGatewayID, "openshell-gateway-id", "", "openshell.gatewayId: warn when it differs from the OpenShell gateway's gateway_id (the sandbox observer's namespaces)")
+	fs.BoolVar(&c.check.SandboxPolicyScopedToGateway, "sandbox-policy-scoped-to-gateway", false, "the sandbox admission policies bind by openshell.gatewayId: fail when it differs from the OpenShell gateway's gateway_id")
 	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
 	fs.StringVar(&c.supervisorImages, "supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")

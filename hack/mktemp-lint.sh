@@ -8,8 +8,9 @@
 # of the call: ) ` ; | & or a trailing comment; a backslash continuation is joined) carry a template of at
 # least six X that is not a hard-coded absolute path. -t, -p and --tmpdir are flagged unless the template is
 # a variable path ($tmp/..., ${TMPDIR...}/...): macOS ignores TMPDIR with -t and --tmpdir is GNU-only.
-# Out of scope: internal/agentd/savework.sh (it runs inside the Linux sandbox, where a bare mktemp is right)
-# and snippets in docs.
+# Also scans internal/**/*.sh and internal/**/*.go (scripts embedded in Go raw strings), because
+# internal/agentd/savework.sh runs under the macOS sandbox in agent lanes' specs (issue 358). Out of scope:
+# snippets in docs.
 #
 # Usage: hack/mktemp-lint.sh [root]    (default: the repository root)
 
@@ -93,6 +94,7 @@ done < <(
 	{
 		[[ -d $root/hack ]] && find "$root/hack" -name '*.sh'
 		[[ -d $root/test ]] && find "$root/test" -name '*.sh'
+		[[ -d $root/internal ]] && grep -rl --include='*.sh' --include='*.go' mktemp "$root/internal" || true
 		[[ -f $root/Makefile ]] && echo "$root/Makefile"
 		[[ -d $root/.github/workflows ]] && find "$root/.github/workflows" -name '*.yml'
 		true
