@@ -108,6 +108,16 @@ for bad in "" ./internal/nope "./internal/agentd ./internal/api" "../etc"; do
 	[[ $rc == 2 ]] || { echo "FAIL: make test-go-suite SUITE='$bad' must exit 2, got $rc"; exit 1; }
 done
 echo "ok: test-go-suite refuses a suite that hack/go-test.sh --list does not name"
+# One EXIT trap for every fixture path. Each variable may be unset when an early check exits, so
+# expand with a default (set -u) and skip the empty ones.
+cleanup_fixtures() {
+	local p
+	for p in "${rc_file:-}" "${rd:-}" "${rd2:-}" "${rd3:-}" "${pf:-}" "${fx:-}"; do
+		[[ -n $p ]] && rm -rf -- "$p"
+	done
+	return 0
+}
+trap cleanup_fixtures EXIT
 rc_file=$(mktemp "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 rd=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
 KOINON_RC_FILE=$rc_file REPORT_DIR=$rd hack/go-test.sh ./no/such/pkg >/dev/null 2>&1 || true
@@ -117,7 +127,6 @@ echo "ok: KOINON_RC_FILE carries the exit status past make"
 # old issue 512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
 # the same run says "ok ... 0 failed" (the first external gate run: a flaky plain test, exit 1, no hint).
 fx=$(mktemp -d "$root/internal/zzfailfixture.XXXXXX")
-trap 'rm -rf "$fx" "$rd" "$rd2" "${rd3:-}" "${pf:-}"' EXIT
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzfail\n\nimport "testing"\n\nfunc TestFails(t *testing.T) { t.Fatal("deliberate") }\n' >"$fx/fail_test.go"
 rc=0
 rd2=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
