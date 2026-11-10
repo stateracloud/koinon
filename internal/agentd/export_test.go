@@ -139,3 +139,5 @@ func FeedCounts(line []byte) (read, handled bool) {
 
 // WaitProcess is the bounded wait for a harness that was disconnected.
 var WaitProcess = waitProcess
+
+var LineTooLongReason = lineTooLongReason

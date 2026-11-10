@@ -832,9 +832,8 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 		closeProcess(proc)
 		r.own.FlushItems(ctx, true)
 		return &failure{
-			reason: "harness output line too long: the harness wrote a line of more than 10 MiB without a newline: " +
-				strings.TrimSpace(stderr.String()),
-			class: classFatal,
+			reason: lineTooLongReason(stderr.String()),
+			class:  classFatal,
 		}
 	}
 	code, werr := waitProcess(proc, harnessExitWait)
@@ -850,6 +849,16 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 	}
 	r.interrupted(ctx, reason, exit, stderr.String())
 	return errDropped
+}
+
+// lineTooLongReason is the failure text of a harness that wrote a line over the limit, with the
+// tail of its stderr when it has one.
+func lineTooLongReason(stderr string) string {
+	reason := "harness output line too long: the harness wrote a line of more than 10 MiB without a newline"
+	if t := strings.TrimSpace(stderr); t != "" {
+		reason += ": " + t
+	}
+	return reason
 }
 
 // harnessExitWait is how long agentd waits for a harness to exit after its connection ended
@@ -874,7 +883,8 @@ func waitProcess(proc execution.Process, d time.Duration) (int, error) {
 		return r.code, r.err
 	case <-time.After(d):
 	}
-	_ = proc.Close()
+	// Close can block on the same signal as Wait (an OpenShell exec), so it must not hold the bound.
+	go func() { _ = proc.Close() }()
 	select {
 	case r := <-res:
 		if r.err == nil {

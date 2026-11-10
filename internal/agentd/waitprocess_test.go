@@ -20,6 +20,8 @@ type stuckProcess struct {
 	closed   chan struct{}
 	once     sync.Once
 	stubborn bool
+	// closeBlocks makes Close hang, as an OpenShell exec's does while its command runs.
+	closeBlocks bool
 }
 
 func newStuck(stubborn bool) *stuckProcess {
@@ -28,7 +30,13 @@ func newStuck(stubborn bool) *stuckProcess {
 
 func (p *stuckProcess) Stdin() io.WriteCloser { return nopWriteCloser{} }
 func (p *stuckProcess) Stdout() io.Reader     { return strings.NewReader("") }
-func (p *stuckProcess) Close() error          { p.once.Do(func() { close(p.closed) }); return nil }
+func (p *stuckProcess) Close() error {
+	if p.closeBlocks {
+		select {}
+	}
+	p.once.Do(func() { close(p.closed) })
+	return nil
+}
 func (p *stuckProcess) Wait() (int, error) {
 	if p.stubborn {
 		select {}
@@ -55,5 +63,24 @@ var _ = Describe("waiting for a disconnected harness", func() {
 		_, err := agentd.WaitProcess(newStuck(true), 100*time.Millisecond)
 		Expect(err).To(MatchError(ContainSubstring("did not exit")))
 		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second))
+	})
+
+	It("is bounded even when Close blocks", func() {
+		p := newStuck(true)
+		p.closeBlocks = true
+		start := time.Now()
+		_, err := agentd.WaitProcess(p, 100*time.Millisecond)
+		Expect(err).To(MatchError(ContainSubstring("did not exit")))
+		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second))
+	})
+})
+
+var _ = Describe("the reason of a harness line that is too long", func() {
+	It("ends without a colon when the harness wrote nothing to stderr", func() {
+		Expect(agentd.LineTooLongReason("  \n")).To(HaveSuffix("without a newline"))
+	})
+
+	It("adds the tail of stderr when there is one", func() {
+		Expect(agentd.LineTooLongReason("boom\n")).To(HaveSuffix("without a newline: boom"))
 	})
 })
