@@ -122,9 +122,6 @@ func (s *Server) CreateServer(ctx context.Context, req *mcpserverv1alpha1.Create
 	if err != nil {
 		return nil, err
 	}
-	if err := s.refuseWhileHeld(); err != nil {
-		return nil, err
-	}
 	in := mcpservers.Input{
 		Name: req.GetName(), URL: req.GetUrl(), Transport: req.GetTransport(), CredentialHeader: req.GetCredentialHeader(),
 		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(),
@@ -148,11 +145,6 @@ func (s *Server) UpdateServer(ctx context.Context, req *mcpserverv1alpha1.Update
 	c, err := s.mcpCaller(ctx, req.GetOrgId())
 	if err != nil {
 		return nil, err
-	}
-	if req.Url != nil || req.Transport != nil {
-		if err := s.refuseWhileHeld(); err != nil {
-			return nil, err
-		}
 	}
 	patch := mcpservers.Patch{URL: req.Url, Transport: req.Transport, RemoveCredential: req.GetRemoveCredential()}
 	if req.CredentialHeader != nil || req.CredentialPrefix != nil || req.CredentialValue != nil {

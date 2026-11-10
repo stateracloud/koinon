@@ -75,6 +75,9 @@ type Diff struct {
 // MiB, not a file) gets a Fallback reason instead, and so does every file when the
 // repository or the base cannot be read. row must already be authorized for the caller.
 func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, error) {
+	if err := s.hold.Err(); err != nil {
+		return Diff{}, err
+	}
 	if row.Tool != githubtools.ToolCreatePullRequest {
 		return Diff{}, ErrNoDiff
 	}

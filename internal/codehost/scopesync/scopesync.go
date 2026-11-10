@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/restorehold"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -66,6 +68,14 @@ type Syncer struct {
 	minAge   time.Duration
 	maxRepos int
 	jobs     *jobs
+	hold     *restorehold.Guard
+}
+
+// WithRestoreHold makes every reading refuse (restorehold.ErrHeld, nothing sent to the code host)
+// while g holds (issue #462, ADR 0107).
+func (s *Syncer) WithRestoreHold(g *restorehold.Guard) *Syncer {
+	s.hold = g
+	return s
 }
 
 // New returns a Syncer. keys opens the connections' secret fields; nil (Koinon without
@@ -93,6 +103,11 @@ func New(pool *pgxpool.Pool, hosts *codehost.Registry, keys connections.Opener, 
 // has finished, or at once after Drain. A failed reading is logged here and leaves the stored scope to
 // age out, which is the safe side.
 func (s *Syncer) Request(ctx context.Context, row store.Connection, actor audit.Actor) <-chan struct{} {
+	if s.hold.Held() {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
 	return s.jobs.start(ctx, row, actor)
 }
 
@@ -129,6 +144,9 @@ func (s *Syncer) logReadFailure(ctx context.Context, row store.Connection, err e
 // A connection that is not a code host is skipped without error. On error the stored scope is left
 // as it was. Only run calls it; everything else asks through Request.
 func (s *Syncer) read(ctx context.Context, row store.Connection, actor audit.Actor) error {
+	if err := s.hold.Err(); err != nil {
+		return err
+	}
 	p, ok := s.hosts.Get(row.Connector)
 	if !ok {
 		return nil

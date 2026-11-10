@@ -4,6 +4,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	connect "connectrpc.com/connect/v2"
@@ -11,9 +12,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
@@ -21,7 +24,10 @@ import (
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/internal/triggers"
 )
 
 // A held install (restore-hold mode, issue #462, ADR 0107) refuses every call an admin can start that
@@ -37,13 +43,18 @@ var _ = Describe("restore hold", func() {
 		id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 		org = "01010101-0101-0101-0101-010101010101"
 		ctx = auth.WithPrincipal(context.Background(), &auth.Principal{
-			PlatformAdmin: true,
+			PlatformAdmin: true, UserID: id,
 			Memberships:   []auth.Membership{{OrgID: id, Role: store.OrgRoleOwner}},
 		})
+		// The services share one guard, as koinon-api wires them; a handler refuses through the service.
 		wire := func(restoreHold bool) *Server {
+			g := restorehold.NewGuard(restoreHold)
 			return &Server{
-				restoreHold: restoreHold,
-				catalog:     &catalog.Service{}, mcp: &mcpservers.Service{}, modelCheck: &modelcheck.Service{}, traces: &tracedest.Service{},
+				hold:    g,
+				catalog: &catalog.Service{}, approvals: approvals.New(nil, approvals.Options{RestoreHold: g}),
+				mcp:        mcpservers.New(nil, nil, nil).WithRestoreHold(g),
+				modelCheck: modelcheck.New(nil, nil, prices.Resolver{}).WithRestoreHold(g),
+				traces:     tracedest.NewWithClient(nil, nil, catalog.URLPolicy{}, nil, nil).WithRestoreHold(g),
 			}
 		}
 		held, free = wire(true), wire(false)
@@ -59,10 +70,11 @@ var _ = Describe("restore hold", func() {
 
 	It("is nil when the install is not held", func() {
 		Expect(free.refuseWhileHeld()).To(Succeed())
+		Expect(held.refuseWhileHeld()).To(HaveOccurred())
 	})
 
 	It("refuses the provider echo check, which calls a model", func() {
-		_, err := held.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: org})
+		_, err := held.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: org, ProviderId: org, Model: "m"})
 		refused(err)
 	})
 
@@ -84,28 +96,40 @@ var _ = Describe("restore hold", func() {
 		refused(err)
 	})
 
-	It("refuses reading an approval's diff from the code host", func() {
-		_, err := held.GetApprovalDiff(ctx, &approvalv1alpha1.GetApprovalDiffRequest{OrgId: org})
+	It("refuses Approve, which would run the call, and Run now, which would start a task", func() {
+		_, err := held.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: org, ArgsSha256: "abc"})
+		refused(err)
+		_, err = held.RunScheduleTrigger(ctx, triggers.RunNow{})
+		Expect(err).To(MatchError(restorehold.ErrHeld)) // the admin REST API maps this one itself
+		_, err = held.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: org, TriggerId: "t"})
 		refused(err)
 	})
 
-	It("refuses adding an MCP server and changing its address, whose preflight dials it", func() {
-		_, err := held.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{OrgId: org})
+	It("maps the service's ErrHeld to FailedPrecondition with the one message", func() {
+		err := held.dbError(fmt.Errorf("wrapped: %w", restorehold.ErrHeld), "x")
 		refused(err)
-		url := "https://mcp.example.invalid/"
-		_, err = held.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{OrgId: org, Url: &url})
+		Expect(err.Error()).To(ContainSubstring(restorehold.Message))
+	})
+
+	It("refuses adding an MCP server and changing its address, whose preflight dials it", func() {
+		// UpdateServer reads the server before its preflight, so its refusal needs a database; the
+		// service spec in internal/mcpservers shares the guarded preflight.
+		_, err := held.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{
+			OrgId: org, Name: "docs", Url: "https://203.0.113.10/mcp", Transport: "streamable-http",
+		})
 		refused(err)
 	})
 
 	It("refuses saving and testing a trace destination, which send a synthetic trace", func() {
 		api := traceAPI{held}
-		_, err := api.CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org})
+		dest := &tracev1alpha1.DestinationInput{Name: "t", Backend: tracev1alpha1.Backend_BACKEND_LANGFUSE}
+		_, err := api.CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: dest})
 		refused(err)
-		_, err = api.UpdateDestination(ctx, &tracev1alpha1.UpdateDestinationRequest{OrgId: org})
+		_, err = api.UpdateDestination(ctx, &tracev1alpha1.UpdateDestinationRequest{OrgId: org, Destination: dest})
 		refused(err)
 		_, err = api.TestDestination(ctx, &tracev1alpha1.TestDestinationRequest{OrgId: org})
 		refused(err)
-		_, err = api.SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{})
+		_, err = api.SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: dest})
 		refused(err)
 		_, err = api.TestPlatformDestination(ctx, &tracev1alpha1.TestPlatformDestinationRequest{})
 		refused(err)

@@ -62,6 +62,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -150,9 +151,11 @@ type Options struct {
 	// Traces manages run-trace destinations, content levels and the platform ceiling (ADR 0074). Nil
 	// means TraceDestinationService answers UNIMPLEMENTED.
 	Traces *tracedest.Service
-	// RestoreHold is restore-hold mode (issue #462, ADR 0107): every call that reaches outward (a model
-	// call, a code-host read, an MCP server request, a trace export) is refused with FailedPrecondition.
-	RestoreHold bool
+	// RestoreHold is the install's restore-hold guard (issue #462, ADR 0107). The services that reach
+	// outward hold the same guard and refuse with restorehold.ErrHeld (FailedPrecondition here); the
+	// Server keeps it for the code-host calls it makes itself (connections, bindings) and for
+	// RunScheduleTrigger. Nil means not held.
+	RestoreHold *restorehold.Guard
 }
 
 // Server implements the four services.
@@ -187,8 +190,8 @@ type Server struct {
 	traces      *tracedest.Service
 	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (old issue 350).
 	leakGuard *orgsettings.Service
-	// restoreHold refuses the calls that reach outward (refuseWhileHeld).
-	restoreHold bool
+	// hold refuses the code-host calls the handlers make themselves (refuseWhileHeld).
+	hold *restorehold.Guard
 }
 
 // New returns a Server backed by pool.
@@ -222,7 +225,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
-		restoreHold: opts.RestoreHold,
+		hold: opts.RestoreHold,
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
@@ -316,6 +319,8 @@ func (s *Server) dbError(err error, what string) error {
 	switch {
 	case errors.As(err, &ce):
 		return err
+	case errors.Is(err, restorehold.ErrHeld):
+		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, pgx.ErrNoRows):
 		return connect.NewError(connect.CodeNotFound, what+" not found")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):

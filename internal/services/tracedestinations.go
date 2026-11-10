@@ -205,9 +205,6 @@ func (a traceAPI) CreateDestination(ctx context.Context, req *tracev1alpha1.Crea
 	if err != nil {
 		return nil, err
 	}
-	if err := a.s.refuseWhileHeld(); err != nil {
-		return nil, err
-	}
 	in, err := traceInput(req.GetDestination())
 	if err != nil {
 		return nil, err
@@ -222,9 +219,6 @@ func (a traceAPI) CreateDestination(ctx context.Context, req *tracev1alpha1.Crea
 func (a traceAPI) UpdateDestination(ctx context.Context, req *tracev1alpha1.UpdateDestinationRequest) (*tracev1alpha1.UpdateDestinationResponse, error) {
 	c, err := a.orgCaller(ctx, req.GetOrgId())
 	if err != nil {
-		return nil, err
-	}
-	if err := a.s.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	in, err := traceInput(req.GetDestination())
@@ -252,9 +246,6 @@ func (a traceAPI) DeleteDestination(ctx context.Context, req *tracev1alpha1.Dele
 func (a traceAPI) TestDestination(ctx context.Context, req *tracev1alpha1.TestDestinationRequest) (*tracev1alpha1.TestDestinationResponse, error) {
 	c, err := a.orgCaller(ctx, req.GetOrgId())
 	if err != nil {
-		return nil, err
-	}
-	if err := a.s.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	d, outcome, err := a.s.traces.Test(requestCtx(ctx), c.org, c.auditActor(), req.GetDestinationId())
@@ -318,9 +309,6 @@ func (a traceAPI) SetPlatformDestination(ctx context.Context, req *tracev1alpha1
 	if err != nil {
 		return nil, err
 	}
-	if err := a.s.refuseWhileHeld(); err != nil {
-		return nil, err
-	}
 	in, err := traceInput(req.GetDestination())
 	if err != nil {
 		return nil, err
@@ -347,9 +335,6 @@ func (a traceAPI) DeletePlatformDestination(ctx context.Context, _ *tracev1alpha
 func (a traceAPI) TestPlatformDestination(ctx context.Context, _ *tracev1alpha1.TestPlatformDestinationRequest) (*tracev1alpha1.TestPlatformDestinationResponse, error) {
 	p, err := a.platformCaller(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := a.s.refuseWhileHeld(); err != nil {
 		return nil, err
 	}
 	d, outcome, err := a.s.traces.TestPlatform(requestCtx(ctx), audit.User(p.UserID))

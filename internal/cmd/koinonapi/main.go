@@ -664,7 +664,9 @@ func serve(ctx context.Context, cfg config) error {
 		Approve:    askSrv.RequestApproval,
 		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
 	})
-	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
+	// One guard for every service that reaches outward (issue #462, ADR 0107).
+	hold := restorehold.NewGuard(cfg.restoreHold)
+	approvalOpts := approvals.Options{RestoreHold: hold, Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -682,7 +684,7 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
-	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
+	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy)).WithRestoreHold(hold)
 	// The provider echo check sends one request through the gateway with the org's model-check key,
 	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
 	// access the check answers that it is not configured.
@@ -700,12 +702,14 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	traceSvc.WithRestoreHold(hold)
+	echo.WithRestoreHold(hold)
 	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
 	// visibility, read when a connection is created or tested and again every few minutes, so the
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
-	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default())
+	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default()).WithRestoreHold(hold)
 	svc := services.New(pool, services.Options{
-		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: cfg.restoreHold,
+		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
@@ -861,7 +865,9 @@ func serve(ctx context.Context, cfg config) error {
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
 				defer cancel()
-				if _, err := approvalSvc.Execute(ctx, org, id); err != nil {
+				if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
+					slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
+				} else if err != nil {
 					slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
 				}
 			},

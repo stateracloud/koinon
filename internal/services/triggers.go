@@ -31,6 +31,10 @@ import (
 // (RunNowQueue), like direct messages, so the org's trigger_concurrency and trigger_rate_per_minute
 // apply to it as they do to scheduled fires; with it off the fire is inline.
 func (s *Server) RunScheduleTrigger(ctx context.Context, in triggers.RunNow) (store.Task, error) {
+	// A held install starts no work: a manual run is an admin starting something (ADR 0107).
+	if err := s.hold.Err(); err != nil {
+		return store.Task{}, err
+	}
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}

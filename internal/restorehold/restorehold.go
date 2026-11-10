@@ -16,6 +16,7 @@ package restorehold
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -55,5 +56,33 @@ func Wait(ctx context.Context, log *slog.Logger, component string) error {
 	log.Warn("restore-hold: "+component+" acts on nothing until the hold is released (restoreHold=false in the chart, then a rollout)",
 		"component", component)
 	<-ctx.Done()
+	return nil
+}
+
+// Message is what an admin sees when a held install refuses a call that would reach outward.
+const Message = "install is held for restore; release the hold first (restoreHold=false in the chart, then a rollout; " +
+	"see the \"Back up and restore\" guide)"
+
+// ErrHeld is what a guarded service returns while the install is held. Both API surfaces map it to
+// a failed precondition (Connect FailedPrecondition, HTTP 409) with Message.
+var ErrHeld = errors.New(Message)
+
+// Guard is the one shared check of a held install. A service that reaches outward (a model call, a
+// code-host read or write, an MCP dial, a trace export, an approved call's execution) holds a Guard
+// and calls Err before it does so, so the hold covers every caller of the service and not one API
+// surface. The nil Guard is an install that is not held.
+type Guard struct{ held bool }
+
+// NewGuard returns a Guard that refuses while held is true.
+func NewGuard(held bool) *Guard { return &Guard{held: held} }
+
+// Held says whether the install is held.
+func (g *Guard) Held() bool { return g != nil && g.held }
+
+// Err is nil when the install is not held and ErrHeld when it is.
+func (g *Guard) Err() error {
+	if g.Held() {
+		return ErrHeld
+	}
 	return nil
 }

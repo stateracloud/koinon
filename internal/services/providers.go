@@ -262,9 +262,6 @@ func (s *Server) CheckProviderEcho(ctx context.Context, req *providerv1alpha1.Ch
 	if err != nil {
 		return nil, err
 	}
-	if err := s.refuseWhileHeld(); err != nil {
-		return nil, err
-	}
 	if s.modelCheck == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "the echo check is not configured")
 	}
