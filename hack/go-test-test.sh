@@ -53,10 +53,23 @@ grep -q -- '-ginkgo.junit-report' hack/go-test.sh || { echo "FAIL: serial Ginkgo
 grep -q 'ginkgo -race.*--junit-report' .github/workflows/ci.yml || { echo "FAIL: go-race does not use ginkgo for its per-spec report"; exit 1; }
 echo "ok: serial Ginkgo suites and go-race report per spec"
 
+# One EXIT trap removes every fixture dir and file this script makes. Each path is registered in
+# fixtures right after its mktemp, so an early exit (set -u or a failed check) still removes it.
+fixtures=()
+cleanup_fixtures() {
+	local p
+	for p in "${fixtures[@]}"; do
+		[[ -n $p ]] && rm -rf -- "$p"
+	done
+	return 0
+}
+trap cleanup_fixtures EXIT
+
 # Behaviour check, opt-in because it runs the suites (needs Docker): a Ginkgo suite outside
 # PARALLEL_SUITES must leave a report with more than one testcase.
 if [[ ${GO_TEST_TEST_RUN:-} == 1 ]]; then
 	d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+	fixtures+=("$d")
 	REPORT_DIR=$d hack/go-test.sh >/dev/null 2>&1 || true
 	f=$(find "$d" -name 'junit_*reconciler*.xml' | head -1)
 	[[ -n $f && $(grep -c '<testcase' "$f") -gt 1 ]] || { echo "FAIL: reconciler report has no per-spec testcases"; exit 1; }
@@ -67,15 +80,18 @@ fi
 # only, so without Docker every one of them skips through testenv.Require. A dead DOCKER_HOST does
 # not simulate that (testcontainers falls back to the default socket), KOINON_TESTENV_UNAVAILABLE does.
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$d")
 rc=0
 out=$(KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome 2>&1) || rc=$?
 [[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: a suite that skips for a missing expected requirement must exit 3 (incomplete), got $rc"; exit 1; }
 grep -q 'SKIPPED, NOT PASSED' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: a suite skipped for a missing requirement is not reported as SKIPPED, NOT PASSED"; exit 1; }
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$d")
 if KOINON_REQUIRE=docker KOINON_TESTENV_UNAVAILABLE=docker REPORT_DIR=$d hack/go-test.sh ./internal/runoutcome >/dev/null 2>&1; then
 	echo "FAIL: KOINON_REQUIRE=docker must fail a suite whose Docker is missing"; exit 1
 fi
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$d")
 if out=$(go run ./hack/testverdict -reports "$d" ./internal/runoutcome 2>&1); then
 	echo "FAIL: testverdict passed a suite that left no report"; exit 1
 fi
@@ -84,6 +100,7 @@ echo "ok: skipped suites are SKIPPED, KOINON_REQUIRE fails them, a missing repor
 
 # A package argument go list rejects must fail the run, not leave an empty run that exits 0.
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$d")
 if REPORT_DIR=$d hack/go-test.sh ./internal/no-such-package >/dev/null 2>&1; then
 	echo "FAIL: go-test.sh passed a package that go list rejects"; exit 1
 fi
@@ -93,6 +110,7 @@ echo "ok: a failing go list fails the run"
 # contract test (a plain test in the chartsmoke suite's package) without helm makes the run
 # incomplete, even though the suite's own specs skip for the opt-in envtest.
 d=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$d")
 rc=0
 out=$(env -u KUBEBUILDER_ASSETS HELM=koinon-no-such-helm REPORT_DIR="$d" hack/go-test.sh ./test/chartsmoke 2>&1) || rc=$?
 [[ $rc == 3 ]] || { echo "$out" | tail -20; echo "FAIL: chart contract test without helm: exit $rc, want 3 (incomplete)"; exit 1; }
@@ -108,18 +126,10 @@ for bad in "" ./internal/nope "./internal/agentd ./internal/api" "../etc"; do
 	[[ $rc == 2 ]] || { echo "FAIL: make test-go-suite SUITE='$bad' must exit 2, got $rc"; exit 1; }
 done
 echo "ok: test-go-suite refuses a suite that hack/go-test.sh --list does not name"
-# One EXIT trap for every fixture path. Each variable may be unset when an early check exits, so
-# expand with a default (set -u) and skip the empty ones.
-cleanup_fixtures() {
-	local p
-	for p in "${rc_file:-}" "${rd:-}" "${rd2:-}" "${rd3:-}" "${pf:-}" "${fx:-}"; do
-		[[ -n $p ]] && rm -rf -- "$p"
-	done
-	return 0
-}
-trap cleanup_fixtures EXIT
 rc_file=$(mktemp "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$rc_file")
 rd=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$rd")
 KOINON_RC_FILE=$rc_file REPORT_DIR=$rd hack/go-test.sh ./no/such/pkg >/dev/null 2>&1 || true
 [[ $(cat "$rc_file") == 1 ]] || { echo "FAIL: KOINON_RC_FILE must hold go-test.sh's exit status (1 for a bad package)"; exit 1; }
 echo "ok: KOINON_RC_FILE carries the exit status past make"
@@ -127,9 +137,11 @@ echo "ok: KOINON_RC_FILE carries the exit status past make"
 # old issue 512: a plain test that fails must fail the run and be named, even though the Ginkgo verdict over
 # the same run says "ok ... 0 failed" (the first external gate run: a flaky plain test, exit 1, no hint).
 fx=$(mktemp -d "$root/internal/zzfailfixture.XXXXXX")
+fixtures+=("$fx")
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzfail\n\nimport "testing"\n\nfunc TestFails(t *testing.T) { t.Fatal("deliberate") }\n' >"$fx/fail_test.go"
 rc=0
 rd2=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$rd2")
 out=$(REPORT_DIR=$rd2 hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
 [[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a failing plain test must exit 1, got $rc"; exit 1; }
 grep -q 'failing part(s): plain packages (exit 1)' <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the failing part is not named"; exit 1; }
@@ -141,9 +153,11 @@ echo "ok: a failing plain test fails the run, names the part and fails the verdi
 # helper), telling the developer how to fix it.
 grep -qF -e 'pflags+=(-parallel ' hack/go-test.sh || { echo "FAIL: go-test.sh does not pass its parallel suites to testverdict as -parallel"; exit 1; }
 pf=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$pf")
 printf '// SPDX-License-Identifier: Apache-2.0\npackage zzparallel\n\nimport "testing"\n\nfunc needHelm(t *testing.T) { testenv.RequireT(t, testenv.Helm) }\n\nfunc TestNeedsHelm(t *testing.T) { needHelm(t) }\n' >"$pf/x_test.go"
 rc=0
 rd3=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$rd3")
 out=$(go run ./hack/testverdict -reports "$rd3" -parallel "$pf" "$pf" 2>&1) || rc=$?
 [[ $rc != 0 ]] || { echo "$out"; echo "FAIL: testverdict passed a plain RequireT test in a -parallel suite"; exit 1; }
 grep -q 'TestNeedsHelm' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not name the plain RequireT test"; exit 1; }
