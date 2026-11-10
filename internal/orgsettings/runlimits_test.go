@@ -89,6 +89,17 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		Expect(secondBefore).To(Equal(firstAfter))
 	})
 
+	It("audits NULL to an explicit value equal to the default as a change, with the stored values", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		def := orgsettings.DefaultMaxConcurrentRuns
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &def})).To(Succeed())
+		var beforeNull bool
+		var after int
+		Expect(pool.QueryRow(ctx, `SELECT summary->'before'->'max_concurrent_runs' = 'null'::jsonb, (summary->'after'->>'max_concurrent_runs')::int FROM audit_events WHERE org_id = $1 AND action = 'org.run_limits.set'`, org).Scan(&beforeNull, &after)).To(Succeed())
+		Expect(beforeNull).To(BeTrue())
+		Expect(after).To(Equal(def))
+	})
+
 	It("refuses values outside the table's bounds and an org that does not exist", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		for _, p := range []orgsettings.RunLimitsPatch{

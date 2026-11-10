@@ -78,7 +78,7 @@ func merge(cur pgtype.Int4, patch *int) pgtype.Int4 {
 }
 
 // SetRunLimits applies the patch to the org's run limits and audits a change as org.run_limits.set,
-// with the effective limits before and after. Other settings of the org stay. An org that does not
+// with the stored limits before and after (null is the default). Other settings of the org stay. An org that does not
 // exist is ErrNotFound.
 func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit.Actor, p RunLimitsPatch) error {
 	if err := p.Validate(); err != nil {
@@ -102,7 +102,6 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		if err != nil {
 			return err
 		}
-		before := runLimitsOf(apply(Defaults(), row))
 		next := store.SetOrgRunLimitsParams{
 			OrgID:                org,
 			MaxConcurrentRuns:    merge(row.MaxConcurrentRuns, p.MaxConcurrentRuns),
@@ -112,22 +111,6 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		if err := q.SetOrgRunLimits(ctx, next); err != nil {
 			return err
 		}
-		after := before
-		if next.MaxConcurrentRuns.Valid {
-			after.MaxConcurrentRuns = int(next.MaxConcurrentRuns.Int32)
-		} else {
-			after.MaxConcurrentRuns = DefaultMaxConcurrentRuns
-		}
-		if next.TriggerConcurrency.Valid {
-			after.TriggerConcurrency = int(next.TriggerConcurrency.Int32)
-		} else {
-			after.TriggerConcurrency = DefaultTriggerConcurrency
-		}
-		if next.TriggerRatePerMinute.Valid {
-			after.TriggerRatePerMinute = int(next.TriggerRatePerMinute.Int32)
-		} else {
-			after.TriggerRatePerMinute = DefaultTriggerRatePerMinute
-		}
 		// What changed is the stored row, not the effective limits: NULL (the default) to an explicit
 		// value equal to the default is a change, and the audit trail shows it.
 		if row.MaxConcurrentRuns == next.MaxConcurrentRuns && row.TriggerConcurrency == next.TriggerConcurrency &&
@@ -136,15 +119,24 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: runLimitsSetAction, TargetKind: "org", TargetID: org.String(),
-			Before: limitsSummary(before), After: limitsSummary(after),
+			Before: limitsSummary(row.MaxConcurrentRuns, row.TriggerConcurrency, row.TriggerRatePerMinute),
+			After:  limitsSummary(next.MaxConcurrentRuns, next.TriggerConcurrency, next.TriggerRatePerMinute),
 		})
 		return nil
 	})
 }
 
-func limitsSummary(l RunLimits) map[string]any {
+// limitsSummary is the audit summary of the stored limits: null is "the default", so NULL to an
+// explicit value equal to the default shows as a change.
+func limitsSummary(maxRuns, triggerConcurrency, ratePerMinute pgtype.Int4) map[string]any {
+	stored := func(v pgtype.Int4) any {
+		if !v.Valid {
+			return nil
+		}
+		return int(v.Int32)
+	}
 	return map[string]any{
-		"max_concurrent_runs": l.MaxConcurrentRuns, "trigger_concurrency": l.TriggerConcurrency,
-		"trigger_rate_per_minute": l.TriggerRatePerMinute,
+		"max_concurrent_runs": stored(maxRuns), "trigger_concurrency": stored(triggerConcurrency),
+		"trigger_rate_per_minute": stored(ratePerMinute),
 	}
 }
