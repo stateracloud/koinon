@@ -432,7 +432,7 @@ func (cr *countingReader) next() {
 	for {
 		chunk, err := cr.br.ReadSlice('\n')
 		line = append(line, chunk...)
-		if err == bufio.ErrBufferFull {
+		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
 		if err != nil {
