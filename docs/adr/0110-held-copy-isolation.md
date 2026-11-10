@@ -1,7 +1,7 @@
-# DRAFT. A restored copy does not act as its source
+# 0110. A restored copy does not act as its source
 
-- Status: Proposed (draft; the number is reserved by the parent session with `hack/claim.sh adr`). Decisions 1 to 6
-  record procoduck's answers of 2026-11-10; decision 0 and the guards of decision 4 are the design they rest on.
+- Status: Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0,
+  the guards of decision 4 and decision 7 are the design they rest on.
 - Date: 2026-11-10
 - Amends: [0107](0107-restore-hold-mode.md) (what a held install writes; how a release works)
 - Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark),
@@ -106,8 +106,9 @@ revokes every session on every release, audited as `restore.sessions_revoked` wi
 sessions are already refused (decision 3); the revoke makes that permanent. Users log in again.
 
 API tokens are **not** revoked by the release. `restore status` lists the tokens that were active at the dump time
-(not revoked, not expired, with `last_used_at` and creator) so a platform admin can revoke the ones that were
-revoked or lost after the dump. Whether the in-place release should also quarantine tokens is open (Q1).
+(not revoked, not expired, with `last_used_at` and creator). They are **not** refused (procoduck, 2026-11-10). A
+platform admin re-checks the list, and the runbook says to revoke each token that was revoked or reported lost since
+the dump.
 
 ### 3. Source API tokens are refused on a copy; a platform admin can re-enable them
 
@@ -131,7 +132,7 @@ Effect per restore shape:
 
 | Shape | Tokens | Sessions |
 |---|---|---|
-| In place (same mark) | work; listed in `restore status` (Q1) | all revoked at release (decision 2) |
+| In place (same mark) | work; listed in `restore status` for a platform admin to re-check (decision 2) | all revoked at release (decision 2) |
 | Fresh copy, new mark (drill, staging) | refused, "restored copy"; re-enable by a platform admin | refused, then revoked at release |
 | Fresh namespace, mark backup applied (DR) | work | revoked at release |
 | Fresh namespace, mark lost (DR) | refused until `adopt-restore` | refused, then revoked at release |
@@ -212,10 +213,16 @@ one-shot request object.
   not GA on every supported Kubernetes version; validation needs only VAP.)
 - **What the reconciler does.** It watches the CRD in its own namespace. It refuses an object older than its `ttl`
   or whose `nonce` is already in the new table `recovery_requests` (nonce, CR UID, action, requester, result), so a
-  re-applied manifest (a GitOps sync, a copy-paste) does nothing. It then runs the action with the functions #512
-  planned for the CLI, which become internal actions of a shared package (`internal/recovery`) and not a pod-exec
-  command:
-  - `mint-admin-token`: a platform admin API token, TTL at most 24 h, bound to the current mark;
+  re-applied manifest (a GitOps sync, a copy-paste) does nothing. It then runs the action with the functions of
+  #512 (`internal/auth/reset.go`, `internal/cmd/koinonapi/operatoraccess.go`), which move into a shared package
+  (`internal/recovery`) as internal actions and are no longer a pod-exec command:
+  - `mint-admin-token`: a platform admin API token, TTL at most 24 h, bound to the current mark. When no platform
+    admin user is left (deleted, or OIDC-only with no admin group member), it creates a **temporary platform admin**
+    user (the Keycloak pattern; procoduck, 2026-11-10). The user row carries `temporary_until` (default now + 24 h,
+    `spec.temporaryFor` at most 72 h); the UI shows a "temporary" badge on it and a banner to every platform admin,
+    and every audit event of that user carries `temporary: true`. At `temporary_until` the reconciler disables the
+    user and revokes its tokens and sessions (`recovery.temporary_admin_expired`), unless another platform admin who
+    is not temporary exists by then; then the temporary user is disabled at once;
   - `reset-password`: a one-time password with a forced change at the next login; all the user's sessions revoked;
   - `adopt-restore`: rewrites `install_binding` with this install's mark and targets (state `same`), and re-enables
     every refused token that is not revoked or expired (`token.rebind`).
@@ -313,10 +320,25 @@ picture).
   sessions on the live install until `adopt-restore`. The mark backup (ADR 0106) becomes more important.
 - Negative: every release signs everyone out, also a release with no data loss (a hold kept only for a check).
 - Negative: an operator on a copy cannot use a source API token; automation against a copy needs a new token.
-- The chart gets its first CRD and a ValidatingAdmissionPolicy for it, and the reconciler more RBAC in its namespace
-  (Secrets, Roles, RoleBindings). `make test-chart-smoke` and `make test-admission` gain cases.
-- Schema: new tables `install_binding` and `recovery_requests` and nullable columns only (expand-only; allowed in a
-  patch line, ADR 0085).
+- **CRD.** The chart ships its first CustomResourceDefinition (`PlatformAdminRecovery`). Helm does not upgrade
+  CRDs in `crds/`, so it is a template guarded by `recovery.enabled` (default true) with
+  `helm.sh/resource-policy: keep`; a schema change of the CRD follows the ADR 0085 rule for APIs (add fields only
+  within a patch line). Uninstall leaves the CRD; the guide says how to delete it.
+- **RBAC.** The chart renders the Role `<fullname>-platform-recovery` (`create`, `get`, `list`, `delete` on
+  `platformadminrecoveries`) bound to the subjects in `recovery.subjects` only (empty by default). The reconciler's
+  Role gains `get`, `list`, `watch`, `update` on the CR and its status, and `create`, `delete` on Secrets, Roles
+  and RoleBindings in the release namespace, plus the `get` on Secrets it grants (escalation rule). rbac.yaml stays
+  free of ClusterRoles; the CRD and the ValidatingAdmissionPolicy and its binding are the only cluster-scoped objects
+  it adds. `hack/chart-check.d` gets `99-platform-recovery.sh` and `99-restore-release.sh`.
+- **Chart smoke.** New startup inputs: `KOINON_INSTALL_MARK` on koinon-api, the CRD the reconciler watches, and the
+  `restore-release-check` hook Job. `make test-chart-smoke` asserts koinon-api starts with the mark, the reconciler
+  starts with the CRD present and refuses to start without it when `recovery.enabled` is true, and the hook Job
+  passes on a plain upgrade.
+- **Admission.** The ValidatingAdmissionPolicy is native (never Kyverno). `make test-admission` gets cases: a create
+  with another user's `requester` or groups is refused, an update of `spec` is refused, a create with a `ttl` over
+  1 h or no `nonce` is refused, and a valid create is admitted.
+- Schema: new tables `install_binding` and `recovery_requests`, a nullable `temporary_until` on users, and nullable
+  columns elsewhere only (expand-only; allowed in a patch line, ADR 0085).
 - ADR 0107 is amended: the importer no longer writes while held (only the purger and the audit anchor do); the
   reconciler serves recovery requests while held; a release runs the `restore-release-check` Job; the release of a
   copy keeps the guards of decisions 3 and 4 until `adopt-restore`.
@@ -324,12 +346,33 @@ picture).
 - A dump taken before this ADR, restored unheld, is claimed silently (state `unknown`, unheld). The runbook already
   starts every restore held.
 
-## Open questions (procoduck)
+## Implementation
 
-- Q1: does the release of an in-place restore also refuse (quarantine) the API tokens active at the dump, until a
-  platform admin re-enables them, or only list them (the current decision)?
-- Q2: for `mint-admin-token` with no platform admin user left (deleted, or OIDC-only), does the action create a
-  temporary platform admin user (the Keycloak pattern), or must it name an existing one?
+Each part is one pull request. The drill specs of its decisions move from known gap to required in the same PR.
+
+- **(a) Outward disable switch** (decision 5). `internal/outward`, the `admin_disabled_*` columns on the five
+  target kinds, `SetOutwardTargetDisabled` (REST and Connect), the UI switch, the declarative `disabled: true`, the
+  hold rule (disable yes, enable no). Depends on nothing.
+- **(b) Install binding, token and session refusal, adopt and rebind** (decisions 0, 3, 4). `install_binding`, the
+  mark on koinon-api (chart smoke), `install_mark` on tokens and sessions, the refusal reason and metric,
+  `RebindToken`, the internal `adopt-restore` function, the runtime guards (restore-only checkpoints, OIDC off) and
+  `checkpoints.readOnly`. Depends on nothing; (d) calls its adopt function.
+- **(c) Importer plan-only and the `restore-release-check` Job** (decisions 1, 2). The dry-run mode of the importer,
+  the `HeldNotApplied` Event and metric, the pre-upgrade hook Job with `restore.acceptImporterDeletions`, the
+  session revoke on release, the `restore.release` audit event, and the drill's accept flag. Depends on nothing; it
+  revokes sessions with (b)'s columns present or not.
+- **(d) `PlatformAdminRecovery`** (decision 6). The CRD, the ValidatingAdmissionPolicy, the Roles, the reconciler
+  handler (also while held), `recovery_requests`, the result Secret and its Role, the temporary platform admin and
+  its expiry, and the admission and chart-smoke cases. Built on #512's functions from `/private/tmp/kw/l512`
+  commit ea8a4b153 (`internal/auth/reset.go`, `internal/cmd/koinonapi/operatoraccess.go`), moved into
+  `internal/recovery`. Depends on #512 merged and on (b) for `adopt-restore`.
+- **(e) `restore status`** (decision 7). The status function, `GET /admin/v1/restore/status`, the report in the
+  release-check Job's log, the tokens-at-dump list. Depends on (a), (b) and (c) for its sections; it can land
+  first with those sections empty and fill them as they merge.
+
+## Open questions
+
+None. procoduck answered the last two on 2026-11-10 (decisions 2 and 6).
 
 ## Links
 
