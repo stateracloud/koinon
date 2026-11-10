@@ -9,7 +9,7 @@
 # controller and the gateway) are refused (#109). run.sh calls it after the Go driver, for SUITE=go
 # (ESCAPE_OPENSHELL=0 leaves it out). Needs the cluster: CLUSTER names the kind cluster.
 #
-# test/escape/kind.sh does the work: probe image, the gateway stand-in in koinon-fixtures, the port-forward and
+# test/escape/kind.sh does the work: probe image (pulled from the published tag, #482; built only on a miss), the gateway stand-in in koinon-fixtures, the port-forward and
 # client certificate of the install's OpenShell. Differences from `make test-escape-kind` (a bare OpenShell
 # without the chart): the live admission case is on and must not skip, because the namespace of the
 # workspace is under the chart's policy, and the Gitea read grant cases are out (kind.sh has the reason;
@@ -54,6 +54,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "escape suite (OpenShell cases) against the chart install in kind-$CLUSTER: policy $ns-koinon-sandbox-pods, $bindings binding(s)"
+# The published probe image (PROBE_PULL_REPO) is pulled; only without it is the probe built on this base.
 CLUSTER="$CLUSTER" \
 KOINON_OPENSHELL_WORKSPACE="$ws" \
 KOINON_ESCAPE_CHART_NAMESPACE="$ns" \

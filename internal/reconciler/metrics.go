@@ -54,6 +54,9 @@ type Metrics struct {
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
+	// GatewayIDMismatch is 1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId,
+	// which leaves the sandbox admission policies matching none of its namespaces (old issue 475).
+	GatewayIDMismatch prometheus.Gauge
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered, for tests that
@@ -99,6 +102,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_sandbox_observer_errors_total",
 			Help: "Failed reads or RoleBindings of the sandbox observer (ADR 0078), by reason (forbidden, not_found or other).",
 		}, []string{"reason"}),
+		GatewayIDMismatch: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_reconciler_openshell_gateway_id_mismatch",
+			Help: "1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId, so the sandbox admission policies match none of its namespaces and fail open, else 0.",
+		}),
 	}
 	for _, k := range []string{"ok", "error"} {
 		m.Passes.WithLabelValues(k)
@@ -121,7 +128,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedStale,
-			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors)
+			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.GatewayIDMismatch)
 	}
 	return m
 }

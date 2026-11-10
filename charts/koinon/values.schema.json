@@ -729,7 +729,8 @@
             "pods": {"$ref": "#/definitions/identities"},
             "supervisorPods": {"$ref": "#/definitions/identities"},
             "sandboxes": {"$ref": "#/definitions/identities"},
-            "secrets": {"$ref": "#/definitions/identities"}
+            "secrets": {"$ref": "#/definitions/identities"},
+            "namespaces": {"$ref": "#/definitions/identities"}
           }
         }
       }

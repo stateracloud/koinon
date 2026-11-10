@@ -35,6 +35,7 @@ The reconciler runs as one leading replica; standby replicas report the Go and p
 | `koinon_reconciler_sandbox_repairs_total` | counter | none | Stuck, failed or completed sandboxes deleted to be recreated ([stuck sandboxes](../agent-health/)). |
 | `koinon_reconciler_agents_marked_unhealthy_total` | counter | none | Agents marked unhealthy because their sandbox kept failing. |
 | `koinon_reconciler_sandbox_observer_errors_total` | counter | `reason`: `forbidden`, `not_found`, `other` | Failed reads of sandbox pods or failed RoleBindings of the [sandbox observer](../agent-health/#how-koinon-finds-the-cause). `forbidden` means the cluster refused (the RoleBinding is gone, or `openshell.gatewayId` is wrong). The observer never fails a pass. |
+| `koinon_reconciler_openshell_gateway_id_mismatch` | gauge | none | 1 while the OpenShell gateway's `gateway_id` differs from `openshell.gatewayId`; 0 otherwise. The sandbox admission policies select namespaces by that ID, so on a mismatch they cover none of the gateway's sandboxes and fail open. Checked on every pass from OpenShell's gateway ConfigMap; alert on `== 1`. |
 
 `gateway_rejected` and `gateway_apply` count once per pass, not once per object. Any counted error also makes
 the pass `result="error"`, so `result="ok"` means no error kind increased.

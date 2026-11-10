@@ -190,6 +190,10 @@ func serve(ctx context.Context, cfg config) error {
 	} else {
 		log.Warn("no OpenShell gateway ConfigMap is configured: a new supervisor image does not recreate existing sandboxes")
 	}
+	var gatewayIDs reconciler.GatewayIDSource
+	if cfg.openshellConfigMap != "" {
+		gatewayIDs = reconciler.KubeGatewayID{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
@@ -209,6 +213,8 @@ func serve(ctx context.Context, cfg config) error {
 			SandboxJobs:         cfg.sandboxJobs,
 			KeepWarmPerOrg:      cfg.keepWarmPerOrg,
 			Supervisor:          supervisor,
+			GatewayID:           cfg.openshellGateway,
+			GatewayIDs:          gatewayIDs,
 			MaxRecreatesPerPass: cfg.maxRecreates,
 			ResyncInterval:      cfg.resyncInterval,
 			HomeRetention:       reconciler.Retention(cfg.homeRetention),

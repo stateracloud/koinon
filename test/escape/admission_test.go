@@ -18,6 +18,7 @@ import (
 	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -158,7 +159,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 		for _, b := range bindingsB {
 			Expect(names).NotTo(HaveKey(b.Name), "binding name clash between releases")
-			if !strings.HasSuffix(b.Name, "-unlabelled") {
+			if !strings.HasSuffix(b.Name, "-unlabelled") && !strings.HasSuffix(b.Name, "-sandbox-namespaces") {
 				Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/gateway-id", "prod"))
 			}
 		}
@@ -276,6 +277,52 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		} {
 			denied(createPod(ctx, controllerUser, ns, workload("shape", c.mutate)), c.message)
 		}
+	})
+
+	It("lets sandbox pods mount only the claim their Sandbox made, and no generic ephemeral volume (issue 475)", func(ctx SpecContext) {
+		const claimMessage = "sandbox pods may mount only the PersistentVolumeClaim their Sandbox made"
+		owned := func(sandbox string) metav1.OwnerReference {
+			return metav1.OwnerReference{APIVersion: "agents.x-k8s.io/v1beta1", Kind: "Sandbox", Name: sandbox, UID: "00000000-0000-0000-0000-000000000475", Controller: new(true)}
+		}
+		claim := func(volume, claimName string) corev1.Volume {
+			return corev1.Volume{Name: volume, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}}
+		}
+		with := func(owner []metav1.OwnerReference, v corev1.Volume) func(*corev1.Pod) {
+			return func(p *corev1.Pod) { p.OwnerReferences = owner; p.Spec.Volumes = []corev1.Volume{v} }
+		}
+		By("the claim OpenShell 0.1.7 gets from the controller (workspace-<sandbox>) is admitted (control)")
+		// Created for real: the orphan-update check below reads it back (createPod is a dry run).
+		_, err := as[controllerUser].CoreV1().Pods(ns).Create(ctx, workload("pvc-ok", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-a"))), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		By("another claim, another sandbox's claim, and an unowned pod are denied")
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-foreign", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "admin-data")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-other", with([]metav1.OwnerReference{owned("sb-a")}, claim("workspace", "workspace-sb-b")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-volname", with([]metav1.OwnerReference{owned("sb-a")}, claim("data", "workspace-sb-a")))), claimMessage)
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-noowner", with(nil, claim("workspace", "workspace-sb-a")))), claimMessage)
+		notController := owned("sb-a")
+		notController.Controller = nil
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-notctl", with([]metav1.OwnerReference{notController}, claim("workspace", "workspace-sb-a")))), claimMessage)
+		denied(createPod(ctx, gatewayUser, ns, supervisor("pvc-supervisor", func(p *corev1.Pod) {
+			p.Spec.Volumes = append(p.Spec.Volumes, claim("workspace", "admin-data"))
+		})), claimMessage)
+		By("a hyphen in the volume name makes the claim name ambiguous across sandboxes: denied")
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-hyphen", with([]metav1.OwnerReference{owned("a")}, claim("workspace-sb", "workspace-sb-a")))), claimMessage)
+		By("an update that only drops the owner reference (orphan garbage collection) is not denied")
+		for _, user := range []string{"admin", otherUser} {
+			p, err := admin.CoreV1().Pods(ns).Get(ctx, "pvc-ok", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			p.OwnerReferences = nil
+			_, err = as[user].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			Expect(err).NotTo(HaveOccurred(), user)
+		}
+		By("a generic ephemeral volume is denied")
+		ephemeral := corev1.Volume{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+			},
+		}}}}
+		denied(createPod(ctx, controllerUser, ns, workload("pvc-ephemeral", with([]metav1.OwnerReference{owned("sb-a")}, ephemeral))), "generic ephemeral volumes are not allowed")
 	})
 
 	It("denies the SPIRE agent socket in every sandbox pod: the SPIFFE CSI driver and the socket's hostPath (ADR 0097 decision 11)", func(ctx SpecContext) {
@@ -465,12 +512,71 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		}
 	})
 
+	// Old issue 475: the policies select namespaces by label, so relabelling a namespace would take it
+	// out of all of them. Only the namespace lifecycle owners (sandboxPolicy.identities.namespaces)
+	// may change those labels on a namespace the policies cover.
+	It("refuses relabelling a sandbox namespace out of the policies, except by the namespace owners", func(ctx SpecContext) {
+		relabel := func(user, namespace string, mutate func(map[string]string)) error {
+			n, err := admin.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			if n.Labels == nil {
+				n.Labels = map[string]string{}
+			}
+			mutate(n.Labels)
+			_, err = as[user].CoreV1().Namespaces().Update(ctx, n, dryRunUpdate)
+			return err
+		}
+		const msg = "only the namespace lifecycle owners may change the labels"
+		moves := map[string]func(map[string]string){
+			"removing gateway-id":          func(l map[string]string) { delete(l, "openshell.ai/gateway-id") },
+			"changing gateway-id":          func(l map[string]string) { l["openshell.ai/gateway-id"] = "elsewhere" },
+			"removing managed-by":          func(l map[string]string) { delete(l, "openshell.ai/managed-by") },
+			"changing managed-by":          func(l map[string]string) { l["openshell.ai/managed-by"] = "someone" },
+			"removing both":                func(l map[string]string) { delete(l, "openshell.ai/gateway-id"); delete(l, "openshell.ai/managed-by") },
+			"dropping every label at once": func(l map[string]string) { clear(l) },
+		}
+		for _, user := range []string{"admin", controllerUser, otherUser} {
+			for _, move := range moves {
+				denied(relabel(user, ns, move), msg)
+			}
+		}
+
+		By("the namespace owner may still change them")
+		for _, move := range moves {
+			Expect(relabel(gatewayUser, ns, move)).To(Succeed())
+		}
+
+		By("a namespace without a gateway-id label is covered too: nobody else may claim it for a gateway")
+		denied(relabel("admin", unlabelled, func(l map[string]string) { l["openshell.ai/gateway-id"] = "openshell" }), msg)
+		denied(relabel(otherUser, unlabelled, func(l map[string]string) { delete(l, "openshell.ai/managed-by") }), msg)
+
+		By("another release's gateway namespace is covered by that release's own policy")
+		denied(relabel("admin", nsB, func(l map[string]string) { delete(l, "openshell.ai/gateway-id") }), msg)
+
+		By("other labels and annotations stay open (control)")
+		Expect(relabel("admin", ns, func(l map[string]string) { l["team"] = "sandboxes" })).To(Succeed())
+		Expect(relabel(otherUser, unlabelled, func(l map[string]string) { l["pod-security.kubernetes.io/enforce"] = "restricted" })).To(Succeed())
+
+		By("a namespace that is not a sandbox namespace is free (control), and may be labelled into the policies")
+		Expect(relabel("admin", plain, func(l map[string]string) { l["team"] = "other" })).To(Succeed())
+		Expect(relabel("admin", plain, func(l map[string]string) {
+			l["openshell.ai/managed-by"], l["openshell.ai/gateway-id"] = "openshell", "openshell"
+		})).To(Succeed())
+		_, err := admin.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
 		for _, p := range policies {
 			Expect(p.Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)), p.Name)
 		}
 		for _, b := range bindings {
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
+			if strings.HasSuffix(b.Name, "-sandbox-namespaces") {
+				// Judges the old object's labels itself: a namespaceSelector reads the new object's.
+				Expect(b.Spec.MatchResources).To(BeNil(), b.Name)
+				continue
+			}
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
 			if strings.HasSuffix(b.Name, "-unlabelled") {
@@ -601,6 +707,31 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("lets Sandbox volumeClaimTemplates carry only hyphen-free names and no volumeName (issue 475)", func(ctx SpecContext) {
+		template := func(name string, spec map[string]any) map[string]any {
+			return map[string]any{"metadata": map[string]any{"name": name}, "spec": spec}
+		}
+		sandbox := func(templates ...any) *unstructured.Unstructured {
+			return &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": sandboxGVR.GroupVersion().String(), "kind": "Sandbox",
+				"metadata": map[string]any{"name": "templated"},
+				"spec": map[string]any{
+					"podTemplate":          map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "agent", "image": "registry.invalid/x:1"}}}},
+					"volumeClaimTemplates": templates,
+				},
+			}}
+		}
+		create := func(user string, sb *unstructured.Unstructured) error {
+			_, err := asDynamic[user].Resource(sandboxGVR).Namespace(ns).Create(ctx, sb, dryRun)
+			return err
+		}
+		for _, user := range []string{gatewayUser, controllerUser} {
+			Expect(create(user, sandbox(template("workspace", map[string]any{"accessModes": []any{"ReadWriteOnce"}})))).To(Succeed(), user)
+			denied(create(user, sandbox(template("workspace-sb", map[string]any{}))), "must not contain '-'")
+			denied(create(user, sandbox(template("workspace", map[string]any{"volumeName": "pv-admin"}))), "must not set spec.volumeName")
+		}
+	})
+
 	It("lets only the OpenShell gateway and the controller write Sandbox objects", func(ctx SpecContext) {
 		sb := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": sandboxGVR.GroupVersion().String(), "kind": "Sandbox",
@@ -687,8 +818,8 @@ func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extra
 			Fail(fmt.Sprintf("unexpected %s in sandbox-policy.yaml", meta.Kind))
 		}
 	}
-	Expect(policies).To(HaveLen(3), "the pods, objects and connect policies")
-	Expect(bindings).To(HaveLen(6), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label")
+	Expect(policies).To(HaveLen(4), "the pods, objects, connect and namespace label policies")
+	Expect(bindings).To(HaveLen(7), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label, and the namespace label policy's")
 	return policies, bindings
 }
 

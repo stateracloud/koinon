@@ -175,6 +175,11 @@ type Config struct {
 	// of the sandbox spec hash, so an OpenShell upgrade recreates each sandbox through the usual path
 	// (ADR 0085 decision 9). Nil leaves it out of the hash.
 	Supervisor SupervisorSource
+	// GatewayID is openshell.gatewayId, the ID the sandbox admission policies select namespaces by, and
+	// GatewayIDs says which gateway_id the OpenShell gateway runs with. Every pass compares them and
+	// sets koinon_reconciler_openshell_gateway_id_mismatch (old issue 475). Either nil/empty skips it.
+	GatewayID  string
+	GatewayIDs GatewayIDSource
 	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
 	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
 	// DefaultMaxRecreatesPerPass; negative is no cap.
@@ -214,6 +219,9 @@ type Reconciler struct {
 	supImage string
 	supKnown bool
 	supErr   error
+	// gwMu guards gwMismatch, the last result of the gateway ID check (gatewayid.go).
+	gwMu       sync.Mutex
+	gwMismatch bool
 	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
 	recreates atomic.Int32
 
@@ -438,6 +446,7 @@ func (r *Reconciler) observeUnmarked(ctx context.Context) {
 func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	r.recreates.Store(0)
 	r.refreshSupervisor(ctx)
+	r.checkGatewayID(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
