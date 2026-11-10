@@ -51,6 +51,9 @@ check "e2e-kind.yml: decide reads the queue ref and the head repo (label and for
 	grep -q "QUEUE_REF:" "$1" && grep -q "HEAD_REPO:" "$1" && grep -q "pull-requests: read" "$1"' _ "$wfdir/e2e-kind.yml"
 check "the deleted e2e evidence helpers are gone" bash -c '
 	cd "$1"; for f in hack/e2e-gate.sh hack/e2e-rerun-result.sh hack/e2e-label.sh hack/e2e-queue-head.sh .github/workflows/e2e-label.yml; do [ ! -e "$f" ] || exit 1; done' _ "$repo"
+# The route guard (ADR 0105) looks at pushes to main only; it must never become a required or queue-time job.
+check "route-guard.yml: push to main only" bash -c '
+	f="$1/route-guard.yml"; grep -q "^  push:" "$f" && ! grep -Eq "^  (pull_request|pull_request_target|merge_group|workflow_dispatch|schedule):" "$f"' _ "$wfdir"
 # shellcheck disable=SC2016
 check "e2e-kind.yml: the quickstart job is not limited to pull requests and pushes" bash -c '
 	! awk "/^  quickstart:/ { j = 1 } /^  result:/ { j = 0 } j && /^    if:.*event_name/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/e2e-kind.yml"

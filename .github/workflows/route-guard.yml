@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The route guard (ADR 0105): a fast in-repo signal when a commit reaches main without a merge queue build
+# (an admin merge, a break-glass merge, a direct push). hack/route-guard.sh opens or comments on an issue keyed by
+# the sha, labelled `admin:github` for a `.github/**` pull request and `break-glass` otherwise. The job always ends
+# green: a red job on main is noise and cannot undo the merge. The real alarm is the overnight report that reads
+# GitHub's rule-suites record of every bypass.
+#
+# Push to main only: it is not a required check and never runs on a queue build or a pull request. It runs the
+# pushed commit's own script with a read-only token plus `issues: write`; no secret, and no pull request code.
+name: route-guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: route-guard-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: route guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # the merge_group runs of ci
+      pull-requests: read # the merged pull request and its files
+      issues: write # the issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Was this commit built by the merge queue?
+        run: hack/route-guard.sh
