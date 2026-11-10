@@ -35,7 +35,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   esac
 done
 case "$*" in
-*/issues/*/labels*) printf '%s\n' "${STUB_LABELS:-[]}" | jq -c '[.[] | {id: 1, name: .}]' | jq -c "$expr" ;;
+*/issues/*/labels*) [[ -z ${STUB_LABELS_FAIL:-} ]] || exit 1; printf '%s\n' "${STUB_LABELS:-[]}" | jq -c '[.[] | {id: 1, name: .}]' | jq -c "$expr" ;;
 *git/commits/pushsha*) [[ -n ${STUB_TREE_PUSH:-} ]] && jq -n --arg t "$STUB_TREE_PUSH" '{sha: "pushsha", tree: {sha: $t}}' | jq -r "$expr" ;;
 *git/commits/*) [[ -n ${STUB_TREE_MG:-} ]] && jq -n --arg t "$STUB_TREE_MG" '{sha: "x", tree: {sha: $t}}' | jq -r "$expr" ;;
 *"run list"*)
@@ -66,15 +66,6 @@ want() {
   got=$(env "$@" hack/e2e-decide.sh | sed -n 's/^needed=//p' | tail -1)
   if [[ $got == "$expect" ]]; then echo "ok: $desc"; else echo "FAIL: $desc (got '$got', want $expect)" >&2; fail=1; fi
 }
-# req <true|false> <description> [VAR=value...]: the `required=` line (what e2e result enforces, old issue 562).
-req() {
-  local expect=$1 desc=$2 got
-  shift 2
-  export GITHUB_STEP_SUMMARY="$tmp/summary"
-  : >"$GITHUB_STEP_SUMMARY"
-  got=$(env "$@" hack/e2e-decide.sh | sed -n 's/^required=//p' | tail -1)
-  if [[ $got == "$expect" ]]; then echo "ok: $desc"; else echo "FAIL: $desc (got '$got', want $expect)" >&2; fail=1; fi
-}
 summary_has() { grep -q -- "$1" "$tmp/summary" || { echo "FAIL: summary lacks '$1'" >&2; fail=1; }; }
 
 want true "PR touching the e2e's files runs" EVENT=pull_request STUB_FORCED=0
@@ -82,7 +73,6 @@ want true "PR with the e2e label runs" EVENT=pull_request 'LABELS=["bug","e2e"]'
 want false "PR with other labels and nothing relevant does not run" EVENT=pull_request 'LABELS=["bug"]'
 want true "PR that is e2e-relevant but unlabelled runs (fork PRs cannot label, issue #148)" EVENT=pull_request STUB_FULL=0
 summary_has "e2e-relevant"
-summary_has "e2e-lab"
 want true "PR: full-rule failure runs the e2e" EVENT=pull_request STUB_FULL=2
 want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
 want false "PR: nothing relevant says so" EVENT=pull_request
@@ -109,33 +99,34 @@ want false "push: a failed queue run next to a green one still skips on the gree
 want true "push: no queue run runs" "${PQ[@]}" STUB_MG_RUNS=
 want true "push: unreadable pushed tree runs" "${PQ[@]}" STUB_TREE_PUSH=
 want true "push: without PUSH_SHA the queue is not consulted" EVENT=push GH_REPO=o/r STUB_COVERED=abc123 STUB_FULL=0 'STUB_MG_RUNS=77 mgsha' STUB_TREE_PUSH=tree1 STUB_TREE_MG=tree1 STUB_MG_JOB=success
-# #444: the queue commit (main plus the PR) runs the quickstart when the entry is e2e-relevant; the run is the
-# evidence, so `required` stays false (no PR-head lookup).
-MG=(EVENT=merge_group MG_BASE=abc123)
+# #444, ADR 0105: the queue commit (main plus the PR) runs the quickstart when the entry is e2e-relevant or the
+# pull request carries the `e2e` label (read from the queue ref's PR number).
+MG=(EVENT=merge_group MG_BASE=abc123 GH_REPO=o/r QUEUE_REF=refs/heads/gh-readonly-queue/main/pr-12-0a1b2c)
 want true "queue entry touching the e2e's files runs" "${MG[@]}" STUB_FORCED=0
 want true "queue entry that is e2e-relevant runs" "${MG[@]}" STUB_FULL=0
 want false "queue entry with nothing relevant does not run" "${MG[@]}"
 want true "queue entry: a forced-rule failure fails closed" "${MG[@]}" STUB_FORCED=2
 want true "queue entry: a full-rule failure fails closed" "${MG[@]}" STUB_FULL=2
-want true "queue entry without a base sha runs" EVENT=merge_group
-req false "queue entry touching the e2e's files requires no PR-head evidence" "${MG[@]}" STUB_FORCED=0
-req false "queue entry that is e2e-relevant requires no PR-head evidence" "${MG[@]}" STUB_FULL=0
-req false "queue entry with nothing relevant requires none" "${MG[@]}"
-req false "queue entry without a base sha requires none" EVENT=merge_group
+want true "queue entry without a base sha runs" "${MG[@]}" MG_BASE=
+want true "queue entry with the e2e label runs although nothing is relevant" "${MG[@]}" 'STUB_LABELS=["bug","e2e"]'
+summary_has "e2e"
+want false "queue entry with other labels and nothing relevant does not run" "${MG[@]}" 'STUB_LABELS=["bug"]'
+want false "queue entry with no labels and nothing relevant does not run" "${MG[@]}" 'STUB_LABELS=[]'
+want true "queue entry: a label read error fails closed (needed)" "${MG[@]}" STUB_LABELS_FAIL=1
+want true "queue entry: an unparsable ref fails closed (needed)" "${MG[@]}" QUEUE_REF=refs/heads/gh-readonly-queue/main/pr-x-0a1b2c
+want true "queue entry: a missing ref fails closed (needed)" "${MG[@]}" QUEUE_REF=
+# The output has no `required` line any more (ADR 0105).
+out=$(env "${MG[@]}" hack/e2e-decide.sh)
+if grep -q '^required=' <<<"$out"; then echo "FAIL: decide still prints required=" >&2; fail=1; else echo "ok: no required= output"; fi
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
-# required: the pull request needs an e2e, whether or not it runs here.
-req true "PR touching the e2e's files requires one" EVENT=pull_request STUB_FORCED=0
-req true "PR with the label requires one" EVENT=pull_request 'LABELS=["e2e"]'
-req true "e2e-relevant PR without the label requires one (not run here)" EVENT=pull_request STUB_FULL=0
-req true "PR: a rule failure requires one" EVENT=pull_request STUB_FORCED=2
-req true "PR: a full-rule failure requires one" EVENT=pull_request STUB_FULL=2
-req false "PR with nothing relevant requires none" EVENT=pull_request
-req false "dispatch requires nothing of itself" EVENT=workflow_dispatch
-req false "push requires nothing" EVENT=push STUB_COVERED=abc123 STUB_FULL=0
-req false "nightly requires nothing" EVENT=schedule
-# On a pull request, required implies needed: no PR is left waiting for evidence it cannot produce.
-want true "relevant unlabelled PR runs here" EVENT=pull_request STUB_FULL=0 'LABELS=[]'
+# Fork pull requests (ADR 0105): the flavor images are private until v0.3, so the advisory run needs the label.
+FORK=(EVENT=pull_request HEAD_REPO=fork/r BASE_REPO=o/r)
+want false "fork PR that is e2e-relevant does not run unlabelled" "${FORK[@]}" STUB_FULL=0
+want false "fork PR touching the e2e's files does not run unlabelled" "${FORK[@]}" STUB_FORCED=0
+want true "fork PR with the e2e label runs" "${FORK[@]}" 'LABELS=["e2e"]'
+want true "same-repo PR (head repo = base repo) still runs unlabelled when relevant" EVENT=pull_request HEAD_REPO=o/r BASE_REPO=o/r STUB_FULL=0
+want true "queue entry in the middle of the fork logic is unaffected" "${MG[@]}" STUB_FULL=0
 
 [[ $fail -eq 0 ]] && echo "e2e-decide tests passed"
 exit "$fail"

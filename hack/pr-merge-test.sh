@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/pr-merge.sh offline: `gh` is a stub on PATH answering from files in $FAKE_DIR, and the
-# helper scripts (pr-wait, needs-e2e, threads, review-gate) are stubs that record their calls. The stub answers `gh api`
+# helper scripts (pr-wait, threads, review-gate) are stubs that record their calls. The stub answers `gh api`
 # with API-shaped JSON (what GitHub prints; a recorded real answer lives in hack/testdata/pr-verdict/) and applies the
 # call's own `--jq` filter to it, so the script's parsing is tested, not a pre-chewed list.
 
@@ -16,7 +16,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
-export PR_MERGE_WAIT="$tmp/bin/wait" PR_MERGE_NEEDS_E2E="$tmp/bin/needs"
+export PR_MERGE_WAIT="$tmp/bin/wait"
 export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
@@ -35,7 +35,9 @@ case "$1 $2" in
 "pr view")
   sed "s/\"mergeStateStatus\":\"CLEAN\"/\"mergeStateStatus\":\"${MSTATE:-CLEAN}\"/" "$FAKE_DIR/pr.json" ;;
 "pr merge") exit "${MERGE_RC:-0}" ;;
-"pr comment") ;;
+"pr comment") exit "${COMMENT_RC:-0}" ;;
+"pr edit") exit "${EDIT_RC:-0}" ;;
+"issue create") [ -z "${ISSUE_NOLABEL_FAILS:-}" ] || [[ $* != *--label* ]] || exit 1; exit 0 ;;
 "api repos/{owner}/{repo}/pulls/"*"/files")
   [ -f "$FAKE_DIR/files" ] || exit 9
   cat "$FAKE_DIR/files" ;;
@@ -45,6 +47,7 @@ case "$1 $2" in
 "api repos/{owner}/{repo}/commits/"*"/check-runs"*) apijq "$FAKE_DIR/runs" "$@" ;;
 "api repos/{owner}/{repo}/actions/runs"*) [ -f "$FAKE_DIR/wfruns" ] || exit 9; apijq "$FAKE_DIR/wfruns" "$@" ;;
 "api graphql")
+  if [[ $* == *enqueuePullRequest* ]]; then [ -z "${JUMP_FAILS:-}" ] || exit 1; exit 0; fi
   if [ -f "$FAKE_DIR/queue" ]; then cat "$FAKE_DIR/queue"; else echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"mergeQueueEntry":null}}}}'; fi ;;
 *) exit 9 ;;
 esac
@@ -63,6 +66,8 @@ show)
   case $2 in
   *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
   *:hack/claim.sh) [ -z "${SHOW_FAILS_CLAIM:-}" ] || exit 128; printf '#!/usr/bin/env bash\n' ;;
+  *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
+  *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
   *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
   *) exit 128 ;;
   esac ;;
@@ -74,12 +79,6 @@ cat >"$tmp/bin/wait" <<'SH'
 echo "wait $*" >>"$FAKE_DIR/calls"
 if [ -f "$FAKE_DIR/close-after-wait" ]; then sed -i.bak 's/"OPEN"/"CLOSED"/' "$FAKE_DIR/pr.json"; fi
 exit "${WAIT_RC:-0}"
-SH
-cat >"$tmp/bin/needs" <<'SH'
-#!/usr/bin/env bash
-cat >/dev/null
-echo "needs $*" >>"$FAKE_DIR/calls"
-exit "${NEEDS_RC:-1}"
 SH
 cat >"$tmp/bin/threads" <<'SH'
 #!/usr/bin/env bash
@@ -93,15 +92,22 @@ echo "review EVENT=$EVENT PR=$PR SHA=$SHA GH_REPO=$GH_REPO" >>"$FAKE_DIR/calls"
 [ "${REVIEW_RC:-0}" = 0 ] || echo "::error::pull request #$PR touches sensitive paths and its head has no review-verdict status"
 exit "${REVIEW_RC:-0}"
 SH
+cat >"$tmp/bin/needs" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "needs $*" >>"$FAKE_DIR/calls"
+exit "${NEEDS_RC:-1}"
+SH
 chmod +x "$tmp/bin"/*
+export PR_MERGE_NEEDS_E2E="$tmp/bin/needs"
 
 fail=0
 setup() { # <isDraft> <runs rows, one JSON object per line>
   rm -rf "$FAKE_DIR"
   mkdir -p "$FAKE_DIR"
-  printf '{"state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","headRefName":"feat/x","isCrossRepository":false,"baseRefName":"main","mergeStateStatus":"CLEAN","reviewDecision":"","autoMergeRequest":{"enabledAt":"2026-11-08T10:00:00Z"},"closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
+  printf '{"id":"PR_node7","state":"OPEN","isDraft":%s,"headRefOid":"abc1234def","headRefName":"feat/x","isCrossRepository":false,"baseRefName":"main","mergeStateStatus":"CLEAN","reviewDecision":"","autoMergeRequest":{"enabledAt":"2026-11-08T10:00:00Z"},"closingIssuesReferences":[{"number":647}]}' "$1" >"$FAKE_DIR/pr.json"
   printf '%s\n' "$2" | jq -sc '{check_runs: .}' >"$FAKE_DIR/runs"
-  printf 'hack/x.sh\n' >"$FAKE_DIR/files"
+  printf '.github/workflows/x.yml\nhack/x.sh\n' >"$FAKE_DIR/files"
   printf '{"statuses":[{"context":"dco","state":"success","created_at":"2026-11-01T10:00:00Z","target_url":""}]}\n' >"$FAKE_DIR/statuses"
 }
 run() {
@@ -164,10 +170,12 @@ grep -q '^claim ' "$FAKE_DIR/calls" && { echo "FAIL: pr-merge calls no claim.sh 
 grep -q '^gh pr comment 7 --body .*read 3 required contexts on head .abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: comment names the SHA and the count" >&2; fail=1; }
 
 setup false "$green"
-NEEDS_RC=0 run 7
+run 7
 check "without --admin it enables auto-merge" 0 merge
 grep -q -- '--auto' "$FAKE_DIR/calls" || { echo "FAIL: --auto" >&2; fail=1; }
-grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: a needs-e2e change waits with --require e2e" >&2; fail=1; }
+grep -q -- '--require' "$FAKE_DIR/calls" && { echo "FAIL: pr-wait gets no --require (no e2e gate on the head, ADR 0105)" >&2; fail=1; }
+grep -q 'pulls/7/files' "$FAKE_DIR/calls" && { echo "FAIL: the default route reads no file list" >&2; fail=1; }
+grep -q '^wait 7 --checks$' "$FAKE_DIR/calls" || { echo "FAIL: waits with --checks only" >&2; fail=1; }
 
 # #225: the merge queue, detected from the ruleset at run time
 setup false "$green"
@@ -180,19 +188,144 @@ grep -q 'added to the merge queue' <<<"$out" || { echo "FAIL: queue: output says
 setup false "$green"
 echo true >"$FAKE_DIR/rules"
 run 7 --admin
-check "with a merge queue --admin still merges directly" 0 merge
+check "with a merge queue --admin on a .github/ PR still merges directly" 0 merge
 grep -q -- '--merge --admin --match-head-commit' "$FAKE_DIR/calls" || { echo "FAIL: queue: admin bypass" >&2; fail=1; }
 grep -q 'added to the merge queue' <<<"$out" && { echo "FAIL: queue: admin is not queued" >&2; fail=1; }
-grep -q 'skips the merge queue' <<<"$out" && { echo "FAIL: queue: no admin warning when e2e is not needed" >&2; fail=1; }
+grep -q 'skips the merge queue and so the queue e2e' <<<"$out" || { echo "FAIL: admin says it skips the queue e2e: $out" >&2; fail=1; }
+# --admin stays fail-closed for the e2e: an e2e-relevant .github PR needs a green quickstart on the head
+setup false "$green"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, no quickstart: refused (10)" 10 nomerge
+grep -q 'no green quickstart (missing)' <<<"$out" || { echo "FAIL: refusal names the missing quickstart: $out" >&2; fail=1; }
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z failure)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, red quickstart: refused (10)" 10 nomerge
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, skipped quickstart: refused (10)" 10 nomerge
+setup false "$green
+$(r quickstart 2026-11-01T10:00:00Z success)"
+NEEDS_RC=0 run 7 --admin
+check "--admin, e2e needed, green quickstart: merges" 0 merge
+setup false "$green"
+NEEDS_RC=2 run 7 --admin
+check "--admin, needs-e2e cannot say (2): treated as needed, refused (10)" 10 nomerge
+setup false "$green"
+NEEDS_RC=1 run 7 --admin
+check "--admin, .github only, e2e not needed: merges without a quickstart" 0 merge
+setup false "$green"
+NEEDS_RC=0 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass does not need the quickstart" 0 merge
+# ADR 0105: --admin only for a PR with a .github/ path
 setup false "$green"
 echo true >"$FAKE_DIR/rules"
-NEEDS_RC=0 run 7 --admin
-check "--admin on a queue with an e2e-relevant change still merges" 0 merge
-grep -q 'WARNING: --admin skips the merge queue' <<<"$out" || { echo "FAIL: queue: admin warning for e2e-relevant change: $out" >&2; fail=1; }
+printf 'hack/x.sh\nAGENTS.md\n' >"$FAKE_DIR/files"
+run 7 --admin
+check "--admin on a PR with no .github/ path is refused (9)" 9 nomerge
+grep -q 'merge queue.*--break-glass\|--break-glass' <<<"$out" || { echo "FAIL: --admin refusal names the queue and --break-glass: $out" >&2; fail=1; }
+grep -q '^wait' "$FAKE_DIR/calls" 2>/dev/null && { echo "FAIL: the refusal comes before any wait" >&2; fail=1; }
+setup false "$green"
+printf 'docs/.github/x.md\nhack/github/y\n' >"$FAKE_DIR/files"
+run 7 --admin
+check "--admin: a path that only contains .github/ is not under .github/" 9 nomerge
+setup false "$green"
+rm "$FAKE_DIR/files"
+run 7 --admin
+check "--admin with an unreadable file list is a tool failure (2)" 2 nomerge
+setup false "$green"
+: >"$FAKE_DIR/files"
+run 7 --admin
+check "--admin with an empty file list is a tool failure (2)" 2 nomerge
+# --jump: the front of the queue through GraphQL, pinned to the head; needs the queue rule
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":1,"state":"QUEUED"}}}}}' >"$FAKE_DIR/queue"
+run 7 --jump
+check "--jump enqueues through GraphQL and runs gh pr merge never" 0 nomerge
+grep -q 'api graphql -f query=mutation.*enqueuePullRequest.*jump: true.*-f id=PR_node7 -f oid=abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: --jump mutation with the node id and the head oid" >&2; fail=1; }
+grep -q 'added to the merge queue' <<<"$out" || { echo "FAIL: --jump says queued: $out" >&2; fail=1; }
+grep -q 'Jumped to the front' "$FAKE_DIR/calls" || { echo "FAIL: --jump comment" >&2; fail=1; }
 setup false "$green"
 echo false >"$FAKE_DIR/rules"
-NEEDS_RC=0 run 7 --admin
-grep -q 'skips the merge queue' <<<"$out" && { echo "FAIL: no queue: no admin warning" >&2; fail=1; }
+run 7 --jump
+check "--jump without a queue rule is refused (2)" 2 nomerge
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+JUMP_FAILS=1 run 7 --jump
+check "--jump: a failing mutation fails" 1 nomerge
+setup false "$green"
+run 7 --jump --admin
+check "--jump and --admin are exclusive (64)" 64 nomerge
+# --e2e: the label before the enqueue; too late once queued
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+run 7 --e2e
+check "--e2e labels, then enqueues" 0 merge
+grep -q '^gh pr edit 7 --add-label e2e' "$FAKE_DIR/calls" || { echo "FAIL: --e2e adds the label" >&2; fail=1; }
+setup false "$green"
+echo true >"$FAKE_DIR/rules"
+echo '{"data":{"repository":{"pullRequest":{"isInMergeQueue":true,"mergeQueueEntry":{"position":1,"state":"QUEUED"}}}}}' >"$FAKE_DIR/queue"
+run 7 --e2e
+check "--e2e on a queued PR is refused (2): the label is read when the entry is built" 2 nomerge
+grep -q 'Remove the PR from the queue' <<<"$out" || { echo "FAIL: --e2e says how: $out" >&2; fail=1; }
+setup false "$green"
+run 7 --e2e --admin
+check "--e2e with --admin is a usage error" 64 nomerge
+# --break-glass: needs a reason and --approved-at, runs the review gate, merges with --admin, opens the issue
+setup false "$green"
+run 7 --break-glass "queue down" 
+check "--break-glass without --approved-at is a usage error (64)" 64 nomerge
+setup false "$green"
+run 7 --break-glass "" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass with an empty reason is a usage error (64)" 64 nomerge
+setup false "$green"
+printf 'hack/x.sh\n' >"$FAKE_DIR/files"
+run 7 --break-glass "GitHub merge queue outage" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass merges a PR with no .github/ path" 0 merge
+grep -q -- '--merge --admin --match-head-commit abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: break glass merges with --admin" >&2; fail=1; }
+grep -q '^review EVENT=pull_request PR=7' "$FAKE_DIR/calls" || { echo "FAIL: break glass runs the review gate" >&2; fail=1; }
+grep -q '^gh issue create --title break-glass: PR 7 merged without the merge queue (abc1234)' "$FAKE_DIR/calls" || { echo "FAIL: break glass opens the issue" >&2; fail=1; }
+grep -q -- ' --label break-glass$' "$FAKE_DIR/calls" || { echo "FAIL: ... labelled break-glass" >&2; fail=1; }
+grep -q 'GitHub merge queue outage' "$FAKE_DIR/calls" || { echo "FAIL: the reason is recorded" >&2; fail=1; }
+grep -q 'BREAK GLASS: GitHub merge queue outage' "$FAKE_DIR/calls" || { echo "FAIL: the PR comment says break glass" >&2; fail=1; }
+setup false "$green"
+REVIEW_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass still needs the review verdict (9)" 9 nomerge
+setup false "$green"
+WAIT_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a failed pr-wait --checks is a warning, not a stop" 0 merge
+grep -q 'WARNING: pr-wait.sh --checks exited 1' <<<"$out" || { echo "FAIL: break glass warns about the wait: $out" >&2; fail=1; }
+grep -q 'Checks not green at merge: pr-wait.sh --checks exited 1' "$FAKE_DIR/calls" || { echo "FAIL: the warning is in the break-glass issue" >&2; fail=1; }
+grep -q '^gh pr comment .*Checks not green when merged: pr-wait.sh --checks exited 1' "$FAKE_DIR/calls" || { echo "FAIL: the warning is in the PR comment" >&2; fail=1; }
+setup false "$(r go 2026-11-01T10:00:00Z failure)"
+run 7 --break-glass "runners down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: red or missing required contexts are a warning too" 0 merge
+grep -q 'Checks not green at merge: .*required context(s) not green' "$FAKE_DIR/calls" || { echo "FAIL: not-green contexts are in the issue" >&2; fail=1; }
+setup false "$green"
+COMMENT_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a failed PR comment is a warning, the merge stands" 0 merge
+grep -q '^gh issue create' "$FAKE_DIR/calls" || { echo "FAIL: the issue is opened though the comment failed" >&2; fail=1; }
+setup false "$green"
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+if [ "$(grep -n '^gh issue create' "$FAKE_DIR/calls" | head -1 | cut -d: -f1)" -lt "$(grep -n '^gh pr comment' "$FAKE_DIR/calls" | head -1 | cut -d: -f1)" ]; then :; else echo "FAIL: the issue comes before the comment" >&2; fail=1; fi
+setup false "$green"
+WAIT_RC=3 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a closed PR (pr-wait 3) still stops" 3 nomerge
+setup false "$green"
+WAIT_RC=5 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a draft (pr-wait 5) still stops" 5 nomerge
+setup false "$green"
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+grep -q 'Checks not green at merge: none' "$FAKE_DIR/calls" || { echo "FAIL: a clean break glass says none" >&2; fail=1; }
+setup false "$green"
+ISSUE_NOLABEL_FAILS=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass: a missing label does not stop the merge or the issue" 0 merge
+[ "$(grep -c '^gh issue create' "$FAKE_DIR/calls")" = 2 ] || { echo "FAIL: the unlabelled retry opens the issue" >&2; fail=1; }
+setup false "$green"
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z --admin
+check "--break-glass and --admin are exclusive (64)" 64 nomerge
 setup false "$green"
 echo false >"$FAKE_DIR/rules"
 run 7
@@ -210,21 +343,6 @@ check "pr-wait failing stops the merge" 1 nomerge
 setup false "$green"
 run 7 8
 check "usage" 64 nomerge
-
-# 1. the e2e decision fails closed
-setup false "$green"
-rm "$FAKE_DIR/files"
-NEEDS_RC=1 run 7
-check "an unreadable file list still merges, but requires e2e" 0 merge
-grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: unreadable file list requires e2e" >&2; fail=1; }
-setup false "$green"
-: >"$FAKE_DIR/files"
-NEEDS_RC=1 run 7
-grep -q '^wait 7 --checks --require e2e' "$FAKE_DIR/calls" || { echo "FAIL: empty file list requires e2e" >&2; fail=1; }
-setup false "$green"
-NEEDS_RC=1 run 7
-grep -q 'pulls/7/files --paginate' "$FAKE_DIR/calls" || { echo "FAIL: file list is paginated" >&2; fail=1; }
-grep -q -- '--require' "$FAKE_DIR/calls" && { echo "FAIL: a not-needed change adds no --require" >&2; fail=1; }
 
 # 2. early exit when no longer OPEN; --auto wording
 setup false "$green"
@@ -371,16 +489,16 @@ grep -q 'NOT GREEN go (missing)' <<<"$out" || { echo "FAIL: recorded: go missing
 grep -q 'NOT GREEN dco' <<<"$out" && { echo "FAIL: recorded: dco is green" >&2; fail=1; }
 # the same answer read as a draft PR: the draft run counts and its red go is named
 rows=$(jq -c '[.check_runs[] | {name, status: (.status|ascii_upcase), conclusion: ((.conclusion // "")|ascii_upcase), startedAt: .started_at, completedAt: .completed_at, detailsUrl: .details_url, workflowName: ""}]' "$fx/check-runs-386-draft-era.json")
-v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true "" go "quick checks" dco)
+v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, display_title, status, conclusion, created_at, run_attempt}]' "$fx/runs-386-draft-era.json")" true go "quick checks" dco)
 [ "$v" = "$(printf 'go\tfailure\t42471681674\nquick checks\tsuccess\t42471681674\ndco\tsuccess\t42471681684')" ] || { echo "FAIL: recorded, draft read: $v" >&2; fail=1; }
 
-# #133: a dispatched e2e-kind run (81) failed, e2e-lab passed, and the PR run's (82) `e2e result` was re-run to green: the
-# re-run keeps its created_at, but GitHub's newest check run per name is green, and so is the verdict.
+# #133, ADR 0105: e2e-kind is judged like any workflow. A dispatched run (81) re-run to green does not outvote the
+# newer PR run (82): the newest run of the workflow decides, so its red `e2e result` is the verdict.
 e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}' "$1" "$2" "$2" "$3"; }
 e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
 e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
-v=$(prv_judge "$e2e_rows" "$e2e_runs" false "quickstart" "e2e result")
-[ "$v" = "$(printf 'e2e result\tsuccess\t81')" ] || { echo "FAIL: e2e result re-run green after a red dispatched run: $v" >&2; fail=1; }
+v=$(prv_judge "$e2e_rows" "$e2e_runs" false "e2e result")
+[ "$v" = "$(printf 'e2e result\tfailure\t82')" ] || { echo "FAIL: the newest e2e-kind run decides, an older run's re-run green does not: $v" >&2; fail=1; }
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
 # review (required_reviewers): it is NOT in the queue (2026-11-07 printed "added to the merge queue" for it).

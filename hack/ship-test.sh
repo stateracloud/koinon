@@ -299,19 +299,20 @@ check "board failure is best effort: exit 0" eq "$rc" 0
 check "board failure warns" has '^board warn$' "$tmp/o10c"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
-# 11. ready, auto-merge refused when the e2e is needed, allowed when not
+# 11. ready, auto-merge (ADR 0105: no e2e refusal; the merge queue runs the e2e when the change needs it)
 reset_state
 w=$(newwork); cd "$w"
 echo e >e.txt
 echo 0 >"$FAKE_NEEDS_RC"
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123
 rc=$(run "$tmp/o11" -m "feat: e" --pr-title "t" --pr-body "$tmp/body.md" --ready --auto-merge)
-check "needs e2e: auto-merge refused, exit 1" eq "$rc" 1
-check "refusal says the e2e must be green" has 'needs the kind e2e' "$tmp/o11"
-check "no gh pr merge when refused" hasnt 'gh pr merge' "$FAKE_LOG"
-check "ready still happened before the refusal" has '^ready$' "$tmp/o11"
+check "needs e2e: auto-merge is allowed, exit 0" eq "$rc" 0
+check "no e2e refusal text" hasnt 'needs the kind e2e' "$tmp/o11"
+check "needs-e2e.sh is not consulted" hasnt 'needs-e2e' "$FAKE_LOG"
+check "gh pr merge --auto --merge for an e2e-relevant change" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 reset_state
 echo 1 >"$FAKE_NEEDS_RC"
-export FAKE_PR_URL=https://example.invalid/o/r/pull/123
 echo e2 >e2.txt
 rc=$(run "$tmp/o11b" -m "feat: e2" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
 check "e2e not needed: exit 0" eq "$rc" 0

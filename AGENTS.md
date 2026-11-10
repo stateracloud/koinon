@@ -30,7 +30,7 @@ Instructions for coding agents working on Koinon.
   `hack/preflight.sh` (the lint-level subset).
   Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
   push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`
-  (in the background) and merge it with `hack/pr-merge.sh <PR> [--admin]` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
+  (in the background) and merge it with `hack/pr-merge.sh <PR>` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous;
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
@@ -38,9 +38,9 @@ Instructions for coding agents working on Koinon.
   before you wait on it with `hack/pr-wait.sh`: a draft runs nothing in CI (its `go` and `web` report
   "draft: not run") and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
-- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
-  `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the head (`e2e result` is red without one).
-  The PR's own run runs the quickstart by itself; you dispatch `gh workflow run e2e-kind.yml --ref <branch>` only to re-run. The merge queue re-runs the quickstart on main plus the PR (#444, ADR 0102). `hack/e2e-remote.sh --local` is not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
+- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
+  main plus the PR is the only e2e proof (ADR 0105); the PR's own run is advisory. The `e2e` label forces
+  it. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
@@ -173,16 +173,14 @@ Lessons that cost time more than once. They apply to humans and agents alike.
 - **OpenShell exec stdin is capped.** More than about 4 MiB of stdin that the command does not read
   makes `exec` exit 74. Code that restores or uploads data through exec must chunk it and have the
   command consume each chunk.
-- **Merging.** The only merge method is a merge commit, and `hack/pr-merge.sh <PR> [--admin]` does
-  it: it refuses a draft, runs `hack/pr-wait.sh --checks` (with `--require e2e` when the change needs
-  the e2e: startup flags, chart Jobs or hooks, anything the e2e expects), reads every required context
-  on the head, then `gh pr merge --merge` and a PR comment. It does not call `claim.sh`: the push to
-  main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the
-  wait or the merge. With the merge queue, enqueue (no `--admin`) a needs-e2e PR: the queue runs the
-  hosted quickstart on main plus the PR, which is the merge evidence, so a main that moved during the
-  lab run costs no re-run. `--admin` skips the queue and that run (#444, ADR 0102). After the
-  independent review of a sensitive-path PR's head, record it with `hack/review-verdict.sh <PR>
-  ready|not-ready <reviewer> <sha>` (the `review` check, ADR 0103; advisory until the ruleset requires it). Details: `docs/dev/ci.md#merging`.
+- **Merging.** The only merge method is a merge commit through the merge queue, and
+  `hack/pr-merge.sh <PR>` does it: it refuses a draft, runs `hack/pr-wait.sh --checks`, reads every
+  required context on the head, then enqueues and comments on the PR. It does not call `claim.sh`: the push to
+  main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the wait or the merge.
+  `--jump` enqueues at the front. `--admin` is for a PR that changes at least one `.github/**` path (owner
+  decision, ADR 0105); an e2e-relevant one also needs a green `quickstart` on its head. `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved; it
+  opens a `break-glass` issue. After the independent review of a sensitive-path PR's head, record it with
+  `hack/review-verdict.sh <PR> ready|not-ready <reviewer> <sha>` (the `review` check, ADR 0103). Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

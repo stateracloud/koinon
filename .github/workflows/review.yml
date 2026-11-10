@@ -70,22 +70,6 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # BOOTSTRAP ONLY, untested on purpose: this fallback exists for the one pull request that adds
-          # hack/review-gate.sh (main has no gate yet). Exit condition: remove it, so a missing gate always
-          # fails, after that pull request merges. TODO(#452)
-          # No gate in the checkout: pass only while main's tip has none either (the pull request that
-          # adds the gate). Once main has it, a checkout without it is wrong: fail.
-          if [[ ! -f hack/review-gate.sh ]]; then
-            tip=$(git ls-remote origin refs/heads/main | cut -f1)
-            if [[ ! $tip =~ ^[0-9a-f]{40}$ ]] || ! git fetch -q --no-tags --depth=1 origin "$tip"; then
-              echo "::error::the checkout has no hack/review-gate.sh and main's tip cannot be read ('$tip')"
-              exit 1
-            fi
-            if git cat-file -e "$tip:hack/review-gate.sh" 2>/dev/null; then
-              echo "::error::the checkout has no hack/review-gate.sh but main (${tip:0:12}) has it; the gate did not run"
-              exit 1
-            fi
-            echo "review: main (${tip:0:12}) has no hack/review-gate.sh yet (the pull request that adds it); nothing to check"
-            exit 0
-          fi
+          # A checkout without the gate fails here (exit 127): main has had hack/review-gate.sh since ADR 0103, so a
+          # missing gate is an error, never a pass (the bootstrap fallback of #452 is gone).
           hack/review-gate.sh

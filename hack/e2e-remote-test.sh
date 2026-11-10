@@ -157,8 +157,7 @@ rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --dry-run >"$tmp/log15" 2>&1) || rc=$?
 check "no mode flag runs the local e2e (git archive plus docker run)" sh -c "test $rc -eq 0 && grep -q 'git archive' '$tmp/log15'"
 
-# 7g. hack/e2e-status.sh on its own (the e2e-lab / go-test-lab commit-status contract that pr-wait and
-# e2e-gate read). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
+# 7g. hack/e2e-status.sh on its own (the e2e-lab / go-test-lab commit-status contract). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh $*" >>"$FAKE_GH_LOG"
