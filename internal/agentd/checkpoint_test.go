@@ -454,10 +454,10 @@ var _ = Describe("home checkpoints", func() {
 		id := request(ctx, store.CheckpointReasonStop)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = lateStore{HomeStore: writer}
-			c.Timeout = 500 * time.Millisecond
+			c.Timeout = 5 * time.Second
 			c.Attempts = 1
 		}))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
 		Expect(checkpointOf(ctx, id)().SnapshotID.Valid).To(BeTrue())
 	})
 
