@@ -13,7 +13,7 @@ installs all of them on a kind cluster. A check in CI keeps this page and that s
 | Prerequisite | Version | Needed for |
 | --- | --- | --- |
 | Kubernetes | 1.30 or newer; tested on 1.37 | Everything. The chart requires 1.30 (`kubeVersion`), where ValidatingAdmissionPolicy v1 is GA. The end-to-end test runs `kindest/node:v1.37.0`. |
-| Agent Sandbox | v1.0.7 | The sandbox objects. The preflight needs a controller image tagged `v1.0.x`. |
+| Agent Sandbox | v1.0.10 | The sandbox objects. The preflight needs a controller image tagged `v1.0.x`. |
 | OpenShell gateway | 0.1.7 | Creating and running sandboxes. |
 | A sandbox RuntimeClass | `kata`, or `runc` on kind | Isolation. The default is `kata` (ADR 0045). |
 | CloudNativePG | 1.30.1 | The database, when `postgres.mode` is `cnpg` (the default). |
@@ -91,8 +91,8 @@ Job does not touch the `dbos` schema and needs no database-level privilege.
 ## Agent Sandbox
 
 ```sh
-curl -fsSL -o agent-sandbox.yaml https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.7/sandbox-with-extensions.yaml
-echo "136c10c9347cb5a6740b351444cae82f404e883c3f520272257ba785f2af0da8  agent-sandbox.yaml" | shasum -a 256 -c -
+curl -fsSL -o agent-sandbox.yaml https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.10/sandbox-with-extensions.yaml
+echo "7cc1eca2fb45844b0ec0c35fc975340dc01af2994301ffa8bf05db1ad1e397ee  agent-sandbox.yaml" | shasum -a 256 -c -
 kubectl apply --server-side -f agent-sandbox.yaml
 kubectl -n agent-sandbox-system rollout status deploy/agent-sandbox-controller --timeout=180s
 ```

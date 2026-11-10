@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Spike S1: single-node kind cluster with Agent Sandbox v1.0.7 and OpenShell 0.1.7
+# Spike S1: single-node kind cluster with Agent Sandbox v1.0.10 and OpenShell 0.1.7
 # (Kubernetes driver, default RuntimeClass `runc`). Prints wall-clock per step.
 # Touches only the context kind-koinon-s1.
 
@@ -15,8 +15,8 @@ CTX="kind-${CLUSTER}"
 # kind v0.33.0 default node image (Kubernetes 1.37.0).
 NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 
-AS_VERSION=v1.0.7
-AS_SHA256=136c10c9347cb5a6740b351444cae82f404e883c3f520272257ba785f2af0da8
+AS_VERSION=v1.0.10
+AS_SHA256=7cc1eca2fb45844b0ec0c35fc975340dc01af2994301ffa8bf05db1ad1e397ee
 AS_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AS_VERSION}/sandbox-with-extensions.yaml"
 
 OS_VERSION=0.1.7
