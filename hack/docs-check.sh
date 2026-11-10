@@ -36,10 +36,11 @@ fail() { echo "FAIL: $*" >&2; failures=$((failures + 1)); }
 ok() { echo "ok: $*"; }
 
 # --update used to rewrite the golden file from the page. The command file is now the source and is
-# edited by hand, so there is nothing to write: --update runs the page-against-file comparison only and
-# fails when a page differs (fix the page, or the file if the commands changed on purpose).
-only_commands=0
-if [[ ${1:-} == --update ]]; then only_commands=1; fi
+# edited by hand, so there is nothing to generate: the flag is an error, not a second mode.
+if [[ ${1:-} == --update ]]; then
+  echo "docs-check: --update is gone, there is nothing to generate. Edit test/e2e/commands/*.e1, then make the docs page match, then run 'make docs-check'." >&2
+  exit 1
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/docs-check.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -89,12 +90,6 @@ parses "$quickcmds"
 parses "$backupcmds"
 same "$quickcmds" "$quickstart"
 same "$backupcmds" "$guide"
-
-if [[ $only_commands -eq 1 ]]; then
-  if [[ $failures -ne 0 ]]; then echo "docs-check: $failures problem(s)" >&2; exit 1; fi
-  echo "docs-check: the docs pages match the command files (--update has nothing to write; edit $cmds by hand)"
-  exit 0
-fi
 
 # 2. run.sh runs exactly the e1 blocks.
 used=$(grep -v '^[[:space:]]*#' test/e2e/run.sh | grep -oE '(\be1 |docs-e1\.sh" run )[a-z0-9-]+' | awk '{print $NF}' | sort -u)

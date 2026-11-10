@@ -68,7 +68,9 @@ E1_DOC=$work/page.md "$e1" script >"$work/page.script"
 if diff -u "$work/file.script" "$work/page.script" >/dev/null; then ok "a page and a command file with the same blocks give the same script"; else bad "page and file scripts differ"; fi
 sed -i.bak 's/echo three/echo THREE/' "$work/page.md"
 E1_DOC=$work/page.md "$e1" script >"$work/page.script"
+if (cd "$(dirname "$e1")/.." && bash hack/docs-check.sh --update >"$work/upd.out" 2>&1); then bad "docs-check --update is an error"; elif grep -q 'there is nothing to generate' "$work/upd.out"; then ok "docs-check --update is an error"; else bad "docs-check --update says why"; fi
 if diff -u "$work/file.script" "$work/page.script" >/dev/null; then bad "a changed command in the page is seen"; else ok "a changed command in the page is seen"; fi
+if E1_DOC=$work/page.md E1_FILE=$work/cmds.e1 E1_WORKDIR=$work "$e1" run second >"$work/run.out" 2>&1 && grep -q '^three$' "$work/run.out"; then ok "run reads the command file even when E1_DOC is set"; else bad "run reads the command file even when E1_DOC is set"; fi
 
 # The checked-in command files: names, and every block is valid shell.
 for f in "$here"/../test/e2e/commands/*.e1; do

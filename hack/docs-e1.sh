@@ -19,7 +19,7 @@
 #                             a one-command block replaces the shell (bash -c), so it can be killed
 #
 # Which text it reads: $E1_FILE (default test/e2e/commands/quickstart.e1), or, when $E1_DOC is set, the
-# `sh e1=<name>` blocks of that docs page (Markdown). Blank lines are not part of a block.
+# `sh e1=<name>` blocks of that docs page (Markdown); `run` ignores $E1_DOC. Blank lines are not part of a block.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -29,6 +29,9 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 FILE=${E1_FILE:-$root/test/e2e/commands/quickstart.e1}
 DOC=${E1_DOC:-}
+# `run` is what the e2e tests call: it always reads the command file, so an exported E1_DOC in the
+# caller's shell cannot make a test run a docs page.
+[[ ${1:-} != run ]] || DOC=
 SRC=${DOC:-$FILE}
 
 # blocks prints "<name>\t<line>" for each command line of each e1 block, in order, and "<name>\t" at
