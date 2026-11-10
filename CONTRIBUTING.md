@@ -20,6 +20,10 @@ list on the pull request's base (`main`), so a pull request cannot widen its own
 your first pull request (a local hook run uses `KOINON_ALLOWED_IDENTITIES` meanwhile) and it counts from
 the next one on. Agent worktrees made by `hack/wt.sh new` also refuse a
 commit under another identity (`hack/git-identity-check.sh install` does it for any worktree).
+The hooks set `core.hooksPath`, which replaces `.git/hooks` in that worktree; they chain to a hook of the
+same name in `.git/hooks` (`pre-commit`, `pre-merge-commit`), so a personal one such as a local gitleaks
+hook still runs. The hooks do not run on `--no-verify`, rebase or cherry-pick; CI checks every commit.
+`hack/ship.sh` ignores `KOINON_ALLOWED_IDENTITIES` and `KOINON_SKIP_IDENTITY_CHECK`.
 
 ## AI-assisted contributions
 
