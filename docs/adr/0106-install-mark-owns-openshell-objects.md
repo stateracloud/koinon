@@ -41,8 +41,9 @@ namespace on another cluster that shares the gateway, or a different namespace o
    unmarked: they are shared, idempotent records. New workspaces are stamped and checked. Profiles are
    re-imported with the mark (it is part of their spec hash). The claim takes several passes, longer while
    runs hold agents; the reconciler gauge `koinon_openshell_unmarked_objects{kind}` (sandbox, provider,
-   profile) says how many objects are still unmarked. It counts from one gateway list per pass (the
-   sandboxes, providers and profiles of the install's own workspaces), not from the objects a pass touched, so
+   profile) says how many objects are still unmarked. It counts from the gateway at most once per resync interval and not on every wake-up (the
+   sandboxes and providers across workspaces, the workspace-scoped profiles of the install's own
+   workspaces), not from the objects a pass touched, so
    held-back, failing, ephemeral and archived `retained` objects are counted. If the list fails the gauge
    keeps its last values and `koinon_openshell_unmarked_objects_stale` is 1 (it is also 1 before the first
    count).

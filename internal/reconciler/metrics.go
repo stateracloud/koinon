@@ -45,7 +45,7 @@ type Metrics struct {
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
 	// UnmarkedObjects counts the OpenShell objects in this install's workspaces without the install
-	// mark, from one gateway list per pass, by kind. UnmarkedStale is 1 until a list has succeeded
+	// mark, from the gateway at most once per resync interval, by kind. UnmarkedStale is 1 until a list has succeeded
 	// completely and after one has failed (the values are then the last good ones).
 	UnmarkedObjects *prometheus.GaugeVec
 	UnmarkedStale   prometheus.Gauge
@@ -84,10 +84,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_agents_waiting_for_gateway_key", Help: "Agents whose sandbox work was held back in the last pass because the gateway does not serve their new key yet.",
 		}),
 		UnmarkedObjects: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell sandboxes, providers and profiles in this install's workspaces without its install mark, from one gateway list per pass, by kind (sandbox, provider or profile). Read with koinon_openshell_unmarked_objects_stale: 0 for every kind and stale 0 means no other install can claim them (ADR 0106).",
+			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell sandboxes, providers and profiles in this install's workspaces without its install mark, from the gateway at most once per resync interval, by kind (sandbox, provider or profile). Read with koinon_openshell_unmarked_objects_stale: 0 for every kind and stale 0 means no other install can claim them (ADR 0106).",
 		}, []string{"kind"}),
 		UnmarkedStale: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects_stale", Help: "1 until the gateway list behind koinon_openshell_unmarked_objects has succeeded completely, and after a pass where it failed (the object gauge then shows the last good values); 0 after a good count.",
+			Name: "koinon_openshell_unmarked_objects_stale", Help: "1 until the gateway count behind koinon_openshell_unmarked_objects has succeeded completely, after a count that failed (the object gauge then shows the last good values), and when ownership is off (no install mark: nothing can be claimed, so nothing is safe); 0 after a good count.",
 		}),
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",

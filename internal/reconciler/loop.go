@@ -24,6 +24,9 @@ const (
 	// passTimeout bounds one pass; Apply may wait for agentgateway's hot reload, which
 	// follows the kubelet's ConfigMap sync (about a minute by default).
 	passTimeout = 5 * time.Minute
+	// unmarkedTimeout bounds the gateway count of unmarked objects, which runs after a pass and not
+	// inside its timeout.
+	unmarkedTimeout = time.Minute
 )
 
 // Run reconciles until ctx ends. Only the replica holding the leader lock reconciles; the
@@ -74,8 +77,9 @@ func (r *Reconciler) lead(ctx context.Context) error {
 
 	for {
 		pctx, cancel := context.WithTimeout(ctx, passTimeout)
-		err := r.ReconcileAll(pctx)
+		err := r.reconcilePass(pctx)
 		cancel()
+		r.observeUnmarkedDue(ctx)
 		if err != nil && ctx.Err() == nil {
 			r.log.Warn("reconcile pass incomplete", "err", err)
 		}

@@ -139,6 +139,14 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(stale()).To(BeZero())
 		})
 
+		It("is not safe while the install has no mark: the gauges read 0 and stale reads 1", func(ctx SpecContext) {
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(Equal(1.0))
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind))).To(BeZero(), kind)
+			}
+		})
+
 		It("counts a sandbox the pass held back or failed on, and keeps the values and sets stale when the list fails", func(ctx SpecContext) {
 			gauge := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind)) }
 			queueRun(ctx, org, user, agent.ID)

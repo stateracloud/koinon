@@ -245,7 +245,7 @@ koinon_openshell_unmarked_objects_stale
 
 The condition is that the first gauge is 0 for each of `kind="sandbox"`, `"provider"` and `"profile"` **and**
 the second is 0. A stale value of 1 means the last count of the gateway failed (or none has run yet), so the
-zeros may be old. The count lists the gateway, so it also covers agents that a pass held back or failed
+zeros may be old. The count runs at most once per resync interval, so after a change wait for one interval before you read it. The count lists the gateway, so it also covers agents that a pass held back or failed
 on, and archived (`retained`) sandboxes. The reconciler claims a retained sandbox only when it recreates it,
 and an archived agent is not reconciled. Unarchive such an agent on the live install first and wait until it
 is recreated with the mark (you can archive it again after that). Delete its sandbox on the gateway only when
@@ -253,6 +253,12 @@ you do not need its home volume: that data is gone. If the gauge is not 0, wait:
 raise `reconciler.maxRecreatesPerPass` (default 4) with a `helm upgrade`, or end the runs that hold
 the agents. Do not delete the sandboxes on the gateway by hand to speed it up: the reconciler recreates
 them, but only on a pass when no run holds the agent, and the home volume is replaced.
+
+The reconciler claims only the objects of agents and orgs that still exist. The objects of a **deleted
+agent or org** are still counted but are never claimed, so the gauge stays above 0 for them. Find them on
+the gateway by the missing `koinon.dev/install` label (list the sandboxes and providers of each `koinon-` workspace on the gateway, and the provider profiles
+that carry no `koinon.dev/install` annotation), check that no live agent uses each one, and delete
+them on the gateway before the drill. Then the gauge can reach 0.
 
 ## What to automate, and what is not covered
 

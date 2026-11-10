@@ -185,13 +185,15 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg     Config
-	log     *slog.Logger
-	pool    *pgxpool.Pool
-	q       *store.Queries
-	backend execution.Backend
-	gw      gateway.ModelGateway
-	secrets SecretStore
+	cfg Config
+	log *slog.Logger
+	// lastUnmarked is when the loop last counted unmarked objects; only the leading loop touches it.
+	lastUnmarked time.Time
+	pool         *pgxpool.Pool
+	q            *store.Queries
+	backend      execution.Backend
+	gw           gateway.ModelGateway
+	secrets      SecretStore
 
 	mu sync.Mutex
 	// wsMu guards the per-pass workspace map, which per-sandbox jobs read concurrently.
@@ -344,7 +346,17 @@ func (w *work) logAttrs() []any {
 
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
 // could not converge; the others are converged regardless.
+//
+// It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
+// runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
+	err := r.reconcilePass(ctx)
+	r.observeUnmarked(ctx)
+	return err
+}
+
+// reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
+func (r *Reconciler) reconcilePass(ctx context.Context) error {
 	start := time.Now()
 	err := r.reconcileAll(ctx)
 	r.m.PassDuration.Observe(time.Since(start).Seconds())
@@ -354,8 +366,20 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	}
 	r.m.Passes.WithLabelValues(result).Inc()
 	r.observeSandboxes(ctx)
-	r.observeUnmarked(ctx)
 	return err
+}
+
+// observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
+// count, so a burst of NOTIFY wake-ups does not list the gateway every time. The count has its own
+// timeout (unmarkedTimeout) and never runs inside the pass's. The gauge keeps its values between counts.
+func (r *Reconciler) observeUnmarkedDue(ctx context.Context) {
+	if !r.lastUnmarked.IsZero() && time.Since(r.lastUnmarked) < r.cfg.ResyncInterval {
+		return
+	}
+	r.lastUnmarked = time.Now()
+	uctx, cancel := context.WithTimeout(ctx, unmarkedTimeout)
+	defer cancel()
+	r.observeUnmarked(uctx)
 }
 
 // observeSandboxes sets the sandboxes gauge from the recorded states. A failed read keeps the
@@ -386,14 +410,15 @@ type unmarkedCounter interface {
 // observeUnmarked sets koinon_openshell_unmarked_objects from one list of the gateway's sandboxes,
 // providers and profiles, whatever this pass did or failed to do (issue 461). A list that fails keeps
 // the previous values and sets koinon_openshell_unmarked_objects_stale to 1; a complete one sets it
-// to 0. Without an install mark nothing is unmarked.
+// to 0. Without an install mark ownership is off, no object can be claimed and nothing is safe: the
+// kinds read 0 and stale reads 1, so the drill condition ("0 and stale 0") is not met.
 func (r *Reconciler) observeUnmarked(ctx context.Context) {
 	c, ok := r.backend.(unmarkedCounter)
 	if !ok || !r.owns() {
 		for _, k := range unmarkedKinds {
 			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
 		}
-		r.m.UnmarkedStale.Set(0)
+		r.m.UnmarkedStale.Set(1)
 		return
 	}
 	counts, err := c.CountUnmarked(ctx)
