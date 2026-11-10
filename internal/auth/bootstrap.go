@@ -272,7 +272,9 @@ func revokeBootstrapSessions(ctx context.Context, pool *pgxpool.Pool, now time.T
 		if err != nil || n == 0 {
 			return err
 		}
-		b.Org(bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n}))
+		// Only the deferred path gets here: the marker tells this event from one of a normal start,
+		// which carries install_event_id.
+		b.Org(bootstrapOrgEvent(org.ID, "org.bootstrap_sessions.revoked", nil, map[string]any{"revoked": n, "installEventDeferred": true}))
 		return nil
 	})
 	if err != nil {

@@ -60,21 +60,33 @@ func CheckInstallWriter(ctx context.Context, db Row) (WriterStatus, error) {
 type InstallWriterCheck struct {
 	DB  Row
 	Log *slog.Logger
-	// state is the last logged state ("" before the first check).
+	// Timeout bounds one check; zero means 5 seconds, as WarnSharedWriterLogin waits.
+	Timeout time.Duration
+	// state is the last state the database answered with ("" before the first answer); an error
+	// does not change it, so ok, error, ok is not a new membership.
 	state string
+	// errLogged is true while the last check failed and said so.
+	errLogged bool
 }
 
-// Check runs the check once and reports the status (the zero status when the database could not be
+// Check runs the check once, waiting at most Timeout, and reports the status (the zero status when the database could not be
 // asked).
 func (c *InstallWriterCheck) Check(ctx context.Context) WriterStatus {
-	s, err := CheckInstallWriter(ctx, c.DB)
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	s, err := CheckInstallWriter(cctx, c.DB)
 	if err != nil {
-		if ctx.Err() == nil && c.state != "error" {
-			c.state = "error"
+		if ctx.Err() == nil && !c.errLogged {
+			c.errLogged = true
 			c.Log.Warn("cannot check koinon-api's install audit writer membership; retrying", "err", err)
 		}
 		return WriterStatus{}
 	}
+	c.errLogged = false
 	state := "ok"
 	switch {
 	case !s.RoleExists:

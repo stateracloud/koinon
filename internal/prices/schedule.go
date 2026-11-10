@@ -42,7 +42,9 @@ func ParseRefreshMode(s string) (RefreshMode, error) {
 
 // SyncSettings records the refresh setting koinon-api started with and audits a change
 // (price.refresh.settings_changed, an install event of system koinon-api:price-refresh). The first
-// start with the default mode (auto) records and audits nothing. A bound looser than the default
+// start with the default mode (auto) records and audits nothing. The row then holds the interval
+// too, with no event: a recorded interval only holds a replica back (Tighter takes the longer one),
+// so it widens nothing (#354). A bound looser than the default
 // never gets here: NewRefresher refuses it. No platform admin is needed.
 func (r *Refresher) SyncSettings(ctx context.Context, mode RefreshMode, interval time.Duration) error {
 	if _, err := ParseRefreshMode(string(mode)); err != nil {
