@@ -140,6 +140,9 @@ jobs:
           NEEDS_E2E="$RUNNER_TEMP/needs-e2e.sh" "$RUNNER_TEMP/e2e-decide.sh"
 
   quickstart:
+    # A dispatch with inputs.commit (hack/e2e-bisect.sh) tests another commit than the one the check run attaches
+    # to, so it must not be named `quickstart`: hack/release-gate.sh reads that name on the main head (#453).
+    name: ${{ inputs.commit != '' && 'quickstart (commit)' || 'quickstart' }}
     needs: decide
     if: needs.decide.outputs.needed == 'true'
     permissions:
