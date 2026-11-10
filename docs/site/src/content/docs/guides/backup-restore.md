@@ -3,12 +3,13 @@ title: Back up and restore
 description: Back up the database and the encryption keys by hand, restore them into a stopped install, and check the result.
 ---
 
-A Koinon install has three parts that must agree after a restore:
+A Koinon install has four parts that must agree after a restore:
 
 | Part | Where it lives | What loses it |
 | --- | --- | --- |
 | The database | Postgres: runs, tasks, the ledger, the `dbos` schema (pending workflows and schedules), and every stored credential as ciphertext | A lost volume, a bad upgrade, a dropped table |
 | The encryption keys | The Secret `koinon-kek` (or `secrets.kek.existingSecret`), or your KMS | A deleted namespace, a new cluster |
+| The install mark | The Secret `koinon-install-mark` (key `token`), made once by the chart's hook Job: it marks the OpenShell objects this install made, so another install on the same gateway leaves them alone | A deleted namespace |
 | The checkpoint bucket | Your S3 bucket: the agents' homes | Nothing in this procedure touches it |
 
 The database alone is not a backup. Provider keys, connection secrets, MCP credentials, trace
@@ -72,6 +73,17 @@ fails on a truncated file:
 ```sh e1=verify-dump
 PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name)
 kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --list < koinon.dump > /dev/null
+```
+
+### 3. The install mark
+
+Export the Secret without its namespace and cluster metadata, so it can be applied elsewhere. It holds
+a random token that is not in the database. You need it only to restore as a replacement (see
+[Restore into a new install](#restore-into-a-new-install)), but it is small and cheap to keep:
+
+```sh
+kubectl -n koinon get secret koinon-install-mark -o json \
+  | jq '{apiVersion, kind, type, metadata: {name: .metadata.name}, data}' > koinon-install-mark-backup.json
 ```
 
 Note the chart version (`helm -n koinon list`). Restore with that version. To restore onto a newer
@@ -252,8 +264,80 @@ To restore into another cluster or namespace, create the namespace and the OpenS
 certificate and install the same chart version with your values, as in the
 [Quickstart](/quickstart/#2-install). Then follow the Restore steps above from step 1. Apply the key
 backup before the first start, if you can: a new install makes its own key Secret on first start,
-and step 3 replaces it with yours. Use the same `postgres.mode`; a `cnpg` install cannot be pointed at
+and step 3 replaces it with yours.
+
+Then decide about the install mark. If the new install **replaces** the old one on the same OpenShell
+gateway, stop the old install first (scale its Deployments to zero or uninstall it). Two running
+installs with the same mark both own the objects, which is the clash this mark prevents (issue 461). Then
+apply the mark backup before step 4 (Start), so the new install owns the sandboxes, providers and
+workspaces the old one made. The pods read the mark from the Secret only when they start; a pod that is
+already running keeps the mark it had until you restart it.
+
+```sh
+kubectl -n koinon apply -f koinon-install-mark-backup.json
+```
+
+If you restore a **copy next to the live install** (a drill), do not apply it. The copy keeps the
+mark its own chart install made, and then it cannot touch the live install's objects. With the live
+mark, the copy would own them and could stop and delete them.
+
+Use the same `postgres.mode` as the install the dump came from; a `cnpg` install cannot be pointed at
 a database restored somewhere else.
+
+### Two installs on one OpenShell gateway
+
+A restored copy that runs next to the live install on the same gateway computes the same sandbox,
+provider and workspace names, because the org and agent IDs are the same. Every OpenShell object Koinon
+makes carries an install mark: a hash of a random token in the Secret `koinon-install-mark`, which the
+chart's hook Job creates once. The token is not in Postgres, so a restored database does not bring it:
+the copy gets its own, whatever its namespace is called and on whatever cluster it runs. A Koinon
+install does not adopt, stop, change, exec in or delete an object that has another install's mark. The
+reconcile of that agent fails with "owned by another install", the agent's row goes to `error` (so
+`koinon-agentd` fails its runs and does not run them in the other install's sandbox), and the live
+install is not touched. The copy cannot run those agents on that gateway: give it its own gateway for a
+drill that needs running sandboxes.
+
+The Secret outlives `helm uninstall` and upgrades. If it is lost (the namespace is deleted), the install
+no longer owns its objects. To take them back, apply the mark you backed up (step 3 of Back up), or
+create `koinon-install-mark` again with the old `token`
+(`installMark.existingSecret` names a Secret you manage), or delete the install's sandboxes, providers
+and workspaces on the gateway so that the reconciler makes them again with the new mark.
+
+Objects made before this mark existed have none, and an unmarked object is open to a second install:
+the copy cannot tell it from its own, and can claim, stop or delete it. The live install marks them
+over several passes after the upgrade (see [Upgrading](../upgrading/#upgrading-to-install-marked-openshell-objects-issue-461)):
+a sandbox is recreated with the mark only when no run holds the agent and within the per-pass recreate
+cap, and a provider that a sandbox still attaches is remade only on the pass after that sandbox is gone.
+One pass is therefore not enough.
+
+Run a copy on the same gateway only when **every sandbox, provider and provider profile of the live
+install carries the mark**. Check it on the live install's reconciler metrics
+([Metrics](../metrics/)):
+
+```promql
+koinon_openshell_unmarked_objects
+koinon_openshell_unmarked_objects_stale
+```
+
+The condition is that the first gauge is 0 for each of `kind="sandbox"`, `"provider"` and `"profile"` **and**
+the second is 0. A stale value of 1 means the last count of the gateway failed (or none has run yet), so the
+zeros may be old. The count runs at most once per resync interval, so after a change wait for one interval before you read it. The count lists the gateway, so it also covers agents that a pass held back or failed
+on, and archived (`retained`) sandboxes. The reconciler claims a retained sandbox only when it recreates it,
+and an archived agent is not reconciled. Unarchive such an agent on the live install first and wait until it
+is recreated with the mark (you can archive it again after that). Delete its sandbox on the gateway only when
+you do not need its home volume: that data is gone. If the gauge is not 0, wait: runs that hold an agent finish, and the next passes recreate those sandboxes. To go faster,
+raise `reconciler.maxRecreatesPerPass` (default 4) with a `helm upgrade`, or end the runs that hold
+the agents. Do not delete the sandboxes on the gateway by hand to speed it up: the reconciler recreates
+them, but only on a pass when no run holds the agent, and the home volume is replaced.
+
+The reconciler claims only the objects of agents and orgs that still exist. The objects of a **deleted
+agent or org** are still counted but are never claimed, so the gauge stays above 0 for them. Find them on
+the gateway by the missing `koinon.dev/install` label. Workspaces are named `kw-<16 hex>`. List the sandboxes
+and providers of each `kw-` workspace that has no `koinon.dev/install` label, and the provider profiles of
+each such workspace that carry no `koinon.dev/install` annotation, and of each `kw-` workspace that carries
+this install's own label. Skip every workspace and object with another install's label: on a shared
+gateway that is the other install's, and you must not delete it. Check that no live agent uses each
+unmarked object, and delete it on the gateway before the drill. Then the gauge can reach 0.
 
 ## What to automate, and what is not covered
 

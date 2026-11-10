@@ -32,6 +32,9 @@ import (
 	"maps"
 	"net"
 	"regexp"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -68,17 +71,23 @@ type Gateway struct {
 	// stable_placeholder: lint reports no support and imports drop the field.
 	NoStablePlaceholder bool
 
-	mu         sync.Mutex
-	seq        int
-	workspaces map[string]*datamodelv1.Workspace
-	profiles   map[key]*openshellv1.ProviderProfile
-	providers  map[key]*datamodelv1.Provider
-	sandboxes  map[key]*openshellv1.Sandbox
-	policies   map[key][]*sandboxv1.SandboxPolicy
-	commands   map[string]Command
-	execs      []*openshellv1.ExecSandboxRequest
-	calls      map[string]int
-	faults     map[string][]error
+	// ListPageSize, when above zero, caps every list at that many items and returns a
+	// next_page_token, so a client's paging loop runs more than once. Zero returns one page.
+	ListPageSize int
+
+	mu sync.Mutex
+	// refuseAttachedDelete makes DeleteProvider fail for a provider a sandbox attaches.
+	refuseAttachedDelete bool
+	seq                  int
+	workspaces           map[string]*datamodelv1.Workspace
+	profiles             map[key]*openshellv1.ProviderProfile
+	providers            map[key]*datamodelv1.Provider
+	sandboxes            map[key]*openshellv1.Sandbox
+	policies             map[key][]*sandboxv1.SandboxPolicy
+	commands             map[string]Command
+	execs                []*openshellv1.ExecSandboxRequest
+	calls                map[string]int
+	faults               map[string][]error
 
 	ssh *sshState
 
@@ -240,6 +249,161 @@ func workspaceOf(sel *datamodelv1.WorkspaceSelector) (string, error) {
 		return "", status.Error(codes.InvalidArgument, "workspace_scope must name one workspace")
 	}
 	return ws, nil
+}
+
+// workspaceFilter turns a request's selector into a match on an object's workspace. The
+// all-workspaces selector matches every workspace.
+func workspaceFilter(sel *datamodelv1.WorkspaceSelector) (func(string) bool, error) {
+	if sel.GetAllWorkspaces() != nil {
+		return func(string) bool { return true }, nil
+	}
+	ws, err := workspaceOf(sel)
+	if err != nil {
+		return nil, err
+	}
+	return func(w string) bool { return w == ws }, nil
+}
+
+// page returns the part of items a request with pageSize and token asks for, and the next token.
+// The gateway's ListPageSize caps it. The token is the offset of the next item.
+func page[T any](g *Gateway, items []T, token string) ([]T, string, error) {
+	if g.ListPageSize <= 0 {
+		return items, "", nil
+	}
+	start := 0
+	if token != "" {
+		n, err := strconv.Atoi(token)
+		if err != nil || n < 0 {
+			return nil, "", status.Error(codes.InvalidArgument, "bad page token")
+		}
+		start = n
+	}
+	start = min(start, len(items))
+	end := min(start+g.ListPageSize, len(items))
+	next := ""
+	if end < len(items) {
+		next = strconv.Itoa(end)
+	}
+	return items[start:end], next, nil
+}
+
+// ListWorkspaces implements openshellv1.OpenShellServer.
+func (g *Gateway) ListWorkspaces(_ context.Context, req *openshellv1.ListWorkspacesRequest) (*openshellv1.ListWorkspacesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListWorkspaces"); err != nil {
+		return nil, err
+	}
+	var all []*datamodelv1.Workspace
+	for _, name := range slices.Sorted(maps.Keys(g.workspaces)) {
+		all = append(all, clone(g.workspaces[name]))
+	}
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListWorkspacesResponse{Workspaces: items, NextPageToken: next}, nil
+}
+
+// ListSandboxes implements openshellv1.OpenShellServer. It takes one workspace or all of them.
+func (g *Gateway) ListSandboxes(_ context.Context, req *openshellv1.ListSandboxesRequest) (*openshellv1.ListSandboxesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListSandboxes"); err != nil {
+		return nil, err
+	}
+	match, err := workspaceFilter(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	var all []*openshellv1.Sandbox
+	for _, k := range sortedKeys(g.sandboxes) {
+		if match(k.workspace) {
+			all = append(all, clone(g.sandboxes[k]))
+		}
+	}
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListSandboxesResponse{Sandboxes: items, NextPageToken: next}, nil
+}
+
+// ListProviders implements openshellv1.OpenShellServer. It takes one workspace or all of them.
+func (g *Gateway) ListProviders(_ context.Context, req *openshellv1.ListProvidersRequest) (*openshellv1.ListProvidersResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListProviders"); err != nil {
+		return nil, err
+	}
+	match, err := workspaceFilter(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	var all []*datamodelv1.Provider
+	for _, k := range sortedKeys(g.providers) {
+		if match(k.workspace) {
+			all = append(all, redacted(g.providers[k]))
+		}
+	}
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListProvidersResponse{Providers: items, NextPageToken: next}, nil
+}
+
+// RefuseAttachedProviderDelete makes DeleteProvider fail with FailedPrecondition for a provider a
+// sandbox still attaches. Whether real OpenShell does this is not confirmed, so the fake does it
+// only when a spec asks, to prove Koinon does not delete an attached provider.
+func (g *Gateway) RefuseAttachedProviderDelete() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.refuseAttachedDelete = true
+}
+
+// AddPlatformProfile adds a built-in platform profile, the kind a real gateway returns next to the
+// workspace's own when it lists a workspace's profiles. It has no install annotation.
+func (g *Gateway) AddPlatformProfile(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.profiles[key{"", id}] = &openshellv1.ProviderProfile{Id: id, Source: "builtin", Scope: "platform"}
+}
+
+// ListProviderProfiles implements openshellv1.OpenShellServer. For a workspace it returns the
+// workspace's profiles and the platform ones, as a real gateway does.
+func (g *Gateway) ListProviderProfiles(_ context.Context, req *openshellv1.ListProviderProfilesRequest) (*openshellv1.ListProviderProfilesResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ListProviderProfiles"); err != nil {
+		return nil, err
+	}
+	ws, err := workspaceOf(req.GetWorkspaceScope())
+	if err != nil {
+		return nil, err
+	}
+	var all []*openshellv1.ProviderProfile
+	for _, k := range sortedKeys(g.profiles) {
+		if k.workspace == ws || k.workspace == "" {
+			all = append(all, clone(g.profiles[k]))
+		}
+	}
+	items, next, err := page(g, all, req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	return &openshellv1.ListProviderProfilesResponse{Profiles: items, NextPageToken: next}, nil
+}
+
+func sortedKeys[V any](m map[key]V) []key {
+	keys := slices.Collect(maps.Keys(m))
+	slices.SortFunc(keys, func(a, b key) int {
+		if a.workspace != b.workspace {
+			return strings.Compare(a.workspace, b.workspace)
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	return keys
 }
 
 // GetWorkspace implements openshellv1.OpenShellServer.
@@ -501,6 +665,13 @@ func (g *Gateway) DeleteProvider(_ context.Context, req *openshellv1.DeleteProvi
 			return &openshellv1.DeleteProviderResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_ALREADY_ABSENT}, nil
 		}
 		return nil, status.Errorf(codes.NotFound, "provider %q not found", req.GetName())
+	}
+	if g.refuseAttachedDelete {
+		for sk, sb := range g.sandboxes {
+			if sk.workspace == k.workspace && slices.Contains(sb.GetSpec().GetProviders(), req.GetName()) {
+				return nil, status.Errorf(codes.FailedPrecondition, "provider %q is attached to sandbox %q", req.GetName(), sk.name)
+			}
+		}
 	}
 	delete(g.providers, k)
 	return &openshellv1.DeleteProviderResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED}, nil

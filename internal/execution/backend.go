@@ -100,6 +100,12 @@ type Provider struct {
 	Config map[string]string
 	// Labels are applied to the provider record.
 	Labels map[string]string
+	// ClaimLegacy lets EnsureProvider claim a record made before the install label existed
+	// (issue 461): labels are immutable, so it deletes the record and creates it again with the
+	// label. Set it only while no sandbox attaches the record (OpenShell may refuse to delete an
+	// attached provider, and a delete would strip a live sandbox of it). Without it, an unlabeled
+	// record is taken as this install's and updated in place.
+	ClaimLegacy bool
 }
 
 // ProviderProfile is the type of a provider: which credentials it holds and where they may

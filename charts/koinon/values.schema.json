@@ -561,6 +561,13 @@
     },
     "restoreHold": {"type": "boolean"},
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
+    "installMark": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {"type": "string"}
+      }
+    },
     "bootstrapAdmin": {
       "type": "object",
       "additionalProperties": false,
