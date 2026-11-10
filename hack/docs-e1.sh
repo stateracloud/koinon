@@ -57,7 +57,10 @@ blocks() {
         if (name in seen) { print "duplicate e1 block: " name > "/dev/stderr"; exit 2 }
         seen[name] = 1; print name "\t"; next
       }
-      name != "" { print name "\t" $0 }
+      name != "" { print name "\t" $0; next }
+      $0 !~ /^[[:space:]]*(#.*)?$/ {
+        print "docs-e1: " FILENAME ":" FNR ": command line before the first # e1=<name> marker" > "/dev/stderr"; exit 2
+      }
     ' "$FILE"
   fi
 }
@@ -66,7 +69,9 @@ names() { blocks | cut -f1 | uniq; }
 
 show() {
   local n=$1 out
-  out=$(blocks | awk -F'\t' -v n="$n" '$1 == n && NF > 1 && $2 != "" { sub(/^[^\t]*\t/, ""); print }')
+  # Split at the first tab only: a command line may start with a tab (a <<-EOF body), and a field
+  # split would read it as an empty second field and drop it.
+  out=$(blocks | awk -v n="$n" '{ p = index($0, "\t"); if (substr($0, 1, p - 1) == n && length($0) > p) print substr($0, p + 1) }')
   [[ -n $out ]] || { echo "docs-e1: no e1 block named $n in $SRC" >&2; exit 1; }
   printf '%s\n' "$out"
 }

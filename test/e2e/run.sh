@@ -102,7 +102,7 @@ cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
-e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart")
+e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart" "E1_FILE=$root/test/e2e/commands/quickstart.e1")
 e1() { "${e1_env[@]}" "$root/hack/docs-e1.sh" run "$1"; }
 
 pids=()

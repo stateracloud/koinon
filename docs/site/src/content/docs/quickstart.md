@@ -365,11 +365,11 @@ The end-to-end test, [`test/e2e/run.sh`](https://github.com/stateracloud/koinon/
 builds a kind cluster and then runs the blocks of
 [`test/e2e/commands/quickstart.e1`](https://github.com/stateracloud/koinon/blob/main/test/e2e/commands/quickstart.e1),
 by name, through [`hack/docs-e1.sh`](https://github.com/stateracloud/koinon/blob/main/hack/docs-e1.sh).
-The page shows the same commands; `make docs-check` compares them. Its `kubectl` and `helm` are wrappers that add the kind context.
+The page shows the same commands; `make docs-check` compares them.
 Three things differ: `values.yaml` holds the kind values with the fake GitHub instead of github.com,
 the provider is the fake model server instead of OpenRouter (the Go suite declares it with
-`model-provider.yaml`; the browser suite adds it on the Providers page, as step 4 does), and the
-wrappers add the kind context.
+`model-provider.yaml`; the browser suite adds it on the Providers page, as step 4 does), and in the
+end-to-end test `kubectl` and `helm` are wrappers that add the kind context.
 
 `make docs-check` runs on every pull request. It fails when:
 

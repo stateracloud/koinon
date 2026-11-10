@@ -50,7 +50,7 @@ trap 'rm -rf "$tmp"' EXIT
 # /dev/fd/N and /dev/stdin, so a pipe into diff fails there as if the files differed.
 same() {
   local file=$1 page=$2
-  E1_FILE=$file hack/docs-e1.sh script >"$tmp/file.script" || { fail "reading the e1 blocks of $file"; return; }
+  env -u E1_DOC E1_FILE="$file" hack/docs-e1.sh script >"$tmp/file.script" || { fail "reading the e1 blocks of $file"; return; }
   E1_DOC=$page hack/docs-e1.sh script >"$tmp/page.script" || { fail "reading the e1 blocks of $page"; return; }
   [[ -s $tmp/file.script ]] || { fail "$file has no e1 blocks"; return; }
   if diff -u "$tmp/file.script" "$tmp/page.script" >"$tmp/page.diff"; then
@@ -64,8 +64,8 @@ same() {
 # parses <command file>: every block is valid shell.
 parses() {
   local file=$1 n
-  for n in $(E1_FILE=$file hack/docs-e1.sh names); do
-    E1_FILE=$file hack/docs-e1.sh show "$n" >"$tmp/$n.sh" || { fail "e1 block $n of $file is empty"; continue; }
+  for n in $(env -u E1_DOC E1_FILE="$file" hack/docs-e1.sh names); do
+    env -u E1_DOC E1_FILE="$file" hack/docs-e1.sh show "$n" >"$tmp/$n.sh" || { fail "e1 block $n of $file is empty"; continue; }
     bash -n "$tmp/$n.sh" || fail "e1 block $n of $file is not valid shell"
   done
 }
@@ -82,9 +82,9 @@ fi
 quickcmds=$cmds/quickstart.e1
 backupcmds=$cmds/backup-restore.e1
 guide=$docs/guides/backup-restore.md
-names=$(E1_FILE=$quickcmds hack/docs-e1.sh names) || { fail "reading the e1 blocks of $quickcmds"; names=""; }
+names=$(env -u E1_DOC E1_FILE="$quickcmds" hack/docs-e1.sh names) || { fail "reading the e1 blocks of $quickcmds"; names=""; }
 [[ -n $names ]] || fail "$quickcmds has no e1 blocks"
-gnames=$(E1_FILE=$backupcmds hack/docs-e1.sh names) || { fail "reading the e1 blocks of $backupcmds"; gnames=""; }
+gnames=$(env -u E1_DOC E1_FILE="$backupcmds" hack/docs-e1.sh names) || { fail "reading the e1 blocks of $backupcmds"; gnames=""; }
 [[ -n $gnames ]] || fail "$backupcmds has no e1 blocks"
 parses "$quickcmds"
 parses "$backupcmds"

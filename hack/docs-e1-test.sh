@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+# An E1_* variable from the caller's shell must not change what these tests read.
+unset E1_DOC E1_FILE E1_WORKDIR
 here=$(cd "$(dirname "$0")" && pwd)
 e1=$here/docs-e1.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/docs-e1-test.XXXXXX")
@@ -43,6 +45,17 @@ if E1_FILE=$work/fails.e1 "$e1" run fails >/dev/null 2>&1; then bad "run stops a
 if E1_FILE=$work/cmds.e1 "$e1" show nope >/dev/null 2>&1; then bad "an unknown block is an error"; else ok "an unknown block is an error"; fi
 printf '# e1=a\necho 1\n# e1=a\necho 2\n' >"$work/dup.e1"
 if E1_FILE=$work/dup.e1 "$e1" names >/dev/null 2>&1; then bad "a duplicate block name is an error"; else ok "a duplicate block name is an error"; fi
+
+# A command line that starts with a tab (a <<-EOF body) is kept byte for byte, in a file and in a page.
+printf '# e1=tabs\ncat <<-EOF\n\tindented\n\t\ttwice\nEOF\n' >"$work/tabs.e1"
+want=$'cat <<-EOF\n\tindented\n\t\ttwice\nEOF'
+is "a tab-leading line survives show" "$want" "$(E1_FILE=$work/tabs.e1 "$e1" show tabs)"
+is "a tab-leading line survives script" $'# e1=tabs\n'"$want" "$(E1_FILE=$work/tabs.e1 "$e1" script)"
+printf '%s\n' '```sh e1=tabs' 'cat <<-EOF' $'\tindented' $'\t\ttwice' EOF '```' >"$work/tabs.md"
+is "a tab-leading line survives show in a page" "$want" "$(E1_DOC=$work/tabs.md "$e1" show tabs)"
+# Command content above the first marker is an error that names the file and the line.
+printf '# header\n\necho stray\n# e1=a\necho 1\n' >"$work/stray.e1"
+if E1_FILE=$work/stray.e1 "$e1" names >/dev/null 2>"$work/stray.err"; then bad "a command before the first marker is an error"; elif grep -q 'stray.e1:3:' "$work/stray.err"; then ok "a command before the first marker is an error"; else bad "the error names the file and line"; fi
 
 # The same blocks in a docs page give the same script as the command file.
 cat >"$work/page.md" <<'X'
