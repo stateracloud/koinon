@@ -16,6 +16,6 @@ string from this table.
 
 `agent-ok` alone does not make an issue pickable: `hack/claim.sh next` also needs the board Status
 **Ready**, which only a human sets, a milestone, and no open blocker. `start-here` (a starter issue
-for a new contributor) and `needs-update` (the branch updater) are not triage labels. `good first
+for a new contributor) is not a triage label. `good first
 issue` and `help wanted` mark issues for outside contributors; there are no comment claims since
 [ADR 0104](../adr/0104-work-claims-reduced-to-the-lock.md).

@@ -11,7 +11,6 @@
 #             (#225, ADR 0094 decision 4) it reads <N> from the queue ref and runs the base's
 #             `check-pr <N>`: the fencing point, a claim another human took while the pull request
 #             waited fails here
-#   (the branch updater lives in updater.yml: its triggers differ from the claim's, see there)
 #
 # No pull_request_target (#463, ADR 0082 amendment): GitHub blocks it by default for public
 # repositories (brownouts from 2026-11-09, permanent 2026-12-02). The `claim` check runs on

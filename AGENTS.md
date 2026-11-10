@@ -35,8 +35,8 @@ Instructions for coding agents working on Koinon.
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
 - CI and e2e (details: `docs/dev/ci.md`). Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`)
-  before you wait on it with `hack/pr-wait.sh`: a draft runs almost nothing (`go` and `web` show red
-  on purpose) and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
+  before you wait on it with `hack/pr-wait.sh`: a draft runs nothing in CI (its `go` and `web` report
+  "draft: not run") and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. A needs-e2e PR needs a green
   `e2e-lab` commit status (an external e2e run that passed on this commit) or a green `quickstart` run on the head (`e2e result` is red without one).
@@ -76,12 +76,9 @@ its claims; the default lane is `main`.
 
 Other rules:
 
-- A PR that conflicts with main while auto-merge is on gets the label `needs-update`: merge
-  `origin/main` yourself (the updater bot never pushes code to your branch). The bot merges `main`
-  into a branch only when the PR has auto-merge on, is not a draft, is green on its current head
-  (every required check of `hack/ci-required.txt` passed, newest run per name; advisory and
-  third-party checks do not count) and is behind `main`; a draft, a red or a running PR is left
-  alone, so sync a draft or red branch yourself when you need it.
+- A branch is merged with `origin/main` only when GitHub reports a conflict (`hack/pr-wait.sh` exit 4,
+  or the merge queue drops the entry, exit 8). There is no updater bot and no `needs-update` label. For an `--admin` merge, merge
+  `origin/main` and wait for green first (it skips the queue, which would have tested on main's tip).
 - Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
   procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc
   (`docs/dev/releasing.md`).
@@ -108,8 +105,9 @@ you start, after `take`:
   <N>`). If an open PR or another human's claim touches the same files with the same behaviour, run
   `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
   sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
-- **Merge `main`, never rebase** a pushed branch. Sync points: session start, before a push after an
-  hour on the branch, before marking ready, and when `needs-update` appears.
+- **Merge `main`, never rebase** a pushed branch. Merge `origin/main` only on a conflict
+  (`pr-wait.sh` exit 4, merge queue exit 8); for an `--admin` merge, merge
+  `origin/main` and wait for green first.
 - **Conflict classes.** Mechanical (generated code, the ADR index, golden files, a migration number):
   regenerate or renumber. Append-site (both sides add lines to one list): keep both and run the
   check for that area. Semantic (the same function or behaviour) with the other human's open or

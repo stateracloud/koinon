@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests for hack/claim.sh (ADR 0082, ADR 0104); hack/pr-updater-test.sh tests the updater.
+# Offline tests for hack/claim.sh (ADR 0082, ADR 0104).
 # Nothing here talks to GitHub: the GitHub-facing functions are stubbed. CI runs this file in the
 # `quick checks` job.
 # shellcheck disable=SC2016,SC2329,SC2030,SC2031,SC2034

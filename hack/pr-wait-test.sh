@@ -167,7 +167,7 @@ CLOSED"
 # 6. merge conflict
 seq_set "$(pr OPEN DIRTY "" "$go_p")"
 run 7 --interval 0
-expect "conflict" 4 "needs-update"
+expect "conflict" 4 "conflict: merge origin/main into the branch, resolve it and push"
 
 # 7. timeout (still pending)
 seq_set "$(pr OPEN BLOCKED "" "$go_p")"

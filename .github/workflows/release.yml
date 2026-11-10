@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
       checks: read
-      statuses: read # go-test-lab on the merged pull request's head (old issue 610)
+      actions: read # the merge queue's ci runs (the queue build is the evidence for what main's push skipped)
       pull-requests: read # the merged pull request's head commit, for the pull-request-only dco check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

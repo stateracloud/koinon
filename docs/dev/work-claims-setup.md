@@ -1,14 +1,14 @@
 # Work claims: settings to apply by hand
 
-[ADR 0082](../adr/0082-work-claims-and-ready-queue.md) adds `hack/claim.sh`, `.github/workflows/claims.yml`, `.github/workflows/updater.yml`
+[ADR 0082](../adr/0082-work-claims-and-ready-queue.md) adds `hack/claim.sh`, `.github/workflows/claims.yml` 
 and `hack/adr-lint.sh`; [ADR 0104](../adr/0104-work-claims-reduced-to-the-lock.md) reduces the claim
 to the lock (no lease, no sweeper, no board or comment mirror). Nothing below is applied by the pull
 request; an organization owner does it in this order. The `release claims` job of `claims.yml` needs
 none of it: it runs on `GITHUB_TOKEN` (job permissions `contents: write`, `issues: write`,
 `pull-requests: read`), makes no board writes and fails red when a permission is missing
-([ADR 0094](../adr/0094-work-claims-on-the-public-repository.md) decision 3). Only `updater.yml`
-(`hack/pr-updater.sh`) still uses the App of step 7 until the native merge queue replaces it
-(decision 4).
+([ADR 0094](../adr/0094-work-claims-on-the-public-repository.md) decision 3). The branch updater
+(`updater.yml`, `hack/pr-updater.sh`) is retired (ADR 0094, amendment): nothing reads the App of step 7
+any more, so step 7 is now a retirement list.
 
 ## 1. Project board (https://github.com/orgs/stateracloud/projects/1)
 
@@ -26,10 +26,9 @@ none of it: it runs on `GITHUB_TOKEN` (job permissions `contents: write`, `issue
 ## 2. Labels
 
 `agent-ok` (a human judged the issue safe for an agent), `start-here` (Ready issues for the
-contributor; `claim.sh next --label start-here`), `needs-update` (set and cleared by the updater
-when a PR conflicts with main; it goes with the updater, decision 4), `good first issue` and
-`help wanted` (GitHub's defaults). `unclaimed-ok` (decision 2) and `claim:stale` (ADR 0104) are
-retired: delete the labels.
+contributor; `claim.sh next --label start-here`), `good first issue` and
+`help wanted` (GitHub's defaults). `unclaimed-ok` (decision 2), `claim:stale` (ADR 0104) and `needs-update` (the retired
+updater) are retired: delete the labels.
 
 ## 3. Milestone
 
@@ -56,16 +55,11 @@ current milestone a due date, and put Ready issues in it.
 - Review on sensitive paths only: in the `pull_request` rule add **Require reviewers**
   (`required_reviewers`): one approval, from a team holding `@procoduck` and `@ovirandunu`, for the
   file patterns printed by `hack/claim.sh sensitive-paths` (the `# Sensitive paths` section of
-  `.github/CODEOWNERS` is the single source; re-run the command whenever it changes). ADR 0104 adds
-  `/hack/pr-updater.sh` to that section (the updater runs with the App token): after it merges, set
-  the ruleset's path list again from `hack/claim.sh sensitive-paths`. Leave the general "required
+  `.github/CODEOWNERS` is the single source; re-run the command whenever it changes). The updater's
+  CODEOWNERS line (`/hack/pr-updater.sh`) is gone with the updater: set the ruleset's path list
+  again from `hack/claim.sh sensitive-paths`. Leave the general "required
   approvals" at 0 and "Require review from Code Owners" off. GitHub does not count the pull request
   author, so the other human approves.
-- Keep `require_extra_approval_for_unattributed_changes: true`? It makes a commit that is not
-  attributed to the pull request's author need an extra approval, and the updater's merge commit
-  is made by the App. After step 7, verify on a throwaway pull request that auto-merge still
-  completes after the bot ran `update-branch`; if it waits for an approval, turn that option off for
-  the `main` ruleset or add the App as the exempted actor.
 - Keep merge commits and auto-merge on; squash and rebase stay off; no branch deletion.
 
 ## 6. People
@@ -74,41 +68,13 @@ current milestone a due date, and put Ready issues in it.
   OpenBao, model budget, home lab or CI box; he uses his own setup.
 - Either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay procoduck's.
 
-## 7. The GitHub App, step by step
+## 7. Retire the GitHub App (the updater is gone)
 
-Only `updater.yml` uses it. Once the native merge queue replaces the updater (ADR 0094 decision 4),
-an organization owner retires it: uninstall and delete the `koinon-bot` App, delete the
-`claims-bot` Environment with its two secrets, delete the stored `.pem`, and delete the
-`needs-update` label. Until then keep the steps below.
+Nothing in `.github/` reads `KOINON_BOT_APP_ID` or `KOINON_BOT_PRIVATE_KEY` any more. An organization
+owner, once `grep -r KOINON_BOT .github` is empty on `main`:
 
-1. As an organization owner: Settings -> Developer settings -> GitHub Apps -> **New GitHub App**.
-2. Name **koinon-bot**. Homepage URL: the repository URL. Webhook: **uncheck Active**.
-3. Repository permissions: **Contents** read and write (claim refs), **Pull requests** read and
-   write (update-branch, labels), **Issues** read and write (assignees, labels, comments),
-   **Workflows** read and write (update-branch merge commits can carry workflow changes),
-   **Checks** read and **Commit statuses** read (the updater reads each PR's check rollup),
-   **Metadata** read. Organization permissions: **Projects** read and write. Nothing else.
-4. "Where can this GitHub App be installed?": **Only on this account**. Create the App.
-5. Note the **App ID** (numeric, top of the App page). Generate a **private key** (a `.pem` downloads).
-6. Install App -> `stateracloud` -> **Only select repositories** -> `koinon` only.
-7. Repository Settings -> Environments -> **New environment** `claims-bot` -> Deployment branches
-   and tags: **Selected branches** -> `main`.
-8. In that environment add secrets **`KOINON_BOT_APP_ID`** (the numeric App ID) and
-   **`KOINON_BOT_PRIVATE_KEY`** (the full PEM, including the BEGIN and END lines). Do not add them
-   as repository secrets. (`actions/create-github-app-token` v3 deprecates `app-id` for `client-id`;
-   the workflow passes `app-id`, so keep the numeric ID, and switch both when the input is removed.)
-9. Store the `.pem` in the secret store you use for such keys and delete the download.
-10. Verify: on a throwaway branch open a pull request and enable auto-merge (`claims` has no sweeper
-    to run by hand since ADR 0104). The updater no longer starts on `auto_merge_enabled`: run the
-    `updater` workflow by hand (workflow_dispatch) or wait for the next scheduled run (up to 30
-    minutes). Then its log must report "no auto-merge pull request is behind main" or update the
-    branch, and its merge commit must show `koinon-bot` as the author.
-
-## Verify the tooling
-
-```sh
-hack/claim.sh mine            # your held claims and their lanes
-hack/claim.sh next            # empty until issues are Ready, agent-ok and in the milestone
-hack/claim.sh sensitive-paths # the patterns for the ruleset
-hack/claim_test.sh            # offline tests
-```
+1. Delete the `claims-bot` Environment and its two secrets (`KOINON_BOT_APP_ID`,
+   `KOINON_BOT_PRIVATE_KEY`): Repository Settings -> Environments.
+2. Uninstall and delete the `koinon-bot` App if nothing else uses it (Settings -> Developer settings
+   -> GitHub Apps), and delete the stored `.pem`.
+3. Delete the `needs-update` label.
