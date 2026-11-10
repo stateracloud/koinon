@@ -109,7 +109,8 @@ including how to point Tilt at a remote cluster of your own.
   say on the issue that you are working on it. The `claim` check fails only when another person
   holds a claim on an issue the pull request closes, or reserved the number of an ADR it adds; it
   names the holder and what to do. There is no updater bot: merge `main` into
-  your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip).
+  your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
+  `origin/main` and wait for green first.
 - ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are

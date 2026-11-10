@@ -122,13 +122,14 @@ tree_of() { git -C "$repo" rev-parse "$1^{tree}"; }
 commit_json() { # commit_json SHA TREE
 	printf '{"sha":"%s","tree":{"sha":"%s"}}' "$1" "$2" >"$tmp/commit-$1.json"
 }
-mq_runs() { # mq_runs SHA... (newest first) -> mq-runs.json
-	local first=1 s
+mq_runs() { # mq_runs SHA... (newest first) -> mq-runs.json (call commit_json first: the run's tree comes from it)
+	local first=1 s tree
 	printf '{"workflow_runs":[' >"$tmp/mq-runs.json"
 	for s in "$@"; do
 		[[ $first == 1 ]] || printf ',' >>"$tmp/mq-runs.json"
 		first=0
-		printf '{"id":1,"head_sha":"%s","event":"merge_group","conclusion":"success"}' "$s" >>"$tmp/mq-runs.json"
+		tree=$(jq -r '.tree.sha // ""' "$tmp/commit-$s.json" 2>/dev/null || true)
+		printf '{"id":1,"head_sha":"%s","event":"merge_group","conclusion":"success","head_commit":{"id":"%s","tree_id":"%s"}}' "$s" "$s" "$tree" >>"$tmp/mq-runs.json"
 	done
 	printf ']}' >>"$tmp/mq-runs.json"
 }

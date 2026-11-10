@@ -77,7 +77,8 @@ its claims; the default lane is `main`.
 Other rules:
 
 - A branch is merged with `origin/main` only when GitHub reports a conflict (`hack/pr-wait.sh` exit 4,
-  or the merge queue drops the entry, exit 8). There is no updater bot and no `needs-update` label.
+  or the merge queue drops the entry, exit 8). There is no updater bot and no `needs-update` label. For an `--admin` merge, merge
+  `origin/main` and wait for green first (it skips the queue, which would have tested on main's tip).
 - Releases: either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay
   procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc
   (`docs/dev/releasing.md`).
@@ -105,7 +106,8 @@ you start, after `take`:
   `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
   sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
 - **Merge `main`, never rebase** a pushed branch. Merge `origin/main` only on a conflict
-  (`pr-wait.sh` exit 4, merge queue exit 8).
+  (`pr-wait.sh` exit 4, merge queue exit 8); for an `--admin` merge, merge
+  `origin/main` and wait for green first.
 - **Conflict classes.** Mechanical (generated code, the ADR index, golden files, a migration number):
   regenerate or renumber. Append-site (both sides add lines to one list): keep both and run the
   check for that area. Semantic (the same function or behaviour) with the other human's open or

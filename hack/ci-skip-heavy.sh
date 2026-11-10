@@ -70,23 +70,18 @@ decide_pull_request() {
 	esac
 }
 
-# queue_head: print the head commit of a successful merge_group `ci` run whose tree is $1 (the newest first).
+# queue_head: print the head commit of a successful merge_group `ci` run whose tree is $1 (the newest first),
+# read from each run's own head_commit.tree_id (one call, no per-commit lookups).
 # Return 1 when there is none, 2 when the runs cannot be listed.
 queue_head() {
-	local want=$1 runs sha tree
-	if ! runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&status=success&per_page=30" \
-		--jq '.workflow_runs[] | select(.conclusion == "success") | .head_sha' 2>/dev/null); then
+	local want=$1 sha
+	if ! sha=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&status=success&per_page=30" \
+		--jq ".workflow_runs[] | select(.conclusion == \"success\" and .head_commit.tree_id == \"$want\") | .head_sha" 2>/dev/null); then
 		return 2
 	fi
-	while IFS= read -r sha; do
-		[[ -n $sha ]] || continue
-		tree=$(gh api "repos/$REPO/git/commits/$sha" --jq .tree.sha 2>/dev/null) || continue
-		if [[ $tree == "$want" ]]; then
-			printf '%s\n' "$sha"
-			return 0
-		fi
-	done <<<"$runs"
-	return 1
+	sha=${sha%%$'\n'*}
+	[[ -n $sha ]] || return 1
+	printf '%s\n' "$sha"
 }
 
 # decide_push: skip when a successful merge_group run (the queue build) tested this very tree.

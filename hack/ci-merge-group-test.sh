@@ -93,8 +93,9 @@ check "e2e-kind.yml: the quickstart job is not limited to pull requests and push
 check "e2e-kind.yml: a queue build is never cancelled" bash -c '
 	grep -q "cancel-in-progress: \${{ github.event_name == .pull_request. }}" "$1"' _ "$wfdir/e2e-kind.yml"
 
-# Every required name reports on a queue build. A required context that no workflow produces on `merge_group` makes
-# the entry wait for the 60-minute timeout. For every name in hack/ci-required.txt (not the advisory ones) plus
+# Every required name reports on a queue build. Only a workflow without a `merge_group` trigger makes the entry wait
+# for the 60-minute timeout; a job skipped by its `if:` reports a skipped (green) check that tests nothing, which is
+# also wrong for a required name, so (b) and (c) catch that. For every name in hack/ci-required.txt (not the advisory ones) plus
 # `review` (ADR 0103): find the job that produces it (its `name:`), then check (a) the workflow listens to
 # `merge_group`, (b) the job's `if:` is not false on merge_group, (c) every job it `needs:` passes (b) too, unless
 # the job runs under always()/!cancelled(). The `if:` forms are a small table (event_name compares, the draft flag,
