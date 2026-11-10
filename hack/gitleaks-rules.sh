@@ -12,7 +12,7 @@
 # hack/gitleaks-rules/export.go.txt in the copy, and keeps only the JSON. Literal strings of the
 # rules that look like keys (allowlist examples and the like) are dropped by the exporter.
 #
-# Updating the rules is a reviewed bump: change GITLEAKS_VERSION (and the CI checksum), run this
+# Updating the rules is a reviewed bump: change GITLEAKS_VERSION (and the CI checksum and GITLEAKS_SRC_SHA256 below), run this
 # script, read the diff, run `go test ./internal/tracing/scrub`, commit both.
 #
 # Usage: hack/gitleaks-rules.sh [--src DIR]   (DIR: an unpacked gitleaks checkout of that version)
@@ -25,6 +25,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=hack/versions.env disable=SC1091
 . "$root/hack/versions.env"
+# sha256 of the v$GITLEAKS_VERSION source archive (github.com/.../archive/refs/tags); bump with GITLEAKS_VERSION.
+GITLEAKS_SRC_SHA256=e90fb266d75837e75894c778bf594ab8e2787f12dce5a62651f21b893eaf9abb
 
 src=""
 while [[ $# -gt 0 ]]; do
@@ -40,9 +42,11 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/gitleaks-rules.XXXXXX")
 trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 
 if [[ -z $src ]]; then
-	curl --silent --show-error --fail --location --retry 3 \
-		"https://github.com/gitleaks/gitleaks/archive/refs/tags/v${GITLEAKS_VERSION}.tar.gz" |
-		tar -xz -C "$work" --strip-components=1
+	"$root/hack/fetch-pinned.sh" \
+		"https://github.com/gitleaks/gitleaks/archive/refs/tags/v${GITLEAKS_VERSION}.tar.gz" \
+		"$GITLEAKS_SRC_SHA256" "$work/src.tar.gz" >&2
+	tar -xz -C "$work" --strip-components=1 -f "$work/src.tar.gz"
+	rm -f "$work/src.tar.gz"
 else
 	cp -R "$src"/. "$work"/
 	chmod -R u+w "$work"
