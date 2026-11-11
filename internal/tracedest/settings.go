@@ -284,7 +284,7 @@ func (s *Service) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, e
 	err := s.pool.QueryRow(ctx, `SELECT concat_ws('|',
 		(SELECT content_ceiling::text || '@' || updated_at::text FROM platform_trace_settings),
 		coalesce((SELECT content_level::text || '/' || platform_copy_level::text || '@' || updated_at::text FROM org_trace_settings WHERE org_id = $1), ''),
-		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
-		coalesce((SELECT config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
+		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || ':' || (admin_disabled_at IS NOT NULL)::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
+		coalesce((SELECT config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || ':' || (admin_disabled_at IS NOT NULL)::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
 	return v, err
 }

@@ -59,3 +59,12 @@ func TestEnableOutwardTargetIsRefusedWhileHeld(t *testing.T) {
 		t.Fatalf("status %d, message %q", got.StatusCode, got.Body.Error.Message)
 	}
 }
+
+// A target an admin switched off answers a Test or an echo check with 409, not 500.
+func TestDisabledTargetIsConflict(t *testing.T) {
+	s := adminapi.New(nil, &catalog.Service{}, &tokens.Service{}, nil, pricing.Embedded())
+	status, e := adminapi.Problem(s, outward.ErrDisabled)
+	if status != http.StatusConflict || e.Error.Message != outward.ErrDisabled.Error() {
+		t.Fatalf("status %d, message %q", status, e.Error.Message)
+	}
+}

@@ -14,3 +14,6 @@ import (
 func SetAuditExporter(s *Server, export func(ctx context.Context, w io.Writer, sc audit.ExportScope, fromSeq int64) error, done func()) {
 	s.exportAudit, s.exportDone = export, done
 }
+
+// Problem exposes the error mapper to the external test package.
+func Problem(s *Server, err error) (int, Error) { return s.problem(err) }

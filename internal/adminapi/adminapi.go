@@ -315,7 +315,7 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, oin.Msg)
 	case errors.Is(err, outward.ErrNotFound):
 		return set(http.StatusNotFound, NotFound, "not found")
-	case errors.Is(err, outward.ErrDeclared):
+	case errors.Is(err, outward.ErrDeclared), errors.Is(err, outward.ErrDisabled):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, restorehold.ErrHeld):
 		return set(http.StatusConflict, Conflict, err.Error())

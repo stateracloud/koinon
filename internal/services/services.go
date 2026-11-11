@@ -325,7 +325,7 @@ func (s *Server) dbError(err error, what string) error {
 	switch {
 	case errors.As(err, &ce):
 		return err
-	case errors.Is(err, restorehold.ErrHeld):
+	case errors.Is(err, restorehold.ErrHeld), errors.Is(err, outward.ErrDisabled):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, pgx.ErrNoRows):
 		return connect.NewError(connect.CodeNotFound, what+" not found")
