@@ -57,3 +57,45 @@ var _ = Describe("kind-config.yaml", func() {
 		}
 	})
 })
+
+// The kind cluster pulls through the local registry and its caches (registry.sh, #45): containerd must
+// read certs.d, and the legacy mirrors form, which turns that default off, must not come back.
+var _ = Describe("kind-config.yaml registry wiring", func() {
+	var raw string
+
+	BeforeEach(func() {
+		b, err := os.ReadFile("kind-config.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		raw = string(b)
+	})
+
+	It("points containerd at /etc/containerd/certs.d", func() {
+		var cfg struct {
+			Patches []string `json:"containerdConfigPatches"`
+		}
+		Expect(yaml.Unmarshal([]byte(raw), &cfg)).To(Succeed())
+		Expect(strings.Join(cfg.Patches, "\n")).To(ContainSubstring(`config_path = "/etc/containerd/certs.d"`))
+	})
+
+	It("never uses the legacy registry.mirrors patch", func() {
+		for _, line := range strings.Split(raw, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			Expect(line).NotTo(ContainSubstring("registry.mirrors"))
+			Expect(line).NotTo(ContainSubstring(".mirrors."))
+		}
+	})
+
+	It("is the registry that registry.sh and the values files name", func() {
+		sh, err := os.ReadFile("registry.sh")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(sh)).To(ContainSubstring("KIND_REGISTRY_PORT:-5001"))
+		for _, f := range []string{"koinon-values.yaml", "fakes.yaml", "../../../hack/dev/values-kind.yaml", "../../drill/topology/kind.yaml"} {
+			b, err := os.ReadFile(f)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).To(ContainSubstring("localhost:5001"), f)
+			Expect(string(b)).NotTo(ContainSubstring("kind.local"), f)
+		}
+	})
+})

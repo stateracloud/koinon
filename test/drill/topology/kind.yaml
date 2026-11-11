@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The drill's topology on kind (ADR 0109): the cluster test/e2e/kind/up.sh makes, the images
-# test/e2e/kind/images.sh loads, a second OpenShell gateway for each install. {run} is the run ID.
+# test/e2e/kind/images.sh pushes to the local registry, a second OpenShell gateway for each install. {run} is the run ID.
 # Each gateway has its own gatewayId, so the workspace namespaces openshell-<gatewayId>-* do not collide.
 # Namespaces must start with koinon-drill-. Releases contain "koinon" so the chart names its objects
 # <release>-api and so on. Checkpoints are on (phase 2): the object store is SeaweedFS (Apache-2.0) in the fakes namespace.
@@ -25,7 +25,7 @@ valuesFile: test/e2e/kind/koinon-values.yaml
 gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart
 gatewayVersion: 0.1.7
 gatewayValues: test/e2e/kind/openshell-values.yaml
-fakeModelImage: kind.local/koinon-fakemodel:e2e
+fakeModelImage: localhost:5001/koinon-fakemodel:e2e
 # SeaweedFS 4.50, Apache-2.0: the S3 server of the checkpoint writer's own test (internal/checkpoint/s3_test.go).
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
 runNowCalls: 3

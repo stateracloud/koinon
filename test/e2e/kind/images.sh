@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The images the kind e2e and the restore drill need, built or pulled and loaded into the kind node:
+# The images the kind e2e and the restore drill need, built or pulled and pushed to the local registry
+# (registry.sh, localhost:5001, #45; the node pulls from it, nothing is `kind load`ed):
 # Koinon's api, reconciler and agentd and the fake model server, fake GitHub and fake MCP server with
 # ko, and the OpenCode flavor with buildx (or pulled from FLAVOR_PULL_REPO). test/e2e/run.sh and
 # test/drill/run.sh call it after kind/up.sh.
 #
-#   CLUSTER=koinon-e1  FLAVOR_CACHE=<dir>  FLAVOR_PULL_REPO=<repo>  FLAVOR_BASE=<ref>@sha256:<digest>
+#   KIND_REGISTRY=localhost:5001  FLAVOR_CACHE=<dir>  FLAVOR_PULL_REPO=<repo>  FLAVOR_BASE=<ref>@sha256:<digest>
 #   KO=<ko binary>  GITHUB_TOKEN (authenticates the flavor build's downloads)
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -14,25 +15,28 @@
 
 set -euo pipefail
 
-CLUSTER=${CLUSTER:-koinon-e1}
+REGISTRY=${KIND_REGISTRY:-localhost:5001}
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
 ts=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 
+curl -fsS --max-time 5 "http://${REGISTRY}/v2/" >/dev/null ||
+  { echo "no registry answers on $REGISTRY; run test/e2e/kind/up.sh (it starts test/e2e/kind/registry.sh)" >&2; exit 1; }
+
 arch=$(go env GOARCH)
-step "Koinon images (ko, linux/$arch) into kind"
+step "Koinon images (ko, linux/$arch) pushed to $REGISTRY"
 # The chart's images are <image.registry>/api, /reconciler and /agentd (#167), so each is built --bare
 # into its own repository; the fakes keep ko's import-path names.
 for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd; do
-  KO_DOCKER_REPO="kind.local/${pair%%:*}" KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --bare --tags e2e \
+  KO_DOCKER_REPO="$REGISTRY/${pair%%:*}" "${KO:-ko}" build --bare --tags e2e \
     --platform "linux/$arch" "${pair#*:}"
 done
-KO_DOCKER_REPO=kind.local KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --base-import-paths --tags e2e \
+KO_DOCKER_REPO=$REGISTRY "${KO:-ko}" build --base-import-paths --tags e2e \
   --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
-echo "-- images: ko build and load (6 binaries): $(( $(date +%s) - ts ))s"
+echo "-- images: ko build and push (6 binaries): $(( $(date +%s) - ts ))s"
 
-step "OpenCode flavor into kind"
+step "OpenCode flavor pushed to $REGISTRY"
 # The flavor image is a pure function of flavors/ (hack/flavor-tag.sh). When CI's flavors job has
 # pushed that tag to FLAVOR_PULL_REPO (GHCR, on main), pull it instead of building: the build is
 # minutes. Anything missing falls back to the build.
@@ -54,7 +58,7 @@ if [[ -n $flavor_tag ]]; then
 fi
 if [[ $pulled == 1 ]]; then
   echo "flavor image $FLAVOR_PULL_REPO:$flavor_tag pulled"
-  docker tag "$FLAVOR_PULL_REPO:$flavor_tag" kind.local/flavors/opencode:e2e
+  docker tag "$FLAVOR_PULL_REPO:$flavor_tag" "$REGISTRY/flavors/opencode:e2e"
 else
   # GITHUB_TOKEN (CI) authenticates the Dockerfile's GitHub release downloads as a BuildKit secret (#145).
   secret=()
@@ -68,7 +72,10 @@ else
   base_args=()
   [[ -z $base_out ]] || mapfile -t base_args <<<"$base_out"
   docker buildx build --load --build-context common=flavors/common "${secret[@]}" "${cache[@]}" "${base_args[@]}" \
-    --tag kind.local/flavors/opencode:e2e flavors/opencode
+    --tag "$REGISTRY/flavors/opencode:e2e" flavors/opencode
 fi
-kind load docker-image --name "$CLUSTER" kind.local/flavors/opencode:e2e
+# Only the layers the registry lacks are sent; on a warm registry this is a few requests.
+push_start=$(date +%s)
+docker push -q "$REGISTRY/flavors/opencode:e2e" >/dev/null
+echo "-- OpenCode flavor push: $(( $(date +%s) - push_start ))s"
 echo "-- OpenCode flavor image: $(( $(date +%s) - ts ))s"

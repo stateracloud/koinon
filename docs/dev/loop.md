@@ -10,7 +10,7 @@ everyone, no configuration) and **remote** (a cluster of your own, configured in
 | | `kind` | `remote` |
 | --- | --- | --- |
 | Context | `kind-koinon-*` (`make dev-kind-up` makes `kind-koinon-dev`) | any context listed under `contexts` in `hack/dev/local.yaml` |
-| Registry | none; ko and `kind load` put images into the node | yours (`registry` in local.yaml); Tilt pushes there |
+| Registry | `localhost:5001`, a local registry that `make dev-kind-up` starts; ko and `docker push` push there | yours (`registry` in local.yaml); Tilt pushes there |
 | Sandbox runtime | `runc` (kind has no VM runtime) | `openshell.runtimeClassName` (for example `kata`) |
 | OpenShell | OpenShell 0.1.7, installed by `make dev-kind-up` | the one already on the cluster (`openshell.*`) |
 | Model | the fake model server (model `repo-helper`) | the provider manifest named by `modelProvider`, or add one in the UI |
@@ -24,8 +24,8 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
 - `koinon-api`, `koinon-reconciler`, `koinon-agentd`: built with ko (`./cmd/...`) on every Go
   change, injected into the chart's pods. Each image also gets the tag `dev`, which the chart uses
   where Tilt cannot inject (the preflight Job's probe pods).
-- `flavor-<name>`: `make flavor-<name>` (tag from `hack/flavor-tag.sh`), then `kind load` or
-  `docker push`. The chart gets that tag, so a flavor change rolls the reconciler. Only `opencode`
+- `flavor-<name>`: `make flavor-<name>` (tag from `hack/flavor-tag.sh`), then `docker push`
+  (to the local registry on kind). The chart gets that tag, so a flavor change rolls the reconciler. Only `opencode`
   exists in v0.1 (ADR 0059): `tilt up -- --flavors=opencode`.
 - `postgres` (CloudNativePG `Cluster` from the chart), `koinon-migrate-install` (`koinon-api
   migrate`), `koinon-preflight`, `koinon-ensure-secrets` (`koinon-api ensure-secrets`: the generated database and
@@ -62,6 +62,35 @@ not kind's defaults, which equal the ranges of many host clusters.
 
 Another name: `DEV_KIND_CLUSTER=koinon-foo make dev-kind-up`
 and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute with a warm Go cache.
+
+### Local registry and cached images (#45)
+
+`make dev-kind-up` and the kind e2e (`test/e2e/kind/up.sh`) start, next to the cluster, with
+`test/e2e/kind/registry.sh`:
+
+- `kind-registry` (`127.0.0.1:5001`): the push target. Koinon's images (ko, the OpenCode flavor, the fakes)
+  are pushed to `localhost:5001` and the node pulls them from it, so a layer the registry already has is
+  not sent again. `kind load` copied every image into every node on every run. The chart's `image.registry`
+  is `localhost:5001` in `hack/dev/values-kind.yaml` and `test/e2e/kind/koinon-values.yaml`; every chart
+  image still goes through `koinon.imageRef`. The ConfigMap `kube-public/local-registry-hosting` (KEP-1755)
+  names it for tools that read it.
+- `kind-proxy-ghcr-io` and `kind-proxy-registry-k8s-io`: pull-through caches of the two hosts the install
+  pulls third-party images from (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies,
+  agentgateway). Each node's containerd (`/etc/containerd/certs.d/<host>/hosts.toml`) asks the cache
+  first and falls back to the upstream, without rewriting the reference: names and digests are
+  the ones production uses, and no admission policy list differs. They are anonymous, on the kind network only,
+  and never hold a credential. `KIND_PROXY_HOSTS="ghcr.io registry.k8s.io docker.io"` changes the list.
+
+The registries outlive the cluster (`make dev-kind-down` keeps them, so the next cluster starts warm);
+`test/e2e/kind/registry.sh stop` removes them and `KIND_PROXY_PURGE=1` also the cached blobs. Running `up.sh`
+again reuses them. The registry port is `KIND_REGISTRY_PORT` (default 5001). The e2e sets the pull policy of
+its images to `Always`, so a reused cluster never runs an older image under the same tag. A flavor changed
+on a reused cluster needs a new tag (the content tag of `hack/flavor-tag.sh` does that).
+
+In CI, `e2e-kind.yml` restores the caches' storage with `actions/cache` (key: a hash of the pin files) and
+`main` saves it; a miss only costs the pulls. `test/e2e/run.sh` prints the seconds of every step (registry,
+kind, each operator, images, push) and `quickstart-timings.md` collects them: compare a run before and after
+on the same machine before quoting a gain.
 
 ## Remote cluster
 

@@ -62,7 +62,7 @@ type Topology struct {
 	FakeModelImage string `yaml:"fakeModelImage" json:"fakeModelImage"`
 	// ObjectStoreImage is the S3 server for home checkpoints (phase 2), pinned by digest: SeaweedFS, Apache-2.0.
 	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
-	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
+	// Registry is the image registry of this topology (empty on kind: images are pushed to the local registry, test/e2e/kind/registry.sh).
 	Registry string `yaml:"registry,omitempty" json:"registry,omitempty"`
 	// StorageClass for the databases; empty is the cluster default.
 	StorageClass string `yaml:"storageClass,omitempty" json:"storageClass,omitempty"`

@@ -43,6 +43,12 @@ t0=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 
+# The push registry and the pull-through caches (#45) outlive the cluster; they start before it so a
+# cache is warm for the first pull, and join the cluster's network once it exists.
+step "local registry and pull-through caches"
+"$here/registry.sh" start
+done_step registry-start
+
 step "kind create cluster $CLUSTER"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
   echo "cluster $CLUSTER exists; reusing it"
@@ -50,6 +56,10 @@ else
   kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --config "$here/kind-config.yaml" --wait 120s
 fi
 done_step kind
+
+step "registry attach"
+"$here/registry.sh" attach "$CLUSTER"
+done_step registry-attach
 
 step "kube-network-policies $KNP_VERSION"
 "$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"

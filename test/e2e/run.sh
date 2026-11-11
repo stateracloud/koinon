@@ -5,7 +5,7 @@
 #
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
-#      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
+#      with buildx, all pushed to the local registry (kind/registry.sh, localhost:5001, #45); the fakes deployed in koinon-e2e-fakes;
 #   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
 #      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site
 #      (stateracloud/koinon-docs) shows the same commands and its CI compares its page with that file. They create the namespace, copy the OpenShell client
@@ -160,13 +160,13 @@ t_all=$(date +%s)
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell"
+  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
   step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
   CLUSTER="$CLUSTER" "$here/kind/images.sh"
-  done_step "Images: ko build and load (6 binaries), OpenCode flavor (pull or buildx) and kind load"
+  done_step "Images: ko build and push (6 binaries), OpenCode flavor (pull or buildx) and push"
 fi
 
 step "fakes ($FAKES)"

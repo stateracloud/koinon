@@ -10,8 +10,16 @@
 # unusual and disjoint from each other. The kube-dns ClusterIP is the 10th address of serviceSubnet
 # (10.250.0.10) and the API server Service the 1st (10.250.0.1); the escape suite's defaults
 # (test/escape/sandbox_test.go) name them, and test/e2e/kind/kindconfig_test.go keeps both in step.
+#
+# containerd reads /etc/containerd/certs.d (the local registry and the pull-through caches of
+# registry.sh, #45). kind's node image already defaults to it; the patch states it. Never the legacy
+# `registry.mirrors` form, which turns that default off.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 networking:
   serviceSubnet: 10.250.0.0/16
   podSubnet: 10.251.0.0/16
