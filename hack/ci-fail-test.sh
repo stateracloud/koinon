@@ -135,4 +135,43 @@ check "nothing failed: no output" test -z "$out"
 run
 check "no argument is a usage error" test "$rc" = 64
 
+# failure classes: every recorded sample under hack/testdata/ci-fail/ names its expected class
+# ("# expect: <category> <retry>" on line 1); the first table row that matches wins, none is unknown.
+samples=0
+for f in "$repo"/hack/testdata/ci-fail/*.log; do
+  samples=$((samples + 1))
+  want=$(sed -n '1s/^# expect: //p' "$f")
+  cp "$f" "$tmp/log-go.txt"
+  run 7 --job go
+  got=$(printf '%s\n' "$out" | sed -n 's/^class=\([a-z]*\) retry=\([a-z]*\)$/\1 \2/p')
+  check "class of $(basename "$f") is $want" test "$got" = "$want"
+done
+check "samples exist" test "$samples" -ge 10
+
+# order matters: the same log gets the other class when the rows swap
+cp "$repo/hack/testdata/ci-fail/order-infra-over-test.log" "$tmp/log-go.txt"
+{
+  printf 'test\tno\t--- FAIL\n'
+  printf 'infra\tyes\tErrImagePull\n'
+} >"$tmp/swapped.tsv"
+CI_FAIL_CLASSES="$tmp/swapped.tsv" run 7 --job go
+check "swapped table: first row wins" has "class=test retry=no"
+printf '# only a comment\n' >"$tmp/empty.tsv"
+CI_FAIL_CLASSES="$tmp/empty.tsv" run 7 --job go
+check "empty table falls back to unknown" has "class=unknown retry=unknown"
+run 7
+check "a status without a run is class unknown" has "class=unknown retry=unknown"
+
+# table shape: three tab separated columns, retry yes|no, every regex compiles
+badrows=0
+while IFS=$'\t' read -r c r re; do
+  case $c in '' | '#'*) continue ;; esac
+  case $r in yes | no) ;; *) badrows=$((badrows + 1)) ;; esac
+  rc=0
+  printf '' | grep -Eq -e "$re" || rc=$?
+  [ "$rc" -le 1 ] || badrows=$((badrows + 1))
+  [ -n "$c" ] && [ -n "$re" ] || badrows=$((badrows + 1))
+done <"$repo/hack/ci-fail-classes.tsv"
+check "class table rows are well formed" test "$badrows" = 0
+
 exit "$fail"

@@ -644,6 +644,17 @@ Limit: on `pull_request` the workflow file is the PR head's, so a PR could edit 
 its own `claim`. `.github/**` needs a CODEOWNERS review and the token is read-only without a secret; a
 ruleset "required workflow" could pin the file, and is a settings change (ADR 0082 amendment).
 
+## Failure classes
+
+`hack/ci-fail.sh <PR|run-id>` prints `class=<category> retry=<yes|no|unknown>` under each failing job
+(grep for `^class=`). The class comes from `hack/ci-fail-classes.tsv`: an ordered table of
+category, retry and regex, where the first row that matches the job log wins and no match is
+`unknown`. Order is the rule: infra rows (DNS, image pull, full disk) sit above `race`, `timeout`,
+`lint`, `build` and `test`, because a broken runner also fails the steps after it. When a failure
+shows as `unknown`, add a row and a recorded log sample under `hack/testdata/ci-fail/` (line 1 is
+`# expect: <category> <retry>`); `hack/ci-fail-test.sh` checks every sample and the table shape.
+`retry=yes` means a plain re-run is a fair first step, not that it is safe to hide the failure.
+
 ## Merging
 
 The only merge method is a merge commit, and the merge queue is the single route to main

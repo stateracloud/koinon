@@ -1,0 +1,9 @@
+# expect: test no
+[FAIL] Reconciler creates a sandbox [It] sizes it
+  Expected
+      <int>: 1
+  to equal
+      <int>: 2
+Ran 12 of 12 Specs in 3.4 seconds
+FAIL! -- 11 Passed | 1 Failed
+##[error]Process completed with exit code 1.

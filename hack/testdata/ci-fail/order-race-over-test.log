@@ -1,0 +1,3 @@
+# expect: race no
+--- FAIL: TestA (0.00s)
+WARNING: DATA RACE

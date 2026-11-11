@@ -6,6 +6,9 @@
 # link, then the useful lines of `gh run view --log-failed` (ANSI codes and timestamps stripped;
 # `--- FAIL`, `[FAIL]`/`[FAILED]` with their Expected/to equal lines, `panic:`, `##[error]`,
 # `FAIL<TAB>pkg` and compiler errors `file.go:12:3:` kept; `go: downloading` dropped).
+# After the link it prints one greppable line `class=<category> retry=<yes|no|unknown>`: the first row
+# of hack/ci-fail-classes.tsv (ordered; CI_FAIL_CLASSES overrides the path) that matches the log, else
+# `class=unknown retry=unknown` so a new failure shows up and the table can grow.
 #
 # Usage: hack/ci-fail.sh <PR|run-id> [--job NAME]
 #   A number of 9 digits or more is a run id, a shorter one a PR number. --job keeps the jobs whose
@@ -54,6 +57,21 @@ filter() {
     awk '!seen[$0]++'
 }
 
+# classify: stdin is the filtered log; prints "<category> <retry>" of the first table row (in table
+# order, not log order) with a matching line, or "unknown unknown".
+classify() {
+  local table=${CI_FAIL_CLASSES:-$(dirname "${BASH_SOURCE[0]}")/ci-fail-classes.tsv} log klass retry re
+  log=$(cat)
+  while IFS=$'\t' read -r klass retry re; do
+    case $klass in '' | '#'*) continue ;; esac
+    if grep -Eq -e "$re" <<<"$log"; then
+      echo "$klass $retry"
+      return 0
+    fi
+  done <"$table"
+  echo "unknown unknown"
+}
+
 useful() { # stdin: filtered log
   grep -E -e '--- FAIL' -e '\[FAIL(ED)?\]' -e 'panic:' -e '##\[error\]' \
     -e '^FAIL([[:space:]]|$)' -e '^[[:space:]]*(Expected|to equal|to be |to match|to contain|to have|to succeed|<[^>]+>:)' \
@@ -84,13 +102,16 @@ while IFS=$'\t' read -r name run job url; do
   echo "job $name"
   if [ "$run" = "-" ]; then
     echo "no GitHub Actions run: $url"
+    echo "class=unknown retry=unknown"
     continue
   fi
   echo "run $url"
   args=(run view "$run" --log-failed)
   [ "$job" = "-" ] || args+=(--job "$job")
   log=$(gh "${args[@]}" 2>&1 | filter) || true
-  out=$(useful <<<"$log" | head -n 28) || true
+  read -r cls retry <<<"$(classify <<<"$log")"
+  echo "class=$cls retry=$retry"
+  out=$(useful <<<"$log" | head -n 27) || true
   if [ -z "$out" ]; then
     out=$(printf '%s\n' "$log" | tail -n 10)
   fi

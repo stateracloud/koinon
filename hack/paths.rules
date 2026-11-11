@@ -52,6 +52,8 @@ except go ^\.claude/
 # few scripts they call are listed in `keep`. The script tests run in the `scripts` job.
 except go ^hack/[^/]+\.sh$
 except go ^hack/hooks/
+except go ^hack/ci-fail-classes\.tsv$
+except go ^hack/testdata/ci-fail/
 except go ^hack/chart-check\.d/
 # The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
 # wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
