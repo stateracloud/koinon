@@ -1,6 +1,6 @@
 # 0079. Dependency cooldown: three days everywhere, and a checked fast path for security fixes
 
-- Status: Accepted
+- Status: Accepted; amended by [0112](0112-harness-definitions.md) and [0113](0113-agent-package-access.md)
 - Date: 2026-10-29
 - Amends: [0052](0052-opencode-v2-flavor.md) (the "two-week minimum age" mentioned in the 2026-10-28 amendment)
 - Relates to: [0049](0049-v01-scope-decisions.md), [0061](0061-image-pull-secrets-and-registry-mirrors.md), [0077](0077-pinned-openshell-and-installer.md)
@@ -253,3 +253,10 @@ check on `PNPM_VERSION` is its control, and the image's installs of `web/` then 
 - Docker, "Trivy supply chain compromise: what Docker Hub users should know" (2026-03)
 - CISA alert on the npm supply-chain compromise (Shai-Hulud), 2025-09-23
 - Go proposal golang/go#76485
+
+## Amendment (2026-11-11)
+
+- [0112](0112-harness-definitions.md), decision 13: the three-day minimum age also applies to the npm package of a
+  harness definition, on by default; a platform admin can turn it off or waive one version.
+- [0113](0113-agent-package-access.md), decision 8: what agents install in a sandbox gets the same three days through
+  each package manager's native setting, as an advisory default that the agent can change.

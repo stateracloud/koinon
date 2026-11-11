@@ -32,9 +32,9 @@ are in [0046](0046-adr-conventions.md).
 | [0010](0010-eventing.md) | Eventing: the ticket board is the queue | Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md) |
 | [0011](0011-agent-to-agent.md) | Agent-to-agent: A2A, persisted as tickets | Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md) |
 | [0012](0012-cross-org-sharing.md) | Cross-org sharing through links with exposure profiles | Accepted |
-| [0013](0013-model-access.md) | Model access through one gateway with hierarchical budgets | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md) and 2026-10-30 (below) |
+| [0013](0013-model-access.md) | Model access through one gateway with hierarchical budgets | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md), [0114](0114-model-credentials-by-type.md) and 2026-10-30 (below) |
 | [0014](0014-mcp-and-tools.md) | MCP and tools: shared servers outside sandboxes, one progressive endpoint per agent | Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md) and [0057](0057-mcp-servers.md) |
-| [0015](0015-agent-environment-and-browser.md) | Agent environment and browser | Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) |
+| [0015](0015-agent-environment-and-browser.md) | Agent environment and browser | Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) and [0113](0113-agent-package-access.md) |
 | [0016](0016-harness-and-deployment.md) | Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster | Accepted |
 | [0017](0017-board-and-chat-interaction-model.md) | Board and chat are two views of one ticket | Superseded by [0055](0055-chat-as-its-own-object.md) and [0065](0065-work-model-tasks-inbox.md) |
 | [0018](0018-v1-screens.md) | v1 screens and automatic personal orgs | Accepted |
@@ -54,7 +54,7 @@ are in [0046](0046-adr-conventions.md).
 | [0032](0032-agent-home-checkpoints.md) | Agent home on a PVC, checkpointed incrementally to object storage | Accepted |
 | [0033](0033-file-based-memory.md) | File-based, scoped memory stores | Accepted |
 | [0034](0034-project-identity.md) | Repository, module path, domain and API groups | Accepted; amended 2026-10-26 (below) |
-| [0035](0035-v01-flavors.md) | v0.1 flavors: OpenCode, Hermes and pi over ACP | Accepted; amended by [0059](0059-v01-opencode-only.md) |
+| [0035](0035-v01-flavors.md) | v0.1 flavors: OpenCode, Hermes and pi over ACP | Accepted; amended by [0059](0059-v01-opencode-only.md) and [0112](0112-harness-definitions.md) |
 | [0036](0036-v01-demo.md) | v0.1 demo: a 15-minute quickstart ending in one approved GitHub action | Accepted |
 | [0037](0037-tooling.md) | Tooling: goose, Starlight, ACP Go SDK, Tilt | Accepted; the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md) |
 | [0038](0038-governance.md) | Governance: BDFL with a written path to maintainership | Accepted |
@@ -63,7 +63,7 @@ are in [0046](0046-adr-conventions.md).
 | [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted; amended 2026-10-30 (below) |
 | [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md) |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
-| [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted; amended 2026-11-11 (below) |
+| [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md) |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md) |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted; amended 2026-10-26 (below) |
@@ -78,7 +78,7 @@ are in [0046](0046-adr-conventions.md).
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md) |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
-| [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
+| [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted; amended by [0112](0112-harness-definitions.md) |
 | [0060](0060-migrations-as-a-job.md) | Migrations run as a Job, not on start; an Argo CD Sync hook under Argo | Accepted |
 | [0061](0061-image-pull-secrets-and-registry-mirrors.md) | Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes | Accepted |
 | [0062](0062-code-host-connectors.md) | Code-host connectors: one interface per provider, capabilities as data | Accepted |
@@ -98,8 +98,8 @@ are in [0046](0046-adr-conventions.md).
 | [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0078](0078-sandbox-observer.md) | Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready | Accepted (delivery in rc.7) |
-| [0079](0079-dependency-cooldown.md) | Dependency cooldown: three days everywhere, and a checked fast path for security fixes | Accepted |
-| [0080](0080-tool-set-matches-egress-and-escape-hosts.md) | The tool set matches the sandbox's egress, and escape cases observe proxy decisions | Accepted |
+| [0079](0079-dependency-cooldown.md) | Dependency cooldown: three days everywhere, and a checked fast path for security fixes | Accepted; amended by [0112](0112-harness-definitions.md) and [0113](0113-agent-package-access.md) |
+| [0080](0080-tool-set-matches-egress-and-escape-hosts.md) | The tool set matches the sandbox's egress, and escape cases observe proxy decisions | Accepted; amended by [0113](0113-agent-package-access.md) |
 | [0081](0081-run-limits.md) | Run limits: model requests, spend and time; tokens are reported, not enforced | Accepted |
 | [0082](0082-work-claims-and-ready-queue.md) | Work claims and the ready queue: a claim branch is the lock, the board is the queue | Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`); decision 9 (approval on sensitive paths) amended by [0103](0103-recorded-review-verdict-check.md) once the owner's ruleset step is done; 0103 itself superseded 2026-11-11 (#546: the check is removed) |
 | [0083](0083-sandbox-resources.md) | Sandbox resources: template defaults, platform bounds, requests and limits | Accepted |
@@ -130,3 +130,6 @@ are in [0046](0046-adr-conventions.md).
 | [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted |
 | [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, |
 | [0111](0111-ci-requirements.md) | CI requirements | Accepted |
+| [0112](0112-harness-definitions.md) | Harness definitions: any harness that speaks ACP, described as data | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
+| [0113](0113-agent-package-access.md) | Agent package access: straight to allow-listed registries, in four levels | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release |
+| [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |

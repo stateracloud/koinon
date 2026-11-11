@@ -1,6 +1,6 @@
 # 0015. Agent environment and browser
 
-- Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md)
+- Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) and [0113](0113-agent-package-access.md)
 - Date: 2026-10-21
 - Decision: [design.md#15](../design.md)
 
@@ -64,6 +64,15 @@ device-flow login) follow the same rules as the browser profile:
   `ghcr.io/anomalyco/opencode`. https://github.com/NVIDIA/OpenShell
 - 2026-10-21: OpenShell placeholder rewriting does not cover cookies.
   https://github.com/NVIDIA/OpenShell (docs/how-it-works/providers/overview.mdx)
+
+## Amendment (2026-11-11)
+
+[0113](0113-agent-package-access.md) changes how self-installs reach packages. Agents install straight from
+allow-listed registries, read-only, with any registry login injected by OpenShell; Koinon runs no
+pull-through cache. A proxy behind the registry connection is optional. Access comes in four levels per
+agent. The first open question above (which cache product) is closed; the second (how the network policy
+names the many installing programs) is that ADR's pending spike. `environment.lock` and the promotion of
+common tools are not changed here.
 
 ## Links
 

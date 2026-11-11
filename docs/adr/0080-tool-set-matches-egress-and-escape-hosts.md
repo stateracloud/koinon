@@ -1,6 +1,6 @@
 # 0080. The tool set matches the sandbox's egress, and escape cases observe proxy decisions
 
-- Status: Accepted
+- Status: Accepted; amended by [0113](0113-agent-package-access.md)
 - Date: 2026-10-29
 - Relates to: [0025](0025-testing-strategy.md), [0045](0045-openshell-hardening-defaults.md), [0052](0052-opencode-v2-flavor.md), [0069](0069-native-model-formats.md), [0075](0075-isolation-tiers.md)
 
@@ -82,3 +82,10 @@ kind and CI runs still skip OpenShell cases.
 - OpenShell always blocks loopback and link-local targets, so `localhost` cannot reach a stand-in
   and is not a default. The gateway case needs `KOINON_ESCAPE_GATEWAY_HOST` set explicitly. The 418
   with the real stand-in is still to be confirmed on the home lab.
+
+## Amendment (2026-11-11)
+
+[0113](0113-agent-package-access.md) gives an agent one of four package access levels. The rule of this ADR holds
+for each: a harness's built-in web tools are offered only at the unrestricted level, the one level whose
+sandbox can reach arbitrary hosts. [0112](0112-harness-definitions.md), decision 7, adds that a harness which cannot
+drop its web tools cannot serve an agent below that level.
