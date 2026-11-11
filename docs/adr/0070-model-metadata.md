@@ -1,6 +1,6 @@
 # 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
 
-- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts amended 2026-11-11 (never embedded)
+- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 8 and 9 amended 2026-11-11 (never embedded)
 - Date: 2026-10-28
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
@@ -429,7 +429,7 @@ reproducible.
 ## Amendment (2026-11-11): never embed OpenRouter's catalog; the operator's cluster fetches it
 
 Maintainer decision of 2026-10-31, recorded for issue #68. This amendment replaces the OpenRouter
-parts of decisions 1, 2, 3 and 9. Why: OpenRouter's terms (§12 "Materials", §7 no scraping) give no
+parts of decisions 1, 2, 3, 8 and 9. Why: OpenRouter's terms (§12 "Materials", §7 no scraping) give no
 licence to redistribute its catalog (see Context), and the written answer that decision 9 waited for
 is not needed any more.
 
@@ -443,7 +443,17 @@ is not needed any more.
    OpenRouter and stores the result per install, in the install's database and not in a Koinon
    release. That is an operator's own use of the documented API, which the terms allow.
    - **Refresh: weekly.** The fetch runs again each week while an enabled provider of type
-     `openrouter` exists. It stops when none exists.
+     `openrouter` exists. It stops when none exists. The weekly interval applies to OpenRouter
+     metadata only; decision 8's interval (24h) still applies to models.dev.
+   - **One switch, one parser.** The fetch uses the shared OpenRouter adapter and parser of ADR 0098
+     decision 2.1, not a second client. It follows the three-mode setting of ADR 0098 decision 2
+     (amendment of 2026-11-07), the one flag `--prices-refresh=auto|off|on` (Helm
+     `prices.refresh.enabled`; unset renders `auto`). `auto`, the default, fetches while an enabled
+     `openrouter` provider exists, checked on every tick. `off` makes no request to OpenRouter, so a
+     zero-request install is still one value away, and decision 8's "an install that must not call
+     out relies on the setting being off" holds. `on` fetches whatever providers exist. Decision 8's
+     `modelMetadata.refresh.enabled` (default false) stays the switch for models.dev and the
+     discovery page's live fields; it does not turn the OpenRouter fetch on.
    - **Source record.** Each stored row keeps the fetch time as its source, `openrouter@<fetched_at>`.
      This replaces the commit in the source tag of decision 5.
    - **Review.** The stored catalog feeds discovery and the metadata page. A change in it does not
