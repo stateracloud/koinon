@@ -36,6 +36,7 @@ jobs:
   gate:
     name: gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       checks: read
@@ -56,6 +57,7 @@ jobs:
     name: release
     needs: gate
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: write # creates the draft release
       packages: write # pushes the images and the chart
@@ -164,6 +166,7 @@ jobs:
     needs: [release, flavor]
     if: vars.RELEASE_SIGNING == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write # cosign pushes signatures and attestations next to the images

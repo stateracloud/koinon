@@ -180,6 +180,7 @@ var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
 	store.RunFailureClassPolicy:             runv1alpha1.FailureClass_FAILURE_CLASS_POLICY,
 	store.RunFailureClassFatal:              runv1alpha1.FailureClass_FAILURE_CLASS_FATAL,
 	store.RunFailureClassSandboxUnavailable: runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE,
+	store.RunFailureClassLoop:               runv1alpha1.FailureClass_FAILURE_CLASS_LOOP,
 }
 
 var parkReasonToProto = map[store.RunParkReason]runv1alpha1.ParkReason{

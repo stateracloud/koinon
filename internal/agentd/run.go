@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -131,6 +132,10 @@ type runner struct {
 	turnState atomic.Int32
 
 	replaying atomic.Bool
+
+	// loop reads the harness's stream for a stuck agent (internal/agentd/loopguard); the turn driver
+	// acts on what it finds.
+	loop *loopguard.Detector
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
@@ -256,7 +261,7 @@ const (
 
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
-		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
+		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}), loop: loopguard.New(p.cfg.LoopThresholds),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	// The text the agent types reaches watchers live, batched; only the completed items are stored (old issue 344).
@@ -598,7 +603,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(vc.Instructions, cwd, repos, vc.WebEgress())
+	instructions := instructionsFile(agent.Flavor, vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -1108,7 +1113,7 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 		case turnpolicy.OutCapReached:
 			r.cancelAtTimeLimit(ctx, turn, t.capNote)
 			return
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			reason, class, _ := t.fails()
 			r.fail(ctx, turn, reason, class)
 			return
@@ -1254,6 +1259,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if h.r.replaying.Load() {
 		return nil
 	}
+	h.r.loop.Observe(n)
 	if err := h.r.own.RecordUpdate(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}

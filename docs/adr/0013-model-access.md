@@ -1,6 +1,6 @@
 # 0013. Model access through one gateway with hierarchical budgets
 
-- Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md) and 2026-10-30 (below)
+- Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md), [0114](0114-model-credentials-by-type.md) and 2026-10-30 (below)
 - Date: 2026-10-21
 - Decision: [design.md#13](../design.md)
 
@@ -45,6 +45,13 @@ Three things changed during grilling on 2026-10-21:
 
    Both ship in v0.2, not v1.0. Subscriptions remain personal-only by default, and the
    terms-of-service review still comes first.
+
+   ADR 0044's amendment of 2026-11-11 narrows the second way: it holds only if Koinon's gateway
+   cannot hold the login, and no release is assigned.
+
+   [0114](0114-model-credentials-by-type.md) (2026-11-11) removes the second way: a Copilot token is a gateway
+   credential, personal or organisation-level. Model credentials are handled by type, and model traffic
+   always goes through the gateway.
 
 ```mermaid
 flowchart LR

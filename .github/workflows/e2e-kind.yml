@@ -9,10 +9,10 @@
 #     the entry's own diff against merge_group.base_sha is e2e-relevant, or the pull request carries the `e2e` label
 #     (read when the queue builds the entry; a failed read counts as needed). A red run drops the entry from the
 #     queue. This is the ONE e2e proof for a merge: no PR-head run, dispatched run or `e2e-lab` status counts.
-#   - pull requests: advisory only. The quickstart runs when the full rule (hack/needs-e2e.sh) says the change is
-#     e2e-relevant, the PR changes the e2e's own files or it carries the `e2e` label, so the author sees a red
-#     before a review and a queue slot are spent. A fork PR runs it only with the `e2e` label (the flavor images
-#     on GHCR are private until v0.3). `e2e result` is green on a pull request whatever the quickstart did.
+#   - pull requests (#572, ADR 0105 amended): advisory, and only with the `e2e` label (a fork PR too). No path rule runs
+#     the quickstart on a pull request: the merge queue applies the full rule to every entry and is the only proof,
+#     so an automatic run on the pull request repeated that work. Put the label on when a red before a review and a
+#     queue slot is worth the runner time. `e2e result` is green on a pull request whatever the quickstart did.
 #   - pushes to main: batched (one running, the newest pending) when anything e2e-relevant changed
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
@@ -93,8 +93,9 @@ jobs:
         with:
           fetch-depth: 0 # merge bases, and the last green commit on main
 
-      # The rule asks `go list` which packages the binaries build.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # The rule asks `go list` which packages the binaries build. A pull request reads only its labels (#572).
+      - if: github.event_name != 'pull_request'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -169,8 +170,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
-      # an arbitrary commit, can never write the cache that main's runs read.
+      # Restored everywhere, saved only by a push to main or the nightly schedule on main (below): a pull request, or a
+      # dispatch on an arbitrary commit, can never write the cache that main's runs read.
       - id: e2ego
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -301,7 +302,7 @@ jobs:
         run: test/e2e/kind/down.sh
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build

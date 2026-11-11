@@ -32,6 +32,9 @@ chart smoke
 escape (admission)
 lint-shell
 scripts
+# Runs in the merge queue and on pushes to main only; on a pull request its job-level `if:` skips it, which
+# reports success (#572, #128).
+flavors
 
 # produced by other workflows
 external dco
@@ -41,7 +44,6 @@ external e2e result
 
 # Advisory on purpose: reported, never blocks. Keep this list as short as it is. A job that only
 # runs after a push to main cannot gate a pull request.
-advisory flavors
 advisory flavor-publish
 advisory warm-caches
 advisory warm-caches-web

@@ -1,0 +1,5 @@
+# expect: test no
+=== RUN   TestResolverFallback
+    resolver_test.go:41: lookup nope.invalid: no such host
+--- FAIL: TestResolverFallback (0.00s)
+FAIL

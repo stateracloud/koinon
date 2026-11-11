@@ -100,14 +100,14 @@ existing() { # <regexp>: changed files matching the regexp that still exist
 	while IFS= read -r f; do [[ -e $f ]] && echo "$f"; done < <(grep -E -- "$1" <<<"$FILES" || true)
 }
 
-# triggering <gate>: the changed files that turn the gate on. generate, chart and web are CI
+# triggering <gate>: the changed files that turn the gate on. generate, chart, web, tidy and scripts are CI
 # jobs: the job's rule (hack/paths.rules) decides, so preflight and CI cannot disagree.
 triggering() {
 	local f
 	while IFS= read -r f; do
 		[[ -n $f ]] || continue
 		case $1 in
-		generate | chart | web) paths_job_triggers "$1" "$f" && echo "$f" ;;
+		generate | chart | web | tidy | scripts) paths_job_triggers "$1" "$f" && echo "$f" ;;
 		*) paths_match gate "$1" "$f" && echo "$f" ;;
 		esac
 	done <<<"$FILES"
