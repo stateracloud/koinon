@@ -389,10 +389,13 @@ func (o *Owner) endTask(ctx context.Context, q *store.Queries, outcome store.Run
 // ReasonRunSucceeded is the reason of the status.changed event with which a succeeded run completes
 // its task. RequestSessionRestartForAgent (queries/stuck.sql) matches it literally to tell a task a run
 // completed from one a person completed (#81).
-const ReasonRunSucceeded = "run_succeeded"
+const ReasonRunSucceeded = endReasonPrefix + string(store.RunStateSucceeded)
+
+// endReasonPrefix starts the reason of the status.changed event that ends a task with the run's outcome.
+const endReasonPrefix = "run_"
 
 // endReason is the reason of the status.changed event that ends a task with the run's outcome.
-func endReason(outcome store.RunState) string { return "run_" + string(outcome) }
+func endReason(outcome store.RunState) string { return endReasonPrefix + string(outcome) }
 
 // postReply puts the agent's reply since the run's last park on the task, if it said anything
 // (interim narration before a tool call is left out).

@@ -115,24 +115,28 @@ WHERE t.org_id = @org_id AND t.id = @id
 
 -- name: RequestSessionRestartForAgent :many
 -- Activating a version with "apply to open tasks": every open task of the agent that has a
--- session starts a new one at its next run. A task a run completed counts as open: a chat thread is
--- completed by each turn's run and reopened by the next message, so it is still in use. Its last
--- status.changed event tells it apart from one a person completed: the system's, with the reason
--- run_succeeded (runoutcome.ReasonRunSucceeded). A person's own change, a later reopen or no event at
--- all leaves a completed task alone.
+-- session starts a new one at its next run. A direct-message thread a run completed counts as open:
+-- each turn's run completes it and the next message reopens it, so it is still in use (#81). It is a
+-- thread when a direct message created it (dm_trigger_id, services.DirectMessageTriggerID of the
+-- agent), and a run completed it when its last status.changed event is the system's with the reason
+-- run_succeeded (runoutcome.ReasonRunSucceeded). Any other completed task stays alone: a ticket a run
+-- completed is done (nothing reopens it), and so is a thread a person completed last or that has no
+-- such event.
 UPDATE tasks t
 SET session_restart_pending = true
 WHERE t.org_id = @org_id AND t.agent_id = @agent_id
   AND t.harness_session_id IS NOT NULL AND NOT t.session_restart_pending
   AND (t.state NOT IN ('completed', 'canceled', 'failed')
-    OR (t.state = 'completed' AND EXISTS (
-      SELECT 1 FROM (
-        SELECT e.actor_kind, e.payload FROM task_events e
-        WHERE e.org_id = t.org_id AND e.task_id = t.id AND e.kind = 'status.changed'
-        ORDER BY e.seq DESC
-        LIMIT 1
-      ) last
-      WHERE last.actor_kind = 'system' AND last.payload ->> 'reason' = 'run_succeeded')))
+    OR (t.state = 'completed'
+      AND t.created_by_kind = 'trigger' AND t.created_by_trigger_id = @dm_trigger_id::uuid
+      AND EXISTS (
+        SELECT 1 FROM (
+          SELECT e.actor_kind, e.payload FROM task_events e
+          WHERE e.org_id = t.org_id AND e.task_id = t.id AND e.kind = 'status.changed'
+          ORDER BY e.seq DESC
+          LIMIT 1
+        ) last
+        WHERE last.actor_kind = 'system' AND last.payload ->> 'reason' = 'run_succeeded')))
 RETURNING t.id;
 
 -- name: ListRecentAgentReplies :many

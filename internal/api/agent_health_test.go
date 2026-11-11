@@ -18,7 +18,9 @@ import (
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/savedwork"
+	"github.com/stateracloud/koinon/internal/services"
 )
 
 // Stuck sandboxes and fresh sessions at the service layer (plan item AG1; ADRs 0051, 0054).
@@ -151,6 +153,15 @@ var _ = Describe("agent health and fresh sessions", func() {
 			}
 			return t.GetId()
 		}
+		// thread is open's ticket turned into a direct-message thread of the agent: created by its
+		// direct_message trigger, as services.DirectMessage records it.
+		thread := func(ctx SpecContext, title string, status string) string {
+			id := open(ctx, title, status)
+			_, err := e.pool.Exec(ctx, `UPDATE tasks SET created_by_kind = 'trigger', created_by_user_id = NULL,
+				created_by_trigger_id = $2 WHERE id = $1`, id, services.DirectMessageTriggerID(mustUUID(agent.GetId())))
+			Expect(err).NotTo(HaveOccurred())
+			return id
+		}
 		// statusChanged appends a status.changed event to the task, by actor ("system", as a run that
 		// ends the task writes it, or "user", the person who created the ticket) with an optional reason.
 		statusChanged := func(ctx SpecContext, id, actor, to, reason string) {
@@ -205,17 +216,27 @@ var _ = Describe("agent health and fresh sessions", func() {
 			Expect(after).To(And(ContainSubstring(`"applyToOpenTickets": true`), ContainSubstring(`"ticketsRestarting": 2`)))
 		})
 
-		It("marks a chat thread a run completed and not one a person completed after it (#81)", func(ctx SpecContext) {
-			byRun := open(ctx, "run-completed", "done")
-			statusChanged(ctx, byRun, "system", "completed", "run_succeeded")
-			byPerson := open(ctx, "person-completed", "done")
+		It("marks a chat thread a run completed and no other completed task (#81)", func(ctx SpecContext) {
+			succeeded := runoutcome.ReasonRunSucceeded
+			byRun := thread(ctx, "run-completed", "done")
+			statusChanged(ctx, byRun, "system", "completed", succeeded)
+			byPerson := thread(ctx, "person-completed", "done")
 			statusChanged(ctx, byPerson, "user", "completed", "")
 			// A run completed it, a follow-up reopened it, and then a person closed it.
-			closedLater := open(ctx, "closed-after-run", "done")
-			statusChanged(ctx, closedLater, "system", "completed", "run_succeeded")
+			closedLater := thread(ctx, "closed-after-run", "done")
+			statusChanged(ctx, closedLater, "system", "completed", succeeded)
 			statusChanged(ctx, closedLater, "user", "submitted", "follow_up")
 			statusChanged(ctx, closedLater, "user", "completed", "")
-			failed := open(ctx, "run-failed", "todo")
+			// The reason must be the run's success, and the actor the system.
+			otherReason := thread(ctx, "other-reason", "done")
+			statusChanged(ctx, otherReason, "system", "completed", "run_failed")
+			personWithReason := thread(ctx, "person-with-reason", "done")
+			statusChanged(ctx, personWithReason, "user", "completed", succeeded)
+			noEvent := thread(ctx, "no-event", "done")
+			// A plain ticket a run completed is done: nothing reopens it, so it keeps its session.
+			ticket := open(ctx, "ticket-run-completed", "done")
+			statusChanged(ctx, ticket, "system", "completed", succeeded)
+			failed := thread(ctx, "run-failed", "todo")
 			_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'failed', finished_at = now() WHERE id = $1`, failed)
 			Expect(err).NotTo(HaveOccurred())
 			statusChanged(ctx, failed, "system", "failed", "run_failed")
@@ -223,9 +244,12 @@ var _ = Describe("agent health and fresh sessions", func() {
 			res := reactivate(ctx, true)
 			Expect(res.GetTicketsRestarting()).To(Equal(int32(1)))
 			Expect(pending(ctx, byRun)).To(BeTrue())
-			Expect(pending(ctx, byPerson)).To(BeFalse())
-			Expect(pending(ctx, closedLater)).To(BeFalse())
-			Expect(pending(ctx, failed)).To(BeFalse())
+			for name, id := range map[string]string{
+				"byPerson": byPerson, "closedLater": closedLater, "otherReason": otherReason,
+				"personWithReason": personWithReason, "noEvent": noEvent, "ticket": ticket, "failed": failed,
+			} {
+				Expect(pending(ctx, id)).To(BeFalse(), name)
+			}
 		})
 
 		It("leaves other agents' tickets alone", func(ctx SpecContext) {
