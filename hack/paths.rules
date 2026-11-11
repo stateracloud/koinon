@@ -56,7 +56,7 @@ except go ^hack/chart-check\.d/
 # The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
 # wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
 # (internal/compat) and flavor-tag.sh (test/flavors).
-keep go ^hack/(go-test|golangci-lint|agentgateway-pin|record-compat-fixtures|flavor-tag)\.sh$
+keep go ^hack/(go-test|go-test-host|golangci-lint|agentgateway-pin|record-compat-fixtures|flavor-tag)\.sh$
 keep go \.go$
 
 # --- web ------------------------------------------------------------------------------------------
@@ -178,6 +178,7 @@ script-check - hack/chart-check-test.sh
 script-check - hack/paths-test.sh
 script-check - hack/runner-lint-test.sh
 script-check - hack/runner-lint.sh
+script-check - hack/go-test-host-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh
