@@ -457,7 +457,10 @@ var _ = Describe("home checkpoints", func() {
 			c.Store = lateStore{HomeStore: writer}
 			// The deadline must outlast the real work (connecting to the repository, the backup), and
 			// lateStore holds the result until the deadline: so the spec lasts as long as Timeout.
-			c.Timeout = racescale.D(10 * time.Second)
+			// Not racescaled: with the testing tag (hack/go-test.sh) a repository open takes a few
+			// hundred ms even under -race, 20x less than this, and a scaled 50 s idle was most of
+			// the spec's time (#576).
+			c.Timeout = 10 * time.Second
 			c.Attempts = 1
 		}))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.CheckpointStatusComplete))

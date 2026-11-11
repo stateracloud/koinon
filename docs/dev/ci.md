@@ -389,9 +389,23 @@ together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`,
 checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
 short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
 fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
-a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+a deadline longer than a repository connect. That was 25 s on the runner with scrypt, so the deadline was
+scaled to 50 s and the spec idled for all of it; with the `testing` tag (below) a connect takes a few
+hundred ms under `-race`, and the deadline is a fixed 10 s.
 The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
 processes, and fewer processes would make the job slower for the same risk.
+
+Why a kopia repository was slow under `-race` (#576): kopia derives the repository key from the password
+with scrypt (N=65536) on every open, and a Backup, Restore or Verify opens the repository two or more
+times (connect, open; a new repository also initialises and sets its policy). Scrypt is a tight loop
+over memory, which the race detector slows about 8x: 2 s for a one-byte Verify, 20 s for a seed, on a
+laptop; more on a runner. A longer window would have hidden that. Test binaries build with the `testing`
+tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`, the `go-race-parallel` job and the
+`warm-caches` test compile): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
+makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
+went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
+`make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
+without the tag still passes, only slower (set `GOFLAGS=-tags=testing` yourself for a quick loop).
 
 ## What `ci` runs when
 
