@@ -137,9 +137,11 @@ type Binding struct {
 	now     func() time.Time
 	log     *slog.Logger
 
-	mu    sync.Mutex
-	state State
-	at    time.Time
+	mu      sync.Mutex
+	state   State
+	at      time.Time
+	own     Targets
+	claimed bool
 
 	quarantined *prometheus.CounterVec
 }
@@ -265,6 +267,9 @@ func (b *Binding) Claim(ctx context.Context, own Targets) (State, error) {
 	if !b.Enabled() {
 		return StateSame, nil
 	}
+	b.mu.Lock()
+	b.own = own
+	b.mu.Unlock()
 	if err := b.insertIfAbsent(ctx); err != nil {
 		return "", err
 	}
@@ -272,6 +277,9 @@ func (b *Binding) Claim(ctx context.Context, own Targets) (State, error) {
 	if err != nil {
 		return "", err
 	}
+	b.mu.Lock()
+	b.claimed = true
+	b.mu.Unlock()
 	if !b.held && st == StateSame {
 		if err := b.refreshTargets(ctx, own); err != nil {
 			return st, err
@@ -351,6 +359,15 @@ func (b *Binding) Reassert(ctx context.Context) error {
 	return err
 }
 
+func (b *Binding) isClaimed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.claimed
+}
+
+// ClaimRetryInterval is how often Run retries a claim that failed at start.
+const ClaimRetryInterval = 5 * time.Second
+
 // Run re-asserts the hold every [ReassertInterval] until ctx ends. A process that is not held only
 // refreshes its state (so the gauge follows an adopt-restore); a disabled Binding returns at once.
 func (b *Binding) Run(ctx context.Context) {
@@ -359,12 +376,33 @@ func (b *Binding) Run(ctx context.Context) {
 	}
 	t := time.NewTicker(ReassertInterval)
 	defer t.Stop()
+	retry := time.NewTicker(ClaimRetryInterval)
+	defer retry.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-retry.C:
+			// The start-time claim failed (the migration Job has not created install_binding yet, or the
+			// database was away). Keep trying; until it succeeds Allows fails closed.
+			b.mu.Lock()
+			claimed, own := b.claimed, b.own
+			b.mu.Unlock()
+			if claimed {
+				continue
+			}
+			if _, err := b.Claim(ctx, own); err != nil {
+				if ctx.Err() == nil {
+					b.log.Warn("install binding: claim not yet possible, retrying", "err", err)
+				}
+			} else {
+				b.log.Info("install binding: claimed", "held", b.held)
+			}
 		case <-t.C:
 			var err error
+			if !b.isClaimed() {
+				continue
+			}
 			if b.held {
 				err = b.Reassert(ctx)
 			} else {

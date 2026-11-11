@@ -424,7 +424,8 @@ func serve(ctx context.Context, cfg config) error {
 	if st, err := binding.Claim(ctx, installbinding.Targets{
 		PublicURL: installbinding.Origin(cfg.publicURL), OIDCRedirectURL: installbinding.Origin(cfg.oidcRedirectURL),
 	}); err != nil {
-		return fmt.Errorf("install binding: %w", err)
+		// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+		slog.Warn("install binding: first claim failed, retrying in the background", "err", err)
 	} else if binding.Enabled() {
 		slog.Info("install binding", "state", st, "held", cfg.restoreHold)
 	}

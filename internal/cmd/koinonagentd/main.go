@@ -285,7 +285,8 @@ func run(ctx context.Context, cfg config) error {
 	if cfg.installMark != "" {
 		binding := installbinding.New(db, execution.OwnerID(cfg.installMark), cfg.restoreHold, slog.Default())
 		if _, err := binding.Claim(ctx, installbinding.Targets{}); err != nil {
-			return fmt.Errorf("install binding: %w", err)
+			// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+			slog.Default().Warn("install binding: first claim failed, retrying in the background", "err", err)
 		}
 		binding.StateMetric(reg)
 		safego.Go(ctx, slog.Default(), "install-binding", binding.Run)

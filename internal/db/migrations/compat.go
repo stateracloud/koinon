@@ -24,7 +24,7 @@ import (
 //
 // TestSupportedRange keeps MinSupported inside what the embedded files can say, and
 // TestCompatDeclarations pins min_reader_version to the migrations that write it.
-const MinSupported int64 = 46
+const MinSupported int64 = 69
 
 // Latest returns the highest version among the embedded migration files.
 func Latest() (int64, error) {
