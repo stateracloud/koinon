@@ -86,7 +86,7 @@ var _ = Describe("koinon-api's startup", func() {
 	It("refuses an unknown flag, an unknown command and an environment variable nothing reads", func() {
 		Expect(start(nil, "migrate", "--database-url="+db, "--otlp-addr=")).To(MatchError(ContainSubstring("unknown flag")))
 		Expect(start(nil, "frobnicate")).To(MatchError(ContainSubstring("unknown command")))
-		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/x", "KOINON_OTLP_TRACES_TOKEN_DIR": "/y","KOINON_NO_SUCH": "1"})).
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/x", "KOINON_OTLP_TRACES_TOKEN_DIR": "/y", "KOINON_NO_SUCH": "1"})).
 			To(MatchError(ContainSubstring("KOINON_NO_SUCH")))
 	})
 
