@@ -129,6 +129,18 @@ SELECT * FROM local_credentials WHERE username = @username;
 -- name: GetLocalCredential :one
 SELECT * FROM local_credentials WHERE user_id = @user_id;
 
+-- name: LockLocalCredentialShare :one
+-- A password login holds a share lock on the credential while it creates its session, so a password
+-- change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+-- login either sees the new hash and is refused, or commits first and the reset revokes its session.
+SELECT * FROM local_credentials WHERE user_id = @user_id FOR SHARE;
+
+-- name: LockLocalCredentialUpdate :one
+-- A password change locks the credential row before it writes, so it can refuse when an operator
+-- reset changed the hash after the old password was checked. Lock order: the credential, then the
+-- sessions (as the reset does).
+SELECT * FROM local_credentials WHERE user_id = @user_id FOR UPDATE;
+
 -- name: CreateLocalCredential :exec
 INSERT INTO local_credentials (user_id, username, password_hash, must_change_password)
 VALUES (@user_id, @username, @password_hash, true)
@@ -185,6 +197,11 @@ RETURNING user_id;
 -- name: RevokeOtherUserSessions :exec
 UPDATE sessions SET revoked_at = @now
 WHERE user_id = @user_id AND id <> @keep_session_id AND revoked_at IS NULL;
+
+-- name: RevokeUserSessions :execrows
+-- Ends every live session of the user (the operator's password reset).
+UPDATE sessions SET revoked_at = @now
+WHERE user_id = @user_id AND revoked_at IS NULL;
 
 -- name: RevokeSessionsByMethod :execrows
 UPDATE sessions SET revoked_at = @now

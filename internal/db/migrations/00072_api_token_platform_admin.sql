@@ -1,0 +1,11 @@
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Platform admin API tokens (ADR 0110 decision 6, issue 512). A break-glass token is minted for a
+-- platform admin and is valid only while its root user still holds a platform admin grant. The
+-- ordinary rule (the root user still holds the token's role in the org) is not enough: a platform
+-- admin who also owns the org (the bootstrap admin owns the default org) would keep a working token
+-- after the grant is removed. Tokens a platform admin token creates carry the flag down.
+--
+-- Expand only (ADR 0085): one new column with a default; existing tokens keep the ordinary rule.
+-- +goose Up
+ALTER TABLE api_tokens ADD COLUMN requires_platform_admin boolean NOT NULL DEFAULT false;

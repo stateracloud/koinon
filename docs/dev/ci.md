@@ -305,7 +305,10 @@ requirement exists. A gate is `notrun` when its log shows the machine denied it 
 marker (`--- FAIL`, `[FAIL]`, a compile error, helm `Error:`, chart-check `assertion(s) failed`,
 gitleaks `leaks found:`) is in it: Docker (daemon down, socket denied), the
 network (proxy refusal, no such host, buf remote unavailable), or the sandbox (`deny(`, `operation not permitted`). A real
-test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
+test failure next to such a line stays `fail`. The `generate` and `web` gates need `web/node_modules`
+(`buf` runs `web/node_modules/.bin/protoc-gen-es`): `hack/wt.sh new` installs it, preflight tries one
+`pnpm --dir web install --offline --frozen-lockfile` when it is missing, and if that fails the gate is
+`notrun` (`web dependencies missing`), never `fail` (#541). It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
