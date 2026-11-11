@@ -48,7 +48,10 @@ func envWithoutTestingTag(env []string) []string {
 		}
 		var flags []string
 		for _, f := range strings.Fields(val) {
-			if tags, ok := strings.CutPrefix(f, "-tags="); ok {
+			// Go reads GOFLAGS with shell-like quotes and accepts --tags for -tags.
+			norm := strings.NewReplacer(`"`, "", `'`, "").Replace(f)
+			norm = strings.Replace(norm, "--tags=", "-tags=", 1)
+			if tags, ok := strings.CutPrefix(norm, "-tags="); ok {
 				var keep []string
 				for _, t := range strings.Split(tags, ",") {
 					if t != "testing" && t != "" {

@@ -28,7 +28,7 @@ GO_TAGS ?=
 
 .PHONY: build-go
 build-go: ## Build Go binaries into bin/
-	@case " $$(printf '%s' '$(GO_TAGS)' | tr ',' ' ') " in *" testing "*) echo "build-go: the testing tag makes kopia use an insecure key derivation; it is for test binaries only (#576)" >&2; exit 1;; esac
+	@case " $$(printf '%s' '$(GO_TAGS)' | tr -d "\"'\\\\" | tr ',' ' ') " in *" testing "*) echo "build-go: the testing tag makes kopia use an insecure key derivation; it is for test binaries only (#576)" >&2; exit 1;; esac
 	$(GO) build -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
 
 .PHONY: build-web

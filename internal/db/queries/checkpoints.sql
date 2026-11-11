@@ -559,15 +559,20 @@ ORDER BY o.id;
 -- home_checkpoints_open) or a ready sandbox whose agent has had no checkpoint requested for
 -- @interval_seconds (the hourly request; agent_sandboxes_checkpointable). The tick runs every
 -- checkpoint poll, so its cost follows the orgs with work, not every org that ever existed
--- (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). A superset is fine: the hourly
--- request, the fail queries and the claim re-check every condition (agent status, ephemeral flag).
+-- (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). The sandbox half has the same
+-- agent filters as RequestHourlyHomeCheckpoints (active, not ephemeral), so an org whose agents
+-- cannot be checkpointed is not returned on every poll. A superset is fine: the hourly request,
+-- the fail queries and the claim re-check every condition.
 SELECT o.id FROM orgs o
 WHERE o.deleted_at IS NULL
   AND o.id IN (
     SELECT c.org_id FROM home_checkpoints c WHERE c.status IN ('requested', 'running')
     UNION
     SELECT s.org_id FROM agent_sandboxes s
+    JOIN agents a ON a.org_id = s.org_id AND a.id = s.agent_id
+    LEFT JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
     WHERE s.state = 'ready' AND s.unhealthy_at IS NULL AND s.restore_checkpoint_id IS NULL
+      AND a.status = 'active' AND (v.config->>'ephemeral')::boolean IS NOT TRUE
       AND NOT EXISTS (
           SELECT 1 FROM home_checkpoints c
           WHERE c.org_id = s.org_id AND c.agent_id = s.agent_id

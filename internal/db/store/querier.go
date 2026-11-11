@@ -900,8 +900,10 @@ type Querier interface {
 	// home_checkpoints_open) or a ready sandbox whose agent has had no checkpoint requested for
 	// @interval_seconds (the hourly request; agent_sandboxes_checkpointable). The tick runs every
 	// checkpoint poll, so its cost follows the orgs with work, not every org that ever existed
-	// (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). A superset is fine: the hourly
-	// request, the fail queries and the claim re-check every condition (agent status, ephemeral flag).
+	// (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). The sandbox half has the same
+	// agent filters as RequestHourlyHomeCheckpoints (active, not ephemeral), so an org whose agents
+	// cannot be checkpointed is not returned on every poll. A superset is fine: the hourly request,
+	// the fail queries and the claim re-check every condition.
 	ListOrgIDsWithCheckpointWork(ctx context.Context, intervalSeconds int32) ([]pgtype.UUID, error)
 	// The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
 	// for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the

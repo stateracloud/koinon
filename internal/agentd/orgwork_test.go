@@ -75,6 +75,16 @@ var _ = Describe("agentd org lists for the checkpoint ticks", func() {
 			Expect(listed(ctx)()).To(BeFalse(), "an unhealthy sandbox")
 		})
 
+		It("does not list an org whose only agent is archived or ephemeral (no hourly checkpoint can be made)", func(ctx SpecContext) {
+			exec(ctx, `UPDATE agents SET status = 'archived', archived_at = now() WHERE org_id = $1`, e.org)
+			Expect(listed(ctx)()).To(BeFalse(), "an archived agent")
+			exec(ctx, `UPDATE agents SET status = 'active', archived_at = NULL WHERE org_id = $1`, e.org)
+			Expect(listed(ctx)()).To(BeTrue(), "an active agent is due")
+			exec(ctx, `UPDATE agent_versions SET config = config || '{"ephemeral": true}'::jsonb
+				WHERE org_id = $1 AND id = (SELECT active_version_id FROM agents WHERE org_id = $1 AND id = $2)`, e.org, e.agent.ID)
+			Expect(listed(ctx)()).To(BeFalse(), "an ephemeral agent")
+		})
+
 		It("does not list a deleted org", func(ctx SpecContext) {
 			Expect(listed(ctx)()).To(BeTrue())
 			deleteOrg(ctx)
