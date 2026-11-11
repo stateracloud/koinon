@@ -82,5 +82,12 @@ check "no other envtest key" test "$(grep -c 'key: envtest-' "$wf")" = 3
 check "e2e-go key has no run id" hasnt "$(grep 'key: e2e-go-' "$e2e")" 'run_id'
 check "e2e-go is saved only on an exact miss" grep -q "steps.e2ego.outputs.cache-hit != 'true'" "$e2e"
 
+# Test results (issue 43): only pull requests reuse them, and main's warm-caches job fills them.
+gotest=$(job_body "$wf" go-test)
+check "go-test sets KOINON_GO_TEST_CACHE for pull_request runs only" has "$gotest" "KOINON_GO_TEST_CACHE: \\$\\{\\{ github.event_name == 'pull_request' && '1' \\|\\| '' \\}\\}"
+check "warm-caches runs the cacheable packages through go-test.sh with the cache switch" has "$warm" 'KOINON_GO_TEST_CACHE=1 hack/go-test.sh \$\(hack/go-test-cacheable.sh\)'
+check "warm-caches does not run the cacheable packages with -count=1" hasnt "$warm" 'go-test.sh.*-count=1'
+check "no workflow sets KOINON_GO_TEST_CACHE to 1 outside a pull_request condition" test "$(grep -h 'KOINON_GO_TEST_CACHE' "$wf" | grep -vc "pull_request\|warm-caches\|KOINON_GO_TEST_CACHE=1 hack/go-test.sh\|^ *#")" = 0
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

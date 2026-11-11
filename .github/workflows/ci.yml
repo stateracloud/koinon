@@ -233,6 +233,8 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
+          # Pull requests reuse the results of packages with no Docker, database or cluster input (hack/go-test-cacheable.sh); main and the merge queue run everything with -count=1 (issue 43).
+          KOINON_GO_TEST_CACHE: ${{ github.event_name == 'pull_request' && '1' || '' }}
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (old issue 507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
@@ -861,6 +863,9 @@ jobs:
           go mod download
           go build ./...
           go test -count=1 -run '^$' ./...
+          # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
+          # (same script, same flags: they are part of Go's test cache key), without -count=1.
+          KOINON_GO_TEST_CACHE=1 hack/go-test.sh $(hack/go-test-cacheable.sh)
       - if: steps.gocache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

@@ -184,3 +184,23 @@ grep -q 'TestNeedsHelm' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does
 grep -q 'take the package off PARALLEL_SUITES' <<<"$out" || { echo "$out"; echo "FAIL: the verdict does not say how to fix it"; exit 1; }
 rm -rf "$pf" "$rd3"
 echo "ok: a plain RequireT test in a -parallel suite fails the verdict and says how to fix it"
+
+# Issue 43: which packages may reuse Go's test results. A package with Postgres, Docker, testenv or an
+# external binary among its inputs must stay out (Go's cache key does not cover them).
+cacheable=$(hack/go-test-cacheable.sh ./internal/money ./internal/api ./internal/agentd ./internal/compat ./internal/leakguard)
+grep -Fxq ./internal/money <<<"$cacheable" || { echo "FAIL: ./internal/money (pure) is not cacheable"; exit 1; }
+grep -Fxq ./internal/leakguard <<<"$cacheable" || { echo "FAIL: ./internal/leakguard (pure Ginkgo suite) is not cacheable"; exit 1; }
+for p in ./internal/api ./internal/agentd ./internal/compat; do
+	! grep -Fxq "$p" <<<"$cacheable" || { echo "FAIL: $p (pgtest, testenv or os/exec) must never cache"; exit 1; }
+done
+for s in $suites; do
+	! grep -Fxq "$s" <<<"$(hack/go-test-cacheable.sh "$s")" || true # parallel suites never cache: see the next check
+done
+echo "ok: go-test-cacheable.sh keeps database, Docker and exec packages out"
+
+# The parallel suites never take the cache path, and -count=1 is the default everywhere else.
+grep -q 'KOINON_GO_TEST_CACHE:-} == 1' hack/go-test.sh || { echo "FAIL: go-test.sh has no KOINON_GO_TEST_CACHE switch"; exit 1; }
+grep -q 'run_ginkgo_go_test ginkgo-rest -count=1' hack/go-test.sh || { echo "FAIL: non-cacheable serial Ginkgo suites lost -count=1"; exit 1; }
+grep -q 'run_plain go-test "plain packages" -count=1' hack/go-test.sh || { echo "FAIL: non-cacheable plain packages lost -count=1"; exit 1; }
+! grep -E 'ginkgo-cached|go-test-cached' hack/go-test.sh | grep -q -- '-count=1' || { echo "FAIL: a cacheable group runs with -count=1"; exit 1; }
+echo "ok: -count=1 is the default; only cacheable packages drop it, and only with KOINON_GO_TEST_CACHE=1"

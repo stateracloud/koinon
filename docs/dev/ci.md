@@ -18,6 +18,36 @@ test, so the suite reads "partly run" when only that test ran. A plain test that
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
+### Test result reuse (#43)
+
+Every package runs with `-count=1`, so main and the merge queue run everything every time. A pull
+request run sets `KOINON_GO_TEST_CACHE=1` (the `go-test` job, `pull_request` events only) and the
+packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
+test binary, the command line, the environment variables the test read and the files it opened are the
+same, and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
+the network, a cluster or a binary the test starts, so the three kinds of package split like this:
+
+| Kind | Reuse on a pull request | Why |
+| --- | --- | --- |
+| Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
+| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. |
+| Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
+
+A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
+containerhost, agentgatewayimage, cfgdeliver, fakegitea, policycheck, racescale; `fakemodel` is an
+in-process fake and allowed), testcontainers-go or envtest, or when the package or its tests import
+`os/exec`. So every Postgres, Docker, envtest, git or helm package keeps `-count=1` on pull requests
+too. The rule leans to "not cacheable"; a wrongly excluded package loses a hit, a wrongly included one
+could show a stale pass. `hack/go-test-test.sh` pins it.
+
+Where the results come from: the `warm-caches` job on main runs
+`KOINON_GO_TEST_CACHE=1 hack/go-test.sh $(hack/go-test-cacheable.sh)` after the build, in the same step that
+fills `go-ci`, and saves the results in that entry. It uses the same script, so the flags (part of Go's
+key) match the pull request run. Like the build cache the entry is saved once per Go version and `go.sum`
+hash: a package that changed on main since then misses in every pull request until `go.sum` changes
+(follow-up: refresh the entry on every main push). To check it works, open the `go-test` log of a pull
+request run and look for `(cached)` on lines such as `internal/money (cached)`.
+
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
 Why: Ryuk exits 10 s after its last client disconnects. On a fresh runner a cold image pull leaves
@@ -466,7 +496,7 @@ work that fills it, then saves:
 
 | Cache | Key | Filled by |
 | --- | --- | --- |
-| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, the cacheable packages' test results (#43), one lint run |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
