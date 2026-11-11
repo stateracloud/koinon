@@ -1,0 +1,15 @@
+Package: ca-certificates
+Version: 20260816ubuntu0.24.04.1
+Architecture: all
+
+Package: ca-certificates
+Version: 20260816ubuntu0.24.04.2~rc1
+Architecture: all
+
+Package: git
+Version: 1:2.43.0-1ubuntu7.3
+Architecture: amd64
+
+Package: zstd
+Version: 1.5.5+dfsg2-2build1.1
+Architecture: amd64

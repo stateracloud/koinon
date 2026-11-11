@@ -816,6 +816,7 @@ jobs:
       - run: hack/release-gate-test.sh
       - run: hack/route-guard-test.sh
       - run: hack/dep-age-check-test.sh
+      - run: hack/ubuntu-snapshot-bump_test.sh
       - run: hack/ci-changes-test.sh
       - run: hack/paths-test.sh
       - run: hack/lane-gates-test.sh

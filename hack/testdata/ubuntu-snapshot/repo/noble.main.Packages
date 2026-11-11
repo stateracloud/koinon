@@ -1,0 +1,23 @@
+Package: ca-certificates
+Version: 20240203
+Architecture: all
+
+Package: git
+Version: 1:2.43.0-1ubuntu7.1
+Architecture: amd64
+
+Package: git
+Version: 2.99.0-1
+Architecture: amd64
+
+Package: zstd
+Version: 1.5.5+dfsg2-2build1
+Architecture: amd64
+
+Package: python-is-python3
+Version: 3.11.4-1
+Architecture: all
+
+Package: unrelated
+Version: 9.9-1
+Architecture: amd64

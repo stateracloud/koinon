@@ -158,6 +158,33 @@ func describeTools(f flavor) bool {
 	})
 }
 
+// sizeBudgetLine is the one line the size guard reports for a measured image, passing or not: the
+// measured KiB, the budget and the headroom (negative when over). A bump that grows the image reads
+// the headroom here and raises sizeBudget on purpose, instead of finding out from a red test.
+func sizeBudgetLine(image, arch string, kib, budget int64) string {
+	return fmt.Sprintf("%s (%s): %d KiB measured, budget %d KiB, headroom %d KiB (%.1f%%)",
+		image, arch, kib, budget, budget-kib, 100*float64(budget-kib)/float64(budget))
+}
+
+// sizeBudgetFailure is the failure message when the image is over budget: where the budget lives
+// and how it was measured, so raising it is a deliberate edit with the new number in hand.
+func sizeBudgetFailure(f flavor, arch string, kib, budget int64) string {
+	return fmt.Sprintf("%s\nover budget by %d KiB. To raise it on purpose, edit sizeBudget[%q] of the %q flavor in test/flavors/%s_test.go "+
+		"to the measured %d KiB plus about 10%%, update the measurement comment above it and the size note in flavors/%s/README.md",
+		sizeBudgetLine(f.image(), arch, kib, budget), kib-budget, arch, f.name, f.name, kib, f.name)
+}
+
+var _ = Describe("size budget report", func() {
+	It("reports measured, budget and headroom, and says where to raise the budget", func() {
+		Expect(sizeBudgetLine("img", "arm64", 650_000, 716_000)).To(Equal("img (arm64): 650000 KiB measured, budget 716000 KiB, headroom 66000 KiB (9.2%)"))
+		Expect(sizeBudgetLine("img", "amd64", 700_000, 696_000)).To(ContainSubstring("headroom -4000 KiB"))
+		msg := sizeBudgetFailure(flavor{name: "opencode"}, "amd64", 700_000, 696_000)
+		Expect(msg).To(ContainSubstring("over budget by 4000 KiB"))
+		Expect(msg).To(ContainSubstring(`sizeBudget["amd64"]`))
+		Expect(msg).To(ContainSubstring("test/flavors/opencode_test.go"))
+	})
+})
+
 // describeImageSize registers the image-size guard for one flavor.
 func describeImageSize(f flavor) bool {
 	return Describe(f.name+" image size", func() {
@@ -174,8 +201,11 @@ func describeImageSize(f flavor) bool {
 			out := docker(ctx, "run", "--rm", "--network", "none", "--user", "0", "--entrypoint", "du", f.image(), "-sxk", "/")
 			_, err := fmt.Sscanf(out, "%d", &kib)
 			Expect(err).NotTo(HaveOccurred(), out)
-			Expect(kib).To(BeNumerically("<=", budget),
-				"%s (%s) is %d KiB, over its budget of %d; raise sizeBudget in test/flavors only on purpose", f.image(), arch, kib, budget)
+			// Reported whether it passes or not (the spec's report entries and the verbose output).
+			line := sizeBudgetLine(f.image(), arch, kib, budget)
+			AddReportEntry("image size", line)
+			GinkgoWriter.Println(line)
+			Expect(kib).To(BeNumerically("<=", budget), sizeBudgetFailure(f, arch, kib, budget))
 		}, SpecTimeout(time.Minute))
 	})
 }

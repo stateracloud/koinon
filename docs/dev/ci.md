@@ -547,6 +547,69 @@ merge has no queue build). The gate ignores
 call with no paging; anything else fails the gate), and also accepts a green `merge_group`
 `quickstart` run on a commit with the tagged commit's tree; a failed or cancelled newest run still fails it (#444, ADR 0102).
 
+## Ubuntu snapshot bump (issue 33)
+
+The OpenCode flavor image installs its apt packages at exact versions from one `snapshot.ubuntu.com`
+ID (`UBUNTU_SNAPSHOT` and the `name=version` pins in `flavors/opencode/Dockerfile`). The
+`ubuntu-snapshot` workflow (`.github/workflows/ubuntu-snapshot.yml`, Mondays and `workflow_dispatch`)
+keeps them current with `hack/ubuntu-snapshot-bump.sh`:
+
+- The snapshot is midnight UTC of today minus 3 days. A snapshot holds nothing published after its
+  ID, so ADR 0079's 3 days hold by construction; the script refuses an explicit younger ID, and
+  `hack/dep-age-check.sh` dates the `ARG UBUNTU_SNAPSHOT` of any pull request (a hand edit included)
+  by the ID's own timestamp, with the usual `dependency-age-waiver` path for the security fast path.
+- It verifies `InRelease` with `gpgv` and the Ubuntu archive keyring, checks each `Packages` index
+  against the SHA256 `InRelease` lists, takes the highest version per pin across the three pockets
+  (`dpkg --compare-versions`), and fails when amd64 and arm64 differ or a pin would go backwards.
+  `--check` exits 10 when a pin changes; `--write` edits only the snapshot ARG, the changed pins and
+  the snapshot ID in `flavors/opencode/README.md`.
+- USNs: for each changed package it lists the notices (canonical/ubuntu-security-notices,
+  `osv/usn`, Ubuntu:24.04:LTS records matched on the binary version) between the old and new pin.
+  A security-pocket version can exist without a notice, so "none found" is a finding, not an error;
+  a lookup that could not run says FAILED in the pull request body.
+- Two jobs: `resolve` (read-only token) runs the script and hands over a patch and the body;
+  `propose` (`contents: write`, `pull-requests: write`) applies it on a fresh checkout, commits as
+  `github-actions[bot]` with a `Signed-off-by` (DCO), force-updates only `bot/ubuntu-snapshot`
+  (a guard refuses any other ref) and opens or updates one draft pull request with `GITHUB_TOKEN`.
+  It never touches the base image digest, and it never merges.
+
+Setting (an owner's): Settings, Actions, General, "Allow GitHub Actions to create and approve pull
+requests" must be on for `gh pr create` to work (nothing is auto-approved).
+
+How CI starts on that pull request, with no secret, PAT or App token: GitHub documents that events
+caused by `GITHUB_TOKEN` create no workflow runs, with two exceptions: `workflow_dispatch` and
+`repository_dispatch`, and `pull_request` events of type `opened`, `synchronize` or `reopened`, which
+create runs in an approval-required state (other types, such as `labeled`, `edited` and
+`ready_for_review`, create none). The required workflows listen as follows: `ci.yml`
+(opened, synchronize, reopened, ready_for_review), `dco.yml` (default types), `claims.yml` (opened,
+reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchronize, reopened;
+`e2e-kind.yml` also ready_for_review). So the route is:
+
+1. A maintainer reviews the table and clicks **Approve workflows to run** on the pull request. That
+   starts all of the above for the current head. This is the human review step of ADR 0079.
+2. If GitHub offers no approval button (the feature was still rolling out; this is not verified on
+   this repository), close and reopen the pull request: a person's `reopened` event is a default
+   type of every required workflow and runs them normally.
+3. Mark it ready for review: `ready_for_review` re-runs `ci` in full (a draft reports a vacuous
+   green, above) and `e2e-kind`. `dco` and `claim` do not listen to it; they keep the result of step 1 or 2.
+4. The change touches `flavors/`, so the e2e needs the Merging rule's evidence (the lab cannot build
+   flavors: dispatch `e2e-kind.yml` on the branch).
+
+Every weekly run force-updates the branch and so needs step 1 or 2 again. `ci.yml` has no
+`workflow_dispatch` on purpose: the dispatch route would run no `pull_request` checks and its
+`dependency age` job reads `github.base_ref`. A GitHub App token (or a PAT) would remove the manual
+step, at the price of a stored secret or an App with write access; that is the owner's decision
+(ADR 0094 decision 3 keeps CI on `GITHUB_TOKEN` only today).
+
+The identity checks need no exemption for this bot: the commit carries a `Signed-off-by` for the
+bot's own name and noreply email (`dco`), `* <*@users.noreply.github.com>` in
+`hack/git-identities.allowed` allows the identity (`hack/git-identity-check.sh`), the pull request
+closes no issue so the `claim` check has nothing to refuse, and the subject is a Conventional Commit.
+
+The size guard of `test/flavors` reports measured KiB, budget and headroom on every run (the spec's
+report entry and `GinkgoWriter`), and its failure message names the `sizeBudget` entry to raise, so a
+bump that grows the image is a visible decision.
+
 ## Workflow security review
 
 Reviewed 2026-11-09 for a public repository (#58). Rule: Koinon CI runs on GitHub-hosted runners only
@@ -560,6 +623,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
+| `ubuntu-snapshot.yml` | schedule, dispatch (write access) | `permissions: {}` at top level; `resolve` has `contents: read` and no write token; `propose` has `contents: write, pull-requests: write` and pushes only `bot/ubuntu-snapshot` (guarded) | ok: not reachable from a fork; no secret besides `GITHUB_TOKEN`; needs the "create and approve pull requests" repository setting |
 | `scorecard.yml`, `govulncheck.yml`, `web-isolated.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml`, `web-isolated.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
 Checks behind the table:

@@ -392,8 +392,21 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
 - **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
   Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
   when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).
-  Cadence: at least monthly, and on any Ubuntu security notice for poppler-utils, python3, git,
-  sqlite3 or their libraries. Automating it is a follow-up.
+  The bump is automated (issue 33): the `ubuntu-snapshot` workflow runs weekly (Monday, and by hand
+  from the Actions tab) and calls `hack/ubuntu-snapshot-bump.sh`. The script takes the snapshot of
+  midnight UTC three days ago, so every package in it is at least 3 days old (ADR 0079's cooldown
+  holds by construction), reads the signed `InRelease` and `Packages` indexes of `noble`,
+  `noble-updates` and `noble-security` for amd64 and arm64, and picks the highest version of each pin
+  (it fails if the two architectures disagree). When a pin changes, the workflow opens or updates one
+  draft pull request from `bot/ubuntu-snapshot` that moves `UBUNTU_SNAPSHOT`, the changed pins and
+  this ID together, with a table of pinned versus new versions and the Ubuntu Security Notices that
+  fix them (looked up in canonical/ubuntu-security-notices; a failed lookup says so). The security fast
+  path of ADR 0079 stays a human act: for a high or critical advisory that cannot wait for the next
+  run, bump by hand with a snapshot younger than 3 days and the `dependency-age-waiver` label.
+  The pull request is opened with `GITHUB_TOKEN`, so GitHub starts no checks for it until a
+  maintainer clicks "Approve workflows to run" (or closes and reopens it); see "Ubuntu snapshot bump"
+  in `docs/dev/ci.md`. The new image must also pass the flavor e2e, and `sizeBudget` in
+  `test/flavors` reports its headroom on every run if a bump grows the image.
 - **python3** is the standard library only (json, csv, sqlite3, re, gzip, zipfile, statistics,
   decimal, ...). No pip, `ensurepip`, `python3-venv`, uv or ruff; the build fails if pip appears.
   The entry script sets `PYTHONDONTWRITEBYTECODE=1`, so an agent's imports leave no `__pycache__`
