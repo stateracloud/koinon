@@ -508,7 +508,8 @@ type ListInstallAnchorHeadsInRangeRow struct {
 }
 
 // The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
-// order then org order: the install export's header (ADR 0100 decision 5).
+// order then org order: the install export writes them as stream lines next to each audit.anchor
+// event (ADR 0100 decision 5; format koinon.audit.export.v2).
 func (q *Queries) ListInstallAnchorHeadsInRange(ctx context.Context, arg ListInstallAnchorHeadsInRangeParams) ([]ListInstallAnchorHeadsInRangeRow, error) {
 	rows, err := q.db.Query(ctx, listInstallAnchorHeadsInRange, arg.FromSeq, arg.UpToSeq)
 	if err != nil {
