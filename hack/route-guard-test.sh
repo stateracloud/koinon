@@ -138,23 +138,26 @@ jobs_file "$(job go)" "$(job 'quick checks')"
 run
 has "required job missing: issue" 'issue create'
 
-# 2. a .github/** admin merge: no queue run; the PR changes .github/ and every required check and review were green: NO issue
+# 2. a .github/** admin merge: no queue run; the PR changes .github/ and every required check was green: NO issue (review is advisory)
 reset
 echo '[{"filename":"hack/x.sh"},{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
 run
 exit0 "github admin merge, green"
 hasnt "github admin merge, green: no issue" 'issue create\|issue comment'
 
-# 2b. the same, but review was not green on the head: issue, labelled break-glass (not admin:github)
+# 2b. review is advisory (ADR 0103 amendment, 2026-11-11): red or missing on the head, the expected admin merge still gets NO issue
 reset
 echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
 checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review failure)"
 run
 exit0 "github admin merge, review red"
-has "github admin merge, review red: issue" 'issue create'
-has "github admin merge, review red: break-glass" '--label break-glass'
-hasnt "never admin:github" 'admin:github'
-has "names the check" "check 'review' was not green"
+hasnt "github admin merge, review red: no issue" 'issue create\|issue comment'
+reset
+echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
+checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)"
+run
+exit0 "github admin merge, review missing"
+hasnt "github admin merge, review missing: no issue" 'issue create\|issue comment'
 
 # 2c. a required check missing on the head
 reset
@@ -170,12 +173,12 @@ checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 cha
 run
 has "newest row per check wins: issue" 'issue create'
 
-# 2e. a same-named green check from another app does not count (review red from Actions, green from elsewhere)
+# 2e. a same-named green check from another app does not count (go red from Actions, green from elsewhere)
 reset
 echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
-checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review failure)" "$(chk 7 review success 999)"
+checks_file "$(chk 1 go failure)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 7 go success 999)"
 run
-has "other-app green review does not count: issue" 'issue create'
+has "other-app green go does not count: issue" 'issue create'
 reset
 echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
 checks_file "$(chk 1 go success 999)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)"

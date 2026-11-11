@@ -666,7 +666,7 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; `review` pinned to the
   Actions app; required checks on `merge_group`). PR B merges only with or after it.
 - Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
-  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks and `review` opens none.
+  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks opens none (`review` is advisory and not read).
   The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
 - `--admin` (only for a PR that changes at least one `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
   `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the
