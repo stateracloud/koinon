@@ -280,8 +280,9 @@ change them in tests, and a threshold of zero turns its pattern off.
 
 A harness that announces the second call of a response only after the first has finished is counted as
 two steps: ACP has no response id on tool calls. That can only make a loop show up later, not sooner.
-A message is a new message when its `messageId` changes or when anything but a message chunk came
-before it.
+A message is a new message when its `messageId` changes or when a tool call or a tool call update
+came before it. A thought chunk does not split a message: one answer that alternates reasoning and
+text is one message.
 
 **One nudge, then the end.** The turn policy (`turnpolicy`, ADR 0087) takes a new event, `EvLoop`:
 
@@ -290,7 +291,10 @@ before it.
    nudge: it names the pattern, asks for a different approach or an end of the turn that says what
    blocks it, and warns that Koinon stops the run if it repeats. If the turn ends another way first
    (`end_turn`, a refusal, a fence) that outcome is honoured. If the harness ignores the cancel, no
-   second prompt is sent (it could overlap the first), the nudge is spent, and the next loop ends the run.
+   second prompt is sent (it could overlap the first), the nudge is spent undelivered, and the next loop
+   ends the run with a reason that says the agent could not be asked (the harness ignored the cancel).
+   Keeping the nudge for later would not help: a looping turn that ignores cancels does not end
+   cancelled, so the nudge would wait while the loop goes on.
 2. Second loop, after the detector has counted a full threshold again: agentd cancels the turn and ends
    the turns with `OutLoop`. `conclude` fails the run with class `loop` and the reason "the agent kept
    looping after it was asked to change its approach: ...".

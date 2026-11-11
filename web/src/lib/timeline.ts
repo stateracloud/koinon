@@ -51,7 +51,6 @@ function num(v: unknown): string {
   return typeof v === 'number' ? String(v) : '?'
 }
 
-/** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
 // The loop patterns agentd names in run.loop_nudge (internal/agentd/loopguard).
 const loopPatterns: Record<string, string> = {
   same_action: 'the same action with the same result',
@@ -60,6 +59,7 @@ const loopPatterns: Record<string, string> = {
   alternating: 'two actions taking turns',
 }
 
+/** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
 const sandboxCauses: Record<string, string> = {
   image_pull: 'the image could not be pulled',
   admission: "the cluster's admission policy refused the sandbox",
