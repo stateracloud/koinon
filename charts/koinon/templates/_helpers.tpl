@@ -802,6 +802,14 @@ creates one of this name in each workspace namespace.
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.validationActions to include Deny: without it the policy only warns or audits and does not limit where the reconciler may bind the observer role. Set sandboxObserver.enabled=false to run without the observer" }}
 {{- end }}
 {{- end }}
+{{- if .Values.sandboxNetworkPolicy.enabled }}
+{{- if not .Values.sandboxPolicy.enabled }}
+{{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled: the NetworkPolicy writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxNetworkPolicy.enabled=false" }}
+{{- end }}
+{{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
+{{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create NetworkPolicies cluster-wide while the policy only warns or audits. Set sandboxNetworkPolicy.enabled=false to run without the writer" }}
+{{- end }}
+{{- end }}
 {{- if .Values.checkpoints.enabled }}
 {{- if not .Values.checkpoints.s3.existingSecret }}
 {{- fail "checkpoints.s3.existingSecret is required when checkpoints.enabled is true: a Secret with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region" }}

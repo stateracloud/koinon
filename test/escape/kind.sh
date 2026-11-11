@@ -32,12 +32,14 @@
 # KOINON_ESCAPE_LABEL is the Ginkgo label filter (default openshell).
 #
 # Against the chart install (the kind e2e, test/e2e/escape-openshell.sh, #109): KOINON_ESCAPE_CHART_NAMESPACE
-# names the Koinon release namespace. The script then points the suite's live admission case at the
-# workspace namespace and the chart's policy (KOINON_ESCAPE_NAMESPACE, _POLICY, _SUPERVISOR_IMAGE,
-# KOINON_ESCAPE_POLICY_REQUIRED=1), so the real ValidatingAdmissionPolicy is enforced on the real supervisor
-# and workload pods and the case fails, not skips, when it is not. KOINON_ESCAPE_GITEA_STANDIN=0 leaves the
-# Gitea stand-in out: it re-points the gateway at a derived supervisor image, which the chart's policy
-# (pinned supervisor image) refuses; the Gitea cases run in `make test-escape-kind`.
+# names the Koinon release namespace. The script then points the suite's live admission case and the
+# NetworkPolicy bypass case at the workspace namespace and the chart's policy (KOINON_ESCAPE_NAMESPACE,
+# _POLICY, _NETPOL, _SUPERVISOR_IMAGE, KOINON_ESCAPE_POLICY_REQUIRED=1), so the real
+# ValidatingAdmissionPolicy is enforced on the real supervisor and workload pods and the case fails,
+# not skips, when it is not. Bare `make test-escape-kind` leaves those unset (kindnet does not
+# enforce NetworkPolicy). KOINON_ESCAPE_GITEA_STANDIN=0 leaves the Gitea stand-in out: it re-points
+# the gateway at a derived supervisor image, which the chart's policy (pinned supervisor image)
+# refuses; the Gitea cases run in `make test-escape-kind`.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -58,12 +60,14 @@ root="$(cd "$here/../.." && pwd)"
 # Ambient settings must not point the suite's cluster-side cases at another cluster.
 unset KOINON_ESCAPE_NAMESPACE KOINON_ESCAPE_KUBECONFIG
 export KOINON_ESCAPE_KUBE_CONTEXT="$CTX"
-# OpenShell names a managed workspace's namespace openshell-<gateway id>-<workspace> (the gateway ID is
-# the chart's openshell.gatewayId, default openshell; internal/execution.WorkspaceNamespace). Needed
-# for the live admission case, the NetworkPolicy bypass case (spike 8.15) and Service IP lookups.
-export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
-export KOINON_ESCAPE_RUNTIME_CLASS=${KOINON_ESCAPE_RUNTIME_CLASS:-runc}
+# Live admission, NetworkPolicy bypass and realPods assume the chart install (and, for NetworkPolicy,
+# kube-network-policies from test/e2e/kind/up.sh). Bare `make test-escape-kind` must not export
+# KOINON_ESCAPE_NAMESPACE: kindnet does not enforce NetworkPolicy, and the live specs would run
+# against whatever supervisor image OpenShell actually uses.
 if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
+  # OpenShell names a managed workspace's namespace openshell-<gateway id>-<workspace> (the gateway ID is
+  # the chart's openshell.gatewayId, default openshell; internal/execution.WorkspaceNamespace).
+  export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
   export KOINON_ESCAPE_NETPOL="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-default-deny"
   export KOINON_ESCAPE_POLICY_REQUIRED=1

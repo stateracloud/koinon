@@ -19,6 +19,9 @@ Cluster-scoped objects, all prefixed <namespace>-<fullname> like the sandbox pol
   in a sandbox namespace. failurePolicy Fail.
 
 sandboxNetworkPolicy.enabled=false renders none of it and the reconciler applies nothing.
+sandboxPolicy.enabled and validationActions including Deny are required when this is on
+(koinon.sandboxNetworkPolicy checks in _helpers.tpl): without Deny the ClusterRole grant
+is only Warn/Audit-fenced.
 */ -}}
 {{- if .Values.sandboxNetworkPolicy.enabled }}
 {{- $name := include "koinon.sandboxDefaultDeny" . }}

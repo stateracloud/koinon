@@ -29,6 +29,16 @@ off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
 grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -Fq -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
 grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -q -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
 
+# Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
+if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+	fail "sandboxNetworkPolicy without a Deny validation action must not render"
+fi
+render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false "${off[@]}" >/dev/null 2>&1 ||
+	fail "validation actions without Deny and the NetworkPolicy writer off must render"
+if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+	fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled"
+fi
+
 # A label added to sandboxPolicy.namespaceSelector reaches the writer policy (same as the observer).
 has "a label added to sandboxPolicy.namespaceSelector reaches the NetworkPolicy writer" 'variables.labels\[\\"team\\"\] == \\"sandboxes\\"' \
 	--set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$np"

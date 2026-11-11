@@ -43,11 +43,17 @@ import (
 //	KOINON_ESCAPE_API           host:port the probe must not reach (default 10.96.0.1:443)
 var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), SpecPriority(-5), func() {
 	It("blocks a plain workload pod that opens sockets outside the supervisor", func(ctx SpecContext) {
+		// Chart e2e only: kind.sh exports KOINON_ESCAPE_NAMESPACE with the chart install, and the
+		// VAP admits only the reconciler SA to write the fixed-name default-deny. The escape
+		// workspace is not a Koinon org workspace, so the reconciler never Applies it there —
+		// the suite must CREATE it while impersonating that SA.
 		testenv.Require(
 			testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE"),
+			testenv.Var("chart-namespace", "KOINON_ESCAPE_CHART_NAMESPACE"),
 			testenv.Var("probe-image", "KOINON_OPENSHELL_IMAGE"),
 		)
 		ns := os.Getenv("KOINON_ESCAPE_NAMESPACE")
+		chartNS := os.Getenv("KOINON_ESCAPE_CHART_NAMESPACE")
 		image := os.Getenv("KOINON_OPENSHELL_IMAGE")
 		runtimeClass := envOr("KOINON_ESCAPE_RUNTIME_CLASS", "runc")
 		policyName := envOr("KOINON_ESCAPE_NETPOL", defaultNetPolName())
@@ -59,23 +65,18 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		cfg := kubeConfig()
 		cs := kubernetes.NewForConfigOrDie(cfg)
 
-		By("ensuring Koinon's default-deny NetworkPolicy is in the sandbox namespace")
+		By("ensuring Koinon's default-deny NetworkPolicy is in the sandbox namespace (as the reconciler)")
 		writer := &reconciler.SandboxNetworkPolicy{Kube: cs, Name: policyName}
 		want := writer.Policy(ns)
-		// With the chart, only the reconciler SA may CREATE this object in a sandbox namespace
-		// (ValidatingAdmissionPolicy). Bare OpenShell has no such VAP, so cluster-admin is fine.
-		createCS := cs
-		if chartNS := os.Getenv("KOINON_ESCAPE_CHART_NAMESPACE"); chartNS != "" {
-			reconCfg := rest.CopyConfig(cfg)
-			reconCfg.Impersonate = rest.ImpersonationConfig{
-				UserName: "system:serviceaccount:" + chartNS + ":koinon-reconciler",
-				Groups:   []string{"system:serviceaccounts", "system:authenticated"},
-			}
-			createCS = kubernetes.NewForConfigOrDie(reconCfg)
+		reconCfg := rest.CopyConfig(cfg)
+		reconCfg.Impersonate = rest.ImpersonationConfig{
+			UserName: "system:serviceaccount:" + chartNS + ":koinon-reconciler",
+			Groups:   []string{"system:serviceaccounts", "system:authenticated"},
 		}
+		createCS := kubernetes.NewForConfigOrDie(reconCfg)
 		_, err := createCS.NetworkingV1().NetworkPolicies(ns).Create(ctx, want, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
-			Fail("cannot create the sandbox default-deny NetworkPolicy: " + err.Error())
+			Fail("cannot create the sandbox default-deny NetworkPolicy as the reconciler: " + err.Error())
 		}
 		if err == nil {
 			DeferCleanup(func(ctx SpecContext) {

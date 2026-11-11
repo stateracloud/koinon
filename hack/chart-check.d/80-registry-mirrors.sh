@@ -66,7 +66,7 @@ has "supervisor pin is rewritten" 'c.image in \["art.example.com/ghcr-remote/nvi
 has "explicit supervisorImages are not rewritten" 'c.image in \["ghcr.io/nvidia/openshell/supervisor:0.1.6"\]' \
 	--set global.imageRegistry=art.example.com/proxy --set 'sandboxPolicy.supervisorImages={ghcr.io/nvidia/openshell/supervisor:0.1.6}'
 has "preflight is told the supervisor pin" '--supervisor-images=art.example.com/proxy/nvidia/openshell/supervisor:0.1.7' --set global.imageRegistry=art.example.com/proxy
-lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
+lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
 # (d) pull secrets: strings and {name} maps, merged with the deprecated top-level list, on every pod-bearing object.
 pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSecrets[1].name=other' --set 'imagePullSecrets[0].name=regcred')
 rendered=$(render "${pull_args[@]}")
