@@ -722,7 +722,8 @@ shows as `unknown`, add a row and a recorded log sample under `hack/testdata/ci-
 time from the last push of a pull request to merged over the last N merged code pull requests, the
 merge-queue time, the median duration of each CI job (pull request `ci` and merge queue) and the runner
 minutes per merged pull request. Read-only (`gh` and `jq`). Last push is the head commit's earliest check
-suite (the push time to within seconds); admin merges (no queue event) are reported apart. The definitions
+suite (the push time to within seconds); a queue merge is one whose last queue removal has reason `merged`,
+all other merges are reported apart as admin merges. The definitions
 are in the script header; `hack/ci-timing-test.sh` runs it offline on `hack/testdata/ci-timing/`.
 
 ## Merging

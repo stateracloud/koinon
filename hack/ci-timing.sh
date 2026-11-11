@@ -15,22 +15,26 @@
 #
 # Definitions (one place each):
 #   code pull request   changed at least one file that does not match DOCS_RE below (docs only: Markdown,
-#                       docs/, .claude/). hack/paths.rules has no "code" entry: its `go` and `scripts` jobs
+#                       docs/, .claude/; more than 100 changed files always count as code). hack/paths.rules has no "code" entry: its `go` and `scripts` jobs
 #                       are about CI jobs, not about code. Change DOCS_RE here when the docs rule changes.
 #   last push           the earliest check suite of the head commit (created by GitHub when the push arrives),
 #                       error a few seconds. Fallbacks, in this order: the last HeadRefForcePushedEvent, the
 #                       commit's pushedDate, the committer date (source=commit_date: can be hours early).
-#                       A draft that is marked ready after its last push still counts from the push.
+#                       A draft that is marked ready after its last push still counts from the push. Limit: a head
+#                       commit that was pushed before (a reset to an older pushed commit) gives a time too early.
 #   merged              mergedAt of the pull request.
-#   queue time          the last AddedToMergeQueueEvent to mergedAt. No such event = admin merge: reported
-#                       apart (admin_*), never mixed into the queue numbers.
+#   queue time          a queue merge is a PR whose last RemovedFromMergeQueueEvent has reason "merged"; its queue
+#                       time is the AddedToMergeQueueEvent of that entry (the last one before the removal) to
+#                       mergedAt. Anything else (never queued, or queued, dropped, then merged by hand) is an admin
+#                       merge: reported apart (admin_*), never mixed into the queue numbers.
 #   runner minutes      the sum of the durations of every non-skipped job (all attempts) of every workflow run
-#                       of the pull request branch (event pull_request, any push, created while the PR was open) and of the merge-queue
-#                       runs of that pull request (event merge_group, branch gh-readonly-queue/*/pr-N-*).
+#                       of the pull request branch (event pull_request, any push) whose head_sha is one of the PR's
+#                       first 100 commits (or whose pull_requests[] names it), and of the merge-queue runs of that
+#                       pull request (event merge_group, branch gh-readonly-queue/*/pr-N-*).
 #   ci runs             workflow runs named `ci` on the pull request (all pushes).
 #   job medians         per workflow/job name, successful jobs only; the pull request `ci` runs, and the merge
 #                       queue runs of every workflow. Top 10 by median.
-# Percentiles use the nearest rank. Exit: 0 ok, 64 usage, 1 no data.
+# Percentiles use the nearest rank. Exit: 0 ok, 64 usage, 1 no data or a failed GitHub call (named).
 #
 # Cost: 1 search, one GraphQL call per candidate (about 2N+10), per selected pull request 1 runs call, one
 # merge-queue runs listing, and one jobs call per run; all in parallel (6 at a time). N=20: about 1 minute.
@@ -46,7 +50,7 @@ DOCS_RE='(\.md$|^docs/|^\.claude/)'
 PAR=6
 
 usage() {
-  sed -n "4,36p" "$0" | sed "s/^# \{0,1\}//" >&2
+  sed -n "4,41p" "$0" | sed "s/^# \{0,1\}//" >&2
   exit "${1:-64}"
 }
 
@@ -86,12 +90,61 @@ trap 'rm -rf "$tmp"' EXIT
 
 pwait() { while [ "$(jobs -rp | wc -l)" -ge "$PAR" ]; do wait -n || true; done; }
 
+# ---- fan-out: every background call writes <out>.part and moves it to <out> only on success with output; drain
+# waits for each one and exits 1 naming every <out> (gql-<PR>, jobs-<run id>, ...) that is missing or empty. ------
+declare -A PIDS=()
+spawn() { # spawn <out> <command...>
+  local out=$1
+  shift
+  pwait
+  ( "$@" >"$out.part" && [ -s "$out.part" ] && mv "$out.part" "$out" ) &
+  PIDS[$!]=$out
+}
+drain() {
+  local pid out bad=""
+  for pid in "${!PIDS[@]}"; do wait "$pid" || true; done
+  for pid in "${!PIDS[@]}"; do
+    out=${PIDS[$pid]}
+    [ -s "$out" ] || bad+=" $(basename "$out")"
+  done
+  PIDS=()
+  [ -z "$bad" ] || { echo "ci-timing: GitHub calls failed or returned nothing:$bad" >&2; exit 1; }
+}
+
+# A pull request is a code pull request when a changed file is not docs-only. files: the first 100 paths;
+# changed: the pull request's changedFiles count (more files than listed = code).
+# shellcheck disable=SC2016 # a jq program, not shell
+JQ_CODE='def is_code($d; $files; $changed): (($files | map(select(test($d) | not)) | length) > 0) or ($changed > ($files | length));'
+
 # ---- fetch: writes $tmp/raw.json = {repo, since, until, records:[raw record]} ------------------------------------
-# Raw record: {number, mergedAt, headRefName, files:[path], commitDate, pushedDate, suites:[createdAt],
-#   forcePushed:[createdAt], queued:[createdAt], runs:[{id, name, event, jobs:[{name, conclusion, started_at,
-#   completed_at}]}]}
+# Raw record: {number, mergedAt, headRefName, files:[path], changedFiles, commitDate, pushedDate, suites:[createdAt],
+#   forcePushed:[createdAt], queued:[createdAt], removed:[{createdAt, reason}], runs:[{id, name, event,
+#   jobs:[{name, conclusion, started_at, completed_at}]}]}
+gql_task() {
+  gh api graphql -f query="$QUERY" -f o="$owner" -f r="$name" -F n="$1" --jq '.data.repository.pullRequest'
+}
+runs_task() { # runs_task <PR>: the pull request runs of its branch that belong to its commits
+  gh api -X GET --paginate "repos/$repo/actions/runs" -f event=pull_request -f branch="$(jq -r .headRefName "$tmp/gql-$1.json")" \
+    -f per_page=100 --jq '.workflow_runs[]' |
+    jq -s -c --slurpfile g "$tmp/gql-$1.json" '
+      $g[0] as $g | ($g.allCommits.nodes | map(.commit.oid)) as $oids
+      | [.[] | select(.conclusion != "skipped")
+         | select(((.head_sha as $s | $oids | index($s)) != null)
+                  or any(.pull_requests[]?; .number == $g.number)
+                  or ($g.allCommits.totalCount > 100 and .created_at >= $g.createdAt and .created_at <= $g.mergedAt))
+         | {id, name, event}]'
+}
+mg_task() { # mg_task <from> <to>: the merge-queue runs created in the window
+  gh api -X GET --paginate "repos/$repo/actions/runs" -f event=merge_group -f per_page=100 -f created="$1..$2" \
+    --jq '.workflow_runs[] | {id, name, event, head_branch}' | jq -s -c '.'
+}
+jobs_task() {
+  gh api -X GET --paginate "repos/$repo/actions/runs/$1/jobs" -f per_page=100 -f filter=all --jq '.jobs[]' |
+    jq -s -c '[.[] | select(.conclusion != "skipped") | {name, conclusion, started_at, completed_at}]'
+}
+
 fetch() {
-  local repo=${REPO:-} owner name
+  repo=${REPO:-}
   [ -n "$repo" ] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
   owner=${repo%%/*} name=${repo#*/}
 
@@ -107,26 +160,26 @@ fetch() {
       >"$tmp/cands.json"
 
   # shellcheck disable=SC2016 # a GraphQL query, not shell
-  local query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
-    number mergedAt createdAt headRefName
+  QUERY='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
+    number mergedAt createdAt headRefName changedFiles
     files(first:100){nodes{path}}
-    timelineItems(last:60,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT]){nodes{__typename
-      ... on HeadRefForcePushedEvent{createdAt} ... on AddedToMergeQueueEvent{createdAt}}}
-    commits(last:1){nodes{commit{committedDate pushedDate checkSuites(first:30){nodes{createdAt}}}}}}}}'
+    timelineItems(last:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT,REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{__typename
+      ... on HeadRefForcePushedEvent{createdAt} ... on AddedToMergeQueueEvent{createdAt}
+      ... on RemovedFromMergeQueueEvent{createdAt reason}}}
+    headCommit: commits(last:1){nodes{commit{committedDate pushedDate checkSuites(first:30){nodes{createdAt}}}}}
+    allCommits: commits(first:100){totalCount nodes{commit{oid}}}}}}'
   local num
+  for num in $(jq -r '.[].number' "$tmp/cands.json"); do spawn "$tmp/gql-$num.json" gql_task "$num"; done
+  drain
   for num in $(jq -r '.[].number' "$tmp/cands.json"); do
-    pwait
-    gh api graphql -f query="$query" -f o="$owner" -f r="$name" -F n="$num" \
-      --jq '.data.repository.pullRequest' >"$tmp/gql-$num.json" &
+    jq -e '.number != null' "$tmp/gql-$num.json" >/dev/null || { echo "ci-timing: no pull request data for #$num (gql-$num.json)" >&2; exit 1; }
   done
-  wait
 
   # Select the first N code pull requests (newest first).
-  local sel=""
-  local count=0
+  local sel="" count=0
   for num in $(jq -r '.[].number' "$tmp/cands.json"); do
     [ "$count" -lt "$n" ] || break
-    if jq -e --arg d "$DOCS_RE" '[.files.nodes[].path | select(test($d) | not)] | length > 0' "$tmp/gql-$num.json" >/dev/null; then
+    if jq -e --arg d "$DOCS_RE" "$JQ_CODE"' is_code($d; [.files.nodes[].path]; .changedFiles)' "$tmp/gql-$num.json" >/dev/null; then
       sel+="$num "
       count=$((count + 1))
     fi
@@ -134,25 +187,17 @@ fetch() {
   [ -n "$sel" ] || { echo "ci-timing: no merged code pull request found" >&2; exit 1; }
   [ "$count" -ge "$n" ] || echo "ci-timing: only $count code pull requests in range (wanted $n)" >&2
 
-  # Workflow runs: the pull request runs per branch (GitHub empties pull_requests[] once the branch is deleted, so
-  # the runs of the branch created while the pull request was open count), the merge-queue runs in one window.
-  for num in $sel; do
-    pwait
-    (
-      br=$(jq -r '.headRefName' "$tmp/gql-$num.json")
-      gh api -X GET --paginate "repos/$repo/actions/runs" -f event=pull_request -f branch="$br" -f per_page=100 \
-        --jq '.workflow_runs[]' |
-        jq -s -c --arg a "$(jq -r .createdAt "$tmp/gql-$num.json")" --arg b "$(jq -r .mergedAt "$tmp/gql-$num.json")" \
-          '[.[] | select(.created_at >= $a and .created_at <= $b) | select(.conclusion != "skipped") | {id, name, event}]' \
-          >"$tmp/prruns-$num.json"
-    ) &
-  done
-  wait
-  local minm
-  minm=$(jq -r --arg s "$sel" '[.[] | select(.number as $x | ($s | split(" ") | index($x | tostring)))] | map(.mergedAt) | min' "$tmp/cands.json")
-  gh api -X GET --paginate "repos/$repo/actions/runs" -f event=merge_group -f per_page=100 \
-    -f created=">=$(date -u -d "$minm - 1 day" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -j -v-1d -f %Y-%m-%dT%H:%M:%SZ "$minm" +%Y-%m-%dT%H:%M:%SZ)" \
-    --jq '.workflow_runs[] | {id, name, event, head_branch, conclusion}' | jq -s -c '.' >"$tmp/mgruns.json"
+  # Workflow runs: the pull request runs per branch (kept when the head_sha is one of the pull request's commits,
+  # or pull_requests[] names it; GitHub empties that list once the branch is deleted), and the merge-queue runs
+  # created between a day before the oldest and the latest merge.
+  for num in $sel; do spawn "$tmp/prruns-$num.json" runs_task "$num"; done
+  local -a gfiles=()
+  for num in $sel; do gfiles+=("$tmp/gql-$num.json"); done
+  local from_t to_t
+  from_t=$(jq -s -r '[.[].mergedAt] | min | fromdateiso8601 - 86400 | todate' "${gfiles[@]}")
+  to_t=$(jq -s -r '[.[].mergedAt] | max' "${gfiles[@]}")
+  spawn "$tmp/mgruns.json" mg_task "$from_t" "$to_t"
+  drain
 
   # Jobs of every run, deduplicated.
   local ids id
@@ -162,26 +207,23 @@ fetch() {
       for num in $sel; do jq -r --arg p "/pr-$num-" '.[] | select(.head_branch | contains($p)) | .id' "$tmp/mgruns.json"; done
     } | sort -u
   )
-  for id in $ids; do
-    pwait
-    gh api -X GET "repos/$repo/actions/runs/$id/jobs" -f per_page=100 -f filter=all \
-      --jq '[.jobs[] | select(.conclusion != "skipped") | {name, conclusion, started_at, completed_at}]' >"$tmp/jobs-$id.json" &
-  done
-  wait
+  for id in $ids; do spawn "$tmp/jobs-$id.json" jobs_task "$id"; done
+  drain
 
   # Assemble.
   for num in $sel; do
     jq -c -n --slurpfile g "$tmp/gql-$num.json" --slurpfile p "$tmp/prruns-$num.json" --slurpfile m "$tmp/mgruns.json" \
       --arg pat "/pr-$num-" '
       $g[0] as $g
-      | ($g.commits.nodes[0].commit) as $c
+      | ($g.headCommit.nodes[0].commit) as $c
       | {number: $g.number, mergedAt: $g.mergedAt, headRefName: $g.headRefName,
-         files: [$g.files.nodes[].path], commitDate: $c.committedDate, pushedDate: $c.pushedDate,
+         files: [$g.files.nodes[].path], changedFiles: $g.changedFiles,
+         commitDate: $c.committedDate, pushedDate: $c.pushedDate,
          suites: [$c.checkSuites.nodes[].createdAt],
          forcePushed: [$g.timelineItems.nodes[] | select(.__typename == "HeadRefForcePushedEvent") | .createdAt],
          queued: [$g.timelineItems.nodes[] | select(.__typename == "AddedToMergeQueueEvent") | .createdAt],
+         removed: [$g.timelineItems.nodes[] | select(.__typename == "RemovedFromMergeQueueEvent") | {createdAt, reason}],
          runs: ($p[0] + [$m[0][] | select(.head_branch | contains($pat)) | {id, name, event}])}' >"$tmp/rec-$num.json"
-    # jobs per run
     jq -c '.runs[].id' "$tmp/rec-$num.json" | while read -r id; do
       jq -c --argjson id "$id" -n --slurpfile j "$tmp/jobs-$id.json" '{key: ($id | tostring), value: $j[0]}'
     done | jq -s -c 'from_entries' >"$tmp/jmap-$num.json"
@@ -214,12 +256,14 @@ def jobdur: select(.started_at != null and .completed_at != null) | ((.completed
 
 (.records | map(select(.mergedAt != null))
   | map(. as $r
-    | (($r.files // []) | map(select(test($docs) | not)) | length > 0) as $code
+    | is_code($docs; ($r.files // []); ($r.changedFiles // 0)) as $code
     | (if (($r.suites // []) | length) > 0 then {t: ($r.suites | min), s: "suite"}
        elif (($r.forcePushed // []) | length) > 0 then {t: ($r.forcePushed | max), s: "force_push"}
        elif $r.pushedDate != null then {t: $r.pushedDate, s: "pushed_date"}
        else {t: $r.commitDate, s: "commit_date"} end) as $p
-    | ([($r.queued // [])[] | select(. <= $r.mergedAt)] | max) as $q
+    | (($r.removed // []) | sort_by(.createdAt) | last) as $rm
+    | (if $rm != null and $rm.reason == "merged"
+       then ([($r.queued // [])[] | select(. <= $rm.createdAt)] | max) else null end) as $q
     | ($r.runs // []) as $runs
     | {number: $r.number, code: $code, merged_at: $r.mergedAt, push_at: $p.t, push_source: $p.s,
        admin: ($q == null),
@@ -244,7 +288,7 @@ def jobdur: select(.started_at != null and .completed_at != null) | ((.completed
   push_to_merged_min: ($qd | map(.push_to_merged_min) | stats),
   queue_min: ($qd | map(.queue_min) | stats),
   admin_push_to_merged_min: ($ad | map(.push_to_merged_min) | stats),
-  runner_min_per_pr: ($all | map(.runner_min) | {median: (med | r1), worst: (max | r1)}),
+  runner_min_per_pr: ($all | map(.runner_min) | stats),
   ci_runs_per_pr_median: ($all | map(.ci_runs) | med),
   runs_per_pr_median: ($all | map(.runs) | med),
   job_median_pr_ci: jobtable("pull_request"),
@@ -253,7 +297,7 @@ def jobdur: select(.started_at != null and .completed_at != null) | ((.completed
 }
 JQ
 
-result=$(jq -c --arg docs "$DOCS_RE" "$ANALYSE" "$tmp/raw.json")
+result=$(jq -c --arg docs "$DOCS_RE" "$JQ_CODE $ANALYSE" "$tmp/raw.json")
 if [ "$(jq '.code_prs' <<<"$result")" -eq 0 ]; then
   echo "ci-timing: no code pull request in the input" >&2
   exit 1
@@ -271,8 +315,7 @@ jq -r '
   kv("push_to_merged_min"; .push_to_merged_min),
   kv("queue_min"; .queue_min),
   kv("admin_push_to_merged_min"; .admin_push_to_merged_min),
-  "runner_min_per_pr_median=\(.runner_min_per_pr.median)",
-  "runner_min_per_pr_worst=\(.runner_min_per_pr.worst)",
+  kv("runner_min_per_pr"; .runner_min_per_pr),
   "ci_runs_per_pr_median=\(.ci_runs_per_pr_median)",
   "runs_per_pr_median=\(.runs_per_pr_median)"' <<<"$result"
 tab=$(printf '\t')

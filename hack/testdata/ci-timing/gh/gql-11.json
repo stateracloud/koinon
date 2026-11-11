@@ -1,0 +1,65 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "number": 11,
+    "mergedAt": "2026-11-02T10:30:00Z",
+    "createdAt": "2026-11-02T08:00:00Z",
+    "headRefName": "feat/11-a",
+    "changedFiles": 1,
+    "files": {
+     "nodes": [
+      {
+       "path": "internal/a.go"
+      }
+     ]
+    },
+    "timelineItems": {
+     "nodes": [
+      {
+       "__typename": "AddedToMergeQueueEvent",
+       "createdAt": "2026-11-02T10:15:00Z"
+      },
+      {
+       "__typename": "RemovedFromMergeQueueEvent",
+       "createdAt": "2026-11-02T10:30:00Z",
+       "reason": "merged"
+      }
+     ]
+    },
+    "headCommit": {
+     "nodes": [
+      {
+       "commit": {
+        "committedDate": "2026-11-02T08:00:00Z",
+        "pushedDate": null,
+        "checkSuites": {
+         "nodes": [
+          {
+           "createdAt": "2026-11-02T10:00:00Z"
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "allCommits": {
+     "totalCount": 2,
+     "nodes": [
+      {
+       "commit": {
+        "oid": "aaa111"
+       }
+      },
+      {
+       "commit": {
+        "oid": "bbb222"
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}
