@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // ADR 0068, 0069: a model with a cache_read price and no cache mode runs without caching, and the run
@@ -42,7 +43,7 @@ var _ = Describe("Runs without prompt caching", func() {
 		setup(ctx, e, "mystery", modelformat.OpenAI)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		got := uncached(ctx, r)
 		Expect(got).To(HaveLen(1))
 		Expect(string(got[0].Payload)).To(And(ContainSubstring(model), ContainSubstring("provider format")))
@@ -53,7 +54,7 @@ var _ = Describe("Runs without prompt caching", func() {
 		setup(ctx, e, "anthropic", modelformat.Anthropic)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(uncached(ctx, r)).To(BeEmpty())
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(HaveLen(1))
@@ -67,7 +68,7 @@ var _ = Describe("Runs without prompt caching", func() {
 		setup(ctx, e, "anthropic", modelformat.Anthropic)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon-anthropic/" + model}))
 	})
 
@@ -76,7 +77,7 @@ var _ = Describe("Runs without prompt caching", func() {
 		setup(ctx, e, "openai", modelformat.OpenAI)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(uncached(ctx, r)).To(BeEmpty())
 	})
 })

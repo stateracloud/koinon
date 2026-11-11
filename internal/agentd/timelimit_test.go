@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // The warning before the time limit (old issue 183; ADR 0066 amendment 2026-10-28).
@@ -66,8 +67,8 @@ var _ = Describe("the time limit", func() {
 		m := agentd.NewMetrics(prometheus.NewRegistry())
 		e.pool("agentd-a", withNotice(2*time.Second, m))
 
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.wrap_up_notice"))
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.wrap_up_notice"))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 		prompts, _, cancels, _ := e.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix(wrapUpMarker))
@@ -94,7 +95,7 @@ var _ = Describe("the time limit", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := capped(ctx, e, t, 2)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 		p := canceledPayload(ctx, e, t)
 		Expect(p).To(HaveKeyWithValue("summary", "notes text"))
 		Expect(p).To(HaveKeyWithValue("summarySource", "notes"))
@@ -151,9 +152,9 @@ var _ = Describe("the request and spend limits", func() {
 		r := limited(ctx, e, t, 10, "")
 		m := agentd.NewMetrics(prometheus.NewRegistry())
 		e.pool("agentd-a", fast(m))
-		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		spend(ctx, e, r, 8, "0.001")
-		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(racescale.D(10 * time.Second)).ShouldNot(BeNil())
 		p := noticeOf(ctx, r)
 		Expect(p).To(HaveKeyWithValue("limit", "requests"))
 		Expect(p["modelRequests"]).To(BeEquivalentTo(8))
@@ -172,9 +173,9 @@ var _ = Describe("the request and spend limits", func() {
 		r := limited(ctx, e, t, 1000, "1.00")
 		m := agentd.NewMetrics(prometheus.NewRegistry())
 		e.pool("agentd-a", fast(m))
-		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		spend(ctx, e, r, 1, "0.81")
-		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(racescale.D(10 * time.Second)).ShouldNot(BeNil())
 		p := noticeOf(ctx, r)
 		Expect(p).To(HaveKeyWithValue("limit", "spend"))
 		Expect(p).To(HaveKeyWithValue("spentUSD", "0.81"))

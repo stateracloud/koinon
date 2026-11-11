@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // racingEpochs runs before its first listing of an agent's epoch folders: a keys command that
@@ -81,7 +82,7 @@ var _ = Describe("home checkpoint resync", func() {
 			c.Metrics = m
 			c.Checkpoints = &agentd.Checkpoints{
 				Store: writer, Repositories: fixedRepo{current: current, lost: lost}, Interval: 24 * time.Hour,
-				Poll: 50 * time.Millisecond, Sweep: time.Hour, Attempts: 2, Retry: 10 * time.Millisecond, Timeout: 20 * time.Second,
+				Poll: 50 * time.Millisecond, Sweep: time.Hour, Attempts: 2, Retry: 10 * time.Millisecond, Timeout: racescale.D(20 * time.Second),
 				Lease: 20 * time.Minute,
 			}
 			for _, x := range extra {
@@ -229,7 +230,7 @@ var _ = Describe("home checkpoint resync", func() {
 		request(ctx)
 		stop := e.pool("agentd-a", cps())
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := resync(ctx)()
 		Expect(counts(r)).To(Equal([]int32{2, 1, 1, 0}), "snapshots, added, missing, skipped")
 		Expect(r.Attempts).To(BeEquivalentTo(1))
@@ -272,7 +273,7 @@ var _ = Describe("home checkpoint resync", func() {
 		before := count(ctx)
 		second := request(ctx)
 		Expect(second.FinishedAt.Valid).To(BeFalse(), "a new request starts over")
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(counts(resync(ctx)())).To(Equal([]int32{2, 0, 0, 0}))
 		Expect(count(ctx)).To(Equal(before))
 		Expect(changes("added")).To(BeEquivalentTo(1))
@@ -317,7 +318,7 @@ var _ = Describe("home checkpoint resync", func() {
 		request(ctx)
 		e.pool("agentd-a", cps())
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := resync(ctx)()
 		Expect(r.FailedAt.Valid).To(BeFalse(), r.Error.String)
 		Expect(counts(r)).To(Equal([]int32{1, 0, 0, 0}), "epoch 1 is skipped, not listed under the wrong password")
@@ -338,7 +339,7 @@ var _ = Describe("home checkpoint resync", func() {
 
 		By("a second run finds the same and records nothing new")
 		request(ctx)
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(audited(ctx, agentd.PrefixTakenAction)).To(HaveLen(1))
 		Expect(taken(ctx)).To(BeEquivalentTo(2))
 	})
@@ -353,7 +354,7 @@ var _ = Describe("home checkpoint resync", func() {
 		request(ctx)
 		e.pool("agentd-a", cps())
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		var floor pgtype.Int4
 		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
 		Expect(floor).To(Equal(pgtype.Int4{Int32: 4, Valid: true}), "past r3/, not at the gap r2/")
@@ -374,7 +375,7 @@ var _ = Describe("home checkpoint resync", func() {
 			}}
 		}))
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		var floor pgtype.Int4
 		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
 		Expect(floor.Valid).To(BeFalse(), "the repository is the database's own")
@@ -397,7 +398,7 @@ var _ = Describe("home checkpoint resync", func() {
 			}}
 		}))
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		var floor pgtype.Int4
 		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&floor)).To(Succeed())
 		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}), "past r2/, which the first folder's re-check alone would have dropped")
@@ -427,7 +428,7 @@ var _ = Describe("home checkpoint resync", func() {
 			}}
 		}))
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(lockedDuringListing.Load()).To(BeFalse(), "the bucket was listed while the row lock was held")
 		Expect(audited(ctx, agentd.PrefixTakenAction)).NotTo(BeEmpty())
 	})
@@ -454,7 +455,7 @@ var _ = Describe("home checkpoint resync", func() {
 
 		request(ctx)
 		e.pool("agentd-a", cps())
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(counts(resync(ctx)())).To(Equal([]int32{5, 2, 0, 2}), "snapshots (3 in epoch 0, 2 in epoch 1), added, missing, skipped")
 
 		Expect(checkpointRow(ctx, running).Status).To(Equal(store.CheckpointStatusRunning), "its backup records it")
@@ -486,7 +487,7 @@ var _ = Describe("home checkpoint resync", func() {
 
 		request(ctx)
 		e.pool("agentd-a", cps())
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(counts(resync(ctx)())).To(Equal([]int32{4, 1, 0, 2}), "snapshots, added, missing, skipped")
 		var agentEpoch int64
 		Expect(db.QueryRow(ctx, `SELECT epoch FROM agents WHERE org_id = $1 AND id = $2`, e.org, agent).Scan(&agentEpoch)).To(Succeed())
@@ -516,7 +517,7 @@ var _ = Describe("home checkpoint resync", func() {
 
 		request(ctx)
 		e.pool("agentd-a", cps())
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(counts(resync(ctx)())).To(Equal([]int32{1, 1, 1, 0}))
 		Expect(checkpointRow(ctx, swept).Status).To(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointRow(ctx, inLost).Status).To(Equal(store.CheckpointStatusComplete), "a lost repository cannot be listed: left as it is")
@@ -527,7 +528,7 @@ var _ = Describe("home checkpoint resync", func() {
 		id := recorded(ctx, 0, "k0123456789abcdef0123456789abcdef", time.Hour)
 		request(ctx)
 		e.pool("agentd-a", cps())
-		Eventually(func() bool { return resync(ctx)().FailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return resync(ctx)().FailedAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := resync(ctx)()
 		Expect(r.Attempts).To(BeEquivalentTo(2))
 		Expect(r.Error.String).To(ContainSubstring("not in the bucket"))
@@ -552,7 +553,7 @@ var _ = Describe("home checkpoint resync", func() {
 
 		_, err = db.Exec(ctx, `UPDATE home_repository_epochs SET seeded_at = now() WHERE org_id = $1 AND agent_id = $2`, e.org, agent)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 	})
 
 	It("neither duplicates nor marks missing a checkpoint a backup records while the resync lists the bucket", func(ctx SpecContext) {
@@ -564,7 +565,7 @@ var _ = Describe("home checkpoint resync", func() {
 		}
 		request(ctx)
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = recordingListing{HomeStore: writer, during: during} }))
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(counts(resync(ctx)())).To(Equal([]int32{1, 0, 0, 0}), "the backup's row names it: not added, not missing")
 		Expect(bySnapshot(ctx, res.SnapshotID)).To(HaveLen(1))
 		Expect(checkpointRow(ctx, live).Status).To(Equal(store.CheckpointStatusComplete))
@@ -575,12 +576,12 @@ var _ = Describe("home checkpoint resync", func() {
 		gate := gatedListing{HomeStore: writer, started: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
 		first := request(ctx)
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate }))
-		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(gate.started).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
 		second := request(ctx)
 		Expect(second.RequestID).NotTo(Equal(first.RequestID))
 		close(gate.release)
 
-		Eventually(finished(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(finished(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := resync(ctx)()
 		Expect(r.RequestID).To(Equal(second.RequestID))
 		Expect(r.Attempts).To(BeEquivalentTo(1), "the first try recorded no outcome")

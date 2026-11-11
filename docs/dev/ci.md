@@ -265,6 +265,32 @@ crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, 
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
 
+## The race detector
+
+The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
+its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+`internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
+suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
+runs without it, because the race build is several times slower. Add a package here when it starts
+goroutines or shares state behind a lock; `hack/go-test-test.sh` checks the list. A reported race is
+fixed, never suppressed. Run it locally with `go tool ginkgo -race ./internal/<pkg>/` (Docker for the
+Postgres suites).
+
+Timing under `-race`: the race build is slower and the runner has fewer cores than a laptop, so a
+fixed wall-clock window that is fine on a laptop times out on the runner without any race report (the
+first `go-race` run of agentd failed on 9 specs, all "Timed out after 20s"). Every `Eventually` window
+in `internal/agentd` therefore goes through `racescale.D` (`internal/testing/racescale`: 1x normally,
+5x under `-race`), so normal timing is unchanged. Write new windows the same way. `Consistently`
+windows are not scaled: they assert that nothing happens, and a longer window only slows the suite.
+The same goes for the config budgets a spec lets real work run under (the pool's `Lease` and `Heartbeat`
+together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`, `GatewayRecordWait`, the
+checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
+short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
+fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
+a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
+processes, and fewer processes would make the job slower for the same risk.
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and

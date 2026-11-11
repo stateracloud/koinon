@@ -29,7 +29,7 @@ import (
 // It checks neither signatures nor IAM policies, so this mode proves the startup inputs (the
 // region, the key, the endpoints, the CA, the IRSA identity) and the wrapping; which identity may
 // encrypt is covered by the adapter's own tests.
-const localStackImage = "docker.io/localstack/localstack:4.14.0"
+const localStackImage = containerhost.LocalStackImage
 
 // localStackAdminKeyID is the access key the suite's administrative calls carry: obviously fake,
 // never checked by LocalStack, which only reads the region from the credential scope.

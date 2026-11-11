@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -96,7 +97,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, r)).WithTimeout(10*time.Second).Should(Equal(store.RunStateSucceeded), "the run itself ended well")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10*time.Second)).Should(Equal(store.RunStateSucceeded), "the run itself ended well")
 
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -167,7 +168,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.stuckAfterTurn("")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() int { e.files.mu.Lock(); defer e.files.mu.Unlock(); return e.files.procinfoRuns }).Should(BeNumerically(">=", 1))
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -183,11 +184,11 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		start := time.Now()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() bool {
 			sb, _ := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 			return sb.UnhealthyAt.Valid
-		}).WithTimeout(5 * time.Second).Should(BeTrue())
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(BeTrue())
 		Expect(time.Since(start)).To(BeNumerically(">=", 400*time.Millisecond))
 		e.files.mu.Lock()
 		defer e.files.mu.Unlock()
@@ -202,8 +203,8 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			t := e.task(ctx, "hello")
 			r := e.enqueue(ctx, t)
 			e.pool("agentd-a", fastStuck(receiverURL()), mutate)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Eventually(func() []string { return kindsOf(taskEvents(ctx, e, t)) }).WithTimeout(5 * time.Second).Should(ContainElement("sandbox.work_lost"))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Eventually(func() []string { return kindsOf(taskEvents(ctx, e, t)) }).WithTimeout(racescale.D(5 * time.Second)).Should(ContainElement("sandbox.work_lost"))
 			var lost string
 			for _, ev := range taskEvents(ctx, e, t) {
 				if ev.Kind == "sandbox.work_lost" {
@@ -251,12 +252,12 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() string {
 			var w string
 			_ = db.QueryRow(ctx, `SELECT work FROM sandbox_incidents WHERE org_id = $1`, e.org).Scan(&w)
 			return w
-		}).WithTimeout(5 * time.Second).Should(Equal("nothing"))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(Equal("nothing"))
 		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("sandbox.work_lost"))
 	})
 
@@ -274,12 +275,12 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		}
 		e.stuckAfterTurn(dProc)
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, first)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, first)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		Eventually(func() bool {
 			a, _ := q.GetAgent(ctx, store.GetAgentParams{OrgID: e.org, ID: e.agent.ID})
 			return a.UnhealthyAt.Valid
-		}).WithTimeout(5 * time.Second).Should(BeTrue())
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(BeTrue())
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sb.UnhealthyAt.Valid).To(BeFalse(), "the loop guard: the sandbox is not recreated a fourth time")
@@ -303,8 +304,8 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.files.mu.Unlock()
 		_, err = db.Exec(ctx, `UPDATE agents SET unhealthy_at = NULL, unhealthy_reason = NULL WHERE id = $1`, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(runState(ctx, waiting)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, second)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, waiting)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("recreates before the next run when the process is found by the sweep that precedes the harness", func(ctx SpecContext) {
@@ -327,10 +328,10 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Eventually(func() bool {
 			sb, _ := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 			return sb.UnhealthyAt.Valid
-		}).WithTimeout(10 * time.Second).Should(BeTrue())
+		}).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateSucceeded), "the run waits for the new sandbox")
 		e.recreateSandbox(ctx)
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionGeneration.String).NotTo(Equal(old), "the session lives in the new home")
@@ -344,12 +345,12 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		// The home the session lives in is replaced (as the reconciler does for a stuck sandbox).
 		e.recreateSandbox(ctx)
 		e.message(ctx, t, "after")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
 	})
 })
