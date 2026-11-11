@@ -65,6 +65,15 @@ case_ "pull_request_target comment"   0 $W '# no pull_request_target here\non:\n
 case_ "a longer trigger name passes"  0 $W 'on:\n  pull_request_targets_x: {}'
 case_ "no workflows at all"           0 README.md 'x'
 
+# The timeout rule applies to ci.yml and release.yml only.
+CI=.github/workflows/ci.yml
+case_ "timeout on every job"          0 $CI 'jobs:\n  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 9'
+case_ "a job without a timeout"       1 $CI 'jobs:\n  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n  b:\n    runs-on: ubuntu-latest\n    steps: []'
+case_ "the last job without one"      1 .github/workflows/release.yml 'jobs:\n  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n  b:\n    runs-on: ubuntu-latest'
+case_ "a commented timeout is none"   1 $CI 'jobs:\n  a:\n    runs-on: ubuntu-latest\n    # timeout-minutes: 5'
+case_ "a reusable-workflow job"       0 $CI 'jobs:\n  a:\n    uses: ./.github/workflows/x.yml'
+case_ "other workflows are free"      0 $W 'jobs:\n  a:\n    runs-on: ubuntu-latest'
+
 # The real tree is clean.
 out=$("$script" 2>&1) && ok "the repository is clean" || bad "the repository: $out"
 

@@ -170,8 +170,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
-      # an arbitrary commit, can never write the cache that main's runs read.
+      # Restored everywhere, saved only by a push to main or the nightly schedule on main (below): a pull request, or a
+      # dispatch on an arbitrary commit, can never write the cache that main's runs read.
       - id: e2ego
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -302,7 +302,7 @@ jobs:
         run: test/e2e/kind/down.sh
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build

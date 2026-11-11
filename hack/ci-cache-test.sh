@@ -28,10 +28,15 @@ check "warm-caches runs on pushes to main only" has "$warm" "if: github.event_na
 check "warm-caches does not wait for changes (never skipped by ci-skip-heavy)" hasnt "$warm" 'needs:'
 check "warm-caches looks up with lookup-only" has "$warm" 'lookup-only: true'
 warmweb=$(job_body "$wf" warm-caches-web)
-for k in 'go-ci-' 'envtest-'; do
-  check "warm-caches saves $k" has "$warm" "key: ${k}"
-  check "warm-caches saves $k only on a miss" has "$warm" "cache-hit != 'true'"
-done
+action=$repo/.github/actions/setup-go-cache/action.yml
+check "warm-caches saves envtest-" has "$warm" "key: envtest-"
+check "warm-caches saves envtest- only on a miss" has "$warm" "cache-hit != 'true'"
+check "warm-caches saves go-ci with the key of setup-go-cache, only on a miss" has "$warm" 'key: \$\{\{ steps.go.outputs.key \}\}$'
+check "warm-caches looks up go-ci through setup-go-cache" has "$warm" 'uses: ./.github/actions/setup-go-cache'
+# The go-ci key (weekly, issue 572): one definition for every consumer, with the week as the last part.
+check "setup-go-cache has the go-ci key with a week suffix" grep -Eq 'key=\$\{prefix\}\$\{GO_SUM\}-\$\(\( \$\(date -u \+%s\) / 604800 \)\)' "$action"
+check "setup-go-cache only restores (never saves)" test -z "$(grep -E 'uses: actions/cache/save|uses: actions/cache@' "$action")"
+check "setup-go-cache restore keys fall back to an older week" grep -q 'steps.key.outputs.prefix }}$' "$action"
 check "warm-caches uses actions/cache/save" has "$warm" 'actions/cache/save@'
 check "warm-caches-web saves no Playwright cache (web-e2e runs in the Playwright image, #569)" hasnt "$warmweb" 'playwright'
 check "warm-caches-web runs on pushes to main only" has "$warmweb" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
@@ -59,8 +64,13 @@ total=$(grep -c 'uses: actions/setup-go@' "$wf")
 off=$(awk '/uses: actions\/setup-go@/ { f = 1; next } f && /cache: false/ { n++; f = 0 } f && /^      - / { f = 0 } END { print n + 0 }' "$wf")
 check "every setup-go in ci.yml has cache: false ($off of $total)" test "$total" = "$off"
 for j in generate chart chart-smoke escape-admission scripts flavors; do
-  check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'key: go-ci-'
+  check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'uses: \./\.github/actions/setup-go-cache'
 done
+for j in go-tidy go-lint go-test go-race-serial go-race-parallel; do
+  check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'uses: \./\.github/actions/setup-go-cache'
+done
+# The one exception is `changes`: it restores the module cache alone, under the key without a week.
+check "no job but changes pastes a go-ci key (setup-go-cache defines it)" test "$(grep -c 'key: go-ci-' "$wf")" = 1
 
 check "go-vet is not a job" test -z "$(job_body "$wf" go-vet)"
 check "go-vet is not a need of go" hasnt "$(job_body "$wf" go)" 'go-vet'
@@ -68,19 +78,21 @@ check "go-vet is not in ci-required.txt" hasnt "$(cat "$repo/hack/ci-required.tx
 check "warm-caches is advisory" grep -qx 'advisory warm-caches' "$repo/hack/ci-required.txt"
 check "golangci-lint default set still runs govet (standard)" grep -Eq '^  default: standard' "$repo/.golangci.yml"
 check "go-lint does not save the lint cache" has "$(job_body "$wf" go-lint)" 'skip-save-cache: true'
-# The lint action's cache has a time-interval key: warm-caches must run it on every push to main,
-# so the step carries no go-ci miss condition.
-check "warm-caches runs golangci-lint on every push (no if:)" test "$(awk '/^      - /{blk=$0} /golangci-lint-action@/{print prev} {prev=$0}' <<<"$warm" | grep -c 'if:')" = 0
+# The lint action's cache has a 7-day interval key, and so has the go-ci key (setup-go-cache): the full
+# lint runs only on a go-ci miss, which is the first push of a new interval (issue 572).
+check "warm-caches runs golangci-lint only on a go-ci miss" test "$(awk '/golangci-lint-action@/{print prev} {prev=$0}' <<<"$warm" | grep -c "cache-hit != 'true'")" = 1
 check "warm-caches runs golangci-lint" has "$warm" 'golangci-lint-action@'
 
 # The envtest key follows the Makefile's version.
 ver=$(sed -n 's/^ENVTEST_K8S_VERSION ?= //p' "$repo/Makefile")
-check "envtest keys are envtest-$ver" test "$(grep -c "key: envtest-$ver\$" "$wf")" = 3
-check "no other envtest key" test "$(grep -c 'key: envtest-' "$wf")" = 3
+check "envtest keys are envtest-$ver" test "$(grep -c "key: envtest-$ver\$" "$wf")" = 4
+check "no other envtest key" test "$(grep -c 'key: envtest-' "$wf")" = 4
+check "escape (admission) restores the envtest cache" has "$(job_body "$wf" escape-admission)" "key: envtest-$ver"
 
 # The e2e Go cache: one entry per go.sum, no run id, saved only when the exact key was missing.
 check "e2e-go key has no run id" hasnt "$(grep 'key: e2e-go-' "$e2e")" 'run_id'
 check "e2e-go is saved only on an exact miss" grep -q "steps.e2ego.outputs.cache-hit != 'true'" "$e2e"
+check "e2e-go is also saved from the nightly schedule" grep -q "github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit" "$e2e"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
