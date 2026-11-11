@@ -282,6 +282,12 @@ first `go-race` run of agentd failed on 9 specs, all "Timed out after 20s"). Eve
 in `internal/agentd` therefore goes through `racescale.D` (`internal/testing/racescale`: 1x normally,
 5x under `-race`), so normal timing is unchanged. Write new windows the same way. `Consistently`
 windows are not scaled: they assert that nothing happens, and a longer window only slows the suite.
+The same goes for the config budgets a spec lets real work run under (the pool's `Lease` and `Heartbeat`
+together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`, `GatewayRecordWait`, the
+checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
+short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
+fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
+a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
 The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
 processes, and fewer processes would make the job slower for the same risk.
 

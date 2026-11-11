@@ -174,7 +174,7 @@ func tracingOn(rcv *otlpReceiver, d agentd.TraceDecider, mutate ...func(*agentd.
 	return func(c *agentd.Config) {
 		t := &agentd.Tracing{
 			Decider: d, Endpoint: rcv.URL, TokenFile: tokenFile(),
-			Interval: 50 * time.Millisecond, ExportTimeout: time.Second,
+			Interval: 50 * time.Millisecond, ExportTimeout: racescale.D(time.Second),
 		}
 		for _, m := range mutate {
 			m(t)

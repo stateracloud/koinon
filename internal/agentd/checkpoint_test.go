@@ -455,10 +455,12 @@ var _ = Describe("home checkpoints", func() {
 		id := request(ctx, store.CheckpointReasonStop)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = lateStore{HomeStore: writer}
-			c.Timeout = racescale.D(5 * time.Second)
+			// The deadline must outlast the real work (connecting to the repository, the backup), and
+			// lateStore holds the result until the deadline: so the spec lasts as long as Timeout.
+			c.Timeout = racescale.D(10 * time.Second)
 			c.Attempts = 1
 		}))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 		Expect(checkpointOf(ctx, id)().SnapshotID.Valid).To(BeTrue())
 	})
 
