@@ -30,13 +30,11 @@
 #                  merges with `gh pr merge --admin --merge`, and opens a `break-glass` issue (sha, reason, approver).
 #   --admin        merge now with admin rights, for a pull request that changes at least one path under `.github/`: a
 #                  workflow file runs from the pull request, so those keep the
-#                  CODEOWNERS approval, which one human cannot give (ADR 0103, ADR 0105). Any other pull request is
+#                  CODEOWNERS approval, which one human cannot give (ADR 0105). Any other pull request is
 #                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
 #                  e2e, so it is fail-closed for it: when the base's needs-e2e.sh says the change needs the e2e (or cannot
 #                  say), the head needs a green `quickstart` of its own, else exit 10. Exit 2 when the file list cannot
 #                  be read.
-#   The `review` check (the independent review verdict, ADR 0103) is advisory since 2026-11-11: neither --admin
-#   nor --break-glass reads it, and no mode needs a recorded verdict.
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
@@ -233,7 +231,6 @@ if [ "$jump" = 1 ] && [ "$queue" != 1 ]; then
 fi
 if [ $((admin + glass)) != 0 ]; then
   mode=--admin
-  # The independent review verdict is advisory since 2026-11-11 (ADR 0103 amendment): no review gate here.
   if [ "$glass" = 1 ]; then
     echo "pr-merge: BREAK GLASS: merging PR $pr without the queue (approved at $approved): $reason" >&2
   else

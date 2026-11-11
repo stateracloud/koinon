@@ -543,7 +543,7 @@ run 7
 grep -q 'armed but' <<<"$out" && { echo "FAIL: no auto-merge request, must not say armed: $out" >&2; fail=1; }
 grep -q 'auto-merge is NOT armed.*review is required' <<<"$out" || { echo "FAIL: says not armed, review required: $out" >&2; fail=1; }
 
-# ADR 0103 amendment (2026-11-11): the review verdict is advisory; --admin and --break-glass never run a review gate.
+# ADR 0103 is superseded (#546): --admin and --break-glass never run a review gate.
 setup false "$green"
 run 7 --admin
 check "--admin of a sensitive PR with no review verdict proceeds" 0 merge

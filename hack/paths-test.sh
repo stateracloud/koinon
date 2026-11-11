@@ -85,7 +85,7 @@ example() { # <name> <want jobs> <want e2e exit> <paths...>
 	if [[ $got == "$wj" && $ge == "$we" ]]; then ok; else bad "$name: jobs [${got% }] want [${wj% }]; e2e exit $ge want $we"; fi
 }
 example "one hack script" "" 1 hack/ship.sh
-example "a workflow other than ci.yml" "" 1 .github/workflows/review.yml
+example "a workflow other than ci.yml" "" 1 .github/workflows/dco.yml
 example "the Go test wrapper" "go" 1 hack/go-test.sh
 example "e2e driver script" "go" 0 test/e2e/run.sh
 example "a chart template" "chart chartsmoke escape go" 0 charts/koinon/templates/api.yaml

@@ -191,7 +191,6 @@ script-skip - hack/preflight-test.sh
 script-skip - hack/release-gate-test.sh
 script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
-script-skip - hack/review-gate-test.sh
 script-skip - hack/migrate-lint.sh
 # Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
 script-skip - hack/flavor-tag-test.sh
