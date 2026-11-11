@@ -566,9 +566,94 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	// Issue 507: the namespace label policy runs on every namespace UPDATE in the cluster and fails
+	// closed, so a matchCondition on the OLD object keeps it away from namespaces that carry none of
+	// the guarded labels. The updates below are what Argo CD's managedNamespaceMetadata sends.
+	It("lets annotation and Argo-style metadata updates through, and keeps the guarded labels denied", func(ctx SpecContext) {
+		update := func(user, namespace string, mutate func(*corev1.Namespace)) error {
+			n, err := admin.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			mutate(n)
+			_, err = as[user].CoreV1().Namespaces().Update(ctx, n, dryRunUpdate)
+			return err
+		}
+		const msg = "only the namespace lifecycle owners may change the labels"
+		annotate := func(n *corev1.Namespace) {
+			if n.Annotations == nil {
+				n.Annotations = map[string]string{}
+			}
+			n.Annotations["argocd.argoproj.io/sync-wave"] = "1"
+		}
+		argo := func(n *corev1.Namespace) {
+			annotate(n)
+			if n.Labels == nil {
+				n.Labels = map[string]string{}
+			}
+			n.Labels["app.kubernetes.io/managed-by"] = "argocd"
+			n.Labels["team"] = "platform"
+		}
+
+		By("an annotation-only edit passes, on a sandbox namespace and on another one")
+		for _, user := range []string{"admin", otherUser} {
+			for _, name := range []string{ns, nsB, unlabelled, plain} {
+				Expect(update(user, name, annotate)).To(Succeed(), "%s on %s", user, name)
+			}
+		}
+
+		By("a managedNamespaceMetadata update (labels plus annotations) passes on a namespace outside the policies")
+		Expect(update(otherUser, plain, argo)).To(Succeed())
+
+		By("and on a covered namespace, as long as the guarded labels stay as they are")
+		for _, name := range []string{ns, nsB, unlabelled} {
+			Expect(update(otherUser, name, argo)).To(Succeed(), name)
+		}
+
+		By("the same update that also touches a guarded label is still denied")
+		for _, name := range []string{ns, nsB, unlabelled} {
+			denied(update(otherUser, name, func(n *corev1.Namespace) {
+				argo(n)
+				n.Labels["openshell.ai/managed-by"] = "someone"
+			}), msg)
+		}
+		denied(update("admin", ns, func(n *corev1.Namespace) {
+			argo(n)
+			delete(n.Labels, "openshell.ai/gateway-id")
+		}), msg)
+
+		// The apiserver's namespace strategy puts kubernetes.io/metadata.name back before admission, so
+		// neither object reaches the policy without labels: the has() == false branch of the
+		// matchCondition and the variables is not reachable here (envtest does not cover it).
+		By("clearing the labels of a namespace outside the policies is admitted (the apiserver keeps kubernetes.io/metadata.name)")
+		Expect(update(otherUser, plain, func(n *corev1.Namespace) {
+			n.Labels = nil
+			annotate(n)
+		})).To(Succeed())
+		Expect(update(otherUser, plain, func(n *corev1.Namespace) { n.Labels = nil })).To(Succeed())
+	})
+
+	It("renders no matchConditions pre-filter when the selector has only negative requirements", func(ctx SpecContext) {
+		// A NotIn / DoesNotExist selector alone covers namespaces without the guarded keys, so those
+		// namespaces must still reach the validation (issue 507).
+		ps, _ := renderSandboxPolicy(ctx,
+			"--set", "sandboxPolicy.namespaceSelector.matchLabels=null",
+			"--set-json", `sandboxPolicy.namespaceSelector.matchExpressions=[{"key":"team","operator":"DoesNotExist"}]`)
+		found := false
+		for _, p := range ps {
+			if strings.HasSuffix(p.Name, "-sandbox-namespaces") {
+				found = true
+				Expect(p.Spec.MatchConditions).To(BeEmpty(), p.Name)
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
 	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
 		for _, p := range policies {
 			Expect(p.Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)), p.Name)
+			if strings.HasSuffix(p.Name, "-sandbox-namespaces") {
+				Expect(p.Spec.MatchConditions).To(HaveLen(1), p.Name)
+				Expect(p.Spec.MatchConditions[0].Expression).To(ContainSubstring("oldObject.metadata.labels"), p.Name)
+			}
 		}
 		for _, b := range bindings {
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
