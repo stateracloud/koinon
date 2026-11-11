@@ -29,6 +29,34 @@ mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do no
 `TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
 covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
 
+#### Host guards for a Mac (issue 551)
+
+A Mac that sleeps in the middle of a run stalls Docker and its port forwards, and every suite that
+shares the run's Postgres times out together (2026-11-11: 64 of 125 suites, 10186 s). The functions of
+`hack/go-test-host.sh` (sourced by `hack/go-test.sh`, so `make test`, `hack/preflight.sh` and
+`hack/lane-gates.sh` all get them) guard against that; `hack/go-test-host-test.sh` tests each offline
+with stubs for `uname`, `pmset`, `docker` and `caffeinate`.
+
+- **Keep awake.** On macOS the run holds `caffeinate -i -s -w $$`: it ends with the run, with no timer to
+  run out. `-s` works on AC power only; on battery the script warns. Other systems: nothing happens.
+- **Docker and clock.** Before the tests, `docker info` must answer within `KOINON_DOCKER_PING_SECONDS`
+  (default 5) and the daemon's `SystemTime` (the VM clock, shared by every container) must be within
+  `KOINON_CLOCK_SKEW` seconds (default 2) of the host. If not, the run stops with exit 3 and says
+  `orb restart` for OrbStack. No Docker CLI or a daemon that answers with an error is not a stop: the
+  suites skip as before.
+- **Host slept.** After the run, a `Sleep` event in `pmset -g log` between the start and end turns the
+  result into exit 3 with `go-test verdict: notrun reason="host slept"` (lane-gates: `verdict=notrun
+  reason="host slept"`), whatever the suites reported: the results mean nothing.
+- **Deadlines.** `testenv`'s Docker check (`GetProvider()` and `Health`) shares one 30 s deadline.
+  `go test` and `ginkgo` get `-timeout` / `--timeout` from `GO_TEST_TIMEOUT` (default 20m).
+- **Heavy runs per Mac.** At most `KOINON_GO_SLOTS` (default 2) `go-test.sh` runs at once on one Mac:
+  a slot is a directory under `$TMPDIR/koinon-go-slots` (`KOINON_GO_SLOTS_DIR`) holding the owner's pid;
+  a dead owner's slot is taken over, and a waiting run prints one line. Each run uses `PROCS=4` unless
+  `PROCS` is set. On Linux (CI) there is no cap unless `KOINON_GO_SLOTS` is set. The numbers are a
+  starting point (2 x 4): measure one awake run (`docker stats` plus test process memory) and set
+  `N = floor((VM memory - 2 GiB) / per-run peak)`.
+- Long unattended runs belong on the lab or a cloud host, not the Mac.
+
 ### The gateway behaviour suite (#272, ADR 0097 step 1)
 
 `internal/gateway/gatewaytest` is what Koinon needs from a gateway, stated as behaviour a client or

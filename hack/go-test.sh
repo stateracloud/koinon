@@ -40,6 +40,12 @@
 # events of the go test parts (*.gotest.jsonl), where a plain test's testenv.RequireT skip shows.
 # The reports only record; nothing reruns a failed spec.
 #
+# Host guards (issue 551, hack/go-test-host.sh): on macOS the run holds `caffeinate -i -s -w $$`; Docker
+# must answer and its clock agree with the host's within 2 s (exit 3 otherwise); a run during which
+# `pmset -g log` shows a Sleep ends with exit 3 and `go-test verdict: notrun reason="host slept"`, not
+# with test failures; at most KOINON_GO_SLOTS (default 2) runs share a Mac, with PROCS=4 each unless
+# PROCS is set; `go test` gets -timeout (GO_TEST_TIMEOUT, default 20m per package).
+#
 # KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
 # failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; a wrapper
 # script reads the file to tell NOT RUN from a failure.
@@ -79,8 +85,33 @@ on_exit() {
 }
 trap 'on_exit $?' EXIT # after --list: a listing is not a run
 
+# shellcheck source=hack/go-test-host.sh
+source "$(dirname "$0")/go-test-host.sh"
+host_caffeinate_pid=
+host_slot_dir=
+# shellcheck disable=SC2317,SC2329 # invoked from the exit trap
+host_cleanup() {
+	[[ -z $host_caffeinate_pid ]] || kill "$host_caffeinate_pid" 2>/dev/null || true
+	host_release_slot
+}
+# Chain onto the exit trap set above: the guard and the slot go with the run.
+# shellcheck disable=SC2154 # rc_ is set inside the trap string
+trap 'rc_=$?; host_cleanup; on_exit $rc_' EXIT
+
+host_acquire_slot
+host_keep_awake $$
+host_docker_preflight || exit 3
+run_start=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Four processes per run on a Mac (two runs at once), Ginkgo's default (one per core) elsewhere.
 procs=(-p)
-[[ -z ${PROCS:-} ]] || procs=("--procs=$PROCS")
+if [[ -n ${PROCS:-} ]]; then
+	procs=("--procs=$PROCS")
+elif host_is_mac; then
+	procs=("--procs=4")
+fi
+# An explicit timeout so a stall fails as one clear package, not at go test's silent 10 m default.
+go_timeout=${GO_TEST_TIMEOUT:-20m}
 
 report_dir=${REPORT_DIR:-reports/go}
 mkdir -p "$report_dir"
@@ -150,13 +181,13 @@ failed=()
 # Run all parts so one CI run reports every failing package.
 if ((${#parallel[@]})); then
 	# shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
-	go tool ginkgo "${procs[@]}" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
+	go tool ginkgo "${procs[@]}" --timeout="$go_timeout" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
 fi
 if ((${#ginkgo_rest[@]})); then
 	for dir in "${ginkgo_rest[@]}"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
 	# Through gotestsum for its go test -json events: a plain test in a suite's package that skips
 	# through testenv.RequireT is seen only there (the chart contract test without helm).
-	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || { prc=$?; rc=$prc; failed+=("serial Ginkgo suites (exit $prc)"); }
+	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 -timeout "$go_timeout" "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || { prc=$?; rc=$prc; failed+=("serial Ginkgo suites (exit $prc)"); }
 	for dir in "${ginkgo_rest[@]}"; do
 		name=${dir#./}
 		name=${name//\//_}
@@ -165,7 +196,7 @@ if ((${#ginkgo_rest[@]})); then
 	done
 fi
 if ((${#plain[@]})); then
-	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- "${plain[@]}" || { prc=$?; rc=$prc; failed+=("plain packages (exit $prc)"); }
+	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- -timeout "$go_timeout" "${plain[@]}" || { prc=$?; rc=$prc; failed+=("plain packages (exit $prc)"); }
 fi
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
@@ -186,6 +217,14 @@ if ((${#suites[@]} + ${#events[@]})); then
 	elif [[ $vrc != 0 && $vrc != 3 ]]; then
 		rc=1
 	fi
+fi
+
+# A host that slept makes the run invalid, whatever the suites reported.
+if host_slept_between "$run_start" "$(date '+%Y-%m-%d %H:%M:%S')"; then
+	echo "go-test.sh: the host slept during this run (pmset -g log); the results mean nothing" >&2
+	echo 'go-test verdict: notrun reason="host slept"'
+	rc=3
+	failed=()
 fi
 
 # The verdict above counts Ginkgo specs only: a plain test that failed shows there as "0 failed".

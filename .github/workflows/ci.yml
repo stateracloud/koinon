@@ -790,6 +790,7 @@ jobs:
       - run: hack/ci-web-gate-test.sh
       - run: hack/ci-required-test.sh
       - run: hack/go-test-test.sh
+      - run: hack/go-test-host-test.sh
       - run: hack/repo-contract-test.sh
       - run: hack/wt-test.sh
       - run: hack/tmp-safety-test.sh
