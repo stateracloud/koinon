@@ -539,3 +539,46 @@ agentd, from the price catalog, as follows.
 5. **Not decided here.** A per-org or per-agent override of the point, and measuring the dollar
    effect (the research modelled about $0.18 per run with caching and $0.06 with caching plus
    compaction by tier). Both are separate issues.
+
+### How the per-install fetch is built (#543)
+
+The amendment above leaves these points open; this is what the code does.
+
+1. **One request for the list, shared with the price refresh.** The metadata comes from the same
+   `GET /api/v1/models` body that the price refresh of ADR 0098 reads, by the same parser
+   (`pricefetch.ParseOpenRouter` returns the offers and the metadata in one pass). No second HTTP
+   client exists, and `--prices-refresh=off` makes no request of either kind. The price tick is
+   daily (ADR 0098 decision 2.2) because the stability rule of decision 2.4 needs two fetches 24
+   hours apart; the stored catalog is refreshed from it **weekly**: a scheduled fetch stores the
+   metadata only when the last store is a week old (less 12 hours, so the daily tick does not drift
+   to eight days), when none exists, or when a listed model is enabled that was not in use at the
+   last store (`openrouter_catalog.in_use_models`; a model OpenRouter does not list never makes a
+   tick due). A restart inside the week with the same models in use stores nothing and sends no
+   endpoints request. A scheduled store checks Due again under its lock, so of two replicas that
+   both found it due only one stores and asks the endpoints route. `koinon-api prices fetch` is an operator's own request and always stores.
+2. **Endpoints route.** After storing the list, the install asks
+   `GET /api/v1/models/{author}/{slug}/endpoints` once for each distinct model that an enabled
+   `openrouter` provider has enabled and the list carries, at most 100 per refresh, sequentially, with the same pinned
+   host, no redirects and 16 MiB cap as the list. The upstream list is display data and is stored
+   without any price (ADR 0098 decision 2.7). A failed request is logged as a count and does not fail
+   the price fetch.
+3. **Storage.** `openrouter_catalog` (the last store, `openrouter@<fetched_at>`),
+   `openrouter_models` (display fields, the fetched limits, endpoints), `openrouter_limit_proposals`
+   and `openrouter_limit_values` (migration 00075, install-wide, no org column). A model missing
+   from a later list keeps its row; nothing is retired. A store takes a transaction-scoped advisory
+   lock, so two replicas that both find the catalog due store one after the other, and the second
+   refreshes the first one's proposals instead of failing on a duplicate.
+4. **Which fields change behaviour.** `context_length` and `top_provider.max_completion_tokens`.
+   They are stored as fetched but are not effective. For each model in use, a fetched limit that is
+   not the accepted one becomes a proposal (`koinon-api model-metadata proposals list|accept|dismiss`;
+   accept and dismiss are install audit events `model_metadata.limit.accepted` and `.dismissed`).
+   Until one is accepted, `orcatalog.Store.Effective` reports no limit and the models.dev
+   `openrouter` value applies. Nothing reads the stored catalog yet, neither the display fields nor
+   `Effective`: the model-metadata reader of #265 and #305 is the follow-up that serves them. Until
+   it does, an accepted value is only a recorded decision, and the display fields are stored, not
+   shown. A dismissed value is remembered per model, field and value; a
+   proposal the fetch has moved past is superseded. Proposals are made for models in use only, so a
+   first fetch does not raise hundreds. Display fields (name, description, modalities, tokenizer,
+   supported parameters, endpoints) are effective as soon as they are stored.
+5. **No new flag.** The chart passes no new flag or value: the existing `--prices-refresh` mode is the
+   switch, as the amendment says.
