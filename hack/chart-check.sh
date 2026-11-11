@@ -25,7 +25,15 @@ KUBECONFORM=(go run "github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_
 # helm >= 4: --dry-run=client under helm 3 still contacts the cluster and fails with
 # "Kubernetes cluster unreachable" when KUBECONFIG=/dev/null, which the NOTES assertions then
 # misreport as missing text (#349 / old #420). CI pins HELM_VERSION in hack/versions.env.
-helm_ver=$("$HELM" version --template '{{.Version}}' 2>/dev/null || true)
+# Keep stderr: a sandbox EPERM or missing binary must reach the log so lane-gates can mark
+# chart notrun (exit 3), not fail with a false "need helm 4" (#349 Bugbot).
+helm_ver=""
+helm_err=0
+helm_ver=$("$HELM" version --template '{{.Version}}' 2>&1) || helm_err=$?
+if [[ $helm_err -ne 0 ]]; then
+	echo "chart-check: cannot run $HELM (exit $helm_err): ${helm_ver:-no output}" >&2
+	exit 3
+fi
 helm_major=${helm_ver#v}
 helm_major=${helm_major%%.*}
 if ! [[ ${helm_major:-} =~ ^[0-9]+$ ]] || ((helm_major < 4)); then

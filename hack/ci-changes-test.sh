@@ -101,6 +101,7 @@ expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
+expect "generate" hack/generate.sh         # make generate delegates here (#349)
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
 
@@ -192,7 +193,7 @@ if [[ $(grep -c . <<<"$recipe" || true) -lt 4 ]]; then
 		hack/generate.sh | */hack/generate.sh) gen_script=$tok ;;
 		esac
 	done
-	[[ -n $gen_script && -f $gen_script ]] && recipe=$(cat "$gen_script")
+	[[ -n $gen_script && -f $gen_script ]] && { recipe=$(cat "$gen_script"); gen_inputs+=("$gen_script"); }
 fi
 need_min "lines in the Makefile generate recipe" 4 "$(grep -c . <<<"$recipe" || true)"
 for tok in $recipe; do
