@@ -382,3 +382,29 @@ the ADR 0103 review gate on the head. Decision 6 (`--admin` for `.github/**`): `
 
 ADR 0103 is superseded: `review.yml`, `hack/review-gate.sh` and `hack/review-verdict.sh` are removed. Read every
 `review` context and review-gate step above as historical; the `main` ruleset never requires it.
+
+## Amendment 2026-11-11 (#572): the pull request e2e is label-only, and `flavors` is a queue check
+
+The CI review of 2026-11-11 (72 runs, 20 merged pull requests) measured 31 minutes from the last push to merge,
+and 147 runner minutes for one merged pull request. Two decisions above repeated work the queue does anyway.
+
+1. **The PR `quickstart` runs only with the `e2e` label** (decision 2, and the "Revisit" clause there, which this
+   amendment takes up). On `pull_request`, `decide` answers `needed=false` unless the pull request carries the
+   `e2e` label, a fork pull request included. No path rule starts it: the queue applies the full rule
+   (`hack/needs-e2e.sh`) to every entry and is the only e2e proof. The label stays for a change where a red
+   before review is worth the runner time. `e2e result` on `pull_request` still passes without reading the
+   quickstart, so the required context exists on every pull request; `merge_group`, `push`, the nightly run, rc
+   tags and dispatch decide as before.
+2. **`flavors` is required and does not run on pull requests.** Its job is skipped on `pull_request` (a job-level
+   skip reports success, so the name exists on every pull request, push and merge group build), and runs on the
+   queue commit and on pushes to main when the flavor inputs changed. A red `flavors` in the queue now ejects the
+   entry; before, it was advisory and `flavor-publish` shipped an image the queue had not proven unless
+   `hack/ci-skip-heavy.sh` noticed. `hack/ci-required.txt` lists `flavors` as required (it closes #128). The owner
+   adds `flavors` to the required checks of ruleset 26610739 at merge time of the pull request that changes
+   `ci.yml`; until then the name is advisory in the ruleset and the file is ahead of it
+   (`hack/ci-required-test.sh --ruleset` shows the difference).
+
+Also in the same change (no decision of this ADR, recorded for the route): `lint-shell` and `scripts` are
+path-gated and off on drafts, `go-tidy` and `go-lint` run only when Go files, `go.mod`, `go.sum` or the lint
+config change, `gitleaks` is not run again on a push to main that the queue made (`hack/secrets-skip.sh`: the
+queue run of the same workflow scanned the same tree), and the OpenSSF Scorecard runs weekly, not on every push.

@@ -6,8 +6,8 @@
 # report that reads the rule-suites API (which records every bypass whatever tool made it).
 #
 # A queue merge puts on main a tree that a `merge_group` run of `ci` built, and the queue merged it because every
-# REQUIRED job (hack/ci-required.txt) passed: the run itself can still be in progress or red (the advisory `flavors`
-# job), so this judges the jobs, not the run's conclusion, and polls an in-progress run for up to POLL_MAX seconds
+# REQUIRED job (hack/ci-required.txt) passed: the run itself can still be in progress or red (a `flavors`
+# job still running), so this judges the jobs, not the run's conclusion, and polls an in-progress run for up to POLL_MAX seconds
 # (default 600). When no such run exists for the pushed tree it opens an issue keyed by the sha, or comments on the
 # open one, labelled `break-glass`, unless the commit is the merge of a pull request that changes a path under
 # `.github/` and whose required checks were green on its head: that is the expected `--admin` route

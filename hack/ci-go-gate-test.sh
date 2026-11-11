@@ -33,10 +33,12 @@ trap 'rm -rf "$tmp"' EXIT
 # The gate's script: the run block of its only step.
 sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | awk '/^        run: \|$/ { on = 1; next } on && /^  [a-z-]*:$/ { exit } on { sub(/^          /, ""); print }' >"$tmp/gate.sh"
 [[ -s $tmp/gate.sh ]] || { echo "FAIL: cannot extract the go gate's script"; exit 1; }
+GATE_ENV=() # extra NAME=value pairs for the next gate calls (TIDY, TIDY_RESULT, LINT_RESULT)
 gate() { # gate NAME WANT_RC GO_TEST LAB RESULTS...: runs the extracted script
   local name=$1 want=$2 gt=$3 lab=$4 rc=0
   shift 4
-  CHANGES=success GO=true SKIP=false REASON=x EVENT=pull_request RESULTS="$*" GO_TEST=$gt LAB=$lab LAB_REASON=lab bash "$tmp/gate.sh" >"$tmp/out" 2>&1 || rc=$?
+  env CHANGES=success GO=true SKIP=false REASON=x EVENT=pull_request RESULTS="$*" GO_TEST="$gt" LAB="$lab" LAB_REASON=lab \
+    TIDY=true TIDY_RESULT=success LINT_RESULT=success "${GATE_ENV[@]}" bash "$tmp/gate.sh" >"$tmp/out" 2>&1 || rc=$?
   [[ $rc == "$want" ]] || { echo "FAIL: $name (rc $rc, want $want)"; cat "$tmp/out"; exit 1; }
 }
 gate "all green" 0 success false success success success success success success
@@ -45,4 +47,18 @@ gate "go-test skipped without an external run is a failure" 1 skipped false succ
 gate "go-test skipped by an external run does not excuse another skipped job" 1 skipped true success skipped success skipped success success
 gate "a failed job still fails with an external run" 1 skipped true success failure success skipped success success
 gate "lab true but go-test ran and failed" 1 failure true success success success failure success success
+# go-tidy and go-lint skipped by the `tidy` output (#572: no Go file, go.mod, go.sum or lint config changed).
+GATE_ENV=(TIDY=false TIDY_RESULT=skipped LINT_RESULT=skipped)
+gate "tidy and lint skipped because tidy=false is a pass" 0 success false success skipped skipped success success
+gate "only go-tidy skipped because tidy=false is a pass" 0 success false success skipped success success success
+gate "tidy=false does not excuse a skipped go-test" 1 skipped false success skipped skipped skipped success
+gate "tidy=false does not excuse a skipped go-race" 1 success false success skipped skipped success skipped
+gate "tidy=false and a failed go-lint fails" 1 success false success skipped failure success success
+GATE_ENV=(TIDY=true TIDY_RESULT=skipped LINT_RESULT=success)
+gate "go-tidy skipped although tidy=true is a failure" 1 success false success skipped success success success
+GATE_ENV=(TIDY=true TIDY_RESULT=success LINT_RESULT=skipped)
+gate "go-lint skipped although tidy=true is a failure" 1 success false success success skipped success success
+GATE_ENV=()
+grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-tidy:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-tidy must run on the tidy output"; exit 1; }
+grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-lint:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-lint must run on the tidy output"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"
