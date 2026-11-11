@@ -15,8 +15,10 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/dep-age-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-# Only the function: the script itself needs git and the network.
-eval "$(sed -n '/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p' "$repo/hack/dep-age-check.sh")"
+# Only the pure helpers: the script itself needs git and the network for a full check.
+eval "$(sed -n \
+	'/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p; /^image_registry_host() {/,/^}/p; /^oci_annotation_created() {/,/^}/p' \
+	"$repo/hack/dep-age-check.sh")"
 
 fail=0
 # The URLs are assembled from parts so that no release-asset URL literal appears in this file:
@@ -63,6 +65,85 @@ selected=$(git -C "$repo" ls-files -- "${dockerfile_specs[@]}")
 for want_file in hack/e2e-toolchain/Dockerfile hack/e2e-toolchain/web.Dockerfile; do
 	if grep -qxF "$want_file" <<<"$selected"; then echo "ok   dockerfile specs select $want_file"; else echo "FAIL dockerfile specs miss $want_file"; fail=1; fi
 done
+
+# #537: docker.io/ resolves to registry-1.docker.io (the Hub registry API host).
+host() { # host <name> <input> <want>
+	local got
+	got=$(image_registry_host "$2")
+	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
+}
+host "docker.io host" docker.io registry-1.docker.io
+host "index.docker.io host" index.docker.io registry-1.docker.io
+host "registry-1.docker.io unchanged" registry-1.docker.io registry-1.docker.io
+host "ghcr.io unchanged" ghcr.io ghcr.io
+
+# #537: OCI chart artifacts date from org.opencontainers.image.created; nothing dated fails closed.
+ann() { # ann <name> <json> <want first line or empty>
+	local got
+	got=$(oci_annotation_created "$2" | head -1)
+	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
+}
+ann "helm chart annotation" \
+	'{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","annotations":{"org.opencontainers.image.created":"2026-11-03T19:22:02Z"},"config":{"mediaType":"application/vnd.cncf.helm.config.v1+json","digest":"sha256:abc","size":1}}' \
+	"2026-11-03T19:22:02Z"
+ann "index descriptor annotation" \
+	'{"schemaVersion":2,"manifests":[{"digest":"sha256:abc","annotations":{"org.opencontainers.image.created":"2026-01-02T03:04:05Z"}}]}' \
+	"2026-01-02T03:04:05Z"
+ann "no created annotation" \
+	'{"schemaVersion":2,"config":{"mediaType":"application/vnd.cncf.helm.config.v1+json","digest":"sha256:abc","size":1}}' \
+	""
+
+# A found image reference that cannot be dated must FAIL (report unknown), never exit without a line.
+# Stub the network helpers and exercise check_image offline (#537).
+run_check_image() { # run_check_image <manifest-json> -> stdout of check_image + counters
+	local manifest=$1
+	local frag=$tmp/check_image_frag.sh
+	cat >"$frag" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+MIN_AGE_DAYS=3
+WAIVER=
+fails=0
+checked=0
+report() {
+	local what=\$1 age=\$2 src=\$3 note=\${4:-} status=OK
+	checked=\$((checked + 1))
+	[[ \$age == unknown ]] && status=FAIL
+	[[ \$status == FAIL ]] && fails=\$((fails + 1))
+	printf '%s %s age=%s %s\\n' "\$status" "\$what" "\$age" "\$src"
+	return 0
+}
+age_days() { echo 9.9; }
+image_manifest() { printf '%s' $(printf '%q' "$manifest"); }
+image_blob() { printf '%s' '{"name":"chart","version":"0.0.0"}'; }
+image_registry_published() { return 1; }
+EOF
+	sed -n \
+		'/^image_registry_host() {/,/^}/p; /^oci_annotation_created() {/,/^}/p; /^consider_created() {/,/^}/p; /^check_image() {/,/^}/p' \
+		"$repo/hack/dep-age-check.sh" >>"$frag"
+	cat >>"$frag" <<'EOF'
+check_image "ghcr.io/example/helm-chart@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+echo "checked=$checked"
+echo "fails=$fails"
+EOF
+	bash "$frag" 2>&1
+}
+
+out=$(run_check_image '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.cncf.helm.config.v1+json","digest":"sha256:dead","size":1},"layers":[]}') || true
+if grep -q '^FAIL ' <<<"$out" && grep -q 'checked=1' <<<"$out" && grep -q 'fails=1' <<<"$out"; then
+	echo "ok   undatable image reference fails closed (checked=1)"
+else
+	echo "FAIL undatable image reference: $out"
+	fail=1
+fi
+
+out=$(run_check_image '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","annotations":{"org.opencontainers.image.created":"2026-01-01T00:00:00Z"},"config":{"mediaType":"application/vnd.cncf.helm.config.v1+json","digest":"sha256:dead","size":1},"layers":[]}') || true
+if grep -q '^OK ' <<<"$out" && grep -q 'annotation' <<<"$out" && grep -q 'checked=1' <<<"$out" && grep -q 'fails=0' <<<"$out"; then
+	echo "ok   OCI chart annotation dates the reference"
+else
+	echo "FAIL OCI chart annotation: $out"
+	fail=1
+fi
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"
