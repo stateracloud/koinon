@@ -66,11 +66,12 @@ eq "a malformed --today is refused" "$rc" 1
 suites=(noble noble-updates noble-security)
 comps=(main universe)
 
-# mkrepo DIR: DIR/<snapshot>/dists/<suite>/{InRelease,<comp>/binary-<arch>/Packages.xz}
+# mkrepo DIR SNAPSHOT SRC: DIR/<snapshot>/dists/<suite>/{InRelease,<comp>/binary-<arch>/Packages.xz},
+# built from SRC/<suite>.<comp>.Packages.
 mkrepo() {
-	local dir=$1 suite comp arch f rel h size
+	local dir=$1 snap=$2 src=$3 suite comp arch f rel h size
 	for suite in "${suites[@]}"; do
-		mkdir -p "$dir/$SNAP/dists/$suite"
+		mkdir -p "$dir/$snap/dists/$suite"
 		{
 			echo "-----BEGIN PGP SIGNED MESSAGE-----"
 			echo "Hash: SHA512"
@@ -78,19 +79,19 @@ mkrepo() {
 			echo "Origin: Ubuntu"
 			echo "Suite: $suite"
 			echo "SHA256:"
-		} >"$dir/$SNAP/dists/$suite/InRelease"
+		} >"$dir/$snap/dists/$suite/InRelease"
 		for comp in "${comps[@]}"; do
 			for arch in amd64 arm64; do
 				rel="$comp/binary-$arch/Packages"
-				mkdir -p "$dir/$SNAP/dists/$suite/$comp/binary-$arch"
-				f=$data/repo/$suite.$comp.Packages
-				if [[ -f $f ]]; then xz -c "$f" >"$dir/$SNAP/dists/$suite/$rel.xz"; else : | xz -c >"$dir/$SNAP/dists/$suite/$rel.xz"; fi
-				h=$(sha256sum "$dir/$SNAP/dists/$suite/$rel.xz")
-				size=$(wc -c <"$dir/$SNAP/dists/$suite/$rel.xz")
-				printf ' %s %s %s\n' "${h%% *}" "$size" "$rel.xz" >>"$dir/$SNAP/dists/$suite/InRelease"
+				mkdir -p "$dir/$snap/dists/$suite/$comp/binary-$arch"
+				f=$src/$suite.$comp.Packages
+				if [[ -f $f ]]; then xz -c "$f" >"$dir/$snap/dists/$suite/$rel.xz"; else : | xz -c >"$dir/$snap/dists/$suite/$rel.xz"; fi
+				h=$(sha256sum "$dir/$snap/dists/$suite/$rel.xz")
+				size=$(wc -c <"$dir/$snap/dists/$suite/$rel.xz")
+				printf ' %s %s %s\n' "${h%% *}" "$size" "$rel.xz" >>"$dir/$snap/dists/$suite/InRelease"
 			done
 		done
-		echo "-----BEGIN PGP SIGNATURE-----" >>"$dir/$SNAP/dists/$suite/InRelease"
+		echo "-----BEGIN PGP SIGNATURE-----" >>"$dir/$snap/dists/$suite/InRelease"
 	done
 }
 # reindex DIR SUITE: refresh one InRelease's hash lines after a test changed an index.
@@ -109,8 +110,10 @@ reindex() {
 	done
 }
 
+CUR=20261027T000000Z # the ARG of the fixture Dockerfile: the current snapshot
 repo=$tmp/repo
-mkrepo "$repo"
+mkrepo "$repo" "$SNAP" "$data/repo"
+mkrepo "$repo" "$CUR" "$data/repo-cur"
 base=(--base-url "$repo" --no-gpg --today "$TODAY")
 
 # fresh_files DIR: copies of the fixture Dockerfile and README to edit.
@@ -185,6 +188,54 @@ sed -i.bak 's/^      zstd=/      nosuchpkg=1.0 \\\n      zstd=/' "$tmp/m/Dockerf
 run --check "${base[@]}" --dockerfile "$tmp/m/Dockerfile" --readme "$tmp/m/README.md"
 eq "a pin missing from the snapshot fails" "$rc" 1
 
+# --- dependencies: the pins stay, a dependency of theirs gets newer ----------------------------------------------------
+# The check reports the dependency closure drift between the current and the new snapshot.
+fresh_files "$tmp/a2"
+run --check "${base[@]}" --dockerfile "$tmp/a2/Dockerfile" --readme "$tmp/a2/README.md"
+has "a newer dependency is listed" "$out" "libdep1"
+has "with both versions" "$out" "1.0-1ubuntu0.2"
+lacks "a virtual dependency resolved to its provider that did not change is not listed" "$out" "libprov "
+lacks "an unchanged dependency is not listed" "$out" "libc6 "
+
+# Only a dependency changed: the Dockerfile's pins already are the new candidates, the current snapshot
+# (20261020) has the same packages except an older libdep1. --check must exit 10 and --write move the ARG.
+DEP=20261020T000000Z
+cp -r "$data/repo" "$tmp/src-dep"
+awk 'BEGIN{RS="";ORS="\n\n"} !/^Package: libdep1\nVersion: 1.0-1ubuntu0.2/' "$tmp/src-dep/noble-updates.main.Packages" >"$tmp/src-dep/x" && mv "$tmp/src-dep/x" "$tmp/src-dep/noble-updates.main.Packages"
+mkrepo "$repo" "$DEP" "$tmp/src-dep"
+mkdir -p "$tmp/o"
+cp "$data/expected/Dockerfile" "$data/expected/README.md" "$tmp/o/"
+sed -i.bak "s/20261108T000000Z/$DEP/" "$tmp/o/Dockerfile" "$tmp/o/README.md"
+cp "$tmp/o/Dockerfile" "$tmp/o/Dockerfile.orig"
+run --check "${base[@]}" --dockerfile "$tmp/o/Dockerfile" --readme "$tmp/o/README.md"
+eq "only a dependency is newer: --check exits 10" "$rc" 10
+has "and lists the dependency" "$out" "libdep1"
+has "and says that no pin changes" "$out" "0 pin(s) and 1 dependenc"
+eq "--check wrote nothing" "$(cmp "$tmp/o/Dockerfile" "$tmp/o/Dockerfile.orig" && echo same)" same
+run --write "${base[@]}" --dockerfile "$tmp/o/Dockerfile" --readme "$tmp/o/README.md" --usn-dir "$data/usn" --report "$tmp/o/report.md"
+eq "only a dependency is newer: --write exits 10" "$rc" 10
+eq "and moves the ARG, nothing else" "$(diff "$tmp/o/Dockerfile" "$data/expected/Dockerfile" && echo same)" same
+eq "and the README's snapshot ID" "$(diff "$tmp/o/README.md" "$data/expected/README.md" && echo same)" same
+oreport=$(<"$tmp/o/report.md")
+has "report: the dependency table" "$oreport" "| \`libdep1\` | \`1.0-1\` | \`1.0-1ubuntu0.2\` |"
+has "report: the USN of the dependency's binary" "$oreport" "USN-9004-1"
+
+# Nothing changed at all: the current snapshot has the same indexes as the new one.
+SAME=20261021T000000Z
+mkrepo "$repo" "$SAME" "$data/repo"
+cp "$tmp/o/Dockerfile.orig" "$tmp/o/Dockerfile"
+sed -i.bak "s/^ARG UBUNTU_SNAPSHOT=.*/ARG UBUNTU_SNAPSHOT=$SAME/" "$tmp/o/Dockerfile"
+run --check "${base[@]}" --dockerfile "$tmp/o/Dockerfile" --readme "$tmp/o/README.md"
+eq "same indexes: --check exits 0" "$rc" 0
+has "and says nothing is newer" "$out" "no pin changes and no newer dependency"
+
+# A current snapshot that cannot be fetched fails the run (the comparison needs it).
+cp "$tmp/o/Dockerfile.orig" "$tmp/o/Dockerfile"
+sed -i.bak "s/^ARG UBUNTU_SNAPSHOT=.*/ARG UBUNTU_SNAPSHOT=20200101T000000Z/" "$tmp/o/Dockerfile"
+run --check "${base[@]}" --dockerfile "$tmp/o/Dockerfile" --readme "$tmp/o/README.md"
+eq "an unfetchable current snapshot fails" "$rc" 1
+has "and says why" "$out" "the current snapshot 20200101T000000Z is needed"
+
 # --- USN annotation ---------------------------------------------------------------------------------------------------
 fresh_files "$tmp/u"
 run --check "${base[@]}" --dockerfile "$tmp/u/Dockerfile" --readme "$tmp/u/README.md" --usn-dir "$data/usn" --usn-commit deadbeef --report "$tmp/u/report.md"
@@ -223,14 +274,14 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 	if GNUPGHOME=$gh gpg --batch --quiet --pinentry-mode loopback --passphrase '' --quick-generate-key 'koinon test <test@example.invalid>' ed25519 sign never >/dev/null 2>&1; then
 		GNUPGHOME=$gh gpg --batch --quiet --export >"$tmp/test-keyring.gpg"
 		cp -r "$repo" "$tmp/repo-signed"
-		for suite in "${suites[@]}"; do
-			ir=$tmp/repo-signed/$SNAP/dists/$suite/InRelease
+		for snap in "$SNAP" "$CUR"; do for suite in "${suites[@]}"; do
+			ir=$tmp/repo-signed/$snap/dists/$suite/InRelease
 			# A real clearsigned file: the fixture's fake armor is replaced by gpg's.
 			sed -n '/^SHA256:/,/^-----BEGIN PGP SIGNATURE/p' "$ir" | sed '$d' >"$tmp/sha.txt"
 			{ echo "Origin: Ubuntu"; echo "Suite: $suite"; cat "$tmp/sha.txt"; } >"$tmp/plain.txt"
 			rm -f "$ir"
 			GNUPGHOME=$gh gpg --batch --quiet --pinentry-mode loopback --passphrase '' --clearsign -o "$ir" "$tmp/plain.txt"
-		done
+		done; done
 		fresh_files "$tmp/s"
 		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a signed InRelease verifies" "$rc" 10

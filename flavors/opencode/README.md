@@ -397,7 +397,10 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   midnight UTC three days ago, so every package in it is at least 3 days old (ADR 0079's cooldown
   holds by construction), reads the signed `InRelease` and `Packages` indexes of `noble`,
   `noble-updates` and `noble-security` for amd64 and arm64, and picks the highest version of each pin
-  (it fails if the two architectures disagree). When a pin changes, the workflow opens or updates one
+  (it fails if the two architectures disagree). It also resolves the dependency closure of the pins in the
+  current and the new snapshot: a package that is not pinned but newer (python3.12, curl, expat, ...)
+  moves the snapshot ID on its own, since apt takes it from the snapshot. When a pin or such a
+  dependency changes, the workflow opens or updates one
   draft pull request from `bot/ubuntu-snapshot` that moves `UBUNTU_SNAPSHOT`, the changed pins and
   this ID together, with a table of pinned versus new versions and the Ubuntu Security Notices that
   fix them (looked up in canonical/ubuntu-security-notices; a failed lookup says so). The security fast

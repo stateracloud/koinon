@@ -563,6 +563,13 @@ keeps them current with `hack/ubuntu-snapshot-bump.sh`:
   (`dpkg --compare-versions`), and fails when amd64 and arm64 differ or a pin would go backwards.
   `--check` exits 10 when a pin changes; `--write` edits only the snapshot ARG, the changed pins and
   the snapshot ID in `flavors/opencode/README.md`.
+- Unpinned dependencies count too. Most of the image's security surface is not in the pin list
+  (python3.12 behind python3, curl and expat behind git, oniguruma behind jq): apt takes those from
+  whatever snapshot the ARG names. The script resolves the dependency closure of the pins (Depends and
+  Pre-Depends, first alternative, highest version) in the current and in the new snapshot, and a
+  dependency that is newer in the new one is a change on its own: `--check` exits 10 and `--write`
+  moves the ARG even when no pin changes. The closure over-approximates (it includes what the base
+  image already has), so expect a proposal most weeks; the USN lookup covers the closure too.
 - USNs: for each changed package it lists the notices (canonical/ubuntu-security-notices,
   `osv/usn`, Ubuntu:24.04:LTS records matched on the binary version) between the old and new pin.
   A security-pocket version can exist without a notice, so "none found" is a finding, not an error;

@@ -16,6 +16,12 @@
 #      highest version across all suites and components with `dpkg --compare-versions` (apt installs
 #      the highest candidate; epochs and `~` sort as dpkg sorts them). The two architectures must
 #      agree, or the run fails: a pin is one string for both image platforms.
+#      The pins are not the whole security surface: apt takes every dependency that is not pinned
+#      (python3.12 behind python3, curl and expat behind git, ...) from whatever snapshot the ARG names.
+#      So the script also resolves the dependency closure of the pins (Depends and Pre-Depends, first
+#      alternative, highest version, from the same indexes) in the current and in the new snapshot, and
+#      a dependency that is newer in the new one counts as a change on its own: the ARG moves even when
+#      no pin does. The closure over-approximates (what the base image has is included).
 #   4. --check prints pinned vs candidate; --write rewrites UBUNTU_SNAPSHOT and the changed pins in
 #      the Dockerfile and the snapshot ID in flavors/opencode/README.md, and nothing else.
 #   5. Best effort: for each changed package it lists the Ubuntu Security Notices that fix a binary
@@ -33,7 +39,7 @@
 #     and a USN's claim of which version fixes what.
 #
 # Usage
-#   hack/ubuntu-snapshot-bump.sh --check [options]     exit 0: no pin changes, 10: a pin would change
+#   hack/ubuntu-snapshot-bump.sh --check [options]     exit 0: nothing changes, 10: a pin or a dependency would change
 #   hack/ubuntu-snapshot-bump.sh --write [options]     edit the files; exit 10 when it changed them, 0 when not
 #   hack/ubuntu-snapshot-bump.sh --print-snapshot [--snapshot ID] [--today D]   print the ID that would be used
 # Options
@@ -130,22 +136,52 @@ parse_pins() {
 	done <"$1"
 }
 
-# packages_versions WANTED...: reads a Packages index on stdin, prints "name<TAB>version" for wanted names.
-packages_versions() {
-	awk -v wanted=" $* " '
-		/^Package: / { p = $2; next }
-		/^Version: / { if (index(wanted, " " p " ")) print p "\t" $2; next }'
+# index_records WANTED: reads a Packages index on stdin and prints, for every package named in WANTED
+# (space separated) or providing one of those names, "name<TAB>version<TAB>deps<TAB>provides". deps are
+# the names of the first alternative of every Depends and Pre-Depends group (version constraints and
+# :any qualifiers dropped), provides the names of the Provides entries.
+index_records() {
+	awk -v wanted=" $1 " '
+		function flush(   i, n, k, o, pl, da, pa, alt, keep) {
+			if (p == "") return
+			keep = index(wanted, " " p " ") > 0
+			n = split(prov, pa, /, */)
+			pl = ""
+			for (i = 1; i <= n; i++) {
+				k = pa[i]; sub(/[ (].*/, "", k)
+				if (k == "") continue
+				pl = pl " " k
+				if (index(wanted, " " k " ")) keep = 1
+			}
+			if (keep) {
+				n = split(dep, da, /, */)
+				o = ""
+				for (i = 1; i <= n; i++) {
+					split(da[i], alt, / *\| */)
+					k = alt[1]; sub(/[ (].*/, "", k); sub(/:.*/, "", k)
+					if (k != "") o = o " " k
+				}
+				print p "\t" v "\t" substr(o, 2) "\t" substr(pl, 2)
+			}
+			p = ""; v = ""; dep = ""; prov = ""
+		}
+		/^Package: / { flush(); p = $2; next }
+		/^Version: / { v = $2; next }
+		/^(Pre-)?Depends: / { dep = dep (dep == "" ? "" : ", ") substr($0, index($0, ": ") + 2); next }
+		/^Provides: / { prov = substr($0, index($0, ": ") + 2); next }
+		/^$/ { flush() }
+		END { flush() }'
 }
 
 dpkg_gt() { dpkg --compare-versions "$1" gt "$2"; }
 
-# fetch REL DEST: one file below $base/$snapshot, from a URL or a directory.
+# fetch REL DEST: one file below $base/$fsnap, from a URL or a directory.
 fetch() {
 	local rel=$1 dest=$2
 	if [[ $base == http://* || $base == https://* ]]; then
-		curl --silent --show-error --fail --location --retry 3 --retry-delay 2 --max-time 120 -o "$dest" "$base/$snapshot/$rel"
+		curl --silent --show-error --fail --location --retry 3 --retry-delay 2 --max-time 120 -o "$dest" "$base/$fsnap/$rel"
 	else
-		cp "${base#file://}/$snapshot/$rel" "$dest"
+		cp "${base#file://}/$fsnap/$rel" "$dest"
 	fi
 }
 
@@ -157,16 +193,16 @@ release_hash() {
 		s && $3 == want { print $1; exit }' "$1"
 }
 
-# index_candidates SUITE COMP ARCH: "name<TAB>version" from one verified Packages index.
-index_candidates() {
-	local suite=$1 comp=$2 arch=$3 rel ext got want f
+# append_index SNAP SUITE COMP ARCH: appends one hash-verified, decompressed Packages index to stdout.
+append_index() {
+	local snap=$1 suite=$2 comp=$3 arch=$4 rel ext got want f
 	rel="$comp/binary-$arch/Packages"
 	for ext in .xz .gz ""; do
-		want=$(release_hash "$work/InRelease.$suite" "$rel$ext")
+		want=$(release_hash "$work/InRelease.$snap.$suite" "$rel$ext")
 		[[ -n $want ]] && break
 	done
 	[[ -n $want ]] || { echo "$suite: InRelease lists no $rel{.xz,.gz,}" >&2; return 1; }
-	f="$work/Packages.$suite.$comp.$arch"
+	f="$work/Packages.$snap.$suite.$comp.$arch"
 	fetch "dists/$suite/$rel$ext" "$f$ext" || { echo "$suite: cannot fetch $rel$ext" >&2; return 1; }
 	got=$(sha256sum "$f$ext")
 	got=${got%% *}
@@ -175,7 +211,75 @@ index_candidates() {
 	.xz) xz -dc "$f$ext" ;;
 	.gz) gzip -dc "$f$ext" ;;
 	*) cat "$f$ext" ;;
-	esac | packages_versions "${names[@]}"
+	esac
+	echo
+	rm -f "$f$ext"
+}
+
+# load_snapshot SNAP: verifies every InRelease and Packages index of the snapshot and leaves one
+# decompressed file per architecture, $work/idx.SNAP.ARCH (all suites and components concatenated).
+load_snapshot() {
+	local snap=$1 suite arch comp
+	fsnap=$snap
+	for suite in "${suites[@]}"; do
+		fetch "dists/$suite/InRelease" "$work/InRelease.$snap.$suite" || { echo "ubuntu-snapshot-bump: cannot fetch dists/$suite/InRelease at $snap" >&2; return 1; }
+		if ((!no_gpg)); then
+			gpgv --keyring "$keyring" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
+		fi
+	done
+	for arch in "${ARCHES[@]}"; do
+		: >"$work/idx.$snap.$arch"
+		for suite in "${suites[@]}"; do
+			for comp in "${comps[@]}"; do
+				append_index "$snap" "$suite" "$comp" "$arch" >>"$work/idx.$snap.$arch" || return 1
+			done
+		done
+	done
+}
+
+# closure IDX: "name<TAB>version" for the pinned packages and everything they depend on (Depends and
+# Pre-Depends, first alternative, highest version; a virtual name resolves to its first provider by
+# name). apt installs the highest candidate of each, so this is what the snapshot decides for the image.
+# It over-approximates (packages the base image already has are included), which only means a
+# snapshot move is proposed when a package the image may contain got newer.
+closure() {
+	local idx=$1 n v d p pv first new=1 recs
+	local -A want=() ver=() deps=() prov=()
+	for n in "${names[@]}"; do want[$n]=1; done
+	while ((new)); do
+		new=0 ver=() deps=() prov=()
+		recs=$(index_records "${!want[*]}" <"$idx")
+		while IFS=$'\t' read -r n v d p; do
+			[[ -n $n ]] || continue
+			if [[ -n ${want[$n]:-} ]] && { [[ -z ${ver[$n]:-} ]] || dpkg_gt "$v" "${ver[$n]}"; }; then
+				ver[$n]=$v
+				deps[$n]=$d
+			fi
+			for pv in $p; do
+				[[ -n ${want[$pv]:-} ]] && prov[$pv]+=" $n"
+			done
+		done <<<"$recs"
+		for n in "${!ver[@]}"; do
+			for d in ${deps[$n]}; do
+				[[ -n ${want[$d]:-} ]] || { want[$d]=1; new=1; }
+			done
+		done
+		for pv in "${!want[@]}"; do
+			{ [[ -n ${ver[$pv]:-} ]] || [[ -z ${prov[$pv]:-} ]]; } && continue
+			first=$(tr ' ' '\n' <<<"${prov[$pv]}" | sed '/^$/d' | sort | head -n 1)
+			[[ -n ${want[$first]:-} ]] || { want[$first]=1; new=1; }
+		done
+	done
+	for n in "${!ver[@]}"; do printf '%s\t%s\n' "$n" "${ver[$n]}"; done | sort
+}
+
+# load_versions ARRAY FILE: fills the associative array ARRAY from a closure file.
+load_versions() {
+	local -n arr=$1
+	local n v
+	arr=()
+	# shellcheck disable=SC2034 # arr is the caller's array, filled through the nameref
+	while IFS=$'\t' read -r n v; do [[ -n $n ]] && arr["$n"]=$v; done <"$2"
 }
 
 # --- usage ----------------------------------------------------------------------------------------
@@ -242,6 +346,10 @@ if [[ $cur_snapshot > $snapshot ]]; then
 	echo "snapshot $cur_snapshot in $dockerfile is newer than $snapshot: nothing to do."
 	exit 0
 fi
+if [[ $cur_snapshot == "$snapshot" ]]; then
+	echo "snapshot $cur_snapshot in $dockerfile is already the target: no pin changes."
+	exit 0
+fi
 
 mapfile -t pin_lines < <(parse_pins "$dockerfile")
 ((${#pin_lines[@]} > 0)) || { echo "ubuntu-snapshot-bump: no apt pins found in $dockerfile" >&2; exit 1; }
@@ -271,30 +379,23 @@ elif [[ ! -r $keyring ]] || ! command -v gpgv >/dev/null; then
 	exit 1
 fi
 
-declare -A best_amd64 best_arm64
-for suite in "${suites[@]}"; do
-	fetch "dists/$suite/InRelease" "$work/InRelease.$suite" || { echo "ubuntu-snapshot-bump: cannot fetch dists/$suite/InRelease at $snapshot" >&2; exit 1; }
-	if ((!no_gpg)); then
-		gpgv --keyring "$keyring" "$work/InRelease.$suite" >"$work/gpgv.out" 2>&1 || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; exit 1; }
-	fi
-	for arch in "${ARCHES[@]}"; do
-		declare -n best="best_$arch"
-		for comp in "${comps[@]}"; do
-			lines=$(index_candidates "$suite" "$comp" "$arch") || exit 1
-			while IFS=$'\t' read -r n v; do
-				[[ -n $n ]] || continue
-				if [[ -z ${best[$n]:-} ]] || dpkg_gt "$v" "${best[$n]}"; then best["$n"]=$v; fi
-			done <<<"$lines"
-		done
-		unset -n best
-	done
+load_snapshot "$snapshot" || exit 1
+load_snapshot "$cur_snapshot" || { echo "ubuntu-snapshot-bump: the current snapshot $cur_snapshot is needed to compare dependencies" >&2; exit 1; }
+
+# shellcheck disable=SC2034 # filled by load_versions and read through namerefs
+declare -A new_amd64 new_arm64 cur_amd64 cur_arm64
+for arch in "${ARCHES[@]}"; do
+	closure "$work/idx.$snapshot.$arch" >"$work/closure.new.$arch"
+	closure "$work/idx.$cur_snapshot.$arch" >"$work/closure.cur.$arch"
+	load_versions "new_$arch" "$work/closure.new.$arch"
+	load_versions "cur_$arch" "$work/closure.cur.$arch"
 done
 
 # Every pin must exist on both architectures with the same version, and never go backwards.
 bad=0 changed=()
 declare -A cand
 for n in "${names[@]}"; do
-	a=${best_amd64[$n]:-} b=${best_arm64[$n]:-}
+	a=${new_amd64[$n]:-} b=${new_arm64[$n]:-}
 	if [[ -z $a || -z $b ]]; then
 		echo "ERROR: $n is missing from the snapshot (amd64: ${a:-none}, arm64: ${b:-none})" >&2
 		bad=1
@@ -315,10 +416,50 @@ for n in "${names[@]}"; do
 done
 ((bad == 0)) || exit 1
 
+# The dependencies the pins pull in (any other source package: python3.12 behind python3, curl and
+# expat behind git, ...) are not pinned: apt takes them from whatever snapshot the ARG names. So a
+# dependency that is newer in the new snapshot than in the current one is a change on its own, and the
+# ARG moves for it. A dependency absent from the current snapshot is new (listed, no USN lookup).
+declare -A pinset=() dep_old=() dep_new=()
+dep_changed=()
+for n in "${names[@]}"; do pinset[$n]=1; done
+for arch in "${ARCHES[@]}"; do
+	declare -n nw="new_$arch" cu="cur_$arch"
+	for n in "${!nw[@]}"; do
+		[[ -z ${pinset[$n]:-} ]] || continue
+		if [[ -z ${cu[$n]:-} ]]; then
+			old=none
+		elif dpkg_gt "${nw[$n]}" "${cu[$n]}"; then
+			old=${cu[$n]}
+		else
+			continue
+		fi
+		if [[ -z ${dep_new[$n]:-} ]]; then
+			dep_changed+=("$n")
+			dep_old[$n]=$old
+			dep_new[$n]=${nw[$n]}
+		elif [[ ${dep_new[$n]} != "${nw[$n]}" ]]; then
+			dep_new[$n]+=" ($arch: ${nw[$n]})"
+		fi
+	done
+	unset -n nw cu
+done
+mapfile -t dep_changed < <(printf '%s\n' "${dep_changed[@]}" | sort)
+[[ -n ${dep_changed[0]:-} ]] || dep_changed=()
+
+chg_names=("${changed[@]}")
+for n in "${dep_changed[@]}"; do [[ ${dep_old[$n]} == none ]] || chg_names+=("$n"); done
+
 printf '%-18s %-34s %-34s\n' package pinned candidate
 for n in "${names[@]}"; do
 	printf '%-18s %-34s %-34s%s\n' "$n" "${pinned[$n]}" "${cand[$n]}" "$([[ ${cand[$n]} == "${pinned[$n]}" ]] || echo '  *')"
 done
+
+if ((${#dep_changed[@]} > 0)); then
+	echo
+	printf '%-34s %-34s %-34s\n' 'dependency (not pinned)' 'current snapshot' 'new snapshot'
+	for n in "${dep_changed[@]}"; do printf '%-34s %-34s %-34s\n' "$n" "${dep_old[$n]}" "${dep_new[$n]}"; done
+fi
 
 # --- USN annotation (best effort) --------------------------------------------------------------------
 
@@ -331,7 +472,7 @@ usn_lookup() {
 	find "$dir" -maxdepth 1 -name 'USN-*.json' -print0 >"$files"
 	[[ -s $files ]] || { usn_state="FAILED: no USN-*.json under $dir"; return; }
 	local names_json
-	names_json=$(printf '%s\n' "${changed[@]}" | jq -R . | jq -sc .)
+	names_json=$(printf '%s\n' "${chg_names[@]}" | jq -R . | jq -sc .)
 	# One row per (USN, binary): id, published, binary, binary_version, CVEs, Ubuntu priorities.
 	# shellcheck disable=SC2016 # the jq program
 	if ! xargs -0 jq -r --argjson names "$names_json" '
@@ -360,7 +501,7 @@ usn_for() {
 	return 0
 }
 
-if ((${#changed[@]} > 0)); then
+if ((${#chg_names[@]} > 0)); then
 	usn_lookup
 	echo "USN lookup: $usn_state"
 fi
@@ -382,6 +523,26 @@ if [[ -n $report ]]; then
 			echo "| \`$n\` | \`${pinned[$n]}\` | \`${cand[$n]}\` | $u |"
 		done
 		echo
+		if ((${#dep_changed[@]} > 0)); then
+			echo "Dependencies the pins pull in (not pinned; apt takes them from the snapshot, so these moved with the ARG):"
+			echo
+			echo "| Package | Current snapshot | New snapshot | USNs fixed in between |"
+			echo "| --- | --- | --- | --- |"
+			for n in "${dep_changed[@]}"; do
+				if [[ ${dep_old[$n]} == none ]]; then
+					u="new dependency (no lookup)"
+				else
+					u=$(usn_for "$n" "${dep_old[$n]}" "${dep_new[$n]%% *}" | paste -sd ';' - | sed 's/;/<br>/g')
+					if [[ $usn_state != ok ]]; then
+						u="lookup $usn_state"
+					elif [[ -z $u ]]; then
+						u="none found (noble-updates, or a security upload without a notice)"
+					fi
+				fi
+				echo "| \`$n\` | \`${dep_old[$n]}\` | \`${dep_new[$n]}\` | $u |"
+			done
+			echo
+		fi
 		echo "Unchanged pins: $(for n in "${names[@]}"; do [[ ${cand[$n]} == "${pinned[$n]}" ]] && printf '%s ' "$n"; done)"
 		echo
 		echo "USN source: canonical/ubuntu-security-notices at \`${usn_commit:-unknown}\`; lookup: $usn_state."
@@ -393,13 +554,13 @@ if [[ -n $report ]]; then
 	} >"$report"
 fi
 
-if ((${#changed[@]} == 0)); then
-	echo "no pin changes: the snapshot stays $cur_snapshot."
+if ((${#changed[@]} == 0 && ${#dep_changed[@]} == 0)); then
+	echo "no pin changes and no newer dependency: the snapshot stays $cur_snapshot."
 	exit 0
 fi
 
 if [[ $mode == check ]]; then
-	echo "${#changed[@]} pin(s) would change: ${changed[*]}"
+	echo "${#changed[@]} pin(s) and ${#dep_changed[@]} dependenc(ies) would change; pins: ${changed[*]:-none}"
 	exit 10
 fi
 
@@ -437,5 +598,5 @@ rewrite_readme() {
 
 rewrite_readme
 rewrite_dockerfile
-echo "wrote $dockerfile and $readme: ${changed[*]}"
+echo "wrote $dockerfile and $readme: snapshot $snapshot; pins: ${changed[*]:-none}; ${#dep_changed[@]} dependency change(s)"
 exit 10

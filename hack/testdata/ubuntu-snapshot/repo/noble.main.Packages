@@ -21,3 +21,16 @@ Architecture: all
 Package: unrelated
 Version: 9.9-1
 Architecture: amd64
+
+Package: libdep1
+Version: 1.0-1
+Architecture: amd64
+
+Package: libprov
+Version: 2.0-1
+Architecture: amd64
+Provides: virt-x (= 2.0)
+
+Package: libc6
+Version: 2.39-0ubuntu8
+Architecture: amd64

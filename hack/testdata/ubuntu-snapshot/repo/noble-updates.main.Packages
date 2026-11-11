@@ -13,3 +13,8 @@ Architecture: amd64
 Package: zstd
 Version: 1.5.5+dfsg2-2build1.1
 Architecture: amd64
+
+Package: libdep1
+Version: 1.0-1ubuntu0.2
+Architecture: amd64
+Pre-Depends: zstd
