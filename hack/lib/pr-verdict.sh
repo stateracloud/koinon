@@ -69,7 +69,10 @@ def prv_stamp($runs):
         (first($runs[] | select((.id | tostring) == $id)) // null) as $r
         | if $r == null then . else .workflowName = ($r.name // "") end
       else . end);
-def prv_live($runs; $draft): [$runs[] | select($draft or (.display_title != "ci (draft)"))];
+# Only events that the PR rollup carries count: a workflow_dispatch (or schedule) run of the same workflow on the head
+# has no rows in the rollup and must never supersede the pull_request / merge_group run (PR #521, run 42963683121).
+def prv_pr_event: ((.event // "") | IN("", "pull_request", "pull_request_target", "merge_group", "push"));
+def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select($draft or (.display_title != "ci (draft)"))];
 def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring);
 def prv_drop($runs; $draft):
   if $runs == null then . else
