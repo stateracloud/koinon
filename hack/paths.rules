@@ -193,6 +193,7 @@ script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh
 script-check - hack/ci-fail-test.sh
+script-check - hack/ci-timing-test.sh
 script-check - hack/ci-go-gate-test.sh
 script-check - hack/ci-web-gate-test.sh
 script-check - hack/ci-required-test.sh

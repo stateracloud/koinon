@@ -1,0 +1,18 @@
+{"repo":"example/repo","since":"","until":"","records":[
+{"number":1,"mergedAt":"2026-11-01T10:30:00Z","headRefName":"feat/1-a","files":["internal/a.go","docs/x.md"],"commitDate":"2026-11-01T08:00:00Z","pushedDate":null,
+ "suites":["2026-11-01T10:00:00Z","2026-11-01T10:00:05Z"],"forcePushed":[],"queued":["2026-11-01T10:20:00Z"],
+ "runs":[
+  {"id":1,"name":"ci","event":"pull_request","jobs":[{"name":"go-test","conclusion":"success","started_at":"2026-11-01T10:00:10Z","completed_at":"2026-11-01T10:05:10Z"},{"name":"lint","conclusion":"success","started_at":"2026-11-01T10:00:10Z","completed_at":"2026-11-01T10:02:10Z"}]},
+  {"id":2,"name":"ci","event":"merge_group","jobs":[{"name":"go-test","conclusion":"success","started_at":"2026-11-01T10:20:10Z","completed_at":"2026-11-01T10:28:10Z"}]}]},
+{"number":2,"mergedAt":"2026-11-01T11:20:00Z","headRefName":"fix/2-b","files":["web/src/a.ts"],"commitDate":"2026-11-01T07:00:00Z","pushedDate":null,
+ "suites":["2026-11-01T11:00:00Z"],"forcePushed":[],"queued":["2026-11-01T10:50:00Z","2026-11-01T11:08:00Z"],
+ "runs":[
+  {"id":3,"name":"ci","event":"pull_request","jobs":[{"name":"go-test","conclusion":"success","started_at":"2026-11-01T11:00:10Z","completed_at":"2026-11-01T11:10:10Z"},{"name":"lint","conclusion":"skipped","started_at":null,"completed_at":null}]}]},
+{"number":3,"mergedAt":"2026-11-01T12:40:00Z","headRefName":"fix/3-c","files":["hack/x.sh"],"commitDate":"2026-11-01T09:00:00Z","pushedDate":null,
+ "suites":[],"forcePushed":["2026-11-01T11:00:00Z","2026-11-01T12:00:00Z"],"queued":["2026-11-01T12:26:00Z"],"runs":[]},
+{"number":4,"mergedAt":"2026-11-01T13:50:00Z","headRefName":"ci/4-d","files":[".github/workflows/ci.yml"],"commitDate":"2026-11-01T12:00:00Z","pushedDate":null,
+ "suites":["2026-11-01T13:00:00Z"],"forcePushed":[],"queued":[],
+ "runs":[{"id":5,"name":"ci","event":"pull_request","jobs":[{"name":"go-test","conclusion":"success","started_at":"2026-11-01T13:00:10Z","completed_at":"2026-11-01T13:01:10Z"}]}]},
+{"number":5,"mergedAt":"2026-11-01T14:00:00Z","headRefName":"docs/5-e","files":["README.md","docs/adr/0001.md",".claude/x.json"],"commitDate":"2026-11-01T13:50:00Z","pushedDate":null,
+ "suites":["2026-11-01T13:50:00Z"],"forcePushed":[],"queued":["2026-11-01T13:55:00Z"],"runs":[]}
+]}

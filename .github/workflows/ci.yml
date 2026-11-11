@@ -763,6 +763,7 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/pr-merge-test.sh
       - run: hack/ci-fail-test.sh
+      - run: hack/ci-timing-test.sh
       - run: hack/ci-go-gate-test.sh
       - run: hack/ci-web-gate-test.sh
       - run: hack/ci-required-test.sh
