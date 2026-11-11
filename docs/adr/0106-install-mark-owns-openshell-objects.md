@@ -86,10 +86,19 @@ name. Velero's restore marks restored objects the same way.
   with the providers it attaches) are listed and counted apart, in
   `koinon_openshell_unmarked_objects_waiting_for_agent{kind}`, and do not block: a restored copy of the same
   database sees the same agent in the same status and does not claim the object either. They are claimed only
-  when the agent changes status. The exception is an agent whose status in the backup differs from the live
-  one (activated or unarchived since): the drill does not activate or unarchive agents on the copy, and an
-  operator who wants the second gauge at 0 too unarchives the archived agent on the live install, activates or
-  archives the draft agent, or deletes the sandbox when its home volume is not needed.
+  when the agent changes status. The exception is an agent that was active in the backup and has since
+  returned to draft or been archived on the live install: its objects are hidden as `waits-for-agent` on the
+  live install, so the gate passes, but the copy sees the agent active and an unmarked sandbox, and
+  `reconcileActive` there recreates it with the copy's mark, which deletes the live home volume. (The reverse,
+  an agent activated or unarchived since the backup, is safe: its objects are counted and block the gate.) So
+  the drill takes its backup only after the gate reads 0 (both gauges as above), and no agent leaves active
+  on the live install between the backup and the end of the drill; if one does, the operator does not
+  release the copy's hold and takes the backup again once the gate reads 0. The restore hold (ADR 0107) does not
+  close this by itself: a held reconciler converges no sandbox, so nothing happens while the copy is held,
+  but a drill copy released on the same gateway runs `reconcileActive` like any install. The drill does not
+  activate or unarchive agents on the copy, and an operator who wants the second gauge at 0 too unarchives
+  the archived agent on the live install, activates or archives the draft agent, or deletes the sandbox when
+  its home volume is not needed.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
