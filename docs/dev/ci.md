@@ -18,6 +18,53 @@ test, so the suite reads "partly run" when only that test ran. A plain test that
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
+### Test result reuse (#43)
+
+In CI (`CI` set) every package runs with `-count=1`, so main and the merge queue run everything every
+time. Locally (`CI` unset) `make test` stays as it was: serial Ginkgo suites run with `-count=1`, plain
+packages as Go decides, so they may print `(cached)`. A pull request run sets `KOINON_GO_TEST_CACHE=1`
+(the `go-test` job, `pull_request` events only) and the
+packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
+test binary, the command line, the environment variables the test read and the size, mode and mtime of
+the files it opened are the same (Go does not hash file content), and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
+the network, a cluster or a binary the test starts, so the three kinds of package split like this:
+
+| Kind | Reuse on a pull request | Why |
+| --- | --- | --- |
+| Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
+| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with N > 0. |
+| Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
+
+A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
+containerhost, agentgatewayimage, cfgdeliver, fakegitea, policycheck, racescale; `fakemodel` is an
+in-process fake and allowed), testcontainers-go or envtest, or when the package or its tests import
+`os/exec`. So every Postgres, Docker, envtest, git or helm package keeps `-count=1` on pull requests
+too. The rule leans to "not cacheable"; a wrongly excluded package loses a hit, a wrongly included one
+could show a stale pass. `hack/go-test-test.sh` pins it.
+
+Where the results come from: the `warm-caches` job on main runs
+`KOINON_GO_TEST_CACHE=1 hack/go-test.sh "$pkgs"` (`pkgs` is the output of `hack/go-test-cacheable.sh`) in its
+own step, after the `go-ci` save, with `continue-on-error`: a failing test loses hits and never costs the
+build cache, and an empty list fails the step instead of running `./...`. It saves `~/.cache/go-build` as
+`go-testres-<os>-<arch>-<go version>-<commit sha>` on every push to main; the `go-test` job of a pull
+request restores the newest entry by the `go-testres-` prefix. The script and flags are the same (they are
+part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
+look for `(cached)` on lines such as `internal/money (cached)`.
+
+Why the mtime step: `actions/checkout` stamps every file and directory with the checkout time, so a package
+that opens a file (testdata, golden files, the chart, templates) or lists a directory (`filepath.Glob`,
+`os.ReadDir`, `WalkDir`: Go hashes an opened directory's stat and the stat of each entry) would never hit
+on a CI run. The `go-test` and `warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It
+sets each tracked file's mtime from its git blob id and each tracked directory's from its tree id, so the
+same content has the same mtime on main and on a pull request, and a changed file (even one of the same
+size) gets another mtime, as does every directory above it. A fixed epoch would show a stale pass for a
+same-size edit. A directory that gets untracked entries (the root: `.git`, `reports/`) still differs, so a
+package that lists it only misses. The script is for a throw-away checkout only. Retention: every
+`go-testres-` entry holds the whole build cache (a few hundred MB), so `warm-caches` deletes the
+`go-testres-` entries created before the one it just saved (`actions: write`, `continue-on-error`; by
+`createdAt`, which follows the save order, not the commit order: a prune keeps the entries saved at or after its own, and the worst case is a lost cache hit, never a stale pass) and the repository
+keeps about one, away from the 10 GB quota that go-ci, envtest and the pnpm stores share.
+
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
 Why: Ryuk exits 10 s after its last client disconnects. On a fresh runner a cold image pull leaves
@@ -472,6 +519,7 @@ work that fills it, then saves:
 | Cache | Key | Filled by |
 | --- | --- | --- |
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>-<week>` (`<week>` = whole 7-day periods since the epoch; defined once in `.github/actions/setup-go-cache`) | `go build ./...`, `go test -run '^$' ./...`, the same with `-race` for the go-race packages, one lint run |
+| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
