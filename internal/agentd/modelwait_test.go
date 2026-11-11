@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // A run waits until the gateway serves its model (old issue 174): a new provider is left out of the
@@ -62,7 +63,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		serve(ctx, e, addModel(ctx, e, "served-upstream"))
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
 	})
 
@@ -72,7 +73,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 
-		Eventually(waitEvents(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(waitEvents(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		ev := waitEvents(ctx, r)()[0]
 		Expect(payload(ev)).To(HaveKeyWithValue("model", model))
 		Expect(payload(ev)).To(HaveKeyWithValue("provider", "new-upstream"))
@@ -82,7 +83,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		Expect(waitEvents(ctx, r)()).To(HaveLen(1), "the wait is recorded once")
 
 		serve(ctx, e, id)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("fails with a reason naming the provider when the gateway does not serve the model in time", func(ctx SpecContext) {
@@ -92,11 +93,11 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.Now = clock.Now; c.ModelServeTimeout = 5 * time.Minute })
 
-		Eventually(waitEvents(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(waitEvents(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		clock.Advance(4 * time.Minute)
 		Consistently(runState(ctx, r)).WithTimeout(300 * time.Millisecond).Should(Equal(store.RunStateStarting))
 		clock.Advance(time.Minute + time.Second)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		reason := getRun(ctx, r).OutcomeReason.String
 		Expect(reason).To(ContainSubstring(`the gateway did not serve the model "` + model + `" within 5m0s`))
 		Expect(reason).To(ContainSubstring(`its provider "stuck-upstream" has not reached the gateway`))
@@ -109,7 +110,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		addUnpriced(ctx, e, "unpriced-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the model "` + model + `" has no price, so the gateway does not serve it; ` +
 			"add a price for it on the Prices page and run the task again"))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
@@ -125,7 +126,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the model "` + model + `" has no price, so the gateway does not serve it; ` +
 			"add a price for it on the Prices page and run the task again"))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
@@ -141,7 +142,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the API key of the model provider "lost-upstream" was lost, so the gateway does not ` +
 			`serve the model "` + model + `"; enter the key again on the Providers page and run the task again`))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
@@ -154,7 +155,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		price(ctx, e, "1.1234567") // seven fraction digits, from before the stricter rule
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		reason := getRun(ctx, r).OutcomeReason.String
 		Expect(reason).To(HavePrefix(`the model "` + model + `" is not served: prices: unusable stored price: `))
 		Expect(reason).To(HaveSuffix("; fix its price on the Prices page"))
@@ -178,13 +179,13 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		DeferCleanup(restore)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting), "an error is no reason to fail")
 		Expect(e.gw.Execs()).To(BeEmpty())
 
 		restore()
 		serve(ctx, e, id)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("stops waiting when the run is canceled", func(ctx SpecContext) {
@@ -192,11 +193,11 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		addModel(ctx, e, "slow-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(waitEvents(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(waitEvents(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateCanceled))
 		Consistently(func() []string { return kinds(events(ctx, r)) }, 500*time.Millisecond).
 			Should(Equal([]string{"run.waiting_for_model"}), "nothing is recorded after the cancel")
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal("user canceled"))
@@ -207,7 +208,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(waitEvents(ctx, r)()).To(BeEmpty())
 	})
 })

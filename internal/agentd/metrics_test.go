@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("metrics", func() {
@@ -66,7 +67,7 @@ var _ = Describe("metrics", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		Eventually(func() float64 { return finished(m, "succeeded") }).Should(Equal(1.0))
 		Expect(testutil.ToFloat64(m.Claimed)).To(Equal(1.0))
@@ -84,7 +85,7 @@ var _ = Describe("metrics", func() {
 		e.recordSandbox(ctx, store.SandboxStateDeleted, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 
 		Eventually(func() float64 { return finished(m, "failed") }).Should(Equal(1.0))
 		Expect(finished(m, "succeeded")).To(Equal(0.0))
@@ -96,10 +97,10 @@ var _ = Describe("metrics", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markHang))
 		killA := e.pool("agentd-a", withMetrics(a), func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
-		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
+		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
 		killA()
 		e.pool("agentd-b", withMetrics(b))
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		Expect(testutil.ToFloat64(a.Claimed)).To(Equal(1.0))
 		Expect(testutil.ToFloat64(b.Takeovers)).To(Equal(1.0))

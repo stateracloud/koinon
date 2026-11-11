@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
 )
 
@@ -75,8 +76,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markPaths))
 		e.pool("agentd-paths", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(4))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(4))
 		spans := rcv.snapshot()
 		var names []string
 		for _, s := range spans {
@@ -103,8 +104,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 			rcv := newReceiver()
 			r := e.enqueue(ctx, e.task(ctx, "ask"))
 			e.pool("agentd-askagent-"+level, tracingOn(rcv, fakeDecider{traced: true, level: level}))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(2))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(2))
 			tool := spanByName(rcv.snapshot(), "execute_tool koinon_ask_agent")[0]
 			a := attrMap(tool.Attributes)
 			Expect(a).To(HaveKeyWithValue(semconv.GenAITransferMode, "return_to_caller"))
@@ -132,9 +133,9 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		// agentd's own retry layer, the one for a flavor whose harness does not retry.
 		e.pool("agentd-retry", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), agentd.OwnRetryLayer, func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(endReasons(turnRows(ctx, e, r))).To(Equal([]string{"failed", "end_turn"}))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(2))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(2))
 		roots := map[string]*tracepb.Span{}
 		for _, s := range rootsOf(rcv.snapshot()) {
 			roots[attrMap(s.Attributes)[semconv.KoinonTurn]] = s
@@ -152,7 +153,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markRefuse+" write the notes"))
 		e.pool("agentd-refuse", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(endReasons(turnRows(ctx, e, r))).To(Equal([]string{"refused", "end_turn"}))
 	})
 
@@ -163,9 +164,9 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 4})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-wrapup", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.WrapUpNotice = 2 * time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
-		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"wrap_up", "canceled"}))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(2))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
+		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(racescale.D(5 * time.Second)).Should(Equal([]string{"wrap_up", "canceled"}))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(2))
 		for _, s := range rootsOf(rcv.snapshot()) {
 			if attrMap(s.Attributes)[semconv.KoinonTurn] == "2" {
 				Expect(attrMap(s.Attributes)).To(HaveKeyWithValue(semconv.KoinonOutcome, "canceled"))
@@ -178,11 +179,11 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-cancel", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
-		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(10 * time.Second).Should(Equal([]string{"canceled"}))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal([]string{"canceled"}))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		a := attrMap(rcv.snapshot()[0].Attributes)
 		Expect(a).To(HaveKeyWithValue(semconv.KoinonOutcome, "canceled"))
 	})
@@ -203,8 +204,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markLong+strings.Repeat(" word", 3000)))
 		e.pool("agentd-long", tracingOn(rcv, fakeDecider{traced: true, level: "full"}, func(t *agentd.Tracing) { t.ContentPreCap = 2048 }))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		a := attrMap(rcv.snapshot()[0].Attributes)
 		for _, k := range []string{semconv.GenAIInputMessages, semconv.GenAIOutputMessages} {
 			Expect(len(a[k])).To(BeNumerically("<=", 2048), k)
@@ -242,8 +243,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		reg := agentd.NewMetrics(nil)
 		r := e.enqueue(ctx, e.task(ctx, markLong))
 		e.pool("agentd-big", tracingOn(rcv, fakeDecider{traced: true, level: "full"}, func(t *agentd.Tracing) { t.QueueSize = 4096; t.BatchSize = 64; t.Interval = time.Second }), func(c *agentd.Config) { c.Metrics = reg })
-		Eventually(runState(ctx, r)).WithTimeout(60 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(rcv.count).WithTimeout(30 * time.Second).Should(Equal(257))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(60 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(rcv.count).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(257))
 		Expect(rcv.tooLarge.Load()).To(BeZero(), "no request was refused as too large")
 		Expect(rcv.requests.Load()).To(BeNumerically(">=", 3), "several batches")
 		Expect(testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("export_failed"))).To(BeZero())
@@ -256,10 +257,10 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		reg := agentd.NewMetrics(nil)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-partial", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.Metrics = reg })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() float64 {
 			return testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("rejected"))
-		}).WithTimeout(5 * time.Second).Should(Equal(1.0))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(1.0))
 		Expect(testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("export_failed"))).To(BeZero())
 	})
 
@@ -270,15 +271,15 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		_, err := q.InsertRunTurn(ctx, store.InsertRunTurnParams{OrgID: e.org, RunID: r.ID, TraceID: []byte("0123456789abcdef")})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-takeover", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"interrupted", "end_turn"}))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(func() []string { return endReasons(turnRows(ctx, e, r)) }).WithTimeout(racescale.D(5 * time.Second)).Should(Equal([]string{"interrupted", "end_turn"}))
 	})
 
 	It("adds no turn for a worker that is not the run's owner", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-owner")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		_, err := q.InsertOwnedRunTurn(ctx, store.InsertOwnedRunTurnParams{OrgID: e.org, RunID: r.ID, Epoch: getRun(ctx, r).Epoch + 1, TraceID: []byte("0123456789abcdef")})
 		Expect(err).To(MatchError(pgx.ErrNoRows))
 		_, err = q.InsertOwnedRunTurn(ctx, store.InsertOwnedRunTurnParams{OrgID: e.org, RunID: r.ID, Epoch: getRun(ctx, r).Epoch, TraceID: []byte("0123456789abcdef")})

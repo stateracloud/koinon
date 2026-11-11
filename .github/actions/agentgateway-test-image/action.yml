@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pull the agentgateway test image from this repository owner's GHCR copy (#238) and set
+# KOINON_AGENTGATEWAY_MIRROR for the later steps. Every job that runs a suite which starts agentgateway
+# (internal/testing/agentgatewayimage) uses this action, with `packages: read` on the job.
+# A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
+name: agentgateway-test-image
+description: Pull the pinned agentgateway test image from GHCR and export KOINON_AGENTGATEWAY_MIRROR.
+inputs:
+  token:
+    description: Token that can read the owner's GHCR packages (GITHUB_TOKEN with packages read).
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        OWNER: ${{ github.repository_owner }}
+        FORK: ${{ github.event.repository.fork }}
+      run: |
+        read -r _ _ digest < <(hack/agentgateway-pin.sh)
+        mirror="ghcr.io/${OWNER,,}/agentgateway"
+        if docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN" && docker pull "$mirror@$digest"; then
+          echo "KOINON_AGENTGATEWAY_MIRROR=$mirror" >>"$GITHUB_ENV"
+        elif [[ $FORK == true ]]; then
+          echo "::warning::cannot pull $mirror@$digest; the agentgateway tests pull the chart's repository"
+        else
+          echo "::error::cannot pull $mirror@$digest: dispatch mirror-agentgateway-test-image.yml on this ref, or check the package's Manage Actions access (docs/dev/ci.md)"
+          exit 1
+        fi

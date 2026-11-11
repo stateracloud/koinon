@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // modelCaller makes the fake harness call the fake model server the way a harness does (a
@@ -108,7 +109,7 @@ var _ = Describe("Failure classes", func() {
 		start := time.Now()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick)
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(time.Since(start)).To(BeNumerically(">=", time.Second), "the Retry-After is honoured")
 		Expect(srv.Requests()).To(HaveLen(2))
 		got := retries(ctx, r)
@@ -123,7 +124,7 @@ var _ = Describe("Failure classes", func() {
 		model(e, fakemodel.Faults{Unavailable: 2})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick)
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		got := retries(ctx, r)
 		Expect(got).To(HaveLen(2))
 		Expect(got[0]).To(HaveKeyWithValue("failureClass", "transient"))
@@ -136,7 +137,7 @@ var _ = Describe("Failure classes", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", quick)
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassContextOverflow))
 		Expect(srv.Requests()).To(HaveLen(1), "no blind retry")
 		Expect(retries(ctx, r)).To(BeEmpty())
@@ -154,7 +155,7 @@ var _ = Describe("Failure classes", func() {
 		model(e, fakemodel.Faults{OverloadedMidStream: true})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick, func(c *agentd.Config) { c.ModelRetries = 2 })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassTransient))
 		Expect(srv.Requests()).To(HaveLen(3), "the first request and two retries")
 		Expect(retries(ctx, r)).To(HaveLen(2))
@@ -166,7 +167,7 @@ var _ = Describe("Failure classes", func() {
 		model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 30})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick, func(c *agentd.Config) { c.MaxRetryAfter = 5 * time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
 		Expect(srv.Requests()).To(HaveLen(1))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("asked to wait 30s"))
@@ -184,7 +185,7 @@ var _ = Describe("Failure classes", func() {
 			model(e, fakemodel.Faults{Unavailable: 5})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", harness)
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassTransient))
 			Expect(srv.Requests()).To(HaveLen(1), "the fake harness's one request; agentd adds none")
 			Expect(retries(ctx, r)).To(BeEmpty())
@@ -197,7 +198,7 @@ var _ = Describe("Failure classes", func() {
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			start := time.Now()
 			e.pool("agentd-a", harness)
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(time.Since(start)).To(BeNumerically("<", 15*time.Second))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
 			Expect(srv.Requests()).To(HaveLen(1))
@@ -211,7 +212,7 @@ var _ = Describe("Failure classes", func() {
 			model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 11812})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", harness)
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
 			Expect(srv.Requests()).To(HaveLen(1))
 			Expect(retries(ctx, r)).To(BeEmpty())
@@ -222,7 +223,7 @@ var _ = Describe("Failure classes", func() {
 			e := newEnv(ctx, store.AgentFlavorOpencode)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", harness, func(c *agentd.Config) { c.ModelRetries = 4; c.MaxRetryAfter = 30 * time.Second })
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			_, _, _, launches := e.harness.snapshot()
 			Expect(launches).To(ContainElement(ContainElements(
 				"--model-tries", "5", "--model-retry-backoff-ms", "10", "--model-max-retry-after-ms", "30000")))
@@ -236,7 +237,7 @@ var _ = Describe("Failure classes", func() {
 			e.harness.modelFault = func(context.Context, string) error { calls++; return err }
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", quick, func(c *agentd.Config) { c.ModelRetries = 1 })
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(failedClass(ctx, r)).To(Equal(want))
 			retryable := want == store.RunFailureClassTransient || want == store.RunFailureClassThrottled
 			Expect(calls).To(Equal(map[bool]int{true: 2, false: 1}[retryable]), fmt.Sprint(want))

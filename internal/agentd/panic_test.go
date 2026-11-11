@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // panicBackend panics on the first Exec and delegates after that.
@@ -42,12 +43,12 @@ var _ = Describe("A panic while driving a run", func() {
 
 		// conclude runs after the heartbeat is stopped and waited for: a run that is failed has no
 		// goroutine renewing its lease.
-		Eventually(runState(ctx, first)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, first)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, first)
 		Expect(got.OutcomeReason.String).To(ContainSubstring("panicked"))
 		Expect(got.LeaseExpiresAt.Valid).To(BeFalse(), "no live lease is left behind")
 
 		second := e.enqueue(ctx, e.task(ctx, "second"))
-		Eventually(runState(ctx, second)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, second)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 })
