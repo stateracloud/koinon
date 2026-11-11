@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -424,7 +425,7 @@ func (e *env) poolRunning(conns *pgxpool.Pool, name string, run func(*agentd.Poo
 		if !stopped {
 			stopped = true
 			cancel()
-			Eventually(done).WithTimeout(10 * time.Second).Should(BeClosed())
+			Eventually(done).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
 		}
 	}
 	DeferCleanup(stop)
@@ -492,7 +493,7 @@ func (c *fakeClock) awaitWait() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		return c.reads
-	}).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 3))
+	}).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 3))
 }
 
 func (c *fakeClock) Advance(d time.Duration) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
 )
 
@@ -61,7 +62,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		allow(ctx, e, "old", "unhealthy", 5, ", disabled_reason")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MCPRetryDelay = retry })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(missing(ctx, r)()).To(BeEmpty())
 	})
 
@@ -71,7 +72,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MCPRetryDelay = time.Second })
 
-		Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		ev := missing(ctx, r)()[0]
 		Expect(payload(ev)).To(HaveKeyWithValue("attempt", BeNumerically("==", 1)))
 		Expect(payload(ev)["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
@@ -80,7 +81,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		Expect(prompts).To(BeEmpty())
 
 		setHealth(ctx, e, "tracker")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(eventOf(events(ctx, r), "run.mcp_server_recovered")).To(HaveLen(1))
 		Expect(missing(ctx, r)()).To(HaveLen(1))
 	})
@@ -91,7 +92,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MCPRetryDelay = retry })
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
 			ContainSubstring("not serving tools"), ContainSubstring("tracker"), ContainSubstring("the gateway got no tools"),
 		))
@@ -108,10 +109,10 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.MCPRetryDelay = time.Second })
-		Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		setHealth(ctx, e, "tracker")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 1))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 1))
 		roots := spanByName(rcv.snapshot(), "invoke_agent "+e.agent.DisplayName)
 		Expect(roots).To(HaveLen(1))
 		Expect(attrMap(roots[0].Attributes)).To(And(
@@ -126,7 +127,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), func(c *agentd.Config) { c.MCPRetryDelay = retry })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(missing(ctx, r)()).To(HaveLen(2))
 		Consistently(rcv.count).WithTimeout(time.Second).Should(BeZero())
 	})
@@ -142,10 +143,10 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			c.MCPRetryDelay = time.Second
 			c.WrapUpNotice = 4 * time.Second
 		})
-		Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		setHealth(ctx, e, "tracker")
-		Eventually(runState(ctx, r)).WithTimeout(20 * time.Second).Should(Equal(store.RunStateCanceled))
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 2))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.RunStateCanceled))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 2))
 		roots := spanByName(rcv.snapshot(), "invoke_agent "+e.agent.DisplayName)
 		Expect(len(roots)).To(BeNumerically(">=", 2))
 		for _, s := range roots {
@@ -179,7 +180,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			liveTools.set([]string{slug(ctx, e) + "-tracker_create_issue"}, nil)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(missing(ctx, r)()).To(BeEmpty())
 			Expect(liveTools.calls()).To(BeNumerically(">=", 1))
 		})
@@ -190,7 +191,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
 
-			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 			ev := missing(ctx, r)()[0]
 			Expect(payload(ev)).To(HaveKeyWithValue("attempt", BeNumerically("==", 1)))
 			Expect(payload(ev)["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
@@ -198,7 +199,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			Expect(prompts).To(BeEmpty())
 
 			liveTools.set([]string{slug(ctx, e) + "-tracker_create_issue"}, nil)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(eventOf(events(ctx, r), "run.mcp_server_recovered")).To(HaveLen(1))
 		})
 
@@ -210,7 +211,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
 
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(getRun(ctx, r).OutcomeReason.String).To(And(ContainSubstring("tracker"), ContainSubstring("does not list")))
 			Expect(getRun(ctx, r).OutcomeReason.String).NotTo(ContainSubstring("kgw_"))
 			evs := missing(ctx, r)()
@@ -226,7 +227,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			liveTools.set([]string{slug(ctx, e) + "-tracker-ask_create_issue"}, nil)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(missing(ctx, r)()).To(BeEmpty())
 		})
 
@@ -237,9 +238,9 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			liveTools.set([]string{slug(ctx, e) + "-tracker-ask_close_issue"}, nil)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 			Expect(payload(missing(ctx, r)()[0])["servers"]).To(ConsistOf(HaveKeyWithValue("name", "tracker")))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		})
 
 		It("does not expect tools of a server with none to offer", func(ctx SpecContext) {
@@ -249,7 +250,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			Expect(err).NotTo(HaveOccurred())
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(missing(ctx, r)()).To(BeEmpty())
 		})
 
@@ -259,7 +260,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			liveTools.set(nil, errors.New("koinon-api answered 502"))
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(missing(ctx, r)()).To(BeEmpty())
 		})
 
@@ -268,7 +269,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 			allow(ctx, e, "tracker", "healthy", 2, "")
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
-			Eventually(missing(ctx, r)).WithTimeout(10 * time.Second).Should(HaveLen(1))
+			Eventually(missing(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 			Expect(payload(missing(ctx, r)()[0])["servers"]).To(HaveLen(1))
 		})
 	})

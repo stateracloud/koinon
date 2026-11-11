@@ -292,7 +292,7 @@ var _ = Describe("home checkpoints", func() {
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(cp.Status).To(Equal(store.CheckpointStatusComplete))
-		}).WithTimeout(20 * time.Second).Should(Succeed())
+		}).WithTimeout(racescale.D(20 * time.Second)).Should(Succeed())
 		Expect(cp.Reason).To(Equal(store.CheckpointReasonHourly))
 		Expect(cp.SnapshotID.String).NotTo(BeEmpty())
 		Expect(cp.Generation).To(Equal(e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId()))
@@ -313,7 +313,7 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -323,7 +323,7 @@ var _ = Describe("home checkpoints", func() {
 		By("the reconciler asks for a backup before the image bump; the writer takes it")
 		id := request(ctx, store.CheckpointReasonRecreate)
 		e.pool("agentd-b", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 
 		By("the sandbox is recreated: an empty home, the same generation")
 		reconcilerRecreates(ctx, id)
@@ -336,7 +336,7 @@ var _ = Describe("home checkpoints", func() {
 		By("the next run restores the home before the harness starts and loads the session")
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
 		Expect(home.get()).To(HaveKey(".local/share/opencode/ses_1.db"))
 		Expect(home.get()["big/random.bin"] == big).To(BeTrue(), "the 5 MiB file came back byte for byte")
@@ -374,7 +374,7 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -383,7 +383,7 @@ var _ = Describe("home checkpoints", func() {
 		By("the sandbox stops; its stop backup completes")
 		id := request(ctx, store.CheckpointReasonStop)
 		e.pool("agentd-b", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 
 		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted, row deleting/Archived")
 		_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
@@ -412,7 +412,7 @@ var _ = Describe("home checkpoints", func() {
 		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is owed until the run does it")
 
 		By("the run restores before the harness starts and reloads the session, not a reset")
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(restoreOf(ctx).Valid).To(BeFalse(), "the restore is done")
 		sbRow, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -433,7 +433,7 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = failingStore{HomeStore: writer, backups: errors.New("S3: access denied")}
 		}))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		cp := checkpointOf(ctx, id)()
 		Expect(cp.Attempts).To(BeEquivalentTo(2))
 		Expect(cp.Error.String).To(ContainSubstring("access denied"))
@@ -447,7 +447,7 @@ var _ = Describe("home checkpoints", func() {
 			c.Timeout = 500 * time.Millisecond
 			c.Attempts = 1
 		}))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(10 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("deadline exceeded"))
 	})
 
@@ -485,7 +485,7 @@ var _ = Describe("home checkpoints", func() {
 
 		id := request(ctx, store.CheckpointReasonRecreate)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) { c.Repositories = fixedRepo{current: current} }))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		cp := checkpointOf(ctx, id)()
 		Expect(cp.Attempts).To(BeEquivalentTo(1), "another attempt cannot help")
 		Expect(cp.Error.String).To(And(ContainSubstring(checkpoint.EpochPrefix(org, agent, 1)),
@@ -535,7 +535,7 @@ var _ = Describe("home checkpoints", func() {
 
 		id := request(ctx, store.CheckpointReasonRecreate)
 		e.pool("agentd-a", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		cp := checkpointOf(ctx, id)()
 		Expect(cp.Attempts).To(BeEquivalentTo(1))
 		Expect(cp.Error.String).To(And(ContainSubstring(checkpoint.Prefix(org, agent)),
@@ -578,7 +578,7 @@ var _ = Describe("home checkpoints", func() {
 			Expect(db.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`,
 				e.org, e.agent.ID).Scan(&deleted)).To(Succeed())
 			return deleted
-		}).WithTimeout(10 * time.Second).Should(BeTrue())
+		}).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		snaps, err := writer.Snapshots(ctx, checkpoint.EpochPrefix(org, agent, 1), "koinon_test_foreign-1")
 		Expect(err).NotTo(HaveOccurred(), "the repository found there is not the row's: kept")
 		Expect(snaps).To(HaveLen(1))
@@ -589,7 +589,7 @@ var _ = Describe("home checkpoints", func() {
 		home.failRead = true
 		id := request(ctx, store.CheckpointReasonRecreate)
 		e.pool("agentd-a", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("Input/output error"))
 		By("the home tar did not read whole is not in the bucket either: checkpoints resync records what is there")
 		_, err := writer.Snapshots(ctx, checkpoint.Prefix(e.org.String(), e.agent.ID.String()), "koinon_test_not-a-real-token")
@@ -601,7 +601,7 @@ var _ = Describe("home checkpoints", func() {
 		_, err := q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusFailed))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusFailed))
 		Expect(checkpointOf(ctx, id)().Error.String).To(ContainSubstring("waiting for its home to be restored"))
 	})
 
@@ -609,14 +609,14 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 
 		take := func(files map[string]string) pgtype.UUID {
 			home.set(files)
 			id := request(ctx, store.CheckpointReasonStop)
 			stopW := e.pool("agentd-w", cps(ctx))
-			Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+			Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 			stopW()
 			return id
 		}
@@ -631,7 +631,7 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = failingStore{HomeStore: writer, failRestore: bad}
 		}))
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "the newest would not restore; the older one did")
 		Expect(restoreOf(ctx).Valid).To(BeFalse())
 	})
@@ -640,7 +640,7 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 
 		current := &atomic.Int32{}
@@ -649,7 +649,7 @@ var _ = Describe("home checkpoints", func() {
 			home.set(files)
 			id := request(ctx, store.CheckpointReasonStop)
 			stopW := e.pool("agentd-w", cps(ctx, epochs))
-			Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+			Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 			stopW()
 			return id
 		}
@@ -668,7 +668,7 @@ var _ = Describe("home checkpoints", func() {
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
 		stopB := e.pool("agentd-b", cps(ctx, epochs))
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stopB()
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "new"))
 
@@ -679,7 +679,7 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-c", cps(ctx, epochs, func(c *agentd.Checkpoints) {
 			c.Store = failingStore{HomeStore: writer, failRestore: checkpointOf(ctx, newer)().SnapshotID.String}
 		}))
-		Eventually(runState(ctx, r3)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r3)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"))
 	})
 
@@ -687,14 +687,14 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		current := &atomic.Int32{}
 		take := func(files map[string]string) pgtype.UUID {
 			home.set(files)
 			id := request(ctx, store.CheckpointReasonStop)
 			stopW := e.pool("agentd-w", cps(ctx, func(c *agentd.Checkpoints) { c.Repositories = fixedRepo{current: current} }))
-			Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+			Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 			stopW()
 			return id
 		}
@@ -708,7 +708,7 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Repositories = fixedRepo{current: current, lost: map[int32]bool{1: true}}
 		}))
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "epoch 1's password is lost; epoch 0's checkpoint restored")
 	})
 
@@ -757,7 +757,7 @@ var _ = Describe("home checkpoints", func() {
 		By("epoch 1's first checkpoint completes: epoch 0 goes")
 		complete(1, s1.SnapshotID)
 		Expect(listed()).To(Equal(2))
-		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		Expect(listed()).To(Equal(1), "a deleted repository's checkpoint is not offered to a restore")
 
 		out.Reset()
@@ -812,7 +812,7 @@ var _ = Describe("home checkpoints", func() {
 		By("with its own prefix, a lost repository goes although no later epoch has a checkpoint")
 		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, e0)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		out.Reset()
 		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "its blobs are deleted")
 	})
@@ -829,19 +829,19 @@ var _ = Describe("home checkpoints", func() {
 			c.Metrics = m
 			c.Logger = slog.New(slog.NewTextHandler(io.MultiWriter(GinkgoWriter, logs), nil))
 		})
-		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(10 * time.Second).Should(Equal(1.0))
+		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1.0))
 		Consistently(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(500*time.Millisecond).Should(Equal(1.0), "every sweep counts it again")
 		Expect(strings.Count(logs.String(), "stored prefix is not its own")).To(Equal(1), "about ten sweeps, one log line")
 
 		By("once the row is fixed, the gauge goes back to 0 (and the row is swept)")
 		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, checkpoint.Prefix(org, e.agent.ID.String()))
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(10 * time.Second).Should(BeZero())
+		Eventually(func() float64 { return testutil.ToFloat64(m.SweepRefused) }).WithTimeout(racescale.D(10 * time.Second)).Should(BeZero())
 
 		By("a fixed row that regresses is logged again")
 		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3, deleted_at = NULL WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, other)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() int { return strings.Count(logs.String(), "stored prefix is not its own") }).WithTimeout(10 * time.Second).Should(Equal(2))
+		Eventually(func() int { return strings.Count(logs.String(), "stored prefix is not its own") }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(2))
 	})
 
 	It("keeps a retired repository while the only later checkpoints are in a lost or deleted epoch", func(ctx SpecContext) {
@@ -881,18 +881,18 @@ var _ = Describe("home checkpoints", func() {
 			VALUES ($1, $2, 3, $3, '{}', 'key_lost')`, e.org, e.agent.ID, checkpoint.EpochPrefix(org, agent, 3))
 		Expect(err).NotTo(HaveOccurred())
 		complete(3)
-		Eventually(deleted0).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 	})
 
 	It("does not start the harness when the home cannot be restored", func(ctx SpecContext) {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		id := request(ctx, store.CheckpointReasonRecreate)
 		stopW := e.pool("agentd-w", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 		stopW()
 		reconcilerRecreates(ctx, id)
 		prompts0, _, _, _ := e.harness.snapshot()
@@ -903,7 +903,7 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = failingStore{HomeStore: writer, failRestore: bad}
 		}))
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		prompts, _, _, _ := e.harness.snapshot()
 		Expect(prompts).To(Equal(prompts0), "the harness never saw a prompt")
 		Expect(getRun(ctx, r2).OutcomeReason.String).To(ContainSubstring("restoring the home failed"))
@@ -914,11 +914,11 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		id := request(ctx, store.CheckpointReasonRecreate)
 		stopW := e.pool("agentd-w", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 		stopW()
 		reconcilerRecreates(ctx, id)
 
@@ -926,7 +926,7 @@ var _ = Describe("home checkpoints", func() {
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
 		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) { c.RestoreTries = 3 }))
-		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		reason := getRun(ctx, r2).OutcomeReason.String
 		Expect(reason).To(ContainSubstring("does not support openshell-upload-v1"))
 		Expect(reason).To(ContainSubstring("OpenShell v0.1.4 or later"))
@@ -939,11 +939,11 @@ var _ = Describe("home checkpoints", func() {
 		t := e.task(ctx, "first")
 		stop := e.pool("agentd-a")
 		r1 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		id := request(ctx, store.CheckpointReasonRecreate)
 		stopW := e.pool("agentd-w", cps(ctx))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 		stopW()
 		reconcilerRecreates(ctx, id)
 
@@ -955,9 +955,9 @@ var _ = Describe("home checkpoints", func() {
 			c.Store = blockingStore{HomeStore: writer, stopped: stopped}
 			c.Timeout = 10 * time.Minute // far longer than the spec waits
 		}))
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r2).OutcomeReason.String).To(ContainSubstring("openshell-upload-v1"))
-		Eventually(stopped).WithTimeout(5*time.Second).Should(BeClosed(), "the writer was cancelled, not waited for")
+		Eventually(stopped).WithTimeout(racescale.D(5*time.Second)).Should(BeClosed(), "the writer was cancelled, not waited for")
 	})
 })
 

@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
 )
 
@@ -257,7 +258,7 @@ func parkedRunWith(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.Trace
 	t := a.task(ctx, markQuestion+": deploy the app")
 	r := a.enqueue(ctx, t)
 	a.pool("agentd-trace", tracingOn(rcv, d, mutate...))
-	Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+	Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 	time.Sleep(300 * time.Millisecond) // a real wait between the turns
 	if between != nil {
 		between()
@@ -267,7 +268,7 @@ func parkedRunWith(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.Trace
 		_, err := questions.Respond(ctx, q, b, a.org, mustUUID(qid), a.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us-east-1"})
 		return err
 	})).To(Succeed())
-	Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+	Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	return r, qid
 }
 
@@ -277,7 +278,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 			a := newAskEnv(ctx)
 			rcv := newReceiver()
 			r, qid := parkedRun(ctx, a, rcv, fakeDecider{traced: true, level: level})
-			Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(4))
+			Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(4))
 			spans := rcv.snapshot()
 
 			rcv.mu.Lock()
@@ -421,7 +422,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 		rcv := newReceiver()
 		d := &levelDecider{level: "full"}
 		r, _ := parkedRunWith(ctx, a, rcv, d, func() { d.set("none") })
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(4))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(4))
 		_ = r
 		for _, s := range rcv.snapshot() {
 			a := attrMap(s.Attributes)
@@ -444,7 +445,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 		t := e.task(ctx, "say hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-untraced", tracingOn(rcv, fakeDecider{traced: false, level: "full"}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Consistently(rcv.requests.Load).WithTimeout(500 * time.Millisecond).Should(BeZero())
 		turns, err := q.ListRunTurns(ctx, store.ListRunTurnsParams{OrgID: e.org, RunID: r.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -464,13 +465,13 @@ var _ = Describe("run spans (ADR 0074)", func() {
 			tr.QueueSize = 1
 			tr.ExportTimeout = 400 * time.Millisecond
 		}), func(c *agentd.Config) { c.Metrics = reg })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(time.Since(started)).To(BeNumerically("<", 5*time.Second), "the run did not wait for the export")
 		// The export is tried, times out and the batch is dropped and counted.
-		Eventually(rcv.requests.Load).WithTimeout(5 * time.Second).Should(BeNumerically(">=", 1))
+		Eventually(rcv.requests.Load).WithTimeout(racescale.D(5 * time.Second)).Should(BeNumerically(">=", 1))
 		Eventually(func() float64 {
 			return testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("export_failed"))
-		}).WithTimeout(5 * time.Second).Should(BeNumerically(">=", 1))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(BeNumerically(">=", 1))
 		// Stopping the pool is bounded by the export timeout, not by the receiver.
 		begin := time.Now()
 		stop()
@@ -493,17 +494,17 @@ var _ = Describe("run spans (ADR 0074)", func() {
 			tr.Interval = time.Hour
 			tr.ExportTimeout = 2 * time.Second
 		}), func(c *agentd.Config) { c.Metrics = reg })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		Eventually(func() float64 {
 			return testutil.ToFloat64(reg.TraceSpansDropped.WithLabelValues("queue_full"))
-		}).WithTimeout(5 * time.Second).Should(BeNumerically(">=", 1))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(BeNumerically(">=", 1))
 	})
 
 	It("pins the emitted spans (golden)", func(ctx SpecContext) {
 		a := newAskEnv(ctx)
 		rcv := newReceiver()
 		r, qid := parkedRun(ctx, a, rcv, fakeDecider{traced: true, level: "full"})
-		Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(4))
+		Eventually(rcv.count).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(4))
 		golden("trace_spans", normalizeSpans(rcv.snapshot(), map[string]string{
 			r.ID.String(): "<run>", r.TaskID.String(): "<task>", a.org.String(): "<org>", a.agent.ID.String(): "<agent-id>",
 			a.agent.DisplayName: "<agent-name>", a.user.String(): "<user>", qid: "<question>",

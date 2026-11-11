@@ -276,6 +276,15 @@ goroutines or shares state behind a lock; `hack/go-test-test.sh` checks the list
 fixed, never suppressed. Run it locally with `go tool ginkgo -race ./internal/<pkg>/` (Docker for the
 Postgres suites).
 
+Timing under `-race`: the race build is slower and the runner has fewer cores than a laptop, so a
+fixed wall-clock window that is fine on a laptop times out on the runner without any race report (the
+first `go-race` run of agentd failed on 9 specs, all "Timed out after 20s"). Every `Eventually` window
+in `internal/agentd` therefore goes through `racescale.D` (`internal/testing/racescale`: 1x normally,
+5x under `-race`), so normal timing is unchanged. Write new windows the same way. `Consistently`
+windows are not scaled: they assert that nothing happens, and a longer window only slows the suite.
+The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
+processes, and fewer processes would make the job slower for the same risk.
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and

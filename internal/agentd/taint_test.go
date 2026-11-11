@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
@@ -275,7 +276,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		feed := &recordingFeed{}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed", func(c *agentd.Config) { c.Taint = feed })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(feed.latest).Should(Equal([2]int64{2, 2}))
 		events, epochs := feed.snapshot()
 		Expect(events[0]).To(Equal("start"), "the counts start before the harness runs")
@@ -319,12 +320,12 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		e.pool("agentd-feed-slow", func(c *agentd.Config) { c.Taint = feed })
 		// Both results are counted as read while the first report still waits: the guard sees the
 		// session two results behind, and waits.
-		Eventually(feed.latest).WithTimeout(10 * time.Second).Should(Equal([2]int64{2, 0}))
+		Eventually(feed.latest).WithTimeout(racescale.D(10 * time.Second)).Should(Equal([2]int64{2, 0}))
 		events, _ := feed.snapshot()
 		Expect(events).NotTo(ContainElement(HavePrefix("report")))
 		close(feed.hold)
-		Eventually(feed.latest).WithTimeout(10 * time.Second).Should(Equal([2]int64{2, 2}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(feed.latest).WithTimeout(racescale.D(10 * time.Second)).Should(Equal([2]int64{2, 2}))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("feeds a tool that finishes during the end-of-turn summary before it counts it as done", func(ctx SpecContext) {
@@ -340,7 +341,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		feed := &recordingFeed{}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-summary", func(c *agentd.Config) { c.Taint = feed })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Eventually(feed.latest).Should(Equal([2]int64{1, 1}))
 		events, _ := feed.snapshot()
 		report := slices.Index(events, "report private=false untrusted=true")
@@ -374,7 +375,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		})
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-real", func(c *agentd.Config) { c.Taint = mcpguard.NewFeed(db, nil) })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(getRun(ctx, r).Epoch).To(Equal(int64(1)), "one worker ran it: no takeover")
 		var private bool
 		var fps int
@@ -403,7 +404,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		feed := &errFeed{err: fmt.Errorf("upsert fingerprints: %w", &pgconn.PgError{Code: "21000", Message: "koinon-test cardinality"})}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-permanent", func(c *agentd.Config) { c.Taint = feed })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.Epoch).To(Equal(int64(1)), "no takeover per worker")
 		Expect(got.OutcomeReason.String).To(And(ContainSubstring("leak guard"), ContainSubstring("21000")))
@@ -417,7 +418,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		feed := &errFeed{err: &pgconn.PgError{Code: "40001", Message: "koinon-test serialization"}, failFirst: 2}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-transient", func(c *agentd.Config) { c.Taint = feed })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(getRun(ctx, r).Epoch).To(Equal(int64(1)))
 		Expect(feed.reports.Load()).To(Equal(int32(3)), "two failures, then the third try recorded it")
 	})
@@ -427,7 +428,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		feed := &fencedFeed{}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-fenced", func(c *agentd.Config) { c.Taint = feed })
-		Eventually(func() []string { ev, _ := feed.snapshot(); return ev }).WithTimeout(10 * time.Second).Should(ContainElement("start"))
+		Eventually(func() []string { ev, _ := feed.snapshot(); return ev }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("start"))
 		Consistently(func() []string { return kinds(events(ctx, r)) }).WithTimeout(time.Second).
 			ShouldNot(ContainElement("run.interrupted"), "the newer worker drives the run; this one records nothing")
 		Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateSucceeded))

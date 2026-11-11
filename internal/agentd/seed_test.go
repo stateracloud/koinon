@@ -267,7 +267,7 @@ var _ = Describe("home repository seeds", func() {
 		newRepositories(ctx)
 		e.pool("agentd-a", cps())
 
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := seedRow(ctx)()
 		Expect(r.SeedAttempts).To(Equal(int32(1)))
 		Expect(r.SeedError.Valid).To(BeFalse())
@@ -290,7 +290,7 @@ var _ = Describe("home repository seeds", func() {
 			HavePrefix("system "+e.agent.ID.String()), ContainSubstring(newest.ID.String()), ContainSubstring(cp.ID.String()))))
 
 		By("the new repository holds the newest home: the sweeper deletes the old one")
-		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		Expect(writer.Restore(ctx, e0, pw0, newest.SnapshotID.String, io.Discard)).NotTo(Succeed(), "the old repository's blobs are gone")
 		Expect(gauge("pending")()).To(BeZero())
 		Expect(gauge("failed")()).To(BeZero())
@@ -304,7 +304,7 @@ var _ = Describe("home repository seeds", func() {
 			c.Store = failingStore{HomeStore: writer, failRestore: newest.SnapshotID.String}
 		}))
 
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		copies := inEpoch1(ctx)
 		Expect(copies).To(HaveLen(1))
 		Expect(copies[0].FinishedAt.Time).To(BeTemporally("==", older.FinishedAt.Time))
@@ -316,7 +316,7 @@ var _ = Describe("home repository seeds", func() {
 		_, err := db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
 			VALUES ($1, $2, 'hourly', 'complete', 'later', now(), 1)`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 	})
 
 	It("gives up after its attempts, audits it and keeps the old repository", func(ctx SpecContext) {
@@ -326,14 +326,14 @@ var _ = Describe("home repository seeds", func() {
 			c.Store = failingStore{HomeStore: writer, backups: errors.New("the bucket refused the write")}
 		}))
 
-		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := seedRow(ctx)()
 		Expect(r.SeedAttempts).To(Equal(int32(2)))
 		Expect(r.SeededAt.Valid).To(BeFalse())
 		Expect(r.SeedError.String).To(ContainSubstring("the bucket refused the write"))
 		Expect(inEpoch1(ctx)).To(BeEmpty())
 		Expect(audited(ctx, agentd.SeedFailedAction)).To(ConsistOf(And(HavePrefix("system "), ContainSubstring("the bucket refused the write"))))
-		Eventually(gauge("failed")).WithTimeout(5 * time.Second).Should(Equal(1.0))
+		Eventually(gauge("failed")).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(1.0))
 		Expect(gauge("pending")()).To(BeZero())
 
 		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse(), "nothing newer holds the home")
@@ -344,8 +344,8 @@ var _ = Describe("home repository seeds", func() {
 		_, err := db.Exec(ctx, `INSERT INTO home_checkpoints (org_id, agent_id, reason, status, snapshot_id, finished_at, repository_epoch)
 			VALUES ($1, $2, 'hourly', 'complete', 'later', now(), 1)`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(gauge("failed")).WithTimeout(5 * time.Second).Should(BeZero())
-		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(gauge("failed")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())
+		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 	})
 
 	It("gives up at once on a seed into a prefix that holds another password's repository, records the free epoch and keeps the source (#262)", func(ctx SpecContext) {
@@ -356,7 +356,7 @@ var _ = Describe("home repository seeds", func() {
 		newRepositories(ctx)
 		e.pool("agentd-a", cps())
 
-		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := seedRow(ctx)()
 		Expect(r.SeedAttempts).To(Equal(int32(1)), "another try cannot help")
 		Expect(r.SeedError.String).To(And(ContainSubstring(e1), ContainSubstring("keys new-repositories --agent "+e.agent.ID.String()), ContainSubstring("free epoch 2")))
@@ -395,11 +395,11 @@ var _ = Describe("home repository seeds", func() {
 		newRepositories(ctx)
 		e.pool("agentd-a", cps())
 
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(seedRow(ctx)().SeedAttempts).To(Equal(int32(1)))
 		Expect(inEpoch1(ctx)).To(BeEmpty())
 		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(And(HavePrefix("system "+e.agent.ID.String()), Not(ContainSubstring("fromCheckpoint")))))
-		Eventually(gauge("pending")).WithTimeout(5 * time.Second).Should(BeZero())
+		Eventually(gauge("pending")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())
 	})
 
 	It("gives up on one agent's seed and still seeds another's", func(ctx SpecContext) {
@@ -412,15 +412,15 @@ var _ = Describe("home repository seeds", func() {
 			c.Store = failingStore{HomeStore: writer, failRestore: bad.SnapshotID.String}
 		}))
 
-		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
-		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(func() bool { return seedRow(ctx)().SeedFailedAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
+		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(inEpoch1(ctx)).To(BeEmpty())
 		copies := inEpoch(ctx, b, 1)
 		Expect(copies).To(HaveLen(1))
 		Expect(restored(ctx, checkpoint.EpochPrefix(e.org.String(), b.String(), 1), pw1, copies[0].SnapshotID.String)).To(ContainSubstring("b's home"))
 		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(And(HavePrefix("system "+b.String()), ContainSubstring(good.ID.String()))))
 		Expect(audited(ctx, agentd.SeedFailedAction)).To(ConsistOf(HavePrefix("system " + e.agent.ID.String())))
-		Eventually(gauge("failed")).WithTimeout(5 * time.Second).Should(Equal(1.0))
+		Eventually(gauge("failed")).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(1.0))
 		Expect(gauge("pending")()).To(BeZero())
 		Consistently(deleted0(ctx)).WithTimeout(time.Second).Should(BeFalse(), "the agent whose seed failed keeps its old repository")
 	})
@@ -437,14 +437,14 @@ var _ = Describe("home repository seeds", func() {
 			}
 		})
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate }))
-		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(gate.started).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
 
 		By("keys new-repositories runs again while epoch 1's seed copies")
 		newRepositoriesOf(ctx, e.agent.ID, 1)
 		close(gate.release)
 		By("the superseded try makes its last store call; it records nothing and the slot frees shortly after")
-		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
-		Eventually(func() bool { return seedRowOf(ctx, e.agent.ID, 2)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(gate.done).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
+		Eventually(func() bool { return seedRowOf(ctx, e.agent.ID, 2)().SeededAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(seedRow(ctx)().SeededAt.Valid).To(BeFalse(), "epoch 1 was superseded")
 		Expect(inEpoch1(ctx)).To(BeEmpty(), "its copy is not recorded")
 		copies := inEpoch(ctx, e.agent.ID, 2)
@@ -454,8 +454,8 @@ var _ = Describe("home repository seeds", func() {
 		Expect(audited(ctx, agentd.SeededAction)).To(ConsistOf(ContainSubstring(`"repositoryEpoch": 2`)))
 
 		By("both older repositories go")
-		Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
-		Eventually(func() bool { return seedRow(ctx)().DeletedAt.Valid }).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
+		Eventually(func() bool { return seedRow(ctx)().DeletedAt.Valid }).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 	})
 
 	It("records nothing for a try that outlived its claim, and the later claim seeds", func(ctx SpecContext) {
@@ -470,7 +470,7 @@ var _ = Describe("home repository seeds", func() {
 			}
 		})
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate }))
-		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(gate.started).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
 
 		By("another writer claims the seed while this try runs (its lease ran out)")
 		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seed_attempts = seed_attempts + 1, seed_after = now() + interval '1 hour'
@@ -478,7 +478,7 @@ var _ = Describe("home repository seeds", func() {
 		Expect(err).NotTo(HaveOccurred())
 		close(gate.release)
 		By("the stale try makes its last store call, then nothing is recorded for it")
-		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(gate.done).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
 		Consistently(seeded(ctx)).WithTimeout(2 * time.Second).Should(BeFalse())
 		Expect(inEpoch1(ctx)).To(BeEmpty(), "the stale try's copy is not recorded")
 		r := seedRow(ctx)()
@@ -489,7 +489,7 @@ var _ = Describe("home repository seeds", func() {
 		By("the later claim's lease runs out too: the next try records the seed")
 		_, err = db.Exec(ctx, `UPDATE home_repository_epochs SET seed_after = now() WHERE org_id = $1 AND agent_id = $2 AND repository_epoch = 1`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		Expect(seedRow(ctx)().SeedAttempts).To(Equal(int32(3)))
 		Expect(inEpoch1(ctx)).To(HaveLen(1))
 	})
@@ -512,7 +512,7 @@ var _ = Describe("home repository seeds", func() {
 			}
 		})
 		e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Store = gate; c.Concurrency = 2 }))
-		Eventually(gate.started).WithTimeout(20 * time.Second).Should(BeClosed())
+		Eventually(gate.started).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
 
 		By("with 2 writers, one seed runs at a time: b's waits, and a stop checkpoint gets the other writer")
 		Consistently(func() int32 { return seedRowOf(ctx, b, 1)().SeedAttempts }).WithTimeout(2 * time.Second).Should(BeZero())
@@ -527,12 +527,12 @@ var _ = Describe("home repository seeds", func() {
 			cp, err := q.GetHomeCheckpoint(ctx, store.GetHomeCheckpointParams{OrgID: e.org, ID: stop.ID})
 			Expect(err).NotTo(HaveOccurred())
 			return cp.Status
-		}).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		}).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 
 		close(gate.release)
 		By("the gated try makes its last store call; the one seed slot frees shortly after for b's seed")
-		Eventually(gate.done).WithTimeout(20 * time.Second).Should(BeClosed())
-		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(gate.done).WithTimeout(racescale.D(20 * time.Second)).Should(BeClosed())
+		Eventually(func() bool { return seedRowOf(ctx, b, 1)().SeededAt.Valid }).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 	})
 
 	Describe("a checkpoint whose writer died while the sandbox is not ready", func() {
@@ -558,14 +558,14 @@ var _ = Describe("home repository seeds", func() {
 		It("holds nothing back past its lease: the old repository is deleted", func(ctx SpecContext) {
 			// A long sandbox wait, so the checkpoint is still running when the sweeper looks.
 			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 24 * time.Hour }))
-			Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
-			Eventually(deleted0(ctx)).WithTimeout(10 * time.Second).Should(BeTrue())
+			Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
+			Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 			Expect(status(ctx)().Status).To(Equal(store.CheckpointStatusRunning))
 		})
 
 		It("is failed after its lease and the sandbox wait", func(ctx SpecContext) {
 			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 30 * time.Minute }))
-			Eventually(status(ctx)).WithTimeout(10 * time.Second).Should(And(
+			Eventually(status(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(And(
 				HaveField("Status", store.CheckpointStatusFailed),
 				HaveField("Error.String", ContainSubstring("the writer stopped")),
 			))
@@ -594,7 +594,7 @@ var _ = Describe("home repository seeds", func() {
 
 		It("is left running within its lease and the sandbox wait", func(ctx SpecContext) {
 			e.pool("agentd-a", cps(func(c *agentd.Checkpoints) { c.Lease = 30 * time.Minute; c.SandboxWait = 2 * time.Hour }))
-			Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+			Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 			Consistently(status(ctx)).WithTimeout(time.Second).Should(HaveField("Status", store.CheckpointStatusRunning))
 		})
 	})

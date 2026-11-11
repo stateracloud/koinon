@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // Obviously fake tokens (AGENTS.md).
@@ -127,7 +128,7 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := g.enqueue(ctx, g.task(ctx, "fix the typo"))
 		g.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(eventOf(events(ctx, r), "run.waiting_for_model")).To(BeEmpty(), "it never waits for the model")
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring(
 			`the stored credential of the gitea connection "lab" was lost; enter the secret of the connection "lab" again on the Connections page, then run the task again`))
@@ -144,8 +145,8 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		g.pool("agentd-a")
 
 		var id string
-		Eventually(ids).WithTimeout(15 * time.Second).Should(Receive(&id))
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(ids).WithTimeout(racescale.D(15 * time.Second)).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateParked))
 		Expect(getRun(ctx, r).ParkReason.RunParkReason).To(Equal(store.RunParkReasonApproval))
 		Expect(g.gt.Snapshot("widgets").Pulls).To(BeEmpty(), "nothing reaches Gitea before the approval")
 		Expect(g.gt.Snapshot("widgets").Branches).To(HaveLen(1), "only main")
@@ -167,7 +168,7 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Expect(snap.Branches["main"]).NotTo(Equal(snap.Branches[branch]), "the default branch is untouched")
 		url := g.gt.URL() + "/acme/widgets/pulls/1"
 
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))

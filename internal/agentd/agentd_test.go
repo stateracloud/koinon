@@ -23,6 +23,7 @@ import (
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -78,7 +79,7 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		// The launch command and its endpoints, run in the session directory.
 		_, _, _, args := e.harness.snapshot()
@@ -88,7 +89,7 @@ var _ = Describe("Pool", func() {
 		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
 		// file's removal (no custom host), the harness, the instruction file's check
 		// before the prompt, then the sweep after the harness has ended.
-		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
+		Eventually(e.gw.Execs).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(9))
 		execs := e.gw.Execs()
 		sweep := []string{"/bin/sh", "-c", agentd.SweepScript, "sweep"}
 		read := HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile)
@@ -162,7 +163,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := e.harness.snapshot()
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nsummarise yesterday's issues"}))
 	})
@@ -172,12 +173,12 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		e.message(ctx, t, "second")
 		e.message(ctx, t, "third")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nfirst", "second\n\nthird"}))
@@ -202,7 +203,7 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -215,7 +216,7 @@ var _ = Describe("Pool", func() {
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
 		e.pool("agentd-b")
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(BeEmpty(), "no session/load into an empty home")
@@ -254,7 +255,7 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		stop()
 		// A task from before home generations existed.
 		_, err := db.Exec(ctx, `UPDATE tasks SET harness_session_generation = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
@@ -262,7 +263,7 @@ var _ = Describe("Pool", func() {
 
 		r2 := e.enqueue(ctx, t)
 		e.pool("agentd-b")
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		_, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(BeEmpty())
 		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
@@ -277,7 +278,7 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 
 		// The claimed run is the reconciler's demand; agentd also wakes it while it waits.
 		conn, err := db.Acquire(ctx)
@@ -293,7 +294,7 @@ var _ = Describe("Pool", func() {
 				return ""
 			}
 			return n.Payload
-		}).WithTimeout(5 * time.Second).Should(Equal(e.org.String()))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(e.org.String()))
 		_, err = conn.Exec(ctx, "UNLISTEN koinon_reconcile")
 		Expect(err).NotTo(HaveOccurred())
 		Consistently(runState(ctx, r)).WithTimeout(300*time.Millisecond).Should(Equal(store.RunStateStarting),
@@ -303,7 +304,7 @@ var _ = Describe("Pool", func() {
 		// The reconciler starts it and records it ready.
 		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_READY)
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.gw.Calls("StartSandbox")).To(BeZero(), "only the reconciler starts sandboxes")
 		Expect(e.gw.Calls("GetSandbox")).To(BeZero(), "sandbox state comes from agent_sandboxes")
 	})
@@ -314,12 +315,12 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = 5 * time.Minute; c.Now = clock.Now })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		Consistently(runState(ctx, r)).WithTimeout(300 * time.Millisecond).Should(Equal(store.RunStateStarting))
 
 		clock.Advance(5*time.Minute + time.Second)
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Or(Equal(store.RunStateQueued), Equal(store.RunStateStarting)),
 			"the run waits in the queue; it does not fail")
 		Expect(getRun(ctx, r).OutcomeReason.Valid).To(BeFalse())
@@ -328,7 +329,7 @@ var _ = Describe("Pool", func() {
 		// Capacity returns: the run goes on.
 		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_READY)
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("waits as long as the org's queue wait says", func(ctx SpecContext) {
@@ -339,27 +340,27 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.Now = clock.Now })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		clock.Advance(6 * time.Minute)
 		Consistently(func() []string { return kinds(events(ctx, r)) }).WithTimeout(500 * time.Millisecond).ShouldNot(ContainElement("run.requeued"))
 		clock.Advance(15 * time.Minute)
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 	})
 
 	It("honours a cancel with session/cancel and records only the cut-off message after it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-a")
-		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 
 		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: r.ID, OutcomeReason: "user canceled"})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() int { _, _, c, _ := e.harness.snapshot(); return c }).WithTimeout(5 * time.Second).Should(Equal(1))
+		Eventually(func() int { _, _, c, _ := e.harness.snapshot(); return c }).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(1))
 
 		// The message in progress ("working") is stored as a cut-off item, although the run is
 		// canceled: a stopped run keeps what the agent said (old issue 344).
-		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(5 * time.Second).Should(Equal([]string{"working"}))
+		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(racescale.D(5 * time.Second)).Should(Equal([]string{"working"}))
 		Consistently(func() []string { return kinds(events(ctx, r)) }, 500*time.Millisecond).
 			Should(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk"}))
 		Expect(payload(events(ctx, r)[2])).To(HaveKeyWithValue("partial", true))
@@ -376,7 +377,7 @@ var _ = Describe("Pool", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateCanceled))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("wall-clock cap"))
 		_, _, cancels, _ := e.harness.snapshot()
 		Expect(cancels).To(Equal(1))
@@ -390,7 +391,7 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, markCrash)
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		final := getRun(ctx, r)
 		Expect(final.Takeovers).To(BeEquivalentTo(1))
@@ -416,7 +417,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markLongLine))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(30 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.RunStateFailed))
 
 		final := getRun(ctx, r)
 		Expect(final.OutcomeReason.String).To(ContainSubstring("harness output line too long"))
@@ -430,7 +431,7 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, markHang)
 		r := e.enqueue(ctx, t)
 		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
-		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
+		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
 		claimed := getRun(ctx, r)
 		Expect(claimed.OwnerID.String).To(HavePrefix("agentd-a/"))
 
@@ -438,7 +439,7 @@ var _ = Describe("Pool", func() {
 		// as it stops, cut off, as one item (old issue 344).
 		killA()
 		e.pool("agentd-b")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		final := getRun(ctx, r)
 		Expect(final.OwnerID.String).To(HavePrefix("agentd-b/"))
@@ -476,7 +477,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		final := getRun(ctx, r)
 		Expect(final.OutcomeReason.String).To(HavePrefix("session/load: "))
 		Expect(kinds(events(ctx, r))).To(Equal([]string{"run.failed"}))
@@ -490,11 +491,11 @@ var _ = Describe("Pool", func() {
 			e := newEnv(ctx, flavor)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			// The sweep, mkdir, the instruction file and its check, the git configuration and CA
 			// file, the harness, the file's check before the prompt, then
 			// the sweep after the harness.
-			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
+			Eventually(e.gw.Execs).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(9))
 			execs := e.gw.Execs()
 			Expect(execs[6].GetCommand()).To(Equal([]string{
 				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
@@ -509,7 +510,7 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		content, ok := e.files.get(instructionsFile)
 		Expect(ok).To(BeTrue())
 		Expect(string(content)).To(HavePrefix("# Koinon\n"))
@@ -533,7 +534,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		e.message(ctx, t, "again")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		content, _ = e.files.get(instructionsFile)
 		Expect(string(content)).To(HaveSuffix("\n\nVersion two.\n"))
 		Expect(e.gw.Calls("CreateSandbox")).To(Equal(1), "only newEnv created the sandbox")
@@ -558,7 +559,7 @@ var _ = Describe("Pool", func() {
 		})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		cfg, ok := e.files.get(codehost.SandboxGitConfig)
 		Expect(ok).To(BeTrue())
 		Expect(string(cfg)).To(ContainSubstring("[credential \"https://ghes.example.test\"]"))
@@ -575,7 +576,7 @@ var _ = Describe("Pool", func() {
 		e.files.sweep = func() (string, int) { return "ended: 41 57\n", 0 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		evs := events(ctx, r)
 		swept := eventOf(evs, "run.sandbox_swept")
 		Expect(swept).To(HaveLen(1))
@@ -590,8 +591,8 @@ var _ = Describe("Pool", func() {
 		e.harness.set(func(h *harness) { h.lingers = true })
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(e.files.sweepCount).WithTimeout(10*time.Second).Should(Equal(2), "before the harness and after it")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(e.files.sweepCount).WithTimeout(racescale.D(10*time.Second)).Should(Equal(2), "before the harness and after it")
 	})
 
 	It("sweeps after a run before the agent's next run starts its harness", func(ctx SpecContext) {
@@ -602,9 +603,9 @@ var _ = Describe("Pool", func() {
 		a := e.enqueue(ctx, e.task(ctx, "first"))
 		b := e.enqueue(ctx, e.task(ctx, "second"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, a)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(runState(ctx, b)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Eventually(e.files.sweepCount).WithTimeout(10 * time.Second).Should(Equal(4))
+		Eventually(runState(ctx, a)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, b)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Eventually(e.files.sweepCount).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(4))
 		var order []string
 		for _, x := range e.gw.Execs() {
 			switch c := x.GetCommand(); {
@@ -624,7 +625,7 @@ var _ = Describe("Pool", func() {
 		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
 			ContainSubstring("end the processes left in the sandbox"), ContainSubstring("still running: 41")))
 		_, _, _, args := e.harness.snapshot()
@@ -636,7 +637,7 @@ var _ = Describe("Pool", func() {
 		e.files.sweep = func() (string, int) { return "sweep: unknown PID 1 (tini)\n", 2 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("unknown PID 1 (tini)"))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(BeEmpty(), "the harness never starts")
@@ -647,7 +648,7 @@ var _ = Describe("Pool", func() {
 		e.files.failWrite = true
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("write the instructions to " + instructionsFile))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(BeEmpty(), "the harness never starts")
@@ -661,7 +662,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("the agent version's config is unreadable: "))
 		Expect(e.gw.Execs()).To(BeEmpty(), "nothing runs in the sandbox")
 	})
@@ -672,7 +673,7 @@ var _ = Describe("Pool", func() {
 		e.files.onRead = func(data map[string][]byte) { delete(data, instructionsFile) }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("does not hold the file agentd wrote"))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(BeEmpty(), "the harness never starts")
@@ -691,7 +692,7 @@ var _ = Describe("Pool", func() {
 			}
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 			content, _ := e.files.get(instructionsFile)
 			Expect(string(content)).To(HaveSuffix(instructions + "\n"))
@@ -710,7 +711,7 @@ var _ = Describe("Pool", func() {
 		e.harness.set(func(h *harness) { h.silent = true })
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
 			ContainSubstring("Koinon's MCP tools did not become available"), ContainSubstring(readyCommand),
 		))
@@ -723,12 +724,12 @@ var _ = Describe("Pool", func() {
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		e.harness.set(func(h *harness) { h.stubborn = true })
 		e.message(ctx, t, "again")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r2).OutcomeReason.String).To(HavePrefix("select the model koinon/" + model + ": "))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model, "koinon/" + model}))
 		prompts, loads, _, _ := e.harness.snapshot()
@@ -740,7 +741,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markOutside))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		evs := events(ctx, r)
 		Expect(chunks(evs)).To(Equal([]string{
 			"read-in=allow,read-relative=allow,read-out=reject,read-dotdot=reject,edit-out=reject",
@@ -755,12 +756,12 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error: main process exited)")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"a recreation in progress does not fail the run")
 
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("runs an ephemeral agent's task only in the task's own sandbox", func(ctx SpecContext) {
@@ -775,7 +776,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"never runs in another task's sandbox")
 
@@ -787,7 +788,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		e.sandbox = name
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("requeues a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
@@ -795,7 +796,7 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
@@ -812,7 +813,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("sandbox not ready"))
 		Expect(kinds(events(ctx, r))).NotTo(ContainElement("run.requeued"))
 	})
@@ -822,12 +823,12 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"a failed sandbox is repaired by the reconciler, so the run waits")
 
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("requeues a run whose sandbox stays in error past SandboxTimeout", func(ctx SpecContext) {
@@ -835,7 +836,7 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
@@ -844,13 +845,13 @@ var _ = Describe("Pool", func() {
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		// Mark it once the run waits on the sandbox, not before execute loads the agent (that
 		// fails the run as unhealthy, a different path).
 		Consistently(runState(ctx, r)).WithTimeout(500 * time.Millisecond).Should(Equal(store.RunStateStarting))
 		_, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: e.org, ID: e.agent.ID, Reason: "the sandbox kept failing"})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal("sandbox error: image pull failed"))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 	})
