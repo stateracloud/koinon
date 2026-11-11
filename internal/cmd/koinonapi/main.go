@@ -172,6 +172,9 @@ type config struct {
 	// chartVersion is the Helm chart's version, which the chart passes; it is only recorded
 	// (platform.settings.observed).
 	chartVersion string
+	// release is the Helm release name, which the chart passes. The start-up check scopes its
+	// generated-Secret list with it (#375); it is also recorded in platform.settings.observed.
+	release string
 	// flags is the flag set serve was started with, for the platform settings record.
 	flags *pflag.FlagSet
 
@@ -287,6 +290,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"namespace of connection Secrets (default $POD_NAMESPACE); without one, connections cannot be created")
 	fs.StringVar(&c.chartVersion, "chart-version", "",
 		"version of the Helm chart that deployed this pod (the chart passes it); only recorded in the install audit log")
+	fs.StringVar(&c.release, "release", "",
+		"Helm release name that deployed this pod (the chart passes it); scopes the generated-Secret list to Secrets labelled koinon.dev/release=<name>, and is recorded in the install audit log")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
@@ -586,7 +591,7 @@ func serve(ctx context.Context, cfg config) error {
 	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
 	// The key events of the install audit chain (ADR 0100 decision 3): the keys this process generates,
 	// and the check on start that compares the whole key-set state with the last recorded one.
-	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.kekSecret, cfg.savedWorkSecret)
+	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.release, cfg.kekSecret, cfg.savedWorkSecret)
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new

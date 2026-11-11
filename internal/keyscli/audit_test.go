@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -998,3 +999,44 @@ func writeInstall(ctx context.Context, pool *pgxpool.Pool, e audit.InstallEvent)
 	})
 	return err
 }
+
+var _ = Describe("GeneratedReader with two releases in one namespace", func() {
+	const ns = "shared"
+	secret := func(name, release, uid string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+				UID:       types.UID(uid),
+				Labels: map[string]string{
+					keyscli.GeneratedLabel: "password",
+					keyscli.ReleaseLabel:   release,
+				},
+			},
+			Data: map[string][]byte{"password": []byte("koinon_test_not-a-real-token")},
+		}
+	}
+
+	It("lists only the Secrets of its own Helm release", func(ctx SpecContext) {
+		kube := fake.NewClientset(
+			secret("a-bootstrap", "release-a", "uid-a"),
+			secret("b-bootstrap", "release-b", "uid-b"),
+			secret("a-session", "release-a", "uid-a2"),
+		)
+		read := func(release string) []string {
+			GinkgoHelper()
+			got, err := keyscli.GeneratedReader{Client: kube, Namespace: ns, ListLabelled: true, Release: release}.Read(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			names := make([]string, len(got))
+			for i, g := range got {
+				names[i] = g.SecretName
+				Expect(g.UID).NotTo(BeEmpty())
+				Expect(g.SecretName).NotTo(ContainSubstring("koinon_test"), "values are never read")
+			}
+			return names
+		}
+		Expect(read("release-a")).To(Equal([]string{"a-bootstrap", "a-session"}))
+		Expect(read("release-b")).To(Equal([]string{"b-bootstrap"}))
+		Expect(read("release-c")).To(BeEmpty())
+	})
+})
