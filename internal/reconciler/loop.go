@@ -105,7 +105,7 @@ func lockBlocking(ctx context.Context, c *pgx.Conn, key int64) error {
 		case <-ctx.Done():
 		}
 		for {
-			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			_ = c.PgConn().CancelRequest(cctx)
 			cancel()
 			select {
