@@ -82,6 +82,9 @@ as long as the hold lasted. Decided by procoduck, 2026-11-11: **ready but deny-a
 - `gateway.mode=kubernetes` is unchanged: its data plane is the existing controller, not a pod that waits for a
   ConfigMap.
 - The `set env` runbook of the restore guide does not use the chart value, so it does not touch the gateway.
+- An install held with `restoreHold=true` must be released by upgrading with `restoreHold=false`
+  (`helm upgrade <release> <chart> --reuse-values --set restoreHold=false --wait`), because `set env` leaves the
+  gateway on the deny-all config. The drill does this after the guide's release block.
 
 ## Alternatives considered
 

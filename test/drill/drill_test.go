@@ -629,6 +629,16 @@ stringData:
 		for _, c := range []string{"api", "reconciler", "agentd"} {
 			Expect(metric(ctx, &dst, c, "koinon_restore_hold")).To(BeEquivalentTo(0), "%s is still held after the release", c)
 		}
+		// The target was installed held with the chart value, so the guide's set-env block leaves the gateway on
+		// the deny-all config. Release the chart value too (ADR 0107 decision 3, amendment for #530).
+		_, err = kube.Helm(ctx, "upgrade", dst.in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", dst.in.Namespace,
+			"--reuse-values", "--set", "restoreHold=false", "--wait", "--timeout", "10m")
+		must(err, "helm upgrade "+dst.in.Release+" --set restoreHold=false")
+		cm, err := kube.Kubectl(ctx, "-n", dst.in.Namespace, "get", "deployment", dst.name("gateway"),
+			"-o", "jsonpath={.spec.template.spec.volumes[*].configMap.name}")
+		must(err, "read the gateway volumes")
+		Expect(cm).To(ContainSubstring(dst.in.Release+"-gateway-config"), "the released gateway mounts the reconciler's config")
+		Expect(cm).NotTo(ContainSubstring("-gateway-config-held"), "the released gateway still mounts the deny-all config")
 	})
 
 	Describe("released", func() {
