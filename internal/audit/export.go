@@ -316,6 +316,11 @@ type ExportVerifyOptions struct {
 	// CollectAnchors, on an install export, keeps each verified anchor_heads line on
 	// ExportResult.StreamAnchors (for --anchors). Off by default so verify memory stays bounded.
 	CollectAnchors bool
+	// AnchorOrgID, with CollectAnchors, keeps on each collected anchor only the head of this org
+	// (the org export the anchors are for): checkOrgAnchors reads no other, so memory stays
+	// bounded by the anchor count, not anchors times orgs. Empty keeps every head. The heads are
+	// still all checked against heads_root before they are dropped.
+	AnchorOrgID string
 }
 
 // ExportResult is the verdict on an export file.
@@ -466,7 +471,7 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 			}
 			l := exportLink(tag, scope, ev)
 			if l.bad == "" && tag == installHashTag && ev.Action == ActionAnchor {
-				if msg := readAndCheckAnchorLine(dec, h.InstallID, ev, opt.CollectAnchors, &res); msg != "" {
+				if msg := readAndCheckAnchorLine(dec, h.InstallID, ev, opt, &res); msg != "" {
 					l.bad = msg
 				}
 			}
@@ -508,18 +513,28 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 }
 
 // readAndCheckAnchorLine reads the anchor_heads line after an audit.anchor event and checks it
-// against the event. On success it counts the anchor on res and, when collect is set, appends it to
-// StreamAnchors. The returned string is a break reason, or empty when the line holds.
-func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent, collect bool, res *ExportResult) string {
-	var al ExportAnchorLine
-	err := dec.Decode(&al)
-	switch {
-	case errors.Is(err, io.EOF):
+// against the event. On success it counts the anchor on res and, when opt.CollectAnchors is set,
+// appends it to StreamAnchors (with the heads of opt.AnchorOrgID only, when that is set). The line
+// is parsed like an event line: a key twice in it is refused. The returned string is a break
+// reason, or empty when the line holds.
+func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent, opt ExportVerifyOptions, res *ExportResult) string {
+	var raw json.RawMessage
+	err := dec.Decode(&raw)
+	if errors.Is(err, io.EOF) {
 		return fmt.Sprintf("the anchor event %s has no following anchor_heads line: its anchored heads were removed from the file", ev.ID)
+	}
+	var al ExportAnchorLine
+	if err == nil {
+		err = json.Unmarshal(raw, &al)
+	}
+	switch {
 	case err != nil:
 		return fmt.Sprintf("the line after the anchor event %s is not an anchor_heads line: %v", ev.ID, err)
 	case al.Line != ExportAnchorLineKind:
 		return fmt.Sprintf("the line after the anchor event %s is not an anchor_heads line", ev.ID)
+	}
+	if k, dup := duplicateKey(raw); dup {
+		return fmt.Sprintf("the anchor_heads line has the key %q twice", k)
 	}
 	want, err := parseAnchorSummary(ev.SummaryText)
 	if err != nil {
@@ -545,9 +560,18 @@ func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent,
 		return "the anchored heads do not match the heads_root the anchor event commits to: a head was forged or removed"
 	}
 	res.Anchors++
-	if collect {
+	if opt.CollectAnchors {
+		kept := al.Heads
+		if opt.AnchorOrgID != "" {
+			kept = nil // a fresh slice: al.Heads (every org) is released with the line
+			for _, h := range al.Heads {
+				if h.OrgID == opt.AnchorOrgID {
+					kept = append(kept, h)
+				}
+			}
+		}
 		res.StreamAnchors = append(res.StreamAnchors, ExportAnchor{
-			ChainSeq: al.ChainSeq, EventID: al.EventID, OrgCount: al.OrgCount, HeadsRoot: al.HeadsRoot, Heads: al.Heads,
+			ChainSeq: al.ChainSeq, EventID: al.EventID, OrgCount: al.OrgCount, HeadsRoot: al.HeadsRoot, Heads: kept,
 		})
 	}
 	return ""

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -431,4 +432,21 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		exec(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
 		Expect(migrate(ctx, dsn, time.Minute, required)).To(Succeed())
 	}, SpecTimeout(3*time.Minute))
+})
+
+var _ = Describe("peekExportOrg", func() {
+	It("returns the header's org and a reader that still yields the whole stream", func() {
+		const stream = `{"format":"x","chain":"org","org_id":"00000000-0000-4000-8000-0000000000bb"}` + "\nrest\n"
+		org, r := peekExportOrg(strings.NewReader(stream))
+		Expect(org).To(Equal("00000000-0000-4000-8000-0000000000bb"))
+		b, err := io.ReadAll(r)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).To(Equal(stream))
+	})
+	It("returns no org for a line that is not a header, and loses nothing", func() {
+		org, r := peekExportOrg(strings.NewReader("not json"))
+		Expect(org).To(BeEmpty())
+		b, _ := io.ReadAll(r)
+		Expect(string(b)).To(Equal("not json"))
+	})
 })
