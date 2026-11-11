@@ -134,8 +134,7 @@ var _ = Describe("the held gateway config", func() {
 			resp, err := http.DefaultClient.Do(req)
 			Expect(err).NotTo(HaveOccurred())
 			_ = resp.Body.Close()
-			Expect(resp.StatusCode).To(BeNumerically(">=", 400), "key %q", key)
-			Expect(resp.StatusCode).To(BeNumerically("<", 500), "key %q", key)
+			Expect(resp.StatusCode).To(BeElementOf(http.StatusUnauthorized, http.StatusForbidden), "key %q", key)
 		}
 	}, NodeTimeout(3*time.Minute))
 })

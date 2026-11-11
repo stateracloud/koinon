@@ -24,7 +24,7 @@ env var so it stays out of the config ConfigMap. A fixed key keeps sessions vali
 {{- if eq .Values.gateway.mode "standalone" }}
 {{- $name := include "koinon.componentName" (list . "gateway") }}
 {{- $gw := .Values.gateway.standalone }}
-{{- if .Values.restoreHold }}
+{{- if include "koinon.restoreHold" . }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -170,7 +170,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ ternary (include "koinon.gatewayHeldConfigName" .) (include "koinon.gatewayConfigName" .) (eq (toString .Values.restoreHold) "true") }}
+            name: {{ ternary (include "koinon.gatewayHeldConfigName" .) (include "koinon.gatewayConfigName" .) (include "koinon.restoreHold" . | eq "true") }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ $name }}-data
