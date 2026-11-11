@@ -93,6 +93,24 @@ case_ "W5: a secret besides GITHUB_TOKEN fails" 1 'rule=W5 verdict=fail' \
 	'printf "      - run: echo\n        env:\n          K: \${{ secrets.OPENROUTER_API_KEY }}\n" >>"$r/.github/workflows/ci.yml"'
 case_ "W5: secrets: inherit fails" 1 'rule=W5 verdict=fail' \
 	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: double-quoted inherit fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: \"inherit\"\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: 'inherit' fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: '"'"'inherit'"'"'\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: > block scalar fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: >\n      inherit\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: >- block scalar fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: >-\n      inherit\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: | block scalar fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: |\n      inherit\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: a flow map with a secret fails" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: { K: \${{ secrets.OPENROUTER_API_KEY }} }\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: a flow map with only GITHUB_TOKEN fails too (use a block map)" 1 'rule=W5 verdict=fail' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: { T: x }\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: a block map with only GITHUB_TOKEN passes" 0 'rule=W5 verdict=pass' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets:\n      T: \${{ secrets.GITHUB_TOKEN }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets: with a comment then a map passes" 0 'rule=W5 verdict=pass' \
+	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets:  # explicit\n      T: \${{ secrets.GITHUB_TOKEN }}\n" >>"$r/.github/workflows/ci.yml"'
 case_ "W5: GITHUB_TOKEN passes" 0 'rule=W5 verdict=pass' \
 	'printf "      - run: echo\n        env:\n          T: \${{ secrets.GITHUB_TOKEN }}\n" >>"$r/.github/workflows/ci.yml"'
 case_ "W5: secrets['NAME'] fails" 1 'rule=W5 verdict=fail' \

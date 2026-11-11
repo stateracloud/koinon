@@ -95,10 +95,12 @@ fi
 
 # --- W5 -------------------------------------------------------------------------------------------
 # Every way to reach the secrets context in a workflow: `secrets.NAME`, `secrets['NAME']`, `secrets["NAME"]`
-# (any `secrets[...]`), `secrets: inherit`, and the bare object (`toJSON(secrets)`, `fromJSON(secrets)`,
+# (any `secrets[...]`), any scalar after a `secrets:` key (`inherit` quoted or not, `>`/`|` block scalars, a `{...}` flow map), and the bare object (`toJSON(secrets)`, `fromJSON(secrets)`,
 # `format(..., secrets)`). Only a literal GITHUB_TOKEN passes. A YAML key `secrets:` followed by a map is not
-# a read: its values are expressions and are scanned on their own lines.
-w5_re='(^|[^[:alnum:]_.-])secrets(\.[[:alnum:]_*]+|\[[^]]*\]|:[[:space:]]*inherit|[[:space:]]*[,)}])'
+# a read: its values are expressions and are scanned on their own lines. Any other value on the same line
+# (a scalar in any quoting or block style, or a flow map) fails: only a comment may follow the colon.
+w5_re='(^|[^[:alnum:]_.-])secrets(\.[[:alnum:]_*]+|\[[^]]*\]|[[:space:]]*[,)}])'
+w5_scalar_re='^[[:space:]-]*secrets:[[:space:]]*[^[:space:]#]'
 bad=()
 for f in "${workflows[@]}"; do
 	while IFS= read -r name; do
@@ -108,6 +110,9 @@ for f in "${workflows[@]}"; do
 		*) bad+=("$(basename "$f"): $name") ;;
 		esac
 	done < <(code_lines "$f" | grep -o -i -E "$w5_re" || true)
+	while IFS= read -r name; do
+		bad+=("$(basename "$f"): ${name//[[:space:]]/ }")
+	done < <(code_lines "$f" | grep -E "$w5_scalar_re" || true)
 done
 if [[ ${#bad[@]} -eq 0 ]]; then
 	verdict W5 pass "no workflow reads a secret besides GITHUB_TOKEN"
