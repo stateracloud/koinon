@@ -113,9 +113,22 @@ var _ = Describe("install audit anchors", func() {
 	}
 	anchorSet := func(lines []string) *audit.ExportAnchorSet {
 		GinkgoHelper()
-		res := verifyLines(lines, audit.ExportVerifyOptions{})
+		res := verifyLines(lines, audit.ExportVerifyOptions{CollectAnchors: true})
 		Expect(res.Break).To(BeNil())
-		return &audit.ExportAnchorSet{InstallID: res.Header.InstallID, Anchors: res.Header.Anchors}
+		return &audit.ExportAnchorSet{InstallID: res.Header.InstallID, Anchors: res.StreamAnchors}
+	}
+	// anchorHeadsLine returns the index of the anchor_heads stream line for the given event id.
+	anchorHeadsLine := func(lines []string, eventID string) int {
+		GinkgoHelper()
+		for i, line := range lines[1:] {
+			var m map[string]any
+			Expect(json.Unmarshal([]byte(line), &m)).To(Succeed())
+			if m["line"] == audit.ExportAnchorLineKind && m["event_id"] == eventID {
+				return i + 1
+			}
+		}
+		Fail("no anchor_heads line for event " + eventID)
+		return -1
 	}
 
 	BeforeEach(func(ctx SpecContext) {
@@ -339,55 +352,56 @@ var _ = Describe("install audit anchors", func() {
 			Expect(fres.Break.Seq).To(Equal(a.ChainSeq))
 		})
 
-		It("is found in an export file: a removed or forged header anchor, a forged head", func(ctx SpecContext) {
+		It("is found in an export file: a removed or forged stream anchor, a forged head", func(ctx SpecContext) {
 			a := anchor(ctx)
 			lines := installExport(ctx, store.New(db))
 			Expect(verifyLines(lines, audit.ExportVerifyOptions{}).Break).To(BeNil())
 			res := verifyLines(lines, audit.ExportVerifyOptions{})
 			Expect(res.Anchors).To(Equal(1))
+			hi := anchorHeadsLine(lines, a.EventID)
 
-			By("an anchor removed from the header")
-			cut := append([]string{editLine(lines[0], func(m map[string]any) { delete(m, "anchors") })}, lines[1:]...)
+			By("an anchor_heads line removed after the event")
+			cut := append(append([]string{}, lines[:hi]...), lines[hi+1:]...)
 			r := verifyLines(cut, audit.ExportVerifyOptions{})
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Seq).To(Equal(a.ChainSeq))
-			Expect(r.Break.Reason).To(ContainSubstring("no entry in the header"))
+			Expect(r.Break.Reason).To(ContainSubstring("no following anchor_heads line"))
 
-			By("an anchor forged into the header")
-			forged := append([]string{editLine(lines[0], func(m map[string]any) {
-				anchors := m["anchors"].([]any)
-				extra := map[string]any{}
-				for k, v := range anchors[0].(map[string]any) {
-					extra[k] = v
-				}
-				extra["chain_seq"] = 999
-				m["anchors"] = append(anchors, extra)
-			})}, lines[1:]...)
-			r = verifyLines(forged, audit.ExportVerifyOptions{})
+			By("an orphaned anchor_heads line with no preceding audit.anchor event")
+			// Drop the audit.anchor event so its heads line follows a non-anchor line.
+			orphan := append(append([]string{}, lines[:hi-1]...), lines[hi:]...)
+			r = verifyLines(orphan, audit.ExportVerifyOptions{})
 			Expect(r.Break).NotTo(BeNil())
-			Expect(r.Break.Seq).To(BeEquivalentTo(999))
-			Expect(r.Break.Reason).To(ContainSubstring("forged"))
+			Expect(r.Break.Reason).To(ContainSubstring("no preceding audit.anchor"))
 
 			By("a head with another hash")
-			bad := append([]string{editLine(lines[0], func(m map[string]any) {
-				heads := m["anchors"].([]any)[0].(map[string]any)["heads"].([]any)
+			bad := append([]string{}, lines...)
+			bad[hi] = editLine(lines[hi], func(m map[string]any) {
+				heads := m["heads"].([]any)
 				heads[0].(map[string]any)["hash"] = strings.Repeat("ab", 32)
-			})}, lines[1:]...)
+			})
 			r = verifyLines(bad, audit.ExportVerifyOptions{})
 			Expect(r.Break).NotTo(BeNil())
 			Expect(r.Break.Seq).To(Equal(a.ChainSeq))
 			Expect(r.Break.Reason).To(ContainSubstring("heads_root"))
 
 			By("a head removed")
-			short := append([]string{editLine(lines[0], func(m map[string]any) {
-				an := m["anchors"].([]any)[0].(map[string]any)
-				an["heads"] = an["heads"].([]any)[1:]
-			})}, lines[1:]...)
+			short := append([]string{}, lines...)
+			short[hi] = editLine(lines[hi], func(m map[string]any) {
+				m["heads"] = m["heads"].([]any)[1:]
+			})
 			Expect(verifyLines(short, audit.ExportVerifyOptions{}).Break).NotTo(BeNil())
+
+			By("anchors left in the header are refused")
+			_, err := audit.VerifyExport(strings.NewReader(editLine(lines[0], func(m map[string]any) {
+				m["anchors"] = []any{map[string]any{"chain_seq": 1}}
+			})+"\n"+strings.Join(lines[1:], "\n")+"\n"), audit.ExportVerifyOptions{})
+			Expect(err).To(MatchError(audit.ErrExportFormat))
+			Expect(err).To(MatchError(ContainSubstring("stream lines")))
 		})
 	})
 
-	It("round-trips an export with anchors: the header carries each anchor's heads, a partial export only its own, and an org export checks against them", func(ctx SpecContext) {
+	It("round-trips an export with anchors: stream lines carry each anchor's heads, a partial export only its own, and an org export checks against them", func(ctx SpecContext) {
 		first := anchor(ctx)
 		writeOrg(ctx, orgs[0], "test.n6")
 		second := anchor(ctx)
@@ -396,23 +410,30 @@ var _ = Describe("install audit anchors", func() {
 		lines := installExport(ctx, q)
 		var hdr audit.ExportHeader
 		Expect(json.Unmarshal([]byte(lines[0]), &hdr)).To(Succeed())
-		Expect(hdr.Anchors).To(HaveLen(2))
-		Expect(hdr.Anchors[0].ChainSeq).To(Equal(first.ChainSeq))
-		Expect(hdr.Anchors[1].ChainSeq).To(Equal(second.ChainSeq))
-		Expect(hdr.Anchors[0].Heads).To(HaveLen(len(orgs)))
+		Expect(hdr.Anchors).To(BeEmpty())
+		Expect(hdr.Format).To(Equal(audit.ExportFormat))
+		collected := verifyLines(lines, audit.ExportVerifyOptions{CollectAnchors: true})
+		Expect(collected.Break).To(BeNil())
+		Expect(collected.StreamAnchors).To(HaveLen(2))
+		Expect(collected.StreamAnchors[0].ChainSeq).To(Equal(first.ChainSeq))
+		Expect(collected.StreamAnchors[1].ChainSeq).To(Equal(second.ChainSeq))
+		Expect(collected.StreamAnchors[0].Heads).To(HaveLen(len(orgs)))
 		res := verifyLines(lines, audit.ExportVerifyOptions{})
 		Expect(res.Break).To(BeNil())
 		Expect(res.Anchors).To(Equal(2))
+		Expect(res.StreamAnchors).To(BeEmpty(), "without CollectAnchors the verifier discards each stream line")
 		var out bytes.Buffer
 		Expect(audit.WriteExportReport(&out, res)).To(BeTrue())
 		Expect(out.String()).To(ContainSubstring("2 anchors match their events and heads_root"))
 
-		By("a partial export carries the anchors from its from_seq on")
+		By("a partial export carries only the stream anchors from its from_seq on")
 		part := exportLinesFrom(ctx, q, audit.ExportScope{Install: true}, second.ChainSeq)
 		var phdr audit.ExportHeader
 		Expect(json.Unmarshal([]byte(part[0]), &phdr)).To(Succeed())
-		Expect(phdr.Anchors).To(HaveLen(1))
-		Expect(phdr.Anchors[0].EventID).To(Equal(second.EventID))
+		Expect(phdr.Anchors).To(BeEmpty())
+		partSet := verifyLines(part, audit.ExportVerifyOptions{CollectAnchors: true})
+		Expect(partSet.StreamAnchors).To(HaveLen(1))
+		Expect(partSet.StreamAnchors[0].EventID).To(Equal(second.EventID))
 
 		By("an org export holds against the anchors, and a partial one counts what it cannot see")
 		set := anchorSet(lines)

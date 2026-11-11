@@ -102,8 +102,9 @@ func newAuditCommand() *cobra.Command {
 	export := &cobra.Command{
 		Use:   "export",
 		Short: "Write an audit chain as JSON lines that verify off the cluster (ADR 0100)",
-		Long: "Writes the install chain or one org's chain as JSON lines (format koinon.audit.export.v1): a header, then " +
-			"one line per event in chain_seq order. Check a copy anywhere with koinon-api audit verify --file.",
+		Long: "Writes the install chain or one org's chain as JSON lines (format koinon.audit.export.v2): a header, then " +
+			"one line per event in chain_seq order (an install audit.anchor is followed by an anchor_heads line). " +
+			"Check a copy anywhere with koinon-api audit verify --file.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			sc, err := exportScope(scope, orgID)
@@ -183,7 +184,7 @@ func anchorAudit(ctx context.Context, db audit.Beginner, out io.Writer) error {
 func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
 	if anchors != "" {
-		inst, err := checkExportFile(anchors)
+		inst, err := checkExportFile(anchors, true)
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -194,16 +195,16 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if inst.Header.Chain != audit.ChainInstall {
 			return fmt.Errorf("--anchors %s is an org export; give an install export", anchors)
 		}
-		if len(inst.Header.Anchors) == 0 {
+		if len(inst.StreamAnchors) == 0 {
 			_, _ = fmt.Fprintf(out, "note    --anchors %s holds no anchors: nothing to check the file against\n", anchors)
 		}
-		opt.Anchors = &audit.ExportAnchorSet{InstallID: inst.Header.InstallID, Anchors: inst.Header.Anchors}
+		opt.Anchors = &audit.ExportAnchorSet{InstallID: inst.Header.InstallID, Anchors: inst.StreamAnchors}
 	}
 	if after != "" {
 		if after == "-" {
 			return errors.New("--after must be a file path, not stdin")
 		}
-		prev, err := checkExportFile(after)
+		prev, err := checkExportFile(after, false)
 		if err != nil {
 			return fmt.Errorf("--after %s: %w", after, err)
 		}
@@ -245,14 +246,15 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 // show that the file agrees with itself, and anyone can write a file that does.
 const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it"
 
-// checkExportFile verifies one export file alone.
-func checkExportFile(path string) (audit.ExportResult, error) {
+// checkExportFile verifies one export file alone. collectAnchors keeps stream anchors on the result
+// (for --anchors on an install export).
+func checkExportFile(path string, collectAnchors bool) (audit.ExportResult, error) {
 	f, err := os.Open(path) //nolint:gosec // the operator names the file to check
 	if err != nil {
 		return audit.ExportResult{}, err
 	}
 	defer func() { _ = f.Close() }()
-	return audit.VerifyExport(f, audit.ExportVerifyOptions{})
+	return audit.VerifyExport(f, audit.ExportVerifyOptions{CollectAnchors: collectAnchors})
 }
 
 // verifyAudit verifies the install chain and every org's chain, or one org's with orgID, or the

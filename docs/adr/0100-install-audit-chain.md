@@ -633,16 +633,18 @@ chain would.
   transaction as the purge, under the anchor lock, naming the `org_id`, the last `chain_seq` and the
   head hash. Verify would then accept a missing chain only when such an event follows every anchor that
   names the org.
-- **Header size.** `exportAnchors` carries only the anchors whose event is in the export's
-  `from_seq`..head range, so export by period with `--from-seq`. A full export from seq 1 still puts
-  every anchor in one header line, about 110 MB a year at 100 orgs anchored hourly. Moving each
-  anchor's heads into stream lines next to their `audit.anchor` event is a follow-up before v0.3.
-- **Export.** An install export's header carries `anchors`: for each anchor event in the exported
-  range its `chain_seq`, event ID, `org_count`, `heads_root` and heads. `VerifyExport` checks the
-  header against the events (a missing, forged or duplicated entry, a wrong root or count) with no
-  database. `audit verify --file <org export> --anchors <install export>` then checks an org
-  export's hashes at the anchored `chain_seq` values. The install export verifies on its own first.
-  An org export with no `--anchors` is internally consistent only, and says so.
+- **Header size (amended #406).** Each `audit.anchor` event is followed by an `anchor_heads` stream
+  line (`{"line":"anchor_heads",...}`) with that anchor's org heads. The header never carries
+  `anchors`, so its size does not grow with the anchor count. `VerifyExport` checks each stream line
+  as it reads and discards it unless `CollectAnchors` is set (for `--anchors`). Format
+  `koinon.audit.export.v2` (a break from v1; before the v0.3 upgrade promise, ADR 0099).
+- **Export.** An install export writes one `anchor_heads` stream line after each `audit.anchor`
+  event in the exported range (`chain_seq`, event ID, `org_count`, `heads_root` and heads).
+  `VerifyExport` checks each line against its event (a missing, forged or orphaned line, a wrong
+  root or count) with no database. `audit verify --file <org export> --anchors <install export>`
+  then checks an org export's hashes at the anchored `chain_seq` values. The install export
+  verifies on its own first. An org export with no `--anchors` is internally consistent only, and
+  says so.
 
 *Prior art (sources read 2026-11-08).*
 
@@ -665,11 +667,11 @@ head after an anchor, so the anchor event is what a checkpoint's one hash covers
 follows `audit.anchor` and the anchor job is the natural place to call the signer. (2) The advisory
 lock and the interval check are reusable: a checkpoint is written under the same lock, so one replica
 signs per tick. (3) `audit verify --file ... --anchors` is where `--checkpoint` and `--public-key`
-join: the anchors in an install export header are the thing a checkpoint pins from outside the
-cluster. (4) The export header grows by an optional `checkpoints` list in the same way as `anchors`
-(`omitempty`, so v1 files stay valid). (5) `koinon_audit_checkpoint_age_seconds` sits beside
-`koinon_audit_anchor_age_seconds` in the same registration helper. None of these change the
-encoding above.
+join: the anchors collected from an install export's stream lines are the thing a checkpoint pins
+from outside the cluster. (4) Checkpoints ride as stream lines next to `audit.checkpoint` events
+(same shape as `anchor_heads`), not as a growing header list. (5) `koinon_audit_checkpoint_age_seconds`
+sits beside `koinon_audit_anchor_age_seconds` in the same registration helper. None of these change
+the anchor encoding above.
 
 **4.2 Signed checkpoints.** After each anchor, `koinon-api` signs the install head. The checkpoint is
 a signed note in Koinon's own format. It borrows the layout of a C2SP signed note (origin line, body,
@@ -721,15 +723,17 @@ against the org chains.
 
 **Export.** `koinon-api audit export --scope install|org [--org <id>] [--from-seq N]` and `GET
 /admin/v1/audit/export` (same scope rules as the read) write JSON lines: a header line
-`{"format":"koinon.audit.export.v1","chain":"install"|"org","install_id":...,"org_id":...,
+`{"format":"koinon.audit.export.v2","chain":"install"|"org","install_id":...,"org_id":...,
 "head":{"chain_seq":...,"hash":...}}`, then one line per event in `chain_seq` order with every
 hashed field exactly as hashed (`summary_text` is Postgres's text of the `jsonb`, and `summary` is
-the parsed object for convenience), `prev_hash` and `hash` in hex, and `created_at_micros`. A copy
-verifies off the cluster with `koinon-api audit verify --file <export> [--checkpoint <note>
---public-key <key>]` (the binary runs anywhere, with no database), or with any tool that implements
-decision 1.3, which the export docs spell out. A partial export starts from `--from-seq` and its
-first `prev_hash` is checked against an earlier export or a checkpoint. Streaming to object storage
-or a webhook (at least once, `id` for de-duplication) is later work; checkpoints ride the same sink.
+the parsed object for convenience), `prev_hash` and `hash` in hex, and `created_at_micros`. Each
+install `audit.anchor` event is followed by an `anchor_heads` stream line with that anchor's org
+heads (not in the header). A copy verifies off the cluster with `koinon-api audit verify --file
+<export> [--checkpoint <note> --public-key <key>]` (the binary runs anywhere, with no database), or
+with any tool that implements decision 1.3, which the export docs spell out. A partial export
+starts from `--from-seq` and its first `prev_hash` is checked against an earlier export or a
+checkpoint. Streaming to object storage or a webhook (at least once, `id` for de-duplication) is
+later work; checkpoints ride the same sink.
 
 **Retention.** Nothing is deleted in v1, from either chain kind; the triggers refuse it. Audit
 retention (#29) is designed once for both kinds: a prefix of a chain may only be dropped behind a
