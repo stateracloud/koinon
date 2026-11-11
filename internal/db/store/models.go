@@ -1640,6 +1640,7 @@ type ApiToken struct {
 	RevokedAt     pgtype.Timestamptz
 	LastUsedAt    pgtype.Timestamptz
 	CreatedAt     pgtype.Timestamptz
+	InstallMark   pgtype.Text
 }
 
 type ApprovalRequest struct {
@@ -1866,6 +1867,19 @@ type InstallAuditEvent struct {
 	Summary    []byte
 	RequestID  string
 	CreatedAt  pgtype.Timestamptz
+}
+
+type InstallBinding struct {
+	Singleton          bool
+	Mark               pgtype.Text
+	PublicUrl          pgtype.Text
+	OidcRedirectUrl    pgtype.Text
+	CheckpointEndpoint pgtype.Text
+	CheckpointBucket   pgtype.Text
+	HeldSince          pgtype.Timestamptz
+	ReleasedAt         pgtype.Timestamptz
+	ReleasedBy         pgtype.Text
+	CreatedAt          pgtype.Timestamptz
 }
 
 type InstallIdentity struct {
@@ -2484,6 +2498,7 @@ type Session struct {
 	IdleExpiresAt pgtype.Timestamptz
 	ExpiresAt     pgtype.Timestamptz
 	RevokedAt     pgtype.Timestamptz
+	InstallMark   pgtype.Text
 }
 
 type SpendEntry struct {

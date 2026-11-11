@@ -40,6 +40,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -99,6 +100,9 @@ const (
 )
 
 type envOptions struct {
+	// binding makes the auth service stamp sessions with an install mark and refuse the ones another
+	// install issued (ADR 0110). It gets the env's pool.
+	binding                func(*pgxpool.Pool) *installbinding.Binding
 	bootstrapLoginDisabled bool
 	oidc                   bool
 	groupMappings          []auth.GroupMapping
@@ -234,6 +238,9 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 
 			PlatformAdminGroups: opts.platformAdminGroups,
 		}
+	}
+	if opts.binding != nil {
+		cfg.Binding = opts.binding(e.pool)
 	}
 	svc, err := auth.New(e.pool, cfg)
 	Expect(err).NotTo(HaveOccurred())

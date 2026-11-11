@@ -127,12 +127,13 @@ lacks "the kubernetes-mode reconciler reads no pod logs" 'pods/log' "${k8s[@]}" 
 has "the reconciler is told the gateway Deployment" 'deployment: koinon-gateway$' --set gateway.mode=standalone --show-only templates/config.yaml
 
 # The install mark (issue 461): a random value the hook Job generates once, in a Secret and not in Postgres.
-# koinon-reconciler and koinon-agentd read it from the environment; koinon-api does not need it.
+# koinon-reconciler and koinon-agentd read it from the environment, and since ADR 0110 so does koinon-api: it
+# stamps the tokens and sessions it issues with the hash and refuses those of another install (a restored copy).
 has "the hook ensures koinon-install-mark" 'koinon-install-mark' --show-only templates/ensure-secrets.yaml
 n=$(render --show-only templates/deployments.yaml | grep -c 'name: KOINON_INSTALL_MARK$' || true)
-[ "$n" = 2 ] || fail "$n components get KOINON_INSTALL_MARK, want 2 (reconciler and agentd)"
+[ "$n" = 3 ] || fail "$n components get KOINON_INSTALL_MARK, want 3 (api, reconciler and agentd)"
 n=$(render --show-only templates/deployments.yaml | grep -A4 'name: KOINON_INSTALL_MARK$' | grep -c 'name: koinon-install-mark$' || true)
-[ "$n" = 2 ] || fail "$n install mark references read koinon-install-mark, want 2"
+[ "$n" = 3 ] || fail "$n install mark references read koinon-install-mark, want 3"
 lacks "the install mark never reaches a ConfigMap" 'install-mark' --show-only templates/config.yaml
 lacks "an existing install mark Secret is not ensured" 'koinon-install-mark' --set installMark.existingSecret=mine-mark --show-only templates/ensure-secrets.yaml
 has "an existing install mark Secret is read" 'name: mine-mark$' --set installMark.existingSecret=mine-mark --show-only templates/deployments.yaml

@@ -575,7 +575,9 @@ publicUrl: ""
 # hook Job generates it once into koinon-install-mark (key "token": 64 hex characters) and never changes it; it
 # is not in Postgres, so a restored database gets its own. With existingSecret you supply that Secret (same key);
 # to take over another install's objects deliberately, give it the same token. Losing the Secret (the namespace
-# is deleted) ends the install's ownership: see the backup and restore guide.
+# is deleted) ends the install's ownership: see the backup and restore guide. koinon-api also reads it (ADR 0110):
+# it records the hash in the database and refuses the API tokens and sessions another install issued, so a
+# restored copy with a new mark does not accept the source's credentials until a platform admin re-enables them.
 installMark:
   existingSecret: ""
 

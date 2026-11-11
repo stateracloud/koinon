@@ -3,6 +3,9 @@
 package api_test
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"time"
 
 	connect "connectrpc.com/connect/v2"
@@ -10,9 +13,11 @@ import (
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/tokens"
 )
 
@@ -99,4 +104,87 @@ var _ = Describe("TokenService", func() {
 		_, err = owner.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: "not-a-uuid"})
 		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
 	})
+
+	// ADR 0110 decision 3: a restored copy refuses the tokens of the install that issued them, and
+	// only a platform admin re-enables one.
+	Describe("on a restored copy", func() {
+		var (
+			bindA, bindB *installbinding.Binding
+			svcB         *tokens.Service
+			secret, id   string
+			creator      string
+		)
+		BeforeEach(func(ctx SpecContext) {
+			quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+			res, err := create(ctx, owner, authv1alpha1.OrgRole_ORG_ROLE_ADMIN, 0)
+			Expect(err).NotTo(HaveOccurred())
+			secret, id, creator = res.GetSecret(), res.GetToken().GetId(), res.GetToken().GetCreatedBy()
+
+			By("the source install claims the database and stamps what exists")
+			bindA = installbinding.New(e.pool, "hash-source", false, quiet)
+			Expect(bindA.Claim(ctx, installbinding.Targets{})).To(Equal(installbinding.StateSame))
+			_, err = tokens.New(e.pool, nil).WithBinding(bindA).Authenticate(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a copy of the database starts with another mark")
+			bindB = installbinding.New(e.pool, "hash-copy", false, quiet)
+			Expect(bindB.Claim(ctx, installbinding.Targets{})).To(Equal(installbinding.StateCopy))
+			svcB = tokens.New(e.pool, nil).WithBinding(bindB)
+		})
+
+		It("refuses the source's token, and audits the refusal", func(ctx SpecContext) {
+			_, err := svcB.Authenticate(ctx, secret)
+			Expect(err).To(MatchError(tokens.ErrInvalid))
+			Expect(orgActions(ctx, e, org)).To(ContainElement("token.use_failed"))
+		})
+
+		It("stamps the tokens it creates with its own mark, and accepts them", func(ctx SpecContext) {
+			orgID := mustUUID(org)
+			created, err := svcB.Create(ctx, orgID, audit.System("test"), tokens.Creator{User: mustUUID(creator), Role: store.OrgRoleOwner}, "own", store.OrgRoleAdmin, 0)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svcB.Authenticate(ctx, created.Secret)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("lets only a platform admin rebind a token, and rebinding makes it work, audited", func(ctx SpecContext) {
+			_, err := owner.tokens.RebindToken(ctx, &tokenv1alpha1.RebindTokenRequest{OrgId: org, TokenId: id})
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "an org owner cannot re-enable a token")
+
+			orgID := mustUUID(org)
+			t, err := svcB.Rebind(ctx, orgID, audit.System("test-platform-admin"), id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.ID).To(Equal(id))
+			_, err = svcB.Authenticate(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(orgActions(ctx, e, org)).To(ContainElement("token.rebind"))
+
+			By("a revoked token is not re-enabled")
+			_, err = owner.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: id})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svcB.Rebind(ctx, orgID, audit.System("test-platform-admin"), id)
+			Expect(err).To(MatchError(tokens.ErrNotFound))
+		})
+
+		It("adopt-restore re-enables every live token", func(ctx SpecContext) {
+			_, err := svcB.Authenticate(ctx, secret)
+			Expect(err).To(MatchError(tokens.ErrInvalid))
+			res, err := bindB.Adopt(ctx, audit.System("test-recovery"), installbinding.Targets{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RebindTokens).To(BeNumerically(">=", 1))
+			_, err = svcB.Authenticate(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
+
+// orgActions lists the actions in the org's audit log.
+func orgActions(ctx context.Context, e *env, org string) []string {
+	GinkgoHelper()
+	rows, err := store.New(e.pool).ListAuditEvents(ctx, store.ListAuditEventsParams{OrgID: mustUUID(org), PageSize: 100})
+	Expect(err).NotTo(HaveOccurred())
+	var out []string
+	for _, r := range rows {
+		out = append(out, r.Action)
+	}
+	return out
+}

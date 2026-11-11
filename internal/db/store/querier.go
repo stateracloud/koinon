@@ -574,6 +574,9 @@ type Querier interface {
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
+	// The session if it is still valid at @now, without touching it: the install binding check runs
+	// before the touch, so a refused session's idle deadline does not move (ADR 0110).
+	GetValidSession(ctx context.Context, arg GetValidSessionParams) (Session, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) (int64, error)
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.

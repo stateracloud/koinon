@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installbinding"
 )
 
 // SessionCookieName is the session cookie when Koinon is served over HTTPS.
@@ -63,6 +64,9 @@ type Config struct {
 	Logger *slog.Logger
 	// Now defaults to time.Now; tests replace it.
 	Now func() time.Time
+	// Binding stamps new sessions with the install's mark and refuses sessions that another install
+	// issued (a restored copy, ADR 0110 decision 3). Nil: no mark, nothing refused.
+	Binding *installbinding.Binding
 }
 
 // Service authenticates requests and serves the login endpoints and the
@@ -185,6 +189,7 @@ func (s *Service) createSession(ctx context.Context, q *store.Queries, b audit.B
 		Now:           ts(now),
 		IdleExpiresAt: ts(now.Add(s.cfg.SessionIdleTimeout)),
 		ExpiresAt:     ts(now.Add(s.cfg.SessionMaxLifetime)),
+		InstallMark:   s.cfg.Binding.Stamp(),
 	})
 	if err != nil {
 		return "", store.Session{}, err
@@ -239,10 +244,28 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, e
 		return nil, ErrUnauthenticated
 	}
 	now := s.now()
+	hash := hashToken(token)
+	cur, err := s.q.GetValidSession(ctx, store.GetValidSessionParams{Now: ts(now), TokenHash: hash})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUnauthenticated
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session: %w", err)
+	}
+	// A session another install issued (a restored copy) is refused and never comes back: the user
+	// logs in again, which makes a session of this install. The check runs before the touch, so a
+	// refused session's idle deadline does not move.
+	if ok, err := s.cfg.Binding.Allows(ctx, cur.InstallMark); err != nil {
+		return nil, fmt.Errorf("check session mark: %w", err)
+	} else if !ok {
+		s.cfg.Binding.Refused("session")
+		s.log.Debug("session refused", "reason", installbinding.QuarantineReason)
+		return nil, ErrUnauthenticated
+	}
 	sess, err := s.q.TouchSession(ctx, store.TouchSessionParams{
 		Now:           ts(now),
 		IdleExpiresAt: ts(now.Add(s.cfg.SessionIdleTimeout)),
-		TokenHash:     hashToken(token),
+		TokenHash:     hash,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
