@@ -618,11 +618,14 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		renamed, err := drill.RenameKEKSecret(readFile(file), src.name("kek"), dst.name("kek"))
 		must(err, "rename the KEK Secret in the export")
 		must(os.WriteFile(file, []byte(renamed), 0o600), "write the export")
-		// The guide's resync block runs in the archive check, after the release (agentd answers a resync
-		// request then; a held agentd does nothing).
-		for _, b := range []string{"stop", "restore-db", "restore-keys", "start"} {
+		// The blocks run in the guide's order: resync follows start and runs while the install is held. The
+		// request persists in home_checkpoint_resyncs; agentd answers it after the release (the archive check).
+		for _, b := range []string{"stop", "restore-db", "restore-keys", "start", "resync"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, dst.in.Namespace, dst.in.Release)
 			must(err, out)
+			if b == "resync" {
+				Expect(out).To(MatchRegexp(`Requested a checkpoint resync for [1-9]`), "the resync request on a held install")
+			}
 		}
 		marks.Restored = time.Now()
 	})
@@ -883,17 +886,14 @@ stringData:
 			Expect(dst.org).NotTo(BeEmpty(), "the sign-in check did not finish")
 			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM agent_sandboxes WHERE agent_id = '%s' AND archived_at IS NOT NULL", archive.agent))).To(Equal(1), "the dump holds the agent archived")
 
-			By("the guide's resync block lists the snapshot")
-			out, err := kube.GuideBlock(ctx, repoRoot, workDir, "resync", dst.in.Namespace, dst.in.Release)
-			must(err, out)
-			Expect(out).To(MatchRegexp(`Requested a checkpoint resync for [1-9]`))
+			By("agentd answers the resync requested while held, and lists the snapshot")
 			Eventually(func(g Gomega) {
 				g.Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM audit_events WHERE action = 'home.checkpoints_resynced'")).To(BeNumerically(">=", 1), "agentd finished a resync")
 				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM home_checkpoints WHERE agent_id = '%s' AND status = 'complete' AND snapshot_id = '%s'", archive.agent, archive.snapshot))).To(Equal(1), "the source's snapshot is listed")
 			}).WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10 * time.Second).Should(Succeed())
 
 			By("the next message starts a run that restores the home and loads the session")
-			_, err = dst.client.Tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: dst.org, TaskId: archive.task, Text: "drill-archive-read: is the marker file there?"})
+			_, err := dst.client.Tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: dst.org, TaskId: archive.task, Text: "drill-archive-read: is the marker file there?"})
 			must(err, "append a message to the archive agent's task")
 			q := fmt.Sprintf("SELECT id FROM runs WHERE task_id = '%s' ORDER BY id DESC LIMIT 1", archive.task)
 			Eventually(func(g Gomega) {
