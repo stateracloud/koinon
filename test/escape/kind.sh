@@ -87,6 +87,8 @@ fi
 api_ip=$("${K[@]}" -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}') ||
   { echo "cannot read the kubernetes Service ClusterIP from $CTX" >&2; exit 1; }
 [[ -n $KOINON_ESCAPE_CLUSTER_DNS && -n $api_ip ]] || { echo "empty kube-dns or kubernetes ClusterIP from $CTX" >&2; exit 1; }
+# This script always provides the vars, so the deny specs that read them must fail, not skip, if they are lost.
+export KOINON_REQUIRE="${KOINON_REQUIRE:+$KOINON_REQUIRE,}escape-cluster-ips"
 export KOINON_ESCAPE_CLUSTER_DNS
 export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
 export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}

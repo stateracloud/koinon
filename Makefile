@@ -166,7 +166,7 @@ test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install o
 # The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
 # OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape): `make test-escape-kind` runs
 # them against the one `make dev-kind-up` installs (a bare OpenShell, no Koinon policy), `make test-escape`
-# against any other. The kind e2e runs them too, against the chart install with its sandbox policy live
+# against any other (export KOINON_ESCAPE_CLUSTER_DNS, _API and _INTERNAL from that cluster, else the DNS and deny specs skip). The kind e2e runs them too, against the chart install with its sandbox policy live
 # (test/e2e/escape-openshell.sh, #109).
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
@@ -190,7 +190,7 @@ test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containe
 		exit $$rc; }
 
 .PHONY: test-escape
-test-escape: ## Run the escape suite's OpenShell cases against a gateway you point it at (KOINON_OPENSHELL_*)
+test-escape: ## Run the escape suite's OpenShell cases against a gateway you point it at (KOINON_OPENSHELL_*; export KOINON_ESCAPE_CLUSTER_DNS, _API and _INTERNAL from that cluster, else the DNS and deny specs skip)
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
