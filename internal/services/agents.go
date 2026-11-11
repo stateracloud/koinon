@@ -300,7 +300,9 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		}
 		if req.GetApplyToOpenTickets() {
 			// Open tickets of the agent start a fresh session, with a handoff, at their next run.
-			marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: c.org, AgentID: a.ID})
+			marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{
+				OrgID: c.org, AgentID: a.ID, DmTriggerID: DirectMessageTriggerID(a.ID),
+			})
 			if err != nil {
 				return err
 			}

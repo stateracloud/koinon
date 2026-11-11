@@ -113,6 +113,8 @@ the lab's `e2e-lab` status remain accelerators and still satisfy `e2e result` (t
 way to get the verdict sooner, not a precondition. Cost: a needs-e2e pull request pays for a GitHub run
 even when the lab also passes.
 
+Note (2026-11-11, issue #572): the amendment of ADR 0105 replaces the note above for pull requests: a pull request runs the quickstart only with the `e2e` label; the merge queue is the only e2e proof.
+
 Exit codes of `hack/e2e-remote.sh --argo` separate the cases a caller acts on differently: 0 passed,
 1 the e2e failed, 2 usage, 75 the lab cannot run it now (fall back), 76 not run, 78 no lab configured,
 79 refused for flavors.

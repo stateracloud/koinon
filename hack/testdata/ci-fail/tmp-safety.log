@@ -1,0 +1,4 @@
+# expect: lint no
+hack/x.sh: tmp-safety: writes to /tmp without mktemp
+FAIL hack/x.sh
+##[error]Process completed with exit code 1.

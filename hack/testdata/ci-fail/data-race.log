@@ -1,0 +1,7 @@
+# expect: race no
+==================
+WARNING: DATA RACE
+Write at 0x00c000123456 by goroutine 8:
+--- FAIL: TestCounter (0.02s)
+    testing.go:1400: race detected during execution of test
+FAIL	example.invalid/koinon/internal/counter	1.5s

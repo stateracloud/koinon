@@ -41,8 +41,8 @@ Instructions for coding agents working on Koinon.
   "draft: not run") and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
-  main plus the PR is the only e2e proof (ADR 0105); the PR's own run is advisory. The `e2e` label forces
-  it. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
+  main plus the PR is the only e2e proof (ADR 0105). A pull request runs it only with the `e2e` label
+  (advisory; #572). `flavors` is required but runs in the queue and on main, not on pull requests. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
