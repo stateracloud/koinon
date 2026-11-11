@@ -237,10 +237,9 @@ request-log assertion goes red.
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~12-15 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
-(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
-needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
-it. It also runs batched on main (each push that changed something
+e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` label (advisory; ADR 0105
+amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
+`hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
