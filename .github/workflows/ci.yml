@@ -753,6 +753,7 @@ jobs:
           hack/flavor-tag-test.sh
       - run: hack/koinon-fetch-test.sh
       - run: hack/fetch-pinned-test.sh
+      - run: hack/e2e-parts-test.sh
       - run: hack/pinned-download-lint.sh
       - run: hack/apt-retries-test.sh --self-test
       - run: hack/apt-retries-test.sh
@@ -789,6 +790,7 @@ jobs:
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
       - run: hack/kind-registry-test.sh
+      - run: hack/drill-issue-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
@@ -807,6 +809,8 @@ jobs:
       - run: hack/ci-cache-test.sh
       - run: hack/ci-playwright-image-test.sh
       - run: hack/chart-check-test.sh
+      - run: hack/ci-rules-check-test.sh
+      - run: hack/ci-rules-check.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
   # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so

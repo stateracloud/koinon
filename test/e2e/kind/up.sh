@@ -35,9 +35,11 @@ CNPG_IMAGE_DIGEST=sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4
 CNPG_URL="https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v${CNPG_VERSION}/cnpg-${CNPG_VERSION}.yaml"
 
 here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=test/e2e/kind/parts.sh
+source "$here/parts.sh"
 K=(kubectl --context "$CTX")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/up.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+trap 'kill_parts; rm -rf "$tmp"' EXIT
 
 t0=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
@@ -48,6 +50,18 @@ done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 step "local registry and pull-through caches"
 "$here/registry.sh" start
 done_step registry-start
+
+# The add-ons do not depend on each other once the cluster is up (#572): fetch the three manifests together,
+# apply them, then wait for the rollouts together. Only OpenShell still waits for Agent Sandbox (and the
+# RuntimeClass, applied before). `bg` starts a part in its own process group, `wait_all` fails when any part
+# failed and then ends every other part's whole process tree (parts.sh).
+install_openshell() {
+  "${K[@]}" -n agent-sandbox-system rollout status deploy/agent-sandbox-controller --timeout=180s
+  helm --kube-context "$CTX" upgrade --install openshell \
+    "oci://ghcr.io/nvidia/openshell/helm-chart@${OS_DIGEST}" --version "$OS_VERSION" \
+    --namespace openshell --create-namespace \
+    -f "$here/openshell-values.yaml" --wait --timeout 5m
+}
 
 step "kind create cluster $CLUSTER"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
@@ -61,26 +75,19 @@ step "registry attach"
 "$here/registry.sh" attach "$CLUSTER"
 done_step registry-attach
 
-step "kube-network-policies $KNP_VERSION"
-"$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"
-"${K[@]}" apply -f "$tmp/knp.yaml"
-"${K[@]}" -n kube-system rollout status ds/kube-network-policies --timeout=120s
-done_step network-policies
+step "fetch the add-on manifests (kube-network-policies $KNP_VERSION, CloudNativePG $CNPG_VERSION, Agent Sandbox $AS_VERSION)"
+bg "$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"
+bg "$here/../../../hack/fetch-pinned.sh" "$CNPG_URL" "$CNPG_SHA256" "$tmp/cnpg.yaml"
+bg "$here/../../../hack/fetch-pinned.sh" "$AS_URL" "$AS_SHA256" "$tmp/agent-sandbox.yaml"
+wait_all
+done_step fetch
 
-step "CloudNativePG $CNPG_VERSION"
-"$here/../../../hack/fetch-pinned.sh" "$CNPG_URL" "$CNPG_SHA256" "$tmp/cnpg.yaml"
+step "apply the add-ons and RuntimeClass runc"
 sed -i.bak "s#image: ghcr.io/cloudnative-pg/cloudnative-pg:${CNPG_VERSION}\$#image: ghcr.io/cloudnative-pg/cloudnative-pg:${CNPG_VERSION}@${CNPG_IMAGE_DIGEST}#" "$tmp/cnpg.yaml"
 grep -q "@${CNPG_IMAGE_DIGEST}" "$tmp/cnpg.yaml" || { echo "CNPG image pin not applied" >&2; exit 1; }
+"${K[@]}" apply -f "$tmp/knp.yaml"
 "${K[@]}" apply --server-side -f "$tmp/cnpg.yaml"
-done_step cnpg-apply
-
-step "Agent Sandbox $AS_VERSION"
-"$here/../../../hack/fetch-pinned.sh" "$AS_URL" "$AS_SHA256" "$tmp/agent-sandbox.yaml"
 "${K[@]}" apply --server-side -f "$tmp/agent-sandbox.yaml"
-"${K[@]}" -n agent-sandbox-system rollout status deploy/agent-sandbox-controller --timeout=180s
-done_step agent-sandbox
-
-step "RuntimeClass runc"
 "${K[@]}" apply -f - <<'EOF'
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
@@ -91,17 +98,13 @@ metadata:
     openshell.ai/sandbox-attachable: "true"
 handler: runc
 EOF
-done_step runtimeclass
+done_step apply
 
-step "OpenShell $OS_VERSION"
-helm --kube-context "$CTX" upgrade --install openshell \
-  "oci://ghcr.io/nvidia/openshell/helm-chart@${OS_DIGEST}" --version "$OS_VERSION" \
-  --namespace openshell --create-namespace \
-  -f "$here/openshell-values.yaml" --wait --timeout 5m
-done_step openshell
-
-step "CloudNativePG rollout"
-"${K[@]}" -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=180s
-done_step cnpg-rollout
+step "wait for kube-network-policies, CloudNativePG, Agent Sandbox and OpenShell, together"
+bg "${K[@]}" -n kube-system rollout status ds/kube-network-policies --timeout=120s
+bg "${K[@]}" -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=180s
+bg install_openshell
+wait_all
+done_step rollouts
 
 echo "-- total up: $(( $(date +%s) - t0 ))s"

@@ -1014,10 +1014,19 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
+		// 2 minutes, the value with evidence. The cap counts from the run's first claim
+		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
+		// A 30 s cap failed in CI (#572, PR 595, run 43091299950): after 30 s the new sandbox's pods were
+		// still behind OpenShell's openshell.ai/bootstrap scheduling gate, so no pull had been tried and
+		// the cause was "unknown". Only the OpenShell gateway removes that gate (in its CreateSandbox);
+		// in that run the config change above was recreating the org's other OpenCode sandbox at the
+		// same time. Why the gate stays that long is the slow-start question of #573; this step goes
+		// back to a short cap when that has a cause and a fix, not by a guess.
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
+		missingImageStart := time.Now()
 		By("a task for a new agent: its sandbox is rendered with the broken image")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1047,6 +1056,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return terminal(r.GetState())
 		})
 
+		// Data for the KOINON_SANDBOX_WAIT_CAP above: how long the image_pull failure took on this runner.
+		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 2 minutes)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
 		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))

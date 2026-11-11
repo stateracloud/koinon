@@ -29,6 +29,8 @@ const (
 	classBudget          = store.RunFailureClassBudget
 	classPolicy          = store.RunFailureClassPolicy
 	classFatal           = store.RunFailureClassFatal
+	// classLoop: the agent kept repeating itself after the one nudge (loopguard); not retried.
+	classLoop = store.RunFailureClassLoop
 	// classSandboxUnavailable: the sandbox never became ready within the org's cap, or is in a state
 	// the reconciler will not repair (error, deleted or retained, with the agent unhealthy); not retried.
 	classSandboxUnavailable = store.RunFailureClassSandboxUnavailable

@@ -5,7 +5,9 @@
 #
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
-#      with buildx, all pushed to the local registry (kind/registry.sh, localhost:5001, #45); the fakes deployed in koinon-e2e-fakes;
+#      with buildx, all pushed to the local registry (kind/registry.sh, localhost:5001, #45); the fakes deployed in
+#      koinon-e2e-fakes. The build (kind/images.sh build) runs while step 1 creates the cluster: it needs the
+#      registry, not the cluster;
 #   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
 #      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site
 #      (stateracloud/koinon-docs) shows the same commands and its CI compares its page with that file. They create the namespace, copy the OpenShell client
@@ -151,6 +153,8 @@ diagnostics() {
 
 cleanup() {
   for p in ${pids[@]+"${pids[@]}"}; do kill "$p" 2>/dev/null || true; done
+  # The image build has children (ko, go, docker): stop its whole process group, not only the bash.
+  if [[ -n ${build_pid:-} ]]; then kill -- "-$build_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 ]]; then diagnostics; fi
   if [[ "$KEEP" != 1 ]]; then "$here/kind/down.sh" || true; fi
   echo "logs and timings in $OUT"
@@ -160,16 +164,43 @@ trap cleanup EXIT
 
 t_all=$(date +%s)
 
+# Building the images needs the Docker daemon and the local registry, not the cluster (images.sh build pushes to
+# the registry, #45), so it runs while kind/up.sh creates the cluster (#572). The registry starts first, here;
+# kind/up.sh starts it again, which is a no-op (registry.sh start is idempotent). With SKIP_UP=1 the cluster and
+# the registry exist already and the build runs in line.
+build_pid=""
+if [[ "$SKIP_BUILD" != 1 && "$SKIP_UP" != 1 ]]; then
+  step "local registry and pull-through caches (kind/registry.sh start), before the background build"
+  "$here/kind/registry.sh" start 2>&1 | tee "$OUT/registry-start.log"
+  done_step "Registry: started before the image build"
+  t_build=$(date +%s)
+  echo "== $(date -u +%H:%M:%SZ) images (kind/images.sh build), in the background while the cluster is created"
+  # `set -m` gives the background job its own process group (pgid = its pid), portable to macOS where setsid is
+  # missing; cleanup() kills that group.
+  set -m
+  CLUSTER="$CLUSTER" "$here/kind/images.sh" build >"$OUT/images-build.log" 2>&1 &
+  build_pid=$!
+  set +m
+fi
+
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell"
+  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell (the image build ran at the same time)"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
-  step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
-  CLUSTER="$CLUSTER" "$here/kind/images.sh"
-  done_step "Images: ko build and push (6 binaries), OpenCode flavor (pull or buildx) and push"
+  if [[ -n $build_pid ]]; then
+    step "images: wait for the build that ran during the prerequisites"
+    wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
+    cat "$OUT/images-build.log"
+    echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
+    done_step "Images: ko build and push, flavor pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
+  else
+    step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
+    CLUSTER="$CLUSTER" "$here/kind/images.sh"
+    done_step "Images: ko build and push (6 binaries), OpenCode flavor (pull or buildx) and push"
+  fi
 fi
 
 step "fakes ($FAKES)"
