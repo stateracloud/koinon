@@ -42,14 +42,15 @@
 //	KOINON_ESCAPE_HOST_KERNEL   the nodes' uname -r; enables the Kata guest case (a manual
 //	                            release gate); the case is skipped without it
 //	KOINON_ESCAPE_NAMESPACE     the workspace's Kubernetes namespace; enables the live
-//	                            admission case, with KOINON_ESCAPE_KUBECONFIG and
-//	                            KOINON_ESCAPE_KUBE_CONTEXT (default $KUBECONFIG, current
-//	                            context), KOINON_ESCAPE_POLICY (the chart's pods policy) and
-//	                            KOINON_ESCAPE_SERVICES (namespace/name:port list whose
-//	                            ClusterIPs must be unreachable). The live admission case skips
-//	                            unless the chart's policy is bound to the namespace. The Kata
-//	                            case fails when the variable is set and the sandbox is not
-//	                            under Kata.
+//	                            admission case and the NetworkPolicy bypass case (spike 8.15),
+//	                            with KOINON_ESCAPE_KUBECONFIG and KOINON_ESCAPE_KUBE_CONTEXT
+//	                            (default $KUBECONFIG, current context), KOINON_ESCAPE_POLICY
+//	                            (the chart's pods policy), KOINON_ESCAPE_NETPOL (the chart's
+//	                            default-deny NetworkPolicy name) and KOINON_ESCAPE_SERVICES
+//	                            (namespace/name:port list whose ClusterIPs must be unreachable).
+//	                            The live admission case skips unless the chart's policy is bound
+//	                            to the namespace. The Kata case fails when the variable is set
+//	                            and the sandbox is not under Kata.
 //
 // Provider records hold dummy values, not real credentials: every request these specs make
 // outside the grant must be refused by the sandbox before it leaves the sandbox, and a refusal

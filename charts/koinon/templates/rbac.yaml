@@ -27,10 +27,16 @@ Nothing in this file is cluster-scoped, and nothing here touches Agent Sandbox o
 workspaces, providers and policies go through the OpenShell gateway, not the Kubernetes API.
 Garbage-collecting orphaned sandboxes is not built; when it is, scope it to the sandbox namespaces
 with a Role.
-The one cluster-scoped grant is the sandbox observer's (sandboxObserver.enabled, on by default; ADR
-0078): templates/sandbox-observer.yaml gives the reconciler create on RoleBindings and bind on one
-ClusterRole, fenced by a native ValidatingAdmissionPolicy to OpenShell workspace namespaces, and what
-the RoleBinding grants there is get on pods and Sandboxes. Nothing in sandbox namespaces is written.
+The cluster-scoped grants outside this file are:
+- the sandbox observer's (sandboxObserver.enabled, on by default; ADR 0078):
+  templates/sandbox-observer.yaml gives the reconciler create on RoleBindings and bind on one
+  ClusterRole, fenced by a native ValidatingAdmissionPolicy to OpenShell workspace namespaces, and
+  what the RoleBinding grants there is get on pods and Sandboxes;
+- the sandbox default-deny NetworkPolicy writer (sandboxNetworkPolicy.enabled, on by default; spike
+  8.15, ADR 0045): templates/sandbox-networkpolicy.yaml gives the reconciler create/get/update/patch
+  on NetworkPolicies, fenced by a native ValidatingAdmissionPolicy to the fixed default-deny shape
+  in this gateway's workspace namespaces. That is the one write the reconciler makes in sandbox
+  namespaces (besides the observer RoleBinding).
 */ -}}
 {{- $api := include "koinon.componentName" (list . "api") }}
 apiVersion: rbac.authorization.k8s.io/v1

@@ -167,6 +167,9 @@ type Config struct {
 	// Observer explains sandboxes that never become ready by reading their pods (ADR 0078). Nil turns
 	// it off (sandboxObserver.enabled=false): the recorded reason is then OpenShell's.
 	Observer *SandboxObserver
+	// NetworkPolicy applies the chart's default-deny NetworkPolicy in each workspace namespace
+	// (spike 8.15, ADR 0045). Nil turns it off (sandboxNetworkPolicy.enabled=false).
+	NetworkPolicy *SandboxNetworkPolicy
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -296,6 +299,14 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		cfg.Observer.Errors = cfg.Metrics.ObserverErrors
 		if cfg.Observer.Log == nil {
 			cfg.Observer.Log = cfg.Logger
+		}
+	}
+	if cfg.NetworkPolicy != nil {
+		if err := cfg.NetworkPolicy.validate(); err != nil {
+			return nil, err
+		}
+		if cfg.NetworkPolicy.Log == nil {
+			cfg.NetworkPolicy.Log = cfg.Logger
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
@@ -957,6 +968,10 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	if r.cfg.Observer != nil && ws.Active {
 		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
 		_ = r.cfg.Observer.EnsureAccess(ctx, name)
+	}
+	if r.cfg.NetworkPolicy != nil && ws.Active {
+		// Defense in depth: a missing NetworkPolicy is counted and logged there, never fatal here.
+		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
 	return name, nil
 }

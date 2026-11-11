@@ -173,6 +173,7 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	netpol := newSandboxNetworkPolicy(cfg, kube, log)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -236,9 +237,10 @@ func serve(ctx context.Context, cfg config) error {
 				Keys:   keyring,
 				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
-			Observer: observer,
-			Logger:   log,
-			Metrics:  reconciler.NewMetrics(reg),
+			Observer:      observer,
+			NetworkPolicy: netpol,
+			Logger:        log,
+			Metrics:       reconciler.NewMetrics(reg),
 		})
 	if err != nil {
 		return err
@@ -297,6 +299,17 @@ func newSandboxObserver(cfg config, kube kubernetes.Interface, log *slog.Logger)
 		Kube: kube, Dynamic: dyn, GatewayID: cfg.openshellGateway, ClusterRole: cfg.sandboxObserverClusterRole,
 		ServiceAccount: cfg.sandboxObserverServiceAccount, ServiceAccountNamespace: cfg.namespace, Log: log,
 	}, nil
+}
+
+// newSandboxNetworkPolicy builds the sandbox default-deny NetworkPolicy writer (spike 8.15), or nil when it is off.
+func newSandboxNetworkPolicy(cfg config, kube kubernetes.Interface, log *slog.Logger) *reconciler.SandboxNetworkPolicy {
+	if !cfg.sandboxNetworkPolicy {
+		log.Warn("the sandbox default-deny NetworkPolicy is off: sandbox namespaces rely on OpenShell's own policies alone")
+		return nil
+	}
+	return &reconciler.SandboxNetworkPolicy{
+		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxNetworkPolicyName, Log: log,
+	}
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {

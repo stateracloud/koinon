@@ -57,6 +57,8 @@ var configKeys = map[string]string{
 	"sandbox-observer":                     "sandboxObserver.enabled",
 	"sandbox-observer-cluster-role":        "sandboxObserver.clusterRole",
 	"sandbox-observer-service-account":     "sandboxObserver.serviceAccount",
+	"sandbox-network-policy":               "sandboxNetworkPolicy.enabled",
+	"sandbox-network-policy-name":          "sandboxNetworkPolicy.name",
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-config-map":                   "gateway.configMap",
@@ -135,6 +137,9 @@ func (c *config) finish(v *viper.Viper) error {
 	if c.sandboxObserver && (c.sandboxObserverClusterRole == "" || c.sandboxObserverServiceAccount == "") {
 		return fmt.Errorf("--sandbox-observer-cluster-role and --sandbox-observer-service-account are required with --sandbox-observer")
 	}
+	if c.sandboxNetworkPolicy && c.sandboxNetworkPolicyName == "" {
+		return fmt.Errorf("--sandbox-network-policy-name is required with --sandbox-network-policy")
+	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return fmt.Errorf("--gateway-config-map is required in standalone mode")
 	}
@@ -184,6 +189,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.sandboxObserver, "sandbox-observer", false, "read the pods of sandboxes that never became ready, to say why (ADR 0078); needs the chart's observer ClusterRole")
 	fs.StringVar(&c.sandboxObserverClusterRole, "sandbox-observer-cluster-role", "", "the observer ClusterRole, and the name of the RoleBinding to it in each workspace namespace")
 	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
+	fs.BoolVar(&c.sandboxNetworkPolicy, "sandbox-network-policy", false, "apply a default-deny NetworkPolicy in each OpenShell workspace namespace (spike 8.15, ADR 0045)")
+	fs.StringVar(&c.sandboxNetworkPolicyName, "sandbox-network-policy-name", "", "name of the default-deny NetworkPolicy in each workspace namespace")
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
