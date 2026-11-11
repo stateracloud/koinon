@@ -283,7 +283,8 @@ jobs:
       - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race-serial.xml --output-dir=reports/go ./internal/reconciler/ ./internal/ledger/
         env:
           KOINON_REQUIRE: docker
-      - run: go tool ginkgo -race -p --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
+      - if: ${{ !cancelled() }}
+        run: go tool ginkgo -race -p --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
       - name: Upload test reports
