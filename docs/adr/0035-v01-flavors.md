@@ -1,6 +1,6 @@
 # 0035. v0.1 flavors: OpenCode, Hermes and pi over ACP
 
-- Status: Accepted; amended by [0059](0059-v01-opencode-only.md)
+- Status: Accepted; amended by [0059](0059-v01-opencode-only.md) and [0112](0112-harness-definitions.md)
 - Date: 2026-10-21
 - Decision: [design.md#35](../design.md)
 
@@ -98,6 +98,13 @@ Checked 2026-10-21:
   from the client aren't forwarded. https://zed.dev/acp/agent/pi
 - **Later adapters:** `agentclientprotocol/claude-agent-acp` (Apache-2.0) and
   `zed-industries/codex-acp` (license unverified).
+
+## Amendment (2026-11-11)
+
+[0112](0112-harness-definitions.md) replaces the flavor concept: an agent selects a harness, and a harness definition
+(built-in or custom) records how to obtain and run it. A harness is added by registering a definition,
+not by a table entry and an image. The flavor contract of this ADR becomes the contract of ADR 0112,
+decisions 5 to 9. The rename is groundwork before the core release; the rest is built after it.
 
 ## Links
 
