@@ -3,8 +3,9 @@
 #
 # Post the commit status `review-verdict` on a pull request's head: the record that an independent
 # review of exactly that commit found it ready (success) or not ready (failure) (ADR 0103). The
-# required-to-be check `review` (hack/review-gate.sh, .github/workflows/review.yml) accepts a success
-# on the head of a pull request that touches the sensitive paths.
+# advisory check `review` (hack/review-gate.sh, .github/workflows/review.yml) shows a success on the
+# head of a pull request that touches the sensitive paths. Since 2026-11-11 the verdict is advice, not a
+# merge gate (ADR 0103 amendment); posting it is still how a review is recorded.
 #
 #   hack/review-verdict.sh <PR> <ready|not-ready> <reviewer> <reviewed sha> [note]
 #

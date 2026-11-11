@@ -90,7 +90,11 @@ The policies select sandbox namespaces by label, so three paths could move a san
   policies cover, except from `sandboxPolicy.identities.namespaces` (default: the OpenShell gateway,
   which creates the namespaces in managed mode). Cluster admins are denied. It binds to every
   namespace update and reads the old object's labels itself, because a namespace selector reads the
-  new object's labels, and the new object is the one that has just left the selection. Moving a
+  new object's labels, and the new object is the one that has just left the selection. A
+  matchCondition on the old object (`koinon.sandboxGuardedLabels`) sends only namespaces whose old
+  object has a guarded key to the validation CEL; every other namespace update passes untouched
+  (issue 507). A `sandboxPolicy.namespaceSelector` with no matchLabels, In or Exists requirement
+  renders no pre-filter, so the policy then judges every namespace update. Moving a
   namespace into the policies (adding the labels) stays open.
 - **Gateway ID drift is reported.** The reconciler compares `openshell.gatewayId` with the gateway's
   `gateway_id` (read from OpenShell's gateway ConfigMap) on every pass, the first included, and sets
