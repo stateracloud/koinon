@@ -51,13 +51,14 @@
 # failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; a wrapper
 # script reads the file to tell NOT RUN from a failure.
 
-# Go's test result cache (issue 43): every package runs with -count=1, so a result is never reused, unless
-# KOINON_GO_TEST_CACHE=1 (CI sets it for pull_request runs only; main and the merge queue never do).
-# Then the packages that hack/go-test-cacheable.sh lists (no Docker, database, cluster or external
-# binary among their inputs, which Go's cache key does not cover) run without -count=1 and may print
-# `(cached)` when main's go-ci cache holds the result. `ginkgo -p` runs the parallel suites and never
-# uses the cache; every suite that needs Postgres or Docker keeps -count=1 also with the flag.
-# Details: docs/dev/ci.md#go-test-suites.
+# Go's test result cache (issue 43). Serial Ginkgo suites always run with -count=1. Plain packages:
+# - locally (CI unset) they run as Go decides, so `make test` may print `(cached)` as before;
+# - in CI (CI set) they run with -count=1, so main and the merge queue never reuse a result;
+# - with KOINON_GO_TEST_CACHE=1 (ci.yml sets it on pull_request runs and in warm-caches only), the
+#   packages that hack/go-test-cacheable.sh lists (no Docker, database, cluster or external binary among
+#   their inputs, which Go's cache key does not cover) run without -count=1, also the Ginkgo suites among
+#   them, and may print `(cached)` when the go-testres cache that warm-caches saves on main holds the result.
+# `ginkgo -p` runs the parallel suites and never uses the cache. Details: docs/dev/ci.md#go-test-suites.
 #
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -245,9 +246,21 @@ run_plain() {
 # Go caches a result only when every flag is one of its own: any -ginkgo.* flag after -args (the JUnit and
 # JSON report flags, -ginkgo.fail-on-empty) switches the cache off, and a report file written into the
 # package directory changes the file the test is hashed with. So the cacheable Ginkgo suites run as plain
-# `go test` packages: one test row per suite in go-test-cached.xml, no per-spec report, no verdict entry.
+# `go test` packages: one test row per suite in ginkgo-cached.xml, no per-spec report, no verdict entry.
 ((${#ginkgo_pure[@]})) && run_plain ginkgo-cached "cacheable Ginkgo suites" "" "${ginkgo_pure[@]}"
-((${#plain[@]})) && run_plain go-test "plain packages" -count=1 "${plain[@]}"
+# -ginkgo.fail-on-empty for them, from the output: Ginkgo prints "Ran N of M Specs" at the end of a
+# suite, and go test replays it on a `(cached)` result. No line, or M = 0, fails the run.
+if ((${#ginkgo_pure[@]})); then
+	while IFS= read -r ipath; do
+		# One grep, no pipe: grep -q stops early, and pipefail would read the writer's SIGPIPE as a miss.
+		grep -Eq "\"Package\":\"${ipath//./\\.}\",.*Ran [0-9]+ of [1-9][0-9]* Specs" "$report_dir/ginkgo-cached.gotest.jsonl" 2>/dev/null ||
+			{ rc=1; failed+=("cacheable Ginkgo suite $ipath: no 'Ran N of M Specs' line with M > 0 (no specs, or no RunSpecs)"); }
+	done < <(go list -f '{{.ImportPath}}' "${ginkgo_pure[@]}")
+fi
+# Plain packages: -count=1 in CI (main and the merge queue never reuse a result), Go's default locally.
+plain_count=
+[[ -z ${CI:-} ]] || plain_count=-count=1
+((${#plain[@]})) && run_plain go-test "plain packages" "$plain_count" "${plain[@]}"
 ((${#plain_pure[@]})) && run_plain go-test-cached "cacheable plain packages" "" "${plain_pure[@]}"
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.

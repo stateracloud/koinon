@@ -87,18 +87,67 @@ gotest=$(job_body "$wf" go-test)
 check "go-test sets KOINON_GO_TEST_CACHE for pull_request runs only" has "$gotest" "KOINON_GO_TEST_CACHE: \\$\\{\\{ github.event_name == 'pull_request' && '1' \\|\\| '' \\}\\}"
 check "warm-caches runs the cacheable packages through go-test.sh with the cache switch" has "$warm" 'KOINON_GO_TEST_CACHE: .1.'
 check "warm-caches takes the cacheable list from go-test-cacheable.sh" has "$warm" 'pkgs=\$\(hack/go-test-cacheable.sh\)'
+# shellcheck disable=SC2016 # a regex for a literal $pkgs, not an expansion
 check "warm-caches guards an empty cacheable list" has "$warm" '\[ -n "\$pkgs" \]'
 check "warm-caches' test run cannot fail the job (continue-on-error)" has "$warm" 'continue-on-error: true'
 check "warm-caches saves test results per commit" has "$warm" 'key: go-testres-.*github\.sha'
 check "go-test restores test results by prefix on pull requests" has "$gotest" 'go-testres-.*-$'
 check "go-ci save does not depend on the test run (comes first, no testres condition)" test "$(awk '/actions\/cache\/save@/{s++} /id: testres/{t=NR} /key: go-ci-/{if(s&&!k){k=NR}} END{print (k&&t&&k<t)?1:0}' <<<"$warm")" = 1
 check "warm-caches does not run the cacheable packages with -count=1" hasnt "$warm" 'go-test.sh.*-count=1'
-check "no workflow sets KOINON_GO_TEST_CACHE to 1 outside a pull_request condition" test "$(grep -h 'KOINON_GO_TEST_CACHE' "$wf" | grep -vc "pull_request\|warm-caches\|KOINON_GO_TEST_CACHE: '1'\|^ *#")" = 0
+# cache_switches FILE: every non-comment line of FILE that names KOINON_GO_TEST_CACHE is either go-test's
+# pull_request expression or the unconditional `KOINON_GO_TEST_CACHE: '1'`, and that one is there exactly
+# once, in warm-caches (pushes to main only).
+# shellcheck disable=SC2329 # called through check
+cache_switches() {
+  local allowed="KOINON_GO_TEST_CACHE: (\\$\\{\\{ github.event_name == 'pull_request' && '1' \\|\\| '' \\}\\}|'1') *$"
+  [ "$(grep -cE "^ *KOINON_GO_TEST_CACHE: '1' *$" "$1")" = 1 ] || return 1
+  grep -Eq "^ *KOINON_GO_TEST_CACHE: '1' *$" <<<"$(job_body "$1" warm-caches)" || return 1
+  ! grep -E 'KOINON_GO_TEST_CACHE' "$1" | grep -Ev '^ *#' | grep -Eqv "$allowed"
+}
+check "KOINON_GO_TEST_CACHE is 1 only on pull requests and in warm-caches" cache_switches "$wf"
+# The same check must catch an unconditional switch in go-test, in YAML or in a run line.
+neg=$(mktemp "${TMPDIR:-/tmp}/ci-cache-test.XXXXXX")
+awk '{print} /^  go-test:/{j=1} j&&/KOINON_REQUIRE: docker/{sub(/KOINON_REQUIRE.*/, "KOINON_GO_TEST_CACHE: '"'"'1'"'"'"); print; j=0}' "$wf" >"$neg"
+# shellcheck disable=SC2329 # called through check
+rejects() { grep -q -- "$2" <<<"$(job_body "$1" go-test)" && ! cache_switches "$1"; } # FILE PATTERN-in-go-test
+check "self-test: cache_switches rejects KOINON_GO_TEST_CACHE: '1' in go-test" rejects "$neg" "^ *KOINON_GO_TEST_CACHE: '1'\$"
+sed "s|run: hack/go-test.sh$|run: KOINON_GO_TEST_CACHE=1 hack/go-test.sh|" "$wf" >"$neg"
+check "self-test: cache_switches rejects KOINON_GO_TEST_CACHE=1 in a run line" rejects "$neg" 'run: KOINON_GO_TEST_CACHE=1 hack'
+rm -f "$neg"
+
+# ci-stamp-mtime.sh: two fresh clones of one commit get the same file and directory mtimes; a same-size
+# edit changes the file's mtime and its directories', not a sibling directory's.
+st=$(mktemp -d "${TMPDIR:-/tmp}/ci-stamp-test.XXXXXX")
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+# shellcheck disable=SC2329 # called through check
+same() { [ "$(mtime "$1")" = "$(mtime "$2")" ]; }
+# shellcheck disable=SC2329
+differ() { ! same "$@"; }
+(
+  set -e
+  git init -q "$st/src" && cd "$st/src"
+  mkdir -p a/testdata b && echo one >a/testdata/x.txt && echo two >b/y.txt
+  git add . && git -c user.name=t -c user.email=t@t commit -qm one
+  git clone -q "$st/src" "$st/c1" && git clone -q "$st/src" "$st/c2"
+  find "$st/c2" -not -path '*/.git/*' -exec touch -t 202201010000 {} + # another checkout time
+  echo uno >a/testdata/x.txt && git -c user.name=t -c user.email=t@t commit -qam same-size
+  git clone -q "$st/src" "$st/c3"
+  for c in c1 c2 c3; do "$repo/hack/ci-stamp-mtime.sh" "$st/$c"; done
+) >/dev/null 2>&1
+for p in a/testdata/x.txt a/testdata a b b/y.txt .; do
+  check "ci-stamp-mtime: two checkouts agree on $p" same "$st/c1/$p" "$st/c2/$p"
+done
+check "ci-stamp-mtime: the edit keeps the size" test "$(wc -c <"$st/c1/a/testdata/x.txt")" = "$(wc -c <"$st/c3/a/testdata/x.txt")"
+for p in a/testdata/x.txt a/testdata a .; do
+  check "ci-stamp-mtime: a same-size edit changes the mtime of $p" differ "$st/c1/$p" "$st/c3/$p"
+done
+check "ci-stamp-mtime: a same-size edit leaves a sibling directory alone" same "$st/c1/b" "$st/c3/b"
+rm -rf "$st"
 check "go-test stamps file mtimes before the tests" has "$gotest" 'hack/ci-stamp-mtime\.sh'
 check "warm-caches stamps file mtimes (same stamps as go-test)" has "$warm" 'hack/ci-stamp-mtime\.sh'
 check "warm-caches may delete caches (actions: write)" has "$warm" 'actions: write'
 check "warm-caches prunes older go-testres entries" has "$warm" 'gh cache delete'
-check "the prune keeps the entry just saved" has "$warm" 'select\(\.key != env\.KEEP_KEY\)'
+check "the prune deletes only entries created before the one just saved (overlapping runs keep the newer)" has "$warm" 'select\(\(\.createdAt \| sub\(.*\)\) < env\.MINE\)'
 check "the prune cannot fail the job" test "$(awk '/Prune older test-result caches/{f=1} f&&/continue-on-error: true/{print 1; exit}' <<<"$warm")" = 1
 
 echo "$pass passed, $fail failed"

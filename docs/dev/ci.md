@@ -20,8 +20,10 @@ in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` eve
 
 ### Test result reuse (#43)
 
-Every package runs with `-count=1`, so main and the merge queue run everything every time. A pull
-request run sets `KOINON_GO_TEST_CACHE=1` (the `go-test` job, `pull_request` events only) and the
+In CI (`CI` set) every package runs with `-count=1`, so main and the merge queue run everything every
+time. Locally (`CI` unset) `make test` stays as it was: serial Ginkgo suites run with `-count=1`, plain
+packages as Go decides, so they may print `(cached)`. A pull request run sets `KOINON_GO_TEST_CACHE=1`
+(the `go-test` job, `pull_request` events only) and the
 packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
 test binary, the command line, the environment variables the test read and the size, mode and mtime of
 the files it opened are the same (Go does not hash file content), and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
@@ -30,7 +32,7 @@ the network, a cluster or a binary the test starts, so the three kinds of packag
 | Kind | Reuse on a pull request | Why |
 | --- | --- | --- |
 | Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
-| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. |
+| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with M > 0. |
 | Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
 
 A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
@@ -49,15 +51,19 @@ request restores the newest entry by the `go-testres-` prefix. The script and fl
 part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
 look for `(cached)` on lines such as `internal/money (cached)`.
 
-Why the mtime step: `actions/checkout` stamps every file with the checkout time, so a package that opens a
-file (testdata, golden files, the chart, templates) would never hit on a CI run. The `go-test` and
-`warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It sets each tracked file's mtime
-from its git blob id, so the same content has the same mtime on main and on a pull request, and a changed
-file (even one of the same size) gets another mtime. A fixed epoch would show a stale pass for a same-size
-edit. The script is for a throw-away checkout only. Retention: every `go-testres-` entry holds the whole build
-cache (a few hundred MB), so `warm-caches` deletes all older `go-testres-` entries after it saves the new one
-(`actions: write`, `continue-on-error`) and the repository keeps one, away from the 10 GB quota that go-ci,
-envtest and the pnpm stores share.
+Why the mtime step: `actions/checkout` stamps every file and directory with the checkout time, so a package
+that opens a file (testdata, golden files, the chart, templates) or lists a directory (`filepath.Glob`,
+`os.ReadDir`, `WalkDir`: Go hashes an opened directory's stat and the stat of each entry) would never hit
+on a CI run. The `go-test` and `warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It
+sets each tracked file's mtime from its git blob id and each tracked directory's from its tree id, so the
+same content has the same mtime on main and on a pull request, and a changed file (even one of the same
+size) gets another mtime, as does every directory above it. A fixed epoch would show a stale pass for a
+same-size edit. A directory that gets untracked entries (the root: `.git`, `reports/`) still differs, so a
+package that lists it only misses. The script is for a throw-away checkout only. Retention: every
+`go-testres-` entry holds the whole build cache (a few hundred MB), so `warm-caches` deletes the
+`go-testres-` entries created before the one it just saved (`actions: write`, `continue-on-error`; by
+`createdAt`, so an older run that prunes last never deletes a newer commit's entry) and the repository
+keeps about one, away from the 10 GB quota that go-ci, envtest and the pnpm stores share.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.

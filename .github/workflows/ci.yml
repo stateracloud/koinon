@@ -910,13 +910,19 @@ jobs:
           key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
       # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
       # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
+      # Only entries created before this run's entry go: pushes to main do not cancel each other, and an
+      # older run that prunes last must not delete a newer commit's entry. Fractional seconds are cut
+      # before the string compare (RFC 3339 drops trailing zeros, so they do not sort).
       - name: Prune older test-result caches
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           KEEP_KEY: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
         run: |
-          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,key --jq '.[] | select(.key != env.KEEP_KEY) | .id' |
+          MINE=$(gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEEP_KEY" --limit 100 --json key,createdAt --jq '.[] | select(.key == env.KEEP_KEY) | .createdAt | sub("\\.[0-9]+"; "")')
+          [ -n "$MINE" ] || { echo "no $KEEP_KEY entry; nothing pruned"; exit 0; }
+          export MINE
+          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,createdAt --jq '.[] | select((.createdAt | sub("\\.[0-9]+"; "")) < env.MINE) | .id' |
             while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY"; done
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
       # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action

@@ -193,14 +193,38 @@ grep -Fxq ./internal/leakguard <<<"$cacheable" || { echo "FAIL: ./internal/leakg
 for p in ./internal/api ./internal/agentd ./internal/compat; do
 	! grep -Fxq "$p" <<<"$cacheable" || { echo "FAIL: $p (pgtest, testenv or os/exec) must never cache"; exit 1; }
 done
-for s in $suites; do
-	! grep -Fxq "$s" <<<"$(hack/go-test-cacheable.sh "$s")" || true # parallel suites never cache: see the next check
-done
+# The parallel suites share Postgres (see PARALLEL_SUITES), so none of them may be listed cacheable.
+# shellcheck disable=SC2086 # suites is a word list
+leaked=$(hack/go-test-cacheable.sh $suites) || { echo "FAIL: go-test-cacheable.sh failed on the parallel suites"; exit 1; }
+[[ -z $leaked ]] || { echo "FAIL: parallel suite(s) listed cacheable: $leaked"; exit 1; }
 echo "ok: go-test-cacheable.sh keeps database, Docker and exec packages out"
 
-# The parallel suites never take the cache path, and -count=1 is the default everywhere else.
-grep -q 'KOINON_GO_TEST_CACHE:-} == 1' hack/go-test.sh || { echo "FAIL: go-test.sh has no KOINON_GO_TEST_CACHE switch"; exit 1; }
+# The cache switch, run for real on a pure plain package: the second of two runs prints `(cached)` locally
+# (CI unset) and with KOINON_GO_TEST_CACHE=1, never in CI without it (main and the merge queue).
+rd4=$(mktemp -d "${TMPDIR:-/tmp}/go-test-test.XXXXXX")
+fixtures+=("$rd4")
+# second_run ENV...: the output of the second of two go-test.sh runs of ./internal/money.
+second_run() {
+	env -u CI -u KOINON_GO_TEST_CACHE "$@" REPORT_DIR="$rd4" hack/go-test.sh ./internal/money >/dev/null 2>&1 || { echo "FAIL: go-test.sh ./internal/money failed ($*)" >&2; return 1; }
+	env -u CI -u KOINON_GO_TEST_CACHE "$@" REPORT_DIR="$rd4" hack/go-test.sh ./internal/money 2>&1
+}
+out=$(second_run) || exit 1
+grep -q 'internal/money (cached)' <<<"$out" || { echo "$out"; echo "FAIL: a local run (CI unset) does not reuse a plain package's result"; exit 1; }
+out=$(second_run CI=true) || exit 1
+! grep -q '(cached)' <<<"$out" || { echo "$out"; echo "FAIL: a CI run without KOINON_GO_TEST_CACHE=1 reused a result (needs -count=1)"; exit 1; }
+out=$(second_run CI=true KOINON_GO_TEST_CACHE=1) || exit 1
+grep -q 'internal/money (cached)' <<<"$out" || { echo "$out"; echo "FAIL: KOINON_GO_TEST_CACHE=1 does not reuse a cacheable package's result"; exit 1; }
 grep -q 'run_ginkgo_go_test ginkgo-rest -count=1' hack/go-test.sh || { echo "FAIL: non-cacheable serial Ginkgo suites lost -count=1"; exit 1; }
-grep -q 'run_plain go-test "plain packages" -count=1' hack/go-test.sh || { echo "FAIL: non-cacheable plain packages lost -count=1"; exit 1; }
-! grep -E 'ginkgo-cached|go-test-cached' hack/go-test.sh | grep -q -- '-count=1' || { echo "FAIL: a cacheable group runs with -count=1"; exit 1; }
-echo "ok: -count=1 is the default; only cacheable packages drop it, and only with KOINON_GO_TEST_CACHE=1"
+echo "ok: plain packages reuse results locally and with KOINON_GO_TEST_CACHE=1, and run with -count=1 in CI otherwise"
+
+# A cacheable Ginkgo suite runs without -ginkgo.fail-on-empty (the flag switches Go's cache off); go-test.sh
+# checks its "Ran N of M Specs" line instead, so a suite with no specs still fails the run.
+fx=$(mktemp -d "$root/internal/zzemptyfixture.XXXXXX")
+fixtures+=("$fx")
+printf '// SPDX-License-Identifier: Apache-2.0\npackage zzempty\n\nimport (\n\t"testing"\n\n\t"github.com/onsi/ginkgo/v2"\n)\n\nfunc TestEmpty(t *testing.T) { ginkgo.RunSpecs(t, "empty") }\n' >"$fx/empty_suite_test.go"
+rc=0
+out=$(env -u CI CI=true KOINON_GO_TEST_CACHE=1 REPORT_DIR="$rd4" hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
+[[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a cacheable Ginkgo suite with no specs must exit 1, got $rc"; exit 1; }
+grep -q "cacheable Ginkgo suite .*zzempty.*no 'Ran N of M Specs' line" <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the empty cacheable suite is not named"; exit 1; }
+rm -rf "$rd4" "$fx"
+echo "ok: a cacheable Ginkgo suite with no specs fails the run"
