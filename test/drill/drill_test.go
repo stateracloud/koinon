@@ -888,7 +888,7 @@ stringData:
 
 			By("agentd answers the resync requested while held, and lists the snapshot")
 			Eventually(func(g Gomega) {
-				g.Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM audit_events WHERE action = 'home.checkpoints_resynced'")).To(BeNumerically(">=", 1), "agentd finished a resync")
+				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM audit_events WHERE action = 'home.checkpoints_resynced' AND target_kind = 'agent' AND target_id = '%s'", archive.agent))).To(BeNumerically(">=", 1), "agentd finished the archive agent's resync")
 				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM home_checkpoints WHERE agent_id = '%s' AND status = 'complete' AND snapshot_id = '%s'", archive.agent, archive.snapshot))).To(Equal(1), "the source's snapshot is listed")
 			}).WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10 * time.Second).Should(Succeed())
 
