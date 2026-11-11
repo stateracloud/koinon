@@ -123,6 +123,7 @@ const (
 	NotFound         ErrorCode = "not_found"
 	PermissionDenied ErrorCode = "permission_denied"
 	Unauthenticated  ErrorCode = "unauthenticated"
+	Unavailable      ErrorCode = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -139,6 +140,8 @@ func (e ErrorCode) Valid() bool {
 	case PermissionDenied:
 		return true
 	case Unauthenticated:
+		return true
+	case Unavailable:
 		return true
 	default:
 		return false

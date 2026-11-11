@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -132,6 +133,10 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.Handle(BasePath+"/", s.authenticate(api))
 }
 
+// unavailableRetryAfter is the Retry-After value for HTTP 503 responses. It matches runNowWait
+// in internal/services/runnow_durable.go: a busy org queue asks the client to wait that long.
+const unavailableRetryAfter = 30
+
 // statusRecorder remembers the status a handler wrote, and whether the response has started.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -140,6 +145,9 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
+	if code == http.StatusServiceUnavailable && r.Header().Get("Retry-After") == "" {
+		r.Header().Set("Retry-After", strconv.Itoa(unavailableRetryAfter))
+	}
 	r.status, r.wrote = code, true
 	r.ResponseWriter.WriteHeader(code)
 }
@@ -335,6 +343,14 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusConflict, Conflict, "an entry with this name already exists")
 	case errors.Is(err, catalog.ErrNoKeys):
 		return set(http.StatusServiceUnavailable, Internal, err.Error())
+	case connect.CodeOf(err) == connect.CodeUnavailable:
+		msg := err.Error()
+		var ce *connect.Error
+		if errors.As(err, &ce) {
+			msg = ce.Message()
+		}
+		s.log.Warn("admin API unavailable", "err", err)
+		return set(http.StatusServiceUnavailable, Unavailable, msg)
 	}
 	s.log.Error("admin API error", "err", err)
 	return set(http.StatusInternalServerError, Internal, "internal error")
