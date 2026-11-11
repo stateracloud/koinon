@@ -22,7 +22,8 @@
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 #   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
 #     and on that dispatch `decide`, `quickstart` and `result` are skipped; `continue-on-error` keeps the run's
-#     conclusion (which hack/e2e-bisect.sh reads) as the quickstart's.
+#     conclusion (which hack/e2e-bisect.sh reads) as the quickstart's. The `drill issue` job (#572) opens the issue
+#     for a red drill and is `continue-on-error` for the same reason.
 # The `e2e result` job is the one to require: on a queue build, a push, the nightly or a dispatch it passes when
 # the quickstart passed, or was skipped because `decide` said nothing needed it; it fails when the quickstart
 # failed or was cancelled. Trust limit: `result` runs from this very file, so a PR can edit it to drop the
@@ -150,7 +151,7 @@ jobs:
       contents: read
       packages: read # the flavor image CI's flavors job pushed to GHCR
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 35 # the job takes about 14 minutes (#572); the nightly adds 20 seconds
     defaults:
       run:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
@@ -229,21 +230,40 @@ jobs:
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      # The flavor image is built here when the pull below misses. The docker-container driver is
-      # needed to import the layer cache the flavors job saved on main; this job only restores it
-      # (a pull request never writes it, #145).
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
-          restore-keys: flavors-
-
       - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
         env:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
+
+      # Pull the flavor image first (#572): when the flavors job pushed this flavors/ tree to GHCR (the usual
+      # case), the layer cache and buildx below are not needed and are skipped. test/e2e/kind/images.sh finds
+      # the pulled image in the daemon and does not pull it again.
+      - name: Pull the flavor image
+        id: flavorpull
+        env:
+          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
+        run: |
+          tag=$(hack/flavor-tag.sh opencode) || tag=""
+          if [[ -n $tag ]] && docker pull -q "$FLAVOR_PULL_REPO:$tag" >/dev/null; then
+            echo "pulled $FLAVOR_PULL_REPO:$tag"
+            echo "pulled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no pullable flavor image for tag '$tag'; the run builds it"
+            echo "pulled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The flavor image is built here only when the pull above missed. The docker-container driver is
+      # needed to import the layer cache the flavors job saved on main; this job only restores it
+      # (a pull request never writes it, #145).
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.flavorpull.outputs.pulled != 'true'
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.flavorpull.outputs.pulled != 'true'
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
 
       - name: Quickstart e2e (kind, images, helm install, driver or browser)
         env:
@@ -256,8 +276,9 @@ jobs:
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
-          # Pull the flavor image the flavors job pushed for this flavors/ tree, if there is one.
-          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
+          # The flavor image the step above pulled (the flavors job pushed it for this flavors/ tree). Empty after
+          # a miss, so images.sh goes straight to the build and does not try the pull again.
+          FLAVOR_PULL_REPO: ${{ steps.flavorpull.outputs.pulled == 'true' && format('ghcr.io/{0}/flavors/opencode', github.repository) || '' }}
           # The escape suite's probe image: pulled when flavor-publish pushed this hack/spike/probe tree
           # (hack/probe-tag.sh), so the run needs no apt mirror (#482). A miss builds it.
           PROBE_PULL_REPO: ghcr.io/${{ github.repository }}/spike-probe
@@ -389,6 +410,8 @@ jobs:
     permissions:
       contents: read
       packages: read # the flavor image
+    outputs:
+      red: ${{ steps.verdict.outputs.red }} # `needs.drill.result` is "success" under continue-on-error, so the job says it itself
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
@@ -451,6 +474,9 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
 
       - name: Restore drill (test/drill/run.sh)
+        # A little below the job's 120: a hung drill is then a failed step, so the verdict step below sees it. A job
+        # timeout would end as `cancelled`, which `red` must not count: a person or the concurrency group cancels too.
+        timeout-minutes: 110
         env:
           OUT: ${{ runner.temp }}/drill
           KEEP: "0"
@@ -492,3 +518,39 @@ jobs:
       - name: Delete cluster
         if: always()
         run: test/e2e/kind/down.sh
+
+      # Last step, after the cleanup: `job.status` is failure when any step above failed, the drill step's own
+      # timeout included. A cancel of the whole run (a person, the concurrency group) is `cancelled`, not red.
+      - name: Record the verdict
+        id: verdict
+        if: always()
+        run: echo "red=${{ job.status == 'failure' }}" >> "$GITHUB_OUTPUT"
+
+  # A red drill opens one issue (or comments on the open one), hack/drill-issue.sh (#572). A job of its own so that
+  # only this one holds `issues: write`: the drill job runs the checked-out commit's code and never gets it.
+  drill-issue:
+    name: drill issue
+    needs: drill
+    # Only a red drill of the nightly schedule or of an rc tag push; never a dispatch on a branch (the commit may be
+    # a work in progress, and the issue would be noise).
+    if: >-
+      always() && needs.drill.outputs.red == 'true'
+      && (github.event_name == 'schedule' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')))
+    # Like `drill`, it must never change the run conclusion that hack/e2e-bisect.sh reads: a gh API error here
+    # would otherwise turn a green quickstart's run red and start a false bisect.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write # the drill-red issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DRILL_COMMIT: ${{ inputs.commit || github.sha }} # the commit the drill tested
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: hack/drill-issue.sh

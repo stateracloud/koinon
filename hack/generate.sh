@@ -25,6 +25,7 @@ outs=(
 	internal/db/store
 	internal/audit/internal/auditstore
 	internal/adminapi/api.gen.go
+	docs/reference/proto
 )
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-generate.XXXXXX") || exit 2
@@ -56,6 +57,7 @@ buf generate \
 	&& buf generate --template buf.gen.openshell.yaml \
 	&& buf generate --template buf.gen.agentgateway.yaml \
 	&& buf generate --template buf.gen.googleapis.yaml \
+	&& buf generate --template buf.gen.docs.yaml \
 	&& "$GO" tool sqlc generate \
 	&& "$GO" tool oapi-codegen -config api/admin/v1/oapi-codegen.yaml api/admin/v1/openapi.yaml \
 	|| gen_rc=$?
