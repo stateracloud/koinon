@@ -27,7 +27,16 @@ if render --set prices.refresh.maxAutoPerDay=11 >/dev/null 2>&1; then fail "a pr
 if render --set prices.refresh.maxAutoPerDay=0 >/dev/null 2>&1; then fail "a prices.refresh.maxAutoPerDay below 1 must not render"; fi
 
 # NOTES are printed by install, not by template; each mode says what it does.
-notes() { "$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" "$@" 2>&1 || true; }
+# Fail loudly when helm itself errors; do not hide it with || true (#349 / old #420).
+notes() {
+	local out rc=0
+	out=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" "$@" 2>&1) || rc=$?
+	if [[ $rc -ne 0 ]]; then
+		fail "helm install --dry-run=client for NOTES failed: $(head -1 <<<"$out")"
+		return 0
+	fi
+	printf '%s\n' "$out"
+}
 notes_auto=$(notes)
 grep -q 'prices.refresh is auto' <<<"$notes_auto" || fail "NOTES do not name the auto mode by default"
 grep -q 'The first day brings no OpenRouter estimate' <<<"$notes_auto" || fail "NOTES do not say the first day has no OpenRouter estimate"

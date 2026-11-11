@@ -57,9 +57,11 @@ logdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates.XXXXXX") || exit 2
 failed=0 notrun=0 ran=0
 
 # A real failure marker in a log: a gate with one of these failed, whatever else the log says
-# (go-test.sh logs "docker is not available" skips right next to real failures).
+# (go-test.sh logs "docker is not available" skips right next to real failures). Includes helm
+# (`Error:`), chart-check (`FAIL:` / `assertion(s) failed`), and gitleaks (`leaks found:`), so those
+# stay fail when the log also mentions EPERM or Docker (#349).
 has_failure() { # <log>
-	grep -qE -- '--- FAIL|\[FAIL\]|^FAIL|Summarizing [0-9]+ Failure|verdict: FAILED|^ FAIL |Test Files .*failed|error TS[0-9]+|^ *[0-9]+:[0-9]+ +error |\bSC[0-9]{4}\b|^[^ :]+\.go:[0-9]+:[0-9]+: ' "$1"
+	grep -qE -- '--- FAIL|\[FAIL\]|^FAIL|Summarizing [0-9]+ Failure|verdict: FAILED|^ FAIL |Test Files .*failed|error TS[0-9]+|^ *[0-9]+:[0-9]+ +error |\bSC[0-9]{4}\b|^[^ :]+\.go:[0-9]+:[0-9]+: |^Error:|assertion\(s\) failed|leaks found:' "$1"
 }
 
 # Output that says the machine, not the change, was the problem. Failure markers win. Pass
@@ -71,7 +73,7 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 	fi
 	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
-	elif grep -qE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains' "$log"; then
+	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
 		echo "network denied"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
@@ -179,6 +181,16 @@ for g in $gates; do
 	3) # exit 3 is the missing-requirement code of go-test.sh and preflight: notrun by exit code
 		reason=$(env_problem "$log" ignore)
 		report "$g" 3 "$secs" notrun "${reason:-missing requirement}" "$log" ;;
+	2)
+		# preflight exits 2 when this worktree's pid file is held (a parallel preflight, or a stuck
+		# one). Say so on the gate line: every per-gate call shares that pid file (#349).
+		if grep -q 'already in progress' "$log"; then
+			report "$g" 2 "$secs" fail "preflight already running in this worktree" "$log"
+		else
+			reason=$(env_problem "$log")
+			if [[ -n $reason ]]; then report "$g" "$rc" "$secs" notrun "$reason" "$log"; else report "$g" "$rc" "$secs" fail "" "$log"; fi
+		fi
+		;;
 	*)
 		reason=$(env_problem "$log")
 		if [[ -n $reason ]]; then report "$g" "$rc" "$secs" notrun "$reason" "$log"; else report "$g" "$rc" "$secs" fail "" "$log"; fi
