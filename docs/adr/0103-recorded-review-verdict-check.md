@@ -1,6 +1,6 @@
 # 0103. A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`
 
-- Status: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate; superseded 2026-11-11 (#546): the check is removed
+- Status: Deprecated (2026-11-11, #546: the check is removed; see the amendment). Earlier: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate
 - Date: 2026-11-09
 - Amends: [0082](0082-work-claims-and-ready-queue.md) decision 9 (approval on sensitive paths), once the ruleset step below is done
 - Relates to: [0094](0094-work-claims-on-the-public-repository.md) (the merge queue), [0102](0102-merge-queue-runs-the-kind-e2e.md) (the queue runs the e2e), [0046](0046-adr-conventions.md)
@@ -305,8 +305,8 @@ requests are the owner's habit, not a check.
 
 ## Links
 
-- `hack/review-verdict.sh`, `hack/review-gate.sh`, `hack/review-gate-test.sh`, `.github/workflows/review.yml`
-- `docs/dev/ci.md` "The `review` check"
+- `hack/review-verdict.sh`, `hack/review-gate.sh`, `hack/review-gate-test.sh`, `.github/workflows/review.yml`: removed in #546 (last present at d07e78a37f9c)
+- `docs/dev/ci.md` "The `review` check": removed in #546 (last present at d07e78a37f9c)
 - Prow Tide: https://docs.prow.k8s.io/docs/components/core/tide/config
 - bors-ng reference: https://github.com/bors-ng/bors-ng.github.io/blob/e87e702fff1a5fd338dfd449d3f64845db4252b3/reference.md
 - Mergify conditions: https://docs.mergify.com/configuration/conditions.md
