@@ -92,7 +92,7 @@ only queue latency and runner slots.
    - **Emergency (break glass):** `hack/pr-merge.sh <PR> --break-glass "<reason>" --approved-at <time>`, for a
      queue that cannot merge anything (GitHub's queue or hosted runners down, or every entry fails for a cause
      outside the pull request and the fix cannot pass the queue). Never for "slow" or "flaky". Only the owner
-     approves it; an agent asks. It runs the ADR 0103 review gate on the head, merges with `gh pr merge --admin
+     approves it; an agent asks. It runs the ADR 0103 review gate on the head (2026-11-11: no longer; the verdict is advisory, see the ADR 0103 amendment), merges with `gh pr merge --admin
      --merge`, and opens a `break-glass` issue (sha, reason, approver, skipped checks). `pr-wait.sh --checks` and
      the required-context read still run, but with the hosted runners down (a main reason for break glass) they
      cannot pass, so a failure there is a **warning recorded** in the PR comment and the issue, not a stop; a
@@ -122,7 +122,7 @@ only queue latency and runner slots.
    `.github/**`, because a pull request's own workflow files run on `pull_request` and `merge_group` and could
    fake `review`. With one human that approval needs the bypass (7 of the last 40 merged pull requests touched
    `.github/`, read 2026-11-09). The owner chose speed: no machine account; these pull requests keep
-   `pr-merge.sh --admin`, which still runs `pr-wait.sh --checks` and the review gate on the head, and skips the
+   `pr-merge.sh --admin`, which still runs `pr-wait.sh --checks` and the review gate on the head (2026-11-11: no review gate any more, see the ADR 0103 amendment), and skips the
    queue (an e2e-relevant one needs a green `quickstart` on its head, exit 10 otherwise). The batched push e2e on
    main and the nightly are the backstop.
 

@@ -62,6 +62,7 @@ ls-remote)
 fetch) echo "git $*" >>"$FAKE_DIR/calls"; exit "${FETCH_RC:-0}" ;;
 show)
   echo "git $*" >>"$FAKE_DIR/calls"
+  [ -z "${SHOW_FAIL:-}" ] || case $2 in *:"$SHOW_FAIL") exit 128 ;; esac
   case $2 in
   *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
   *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
@@ -552,5 +553,13 @@ grep -q 'review-gate\|review-verdict' <<<"$out" && { echo "FAIL: the output ment
 setup false "$green"
 FETCH_RC=1 PR_MERGE_NEEDS_E2E="" run 7 --admin
 check "a failed base fetch is a tool failure" 2 nomerge
+setup false "$green"
+SHOW_FAIL=hack/paths.rules PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "a base rule file git show cannot read is a tool failure" 2 nomerge
+setup false "$green"
+PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "the base rule path: fetch ok, rule read from the base, e2e not needed: merges" 0 merge
+grep -q '^git fetch .*origin main' "$FAKE_DIR/calls" || { echo "FAIL: the base was not fetched" >&2; fail=1; }
+grep -q '^git show refs/remotes/origin/main:hack/needs-e2e.sh' "$FAKE_DIR/calls" || { echo "FAIL: needs-e2e.sh not shown from the base" >&2; fail=1; }
 
 exit "$fail"

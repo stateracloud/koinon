@@ -714,10 +714,10 @@ that run is still going, use "Re-run all jobs" when it ends.
 - `hack/pr-merge.sh` no longer runs the gate (advisory since 2026-11-11); `hack/review-gate.sh` is called only by `review.yml`.
 - A listed owner posts the status, so it records a review; it is no separation of duties.
 
-(Superseded by the 2026-11-11 amendment: the check stays advisory and is not added to the ruleset.) The check was to be advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
+(Superseded by the 2026-11-11 amendment: the ruleset step was done, then `review` was removed from the required contexts on 2026-11-11; the check is advisory again.) The check was to be advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
 PUT adds the context `review`, pinned to the GitHub Actions app (`integration_id: 15368`, so a status
 posted by a user cannot satisfy it), and cuts `required_reviewers` to `.github/**`, and `review` moves to
-`external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
+`external review` in `hack/ci-required.txt`.
 
 ### Review threads (#187)
 

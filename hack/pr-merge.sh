@@ -43,7 +43,7 @@
 #   --approved-at  when the human approved the merge; recorded in the comment (required by --break-glass)
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
 #       a tool failed (also: a file list that cannot
-#       be read, --jump without a queue), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
+#       be read, --jump without a queue, the base fetch or a rule file for --admin), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
 #       9 --admin on a PR without a `.github/` path (ADR 0105), 10 --admin on an
 #       e2e-relevant PR without a green quickstart on the head, 64 usage
 #       (pr-wait.sh's code passes through).

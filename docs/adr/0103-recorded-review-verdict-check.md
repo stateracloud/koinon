@@ -280,10 +280,10 @@ What stays:
 What goes:
 
 - `review` is removed from the required status checks of the `main` ruleset (done by the main session on
-  2026-11-11). It is `advisory` in `hack/ci-required.txt` and still reports on `merge_group`.
+  2026-11-11). It is listed in the comment block of advisory checks in `hack/ci-required.txt` (not as an `advisory` entry) and still reports on `merge_group`.
 - The `hack/pr-merge.sh` gate: `--admin` and `--break-glass` no longer run `hack/review-gate.sh` and no longer
   exit 9 for a missing verdict. `hack/review-gate.sh` now has no caller but `review.yml`.
-- Decision 4's ruleset step (add `review` as a required context) is cancelled.
+- Decision 4's ruleset step was done (`review` added as a required context, `required_reviewers` cut to `.github/**`), and `review` was then removed from the required contexts on 2026-11-11.
 
 Cost: nothing in the repository now stops a sensitive-path pull request that nobody reviewed. The queue's
 required checks and the owner's habit of running the review are the guard.
