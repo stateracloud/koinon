@@ -146,9 +146,24 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
-	_, err = kube.Helm(ctx, "install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
-		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--wait", "--timeout", "12m")
+	args := []string{
+		"install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
+		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
+	}
+	if !hold {
+		args = append(args, "--wait")
+	}
+	_, err = kube.Helm(ctx, args...)
 	must(err, "helm install "+in.Release)
+	if hold {
+		// A held reconciler converges nothing (ADR 0107), so it never makes the gateway's ConfigMap and the gateway
+		// Deployment cannot become ready until the hold is released: `helm --wait` would wait for it for ever.
+		// What a held install must reach is its three binaries, ready. The hooks (preflight, migrate) ran above.
+		for _, c := range []string{"api", "reconciler", "agentd"} {
+			out, err := kube.Kubectl(ctx, "-n", in.Namespace, "rollout", "status", "deploy/"+s.name(c), "--timeout=10m")
+			must(err, "the held "+c+" becomes ready: "+out)
+		}
+	}
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
 			_, _ = kube.Helm(ctx, "uninstall", in.Release, "--namespace", in.Namespace, "--wait=false")
