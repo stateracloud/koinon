@@ -1,6 +1,6 @@
 # 0044. In-sandbox credentials as a gated exception
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-11 (below)
 - Date: 2026-10-21
 - Amends: ADR 0006 (identity layers), ADR 0013 (model access, GitHub Copilot), ADR 0015 (agent
   environment and browser)
@@ -66,6 +66,84 @@ use cases besides Copilot will need in-sandbox auth.
 - GitHub Copilot terms of service for agent and gateway use (open item #4).
 - Which other auth types to allowlist first.
 - Encryption key custody for the encrypted path (per agent key in Vault?).
+
+## Amendment (2026-11-11): the exception is narrowed to credentials that cannot be held outside
+
+Direction agreed with the maintainer on 2026-11-11; nothing of this ADR was built before the
+amendment, so no code or data changes with it.
+
+### Why
+
+- **The premise has moved.** This ADR was written when no model gateway could hold a per-user login.
+  Koinon has since decided to own its gateway ([0097](0097-koinon-owned-gateway.md)) and to be the
+  OAuth client for MCP sign-ins, with the tokens held by koinon-api and the gateway only
+  ([0096](0096-mcp-oauth-sign-in.md)). A login that Koinon can run and hold outside the sandbox no
+  longer needs an exception.
+- **The exception was read as a general permission.** New features kept pointing at it as the place
+  where a credential in the sandbox would be allowed (a human shell in the sandbox, a harness that
+  logs in with a vendor subscription). The rule "no secrets in sandboxes" is only a rule if its
+  exception is narrow and named.
+- **The storage rule promised more than it gives.** The harness must read the token to use it, and
+  the agent runs as the harness. Encryption of the path protects the token at rest (the volume, a
+  checkpoint, an export); it does not protect it from the agent.
+- **The open questions stayed open.** Key custody, vendor terms and the first auth types were never
+  answered, because no concrete type forced an answer.
+
+### Decision
+
+1. **Outside the sandbox is the rule, in this order.** A credential is held as an OpenShell provider
+   record behind a placeholder, or by Koinon's gateway (a static provider credential, or a sign-in
+   that Koinon runs and stores, following the pattern of ADR 0096). In-sandbox is allowed only for a
+   named auth type for which both are shown to be impossible. "Easier" and "the harness already does
+   it" are not reasons.
+2. **No generic allowlist framework.** Decision 2's platform-wide list of in-sandbox auth types is
+   not built as a framework that types are added to by configuration. Each auth type that uses the
+   exception is added by its own ADR or by an amendment to this one, which records why the
+   credential cannot be held outside, which hosts its binary may reach, and how it is revoked. The
+   platform setting then offers exactly those types. The per-agent opt-in, the warning, the audit
+   entry and the badge on the agent card stay as decided.
+3. **Subscription and provider logins are no longer the example.** The default for a model or tool
+   login is a sign-in held outside the sandbox. `copilot-device-flow` is not a qualifying type until
+   the verification below shows that Koinon's gateway cannot hold it. The second way of ADR
+   [0013](0013-model-access.md) decision 4 (Copilot as an in-sandbox credential) holds only under
+   that condition.
+4. **Browser session state is the inherent case.** Cookies of the in-sandbox browser exist in the
+   sandbox by nature. They keep the rules of ADR [0015](0015-agent-environment-and-browser.md) and
+   are decided with the browser work, not here.
+5. **What the controls are.** Storage encryption (decision 4) covers the volume, checkpoints and
+   exports. The controls against misuse by the agent are the egress limit on the binary that uses
+   the credential (decision 5) and revocation (decision 6). An auth type whose use cannot be limited
+   to the provider's hosts does not qualify.
+6. **Not a precedent.** A feature that would put a credential into a sandbox does not cite this ADR
+   as its permission; it needs its own decision under point 2. A credential that a person types or
+   pastes into a sandbox is not covered by this ADR.
+7. **Timing.** This replaces decision 8: no release is assigned. Nothing of the exception is built
+   until the first qualifying auth type has its decision.
+
+Decisions 3 (obtained by a human through takeover), 4, 5, 6 and 7 (personal-org agents by default)
+are unchanged.
+
+### Pending verification
+
+No tracking issue exists yet for these; each needs one (ADR 0046, decision 7).
+
+- Whether Koinon's gateway can run and hold a GitHub Copilot device-flow login per user (the token
+  exchange, the refresh, and GitHub's terms for agent and gateway use). Not checked for this
+  amendment.
+- Whether a vendor harness that logs in with a subscription (Claude Code, Codex) can be given a
+  credential held outside the sandbox, or whether its login is bound to the vendor's own client.
+- A sign-in for a model provider held by the gateway is not designed: ADR 0096 covers MCP servers
+  only. It needs its own decision before point 3 can be used.
+
+### Consequences
+
+- Positive: the hard rule has one inherent exception (the browser) and otherwise only named ones,
+  each with its reason on record.
+- Positive: the encrypted path, its key custody, the checkpoint and export handling and the extra
+  escape cases are not built ahead of a need.
+- Negative: until a gateway-held sign-in for model providers exists, personal subscriptions cannot
+  be used at all. Before the amendment they were planned for v0.2.
+- Negative: every new auth type costs a decision instead of a configuration entry.
 
 ## Upstream verification
 
