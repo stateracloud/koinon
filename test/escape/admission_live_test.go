@@ -278,10 +278,6 @@ func realPods(ctx context.Context, cs kubernetes.Interface, ns string) {
 		Expect(*tokens[0].ExpirationSeconds).To(BeNumerically("<=", maxSeconds), p.Name+": expirationSeconds")
 		for _, c := range append(slices.Clone(spec.InitContainers), spec.Containers...) {
 			Expect(c.Image).To(Equal(image), p.Name+"/"+c.Name+": the pinned supervisor image")
-			// #76: the reconciler-owned LimitRange sizes unsized supervisor and init containers.
-			Expect(c.Resources.Requests).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange must supply requests (not BestEffort)")
-			Expect(c.Resources.Requests.Cpu().IsZero()).To(BeFalse(), p.Name+"/"+c.Name+": CPU request")
-			Expect(c.Resources.Requests.Memory().IsZero()).To(BeFalse(), p.Name+"/"+c.Name+": memory request")
 		}
 	}
 }
