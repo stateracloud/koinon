@@ -16,10 +16,10 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
-	"github.com/stateracloud/koinon/internal/execution/openshell/policycheck"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/policycheck"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
