@@ -40,7 +40,6 @@ type SandboxNetworkPolicy struct {
 	Now func() time.Time
 
 	mu     sync.Mutex
-	done   map[string]bool
 	denied map[string]*denial
 }
 
@@ -76,54 +75,51 @@ func (p *SandboxNetworkPolicy) Policy(namespace string) *networkingv1.NetworkPol
 	}
 }
 
-// Ensure makes sure the default-deny NetworkPolicy exists in the workspace's namespace. It creates
-// once per namespace and process; AlreadyExists counts as done when the shape matches. A namespace
-// OpenShell has not created yet is retried by the next call.
+// Ensure converges the default-deny NetworkPolicy in the workspace's namespace: it is created when
+// missing (also after someone deleted it) and its shape is repaired when it drifted. The
+// reconciler calls it once per pass for each active workspace, so it reads the object every time
+// (one GET when nothing changed) instead of caching that it was done. A namespace OpenShell has not
+// created yet, or a denied write, is retried after a backoff.
 func (p *SandboxNetworkPolicy) Ensure(ctx context.Context, workspace string) error {
 	ns := p.namespace(workspace)
 	p.mu.Lock()
-	ok := p.done[ns]
 	d := p.denied[ns]
 	p.mu.Unlock()
-	if ok {
-		return nil
-	}
 	if d != nil && p.now().Before(d.until) {
 		return d.err
 	}
 	ctx, cancel := context.WithTimeout(ctx, netpolCallTimeout)
 	defer cancel()
 	want := p.Policy(ns)
-	_, err := p.Kube.NetworkingV1().NetworkPolicies(ns).Create(ctx, want, metav1.CreateOptions{FieldManager: ManagedByValue})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
+	nps := p.Kube.NetworkingV1().NetworkPolicies(ns)
+	cur, err := nps.Get(ctx, p.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		_, err = nps.Create(ctx, want, metav1.CreateOptions{FieldManager: ManagedByValue})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return p.fail(ns, d, err)
+		}
+		if err == nil {
+			p.log().Info("applied the sandbox default-deny NetworkPolicy", "namespace", ns, "name", p.Name)
+		}
+	case err != nil:
 		return p.fail(ns, d, err)
-	}
-	if apierrors.IsAlreadyExists(err) {
-		cur, getErr := p.Kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, p.Name, metav1.GetOptions{})
-		if getErr != nil {
-			return p.fail(ns, d, getErr)
+	case !defaultDenyShape(cur):
+		cur.Spec = want.Spec
+		if cur.Labels == nil {
+			cur.Labels = map[string]string{}
 		}
-		if !defaultDenyShape(cur) {
-			cur.Spec = want.Spec
-			if cur.Labels == nil {
-				cur.Labels = map[string]string{}
-			}
-			cur.Labels[NetPolLabel] = "true"
-			cur.Labels["app.kubernetes.io/managed-by"] = ManagedByValue
-			if _, err := p.Kube.NetworkingV1().NetworkPolicies(ns).Update(ctx, cur, metav1.UpdateOptions{FieldManager: ManagedByValue}); err != nil {
-				return p.fail(ns, d, err)
-			}
+		cur.Labels[NetPolLabel] = "true"
+		cur.Labels["app.kubernetes.io/managed-by"] = ManagedByValue
+		if _, err := nps.Update(ctx, cur, metav1.UpdateOptions{FieldManager: ManagedByValue}); err != nil {
+			return p.fail(ns, d, err)
 		}
+		p.log().Warn("repaired the sandbox default-deny NetworkPolicy", "namespace", ns, "name", p.Name)
 	}
-	p.mu.Lock()
-	if p.done == nil {
-		p.done = map[string]bool{}
-	}
-	p.done[ns] = true
-	delete(p.denied, ns)
-	p.mu.Unlock()
-	if err == nil {
-		p.log().Info("applied the sandbox default-deny NetworkPolicy", "namespace", ns, "name", p.Name)
+	if d != nil {
+		p.mu.Lock()
+		delete(p.denied, ns)
+		p.mu.Unlock()
 	}
 	return nil
 }

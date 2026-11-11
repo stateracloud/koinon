@@ -41,6 +41,35 @@ var _ = Describe("SandboxNetworkPolicy", func() {
 		Expect(list.Items).To(HaveLen(1))
 	})
 
+	It("re-creates the policy on the next Ensure (the next pass) after someone deleted it", func(ctx SpecContext) {
+		kube := fake.NewClientset()
+		p := &reconciler.SandboxNetworkPolicy{Kube: kube, GatewayID: gateway, Name: name}
+		Expect(p.Ensure(ctx, ws)).To(Succeed())
+		Expect(kube.NetworkingV1().NetworkPolicies(ns).Delete(ctx, name, metav1.DeleteOptions{})).To(Succeed())
+
+		Expect(p.Ensure(ctx, ws)).To(Succeed())
+		np, err := kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(np.Spec.PolicyTypes).To(ConsistOf(networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress))
+		Expect(np.Spec.Egress).To(BeEmpty())
+	})
+
+	It("repairs a policy that drifted after it was created", func(ctx SpecContext) {
+		kube := fake.NewClientset()
+		p := &reconciler.SandboxNetworkPolicy{Kube: kube, GatewayID: gateway, Name: name}
+		Expect(p.Ensure(ctx, ws)).To(Succeed())
+		np, err := kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		np.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{}}
+		_, err = kube.NetworkingV1().NetworkPolicies(ns).Update(ctx, np, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(p.Ensure(ctx, ws)).To(Succeed())
+		np, err = kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(np.Spec.Egress).To(BeEmpty())
+	})
+
 	It("repairs a drifted policy of the same name", func(ctx SpecContext) {
 		kube := fake.NewClientset(&networkingv1.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
