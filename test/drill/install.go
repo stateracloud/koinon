@@ -145,6 +145,14 @@ spec:
       labels: {app: %[1]s, %[4]s: "%[3]s"}
     spec:
       automountServiceAccountToken: false
+      # The image's entrypoint, started as root, chowns /data and su-execs to its seaweed user
+      # (uid 1000); with every capability dropped both fail and the container exits. Start as that
+      # user: the entrypoint then skips the chown and the drop, and fsGroup makes the emptyDir its own.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: seaweedfs
           image: %[5]s

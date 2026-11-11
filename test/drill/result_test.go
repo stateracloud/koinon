@@ -252,6 +252,29 @@ func TestObjectStoreAndCheckpointSecretManifestsAreLabelledAndParse(t *testing.T
 			}
 		}
 	}
+	// The SeaweedFS entrypoint cannot drop from root with no capabilities: the pod starts as its user.
+	for _, d := range strings.Split(drill.ObjectStoreManifest("n", "1", "img"), "\n---\n") {
+		var v struct {
+			Kind string
+			Spec struct {
+				Template struct {
+					Spec struct {
+						SecurityContext struct {
+							RunAsNonRoot bool  `yaml:"runAsNonRoot"`
+							RunAsUser    int64 `yaml:"runAsUser"`
+							FSGroup      int64 `yaml:"fsGroup"`
+						} `yaml:"securityContext"`
+					}
+				}
+			}
+		}
+		if err := yaml.Unmarshal([]byte(d), &v); err != nil {
+			t.Fatal(err)
+		}
+		if sc := v.Spec.Template.Spec.SecurityContext; v.Kind == "Deployment" && (!sc.RunAsNonRoot || sc.RunAsUser != 1000 || sc.FSGroup != 1000) {
+			t.Errorf("object store pod securityContext %+v: want runAsNonRoot, uid 1000, fsGroup 1000", sc)
+		}
+	}
 	if got := drill.ObjectStoreEndpoint("f"); got != "http://objectstore.f.svc:8333" {
 		t.Errorf("endpoint %q", got)
 	}
