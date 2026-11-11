@@ -89,7 +89,9 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		repo       = envOr("KOINON_ESCAPE_REPO", "octocat/Hello-World")
 		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
 		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
-		clusterDNS = envOr("KOINON_ESCAPE_CLUSTER_DNS", "10.96.0.10")
+		// No default: the cluster's DNS and API Service IPs differ per cluster, so a fixed one would pass
+		// on another cluster without probing anything. test/escape/kind.sh reads them from the cluster.
+		clusterDNS = os.Getenv("KOINON_ESCAPE_CLUSTER_DNS")
 		// A model gateway stand-in with no default (ADR 0080): a name the proxy resolves to a
 		// non-loopback address (OpenShell always blocks loopback and link-local) with a server on
 		// port 4000 that answers every request 418 with X-Koinon-Standin: 1 (koinon-fakemodel
@@ -232,6 +234,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
+		testenv.Require(testenv.Var("escape-cluster-ips", "KOINON_ESCAPE_CLUSTER_DNS"))
 		resolvers := []string{"8.8.8.8", "1.1.1.1", clusterDNS}
 		var checks []check
 		for _, h := range resolvers {
@@ -301,8 +304,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(res["env"]).NotTo(HaveKey(HavePrefix("KUBERNETES_")))
 
 		By("the API server is not reachable by Service IP or name")
-		deniedAtConnect(ctx, targets(envOr("KOINON_ESCAPE_API",
-			"10.96.0.1:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443")))
+		testenv.Require(testenv.Var("escape-cluster-ips", "KOINON_ESCAPE_API"))
+		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_API")))
 	}, NodeTimeout(2*time.Minute))
 
 	It("holds no credential on disk or in any environment, only placeholders", func(ctx SpecContext) {
@@ -366,8 +369,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	It("cannot reach the platform's services by name or Service IP", func(ctx SpecContext) {
 		// Spike 8.4 and 8.5: the API server and the gateway's and agentgateway's ports. Names
 		// resolve to the synthetic range, so the refusal has to come from the connect.
-		deniedAtConnect(ctx, targets(envOr("KOINON_ESCAPE_INTERNAL",
-			"10.96.0.1:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080")))
+		testenv.Require(testenv.Var("escape-cluster-ips", "KOINON_ESCAPE_INTERNAL"))
+		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_INTERNAL")))
 	}, NodeTimeout(2*time.Minute))
 
 	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
