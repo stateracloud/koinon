@@ -135,6 +135,11 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: f.agent.GetId(), Thinking: "default"})
 		},
 	},
+	agentv1alpha1connect.AgentServiceSetAgentKeepWarmProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentKeepWarm(ctx, &agentv1alpha1.SetAgentKeepWarmRequest{OrgId: org, AgentId: f.agent.GetId(), KeepWarm: false})
+		},
+	},
 	agentv1alpha1connect.AgentServiceRunAgentTriggerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: f.agent.GetId(), TriggerId: "daily-check"})

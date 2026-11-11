@@ -21,6 +21,7 @@ org it acts in; IDs from another org are not found.
 | ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns the org's agents, oldest first. Viewers and above. |
 | ResumeAgent | `koinon.agent.v1alpha1.ResumeAgentRequest` | `koinon.agent.v1alpha1.ResumeAgentResponse` | - | ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners only. |
 | RunAgentTrigger | `koinon.agent.v1alpha1.RunAgentTriggerRequest` | `koinon.agent.v1alpha1.RunAgentTriggerResponse` | - | RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited. Admins and owners only. |
+| SetAgentKeepWarm | `koinon.agent.v1alpha1.SetAgentKeepWarmRequest` | `koinon.agent.v1alpha1.SetAgentKeepWarmResponse` | - | SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts when found stopped), or withdraws the request. A request, not a promise: the operator caps the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a setting of the agent, not a new version. Audited, with the old and the new value. Fails with FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01). |
 | SetAgentModel | `koinon.agent.v1alpha1.SetAgentModelRequest` | `koinon.agent.v1alpha1.SetAgentModelResponse` | - | SetAgentModel sets the agent's model, or clears it with "default". It is a setting of the agent, not a new version: it applies to the agent's next run. The model must be one the org serves and has a price for. Audited, with the old and the new value. Admins and owners only. |
 | SetAgentThinking | `koinon.agent.v1alpha1.SetAgentThinkingRequest` | `koinon.agent.v1alpha1.SetAgentThinkingResponse` | - | SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting with an empty value so the version's value (a template's spec.model.thinking) and then the default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old and the new value. Admins and owners only. |
 | SetAgentTriggers | `koinon.agent.v1alpha1.SetAgentTriggersRequest` | `koinon.agent.v1alpha1.SetAgentTriggersResponse` | - | SetAgentTriggers proposes a new version with the given triggers (everything else carried over from the latest version). The triggers fire nothing until ActivateAgent activates that version; an active agent keeps running its active version meanwhile. Audited. Admins and owners only. |
@@ -75,6 +76,8 @@ Agent is an agent and the definition it runs.
 | ephemeral | 22 | `bool` | singular |  | The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when the task ends (ADR 0065 decision 13c). |
 | sandbox_archived_at | 23 | `google.protobuf.Timestamp` | singular |  | Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in its last checkpoint and the next run restores it into a fresh sandbox. |
 | model_setting | 24 | `string` | singular |  | The agent's own model setting (SetAgentModel); empty when it follows the version and the org default. When set it wins over `model`, which is the latest version's. |
+| keep_warm | 25 | `bool` | singular |  | Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049 amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org. |
+| keep_warm_granted | 26 | `bool` | singular |  | Whether the reconciler granted the request under the operator's per-org cap (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new request reads false until the reconciler's next pass. |
 
 ### Message ArchiveAgentRequest
 
@@ -224,6 +227,24 @@ ServedModel is a model the org serves and has a price for.
 | --- | --- | --- | --- | --- | --- |
 | name | 1 | `string` | singular |  |  |
 | provider | 2 | `string` | singular |  |  |
+
+### Message SetAgentKeepWarmRequest
+
+SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| keep_warm | 3 | `bool` | singular |  |  |
+
+### Message SetAgentKeepWarmResponse
+
+SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
 
 ### Message SetAgentModelRequest
 

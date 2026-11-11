@@ -1560,6 +1560,7 @@ type Agent struct {
 	Model           pgtype.Text
 	Thinking        pgtype.Text
 	KeepWarm        bool
+	KeepWarmGranted bool
 }
 
 type AgentBudget struct {

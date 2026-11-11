@@ -60,6 +60,14 @@ service AgentService {
   // and the new value. Admins and owners only.
   rpc SetAgentThinking(SetAgentThinkingRequest) returns (SetAgentThinkingResponse);
 
+  // SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts
+  // when found stopped), or withdraws the request. A request, not a promise: the operator caps
+  // the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests
+  // oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a
+  // setting of the agent, not a new version. Audited, with the old and the new value. Fails with
+  // FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
+  rpc SetAgentKeepWarm(SetAgentKeepWarmRequest) returns (SetAgentKeepWarmResponse);
+
   // RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
   // at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
   // Admins and owners only.
@@ -119,6 +127,13 @@ message Agent {
   // The agent's own model setting (SetAgentModel); empty when it follows the version and the org
   // default. When set it wins over `model`, which is the latest version's.
   string model_setting = 24;
+  // Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049
+  // amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org.
+  bool keep_warm = 25;
+  // Whether the reconciler granted the request under the operator's per-org cap
+  // (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
+  // request reads false until the reconciler's next pass.
+  bool keep_warm_granted = 26;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -329,6 +344,18 @@ message SetAgentThinkingRequest {
 // SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
 message SetAgentThinkingResponse {
   GetAgentModelResponse model = 1;
+}
+
+// SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
+message SetAgentKeepWarmRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  bool keep_warm = 3;
+}
+
+// SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
+message SetAgentKeepWarmResponse {
+  Agent agent = 1;
 }
 
 // RunAgentTriggerRequest names the trigger to fire.

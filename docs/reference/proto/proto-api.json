@@ -87,6 +87,15 @@
               "deprecated": false
             },
             {
+              "name": "SetAgentKeepWarm",
+              "description": "SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts\nwhen found stopped), or withdraws the request. A request, not a promise: the operator caps\nthe keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests\noldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a\nsetting of the agent, not a new version. Audited, with the old and the new value. Fails with\nFailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).",
+              "requestType": "koinon.agent.v1alpha1.SetAgentKeepWarmRequest",
+              "responseType": "koinon.agent.v1alpha1.SetAgentKeepWarmResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentModel",
               "description": "SetAgentModel sets the agent's model, or clears it with \"default\". It is a setting of the\nagent, not a new version: it applies to the agent's next run. The model must be one the org\nserves and has a price for. Audited, with the old and the new value. Admins and owners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentModelRequest",
@@ -411,6 +420,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The agent's own model setting (SetAgentModel); empty when it follows the version and the org\ndefault. When set it wins over `model`, which is the latest version's."
+            },
+            {
+              "name": "keep_warm",
+              "number": 25,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049\namendment 2026-11-01). A request: the operator caps how many the reconciler grants per org."
+            },
+            {
+              "name": "keep_warm_granted",
+              "number": 26,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whether the reconciler granted the request under the operator's per-org cap\n(reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new\nrequest reads false until the reconciler's next pass."
             }
           ]
         },
@@ -875,6 +902,60 @@
               "name": "provider",
               "number": 2,
               "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentKeepWarmRequest",
+          "fullName": "koinon.agent.v1alpha1.SetAgentKeepWarmRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "keep_warm",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentKeepWarmResponse",
+          "fullName": "koinon.agent.v1alpha1.SetAgentKeepWarmResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentKeepWarmResponse holds the agent as GetAgent would return it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
               "label": "singular",
               "oneof": "",
               "deprecated": false,

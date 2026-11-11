@@ -507,6 +507,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
 		warm := 0
+		granted := map[pgtype.UUID]bool{}
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
@@ -525,9 +526,15 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
 				// The list is oldest first, so the cap keeps the same agents from pass to pass.
 				w.keepWarm = true
+				granted[a.ID] = true
 				warm++
 			}
 			items = append(items, w)
+		}
+		if err := r.recordKeepWarmGrants(ctx, org.ID, agents, granted); err != nil {
+			// The grant itself holds; only the API's view of it is late. The next pass retries.
+			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+			errs = append(errs, err)
 		}
 		if err := r.claimFlavorProfiles(ctx, org, agents); err != nil {
 			if errors.Is(err, errAbortPass) {
@@ -1544,6 +1551,33 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 // (the OpenShell backend with an owner).
 type profileClaimer interface {
 	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
+}
+
+// recordKeepWarmGrants writes the pass's keep-warm decision to agents.keep_warm_granted, so the API and
+// the agent page can say whether the operator's cap granted an admin's request (#100). Only the agents
+// whose recorded decision differs are written.
+func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, agents []store.Agent, granted map[pgtype.UUID]bool) error {
+	var grant, revoke []pgtype.UUID
+	for _, a := range agents {
+		switch {
+		case granted[a.ID] && !a.KeepWarmGranted:
+			grant = append(grant, a.ID)
+		case !granted[a.ID] && a.KeepWarmGranted:
+			revoke = append(revoke, a.ID)
+		}
+	}
+	for _, c := range []struct {
+		ids     []pgtype.UUID
+		granted bool
+	}{{grant, true}, {revoke, false}} {
+		if len(c.ids) == 0 {
+			continue
+		}
+		if err := r.q.SetAgentsKeepWarmGranted(ctx, store.SetAgentsKeepWarmGrantedParams{OrgID: org, Ids: c.ids, Granted: c.granted}); err != nil {
+			return fmt.Errorf("reconciler: record keep-warm grants of org %s: %w", org.String(), err)
+		}
+	}
+	return nil
 }
 
 // claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)

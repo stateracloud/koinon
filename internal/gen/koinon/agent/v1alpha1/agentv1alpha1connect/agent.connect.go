@@ -47,6 +47,9 @@ const (
 	// AgentServiceSetAgentThinkingProcedure is the procedure name of the AgentService's
 	// SetAgentThinking RPC.
 	AgentServiceSetAgentThinkingProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentThinking"
+	// AgentServiceSetAgentKeepWarmProcedure is the procedure name of the AgentService's
+	// SetAgentKeepWarm RPC.
+	AgentServiceSetAgentKeepWarmProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentKeepWarm"
 	// AgentServiceRunAgentTriggerProcedure is the procedure name of the AgentService's RunAgentTrigger
 	// RPC.
 	AgentServiceRunAgentTriggerProcedure = "/koinon.agent.v1alpha1.AgentService/RunAgentTrigger"
@@ -121,6 +124,13 @@ var (
 			Procedure:  AgentServiceSetAgentThinkingProcedure,
 		}
 	})
+	agentServiceSetAgentKeepWarmSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("SetAgentKeepWarm"),
+			Procedure:  AgentServiceSetAgentKeepWarmProcedure,
+		}
+	})
 	agentServiceRunAgentTriggerSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -172,6 +182,13 @@ type AgentServiceClient interface {
 	// next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
 	// and the new value. Admins and owners only.
 	SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error)
+	// SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts
+	// when found stopped), or withdraws the request. A request, not a promise: the operator caps
+	// the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests
+	// oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a
+	// setting of the agent, not a new version. Audited, with the old and the new value. Fails with
+	// FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
+	SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -222,6 +239,13 @@ type AgentServiceHandler interface {
 	// next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
 	// and the new value. Admins and owners only.
 	SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error)
+	// SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts
+	// when found stopped), or withdraws the request. A request, not a promise: the operator caps
+	// the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests
+	// oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a
+	// setting of the agent, not a new version. Audited, with the old and the new value. Fails with
+	// FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
+	SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -245,6 +269,7 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceGetAgentModelSpec(), Handler: adapter.getAgentModel},
 		connect.Method{Spec: agentServiceSetAgentModelSpec(), Handler: adapter.setAgentModel},
 		connect.Method{Spec: agentServiceSetAgentThinkingSpec(), Handler: adapter.setAgentThinking},
+		connect.Method{Spec: agentServiceSetAgentKeepWarmSpec(), Handler: adapter.setAgentKeepWarm},
 		connect.Method{Spec: agentServiceRunAgentTriggerSpec(), Handler: adapter.runAgentTrigger},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
 	)
@@ -287,6 +312,10 @@ func (UnimplementedAgentServiceHandler) SetAgentModel(context.Context, *v1alpha1
 
 func (UnimplementedAgentServiceHandler) SetAgentThinking(context.Context, *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentThinking is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm is not implemented")
 }
 
 func (UnimplementedAgentServiceHandler) RunAgentTrigger(context.Context, *v1alpha1.RunAgentTriggerRequest) (*v1alpha1.RunAgentTriggerResponse, error) {
@@ -368,6 +397,14 @@ func (c *agentServiceClient) SetAgentModel(ctx context.Context, req *v1alpha1.Se
 func (c *agentServiceClient) SetAgentThinking(ctx context.Context, req *v1alpha1.SetAgentThinkingRequest) (*v1alpha1.SetAgentThinkingResponse, error) {
 	var res v1alpha1.SetAgentThinkingResponse
 	if err := c.client.CallUnary(ctx, agentServiceSetAgentThinkingSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) SetAgentKeepWarm(ctx context.Context, req *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error) {
+	var res v1alpha1.SetAgentKeepWarmResponse
+	if err := c.client.CallUnary(ctx, agentServiceSetAgentKeepWarmSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -493,6 +530,18 @@ func (h agentServiceHandler) setAgentThinking(ctx context.Context, _ connect.Spe
 		return err
 	}
 	res, err := h.svc.SetAgentThinking(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) setAgentKeepWarm(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentKeepWarmRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentKeepWarm(ctx, &req)
 	if err != nil {
 		return err
 	}
