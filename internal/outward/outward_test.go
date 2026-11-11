@@ -4,6 +4,7 @@ package outward_test
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -362,6 +363,46 @@ var _ = Describe("the outward switch", func() {
 			st, err := svc.Get(ctx, outward.ModelProvider, org, id)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(st.Disabled).To(BeFalse())
+		})
+
+		It("never lets a Secret's release undo an admin disable that races it", func(ctx SpecContext) {
+			for i := 0; i < 25; i++ {
+				id := mcp(ctx, fmt.Sprintf("race-%d", i), "race-secret")
+				_, err := svc.SyncDeclared(ctx, org, outward.MCPServer, "race-secret", true)
+				Expect(err).NotTo(HaveOccurred())
+				errs := make(chan error, 2)
+				go func() {
+					_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+					errs <- err
+				}()
+				go func() {
+					_, err := svc.SyncDeclared(ctx, org, outward.MCPServer, "race-secret", false)
+					errs <- err
+				}()
+				Expect(<-errs).NotTo(HaveOccurred())
+				Expect(<-errs).NotTo(HaveOccurred())
+				st, err := svc.Get(ctx, outward.MCPServer, org, id)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(st.Disabled).To(BeTrue(), "iteration %d", i)
+				Expect(st.By).To(Equal(actor.String()), "iteration %d", i)
+				var under pgtype.Text
+				Expect(pool.QueryRow(ctx, `SELECT admin_disabled_under_by FROM mcp_servers WHERE id = $1`, id).Scan(&under)).To(Succeed())
+				Expect(under.Valid).To(BeFalse(), "iteration %d", i)
+				_, err = pool.Exec(ctx, `DELETE FROM mcp_servers WHERE id = $1`, id)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+
+		It("audits an admin's disable under the Secret once, with the admin as owner", func(ctx SpecContext) {
+			id := mcp(ctx, "wiki", "wiki-secret")
+			_, err := svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			before := len(events(ctx, outward.ActionDisable))
+			_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(events(ctx, outward.ActionDisable)).To(HaveLen(before + 1))
 		})
 
 		It("leaves an admin's disable when the Secret does not say disabled", func(ctx SpecContext) {

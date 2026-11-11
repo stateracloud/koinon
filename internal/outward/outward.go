@@ -232,12 +232,19 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 		if disabled && cur.Disabled && cur.Declared() && !strings.HasPrefix(actor.String(), DeclaredActorPrefix) {
 			// An admin disables an item the Secret already holds disabled: remember the admin under the Secret,
 			// so the item stays off, owned by the admin, when the Secret drops the field.
+			var underBy, underNote pgtype.Text
+			if err = tx.QueryRow(ctx, fmt.Sprintf(`SELECT admin_disabled_under_by, admin_disabled_under_note FROM %s WHERE %s`, t.name, w), args...).Scan(&underBy, &underNote); err != nil {
+				return err
+			}
+			out = cur
+			if underBy.String == actor.String() && underNote.String == note {
+				return nil // nothing changes, nothing is audited
+			}
 			if _, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_under_by = $%d, admin_disabled_under_note = NULLIF($%d, '') WHERE %s`,
 				t.name, len(args)+1, len(args)+2, w), append(args, actor.String(), note)...); err != nil {
 				return err
 			}
-			out = cur
-			s.audit(b, org, actor, kind, id, cur, out)
+			s.audit(b, org, actor, kind, id, cur, State{Disabled: true, Name: cur.Name, By: actor.String(), Note: note})
 			return nil
 		}
 		if cur.Disabled == disabled {
@@ -284,6 +291,9 @@ func auditChange(b audit.Batch, org pgtype.UUID, actor audit.Actor, kind Kind, i
 		if st.Note != "" {
 			m["note"] = st.Note
 		}
+		if st.By != "" {
+			m["by"] = st.By
+		}
 		return m
 	}
 	if kind.Platform() {
@@ -313,55 +323,31 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 			changed = n
 			return err // DisableDeclared wakes the reconciler
 		}
-		// An admin's disable that the Secret claimed comes back to the admin; the item stays disabled.
-		back, err := tx.Query(ctx, fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_by = admin_disabled_under_by, admin_disabled_note = admin_disabled_under_note,
-			admin_disabled_under_by = NULL, admin_disabled_under_note = NULL
-			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 AND admin_disabled_under_by IS NOT NULL
-			RETURNING id, %[2]s::text, admin_disabled_by, admin_disabled_note`, t.name, t.nameExpr()), org, secretName, actor.String())
-		if err != nil {
-			return err
-		}
-		type handed struct {
-			id       pgtype.UUID
-			name, by string
-			note     pgtype.Text
-		}
-		var handedBack []handed
-		for back.Next() {
-			var h handed
-			if err := back.Scan(&h.id, &h.name, &h.by, &h.note); err != nil {
-				back.Close()
-				return err
-			}
-			handedBack = append(handedBack, h)
-		}
-		back.Close()
-		if err := back.Err(); err != nil {
-			return err
-		}
-		for _, h := range handedBack {
-			s.audit(b, org, actor, kind, h.id, State{Disabled: true, Name: h.name, By: actor.String(), Note: declaredNote},
-				State{Disabled: true, Name: h.name, By: h.by, Note: h.note.String})
-		}
-		if len(handedBack) > 0 {
-			if err := notifyProvider(ctx, tx, kind, org); err != nil {
-				return err
-			}
-		}
-		q := fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL
-			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 RETURNING id, %[2]s::text`, t.name, t.nameExpr())
+		// One statement per row, under the row lock: an admin's disable that the Secret claimed comes back to the
+		// admin (the item stays disabled); any other disable of the Secret is lifted. The lock makes a concurrent
+		// admin disable either come first (and be seen here) or wait until the release is done.
+		q := fmt.Sprintf(`WITH old AS (
+				SELECT id, admin_disabled_under_by FROM %[1]s
+				WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 FOR UPDATE)
+			UPDATE %[1]s AS t SET
+				admin_disabled_at = CASE WHEN old.admin_disabled_under_by IS NULL THEN NULL ELSE t.admin_disabled_at END,
+				admin_disabled_by = old.admin_disabled_under_by, admin_disabled_note = t.admin_disabled_under_note,
+				admin_disabled_under_by = NULL, admin_disabled_under_note = NULL
+			FROM old WHERE t.org_id = $1 AND t.id = old.id
+			RETURNING t.id, %[2]s::text, t.admin_disabled_by, t.admin_disabled_note`, t.name, t.nameExpr())
 		rows, err := tx.Query(ctx, q, org, secretName, actor.String())
 		if err != nil {
 			return err
 		}
 		type hit struct {
-			id   pgtype.UUID
-			name string
+			id       pgtype.UUID
+			name     string
+			by, note pgtype.Text
 		}
 		var hits []hit
 		for rows.Next() {
 			var h hit
-			if err := rows.Scan(&h.id, &h.name); err != nil {
+			if err := rows.Scan(&h.id, &h.name, &h.by, &h.note); err != nil {
 				rows.Close()
 				return err
 			}
@@ -372,7 +358,13 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 			return err
 		}
 		for _, h := range hits {
-			s.audit(b, org, actor, kind, h.id, State{Disabled: true, Name: h.name, By: actor.String()}, State{Name: h.name})
+			before := State{Disabled: true, Name: h.name, By: actor.String()}
+			if !h.by.Valid {
+				s.audit(b, org, actor, kind, h.id, before, State{Name: h.name})
+				continue
+			}
+			before.Note = declaredNote
+			s.audit(b, org, actor, kind, h.id, before, State{Disabled: true, Name: h.name, By: h.by.String, Note: h.note.String})
 		}
 		changed = len(hits)
 		return notifyProvider(ctx, tx, kind, org)
