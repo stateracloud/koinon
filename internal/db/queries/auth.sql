@@ -147,9 +147,18 @@ WHERE user_id = @user_id;
 
 -- name: CreateSession :one
 INSERT INTO sessions (token_hash, user_id, auth_method, created_at, last_seen_at,
-                      idle_expires_at, expires_at)
-VALUES (@token_hash, @user_id, @auth_method, @now, @now, @idle_expires_at, @expires_at)
+                      idle_expires_at, expires_at, install_mark)
+VALUES (@token_hash, @user_id, @auth_method, @now, @now, @idle_expires_at, @expires_at, sqlc.narg(install_mark))
 RETURNING *;
+
+-- name: GetValidSession :one
+-- The session if it is still valid at @now, without touching it: the install binding check runs
+-- before the touch, so a refused session's idle deadline does not move (ADR 0110).
+SELECT * FROM sessions
+WHERE token_hash = @token_hash
+  AND revoked_at IS NULL
+  AND expires_at > @now::timestamptz
+  AND idle_expires_at > @now::timestamptz;
 
 -- name: TouchSession :one
 -- Returns the session if it is still valid at @now and extends its idle

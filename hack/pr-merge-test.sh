@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/pr-merge.sh offline: `gh` is a stub on PATH answering from files in $FAKE_DIR, and the
-# helper scripts (pr-wait, threads, review-gate) are stubs that record their calls. The stub answers `gh api`
+# helper scripts (pr-wait, threads) are stubs that record their calls. The stub answers `gh api`
 # with API-shaped JSON (what GitHub prints; a recorded real answer lives in hack/testdata/pr-verdict/) and applies the
 # call's own `--jq` filter to it, so the script's parsing is tested, not a pre-chewed list.
 
@@ -17,7 +17,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
 export PR_MERGE_WAIT="$tmp/bin/wait"
-export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 PR_MERGE_REVIEW_GATE="$tmp/bin/review" GH_REPO=o/r
+export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -54,18 +54,16 @@ esac
 SH
 cat >"$tmp/bin/git" <<'SH'
 #!/usr/bin/env bash
-# ls-remote answers from $FAKE_DIR/remote; the base's review gate (fetch, cat-file, show) from $FAKE_DIR/base-gate.
+# ls-remote answers from $FAKE_DIR/remote; fetch and show answer the base's e2e rule files.
 case $1 in
 ls-remote)
   [ -f "$FAKE_DIR/remote" ] || exit 2
   printf '%s\t%s\n' "$(cat "$FAKE_DIR/remote")" "$3" ;;
 fetch) echo "git $*" >>"$FAKE_DIR/calls"; exit "${FETCH_RC:-0}" ;;
-cat-file) [ -f "$FAKE_DIR/base-gate" ] ;;
 show)
   echo "git $*" >>"$FAKE_DIR/calls"
+  [ -z "${SHOW_FAIL:-}" ] || case $2 in *:"$SHOW_FAIL") exit 128 ;; esac
   case $2 in
-  *:hack/review-gate.sh) cat "$FAKE_DIR/base-gate" ;;
-  *:hack/claim.sh) [ -z "${SHOW_FAILS_CLAIM:-}" ] || exit 128; printf '#!/usr/bin/env bash\n' ;;
   *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
   *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
   *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
@@ -85,12 +83,6 @@ cat >"$tmp/bin/threads" <<'SH'
 echo "threads $*" >>"$FAKE_DIR/calls"
 [ "${THREADS_RC:-0}" != 7 ] || echo "UNRESOLVED hack/x.sh:42 deepsource-io id=PRRT_2"
 exit "${THREADS_RC:-0}"
-SH
-cat >"$tmp/bin/review" <<'SH'
-#!/usr/bin/env bash
-echo "review EVENT=$EVENT PR=$PR SHA=$SHA GH_REPO=$GH_REPO" >>"$FAKE_DIR/calls"
-[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::pull request #$PR touches sensitive paths and its head has no review-verdict status"
-exit "${REVIEW_RC:-0}"
 SH
 cat >"$tmp/bin/needs" <<'SH'
 #!/usr/bin/env bash
@@ -273,7 +265,7 @@ grep -q 'Remove the PR from the queue' <<<"$out" || { echo "FAIL: --e2e says how
 setup false "$green"
 run 7 --e2e --admin
 check "--e2e with --admin is a usage error" 64 nomerge
-# --break-glass: needs a reason and --approved-at, runs the review gate, merges with --admin, opens the issue
+# --break-glass: needs a reason and --approved-at, merges with --admin, opens the issue
 setup false "$green"
 run 7 --break-glass "queue down" 
 check "--break-glass without --approved-at is a usage error (64)" 64 nomerge
@@ -285,14 +277,14 @@ printf 'hack/x.sh\n' >"$FAKE_DIR/files"
 run 7 --break-glass "GitHub merge queue outage" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass merges a PR with no .github/ path" 0 merge
 grep -q -- '--merge --admin --match-head-commit abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: break glass merges with --admin" >&2; fail=1; }
-grep -q '^review EVENT=pull_request PR=7' "$FAKE_DIR/calls" || { echo "FAIL: break glass runs the review gate" >&2; fail=1; }
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: break glass ran a review gate" >&2; fail=1; }
 grep -q '^gh issue create --title break-glass: PR 7 merged without the merge queue (abc1234)' "$FAKE_DIR/calls" || { echo "FAIL: break glass opens the issue" >&2; fail=1; }
 grep -q -- ' --label break-glass$' "$FAKE_DIR/calls" || { echo "FAIL: ... labelled break-glass" >&2; fail=1; }
 grep -q 'GitHub merge queue outage' "$FAKE_DIR/calls" || { echo "FAIL: the reason is recorded" >&2; fail=1; }
 grep -q 'BREAK GLASS: GitHub merge queue outage' "$FAKE_DIR/calls" || { echo "FAIL: the PR comment says break glass" >&2; fail=1; }
 setup false "$green"
-REVIEW_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
-check "--break-glass still needs the review verdict (9)" 9 nomerge
+run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
+check "--break-glass needs no review verdict" 0 merge
 setup false "$green"
 WAIT_RC=1 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass: a failed pr-wait --checks is a warning, not a stop" 0 merge
@@ -494,11 +486,41 @@ v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, disp
 
 # #133, ADR 0105: e2e-kind is judged like any workflow. A dispatched run (81) re-run to green does not outvote the
 # newer PR run (82): the newest run of the workflow decides, so its red `e2e result` is the verdict.
+# (#399 comment fix: the green row is in run 81, not 82.)
 e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}' "$1" "$2" "$2" "$3"; }
 e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
 e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
 v=$(prv_judge "$e2e_rows" "$e2e_runs" false "e2e result")
 [ "$v" = "$(printf 'e2e result\tfailure\t82')" ] || { echo "FAIL: the newest e2e-kind run decides, an older run's re-run green does not: $v" >&2; fail=1; }
+
+# #399: within one run the newest finished row decides, cancelled included (an older green must not win).
+setup false "$(r go 2026-11-01T10:00:00Z success 72)
+$(r go 2026-11-01T11:00:00Z cancelled 72)
+$(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
+wfruns "$ci_old" "$ci_new"
+run 7 --admin
+check "#399: a newer cancelled row in the same run beats an older green" 1 nomerge
+grep -q 'NOT GREEN go (cancelled, run 72)' <<<"$out" || { echo "FAIL: newest cancelled decides: $out" >&2; fail=1; }
+
+# #399: prv_empty only covers workflows that carry a required context (advisory startup_failure is ignored).
+setup false "$(r go 2026-11-01T10:00:00Z success 72)
+$(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
+wfruns "$ci_new" "$(wfrun 90 mirror.yml mirror 2026-11-01T10:06:00Z 1 completed startup_failure)"
+run 7 --admin
+check "#399: an advisory workflow's empty run does not block the merge" 0 merge
+
+# #399: a commit status whose target_url contains /runs/<id> is not dropped by the run filter.
+rows=$(jq -nc '[
+  {"name":"go","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:05:00Z","completedAt":"2026-11-01T10:05:00Z","detailsUrl":"https://github.com/o/r/actions/runs/72/job/1","workflowName":"ci"},
+  {"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:05:00Z","completedAt":"2026-11-01T10:05:00Z","detailsUrl":"https://github.com/o/r/actions/runs/72/job/2","workflowName":"ci"},
+  {"name":"dco","state":"SUCCESS","startedAt":"2026-11-01T10:00:00Z","targetUrl":"https://github.com/o/r/actions/runs/71/job/1"}
+]')
+v=$(prv_judge "$rows" "[$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z),$(wfrun 72 ci.yml ci 2026-11-01T10:05:00Z)]" false go "quick checks" dco)
+if [ "$v" = "$(printf 'go\tsuccess\t72\nquick checks\tsuccess\t72\ndco\tsuccess\t71')" ]; then
+  echo "ok: #399 status with /runs/id is kept by the run filter"
+else
+  echo "FAIL: #399 status with /runs/id is kept: $v" >&2; fail=1
+fi
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
 # review (required_reviewers): it is NOT in the queue (2026-11-07 printed "added to the merge queue" for it).
@@ -521,67 +543,23 @@ run 7
 grep -q 'armed but' <<<"$out" && { echo "FAIL: no auto-merge request, must not say armed: $out" >&2; fail=1; }
 grep -q 'auto-merge is NOT armed.*review is required' <<<"$out" || { echo "FAIL: says not armed, review required: $out" >&2; fail=1; }
 
-# ADR 0103: --admin bypasses the ruleset's `review` check, so pr-merge runs the gate on the head itself.
+# ADR 0103 is superseded (#546): --admin and --break-glass never run a review gate.
 setup false "$green"
-REVIEW_RC=1 run 7 --admin
-check "--admin on a sensitive PR without a review verdict is refused" 9 nomerge
-grep -q 'hack/review-verdict.sh 7 ready <reviewer> abc1234def' <<<"$out" || { echo "FAIL: the refusal names hack/review-verdict.sh: $out" >&2; fail=1; }
-grep -q 'has no review-verdict status' <<<"$out" || { echo "FAIL: the gate's reason is shown: $out" >&2; fail=1; }
-grep -q '^review EVENT=pull_request PR=7 SHA=abc1234def GH_REPO=o/r$' "$FAKE_DIR/calls" || { echo "FAIL: the gate runs on the PR head" >&2; fail=1; }
+run 7 --admin
+check "--admin of a sensitive PR with no review verdict proceeds" 0 merge
+grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: a review gate ran under --admin" >&2; fail=1; }
+grep -q 'review-gate\|review-verdict' <<<"$out" && { echo "FAIL: the output mentions the review gate: $out" >&2; fail=1; }
+# --admin still decides the e2e from the base's rule: fetch the base, read the rule from it (fail closed).
 setup false "$green"
-REVIEW_RC=0 run 7 --admin
-check "--admin with a review verdict (or no sensitive path) merges" 0 merge
-setup false "$green"
-REVIEW_RC=1 run 7
-check "without --admin the ruleset judges the review check: the gate is not run here" 0 merge
-grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran without --admin" >&2; fail=1; }
-
-# The gate comes from the base (origin/main), not this checkout; PR_MERGE_REVIEW_GATE needs PR_MERGE_TEST=1.
-base_gate() { # the base's gate as `git show` prints it: records where it runs, checks its siblings, exits REVIEW_RC
-  cat >"$FAKE_DIR/base-gate" <<'SH'
-#!/usr/bin/env bash
-d=$(cd "$(dirname "$0")/.." && pwd)
-[ -x "$d/hack/claim.sh" ] && [ -f "$d/.github/CODEOWNERS" ] || { echo "base gate: siblings missing"; exit 3; }
-echo "basegate PR=$PR SHA=$SHA" >>"$FAKE_DIR/calls"
-echo "baseenv CLAIM=${CLAIM-unset} CODEOWNERS=${CODEOWNERS-unset} KOINON_CLAIM_CODEOWNERS=${KOINON_CLAIM_CODEOWNERS-unset}" >>"$FAKE_DIR/calls"
-[ "${REVIEW_RC:-0}" = 0 ] || echo "::error::base gate: no review-verdict"
-exit "${REVIEW_RC:-0}"
-SH
-}
-setup false "$green"; base_gate
-REVIEW_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
-check "--admin runs the base's gate (refuses)" 9 nomerge
-grep -q '^git fetch -q --no-tags origin main$' "$FAKE_DIR/calls" || { echo "FAIL: the base is fetched" >&2; fail=1; }
-grep -q '^git show refs/remotes/origin/main:hack/review-gate.sh$' "$FAKE_DIR/calls" || { echo "FAIL: the gate is read from origin/main" >&2; fail=1; }
-grep -q '^basegate PR=7 SHA=abc1234def$' "$FAKE_DIR/calls" || { echo "FAIL: the base's gate ran: $out" >&2; fail=1; }
-grep -q 'base gate: no review-verdict' <<<"$out" || { echo "FAIL: the base gate's reason is shown: $out" >&2; fail=1; }
-grep -q '^review ' "$FAKE_DIR/calls" && { echo "FAIL: the hook gate ran instead of the base's" >&2; fail=1; }
-setup false "$green"; base_gate
-REVIEW_RC=0 PR_MERGE_REVIEW_GATE="" run 7 --admin
-check "--admin with the base's gate passing merges" 0 merge
-setup false "$green"; base_gate
-CLAIM=/nonexistent/claim.sh CODEOWNERS=/nonexistent/CODEOWNERS KOINON_CLAIM_CODEOWNERS=/nonexistent/CO REVIEW_RC=0 PR_MERGE_REVIEW_GATE="" run 7 --admin
-check "the caller's CLAIM, CODEOWNERS and KOINON_CLAIM_CODEOWNERS do not reach the base's gate" 0 merge
-grep -q '^baseenv CLAIM=unset CODEOWNERS=unset KOINON_CLAIM_CODEOWNERS=unset$' "$FAKE_DIR/calls" || { echo "FAIL: the base gate saw the caller's file variables" >&2; fail=1; }
-setup false "$green"; base_gate
-REVIEW_RC=0 PR_MERGE_TEST="" PR_MERGE_REVIEW_GATE=true run 7 --admin
-check "PR_MERGE_REVIEW_GATE without PR_MERGE_TEST=1 is ignored" 0 merge
-grep -q '^basegate ' "$FAKE_DIR/calls" || { echo "FAIL: the hook replaced the gate without PR_MERGE_TEST=1" >&2; fail=1; }
-setup false "$green"
-PR_MERGE_REVIEW_GATE="" run 7 --admin
-check "no gate on the base: the local copy runs (and fails closed on the stub)" 9 nomerge
-grep -q 'origin/main has no hack/review-gate.sh yet.*using the local copy' <<<"$out" || { echo "FAIL: says it uses the local copy: $out" >&2; fail=1; }
-grep -q '::error::' <<<"$out" || { echo "FAIL: the local gate ran: $out" >&2; fail=1; }
-setup false "$green"; base_gate
-FETCH_RC=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
+FETCH_RC=1 PR_MERGE_NEEDS_E2E="" run 7 --admin
 check "a failed base fetch is a tool failure" 2 nomerge
-setup false "$green"; base_gate
-SHOW_FAILS_CLAIM=1 PR_MERGE_REVIEW_GATE="" run 7 --admin
-check "a base file that git show cannot read is a tool failure" 2 nomerge
-grep -q 'cannot read hack/claim.sh from origin/main' <<<"$out" || { echo "FAIL: names the unreadable base file: $out" >&2; fail=1; }
-grep -q '^basegate ' "$FAKE_DIR/calls" && { echo "FAIL: the gate ran with a missing base file" >&2; fail=1; }
 setup false "$green"
-GH_REPO="" run 7 --admin
-check "an unreadable repository name is a tool failure" 2 nomerge
+SHOW_FAIL=hack/paths.rules PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "a base rule file git show cannot read is a tool failure" 2 nomerge
+setup false "$green"
+PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "the base rule path: fetch ok, rule read from the base, e2e not needed: merges" 0 merge
+grep -q '^git fetch .*origin main' "$FAKE_DIR/calls" || { echo "FAIL: the base was not fetched" >&2; fail=1; }
+grep -q '^git show refs/remotes/origin/main:hack/needs-e2e.sh' "$FAKE_DIR/calls" || { echo "FAIL: needs-e2e.sh not shown from the base" >&2; fail=1; }
 
 exit "$fail"

@@ -16,7 +16,7 @@ const listCostReportProviders = `-- name: ListCostReportProviders :many
 SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope,
        cost_reconcile_since::timestamptz AS cost_reconcile_since
 FROM providers
-WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL
+WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL AND admin_disabled_at IS NULL
   AND type = ANY($1::text[])
 ORDER BY org_id, id
 `
@@ -162,7 +162,7 @@ SET cost_api_key = CASE WHEN $1::boolean THEN $2 ELSE cost_api_key END,
     cost_api_key_lost_at = CASE WHEN $1::boolean THEN NULL ELSE cost_api_key_lost_at END,
     cost_scope = $3
 WHERE org_id = $4 AND id = $5
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type SetProviderCostKeyParams struct {
@@ -206,6 +206,11 @@ func (q *Queries) SetProviderCostKey(ctx context.Context, arg SetProviderCostKey
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
 		&i.CostReconcileSince,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }

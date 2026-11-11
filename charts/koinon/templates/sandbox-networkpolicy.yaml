@@ -1,0 +1,144 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15, ADR 0045).
+
+Standard networking.k8s.io/v1 only (no CNI-specific resources). On by default
+(sandboxNetworkPolicy.enabled). The chart does not install NetworkPolicies into
+workspace namespaces itself (they are created later by OpenShell): the reconciler
+applies one named <namespace>-<fullname>-sandbox-default-deny in each workspace
+namespace of openshell.gatewayId, with an empty podSelector and policyTypes
+[Ingress, Egress] and no allow rules. OpenShell's own workload and supervisor
+policies are additive with it (NVIDIA/OpenShell isolation.rs).
+
+Cluster-scoped objects, all prefixed <namespace>-<fullname> like the sandbox policies:
+- a ClusterRole that lets the reconciler create, get, update and patch NetworkPolicies;
+- a ClusterRoleBinding of that role to the reconciler;
+- a native ValidatingAdmissionPolicy (never Kyverno) that bounds the grant: the
+  reconciler may write a NetworkPolicy only in a sandbox namespace of this gateway,
+  with the fixed name and the default-deny shape. Nobody else may write that name
+  in a sandbox namespace. failurePolicy Fail.
+
+sandboxNetworkPolicy.enabled=false renders none of it and the reconciler applies nothing.
+sandboxPolicy.enabled and validationActions including Deny are required when this is on
+(koinon.sandboxNetworkPolicy checks in _helpers.tpl): without Deny the ClusterRole grant
+is only Warn/Audit-fenced.
+*/ -}}
+{{- if .Values.sandboxNetworkPolicy.enabled }}
+{{- $name := include "koinon.sandboxDefaultDeny" . }}
+{{- $writer := printf "%s-writer" $name }}
+{{- $policy := printf "%s-binding" $name }}
+{{- $sa := include "koinon.componentName" (list . "reconciler") }}
+{{- $user := printf "system:serviceaccount:%s:%s" .Release.Namespace $sa }}
+{{- $gatewayID := .Values.openshell.gatewayId }}
+{{- $sel := .Values.sandboxPolicy.namespaceSelector }}
+{{- $conds := list }}
+{{- range $k, $v := ($sel.matchLabels | default dict) }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
+{{- end }}
+{{- range ($sel.matchExpressions | default list) }}
+{{- $k := .key | quote }}
+{{- if eq .operator "In" }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] in %s)" $k $k (.values | toJson)) }}
+{{- else if eq .operator "NotIn" }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels) || !(variables.labels[%s] in %s))" $k $k (.values | toJson)) }}
+{{- else if eq .operator "Exists" }}
+{{- $conds = append $conds (printf "(%s in variables.labels)" $k) }}
+{{- else if eq .operator "DoesNotExist" }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels))" $k) }}
+{{- else }}
+{{- fail (printf "sandboxPolicy.namespaceSelector.matchExpressions: operator %q is not supported by the sandbox NetworkPolicy writer policy (In, NotIn, Exists, DoesNotExist)" .operator) }}
+{{- end }}
+{{- end }}
+{{- if not $conds }}
+{{- fail "sandboxPolicy.namespaceSelector selects nothing: the sandbox NetworkPolicy writer policy needs it to say which namespaces are sandbox namespaces" }}
+{{- end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $writer }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $writer }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $writer }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [networking.k8s.io]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [networkpolicies]
+  matchConditions:
+    - name: reconciler-or-default-deny
+      expression: >-
+        request.userInfo.username == {{ $user | quote }} || object.metadata.name == {{ $name | quote }}
+  variables:
+    - name: reconciler
+      expression: {{ printf "request.userInfo.username == %s" ($user | quote) | quote }}
+    - name: labels
+      expression: "has(namespaceObject.metadata.labels) ? namespaceObject.metadata.labels : {'koinon.dev/none': ''}"
+    - name: sandboxNamespace
+      expression: {{ join " && " $conds | quote }}
+    - name: ourGateway
+      expression: >-
+        variables.sandboxNamespace && 'openshell.ai/gateway-id' in variables.labels &&
+        variables.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }} &&
+        'openshell.ai/sandbox-workspace' in variables.labels &&
+        namespaceObject.metadata.name.startsWith({{ printf "openshell-%s-" $gatewayID | quote }}) &&
+        namespaceObject.metadata.name != {{ .Release.Namespace | quote }}
+    - name: defaultDeny
+      expression: >-
+        (!has(object.spec.podSelector.matchLabels) || size(object.spec.podSelector.matchLabels) == 0) &&
+        (!has(object.spec.podSelector.matchExpressions) || size(object.spec.podSelector.matchExpressions) == 0) &&
+        has(object.spec.policyTypes) && size(object.spec.policyTypes) == 2 &&
+        'Ingress' in object.spec.policyTypes && 'Egress' in object.spec.policyTypes &&
+        (!has(object.spec.ingress) || size(object.spec.ingress) == 0) &&
+        (!has(object.spec.egress) || size(object.spec.egress) == 0)
+  validations:
+    - expression: "variables.reconciler || !variables.sandboxNamespace"
+      reason: Forbidden
+      messageExpression: "'only the Koinon reconciler may write the sandbox default-deny NetworkPolicy in sandbox namespaces, not ' + request.userInfo.username"
+    - expression: "!variables.reconciler || variables.ourGateway"
+      reason: Forbidden
+      message: {{ printf "the sandbox default-deny NetworkPolicy may be written only in OpenShell workspace namespaces of gateway %s" $gatewayID | quote }}
+    - expression: {{ printf "!variables.reconciler || object.metadata.name == %s" ($name | quote) | quote }}
+      reason: Forbidden
+      message: {{ printf "the sandbox default-deny NetworkPolicy must be named %s" $name | quote }}
+    - expression: "!variables.reconciler || variables.defaultDeny"
+      reason: Forbidden
+      message: "the sandbox default-deny NetworkPolicy must select every pod, list policyTypes Ingress and Egress, and allow no traffic"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $policy }}
+  validationActions: {{ toJson .Values.sandboxPolicy.validationActions }}
+{{- end }}

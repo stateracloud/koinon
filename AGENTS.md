@@ -29,7 +29,7 @@ Instructions for coding agents working on Koinon.
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADRs: `hack/adr-lint.sh`, `hack/adr-index.sh`.
 - Before you hand over or push: `hack/lane-gates.sh` (blocks; the gates your change touches, one
   `gate=… verdict=pass|fail|notrun` line each, `docs/dev/ci.md#the-local-gate-command`) or
-  `hack/preflight.sh` (the lint-level subset).
+  `hack/preflight.sh` (the diff-selected gates without the heavy jobs).
   Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
   push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`
   (in the background) and merge it with `hack/pr-merge.sh <PR>` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
@@ -63,7 +63,7 @@ its claims; the default lane is `main`.
 1. `hack/claim.sh next` (or `next --label start-here`): Ready, `agent-ok`, current-milestone,
    unblocked issues that nobody holds, by Priority then age. Only humans move issues to Ready; never
    start an issue that is not listed unless your human names it. Then the overlap check (below).
-2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane, eight per human; a
+2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane; the per-human cap is off while one human works on the repository (ADR 0104 amendment); a
    PR that closes several issues takes them together, `take N M` (all or nothing). It assigns your
    human.
 3. Push `<type>/<N>-<slug>` and open a draft PR with `Closes #N` (the board's built-in workflow moves
@@ -181,8 +181,7 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the wait or the merge.
   `--jump` enqueues at the front. `--admin` is for a PR that changes at least one `.github/**` path (owner
   decision, ADR 0105); an e2e-relevant one also needs a green `quickstart` on its head. `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved; it
-  opens a `break-glass` issue. After the independent review of a sensitive-path PR's head, record it with
-  `hack/review-verdict.sh <PR> ready|not-ready <reviewer> <sha>` (the `review` check, ADR 0103). Details: `docs/dev/ci.md#merging`.
+  opens a `break-glass` issue. Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

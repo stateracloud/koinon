@@ -268,8 +268,16 @@ while :; do
       wfruns=$(prv_runs "$head")
       if [ -n "$wfruns" ]; then
         is_draft=$(jq -r '.isDraft // false' <<<"$json")
+        # Required contexts scope prv_empty (#399): load them before judging empty runs when we can
+        # (do not set ctx_tried here; the block below still owns the fail-closed messaging).
+        if [ "$ctx_tried" = 0 ]; then
+          load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
+        fi
+        want_json=$(printf '%s\n' "$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"} | awk 'NF' | jq -R . | jq -sc .)
         # A completed newest run with no jobs at all (startup_failure) never gets checks: a failure, not a wait.
-        empty=$(jq -r --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'(.statusCheckRollup // []) | prv_empty($runs; $draft)[] | "\(.name)\t\(.id)\t\(.conclusion)"' <<<"$json")
+        # Only workflows that carry a required context (or every workflow when none are known, fail closed).
+        empty=$(jq -r --argjson runs "$wfruns" --argjson draft "$is_draft" --argjson want "$want_json" \
+          "$PRV_JQ"'(.statusCheckRollup // []) | prv_empty($runs; $draft; $want)[] | "\(.name)\t\(.id)\t\(.conclusion)"' <<<"$json")
         if [ -n "$empty" ]; then
           while IFS=$'\t' read -r ename eid econ; do
             echo "FAILED $ename: run $eid ended ($econ) with no jobs"
@@ -277,7 +285,9 @@ while :; do
           exit 1
         fi
         before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
-        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft)' <<<"$json")
+        # An explicit --require name is judged on its newest run of any event, a dispatched run included.
+        req_json=$(printf '%s\n' ${required[@]+"${required[@]}"} | awk 'NF' | jq -R . | jq -sc .)
+        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" --argjson req "$req_json" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; $req)' <<<"$json")
         if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then
           if jq -e 'any(.[]; .display_title == "ci (draft)")' <<<"$wfruns" >/dev/null; then ready_dropped=1; else superseded=1; fi
         fi

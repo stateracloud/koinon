@@ -321,6 +321,18 @@ func agentGatewayKey(ctx context.Context, kubectl, org, agentID string) string {
 	return string(raw)
 }
 
+// secretToken reads key "token" of a Secret in the koinon namespace, for the checks that one OTLP
+// token does not admit the other's path. It never leaves this process.
+func secretToken(ctx context.Context, kubectl, name string) string {
+	GinkgoHelper()
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "secret", name, "-o", "jsonpath={.data.token}").Output()
+	Expect(err).NotTo(HaveOccurred())
+	raw, err := base64.StdEncoding.DecodeString(string(out))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(raw).NotTo(BeEmpty(), name)
+	return string(raw)
+}
+
 // portForward forwards a free local port to target's port in the koinon namespace until the spec ends.
 func portForward(ctx context.Context, kubectl, target, port string) string {
 	GinkgoHelper()

@@ -516,11 +516,10 @@ be read or the lock is not free within the first-attempt budget, the Secret is m
 and the event follows it (start never blocks on the database); the start-up check then records
 anything lost as `keys.observed`.
 
-`koinon-api` does not know its Helm release name (no flag or environment variable carries it), so its
-label-selected list of generated Secrets (`koinon.dev/generated`) is not scoped by the chart's
-`koinon.dev/release` label: two releases in one namespace see each other's generated Secrets in their
-`keys.observed` state. Scoping it needs a new start-up input; release identity is #375 (v0.2). Until
-then one Koinon release per namespace stays the rule (maintainer decision 2026-11-08).
+`koinon-api` takes the Helm release name as `--release` (the chart passes `.Release.Name`) and scopes
+its label-selected list of generated Secrets to `koinon.dev/generated,koinon.dev/release=<release>`
+(#375). Two releases in one namespace each see only their own ensure-secrets Secrets in
+`keys.observed`. An empty `--release` (a local run) leaves the list unscoped.
 
 **Helm-set settings.** `koinon-api` builds, on start, a fixed list of install-wide settings from its
 flags. For a flag that names a Secret, a file or a directory it records the name only, never the
@@ -535,8 +534,8 @@ contents. The list:
   `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `github-api-url`;
 - keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
   `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
-- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
-- the chart and image version.
+- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `otlp-traces-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
+- the chart (`chart-version`, `release`) and image version.
 
 The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR
 0098 decision 5), and one change is recorded once. In one transaction under a fixed advisory lock
@@ -549,7 +548,7 @@ on it, and a test lists the flags that are not, so none is forgotten.
 **Amendment (maintainer decision 2026-11-08): summary keys.** Five flags that name a Secret, a file
 or a directory are recorded under a neutral summary key, because the audit scrubber refuses a key that
 looks like a secret value: `bootstrap-password-file` as `bootstrap-admin-pw-file`, `kek-secret` as `kek-object`,
-`saved-work-secret` as `saved-work-object`, `otlp-token-dir` as `otlp-auth-dir`, and
+`saved-work-secret` as `saved-work-object`, `otlp-token-dir` as `otlp-auth-dir`, `otlp-traces-token-dir` as `otlp-traces-auth-dir`, and
 `openbao-token-file` as `openbao-auth-file`. Every other flag is recorded under its own name.
 
 ### 4. Anchors in v0.1; signed checkpoints designed now, built after v0.1
@@ -633,16 +632,18 @@ chain would.
   transaction as the purge, under the anchor lock, naming the `org_id`, the last `chain_seq` and the
   head hash. Verify would then accept a missing chain only when such an event follows every anchor that
   names the org.
-- **Header size.** `exportAnchors` carries only the anchors whose event is in the export's
-  `from_seq`..head range, so export by period with `--from-seq`. A full export from seq 1 still puts
-  every anchor in one header line, about 110 MB a year at 100 orgs anchored hourly. Moving each
-  anchor's heads into stream lines next to their `audit.anchor` event is a follow-up before v0.3.
-- **Export.** An install export's header carries `anchors`: for each anchor event in the exported
-  range its `chain_seq`, event ID, `org_count`, `heads_root` and heads. `VerifyExport` checks the
-  header against the events (a missing, forged or duplicated entry, a wrong root or count) with no
-  database. `audit verify --file <org export> --anchors <install export>` then checks an org
-  export's hashes at the anchored `chain_seq` values. The install export verifies on its own first.
-  An org export with no `--anchors` is internally consistent only, and says so.
+- **Header size (amended #406).** Each `audit.anchor` event is followed by an `anchor_heads` stream
+  line (`{"line":"anchor_heads",...}`) with that anchor's org heads. The header never carries
+  `anchors`, so its size does not grow with the anchor count. `VerifyExport` checks each stream line
+  as it reads and discards it unless `CollectAnchors` is set (for `--anchors`). Format
+  `koinon.audit.export.v2` (a break from v1; before the v0.3 upgrade promise, ADR 0099).
+- **Export.** An install export writes one `anchor_heads` stream line after each `audit.anchor`
+  event in the exported range (`chain_seq`, event ID, `org_count`, `heads_root` and heads).
+  `VerifyExport` checks each line against its event (a missing, forged or orphaned line, a wrong
+  root or count) with no database. `audit verify --file <org export> --anchors <install export>`
+  then checks an org export's hashes at the anchored `chain_seq` values. The install export
+  verifies on its own first. An org export with no `--anchors` is internally consistent only, and
+  says so.
 
 *Prior art (sources read 2026-11-08).*
 
@@ -665,11 +666,11 @@ head after an anchor, so the anchor event is what a checkpoint's one hash covers
 follows `audit.anchor` and the anchor job is the natural place to call the signer. (2) The advisory
 lock and the interval check are reusable: a checkpoint is written under the same lock, so one replica
 signs per tick. (3) `audit verify --file ... --anchors` is where `--checkpoint` and `--public-key`
-join: the anchors in an install export header are the thing a checkpoint pins from outside the
-cluster. (4) The export header grows by an optional `checkpoints` list in the same way as `anchors`
-(`omitempty`, so v1 files stay valid). (5) `koinon_audit_checkpoint_age_seconds` sits beside
-`koinon_audit_anchor_age_seconds` in the same registration helper. None of these change the
-encoding above.
+join: the anchors collected from an install export's stream lines are the thing a checkpoint pins
+from outside the cluster. (4) Checkpoints ride as stream lines next to `audit.checkpoint` events
+(same shape as `anchor_heads`), not as a growing header list. (5) `koinon_audit_checkpoint_age_seconds`
+sits beside `koinon_audit_anchor_age_seconds` in the same registration helper. None of these change
+the anchor encoding above.
 
 **4.2 Signed checkpoints.** After each anchor, `koinon-api` signs the install head. The checkpoint is
 a signed note in Koinon's own format. It borrows the layout of a C2SP signed note (origin line, body,
@@ -721,15 +722,17 @@ against the org chains.
 
 **Export.** `koinon-api audit export --scope install|org [--org <id>] [--from-seq N]` and `GET
 /admin/v1/audit/export` (same scope rules as the read) write JSON lines: a header line
-`{"format":"koinon.audit.export.v1","chain":"install"|"org","install_id":...,"org_id":...,
+`{"format":"koinon.audit.export.v2","chain":"install"|"org","install_id":...,"org_id":...,
 "head":{"chain_seq":...,"hash":...}}`, then one line per event in `chain_seq` order with every
 hashed field exactly as hashed (`summary_text` is Postgres's text of the `jsonb`, and `summary` is
-the parsed object for convenience), `prev_hash` and `hash` in hex, and `created_at_micros`. A copy
-verifies off the cluster with `koinon-api audit verify --file <export> [--checkpoint <note>
---public-key <key>]` (the binary runs anywhere, with no database), or with any tool that implements
-decision 1.3, which the export docs spell out. A partial export starts from `--from-seq` and its
-first `prev_hash` is checked against an earlier export or a checkpoint. Streaming to object storage
-or a webhook (at least once, `id` for de-duplication) is later work; checkpoints ride the same sink.
+the parsed object for convenience), `prev_hash` and `hash` in hex, and `created_at_micros`. Each
+install `audit.anchor` event is followed by an `anchor_heads` stream line with that anchor's org
+heads (not in the header). A copy verifies off the cluster with `koinon-api audit verify --file
+<export> [--checkpoint <note> --public-key <key>]` (the binary runs anywhere, with no database), or
+with any tool that implements decision 1.3, which the export docs spell out. A partial export
+starts from `--from-seq` and its first `prev_hash` is checked against an earlier export or a
+checkpoint. Streaming to object storage or a webhook (at least once, `id` for de-duplication) is
+later work; checkpoints ride the same sink.
 
 **Retention.** Nothing is deleted in v1, from either chain kind; the triggers refuse it. Audit
 retention (#29) is designed once for both kinds: a prefix of a chain may only be dropped behind a

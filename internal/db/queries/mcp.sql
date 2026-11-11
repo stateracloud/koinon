@@ -125,7 +125,7 @@ WHERE org_id = @org_id AND id = @id AND source = 'secret';
 -- Enabled servers, for the gateway and the prober. A server whose credential was lost (#85) is not
 -- served until the credential is entered again.
 SELECT * FROM mcp_servers
-WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
+WHERE org_id = @org_id AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name;
 
 -- name: RecordMCPServerProbe :one
@@ -274,7 +274,7 @@ VALUES (@org_id, @agent_id, @server_id, sqlc.narg(tools));
 
 -- name: GetServedMCPServerByName :one
 SELECT * FROM mcp_servers
-WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
+WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
 
 -- name: GetAgentMCPServer :one
 SELECT * FROM agent_mcp_servers
@@ -283,12 +283,13 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND server_id = @server_id;
 -- name: ListUnavailableMCPServersOfAgent :many
 -- The servers an agent may use that are down or disabled right now, for the note agentd gives the
 -- agent when a session starts. credential_lost: its credential was lost (#85), so it is not served.
-SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason,
+SELECT s.name, s.health::text AS health, s.health_reason,
+       COALESCE(s.disabled_reason, CASE WHEN s.admin_disabled_at IS NOT NULL THEN 'disabled by an admin' END) AS disabled_reason,
        (s.credential_lost_at IS NOT NULL)::boolean AS credential_lost
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL OR s.credential_lost_at IS NOT NULL)
+  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.admin_disabled_at IS NOT NULL OR s.removed_at IS NOT NULL OR s.credential_lost_at IS NOT NULL)
 ORDER BY s.name;
 
 -- name: ListMissingMCPServersOfAgent :many
@@ -301,7 +302,7 @@ SELECT s.name, s.health::text AS health, s.health_reason, s.consecutive_failures
 FROM agent_mcp_servers a
 JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL
+  AND s.disabled_reason IS NULL AND s.admin_disabled_at IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL
   AND (s.health = 'unhealthy' OR (s.health = 'healthy' AND s.consecutive_failures > 0))
 ORDER BY s.name;
 
@@ -320,7 +321,7 @@ JOIN orgs o ON o.id = s.org_id
 LEFT JOIN mcp_tools t ON t.org_id = s.org_id AND t.server_id = s.id AND t.present
   AND (a.tools IS NULL OR t.name = ANY(a.tools))
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
-  AND s.disabled_reason IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL AND s.health <> 'unhealthy'
+  AND s.disabled_reason IS NULL AND s.admin_disabled_at IS NULL AND s.removed_at IS NULL AND s.credential_lost_at IS NULL AND s.health <> 'unhealthy'
 GROUP BY s.id, s.name, o.slug
 ORDER BY s.name;
 

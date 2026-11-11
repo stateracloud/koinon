@@ -3,15 +3,12 @@
 package gatewaytest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +16,6 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
-	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
@@ -38,6 +34,7 @@ func anthropicSpec(env Env) {
 		var (
 			llmURL  string
 			logs    func(context.Context) string
+			records func(ctx context.Context, keyID string) ([]gateway.UsageRecord, error)
 			upstrm  *fakemodel.Server
 			keyC    gateway.IssuedKey // acme, unlimited
 			keyL    gateway.IssuedKey // acme, over a small budget
@@ -174,7 +171,7 @@ func anthropicSpec(env Env) {
 			gw, err := env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": providerKey}, "")
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
-			llmURL, logs = gw.URL, gw.Logs
+			llmURL, logs, records = gw.URL, gw.Logs, gw.usage
 			_, err = gw.Driver.Apply(ctx, state)
 			Expect(err).NotTo(HaveOccurred())
 		}, NodeTimeout(5*time.Minute))
@@ -481,11 +478,18 @@ func anthropicSpec(env Env) {
 			})
 		}
 
-		It("logs a Messages stream that was cut: its format, that it streamed, and why it ended", func(ctx SpecContext) {
-			Expect(logs).NotTo(BeNil(), "the driver must expose the gateway's log")
+		// usageOf returns the usage records the gateway kept of keyC's requests.
+		usageOf := func(ctx context.Context) []gateway.UsageRecord {
+			recs, err := records(ctx, keyC.ID)
+			Expect(err).NotTo(HaveOccurred())
+			return recs
+		}
+
+		It("keeps the usage record of a Messages stream that was cut: its format, that it streamed, and that it failed", func(ctx SpecContext) {
+			Expect(records).NotTo(BeNil(), "the driver must expose the gateway's usage records")
 			// The upstream drops the connection after half of the events. The client's read fails or
 			// ends early; what matters is the record.
-			before := len(accessLog(logs(ctx), keyC.ID))
+			before := len(usageOf(ctx))
 			raw, err := json.Marshal(msgBody("claude-cut", true))
 			Expect(err).NotTo(HaveOccurred())
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/messages", bytes.NewReader(raw))
@@ -497,89 +501,47 @@ func anthropicSpec(env Env) {
 				_ = resp.Body.Close()
 			}
 
-			var recs []map[string]any
+			var recs []gateway.UsageRecord
 			Eventually(func() int {
-				recs = accessLog(logs(ctx), keyC.ID)
+				recs = usageOf(ctx)
 				return len(recs)
 			}, 30*time.Second, time.Second).Should(BeNumerically(">", before))
 			rec := recs[len(recs)-1]
 			// The gateway answered 200 before the cut, so the status says nothing; what tells the ledger is
-			// the error reason, set only when the proxy failed the response, with the usage of
+			// the error reason, set only when the gateway failed the response, with the usage of
 			// message_start alone (the final output count of 10 never arrived).
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldFormat, "anthropic"))
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldStream, true))
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldStatus, float64(200)))
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldError, "Upstream"))
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldOutput, float64(1)))
-			Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldInput, float64(100)))
+			Expect(rec.Format).To(Equal(modelformat.Anthropic))
+			Expect(rec.Stream).To(BeTrue())
+			Expect(rec.Status).To(BeEquivalentTo(http.StatusOK))
+			Expect(rec.Error).NotTo(BeEmpty(), "a cut stream is a failed response")
+			Expect(rec.OutputTokens).To(BeEquivalentTo(1))
+			Expect(rec.InputTokens).To(BeEquivalentTo(50), "100 reported input less 30 cache read and 20 cache write: the buckets are disjoint")
 		})
 
-		It("logs the cache tokens, with the input including both", func(ctx SpecContext) {
-			Expect(logs).NotTo(BeNil(), "the driver must expose the gateway's log")
+		It("keeps the cache tokens in their own buckets, apart from the input", func(ctx SpecContext) {
+			Expect(records).NotTo(BeNil(), "the driver must expose the gateway's usage records")
 			code, body := messages(ctx, keyC.Material, "claude-test", true)
 			Expect(code).To(Equal(http.StatusOK), body)
 			code, body = messages(ctx, keyC.Material, "claude-test", false)
 			Expect(code).To(Equal(http.StatusOK), body)
 
-			// The upstream reports input_tokens 50 beside 30 cache reads and 20 writes; the log carries
-			// agentgateway's consistent semantics, where the input includes both.
-			want := map[string]any{
-				agentgateway.LogFieldInput: float64(100), agentgateway.LogFieldCacheRead: float64(30),
-				agentgateway.LogFieldCacheWrite: float64(20), agentgateway.LogFieldOutput: float64(10),
-			}
-			Eventually(func() []map[string]any { return accessLog(logs(ctx), keyC.ID) }, 30*time.Second, time.Second).
-				Should(ContainElement(HaveKeyWithValue(agentgateway.LogFieldOutput, want[agentgateway.LogFieldOutput])))
-			finished := 0
-			for _, rec := range accessLog(logs(ctx), keyC.ID) {
-				if rec[agentgateway.LogFieldInput] != want[agentgateway.LogFieldInput] || rec[agentgateway.LogFieldOutput] != want[agentgateway.LogFieldOutput] || rec[agentgateway.LogFieldFormat] != "anthropic" {
-					continue // not the usage of a finished response (the cut stream has output 1; a chat-completions record has format openai)
+			// The upstream reports input_tokens 50 beside 30 cache reads and 20 writes: the usage
+			// record keeps the three apart (disjoint buckets, ADR 0097 decision 3).
+			finished := func() (n int) {
+				for _, rec := range usageOf(ctx) {
+					if rec.Format != modelformat.Anthropic || rec.OutputTokens != 10 {
+						continue // not the usage of a finished response (the cut stream has output 1; a chat-completions record has format openai)
+					}
+					n++
+					Expect(rec.Error).To(BeEmpty(), "a normal end carries no error")
+					Expect(rec.InputTokens).To(BeEquivalentTo(50))
+					Expect(rec.CacheReadTokens).To(BeEquivalentTo(30))
+					Expect(rec.CacheWriteTokens).To(BeEquivalentTo(20))
 				}
-				finished++
-				Expect(rec).NotTo(HaveKey(agentgateway.LogFieldError), "a normal end carries no error")
-				Expect(rec).To(HaveKeyWithValue(agentgateway.LogFieldFormat, "anthropic"))
-				for k, v := range want {
-					Expect(rec).To(HaveKeyWithValue(k, v), k)
-				}
+				return n
 			}
-			Expect(finished).To(BeNumerically(">=", 2), "the streamed and the unstreamed response are both logged")
+			Eventually(finished, 30*time.Second, time.Second).Should(BeNumerically(">=", 2),
+				"the streamed and the unstreamed response are both recorded")
 		}, SpecTimeout(2*time.Minute))
 	})
-}
-
-// logfmtField matches a koinon.* field of a logfmt access-log line.
-var logfmtField = regexp.MustCompile(`\b(koinon\.[a-z_]+)=("[^"]*"|\S+)`)
-
-// accessLog returns the access-log records of the gateway log that carry the key ID. Standalone
-// agentgateway logs JSON lines (config.logging.format json); the Kubernetes proxy logs logfmt
-// (a JSON number reads as float64 in both).
-func accessLog(log, keyID string) []map[string]any {
-	var out []map[string]any
-	sc := bufio.NewScanner(strings.NewReader(log))
-	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if !strings.Contains(line, keyID) {
-			continue
-		}
-		rec := map[string]any{}
-		if strings.HasPrefix(line, "{") {
-			if json.Unmarshal([]byte(line), &rec) != nil {
-				continue
-			}
-		} else {
-			for _, m := range logfmtField.FindAllStringSubmatch(line, -1) {
-				if n, err := strconv.ParseFloat(m[2], 64); err == nil {
-					rec[m[1]] = n
-				} else if b, err := strconv.ParseBool(m[2]); err == nil {
-					rec[m[1]] = b
-				} else {
-					rec[m[1]] = strings.Trim(m[2], `"`)
-				}
-			}
-		}
-		if rec[agentgateway.LogFieldKey] == keyID {
-			out = append(out, rec)
-		}
-	}
-	return out
 }

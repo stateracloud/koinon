@@ -134,9 +134,9 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, erro
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (token_hash, user_id, auth_method, created_at, last_seen_at,
-                      idle_expires_at, expires_at)
-VALUES ($1, $2, $3, $4, $4, $5, $6)
-RETURNING id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at
+                      idle_expires_at, expires_at, install_mark)
+VALUES ($1, $2, $3, $4, $4, $5, $6, $7)
+RETURNING id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at, install_mark
 `
 
 type CreateSessionParams struct {
@@ -146,6 +146,7 @@ type CreateSessionParams struct {
 	Now           pgtype.Timestamptz
 	IdleExpiresAt pgtype.Timestamptz
 	ExpiresAt     pgtype.Timestamptz
+	InstallMark   pgtype.Text
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -156,6 +157,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.Now,
 		arg.IdleExpiresAt,
 		arg.ExpiresAt,
+		arg.InstallMark,
 	)
 	var i Session
 	err := row.Scan(
@@ -168,6 +170,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.IdleExpiresAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.InstallMark,
 	)
 	return i, err
 }
@@ -367,6 +370,39 @@ func (q *Queries) GetUserByIdentity(ctx context.Context, arg GetUserByIdentityPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getValidSession = `-- name: GetValidSession :one
+SELECT id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at, install_mark FROM sessions
+WHERE token_hash = $1
+  AND revoked_at IS NULL
+  AND expires_at > $2::timestamptz
+  AND idle_expires_at > $2::timestamptz
+`
+
+type GetValidSessionParams struct {
+	TokenHash []byte
+	Now       pgtype.Timestamptz
+}
+
+// The session if it is still valid at @now, without touching it: the install binding check runs
+// before the touch, so a refused session's idle deadline does not move (ADR 0110).
+func (q *Queries) GetValidSession(ctx context.Context, arg GetValidSessionParams) (Session, error) {
+	row := q.db.QueryRow(ctx, getValidSession, arg.TokenHash, arg.Now)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.UserID,
+		&i.AuthMethod,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.IdleExpiresAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.InstallMark,
 	)
 	return i, err
 }
@@ -710,7 +746,7 @@ WHERE token_hash = $3
   AND revoked_at IS NULL
   AND expires_at > $1::timestamptz
   AND idle_expires_at > $1::timestamptz
-RETURNING id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at
+RETURNING id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at, install_mark
 `
 
 type TouchSessionParams struct {
@@ -734,6 +770,7 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (Ses
 		&i.IdleExpiresAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.InstallMark,
 	)
 	return i, err
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
@@ -229,6 +230,11 @@ func Load(_ context.Context, opener Opener, c store.Connection) (codehost.Connec
 	if c.RemovedAt.Valid {
 		return codehost.Connection{}, fmt.Errorf("%w: the Kubernetes Secret %s that declared %q was deleted; restore the Secret, or bind the agent to another connection",
 			ErrRemoved, c.ManagedBySecret.String, c.DisplayName)
+	}
+	if c.AdminDisabledAt.Valid {
+		// The outward switch (ADR 0110 decision 5): every caller that dials the code host loads the connection
+		// here, so a disabled connection is not called, tested or synced.
+		return codehost.Connection{}, fmt.Errorf("connection %q: %w", c.DisplayName, outward.ErrDisabled)
 	}
 	if c.CredentialLostAt.Valid {
 		return codehost.Connection{}, fmt.Errorf("%w: %s", ErrCredentialLost, LostRemedy(c))

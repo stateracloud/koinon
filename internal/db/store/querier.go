@@ -574,6 +574,9 @@ type Querier interface {
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
+	// The session if it is still valid at @now, without touching it: the install binding check runs
+	// before the touch, so a refused session's idle deadline does not move (ADR 0110).
+	GetValidSession(ctx context.Context, arg GetValidSessionParams) (Session, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) (int64, error)
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
@@ -787,7 +790,8 @@ type Querier interface {
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
 	// The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
-	// order then org order: the install export's header (ADR 0100 decision 5).
+	// order then org order: the install export writes them as stream lines next to each audit.anchor
+	// event (ADR 0100 decision 5; format koinon.audit.export.v2).
 	ListInstallAnchorHeadsInRange(ctx context.Context, arg ListInstallAnchorHeadsInRangeParams) ([]ListInstallAnchorHeadsInRangeRow, error)
 	// A page of audit.anchor events in chain order, from after_seq (exclusive) to up_to_seq (inclusive),
 	// with the summary as Postgres prints it.

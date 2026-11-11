@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"runtime"
 	"strings"
 	"time"
 
@@ -75,7 +77,7 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		Expect(lines).To(HaveLen(1 + 7))
 		var hdr audit.ExportHeader
 		Expect(json.Unmarshal([]byte(lines[0]), &hdr)).To(Succeed())
-		Expect(hdr.Format).To(Equal("koinon.audit.export.v1"))
+		Expect(hdr.Format).To(Equal("koinon.audit.export.v2"))
 		Expect(hdr.Chain).To(Equal("org"))
 		Expect(hdr.OrgID).To(Equal(org.String()))
 		Expect(hdr.Head.ChainSeq).To(BeEquivalentTo(7))
@@ -143,7 +145,7 @@ var _ = Describe("audit export and off-cluster verify", func() {
 	})
 
 	It("refuses what is not an export", func() {
-		for _, in := range []string{"", "not json\n", `{"format":"other.v9"}` + "\n", `{"format":"koinon.audit.export.v1","chain":"org"}` + "\n"} {
+		for _, in := range []string{"", "not json\n", `{"format":"other.v9"}` + "\n", `{"format":"koinon.audit.export.v1","chain":"org"}` + "\n", `{"format":"koinon.audit.export.v2","chain":"org"}` + "\n"} {
 			_, err := audit.VerifyExport(strings.NewReader(in), audit.ExportVerifyOptions{})
 			Expect(err).To(MatchError(audit.ErrExportFormat), in)
 		}
@@ -414,4 +416,103 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		Expect(res.Break).NotTo(BeNil())
 		Expect(res.Break.Seq).To(BeEquivalentTo(1701))
 	})
+
+	It("keeps the header small and verify memory bounded with many anchors", func() {
+		// Synthetic install chain: every event is an audit.anchor followed by an anchor_heads line
+		// with one org. A v1-style header holding every anchor would grow with n; v2 streams.
+		const (
+			install = "00000000-0000-4000-8000-0000000000aa"
+			org     = "00000000-0000-4000-8000-0000000000bb"
+			n       = 4000
+		)
+		orgHash := bytes.Repeat([]byte{0x11}, 32)
+		root := hex.EncodeToString(audit.HeadsRoot(install, []audit.AnchorHead{{OrgID: org, ChainSeq: 1, Hash: orgHash}}))
+		summary := fmt.Sprintf(`{"after":{"org_count":1,"heads_root":"%s"}}`, root)
+		prev := audit.ZeroHash
+		var lastHash []byte
+		pairs := make([]struct{ ev, heads []byte }, 0, n)
+		for seq := int64(1); seq <= n; seq++ {
+			row := store.ListInstallAuditChainRowsRow{
+				ScopeText: install, IDText: fmt.Sprintf("00000000-0000-4000-8000-%012d", seq), ChainSeq: seq,
+				ActorKind: "system", ActorID: "koinon-api:audit-anchor", Action: audit.ActionAnchor, TargetKind: "install", TargetID: install,
+				SummaryText: summary, CreatedMicros: 1700000000000000 + seq, PrevHash: prev,
+			}
+			row.Hash = audit.InstallRowHash(row)
+			prev = row.Hash
+			lastHash = row.Hash
+			ev, err := json.Marshal(audit.ExportEvent{
+				ChainSeq: seq, ID: row.IDText, ActorKind: row.ActorKind, ActorID: row.ActorID, Action: row.Action,
+				TargetKind: row.TargetKind, TargetID: row.TargetID, SummaryText: row.SummaryText, Summary: json.RawMessage(row.SummaryText),
+				CreatedAtMicros: row.CreatedMicros, PrevHash: hex.EncodeToString(row.PrevHash), Hash: hex.EncodeToString(row.Hash),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			al, err := json.Marshal(audit.ExportAnchorLine{
+				Line: audit.ExportAnchorLineKind, ChainSeq: seq, EventID: row.IDText, OrgCount: 1, HeadsRoot: root,
+				Heads: []audit.ExportAnchorHead{{OrgID: org, ChainSeq: 1, Hash: hex.EncodeToString(orgHash)}},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			pairs = append(pairs, struct{ ev, heads []byte }{ev: ev, heads: al})
+		}
+		hdr, err := json.Marshal(audit.ExportHeader{
+			Format: audit.ExportFormat, Chain: "install", InstallID: install, FromSeq: 1,
+			Head: audit.ExportHead{ChainSeq: n, Hash: hex.EncodeToString(lastHash)},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(hdr)).To(BeNumerically("<", 512), "header size must not grow with the anchor count")
+
+		// Stream one line at a time so the input itself is not one giant buffer held by the verifier.
+		stream := func() *manyAnchorReader {
+			return &manyAnchorReader{hdr: append(append([]byte{}, hdr...), '\n'), pairs: pairs}
+		}
+
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		res, err := audit.VerifyExport(stream(), audit.ExportVerifyOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Break).To(BeNil())
+		Expect(res.Anchors).To(Equal(n))
+		Expect(res.StreamAnchors).To(BeEmpty())
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		// Retained heap after a streaming verify must stay well below holding every anchor line
+		// (~n * ~300 B ≈ 1.2 MiB of JSON alone, plus structured copies under CollectAnchors).
+		Expect(int64(after.HeapAlloc)).To(BeNumerically("<", int64(before.HeapAlloc)+2<<20),
+			"heap grew by %d bytes after verify of %d anchors", int64(after.HeapAlloc)-int64(before.HeapAlloc), n)
+
+		By("CollectAnchors keeps every stream line for --anchors")
+		kept, err := audit.VerifyExport(stream(), audit.ExportVerifyOptions{CollectAnchors: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(kept.StreamAnchors).To(HaveLen(n))
+	})
 })
+
+// manyAnchorReader yields a header then event/anchor_heads pairs without joining them into one string.
+type manyAnchorReader struct {
+	hdr   []byte
+	pairs []struct {
+		ev, heads []byte
+	}
+	i   int // 0 = header, then 2*i-1 event / 2*i heads for pair i-1
+	buf []byte
+}
+
+func (r *manyAnchorReader) Read(p []byte) (int, error) {
+	if len(r.buf) == 0 {
+		switch {
+		case r.i == 0:
+			r.buf, r.i = r.hdr, 1
+		case (r.i-1)/2 >= len(r.pairs):
+			return 0, io.EOF
+		case (r.i-1)%2 == 0:
+			r.buf = append(append([]byte{}, r.pairs[(r.i-1)/2].ev...), '\n')
+			r.i++
+		default:
+			r.buf = append(append([]byte{}, r.pairs[(r.i-1)/2].heads...), '\n')
+			r.i++
+		}
+	}
+	n := copy(p, r.buf)
+	r.buf = r.buf[n:]
+	return n, nil
+}

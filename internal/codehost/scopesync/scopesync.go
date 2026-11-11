@@ -245,7 +245,9 @@ func (s *Syncer) syncOrg(ctx context.Context, org pgtype.UUID, minAge time.Durat
 			if ctx.Err() != nil {
 				return
 			}
-			if row.RemovedAt.Valid || row.CredentialLostAt.Valid {
+			// An admin-disabled connection (ADR 0110 decision 5) is not dialled and its stored reading is left as
+			// it is; enabling it asks for a fresh reading (services.SetOutwardTargetDisabled).
+			if row.RemovedAt.Valid || row.CredentialLostAt.Valid || row.AdminDisabledAt.Valid {
 				continue
 			}
 			if minAge > 0 && s.readWithin(ctx, row, minAge) {

@@ -63,8 +63,8 @@ check "e2e-kind.yml: a queue build is never cancelled" bash -c '
 
 # Every required name reports on a queue build. Only a workflow without a `merge_group` trigger makes the entry wait
 # for the 60-minute timeout; a job skipped by its `if:` reports a skipped (green) check that tests nothing, which is
-# also wrong for a required name, so (b) and (c) catch that. For every name in hack/ci-required.txt (not the advisory ones) plus
-# `review` (ADR 0103): find the job that produces it (its `name:`), then check (a) the workflow listens to
+# also wrong for a required name, so (b) and (c) catch that. For every name in hack/ci-required.txt (not the advisory ones):
+# find the job that produces it (its `name:`), then check (a) the workflow listens to
 # `merge_group`, (b) the job's `if:` is not false on merge_group, (c) every job it `needs:` passes (b) too, unless
 # the job runs under always()/!cancelled(). The `if:` forms are a small table (event_name compares, the draft flag,
 # always(), !cancelled(), outputs and results of other jobs); an unknown form fails the test, so teach it the new form.
@@ -122,6 +122,10 @@ ATOMS = [
     (r"github\.event_name\s*==\s*'([a-z_]+)'", lambda g: g == "merge_group"),
     (r"github\.event_name\s*!=\s*'([a-z_]+)'", lambda g: g != "merge_group"),
     (r"github\.event\.pull_request\.draft", lambda: False),
+    # a queue ref is gh-readonly-queue/..., never a tag; a queue build has no dispatch inputs
+    (r"startsWith\(github\.ref,\s*'refs/tags/'\)", lambda: False),
+    (r"inputs\.suite\s*==\s*'[a-z]+'", lambda: False),
+    (r"inputs\.suite\s*!=\s*'[a-z]+'", lambda: True),
     (r"always\(\)", lambda: True),
     (r"!cancelled\(\)", lambda: True),
     # conditional on an upstream output or result: a skip still reports, so it counts as running
@@ -202,7 +206,6 @@ print("ok %s/%s" % (found[0][0], found[0][3]))
 PY
 }
 required_names=$(sed -E 's/#.*//; s/[[:space:]]+$//' "$repo/hack/ci-required.txt" | awk 'NF { if ($1 == "advisory") next; sub(/^(aggregator|external) /, ""); print }')
-required_names=$(printf '%s\nreview\n' "$required_names" | sort -u)
 mg_seen=""
 while IFS= read -r name; do
 	[[ -n $name ]] || continue
@@ -223,7 +226,7 @@ while IFS= read -r name; do
 		;;
 	esac
 done <<<"$required_names"
-for name in review claim dco gitleaks 'e2e result'; do
+for name in claim dco gitleaks 'e2e result'; do
 	if [[ $mg_seen == *"|$name|"* ]]; then
 		echo "ok: '$name' is among the names checked"
 		pass=$((pass + 1))
@@ -234,7 +237,11 @@ for name in review claim dco gitleaks 'e2e result'; do
 done
 # `e2e result` reads `decide`; a skipped decide on a queue build would hand the gate an empty output.
 decide_if=$(awk '/^  decide:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/e2e-kind.yml")
-check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || !github.event.pull_request.draft) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'"
+check "e2e-kind.yml: the advisory drill job is continue-on-error and runs only on schedule, rc tags and a drill dispatch" bash -c '
+	awk "/^  drill:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    continue-on-error: true/ { c = 1 } j && /event_name == .schedule./ { s = 1 } j && /refs\/tags\// { t = 1 } j && /inputs.suite == .drill./ { d = 1 } END { exit !(c && s && t && d) }" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: result is skipped on an rc tag push and a drill dispatch" bash -c '
+	awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if: always\(\).*refs\/tags\/.*suite != .drill./ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/e2e-kind.yml"
 check "e2e-kind.yml: result runs under always()" bash -c 'awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if: always\(\)/ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/e2e-kind.yml"
 # The checker itself: a workflow without merge_group, an upstream gated on pull_request, and an unknown form are caught.
 mgtmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-mg-eval.XXXXXX") || exit 1

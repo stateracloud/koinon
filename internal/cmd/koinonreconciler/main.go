@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -173,6 +174,7 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	netpol := newSandboxNetworkPolicy(cfg, kube, log)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -181,6 +183,17 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	restorehold.Metric(reg, cfg.restoreHold)
+	// The install binding (ADR 0110 decision 0): the reconciler owns no outward target column. It claims
+	// the row when it is the first binary to start unheld, and a held reconciler re-asserts the hold.
+	if cfg.installMark != "" {
+		binding := installbinding.New(pool, execution.OwnerID(cfg.installMark), cfg.restoreHold, log)
+		if _, err := binding.Claim(ctx, installbinding.Targets{}); err != nil {
+			// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+			log.Warn("install binding: first claim failed, retrying in the background", "err", err)
+		}
+		binding.StateMetric(reg)
+		safego.Go(ctx, log, "install-binding", binding.Run)
+	}
 	if cfg.restoreHold {
 		// Nothing converges: no sandbox is created, stopped or recreated, no provider key is applied, and the
 		// spend settler and the provider cost reconciliation do not run (issue #462).
@@ -236,9 +249,10 @@ func serve(ctx context.Context, cfg config) error {
 				Keys:   keyring,
 				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
-			Observer: observer,
-			Logger:   log,
-			Metrics:  reconciler.NewMetrics(reg),
+			Observer:      observer,
+			NetworkPolicy: netpol,
+			Logger:        log,
+			Metrics:       reconciler.NewMetrics(reg),
 		})
 	if err != nil {
 		return err
@@ -297,6 +311,17 @@ func newSandboxObserver(cfg config, kube kubernetes.Interface, log *slog.Logger)
 		Kube: kube, Dynamic: dyn, GatewayID: cfg.openshellGateway, ClusterRole: cfg.sandboxObserverClusterRole,
 		ServiceAccount: cfg.sandboxObserverServiceAccount, ServiceAccountNamespace: cfg.namespace, Log: log,
 	}, nil
+}
+
+// newSandboxNetworkPolicy builds the sandbox default-deny NetworkPolicy writer (spike 8.15), or nil when it is off.
+func newSandboxNetworkPolicy(cfg config, kube kubernetes.Interface, log *slog.Logger) *reconciler.SandboxNetworkPolicy {
+	if !cfg.sandboxNetworkPolicy {
+		log.Warn("the sandbox default-deny NetworkPolicy is off: sandbox namespaces rely on OpenShell's own policies alone")
+		return nil
+	}
+	return &reconciler.SandboxNetworkPolicy{
+		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxNetworkPolicyName, Log: log,
+	}
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {

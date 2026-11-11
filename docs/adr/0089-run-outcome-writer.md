@@ -81,3 +81,9 @@ success commit; the task left working after a park; and three more).
 - **The park's resolution moved to `internal/runpark`** (`Resolve`, formerly `approvals.ResolveRun`):
   the module imports the question service, which resumed parks through the approval service, which
   cancels expired runs through the module. `runpark` depends on the store alone and breaks that cycle.
+
+## Amendment 2026-11-11 (#21): `Supersede`
+
+`Owner.Supersede` ends a run queued behind a parked run without a turn, because the earlier run already
+read every message this run was queued for. It takes starting -> running -> succeeded in one transaction
+under `LockRun`, ends the turn row, and completes the task.

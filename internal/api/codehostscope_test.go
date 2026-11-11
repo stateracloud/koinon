@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -333,9 +334,12 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		conn := create(ctx)
 		svc := orgsettings.NewService(e.pool)
 		for range 25 {
+			// The credential is read before the race, as a connector does (it opens the row, then
+			// reports), so the race exercises only the code under test (#498).
+			cred := fp(ctx, conn)
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, cred, reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{
@@ -356,10 +360,14 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 		for range 15 {
 			conn := create(ctx)
 			// Rows for the delete's cascade to remove, so it waits on the replacement's.
-			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())).To(Succeed())
+			// The credential is read once, before the race (#498): a read inside the replace closure
+			// fails with a raw no-rows when the delete commits first, which is the spec's own read,
+			// not the code under test.
+			cred := fp(ctx, conn)
+			Expect(svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, cred, reading, time.Now())).To(Succeed())
 			rerr, cerr := race(
 				func() error {
-					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, fp(ctx, conn), reading, time.Now())
+					return svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, cred, reading, time.Now())
 				},
 				func() error {
 					_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: conn})
@@ -367,10 +375,24 @@ var _ = Describe("the code-host scope beside changes of its connection (#115)", 
 				})
 			noDeadlock(rerr)
 			noDeadlock(cerr)
+			// Allowed outcomes: the replace wins (nil) or the delete wins (the typed ErrNotFound,
+			// never a raw pgx no-rows). The delete always succeeds.
 			if rerr != nil {
 				Expect(rerr).To(MatchError(orgsettings.ErrNotFound), "the connection was deleted first")
+				Expect(errors.Is(rerr, pgx.ErrNoRows)).To(BeFalse(), "a raw no-rows must never reach the caller")
 			}
 			Expect(cerr).NotTo(HaveOccurred())
 		}
 	}, SpecTimeout(2*time.Minute))
+
+	It("answers a replacement of a deleted connection with ErrNotFound, not a raw pgx error (#498)", func(ctx SpecContext) {
+		svc := orgsettings.NewService(e.pool)
+		conn := create(ctx)
+		cred := fp(ctx, conn)
+		_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: conn})
+		Expect(err).NotTo(HaveOccurred())
+		rerr := svc.ReplaceCodeHostRepos(ctx, mustUUID(org), audit.System("koinon-test:spec"), conn, cred, reading, time.Now())
+		Expect(rerr).To(MatchError(orgsettings.ErrNotFound))
+		Expect(errors.Is(rerr, pgx.ErrNoRows)).To(BeFalse())
+	}, SpecTimeout(time.Minute))
 })

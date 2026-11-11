@@ -13,11 +13,16 @@
 #   2. Inside the chosen run, a check name is judged by its newest row: a row that has not finished
 #      (a live re-run attempt) outranks finished ones; otherwise the newest by start time (completion time
 #      for a row that never started, which the GraphQL rollup reports with a null startedAt), then job id.
+#      The newest finished row decides even when it is cancelled or skipped (a re-run that was then
+#      cancelled must not read as green to `pr-merge --admin`, #399).
 #   3. Commit statuses and check runs without a workflow run (e2e-lab, external apps) have no run to
-#      choose: the newest row of that name decides.
+#      choose: the newest row of that name decides. Statuses are never dropped by the run filter, even
+#      when their target_url happens to contain `/runs/<id>` (#399).
 #   4. (Removed by ADR 0105: the e2e-kind workflow and `quickstart` were an exception that counted any green row
 #      on the head. The queue's `quickstart` is the e2e proof, so they are judged like every other workflow.)
 #   5. A completed newest run with no check run at all (startup_failure) is a failure (prv_empty), never a wait.
+#      Only workflows that carry a required context (or every workflow when the required set is empty, fail
+#      closed) are considered (#399).
 #   6. When the runs cannot be listed nothing is dropped (fail towards "not green": a draft run's red shows
 #      as red, never as green).
 # A verdict word per context: success skipped pending failure cancelled missing.
@@ -46,20 +51,16 @@ def prv_row: {
   bad: ((.conclusion // .state // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"))
 };
 def prv_ok: .done and (.bad | not) and (.skipped | not);
-# The rows of one check name: its verdict row. A cancelled or skipped row never outranks one that is queued or in
-# progress (old issue 431); a success outranks a skip or cancel but not a newer failure (old issue 392, 547).
-# A row that has not finished outranks every finished one, a green included (rule 2).
+# The rows of one check name: its verdict row. A row that has not finished outranks every finished one
+# (rule 2, old issue 431). Among finished rows the newest decides, cancelled and skipped included (#399):
+# an older green must not outvote a newer cancelled re-run.
 def prv_newest: sort_by([.ts, .job]) | . as $s | ($s | last) as $l
-  | ([$s[] | select(prv_ok)] | last) as $g
-  | ([$s[] | select(.done and .bad and (.cancelled | not))] | last) as $f
-  | if any($s[]; .done | not) then ([$s[] | select(.done | not)] | last)
-    elif $g != null and $f != null and $f.ts > $g.ts then $f
-    elif $g != null then $g
-    elif ($l.done and ($l.cancelled or $l.skipped)) and any($s[]; .done | not) then ([$s[] | select(.done | not)] | last)
-    else $l end;
+  | if any($s[]; .done | not) then ([$s[] | select(.done | not)] | last) else $l end;
 # Rule 2 for the prv_row rows of a list: a name is collapsed within one run (statuses have no run: one group). When the
 # runs could not be listed, two runs of one name both stay, so a draft run's red is never outvoted by a newer green.
 def prv_collapse: group_by(.name) | map(group_by(.run) | map(prv_newest)) | add // [];
+# A commit status row: rollup/status shapes carry .state and no Actions .status (rule 3, #399).
+def prv_is_status: ((.state // "") != "") and ((.status // "") == "");
 # Rules 1, 3, 5: drop the rows of runs that do not count. $runs is the array of prv_runs, or null when unreadable.
 # Rows that carry no workflowName (check runs read by REST, prv_check_rows) get it from their run.
 def prv_stamp($runs):
@@ -68,30 +69,64 @@ def prv_stamp($runs):
         (first($runs[] | select((.id | tostring) == $id)) // null) as $r
         | if $r == null then . else .workflowName = ($r.name // "") end
       else . end);
-def prv_live($runs; $draft): [$runs[] | select($draft or (.display_title != "ci (draft)"))];
+# Only events that the PR rollup carries count: a workflow_dispatch (or schedule) run of the same workflow on the head
+# has no rows in the rollup and must never supersede the pull_request / merge_group run (PR #521, run 42963683121).
+def prv_pr_event: ((.event // "") | IN("", "pull_request", "pull_request_target", "merge_group", "push"));
+def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select($draft or (.display_title != "ci (draft)"))];
 def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring);
-def prv_drop($runs; $draft):
+# $req: names the caller asked for explicitly (pr-wait --require). Such a name is judged on its newest run of any event
+# (created_at, then run_attempt, per workflow path), so a failed workflow_dispatch run of it (hack/e2e-remote.sh) is read,
+# not hidden behind an older pull_request run. Every other name keeps the rule above: events outside the PR never decide.
+def prv_drop($runs; $draft; $req):
   if $runs == null then . else
     ($runs | map(.id | tostring)) as $known
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
-    | map(prv_rid as $id
-        | select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null))
+    | ([$runs[] | select($draft or (.display_title != "ci (draft)"))]) as $any
+    | . as $rows
+    | ([$rows[] | select(prv_is_status | not) | select((prv_name as $n | $req | index($n)) != null)
+          | {n: prv_name, id: prv_rid} | select(.id != null)] | unique) as $asked
+    | (reduce $asked[] as $a ({};
+        ([$any[] | select((.id | tostring) == $a.id)] | first // null) as $r
+        | if $r == null then . else
+            .["\($a.n)\t\($r.path)"] = ([(.["\($a.n)\t\($r.path)"] // null), $r] | map(select(. != null))
+              | max_by([.created_at, .run_attempt])) end)) as $win
+    | map(if prv_is_status then .
+        else prv_rid as $id | prv_name as $n
+          | if $id != null and ($known | index($id)) != null and ($req | index($n)) != null then
+              select(([$any[] | select((.id | tostring) == $id)] | first // null) as $r
+                | $r != null and ($win["\($n)\t\($r.path)"].id | tostring) == $id)
+            else select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null) end
+        end)
     | prv_stamp($runs)
   end;
+def prv_drop($runs; $draft): prv_drop($runs; $draft; []);
 # The newest run of a workflow that completed and has no check run at all
 # (startup_failure, a workflow file that failed to parse): nothing would ever arrive, so it is a failure, not a wait.
 # A run that ended success or skipped is not such a case: its jobs ran but are not in the PR's rollup (for
 # example a workflow_dispatch on the head), so it is no part of the verdict and is ignored.
 # Applies to the raw rows (before prv_drop). Prints {id, name, conclusion} objects; none when the runs are unreadable.
-def prv_empty($runs; $draft):
+# $want is the required context names. Only workflows that have produced one of those contexts on this head
+# are considered; when $want is empty every empty current run fails closed (#399).
+def prv_empty($runs; $draft; $want):
   if $runs == null then [] else
-    (map(prv_rid) | map(select(. != null))) as $have
+    . as $rows
+    | ($rows | map(prv_rid) | map(select(. != null))) as $have
+    # Workflows that have produced a required context on this head (fail closed when $want is empty).
+    | ([$rows[] | select((.name // .context // "") as $n | ($want | index($n)) != null) | prv_rid]
+        | map(select(. != null))) as $wanted_run_ids
+    | ([$runs[] | select((.id | tostring) as $i | ($wanted_run_ids | index($i)) != null) | .path] | unique) as $wanted_paths
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
-    | [$live[] | select((.id | tostring) as $i | ($cur | index($i)) != null and (.path | startswith(".github/workflows/"))
-        and .status == "completed" and ((.conclusion // "") | IN("success", "skipped") | not) and ($have | index($i)) == null)
-      | {id: (.id | tostring), name: (.name // "workflow"), conclusion: (.conclusion // "unknown")}]
+    | [$live[] | . as $run | select(($run.id | tostring) as $i
+        | ($cur | index($i)) != null
+          and ($run.path | startswith(".github/workflows/"))
+          and $run.status == "completed"
+          and (($run.conclusion // "") | IN("success", "skipped") | not)
+          and ($have | index($i)) == null
+          # Bind $run.path before ($wanted_paths | ...): after |, . is the paths array (#399).
+          and (($want | length) == 0 or ($wanted_paths | length) == 0 or (($wanted_paths | index($run.path)) != null)))
+      | {id: ($run.id | tostring), name: ($run.name // "workflow"), conclusion: ($run.conclusion // "unknown")}]
   end;
 def prv_word: if .done | not then "pending" elif .skipped then "skipped" elif .cancelled then "cancelled" elif .bad then "failure" else "success" end;
 JQ
@@ -132,7 +167,7 @@ prv_judge() {
     | (($want[] | . as $n
       | [$r[] | select(.name == $n)] as $c
       | if ($c | length) == 0 then [$n, "missing", ""] else (([$c[] | select(prv_ok | not)] | first) // $c[0]) as $x | [$n, ($x | prv_word), ($x.run // "")] end),
-      ($rows | prv_empty($runs; $draft)[] | ["\(.name): run has no jobs (\(.conclusion))", "failure", .id]))
+      ($rows | prv_empty($runs; $draft; $want)[] | ["\(.name): run has no jobs (\(.conclusion))", "failure", .id]))
     | @tsv'
 }
 

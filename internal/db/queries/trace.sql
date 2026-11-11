@@ -15,7 +15,7 @@ WHERE org_id = @org_id AND id = @id;
 -- name: CountEnabledTraceDestinations :one
 -- A destination whose credentials were lost (#85) receives nothing, so it does not count.
 SELECT count(*) FROM trace_destinations
-WHERE org_id = @org_id AND enabled AND credential_lost_at IS NULL;
+WHERE org_id = @org_id AND enabled AND admin_disabled_at IS NULL AND credential_lost_at IS NULL;
 
 -- name: InsertTraceDestination :one
 INSERT INTO trace_destinations (org_id, id, name, backend, endpoint_url, params, credentials, secret_fields,

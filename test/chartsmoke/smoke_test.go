@@ -182,7 +182,7 @@ func describeMode(name, valuesFile string) {
 				// supplies, as in external-operator-secrets mode, is not the Job's to create). The
 				// reconciler and agentd read the install mark from its Secret (issue 461).
 				generated := r.generatedSecretNames()
-				for _, name := range []string{"koinon-otlp-token", "koinon-install-mark"} {
+				for _, name := range []string{"koinon-otlp-token", "koinon-otlp-traces-token", "koinon-install-mark"} {
 					if generated[name] {
 						Expect(cl.Secret(ctx, name)).NotTo(BeNil(), name)
 						Expect(cl.Secret(ctx, name).Data).To(HaveKey("token"), name)
@@ -270,6 +270,18 @@ func describeMode(name, valuesFile string) {
 			Expect(ids).To(ContainElement(string(s.Data["active"])))
 		})
 
+		// The start-up check scopes its generated-Secret list to this Helm release (#375), so two
+		// releases in one namespace do not see each other's ensure-secrets Secrets.
+		It("gives koinon-api the Helm release name to scope generated Secrets", func() {
+			api := r.deployment("koinon-api")
+			Expect(api).NotTo(BeNil())
+			args := api.Spec.Template.Spec.Containers[0].Args
+			i := slices.Index(args, "--release")
+			Expect(i).To(BeNumerically(">=", 0), "koinon-api has --release")
+			Expect(i + 1).To(BeNumerically("<", len(args)))
+			Expect(args[i+1]).To(Equal(release), "the chart passes .Release.Name")
+		})
+
 		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
 		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
 		// needs before koinon-api starts.
@@ -306,6 +318,44 @@ func describeMode(name, valuesFile string) {
 			// The KEK Secret is created by the API on its first start (KOINON_KEK_CREATE).
 			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
 		}, SpecTimeout(3*time.Minute))
+
+		// The install binding (ADR 0110): koinon-api reads the install mark from the same Secret as the
+		// reconciler and agentd, and its first unheld start claims the one install_binding row with the
+		// hash of that mark. A koinon-api without KOINON_INSTALL_MARK would bind nothing and refuse nothing.
+		It("gives koinon-api the install mark and binds the database to it", func(ctx SpecContext) {
+			c := r.deployment("koinon-api").Spec.Template.Spec.Containers[0]
+			var ref *corev1.EnvVar
+			for i := range c.Env {
+				if c.Env[i].Name == "KOINON_INSTALL_MARK" {
+					ref = &c.Env[i]
+				}
+			}
+			Expect(ref).NotTo(BeNil(), "koinon-api has KOINON_INSTALL_MARK")
+			Expect(ref.ValueFrom).NotTo(BeNil())
+			Expect(ref.ValueFrom.SecretKeyRef).NotTo(BeNil())
+			Expect(ref.ValueFrom.SecretKeyRef.Key).To(Equal("token"))
+
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			// A held start (--restore-hold, ADR 0107) writes an unbound row: state copy, held_since set
+			// (ADR 0110 decision 0). An unheld first start claims the row with its own mark.
+			held := slices.Contains(c.Args, "--restore-hold")
+			for _, e := range c.Env {
+				if e.Name == "KOINON_RESTORE_HOLD" && e.Value == "true" {
+					held = true
+				}
+			}
+			var bound, heldSince bool
+			Expect(conn.QueryRow(ctx, `SELECT mark IS NOT NULL, held_since IS NOT NULL FROM install_binding WHERE singleton`).Scan(&bound, &heldSince)).To(Succeed(),
+				"koinon-api wrote the install_binding row on its first start")
+			if held {
+				Expect(bound).To(BeFalse(), "a held first start writes an unbound row (state copy)")
+				Expect(heldSince).To(BeTrue(), "a held first start sets held_since")
+			} else {
+				Expect(bound).To(BeTrue(), "an unheld first start binds the row to its own mark")
+			}
+		}, SpecTimeout(time.Minute))
 
 		// The install audit chain (ADR 0100): the group role existed before the migration, the login
 		// roles came after it, and koinon-api, which connects as koinon_api, can append to the chain.

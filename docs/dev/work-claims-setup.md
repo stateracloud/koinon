@@ -52,12 +52,10 @@ current milestone a due date, and put Ready issues in it.
   `claim` fails only on another human's held claim on an issue the pull request closes, or on
   another human's `claim/adr-NNNN` reservation for an ADR file it adds (decision 2); a pull
   request without `Closes #N`, a Dependabot one and a `chore` one pass, so no exemption exists.
-- Review on sensitive paths only: in the `pull_request` rule add **Require reviewers**
+- Review on `.github/**` only (ADR 0103 amendment, 2026-11-11): in the `pull_request` rule add **Require reviewers**
   (`required_reviewers`): one approval, from a team holding `@procoduck` and `@ovirandunu`, for the
-  file patterns printed by `hack/claim.sh sensitive-paths` (the `# Sensitive paths` section of
-  `.github/CODEOWNERS` is the single source; re-run the command whenever it changes). The updater's
-  CODEOWNERS line (`/hack/pr-updater.sh`) is gone with the updater: set the ruleset's path list
-  again from `hack/claim.sh sensitive-paths`. Leave the general "required
+  pattern `.github/**` alone (the other sensitive paths of `.github/CODEOWNERS` need no approval). The updater's
+  CODEOWNERS line (`/hack/pr-updater.sh`) is gone with the updater. Leave the general "required
   approvals" at 0 and "Require review from Code Owners" off. GitHub does not count the pull request
   author, so the other human approves.
 - Keep merge commits and auto-merge on; squash and rebase stay off; no branch deletion.

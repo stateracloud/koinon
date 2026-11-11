@@ -5,6 +5,7 @@ syntax = "proto3";
 package koinon.mcpserver.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/outward/v1alpha1/outward.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1;mcpserverv1alpha1";
 
@@ -115,6 +116,9 @@ message Server {
   // forget`, ADR 0085 decision 13): the server is not served until the credential is entered again; has_credential
   // is false and credential_header and credential_prefix are kept, so only the value is asked for. Unset otherwise.
   google.protobuf.Timestamp credential_lost_at = 23;
+  // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+  // not called, probed or offered to runs. Unset otherwise.
+  koinon.outward.v1alpha1.AdminDisabled admin_disabled = 24;
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).

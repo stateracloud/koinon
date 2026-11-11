@@ -104,8 +104,8 @@ including how to point Tilt at a remote cluster of your own.
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
   bypass. Merge with a merge commit (keeps stacked pull requests intact); squash and rebase merges
-  are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
-  paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
+  are off. CODEOWNERS requests the other maintainer's review; approval is required on
+  `.github/**` only (CODEOWNERS).
 - A pull request names the issue it closes with `Closes #N`. A maintainer's agent claims the issue
   first with `hack/claim.sh take N`, so no other lane starts on it; the claim ends when the pull
   request merges, or with `hack/claim.sh release N` (or `release-pr <PR>` after a close without a merge)

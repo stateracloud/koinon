@@ -15,6 +15,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -126,7 +127,18 @@ func agentgatewayController(image string) *appsv1.Deployment {
 }
 
 func runtimeClass(name string, labels map[string]string) *nodev1.RuntimeClass {
-	return &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}, Handler: "kata"}
+	return &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}, Handler: "kata",
+		Overhead: &nodev1.Overhead{PodFixed: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("130Mi"), corev1.ResourceCPU: resource.MustParse("250m"),
+		}},
+	}
+}
+
+func runtimeClassNoOverhead(name string, labels map[string]string) *nodev1.RuntimeClass {
+	rc := runtimeClass(name, labels)
+	rc.Overhead = nil
+	return rc
 }
 
 type fakeGateway struct {
@@ -315,6 +327,16 @@ var _ = Describe("Checker", func() {
 		Expect(preflight.Write(&strings.Builder{}, results)).To(BeZero())
 	})
 
+	It("does not ask a non-Kata RuntimeClass for overhead.podFixed", func(ctx SpecContext) {
+		c := healthyCluster()
+		rc := runtimeClassNoOverhead("kata", map[string]string{preflight.AttachableLabel: "true"})
+		rc.Handler = "runc"
+		c.with(rc)
+		r := find(c.run(ctx), "RuntimeClass")
+		Expect(r.Status).To(Equal(preflight.Pass), r.Message)
+		Expect(r.Message).To(ContainSubstring("handler runc"))
+	})
+
 	DescribeTable("fails when a prerequisite is missing",
 		func(ctx SpecContext, breakIt func(*cluster), check, message, fix string) {
 			c := healthyCluster()
@@ -422,6 +444,19 @@ var _ = Describe("Checker", func() {
 			Expect(out.String()).To(ContainSubstring("WARN  " + r.Check))
 			Expect(out.String()).To(HaveSuffix("Preflight passed with 1 warnings.\n"))
 		},
+		Entry("RuntimeClass overhead", func(c *cluster) {
+			c.with(runtimeClassNoOverhead("kata", map[string]string{preflight.AttachableLabel: "true"}))
+		}, "RuntimeClass", "no overhead.podFixed memory and cpu", "beyond its container limits"),
+		Entry("RuntimeClass overhead memory", func(c *cluster) {
+			rc := runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"})
+			delete(rc.Overhead.PodFixed, corev1.ResourceMemory)
+			c.with(rc)
+		}, "RuntimeClass", "no overhead.podFixed memory: ", "memory: 130Mi, cpu: 250m for Cloud Hypervisor"),
+		Entry("RuntimeClass overhead cpu", func(c *cluster) {
+			rc := runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"})
+			rc.Overhead.PodFixed[corev1.ResourceCPU] = resource.MustParse("0")
+			c.with(rc)
+		}, "RuntimeClass", "no overhead.podFixed cpu: ", "memory: 320Mi, cpu: 250m for QEMU"),
 		Entry("guest seccomp off", func(c *cluster) {
 			c.prober = fakeProber{res: preflight.ProbeResult{Seccomp: 0, Filters: 0, Keyctl: "allowed"}}
 		}, "Kata guest seccomp", "off: a kata pod with RuntimeDefault runs with Seccomp: 0 and keyctl allowed",

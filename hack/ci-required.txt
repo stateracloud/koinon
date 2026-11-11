@@ -10,7 +10,7 @@
 # `if:` that skips it counts as passing, which is intended for "this change does not touch my files"
 # (and for pull-request-only steps such as the dependency age ones inside `quick checks`: rulesets only check pull request heads).
 # Only a workflow-level `paths:` filter leaves a check absent and blocks the merge.
-# Every required name (and `review`, ADR 0103) must report on `merge_group`: hack/ci-merge-group-test.sh checks the
+# Every required name must report on `merge_group`: hack/ci-merge-group-test.sh checks the
 # trigger, the job's `if:` and its `needs:` chain. `e2e-lab` is information only and never required
 # (hack/ci-required-test.sh, also with --ruleset).
 #
@@ -46,7 +46,7 @@ advisory flavor-publish
 advisory warm-caches
 advisory warm-caches-web
 
-# Advisory checks that other workflows produce (no `advisory` line: that form names ci.yml jobs). Each
-# listens to merge_group (checked like the required ones); it moves to `external` above when the
-# ruleset requires it:
-#   review           .github/workflows/review.yml
+# The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514) is advisory, and is not a pull request or
+# merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
+# required (a required name must report on every PR, push and merge_group build). It is `continue-on-error`, so a red
+# drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.

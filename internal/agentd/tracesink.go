@@ -76,7 +76,7 @@ type Tracing struct {
 	// Decider decides per run; required.
 	Decider TraceDecider
 	// Endpoint is the base URL of koinon-api's internal OTLP listener; the exporter appends
-	// /v1/traces. TokenFile is the file with the bearer token it requires, read on every export so a
+	// /v1/traces. TokenFile is the file with the bearer token it requires for /v1/traces (agentd's own, not the gateway's), read on every export so a
 	// rotated token applies. Both are required unless Exporter is set.
 	Endpoint, TokenFile string
 	// Exporter replaces the OTLP/HTTP exporter (tests).

@@ -399,8 +399,12 @@ The install-wide audit log of platform actions that belong to no org, such as pl
 _Avoid_: Platform log, global audit log
 
 **Install mark**:
-The random token in the Secret `koinon-install-mark`, made once per deployment and not stored in Postgres. A hash of it labels every OpenShell object the install makes, and an install refuses objects with another mark, so a restore next to the live install cannot touch them (ADR 0106).
+The random token in the Secret `koinon-install-mark`, made once per deployment and not stored in Postgres. A hash of it labels every OpenShell object the install makes, and an install refuses objects with another mark, so a restore next to the live install cannot touch them (ADR 0106). The same hash also stamps API tokens and sessions (ADR 0110).
 _Avoid_: Install ID (that one is in the database), namespace hash
+
+**Install binding**:
+The one `install_binding` row in Postgres that records which install owns the database, by the hash of its install mark. Each process computes a state against it: `same` (this install owns it), `copy` (another install does) or `unknown` (no row). A `copy` refuses API tokens and sessions that another install issued, until a platform admin runs adopt-restore or rebinds a token (ADR 0110).
+_Avoid_: Install lock, database owner
 
 **System actor**:
 The actor of an audit event that Koinon itself caused, named `<component>:<function>`, such as `koinon-api:price-refresh`; the format is frozen and an ID is never renamed (ADR 0100 decision 2).

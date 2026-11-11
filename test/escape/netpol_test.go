@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package escape_test
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
+	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
+)
+
+// Spike 8.15: a standard Kubernetes NetworkPolicy on the sandbox namespace keeps a bypass of the
+// supervisor proxy (a plain pod that opens sockets directly) blocked. The chart ships a
+// namespace-wide default-deny (sandboxNetworkPolicy, on by default); OpenShell's own workload
+// policy is additive with it. This case applies Koinon's shape when it is missing (as the
+// reconciler SA when the chart VAP is present), creates a compliant one-shot workload probe pod as
+// the Agent Sandbox controller (so the chart's VAP admits it), and asserts the API server is
+// unreachable from that pod. The probe writes open/blocked to its termination message: the chart's
+// sandbox-connect policy denies pods/exec in sandbox namespaces, so kubectl exec cannot be used.
+//
+//	KOINON_ESCAPE_NAMESPACE     the workspace namespace (required)
+//	KOINON_ESCAPE_CHART_NAMESPACE  the Koinon release namespace (required; chart e2e only)
+//	KOINON_ESCAPE_KUBECONFIG    kubeconfig (default $KUBECONFIG)
+//	KOINON_ESCAPE_KUBE_CONTEXT  context (default current)
+//	KOINON_ESCAPE_NETPOL        NetworkPolicy name (default <chart ns>-koinon-sandbox-default-deny
+//	                            when KOINON_ESCAPE_CHART_NAMESPACE is set, else
+//	                            koinon-sandbox-default-deny)
+//	KOINON_OPENSHELL_IMAGE      probe image with /bin/sh and nc (required)
+//	KOINON_ESCAPE_RUNTIME_CLASS runtime class the pods policy admits (default runc)
+//	KOINON_ESCAPE_API           host:port list; the probe must not reach the first entry
+//	                            (default: the default/kubernetes Service ClusterIP, port 443)
+var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), SpecPriority(-5), func() {
+	It("blocks a plain workload pod that opens sockets outside the supervisor", func(ctx SpecContext) {
+		// Chart e2e only: kind.sh exports KOINON_ESCAPE_NAMESPACE with the chart install, and the
+		// VAP admits only the reconciler SA to write the fixed-name default-deny. The escape
+		// workspace is not a Koinon org workspace, so the reconciler never Applies it there —
+		// the suite must CREATE it while impersonating that SA.
+		testenv.Require(
+			testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE"),
+			testenv.Var("chart-namespace", "KOINON_ESCAPE_CHART_NAMESPACE"),
+			testenv.Var("probe-image", "KOINON_OPENSHELL_IMAGE"),
+		)
+		ns := os.Getenv("KOINON_ESCAPE_NAMESPACE")
+		chartNS := os.Getenv("KOINON_ESCAPE_CHART_NAMESPACE")
+		image := os.Getenv("KOINON_OPENSHELL_IMAGE")
+		runtimeClass := envOr("KOINON_ESCAPE_RUNTIME_CLASS", "runc")
+		policyName := envOr("KOINON_ESCAPE_NETPOL", defaultNetPolName())
+
+		cfg := kubeConfig()
+		cs := kubernetes.NewForConfigOrDie(cfg)
+
+		// The API server's Service IP differs per cluster (service subnet), and an address nothing
+		// answers on would read as "blocked" without testing the policy. Take the first
+		// KOINON_ESCAPE_API entry when set, else read the kubernetes Service from this cluster.
+		var apiHost string
+		apiPort := 443
+		if v := os.Getenv("KOINON_ESCAPE_API"); v != "" {
+			t := targets(v)
+			apiHost, apiPort = t[0].host, t[0].port
+		} else {
+			svc, err := cs.CoreV1().Services("default").Get(ctx, "kubernetes", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), "read the kubernetes Service ClusterIP")
+			apiHost = svc.Spec.ClusterIP
+		}
+		Expect(apiHost).NotTo(BeEmpty(), "API server Service IP")
+
+		By("ensuring Koinon's default-deny NetworkPolicy is in the sandbox namespace (as the reconciler)")
+		writer := &reconciler.SandboxNetworkPolicy{Kube: cs, Name: policyName}
+		want := writer.Policy(ns)
+		reconCfg := rest.CopyConfig(cfg)
+		reconCfg.Impersonate = rest.ImpersonationConfig{
+			UserName: "system:serviceaccount:" + chartNS + ":koinon-reconciler",
+			Groups:   []string{"system:serviceaccounts", "system:authenticated"},
+		}
+		createCS := kubernetes.NewForConfigOrDie(reconCfg)
+		_, err := createCS.NetworkingV1().NetworkPolicies(ns).Create(ctx, want, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			Fail("cannot create the sandbox default-deny NetworkPolicy as the reconciler: " + err.Error())
+		}
+		if err == nil {
+			DeferCleanup(func(ctx SpecContext) {
+				_ = cs.NetworkingV1().NetworkPolicies(ns).Delete(ctx, policyName, metav1.DeleteOptions{})
+			})
+		}
+		np, err := cs.NetworkingV1().NetworkPolicies(ns).Get(ctx, policyName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(np.Spec.PolicyTypes).To(ConsistOf(networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress))
+		Expect(np.Spec.Ingress).To(BeEmpty())
+		Expect(np.Spec.Egress).To(BeEmpty())
+
+		By("creating a one-shot workload probe (sandbox-connect denies pods/exec)")
+		podName := "koinon-escape-netpol"
+		_ = cs.CoreV1().Pods(ns).Delete(ctx, podName, metav1.DeleteOptions{})
+		automount := false
+		// Retry inside the pod: kube-network-policies can lag a few seconds after the NetworkPolicy lands.
+		// A probe image without nc would fail every check and read as "blocked": report it instead.
+		script := fmt.Sprintf(`command -v nc >/dev/null 2>&1 || { printf no-nc >/dev/termination-log; exit 2; }
+for i in $(seq 1 60); do
+  if nc -z -w 1 %s %d; then
+    sleep 1
+  else
+    printf blocked >/dev/termination-log
+    exit 0
+  fi
+done
+printf open >/dev/termination-log
+exit 1
+`, apiHost, apiPort)
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   podName,
+				Labels: map[string]string{"openshell.ai/boundary-role": "workload", "koinon.dev/escape-netpol": "1"},
+			},
+			Spec: corev1.PodSpec{
+				RuntimeClassName:             &runtimeClass,
+				AutomountServiceAccountToken: &automount,
+				RestartPolicy:                corev1.RestartPolicyNever,
+				Containers: []corev1.Container{{
+					Name:    "probe",
+					Image:   image,
+					Command: []string{"/bin/sh", "-c", script},
+				}},
+			},
+		}
+		impersonated := rest.CopyConfig(cfg)
+		impersonated.Impersonate = rest.ImpersonationConfig{UserName: controllerUser, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+		controller := kubernetes.NewForConfigOrDie(impersonated)
+		_, err = controller.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+		if err != nil {
+			// Without the chart's VAP, cluster-admin creation also works (bare OpenShell).
+			_, err = cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+		}
+		Expect(err).NotTo(HaveOccurred(), "create the NetworkPolicy bypass probe pod")
+		DeferCleanup(func(ctx SpecContext) {
+			_ = cs.CoreV1().Pods(ns).Delete(ctx, podName, metav1.DeleteOptions{})
+		})
+
+		By("the probe cannot reach the API server (result in the termination message)")
+		var last string
+		Eventually(func() string {
+			p, getErr := cs.CoreV1().Pods(ns).Get(ctx, podName, metav1.GetOptions{})
+			if getErr != nil || len(p.Status.ContainerStatuses) == 0 {
+				return ""
+			}
+			term := p.Status.ContainerStatuses[0].State.Terminated
+			if term == nil {
+				return ""
+			}
+			last = term.Message
+			return last
+		}).WithContext(ctx).WithTimeout(2*time.Minute).WithPolling(2*time.Second).
+			Should(Equal("blocked"), "last probe termination message: %q", last)
+	}, NodeTimeout(5*time.Minute))
+})
+
+func defaultNetPolName() string {
+	if chartNS := os.Getenv("KOINON_ESCAPE_CHART_NAMESPACE"); chartNS != "" {
+		return chartNS + "-koinon-sandbox-default-deny"
+	}
+	return "koinon-sandbox-default-deny"
+}

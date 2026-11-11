@@ -32,6 +32,8 @@ const (
 	TokenServiceListTokensProcedure = "/koinon.token.v1alpha1.TokenService/ListTokens"
 	// TokenServiceRevokeTokenProcedure is the procedure name of the TokenService's RevokeToken RPC.
 	TokenServiceRevokeTokenProcedure = "/koinon.token.v1alpha1.TokenService/RevokeToken"
+	// TokenServiceRebindTokenProcedure is the procedure name of the TokenService's RebindToken RPC.
+	TokenServiceRebindTokenProcedure = "/koinon.token.v1alpha1.TokenService/RebindToken"
 )
 
 var (
@@ -57,6 +59,13 @@ var (
 			Procedure:  TokenServiceRevokeTokenProcedure,
 		}
 	})
+	tokenServiceRebindTokenSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_token_v1alpha1_token_proto.Services().ByName("TokenService").Methods().ByName("RebindToken"),
+			Procedure:  TokenServiceRebindTokenProcedure,
+		}
+	})
 )
 
 // TokenServiceClient is a client for the koinon.token.v1alpha1.TokenService service.
@@ -68,6 +77,10 @@ type TokenServiceClient interface {
 	ListTokens(context.Context, *v1alpha1.ListTokensRequest) (*v1alpha1.ListTokensResponse, error)
 	// RevokeToken revokes a token. Revoking twice is fine.
 	RevokeToken(context.Context, *v1alpha1.RevokeTokenRequest) (*v1alpha1.RevokeTokenResponse, error)
+	// RebindToken re-enables a token that a restored copy refuses because another install issued it
+	// (ADR 0110). Platform admins only: an org owner cannot, the same as for the adopt-restore
+	// recovery action. A revoked or expired token is not re-enabled. Audited as token.rebind.
+	RebindToken(context.Context, *v1alpha1.RebindTokenRequest) (*v1alpha1.RebindTokenResponse, error)
 }
 
 // NewTokenServiceClient constructs a client for the koinon.token.v1alpha1.TokenService service.
@@ -85,6 +98,10 @@ type TokenServiceHandler interface {
 	ListTokens(context.Context, *v1alpha1.ListTokensRequest) (*v1alpha1.ListTokensResponse, error)
 	// RevokeToken revokes a token. Revoking twice is fine.
 	RevokeToken(context.Context, *v1alpha1.RevokeTokenRequest) (*v1alpha1.RevokeTokenResponse, error)
+	// RebindToken re-enables a token that a restored copy refuses because another install issued it
+	// (ADR 0110). Platform admins only: an org owner cannot, the same as for the adopt-restore
+	// recovery action. A revoked or expired token is not re-enabled. Audited as token.rebind.
+	RebindToken(context.Context, *v1alpha1.RebindTokenRequest) (*v1alpha1.RebindTokenResponse, error)
 }
 
 // RegisterTokenServiceHandler registers svc as the koinon.token.v1alpha1.TokenService
@@ -95,6 +112,7 @@ func RegisterTokenServiceHandler(server *connect.Server, svc TokenServiceHandler
 		connect.Method{Spec: tokenServiceCreateTokenSpec(), Handler: adapter.createToken},
 		connect.Method{Spec: tokenServiceListTokensSpec(), Handler: adapter.listTokens},
 		connect.Method{Spec: tokenServiceRevokeTokenSpec(), Handler: adapter.revokeToken},
+		connect.Method{Spec: tokenServiceRebindTokenSpec(), Handler: adapter.rebindToken},
 	)
 }
 
@@ -111,6 +129,10 @@ func (UnimplementedTokenServiceHandler) ListTokens(context.Context, *v1alpha1.Li
 
 func (UnimplementedTokenServiceHandler) RevokeToken(context.Context, *v1alpha1.RevokeTokenRequest) (*v1alpha1.RevokeTokenResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.token.v1alpha1.TokenService.RevokeToken is not implemented")
+}
+
+func (UnimplementedTokenServiceHandler) RebindToken(context.Context, *v1alpha1.RebindTokenRequest) (*v1alpha1.RebindTokenResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.token.v1alpha1.TokenService.RebindToken is not implemented")
 }
 
 type tokenServiceClient struct {
@@ -136,6 +158,14 @@ func (c *tokenServiceClient) ListTokens(ctx context.Context, req *v1alpha1.ListT
 func (c *tokenServiceClient) RevokeToken(ctx context.Context, req *v1alpha1.RevokeTokenRequest) (*v1alpha1.RevokeTokenResponse, error) {
 	var res v1alpha1.RevokeTokenResponse
 	if err := c.client.CallUnary(ctx, tokenServiceRevokeTokenSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tokenServiceClient) RebindToken(ctx context.Context, req *v1alpha1.RebindTokenRequest) (*v1alpha1.RebindTokenResponse, error) {
+	var res v1alpha1.RebindTokenResponse
+	if err := c.client.CallUnary(ctx, tokenServiceRebindTokenSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -173,6 +203,18 @@ func (h tokenServiceHandler) revokeToken(ctx context.Context, _ connect.Spec, st
 		return err
 	}
 	res, err := h.svc.RevokeToken(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tokenServiceHandler) rebindToken(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.RebindTokenRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RebindToken(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // procSet is one set of Koinon processes on the shared Postgres: a koinon-api tool server and an
@@ -193,8 +194,8 @@ var _ = Describe("Restarts with two process sets on one Postgres (B8)", func() {
 		r := g.enqueue(ctx, t)
 		owners.watch(r)
 		var id string
-		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		Expect(owners.snapshot()).To(HaveLen(1))
 
 		// Both sets stay alive: the approver decides through one, two decisions race, only one
@@ -202,7 +203,7 @@ var _ = Describe("Restarts with two process sets on one Postgres (B8)", func() {
 		svcAny, _ := svcs.Load(b.name)
 		approveTwice(ctx, g, svcAny.(*approvals.Service), id)
 
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Consistently(func() int { p, _, _, _ := g.harness.snapshot(); return len(p) }).WithTimeout(time.Second).Should(Equal(2),
 			"one prompt for the task, one for the resume")
 		prompts, loads, _, _ := g.harness.snapshot()
@@ -228,19 +229,19 @@ var _ = Describe("Restarts with two process sets on one Postgres (B8)", func() {
 		r := g.enqueue(ctx, t)
 		owners.watch(r)
 		var id string
-		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		svcAny, _ := svcs.Load(a.name)
 		approveTwice(ctx, g, svcAny.(*approvals.Service), id)
 
 		// Whichever set claimed the resume dies inside the prompt, holding the lease.
 		var claimant string
-		Eventually(hang.blocked).WithTimeout(15 * time.Second).Should(Receive(&claimant))
+		Eventually(hang.blocked).WithTimeout(racescale.D(15 * time.Second)).Should(Receive(&claimant))
 		victim, survivor := setOf(claimant, a, b)
 		Expect(getRun(ctx, r).State).To(Equal(store.RunStateRunning))
 		victim.kill()
 
-		Eventually(runState(ctx, r)).WithTimeout(20 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		final := getRun(ctx, r)
 		Expect(final.OwnerID.String).To(HavePrefix(survivor.name + "/"))
 		Expect(final.Epoch).To(BeEquivalentTo(3), "claimed, resumed after the park, taken over")
@@ -266,13 +267,13 @@ var _ = Describe("Restarts with two process sets on one Postgres (B8)", func() {
 		r := a0.enqueue(ctx, t)
 		owners.watch(r)
 		var qid string
-		Eventually(a0.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(a0.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		Expect(owners.snapshot()).To(HaveLen(1))
 
 		answerThrice(ctx, a0, b.conns, qid)
 
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Consistently(func() int { p, _, _, _ := a0.harness.snapshot(); return len(p) }).WithTimeout(time.Second).Should(Equal(2),
 			"one prompt for the question, one for the answer")
 		prompts, loads, _, _ := a0.harness.snapshot()
@@ -296,16 +297,16 @@ var _ = Describe("Restarts with two process sets on one Postgres (B8)", func() {
 		r := a0.enqueue(ctx, t)
 		owners.watch(r)
 		var qid string
-		Eventually(a0.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(a0.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		answerThrice(ctx, a0, a.conns, qid)
 
 		var claimant string
-		Eventually(hang.blocked).WithTimeout(15 * time.Second).Should(Receive(&claimant))
+		Eventually(hang.blocked).WithTimeout(racescale.D(15 * time.Second)).Should(Receive(&claimant))
 		victim, survivor := setOf(claimant, a, b)
 		victim.kill()
 
-		Eventually(runState(ctx, r)).WithTimeout(20 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		final := getRun(ctx, r)
 		Expect(final.OwnerID.String).To(HavePrefix(survivor.name + "/"))
 		Expect(final.Epoch).To(BeEquivalentTo(3))

@@ -109,6 +109,7 @@ var recordedSettings = []platformSetting{
 	// telemetry and scheduling
 	setting("otlp-addr", kindValue),
 	{Flag: "otlp-token-dir", Key: "otlp-auth-dir", Kind: kindRef},
+	{Flag: "otlp-traces-token-dir", Key: "otlp-traces-auth-dir", Kind: kindRef},
 	setting("durable", kindValue),
 	setting("restore-hold", kindValue),
 	setting("run-cap-sweep-interval", kindValue),
@@ -116,6 +117,7 @@ var recordedSettings = []platformSetting{
 
 	// the chart (the image's version is added by platformSettings)
 	setting("chart-version", kindValue),
+	setting("release", kindValue),
 }
 
 // imageVersionKey is the summary key of the build's version, which is not a flag.
@@ -129,6 +131,7 @@ var unrecordedSettings = map[string]string{ //nolint:gosec // flag names and rea
 	"prices-refresh-interval":           "price refresh settings are price.refresh.settings_changed (ADR 0098 decision 5, #316)",
 	"prices-refresh-max-change-percent": "price refresh settings are price.refresh.settings_changed (ADR 0098 decision 5, #316)",
 	"prices-refresh-max-auto-per-day":   "price refresh settings are price.refresh.settings_changed (ADR 0098 decision 5, #316)",
+	"install-mark":                      "a random secret in a Secret (ADR 0106, ADR 0110); only its hash is recorded, in install_binding",
 	"addr":                              "the pod's own listen port; the chart's Service follows it",
 	"tools-addr":                        "the pod's own listen port; the chart's Service follows it",
 	"metrics-addr":                      "the pod's own listen port; the chart's Service follows it",

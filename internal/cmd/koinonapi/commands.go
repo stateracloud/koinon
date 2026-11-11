@@ -73,6 +73,9 @@ func newServeCommand() *cobra.Command {
 			if c.otlpAddr != "" && c.otlpTokenDir == "" {
 				return errors.New("--otlp-token-dir is required with --otlp-addr: the OTLP receiver never runs without its bearer token (pass --otlp-addr= to turn the receiver off)")
 			}
+			if c.otlpAddr != "" && c.otlpTracesTokenDir == "" {
+				return errors.New("--otlp-traces-token-dir is required with --otlp-addr: /v1/traces has its own bearer token, held only by koinon-agentd (pass --otlp-addr= to turn the receiver off)")
+			}
 			if c.oidcIssuer == "" {
 				mappings, err := auth.ParseGroupMappings(c.defaultOrgGroups)
 				if err != nil {

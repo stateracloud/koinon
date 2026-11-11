@@ -54,8 +54,13 @@ done
 if render --set global.imageRegistry=https://art.example.com >/dev/null 2>&1; then fail "imageRegistry with a scheme must not render"; fi
 if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/null 2>&1; then fail "a mirror with a scheme must not render"; fi
 # NOTES warn when image.registry is customised next to a global mirror (helm install prints them; template does not).
-notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
-grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
+# Do not hide a helm failure with || true: that turned an unsupported helm into "missing NOTES" (#349).
+notes=""
+if ! notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1); then
+	fail "helm install --dry-run=client for NOTES failed: $(head -1 <<<"$notes")"
+else
+	grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
+fi
 # An explicit image.registry is the upstream that the rewrite starts from.
 has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/api:0.0.0$' \
 	--set image.registry=quay.io/mine --set 'global.registryMirrors.quay\.io=art.example.com/ghcr-remote'
@@ -66,7 +71,7 @@ has "supervisor pin is rewritten" 'c.image in \["art.example.com/ghcr-remote/nvi
 has "explicit supervisorImages are not rewritten" 'c.image in \["ghcr.io/nvidia/openshell/supervisor:0.1.6"\]' \
 	--set global.imageRegistry=art.example.com/proxy --set 'sandboxPolicy.supervisorImages={ghcr.io/nvidia/openshell/supervisor:0.1.6}'
 has "preflight is told the supervisor pin" '--supervisor-images=art.example.com/proxy/nvidia/openshell/supervisor:0.1.7' --set global.imageRegistry=art.example.com/proxy
-lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false
+lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
 # (d) pull secrets: strings and {name} maps, merged with the deprecated top-level list, on every pod-bearing object.
 pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSecrets[1].name=other' --set 'imagePullSecrets[0].name=regcred')
 rendered=$(render "${pull_args[@]}")

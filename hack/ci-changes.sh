@@ -3,10 +3,10 @@
 #
 # Prints name=true|false lines (for $GITHUB_OUTPUT) saying which CI jobs a change can affect.
 # The path rules are in hack/paths.rules (read through hack/paths-lib.sh); this script adds the
-# flavors suite's `go list` build graph.
+# flavors and chartsmoke suites' `go list` build graphs.
 # With no base ref (a push to main) every job runs. Usage: hack/ci-changes.sh [base-ref]
 # `--stdin` in place of the base ref reads the changed paths from stdin (hack/ci-changes-test.sh);
-# `--flavors-dirs` prints the directories the flavors suite builds from.
+# `--flavors-dirs` / `--chartsmoke-dirs` print the directories each suite builds from.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -15,17 +15,23 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# strip_mod_dirs: repository-relative directories from `go list` .Dir lines (logical and physical).
+strip_mod_dirs() {
+	local root
+	root=$(pwd -P) # go reports .Dir under the logical or the physical path, so strip both
+	awk -v r="$root/" -v l="$PWD/" 'index($0, r) == 1 { print substr($0, length(r) + 1) } index($0, l) == 1 { print substr($0, length(l) + 1) }' | sort -u
+}
+
 # flavors_dirs: the repository-relative directory of every package of this module that the flavors
 # suite builds, tests included (`go list -deps -test`, as the flavors job runs it on linux).
 # CI_CHANGES_FLAVORS_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
 flavors_dirs() {
-	local root out dirs
+	local out dirs
 	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
 		dirs=$CI_CHANGES_FLAVORS_DIRS
 	else
-		root=$(pwd -P) # go reports .Dir under the logical or the physical path, so strip both
 		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
-		dirs=$(awk -v r="$root/" -v l="$PWD/" 'index($0, r) == 1 { print substr($0, length(r) + 1) } index($0, l) == 1 { print substr($0, length(l) + 1) }' <<<"$out" | sort -u)
+		dirs=$(strip_mod_dirs <<<"$out")
 	fi
 	# The suite's own directory must be in the list; if not, the strip failed (a path outside
 	# the checkout, a symlink): fail closed instead of reporting "no dependency changed".
@@ -33,10 +39,34 @@ flavors_dirs() {
 	printf '%s\n' "$dirs"
 }
 
-if [[ ${1:-} == --flavors-dirs ]]; then
+# chartsmoke_dirs: packages the chart smoke suite builds (tests included) plus the three cmd/
+# binaries images_test.go compiles with `go build` and no tags. Non-Go inputs the suite reads
+# (charts/, hack/versions.env) stay in hack/paths.rules. CI_CHANGES_CHARTSMOKE_DIRS replaces
+# the `go list` calls; the test sets it once.
+chartsmoke_dirs() {
+	local out dirs
+	if [[ -v CI_CHANGES_CHARTSMOKE_DIRS ]]; then
+		dirs=$CI_CHANGES_CHARTSMOKE_DIRS
+	else
+		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/chartsmoke/...) || return 1
+		out+=$'\n'
+		out+=$(GOOS=linux go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler) || return 1
+		dirs=$(strip_mod_dirs <<<"$out")
+	fi
+	grep -qxF test/chartsmoke <<<"$dirs" || return 1
+	printf '%s\n' "$dirs"
+}
+
+case ${1:-} in
+--flavors-dirs)
 	flavors_dirs
 	exit
-fi
+	;;
+--chartsmoke-dirs)
+	chartsmoke_dirs
+	exit
+	;;
+esac
 
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
@@ -63,14 +93,21 @@ while IFS= read -r f; do
 	if [[ -n $f ]] && paths_match everything - "$f"; then everything=true; fi
 done <<<"$files"
 
-# flavors_graph: a changed file lies in (or below, for embedded files) the directory of a package
-# the flavors suite builds. Derived, so a new import of the suite is covered without editing a
+# suite_graph <dirs-fn> <job>: a changed file lies in (or below, for embedded files) a package
+# directory the suite builds, and is not excluded by the job's except/keep rules (so chartsmoke
+# still skips web/src and foreign _test.go). Derived, so a new import is covered without editing a
 # list. If `go list` fails (no toolchain) the job runs: fail closed.
-flavors_graph() {
-	local dirs f
-	dirs=$(flavors_dirs) || return 0
+suite_graph() {
+	local dirs_fn=$1 job=$2 dirs f
+	dirs=$("$dirs_fn") || return 0
 	while IFS= read -r f; do
-		[[ -n $f ]] && paths_in_graph "$dirs" "$f" && return 0
+		[[ -n $f ]] || continue
+		paths_in_graph "$dirs" "$f" || continue
+		if paths_match except "$job" "$f"; then
+			paths_match keep "$job" "$f" && return 0
+			continue
+		fi
+		return 0
 	done <<<"$files"
 	return 1
 }
@@ -78,7 +115,9 @@ flavors_graph() {
 for j in "${jobs[@]}"; do
 	if [[ $everything == true ]] || paths_job_any "$j" <<<"$files"; then
 		echo "$j=true"
-	elif [[ $j == flavors ]] && flavors_graph; then
+	elif [[ $j == flavors ]] && suite_graph flavors_dirs flavors; then
+		echo "$j=true"
+	elif [[ $j == chartsmoke ]] && suite_graph chartsmoke_dirs chartsmoke; then
 		echo "$j=true"
 	else
 		echo "$j=false"

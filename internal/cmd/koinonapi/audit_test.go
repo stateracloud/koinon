@@ -238,7 +238,10 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		_, err = run("verify", "--anchors", inst)
 		Expect(err).To(MatchError(ContainSubstring("--anchors needs --file")))
 		_, err = run("verify", "--file", inst, "--anchors", inst)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ContainSubstring("--anchors is for an org export")))
+		_, err = run("verify", "--file", orgFile, "--anchors", orgFile)
+		Expect(err).To(MatchError(ContainSubstring("is an org export; give an install export")))
+		Expect(err.Error()).NotTo(ContainSubstring("CollectAnchors"), "operator sees a CLI message, not the library option name")
 	}, SpecTimeout(3*time.Minute))
 
 	It("reads --scope and --org", func() {

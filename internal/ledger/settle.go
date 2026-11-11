@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
 )
@@ -452,6 +453,11 @@ func (s *Settler) lookup(ctx context.Context, q *store.Queries, org pgtype.UUID,
 		return providerusage.Usage{}, errNoSource
 	} else if err != nil {
 		return providerusage.Usage{}, fmt.Errorf("read provider: %w", err)
+	}
+	if prov.AdminDisabledAt.Valid {
+		// An admin switched the provider off (ADR 0110 decision 5): its usage API is not called. Like any
+		// failed lookup the entry is asked again until its deadline, then the logged usage is final.
+		return providerusage.Usage{}, outward.ErrDisabled
 	}
 	src, ok := s.sources().For(prov.Type, prov.Url, row.ResponseID.String)
 	if !ok {

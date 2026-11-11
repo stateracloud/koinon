@@ -90,7 +90,11 @@ The policies select sandbox namespaces by label, so three paths could move a san
   policies cover, except from `sandboxPolicy.identities.namespaces` (default: the OpenShell gateway,
   which creates the namespaces in managed mode). Cluster admins are denied. It binds to every
   namespace update and reads the old object's labels itself, because a namespace selector reads the
-  new object's labels, and the new object is the one that has just left the selection. Moving a
+  new object's labels, and the new object is the one that has just left the selection. A
+  matchCondition on the old object (`koinon.sandboxGuardedLabels`) sends only namespaces whose old
+  object has a guarded key to the validation CEL; every other namespace update passes untouched
+  (issue 507). A `sandboxPolicy.namespaceSelector` with no matchLabels, In or Exists requirement
+  renders no pre-filter, so the policy then judges every namespace update. Moving a
   namespace into the policies (adding the labels) stays open.
 - **Gateway ID drift is reported.** The reconciler compares `openshell.gatewayId` with the gateway's
   `gateway_id` (read from OpenShell's gateway ConfigMap) on every pass, the first included, and sets
@@ -129,3 +133,19 @@ The policies select sandbox namespaces by label, so three paths could move a san
   claim could be bound to a PV an admin made (hostPath or `csi.spiffe.io`). The guard for that is
   outside pod admission (RBAC on claims, or a policy on `persistentvolumeclaims`); this rule
   assumes no non-admin identity has claim create rights in a sandbox namespace.
+
+## Amendment (2026-11-11): default-deny NetworkPolicy in sandbox namespaces (issue 13, spike 8.15)
+
+The chart ships a **default-deny** standard `networking.k8s.io/v1` NetworkPolicy for OpenShell
+sandbox namespaces, **on by default** (`sandboxNetworkPolicy.enabled`). No CNI-specific features.
+
+- The chart renders a ClusterRole, ClusterRoleBinding and ValidatingAdmissionPolicy
+  (`templates/sandbox-networkpolicy.yaml`) that let the reconciler write only the fixed-name
+  default-deny shape in this gateway's workspace namespaces.
+- The reconciler applies `<namespace>-<fullname>-sandbox-default-deny` in each workspace
+  namespace: empty `podSelector`, `policyTypes: [Ingress, Egress]`, no allow rules. OpenShell's
+  own workload and supervisor policies are additive with it (OpenShell `isolation.rs`).
+- The escape suite's NetworkPolicy bypass case (`test/escape/netpol_test.go`) creates a plain
+  workload probe pod that opens sockets outside the supervisor and asserts the path stays blocked.
+- Turning `sandboxNetworkPolicy.enabled` off renders none of the chart objects and applies nothing;
+  sandbox namespaces then rely on OpenShell's policies alone.

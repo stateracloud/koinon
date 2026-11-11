@@ -61,6 +61,11 @@ var (
 // list of it finds them without reading any value.
 const GeneratedLabel = project.Domain + "/generated"
 
+// ReleaseLabel names the Helm release that generated a Secret (ensure-secrets sets it; Argo CD must
+// not use app.kubernetes.io/instance on these Secrets). The start-up check scopes its list with it
+// so two releases in one namespace do not see each other's generated Secrets (#375).
+const ReleaseLabel = project.Domain + "/release"
+
 // advisoryLockName serialises the start-up check across replicas.
 const advisoryLockName = "koinon.keys_observed"
 
@@ -193,9 +198,22 @@ type GeneratedReader struct {
 	// ListLabelled also lists the Secrets labelled GeneratedLabel. It needs the list verb on Secrets,
 	// which koinon-api has and the key-admin Job (get and update on the KEK Secret by name) does not.
 	ListLabelled bool
+	// Release is the Helm release name. When set with ListLabelled, the list is scoped to Secrets
+	// labelled ReleaseLabel=<Release> as well, so two releases in one namespace each see only their
+	// own (#375). Empty leaves the list unscoped (one release per namespace, or a local run).
+	Release string
 	// Names are Secrets read by name, for the ones no label marks: the KEK Secret and the saved-work
 	// key. A name that does not exist is skipped.
 	Names []string
+}
+
+// labelledSelector is the LabelSelector for ListLabelled: GeneratedLabel, and ReleaseLabel when
+// Release is set.
+func (r GeneratedReader) labelledSelector() string {
+	if r.Release == "" {
+		return GeneratedLabel
+	}
+	return GeneratedLabel + "," + ReleaseLabel + "=" + r.Release
 }
 
 // Read lists the Secrets labelled GeneratedLabel (with ListLabelled) and gets those in Names. koinon-api
@@ -207,7 +225,7 @@ func (r GeneratedReader) Read(ctx context.Context) ([]GeneratedSecret, error) {
 		byName[s.Name] = GeneratedSecret{SecretName: s.Name, UID: string(s.UID), CreatedAt: s.CreationTimestamp.UTC().Format(time.RFC3339)}
 	}
 	if r.ListLabelled {
-		list, err := secrets.List(ctx, metav1.ListOptions{LabelSelector: GeneratedLabel})
+		list, err := secrets.List(ctx, metav1.ListOptions{LabelSelector: r.labelledSelector()})
 		if err != nil {
 			return nil, fmt.Errorf("list the generated Secrets: %w", err)
 		}

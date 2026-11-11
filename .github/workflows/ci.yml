@@ -226,21 +226,9 @@ jobs:
       # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
       # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
       - name: agentgateway test image
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-          FORK: ${{ github.event.repository.fork }}
-        run: |
-          read -r _ _ digest < <(hack/agentgateway-pin.sh)
-          mirror="ghcr.io/${OWNER,,}/agentgateway"
-          if docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN" && docker pull "$mirror@$digest"; then
-            echo "KOINON_AGENTGATEWAY_MIRROR=$mirror" >>"$GITHUB_ENV"
-          elif [[ $FORK == true ]]; then
-            echo "::warning::cannot pull $mirror@$digest; the agentgateway tests pull the chart's repository"
-          else
-            echo "::error::cannot pull $mirror@$digest: dispatch mirror-agentgateway-test-image.yml on this ref, or check the package's Manage Actions access (docs/dev/ci.md)"
-            exit 1
-          fi
+        uses: ./.github/actions/agentgateway-test-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
@@ -260,6 +248,10 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     name: go-race
     runs-on: ubuntu-latest
+    # packages: read pulls the agentgateway test image the ledger suite starts (as in go-test).
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: go
@@ -275,9 +267,20 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
-      # A Ginkgo suite: ginkgo writes one testcase per spec to the report.
-      - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race.xml --output-dir=reports/go ./internal/reconciler/
+      - name: agentgateway test image
+        uses: ./.github/actions/agentgateway-test-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      # The concurrent packages run under the race detector (docs/dev/ci.md#the-race-detector): the
+      # reconciler runs per-sandbox jobs concurrently (LT1), agentd, ledger and durable hold shared
+      # state behind locks and channels. Each is a Ginkgo suite, so ginkgo writes one testcase per
+      # spec to the report. The reconciler and the ledger share fixed state and run one process; agentd and durable
+      # are parallel suites (see hack/go-test.sh) and run with -p, as in go-test. hack/go-test-test.sh keeps the lists whole.
+      - run: mkdir -p reports/go && go tool ginkgo -race --keep-going --procs=1 --junit-report=go-race-serial.xml --output-dir=reports/go ./internal/reconciler/ ./internal/ledger/
+        env:
+          KOINON_REQUIRE: docker
+      - if: ${{ !cancelled() }}
+        run: go tool ginkgo -race -p --keep-going --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
       - name: Upload test reports
@@ -823,7 +826,6 @@ jobs:
       - run: hack/ci-supersede-test.sh
       - run: hack/ci-concurrency-test.sh
       - run: hack/ci-merge-group-test.sh
-      - run: hack/review-gate-test.sh
       - run: hack/ci-cache-test.sh
       - run: hack/chart-check-test.sh
 

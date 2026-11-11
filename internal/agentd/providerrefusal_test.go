@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // OpenCode 2.2.0 words a provider's 403 as "Authentication required", with no status. The run is
@@ -52,7 +53,7 @@ var _ = Describe("Who refused the model request", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := refuse(ctx, e, 403, time.Second)
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = 10 * time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(30 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassPolicy))
 		Expect(got.OutcomeReason.String).To(HavePrefix("The model provider refused the request (HTTP 403) [as reported by the harness: "))
@@ -65,7 +66,7 @@ var _ = Describe("Who refused the model request", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := refuse(ctx, e, 401, 0)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("rejected the API key Koinon holds for it (HTTP 401)"))
@@ -80,7 +81,7 @@ var _ = Describe("Who refused the model request", func() {
 		r := refuse(ctx, e, 0, 0)
 		start := time.Now()
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("Authentication required: provider authentication required"))
@@ -100,7 +101,7 @@ var _ = Describe("Who refused the model request", func() {
 		Expect(err).NotTo(HaveOccurred())
 		r := refuse(ctx, e, 0, 0)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 	})
 })

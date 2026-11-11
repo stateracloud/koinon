@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
@@ -87,7 +88,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.otlpEndpoint, "otlp-endpoint", "",
 		"base URL of koinon-api's internal OTLP/HTTP listener (for example http://koinon-api.koinon.svc:4318), where run spans are exported; empty: not exported")
 	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
-		"file with the bearer token that listener requires (the Secret koinon-otlp-token, key token, mounted read-only); required with --otlp-endpoint")
+		"file with the bearer token that listener requires (the Secret koinon-otlp-traces-token, key token, mounted read-only; not the gateway's token, issue 55); required with --otlp-endpoint")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
@@ -278,6 +279,17 @@ func run(ctx context.Context, cfg config) error {
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err
+	}
+	// The install binding (ADR 0110 decision 0). agentd owns the checkpoint target columns, which the
+	// runtime guard of part b2 fills; today it claims the row and a held agentd re-asserts the hold.
+	if cfg.installMark != "" {
+		binding := installbinding.New(db, execution.OwnerID(cfg.installMark), cfg.restoreHold, slog.Default())
+		if _, err := binding.Claim(ctx, installbinding.Targets{}); err != nil {
+			// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+			slog.Default().Warn("install binding: first claim failed, retrying in the background", "err", err)
+		}
+		binding.StateMetric(reg)
+		safego.Go(ctx, slog.Default(), "install-binding", binding.Run)
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
 	if cfg.restoreHold {

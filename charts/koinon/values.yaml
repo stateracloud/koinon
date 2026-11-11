@@ -53,11 +53,13 @@ api:
   # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
   # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
   # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.
+  # The listener has two tokens with separate scopes (issue 55): otlpToken admits /v1/logs (the
+  # gateway's), otlpTracesToken admits /v1/traces (only koinon-agentd's). Each path refuses the other's.
   otlpPort: 4318
-  # The receiver's bearer token. By default the ensure-secrets hook Job generates the Secret
-  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api, koinon-agentd
-  # and the gateway mount it; sandboxes never see it. existingSecret names your own Secret with a
-  # "token" key instead.
+  # The /v1/logs bearer token. By default the ensure-secrets hook Job generates the Secret
+  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api and the
+  # gateway mount it; koinon-agentd and sandboxes never see it. existingSecret names your own Secret
+  # with a "token" key instead.
   #
   # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
   # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
@@ -68,6 +70,12 @@ api:
   # the new token, delete "previous". See https://koinon.stateracloud.com/docs/operate/secret-keys/.
   # With a Secret you manage (existingSecret), rotate the same way.
   otlpToken:
+    existingSecret: ""
+  # The /v1/traces bearer token, held only by koinon-agentd (the sender) and koinon-api (the check);
+  # the gateway and sandboxes never see it. The hook Job generates the Secret koinon-otlp-traces-token
+  # (key "token") unless existingSecret names your own. Rotation is the same as for otlpToken
+  # ("previous" plus a new "token"); only koinon-agentd sends it, so there is no gateway to reload.
+  otlpTracesToken:
     existingSecret: ""
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.
@@ -553,7 +561,18 @@ openshell:
   # gateway; otherwise the exec channel that controls every sandbox crosses the cluster in clear
   # text. The components log a warning. Not allowed together with clientTLSSecret.
   insecure: false
-  # Default sandbox runtime class (ADR 0045).
+  # Default sandbox runtime class (ADR 0045). A Kata class must carry overhead.podFixed memory and
+  # cpu; the preflight warns when either is missing. Kubernetes adds podFixed to the scheduler's and
+  # ResourceQuota's view of each pod and to the pod cgroup's limits (sum of container limits plus
+  # podFixed). Without it the scheduler undercounts every vm sandbox, a sandbox near its memory limit
+  # can get the VMM OOM-killed, and the guest's and VMM's cpu comes out of the workload's limit.
+  # Sizing (ADR 0039, 2026-11-11 amendment): Kata gives the guest default_memory plus the container
+  # limits, but the host charges guest RAM only as the guest touches it, so podFixed covers what one
+  # sandbox uses beyond its limits (guest kernel and kata-agent, shim, VMM, virtiofsd), not
+  # default_memory. kata-deploy ships memory 130Mi, cpu 250m for Cloud Hypervisor (Talos's kata
+  # handler) and 320Mi, 250m for QEMU. Measure as Kata's sizing guide says (host side: the pod
+  # cgroup's memory.current minus the nominal VM size, under load) and raise it if needed. With enable_mem_prealloc or hugepages the whole guest is charged at boot, so
+  # podFixed must also cover default_memory.
   runtimeClassName: kata
   # The OpenShell gateway's gateway_id (its chart's gatewayId; the default there is openshell). In
   # managed mode OpenShell names each workspace's namespace openshell-<gatewayId>-<workspace> and
@@ -575,7 +594,9 @@ publicUrl: ""
 # hook Job generates it once into koinon-install-mark (key "token": 64 hex characters) and never changes it; it
 # is not in Postgres, so a restored database gets its own. With existingSecret you supply that Secret (same key);
 # to take over another install's objects deliberately, give it the same token. Losing the Secret (the namespace
-# is deleted) ends the install's ownership: see the backup and restore guide.
+# is deleted) ends the install's ownership: see the backup and restore guide. koinon-api also reads it (ADR 0110):
+# it records the hash in the database and refuses the API tokens and sessions another install issued, so a
+# restored copy with a new mark does not accept the source's credentials until a platform admin re-enables them.
 installMark:
   existingSecret: ""
 
@@ -736,6 +757,16 @@ metrics:
 sandboxObserver:
   enabled: true
 
+# Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15, ADR 0045).
+# On by default. Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
+# renders a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-networkpolicy.yaml);
+# the reconciler applies a NetworkPolicy named <namespace>-<fullname>-sandbox-default-deny in each
+# workspace namespace of openshell.gatewayId: empty podSelector, policyTypes [Ingress, Egress], no
+# allow rules. OpenShell's own workload and supervisor policies are additive with it. Off, the
+# chart renders none of it and the reconciler applies nothing.
+sandboxNetworkPolicy:
+  enabled: true
+
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
@@ -775,6 +806,9 @@ sandboxPolicy:
   # (scopeToGateway), so a release's policies cover only its own gateway's workspace namespaces: two
   # Koinon releases with their own gateways on one cluster do not block each other's sandboxes
   # (old issue 460).
+  # A selector with no matchLabels, In or Exists requirement (only NotIn / DoesNotExist) turns off the
+  # namespace label policy's matchConditions pre-filter, so that policy then judges every namespace
+  # update in the cluster (issue 507).
   namespaceSelector:
     matchLabels:
       openshell.ai/managed-by: openshell

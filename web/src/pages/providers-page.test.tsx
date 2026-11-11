@@ -7,6 +7,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { AdminDisabledSchema } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import {
   ModelSchema,
   ProviderSchema,
@@ -37,10 +38,11 @@ const removedProvider = create(ProviderSchema, {
 })
 const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', createdAt: t, updatedAt: t })
 const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'openai', formats: single, url: 'https://api.example.com/v1', source: 'ui', disabledReason: 'shadowed by a provider of the same name declared in a Kubernetes Secret' })
+const adminOff = create(ProviderSchema, { id: 'p-off', name: 'switched-off', type: 'openai', formats: single, url: 'https://api.example.com/v1', hasKey: true, source: 'ui', createdAt: t, updatedAt: t, adminDisabled: create(AdminDisabledSchema, { at: t, by: 'user u-1', note: 'restored copy' }) })
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; withCostKey?: boolean; withLostCostKey?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean; withAdminOff?: boolean; withCostKey?: boolean; withLostCostKey?: boolean; holdModelsRefetchAfterCreate?: Promise<void> } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -48,7 +50,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
       getDefaultModel: () => ({ model: '', available: [] }),
       listProviders: () => {
         calls.listed++
-        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [opts.withLostCostKey ? create(ProviderSchema, { ...claude, costKeyLostAt: timestampFromMs(Date.now()), costScope: 'wrkspc_01Cost' }) : opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }
+        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAdminOff ? [adminOff] : []), ...(opts.withAnthropic ? [opts.withLostCostKey ? create(ProviderSchema, { ...claude, costKeyLostAt: timestampFromMs(Date.now()), costScope: 'wrkspc_01Cost' }) : opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }
       },
       listModels: async () => {
         // Hold the refetch that follows a provider create, so the form's completion arrives late.
@@ -118,6 +120,17 @@ describe('Providers page', () => {
 
     const off = within(within(list).getByRole('region', { name: 'dup' }))
     expect(off.getByText(/shadowed by a provider of the same name/)).toBeInTheDocument()
+  })
+
+  it('shows an admin-switched-off provider as disabled and offers no echo check', async () => {
+    setup({ withAdminOff: true })
+    const list = await screen.findByRole('list', { name: 'Providers' })
+    const off = within(within(list).getByRole('region', { name: 'switched-off' }))
+    expect(off.getByText('Disabled')).toBeInTheDocument()
+    expect(off.queryByText('Active')).not.toBeInTheDocument()
+    expect(off.queryByRole('button', { name: /echo/i })).not.toBeInTheDocument()
+    const on = within(within(list).getByRole('region', { name: 'openrouter' }))
+    expect(on.getByRole('button', { name: /echo/i })).toBeInTheDocument()
   })
 
   it('adds a provider with a write-only key and clears the key from the page', async () => {

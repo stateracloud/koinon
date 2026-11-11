@@ -364,6 +364,16 @@ such care; this one fails closed on any CEL error, so it only reads labels.
 {{- if $p.scopeToGateway }}
 {{- $scope = printf "(%s) || (%s)" $scope (include "koinon.selectorCEL" (list (include "koinon.sandboxUnlabelledSelector" $ | fromYaml) "variables.oldLabels")) }}
 {{- end }}
+{{- /*
+  A pre-filter is sound only when the selector has a positive requirement (a matchLabels entry, an In
+  or an Exists expression): then a namespace with none of the guarded keys is outside every branch of
+  `covered`. NotIn and DoesNotExist match a namespace that lacks the key, so a selector with only
+  those covers a namespace with no labels at all, and the filter would let its relabel through. The
+  gateway-id label that scopeToGateway adds does not count: the unlabelled branch has none.
+*/ -}}
+{{- $positive := false }}
+{{- if ($p.namespaceSelector.matchLabels | default dict) }}{{- $positive = true }}{{- end }}
+{{- range ($p.namespaceSelector.matchExpressions | default list) }}{{- if or (eq .operator "In") (eq .operator "Exists") }}{{- $positive = true }}{{- end }}{{- end }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -379,6 +389,18 @@ spec:
         apiVersions: [v1]
         operations: [UPDATE]
         resources: [namespaces]
+  # Only an UPDATE of a namespace that carries one of the guarded keys reaches the variables and the
+  # validation: every other namespace update in the cluster (Argo CD's managedNamespaceMetadata
+  # included) passes untouched, so a CEL error in the validation cannot block it. The keys come from
+  # koinon.sandboxGuardedLabels, not a fixed prefix, because namespaceSelector is configurable. The
+  # test reads the OLD object, as the validation does. It is rendered only when the selector has a
+  # positive requirement (matchLabels, In, Exists): a selector of NotIn / DoesNotExist alone covers
+  # a namespace without the keys, and that namespace must still reach the validation.
+{{- if $positive }}
+  matchConditions:
+    - name: old-object-has-a-guarded-label
+      expression: {{ printf "has(oldObject.metadata.labels) && %s.exists(k, k in oldObject.metadata.labels)" (include "koinon.sandboxGuardedLabels" .) | quote }}
+{{- end }}
   variables:
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.namespaces | default list)) | quote }}

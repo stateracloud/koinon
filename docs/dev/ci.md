@@ -219,6 +219,21 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+**The restore drill** (ADR 0109, #514; `test/drill`) is the evidence for ADR 0085 decision 15: a Ginkgo suite
+seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
+with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
+kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
+`koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
+`e2e-kind.yml` (`continue-on-error: true`, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
+reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
+branch): nightly, on rc tags (`v*-rc.*`) and on `gh workflow run e2e-kind.yml -f suite=drill`, which runs only the
+drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
+merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
+fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
+any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
+commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
+`junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
+
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
 queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts
@@ -258,12 +273,39 @@ and exits 1 when a gate failed, 3 when none failed but a gate could not run on t
 all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
 requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
 requirement exists. A gate is `notrun` when its log shows the machine denied it and no failure
-marker (`--- FAIL`, `[FAIL]`, a compile error) is in it: Docker (daemon down, socket denied), the
-network (proxy refusal, no such host), or the sandbox (`deny(`, `operation not permitted`). A real
+marker (`--- FAIL`, `[FAIL]`, a compile error, helm `Error:`, chart-check `assertion(s) failed`,
+gitleaks `leaks found:`) is in it: Docker (daemon down, socket denied), the
+network (proxy refusal, no such host, buf remote unavailable), or the sandbox (`deny(`, `operation not permitted`). A real
 test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
-its offline self-test (stubbed gates, run by the `scripts` job).
+its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
+
+## The race detector
+
+The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
+its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+`internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
+suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
+runs without it, because the race build is several times slower. Add a package here when it starts
+goroutines or shares state behind a lock; `hack/go-test-test.sh` checks the list. A reported race is
+fixed, never suppressed. Run it locally with `go tool ginkgo -race ./internal/<pkg>/` (Docker for the
+Postgres suites).
+
+Timing under `-race`: the race build is slower and the runner has fewer cores than a laptop, so a
+fixed wall-clock window that is fine on a laptop times out on the runner without any race report (the
+first `go-race` run of agentd failed on 9 specs, all "Timed out after 20s"). Every `Eventually` window
+in `internal/agentd` therefore goes through `racescale.D` (`internal/testing/racescale`: 1x normally,
+5x under `-race`), so normal timing is unchanged. Write new windows the same way. `Consistently`
+windows are not scaled: they assert that nothing happens, and a longer window only slows the suite.
+The same goes for the config budgets a spec lets real work run under (the pool's `Lease` and `Heartbeat`
+together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`, `GatewayRecordWait`, the
+checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
+short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
+fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
+a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
+processes, and fewer processes would make the job slower for the same risk.
 
 ## What `ci` runs when
 
@@ -283,8 +325,8 @@ One source, `hack/paths.rules`. Which paths turn on which job or gate is data, i
 `hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
 e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
 `lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
-the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
-graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds the `go list` build
+graphs of the flavors and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
 that file and nowhere else.
 
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
@@ -296,11 +338,10 @@ that file and nowhere else.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
-  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
-  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
-  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
-  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
-  list cannot name, so it is not done.
+  tags. `hack/ci-changes.sh` derives the Go packages those commands and the suite import (`go list`,
+  like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
+  `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
+  `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
@@ -483,7 +524,6 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
-| `review.yml` | `pull_request`, `merge_group` (the `review` job, ADR 0103); `push` to `main` (passes) | `GITHUB_TOKEN` only, `contents: read, pull-requests: read, statuses: read`; no secret, no Environment | ok: checks out main's tip at run time (`pull_request.base.ref`; `merge_group.base_sha` in the queue) and runs its `hack/review-gate.sh`, `hack/claim.sh` and CODEOWNERS; the PR's code never runs. The workflow file is the PR head's; the guard is the approval on `.github/**` (see "The `review` check") |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
@@ -575,7 +615,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 (ADR 0105): `hack/pr-merge.sh <PR>` enqueues; the queue builds main plus the PR and its `quickstart`
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
-runs the review gate, merges with `--admin`, and opens a `break-glass` issue with the reason.
+merges with `--admin`, and opens a `break-glass` issue with the reason.
 `--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
@@ -611,10 +651,14 @@ green passed). The rule:
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
    outranks every finished one, a green included; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
-   never-started cancelled job with a null `startedAt`), then job id.
-3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins.
+   never-started cancelled job with a null `startedAt`), then job id. The newest finished row decides even when it is
+   cancelled or skipped (#399): a re-run that was then cancelled must not read as green to `pr-merge --admin`.
+3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins. Statuses are
+   never dropped by the run filter, even when their `target_url` happens to contain `/runs/<id>` (#399).
 4. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
-   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come.
+   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come. Only
+   workflows that have produced a required context on this head are considered; when the required set is empty every
+   empty current run fails closed (#399).
 6. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
 
 A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.
@@ -660,55 +704,14 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   flavor image itself when GHCR has none for the tree. The push to main after the queue merge does not run the
   quickstart again: `decide` (push) accepts a green `merge_group` quickstart job whose head commit has the
   pushed commit's tree (`PUSH_SHA`). The PR-head lookup shim and `e2e-lab` gate are gone (#452).
-- Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; `review` pinned to the
-  Actions app; required checks on `merge_group`). PR B merges only with or after it.
+- Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; required checks on `merge_group`). PR B merges only with or after it.
 - Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
-  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks and `review` opens none.
+  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks opens none.
   The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
 - `--admin` (only for a PR that changes at least one `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
   `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the
   queue-commit quickstart, so `pr-merge.sh --admin` exits 9 for a PR with no `.github/` path; `--break-glass` is
-  the audited exception for anything else. Both run `pr-wait.sh --checks` and the review gate first.
-
-### The `review` check (ADR 0103)
-
-`review` (`.github/workflows/review.yml`, `hack/review-gate.sh`) records the independent review of a
-sensitive-path pull request as a check. A pull request that touches none of the patterns of `hack/claim.sh
-sensitive-paths` passes. Otherwise its head needs the commit status `review-verdict` = success, posted after
-the review of exactly that commit:
-
-    hack/review-verdict.sh <PR> ready <reviewer> <reviewed sha> ['<note>']   # or not-ready
-
-The script refuses when the head is no longer the reviewed SHA (exit 4, `STALE`): a push, a merge of `main`
-included, needs a new review. It re-runs a `review` job whose result disagrees with the new verdict; while
-that run is still going, use "Re-run all jobs" when it ends.
-
-- Only a status from a listed poster counts: the user logins on the sensitive lines of the base's
-  `.github/CODEOWNERS` (no team, never a `*[bot]` login). The newest such status counts; a status from any
-  other login neither passes nor blocks.
-- Drafts skip the job, which counts as passed for a required check; `ready_for_review` starts a new run.
-- Pull request runs use `pull_request` (no `pull_request_target`, #463) with a read-only token, and check
-  out main's tip at run time (`pull_request.base.ref`, not the recorded `base.sha`, which can be an old
-  base without the gate) to run its gate, `claim.sh` and CODEOWNERS. A checkout without the gate passes
-  only while main has none either. The gate's own files
-  (`review.yml`, CODEOWNERS, `hack/review-gate.sh`, `hack/review-verdict.sh`, `hack/claim.sh`) are
-  sensitive paths, so a change to them needs a verdict too.
-- Trade-off: the workflow file is the pull request's own, so a pull request could edit `review.yml` to
-  make `review` pass. The guard is the CODEOWNERS approval rule, kept for `.github/**` only: a pull
-  request that changes anything under `.github/` still needs the second human (or an admin merge), and
-  everything else moves to `review` and the merge queue. The ruleset "required workflows" rule would
-  remove that last pattern when the plan has it.
-- A `merge_group` build judges the queued pull request's head and files, with the gate from
-  `merge_group.base_sha`, and fails unless that head is a parent of the queue commit.
-- An exact pattern also matches `<pattern>/*`. Every read error fails the check.
-- `hack/pr-merge.sh --admin` runs the gate on the head itself and refuses with exit 9 (naming
-  `hack/review-verdict.sh`), with the base's gate; an admin merge in the web UI skips it.
-- A listed owner posts the status, so it records a review; it is no separation of duties.
-
-The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
-PUT adds the context `review`, pinned to the GitHub Actions app (`integration_id: 15368`, so a status
-posted by a user cannot satisfy it), and cuts `required_reviewers` to `.github/**`, and `review` moves to
-`external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
+  the audited exception for anything else. Both run `pr-wait.sh --checks` first.
 
 ### Review threads (#187)
 

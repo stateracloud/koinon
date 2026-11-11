@@ -67,21 +67,32 @@ var _ = Describe("the AWS KMS wrapper", func() {
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize) // obviously fake
 	aad := []byte("koinon-test-aad")
 
-	// The contract runs against the AWS stand-in of hardening_test.go, whose dry run answers as AWS
-	// documents it: LocalStack ignores DryRun, so its probe is never healthy (below). LocalStack
-	// still round-trips real ciphertexts in the specs that follow.
+	// The contract runs twice. Against the AWS stand-in of hardening_test.go, whose dry run answers as
+	// AWS documents it, it runs whole: that is the reachability target. Against LocalStack it runs
+	// without the reachability spec, since LocalStack ignores DryRun and its probe is never healthy
+	// (below); every other spec then covers real KMS-format ciphertext.
 	Describe("the wrapper contract", func() {
-		secretstoretest.WrapperContract(
-			func() secretstore.Wrapper {
-				_, url := newFakeKMS()
-				return onFake(url, fixed(creds("admin"), nil))
-			},
-			func() secretstore.Wrapper {
-				w, err := awskms.NewWithCredentials(awskms.Config{Region: region, KeyID: testKey, Endpoint: hanging()}, static(nil))
-				Expect(err).NotTo(HaveOccurred())
-				return w
-			},
-		)
+		newHanging := func() secretstore.Wrapper {
+			w, err := awskms.NewWithCredentials(awskms.Config{Region: region, KeyID: testKey, Endpoint: hanging()}, static(nil))
+			Expect(err).NotTo(HaveOccurred())
+			return w
+		}
+		Describe("against the AWS stand-in", func() {
+			secretstoretest.WrapperContract(
+				func() secretstore.Wrapper {
+					_, url := newFakeKMS()
+					return onFake(url, fixed(creds("admin"), nil))
+				},
+				newHanging,
+			)
+		})
+		Describe("against LocalStack", func() {
+			secretstoretest.WrapperContract(
+				func() secretstore.Wrapper { return withKey(testKey) },
+				nil,
+				secretstoretest.SkipReachability("LocalStack ignores DryRun, so the probe reads the decrypt right as unverified; the stand-in is the reachability target"),
+			)
+		})
 	})
 
 	Describe("the install binding contract (old issue 615)", func() {

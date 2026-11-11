@@ -369,3 +369,16 @@ Quick pass (about 15 minutes), sources read 2026-11-09 unless noted.
 - Agents never sync a branch by hand except for a conflict.
 - Draft runs stop being red; a red run on a ready pull request means something again.
 - The lab is no longer on the merge path, so a lab outage blocks nothing.
+
+## Amendment 2026-11-11: the review verdict is advisory
+
+ADR 0103 now treats the recorded review verdict as advice (see its 2026-11-11 amendment), and `review` is off the
+ruleset. This changes two decisions above. Decision 5 (break glass): `pr-merge.sh --break-glass` no longer runs
+the ADR 0103 review gate on the head. Decision 6 (`--admin` for `.github/**`): `pr-merge.sh --admin` still runs
+`pr-wait.sh --checks` but no longer runs the review gate. The route guard no longer reads `review`: the expected
+`--admin` merge needs only the other required checks green on the head. The rest of both decisions stands.
+
+## Amendment 2026-11-11 (#546): the `review` check is gone
+
+ADR 0103 is superseded: `review.yml`, `hack/review-gate.sh` and `hack/review-verdict.sh` are removed. Read every
+`review` context and review-gate step above as historical; the `main` ruleset never requires it.

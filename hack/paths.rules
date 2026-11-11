@@ -67,26 +67,26 @@ job web ^(web/|api/proto/)
 # one is missing here: the protos and the vendored OpenShell and agentgateway protos, the OpenAPI
 # spec and its config, the sqlc inputs, the buf and sqlc configs, protoc-gen-es (web/package.json,
 # its lockfile) and the outputs.
-job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$)
+# hack/generate.sh is the body of `make generate` (#349): a wrapper-only edit must still run the job.
+job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
 job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
 
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
-# no build tags (test/chartsmoke/images_test.go), so what can change the result is the chart, the
-# Go packages those commands and the suite import, the files they embed, and go.mod/go.sum.
-# The list is hand-written and partial (the Jobs also read hack/versions.env and other files the
-# suite names); a push to main runs the job anyway.
-job chartsmoke ^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/.*\.go$|test/chartsmoke/|go\.(mod|sum))
-# web/ without .go: the suite builds without the `webui` tag, so web/src, web/package.json and
-# the rest never reach a binary (web/webui.go and web/webui_stub.go are Go files and stay).
-# api/proto/: the Go code generated from it is committed under internal/gen, where a change
-# matches; a proto edit without regenerating fails the `generate` job. api/admin/v1/openapi.yaml
-# is embedded by api/admin/v1/spec.go and stays a trigger.
-except chartsmoke ^api/proto/.*\.proto$
+# no build tags (test/chartsmoke/images_test.go). Go packages those commands and the suite import
+# (and files they embed) are derived by hack/ci-changes.sh (`go list`, like flavors). This seed
+# covers what the graph cannot name: the chart itself, hack/versions.env (tool pins the job and
+# the suite's helpers read), the suite's own tree, and go.mod/go.sum.
+job chartsmoke ^(charts/|test/chartsmoke/|hack/versions\.env$|go\.(mod|sum))
+# The go-list graph's package directory `web` would also match web/src and package.json; the suite
+# builds without the `webui` tag, so only the Go stubs under web/ can change a binary.
+except chartsmoke ^web/
+# keep wins over except (#524 Bugbot): must not reinclude web/*_test.go (ERE, no lookaround).
+keep chartsmoke ^web/(.*/)?([^/]*[^t]|[^/]*[^s]t|[^/]*[^e]st|[^/]*[^t]est|[^/]*[^_]test|[^/]{1,4})\.go$
 # Test files of other packages are not compiled into a binary or into the suite's imports; the
-# suite's own _test.go files are under test/chartsmoke/ and stay.
+# suite's own _test.go files are under test/chartsmoke/ (seed) and stay.
 except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 
 # --- escape: the admission specs (the only ones CI runs) read the chart and the testenv helper -----
@@ -167,6 +167,7 @@ script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
 script-check - hack/lane-gates-test.sh
+script-check - hack/generate-test.sh
 script-check - hack/ci-supersede-test.sh
 script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
@@ -190,7 +191,6 @@ script-skip - hack/preflight-test.sh
 script-skip - hack/release-gate-test.sh
 script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
-script-skip - hack/review-gate-test.sh
 script-skip - hack/migrate-lint.sh
 # Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
 script-skip - hack/flavor-tag-test.sh
@@ -216,7 +216,7 @@ script-skip - hack/adr-lint.sh
 # (old issue 281 changed branch naming in githubtools; old issue 284 a startup flag the chart's
 # migrate Job lacked). Unit and package tests cannot see those.
 #
-# Go code is not listed by directory: the binaries are the commands test/e2e/run.sh builds with ko
+# Go code is not listed by directory: the binaries are the commands test/e2e/kind/images.sh (run.sh and the drill) builds with ko
 # (the three services and the three fakes it deploys; hack/needs-e2e-test.sh checks them against
 # its `ko build` line). A non-test file in the directory of a package in their dependency graph
 # (`go list -deps`, this module only), or below it (embedded files), is relevant.

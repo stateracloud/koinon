@@ -10,7 +10,7 @@
 SELECT org_id, id, type, url, cost_api_key, cost_scope::text AS cost_scope,
        cost_reconcile_since::timestamptz AS cost_reconcile_since
 FROM providers
-WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL
+WHERE cost_api_key IS NOT NULL AND cost_scope IS NOT NULL AND removed_at IS NULL AND admin_disabled_at IS NULL
   AND type = ANY(@types::text[])
 ORDER BY org_id, id;
 

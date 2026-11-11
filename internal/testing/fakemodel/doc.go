@@ -23,7 +23,8 @@
 // mid-body). Further modes (FM2): rateLimit answers the first N requests with HTTP 429 and a
 // Retry-After header; contextLength answers 400 context_length_exceeded (OpenAI) or "prompt is
 // too long" (Anthropic); overloadedMidStream ends a stream with an overloaded error event after
-// about half the events; lockstep holds each request until the test calls [Server.Release]
+// about half the events; stallMidStream holds a stream open after about half the events until the
+// client closes it; splitWrites writes each SSE event in small flushed pieces; lockstep holds each request until the test calls [Server.Release]
 // ([Server.Waiting] counts the held ones; lockstep works only in-process, because the
 // binary has no release endpoint); refuse answers the first N requests with refuseStatus (a client
 // error, 400 by default), and doNotRetry marks every scripted fault with x-should-retry: false.
