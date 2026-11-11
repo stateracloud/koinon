@@ -1,0 +1,3 @@
+# expect: infra yes
+--- FAIL: TestPull (1.00s)
+Error: ErrImagePull
