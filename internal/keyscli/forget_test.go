@@ -530,11 +530,31 @@ var _ = Describe("koinon-api keys forget", func() {
 			defer func() { _ = lock.Rollback(ctx) }()
 
 			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
-				ContainSubstring("at least 3 connections"), ContainSubstring("pool_max_conns=1"))))
+				ContainSubstring("at least 2 connections"), ContainSubstring("pool_max_conns=1"))))
 			lost, work := orgState(ctx, o)
 			Expect(lost).To(BeFalse())
 			Expect(work).NotTo(Equal("expired"))
 		}, SpecTimeout(10*time.Second))
+
+		It("finishes with a pool of two connections when an agent's repository needs a new epoch", func(ctx SpecContext) {
+			// The probe runs before the org's transaction (#285): the Change holds one connection, and
+			// the probe and then the transaction use the other.
+			o := sealOrg(ctx)
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM agents WHERE org_id = $1`, o.org).Scan(&agent)).To(Succeed())
+			_, err := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}.Current(ctx, o.org, agent)
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+			tool.Pool = poolWith(ctx, 2, 0)
+			tool.Yes = true
+
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			var epoch int32
+			Expect(pool.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE agent_id = $1`, agent).Scan(&epoch)).To(Succeed())
+			Expect(epoch).To(Equal(int32(1)))
+			lost, _ := orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+		}, SpecTimeout(30*time.Second))
 
 		It("finishes when the server ends idle transactions sooner than the run takes", func(ctx SpecContext) {
 			o := sealOrg(ctx)

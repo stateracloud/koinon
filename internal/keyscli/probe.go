@@ -166,7 +166,10 @@ func (t *Tool) probeEpochs(ctx context.Context, targets []homeTarget) (map[probe
 // the transaction is then rolled back and the command run again.
 func checkEpoch(probed map[probeKey]int32, org, agent pgtype.UUID, got int32) error {
 	want, ok := probed[probeKey{org, agent}]
-	if !ok || want != got {
+	if !ok {
+		return fmt.Errorf("agent %s needs repository epoch %d, and its storage was not checked (its repository changed meanwhile): nothing was changed, run the command again", agent, got)
+	}
+	if want != got {
 		return fmt.Errorf("the next repository epoch of agent %s changed while the storage was checked (checked %d, would start %d): nothing was changed, run the command again", agent, want, got)
 	}
 	return nil

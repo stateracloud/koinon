@@ -533,9 +533,13 @@ may hold both, so the check goes through the database:
   records it when a backup or a seed meets a taken prefix and when a resync finds folders after the
   newest epoch.
 - `keys new-repositories` probes every agent before it starts any epoch, so one refused agent refuses
-  the command. `keys forget` collects the agents that need an epoch inside its org transaction and
-  probes them together on other connections of the pool (hence `forgetMinConns` is 3), so a refusal
-  rolls back the lost marks of that org too.
+  the command. `keys forget` reads the agents of an org that need an epoch (their current
+  repository is sealed with the lost KEK or already lost) and probes them together before the org's
+  transaction, so a refusal comes before any lost mark. The probe must not run inside that
+  transaction: it locks the agents' repository rows, and the floor of a `taken` answer is recorded
+  under that lock, so agentd would wait for the command and the command for agentd until the probe
+  timed out. The transaction collects the agents again under its locks; one the probe did not
+  cover is refused like a changed epoch, and the org rolls back.
 - The probe table is ephemeral: the command deletes the rows it read, agentd deletes rows an hour
   after they expire, and agentd never claims an expired probe.
 

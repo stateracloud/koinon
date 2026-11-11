@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -241,6 +242,7 @@ var _ = Describe("storage probes", func() {
 			tool   *keyscli.Tool
 			out    *bytes.Buffer
 			passwd checkpoint.Passwords
+			kube   *fake.Clientset
 		)
 		BeforeAll(func(ctx SpecContext) {
 			testenv.Require(testenv.Docker)
@@ -254,7 +256,7 @@ var _ = Describe("storage probes", func() {
 			const ns = "koinon"
 			key := make([]byte, secretstore.KeySize)
 			_, _ = rand.Read(key)
-			kube := fake.NewClientset()
+			kube = fake.NewClientset()
 			_, err := kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns},
 				Data:       map[string][]byte{"kek-20260101-aaaa": secretstore.EncodeKey(key), "active": []byte("kek-20260101-aaaa")},
@@ -301,6 +303,50 @@ var _ = Describe("storage probes", func() {
 			By("the second try: agentd recorded the floor with its answer, so the probe asks about 2, which is free")
 			Expect(tool.NewRepositories(ctx, false, []string{agent.String()})).To(Succeed())
 			Expect(epochs(ctx)).To(Equal(1))
+			var epoch int32
+			Expect(db.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&epoch)).To(Succeed())
+			Expect(epoch).To(Equal(int32(2)))
+		}, SpecTimeout(3*time.Minute))
+
+		It("keys forget: refuses an epoch-0 agent's rotation onto a taken r1/ with taken, marks nothing lost, and rotates on the second try", func(ctx SpecContext) {
+			By("a repository at r1/ that this database has no row for, and the KEK of epoch 0 lost")
+			_, err := real.Backup(ctx, checkpoint.EpochPrefix(e.org.String(), agent.String(), 1), "koinon_test_unknown-to-the-database", tarOf(map[string]string{"a": "b"}), checkpoint.Meta{CheckpointID: "c"})
+			Expect(err).NotTo(HaveOccurred())
+			const lost, next = "kek-20260101-aaaa", "kek-20260102-bbbb"
+			key := make([]byte, secretstore.KeySize)
+			_, _ = rand.Read(key)
+			sec, err := kube.CoreV1().Secrets("koinon").Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, lost)
+			sec.Data[next] = secretstore.EncodeKey(key)
+			sec.Data["active"] = []byte(next)
+			_, err = kube.CoreV1().Secrets("koinon").Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			// Other specs of this process leave placeholder envelopes ('{}') that name no KEK, and keys
+			// forget counts every envelope of the install (Tool.Usage): name a KEK this spec does not use.
+			for _, c := range keyscli.Columns {
+				_, err = db.Exec(ctx, fmt.Sprintf(`UPDATE %[1]s SET %[2]s = jsonb_set(%[2]s, '{kek_id}', '"kek-20250101-0000"') WHERE %[2]s IS NOT NULL AND %[2]s->>'kek_id' IS NULL`, c.Table, c.Column))
+				Expect(err).NotTo(HaveOccurred(), c.Table)
+			}
+			stop := e.pool("agentd-a", cfg(real))
+			defer stop()
+			repoLost := func() bool {
+				GinkgoHelper()
+				var l bool
+				Expect(db.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&l)).To(Succeed())
+				return l
+			}
+
+			By("the first try: agentd answers taken (the org's transaction holds no lock agentd needs) and records the floor")
+			err = tool.Forget(ctx, lost)
+			Expect(err).To(MatchError(And(ContainSubstring("nothing was changed"), ContainSubstring("repository epoch 1 already holds a repository"))))
+			Expect(err).NotTo(MatchError(ContainSubstring("did not check the storage")))
+			Expect(repoLost()).To(BeFalse(), "nothing is marked lost")
+			Expect(epochs(ctx)).To(BeZero())
+
+			By("the second try probes epoch 2, which is free, and rotates there")
+			Expect(tool.Forget(ctx, lost)).To(Succeed())
+			Expect(repoLost()).To(BeTrue())
 			var epoch int32
 			Expect(db.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2`, e.org, agent).Scan(&epoch)).To(Succeed())
 			Expect(epoch).To(Equal(int32(2)))

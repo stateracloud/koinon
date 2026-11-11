@@ -174,13 +174,12 @@ func (t *Tool) beginForget(ctx context.Context, id string) (*Change, *secretstor
 }
 
 // forgetMinConns is the pool size keys forget needs: the Change keeps one connection for the whole
-// run (the lock's transaction, idle between the orgs), each org's transaction needs a second one, and
-// the storage probe of a new repository epoch (#285) runs on a third while that transaction is open.
-const forgetMinConns = 3
+// run (the lock's transaction, idle between the orgs) and each org's transaction needs a second one.
+// The storage probe (#285) runs before the org's transaction, on that second connection.
+const forgetMinConns = 2
 
-// checkForgetPool refuses a pool that is too small, before the question and before the lock: with too
-// few connections the Change holds one and the first org's transaction, or its probe, waits for
-// the others forever.
+// checkForgetPool refuses a pool that is too small, before the question and before the lock: with one
+// connection the Change holds it and the first org's transaction waits for it forever.
 func (t *Tool) checkForgetPool() error {
 	if n := t.Pool.Config().MaxConns; n < forgetMinConns {
 		return fmt.Errorf("keys forget needs a database pool of at least %d connections, and this one allows %d: remove pool_max_conns=%d from the database URL or raise it", forgetMinConns, n, n)
@@ -354,6 +353,17 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 	if err != nil {
 		return err
 	}
+	// koinon-agentd checks that no prefix a new epoch would start holds a repository (#285), before
+	// the org's transaction: that transaction locks the agents' repository rows, which agentd's answer
+	// of taken needs to record the floor. A refusal returns here, before anything is marked lost.
+	rotate, err := t.forgetRotateTargets(ctx, org, id)
+	if err != nil {
+		return err
+	}
+	probed, err := t.probeEpochs(ctx, rotate)
+	if err != nil {
+		return err
+	}
 	lost := map[string][]string{}
 	var epochs []string
 	_, err = audit.InPgTx(ctx, t.Pool, func(tx pgx.Tx, b audit.Batch) error {
@@ -399,7 +409,6 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 		}
 		q := store.New(tx)
 		pw := checkpoint.Passwords{Q: q, Keys: ring}
-		var rotate []homeTarget
 		for _, key := range slices.Sorted(maps.Keys(agents)) {
 			agent := agents[key]
 			lostNow, err := currentRepositoryLost(ctx, q, org, agent)
@@ -409,22 +418,13 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 			if !lostNow {
 				continue // a retired epoch's password was lost; the current one still opens
 			}
-			rotate = append(rotate, homeTarget{org: org, agent: agent})
-		}
-		// koinon-agentd checks that no prefix a new epoch would start holds a repository (#285). The
-		// probe runs on its own connections while this transaction is open; a refusal returns here
-		// and rolls back what was marked lost, so nothing is written.
-		probed, err := t.probeEpochs(ctx, rotate)
-		if err != nil {
-			return err
-		}
-		for _, h := range rotate {
-			agent, key := h.agent, h.agent.String()
 			r, ok, err := pw.NewEpochIn(ctx, q, org, agent, checkpoint.ReasonKeyLost, retain)
 			if err != nil {
 				return fmt.Errorf("new repository epoch for agent %s: %w", key, err)
 			}
 			if ok {
+				// The epoch must be the one probed; an agent the probe did not cover (its repository
+				// changed after forgetRotateTargets read it) is refused too, and the org rolls back.
 				if err := checkEpoch(probed, org, agent, r.Epoch); err != nil {
 					return err
 				}
@@ -454,6 +454,40 @@ func (t *Tool) forgetOrg(ctx context.Context, ring *secretstore.Keyring, setting
 	}
 	res.NewEpochs += len(epochs)
 	return nil
+}
+
+// forgetRotateTargets reads, before the org's transaction, the agents of org that forgetting id
+// leaves without a password for their current repository (its highest epoch, else epoch 0): it is
+// sealed with id or already lost. These are the agents forgetOrg starts a new epoch for, and so the
+// ones probed; the transaction computes the same set again under its locks and checkEpoch refuses an
+// agent that is not in this one.
+func (t *Tool) forgetRotateTargets(ctx context.Context, org pgtype.UUID, id string) ([]homeTarget, error) {
+	rows, err := t.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT h.agent_id FROM %[1]s h
+		LEFT JOIN LATERAL (
+			SELECT e.%[3]s AS envelope, e.credential_lost_at FROM %[2]s e
+			WHERE e.org_id = h.org_id AND e.agent_id = h.agent_id
+			ORDER BY e.repository_epoch DESC LIMIT 1
+		) cur ON true
+		WHERE h.org_id = $1
+		  AND (h.%[3]s->>'kek_id' = $2 OR EXISTS (
+			SELECT 1 FROM %[2]s e WHERE e.org_id = h.org_id AND e.agent_id = h.agent_id AND e.%[3]s->>'kek_id' = $2))
+		  AND CASE WHEN cur.credential_lost_at IS NULL AND cur.envelope IS NULL
+			THEN h.credential_lost_at IS NOT NULL OR h.%[3]s->>'kek_id' = $2
+			ELSE cur.credential_lost_at IS NOT NULL OR cur.envelope->>'kek_id' = $2 END
+		ORDER BY h.agent_id`, checkpoint.Table, checkpoint.EpochsTable, checkpoint.Column), org, id)
+	if err != nil {
+		return nil, fmt.Errorf("reading the agents whose repository needs a new epoch: %w", err)
+	}
+	agents, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("reading the agents whose repository needs a new epoch: %w", err)
+	}
+	out := make([]homeTarget, 0, len(agents))
+	for _, a := range agents {
+		out = append(out, homeTarget{org: org, agent: a})
+	}
+	return out, nil
 }
 
 // currentRepositoryLost reports whether the agent's current repository (its highest epoch, else
