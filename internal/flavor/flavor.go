@@ -105,6 +105,11 @@ type Descriptor struct {
 	// a flavor must list exactly what its image has (flavors/<flavor>/README.md). Empty when the
 	// image ships none the agent should rely on.
 	Tools []string
+	// TruncatedOutputSaved is true when the harness cuts a long tool result and saves the full
+	// output to a file it names in the result ("full output saved to FILE"; OpenCode: 2,000 lines
+	// or 50 KiB). agentd's instructions then tell the agent to query that file instead of running
+	// the command again.
+	TruncatedOutputSaved bool
 }
 
 var table = []Descriptor{
@@ -141,6 +146,8 @@ var table = []Descriptor{
 		MCPToolPrefix:        "koinon_",
 		// The tools of the OpenCode image (flavors/opencode/README.md).
 		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "python3", "git"},
+		// OpenCode saves the full output of a cut tool result to a file.
+		TruncatedOutputSaved: true,
 	},
 }
 

@@ -144,4 +144,7 @@ var LineTooLongReason = lineTooLongReason
 
 // WorkingWithData exposes the "Working with large data" section for a flavor's tools, which
 // need not belong to a shipped flavor.
-func WorkingWithData(tools ...string) string { return workingWithDataFor(tools) }
+func WorkingWithData(tools ...string) string { return workingWithDataFor(tools, false) }
+
+// WorkingWithDataSaved is WorkingWithData for a harness that saves a cut tool result to a file.
+func WorkingWithDataSaved(tools ...string) string { return workingWithDataFor(tools, true) }

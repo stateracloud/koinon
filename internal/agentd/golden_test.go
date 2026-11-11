@@ -148,12 +148,18 @@ var _ = Describe("Prompt shapes (golden)", func() {
 	It("the section on large data names only the tools the flavor declares", func() {
 		d, ok := flavor.Lookup(store.AgentFlavorOpencode)
 		Expect(ok).To(BeTrue())
-		Expect(agentd.InstructionsFile("x", "/sandbox/work")).To(ContainSubstring(agentd.WorkingWithData(d.Tools...)))
+		Expect(agentd.InstructionsFile("x", "/sandbox/work")).To(ContainSubstring(agentd.WorkingWithDataSaved(d.Tools...)))
 
 		some := agentd.WorkingWithData("jq", "yq")
 		Expect(some).To(ContainSubstring("`jq`; YAML"))
 		Expect(some).NotTo(ContainSubstring("duckdb"))
 		Expect(some).NotTo(ContainSubstring("python3"))
+	})
+	It("the saved-output line needs the harness property, not only the tools", func() {
+		tools := []string{"rg", "jq", "duckdb"}
+		Expect(agentd.WorkingWithDataSaved(tools...)).To(ContainSubstring("full output saved to FILE"))
+		Expect(agentd.WorkingWithData(tools...)).NotTo(ContainSubstring("full output saved to FILE"))
+		Expect(agentd.WorkingWithData(tools...)).To(ContainSubstring("Never try to install"))
 	})
 	It("the section on large data of a flavor with no tools is the neutral form", func() {
 		got := agentd.WorkingWithData()

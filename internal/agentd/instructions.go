@@ -38,39 +38,42 @@ const instructionsPreamble = "# Koinon\n\n" +
 
 // dataBullet is one line of the "Working with large data" section. It is shown only when the
 // flavor's image ships every tool in needs (flavor.Descriptor.Tools); a line with no needs
-// holds for any flavor.
+// holds for any flavor. A line with savesOutput is also shown only for a harness that saves a
+// cut tool result to a file (flavor.Descriptor.TruncatedOutputSaved).
 type dataBullet struct {
-	needs []string
-	text  string
+	needs       []string
+	savesOutput bool
+	text        string
 }
 
 // dataBullets is Koinon's guidance on how to read large inputs, with the tools the flavor image
 // ships (flavors/opencode/README.md). The section follows the preamble in every run, whatever the
-// agent version says. OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full
-// output to a file; the section tells the agent to query that file rather than run the command
-// again. The image has no network, no pip and no package manager the agent may use.
+// agent version says. The image has no network, no pip and no package manager the agent may use.
 //
-// The flavor decides which tools exist, not this file: a flavor that lacks a tool never hears
-// about it, and a line that names several tools needs all of them.
+// The flavor decides which tools exist and how its harness cuts output, not this file: a flavor
+// that lacks a tool never hears about it, and a line that names several tools needs all of them.
+// OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full output to a file; a
+// harness with that behaviour (TruncatedOutputSaved) tells the agent to query the file rather
+// than run the command again.
 var dataBullets = []dataBullet{
-	{nil, "- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.\n"},
-	{[]string{"rg", "fd", "ast-grep"}, "- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
+	{nil, false, "- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.\n"},
+	{[]string{"rg", "fd", "ast-grep"}, false, "- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
 		"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n"},
-	{[]string{"jq", "yq"}, "- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
+	{[]string{"jq", "yq"}, false, "- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
 		"Select fields; do not `cat` a large file.\n"},
-	{[]string{"duckdb"}, "- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
+	{[]string{"duckdb"}, false, "- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
 		"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
 		"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n"},
-	{[]string{"sqlite3"}, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n"},
-	{[]string{"pdftotext"}, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
+	{[]string{"sqlite3"}, false, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n"},
+	{[]string{"pdftotext"}, false, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
 		"PDF with the read tool.\n"},
-	{[]string{"git"}, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n"},
-	{[]string{"rg", "jq", "duckdb"}, "- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
+	{[]string{"git"}, false, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n"},
+	{[]string{"rg", "jq", "duckdb"}, true, "- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
 		"`duckdb`; do not run the command again.\n"},
-	{[]string{"python3"}, "- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, " +
+	{[]string{"python3"}, false, "- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, " +
 		"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
 		"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n"},
-	{nil, "- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
+	{nil, false, "- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
 		"Use what is installed, or say what is missing.\n"},
 }
 
@@ -79,13 +82,16 @@ var dataBullets = []dataBullet{
 // never dropped, because those two rules hold on any image.
 func workingWithData(f store.AgentFlavor) string {
 	d, _ := flavor.Lookup(f)
-	return workingWithDataFor(d.Tools)
+	return workingWithDataFor(d.Tools, d.TruncatedOutputSaved)
 }
 
-func workingWithDataFor(tools []string) string {
+func workingWithDataFor(tools []string, truncatedOutputSaved bool) string {
 	var b strings.Builder
 	b.WriteString("## Working with large data\n\n")
 	for _, l := range dataBullets {
+		if l.savesOutput && !truncatedOutputSaved {
+			continue
+		}
 		if slices.ContainsFunc(l.needs, func(t string) bool { return !slices.Contains(tools, t) }) {
 			continue
 		}
