@@ -188,6 +188,7 @@ script-check - hack/git-identity-check-test.sh
 script-check - hack/git-identity-check.sh range @BASE@ HEAD
 script-check - hack/koinon-fetch-test.sh
 script-check - hack/fetch-pinned-test.sh
+script-check - hack/e2e-parts-test.sh
 script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh
@@ -205,6 +206,7 @@ script-check - hack/agentgateway-pin.sh --check
 script-check - hack/golangci-lint-test.sh
 script-check - hack/preflight-stop-test.sh
 script-check - hack/e2e-decide-test.sh
+script-check - hack/drill-issue-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh

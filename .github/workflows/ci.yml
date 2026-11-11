@@ -753,6 +753,7 @@ jobs:
           hack/flavor-tag-test.sh
       - run: hack/koinon-fetch-test.sh
       - run: hack/fetch-pinned-test.sh
+      - run: hack/e2e-parts-test.sh
       - run: hack/pinned-download-lint.sh
       - run: hack/apt-retries-test.sh --self-test
       - run: hack/apt-retries-test.sh
@@ -788,6 +789,7 @@ jobs:
       - run: hack/golangci-lint-test.sh
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
+      - run: hack/drill-issue-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh

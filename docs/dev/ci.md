@@ -302,14 +302,17 @@ seeds a source install, backs it up with the guide's commands, declares it lost,
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
 kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
-`e2e-kind.yml` (`continue-on-error: true`, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
+`e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 110` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
 branch): nightly, on rc tags (`v*-rc.*`) and on `gh workflow run e2e-kind.yml -f suite=drill`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
 merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
-commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
+commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). A red drill opens one issue
+with the label `drill-red`, or comments on the open one (the `drill issue` job, `hack/drill-issue.sh`; it runs only for the nightly schedule and rc tag pushes, never for a
+dispatch on a branch, names the commit the drill tested, and is `continue-on-error`; only that job
+has `issues: write`; close the issue when a nightly run is green). `test/e2e/run.sh` writes
 `junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
 Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session come back; needs the drill's
 SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
@@ -858,3 +861,12 @@ every required check green. Auto-merge then never fires, and nothing in the chec
 `.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly (and on dispatch; #572 removed the push trigger),
 publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
 in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
+
+## CodeQL
+
+`.github/workflows/codeql.yml` is CodeQL's advanced setup (#572); the default setup is off. It scans a pull request
+only when it changes Go or web code (a `paths` filter, allowed because the check is advisory), and `main` once a week
+(and on a dispatch). There is no `push` or `merge_group` trigger, and it saves no database or TRAP cache. Languages
+and query suite are the default setup's (actions, go, javascript-typescript, python; `default`). Not in
+`hack/ci-required.txt`. Switching over: merge the workflow, switch the default setup off in Settings right after
+(both cannot upload for one language), then run the workflow once by hand.
