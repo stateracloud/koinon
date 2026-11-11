@@ -99,6 +99,17 @@ type Descriptor struct {
 	// result and set the legs from the tool's declaration (ADR 0091 decision 4). "" when the
 	// flavor's titles cannot be told apart, and every call of kind other then sets both legs.
 	MCPToolPrefix string
+	// Tools are the command-line tools the flavor's image ships for the agent to use, by the
+	// name of the command (rg, fd, jq, yq, ast-grep, duckdb, sqlite3, pdftotext, pdfinfo, python3, python, file, git).
+	// agentd's "Working with large data" section names a tool only when the flavor lists it, so
+	// a flavor must list exactly what its image has (flavors/<flavor>/README.md). Empty when the
+	// image ships none the agent should rely on.
+	Tools []string
+	// TruncatedOutputSaved is true when the harness cuts a long tool result and saves the full
+	// output to a file it names in the result ("full output saved to FILE"; OpenCode: 2,000 lines
+	// or 50 KiB). agentd's instructions then tell the agent to query that file instead of running
+	// the command again.
+	TruncatedOutputSaved bool
 }
 
 var table = []Descriptor{
@@ -133,6 +144,10 @@ var table = []Descriptor{
 		// (flavors/opencode/README.md, "Model retries").
 		RetriesModelRequests: true,
 		MCPToolPrefix:        "koinon_",
+		// The tools of the OpenCode image (flavors/opencode/README.md).
+		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"},
+		// OpenCode saves the full output of a cut tool result to a file.
+		TruncatedOutputSaved: true,
 	},
 }
 
@@ -150,6 +165,7 @@ func (d Descriptor) clone() Descriptor {
 	d.DefaultBinaries = slices.Clone(d.DefaultBinaries)
 	d.CacheArgs = maps.Clone(d.CacheArgs)
 	d.ModelEntries = maps.Clone(d.ModelEntries)
+	d.Tools = slices.Clone(d.Tools)
 	return d
 }
 

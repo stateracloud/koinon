@@ -1,0 +1,4 @@
+# expect: lint no
+internal/foo/foo.go:10:2: Error return value is not checked (errcheck)
+golangci-lint run failed
+##[error]Process completed with exit code 1.
