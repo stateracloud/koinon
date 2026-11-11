@@ -27,9 +27,10 @@ import (
 // Spike 8.15: a standard Kubernetes NetworkPolicy on the sandbox namespace keeps a bypass of the
 // supervisor proxy (a plain pod that opens sockets directly) blocked. The chart ships a
 // namespace-wide default-deny (sandboxNetworkPolicy, on by default); OpenShell's own workload
-// policy is additive with it. This case applies Koinon's shape when it is missing, creates a
-// compliant workload probe pod as the Agent Sandbox controller (so the chart's VAP admits it),
-// and asserts the API server is unreachable from that pod.
+// policy is additive with it. This case applies Koinon's shape when it is missing (as the
+// reconciler SA when the chart VAP is present), creates a compliant workload probe pod as the
+// Agent Sandbox controller (so the chart's VAP admits it), and asserts the API server is
+// unreachable from that pod.
 //
 //	KOINON_ESCAPE_NAMESPACE     the workspace namespace (required)
 //	KOINON_ESCAPE_KUBECONFIG    kubeconfig (default $KUBECONFIG)
@@ -61,7 +62,18 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		By("ensuring Koinon's default-deny NetworkPolicy is in the sandbox namespace")
 		writer := &reconciler.SandboxNetworkPolicy{Kube: cs, Name: policyName}
 		want := writer.Policy(ns)
-		_, err := cs.NetworkingV1().NetworkPolicies(ns).Create(ctx, want, metav1.CreateOptions{})
+		// With the chart, only the reconciler SA may CREATE this object in a sandbox namespace
+		// (ValidatingAdmissionPolicy). Bare OpenShell has no such VAP, so cluster-admin is fine.
+		createCS := cs
+		if chartNS := os.Getenv("KOINON_ESCAPE_CHART_NAMESPACE"); chartNS != "" {
+			reconCfg := rest.CopyConfig(cfg)
+			reconCfg.Impersonate = rest.ImpersonationConfig{
+				UserName: "system:serviceaccount:" + chartNS + ":koinon-reconciler",
+				Groups:   []string{"system:serviceaccounts", "system:authenticated"},
+			}
+			createCS = kubernetes.NewForConfigOrDie(reconCfg)
+		}
+		_, err := createCS.NetworkingV1().NetworkPolicies(ns).Create(ctx, want, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			Fail("cannot create the sandbox default-deny NetworkPolicy: " + err.Error())
 		}
