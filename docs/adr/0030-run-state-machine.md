@@ -57,7 +57,6 @@ stateDiagram-v2
     running --> failed
     parked --> canceled: timeout alarm or user cancel
     starting --> failed
-    starting --> succeeded: nothing left to say (Supersede, ADR 0089)
     starting --> queued: sandbox not ready in time (ADR 0066)
     succeeded --> [*]
     failed --> [*]
@@ -239,3 +238,16 @@ batches), and decides:
 - **Limits.** Only a `401` or `403` is looked up; other statuses already arrive with a code or a
   recognisable text. The lookup needs the run to be attributed (the key's agent, the record's time
   inside the run, `ledger.RunGrace`), which holds for every request an agent's key makes.
+
+## Amendment 2026-11-11 (#21)
+
+A run superseded before its first turn goes `starting -> succeeded` as a composite step: `MarkRunRunning`
+then `FinishRun`, in one transaction in `Owner.Supersede` (ADR 0089 amendment 2026-11-11). The diagram
+edge is added with that label:
+
+```
+starting --> succeeded: composite (Supersede: MarkRunRunning then FinishRun, one transaction)
+```
+
+`FinishRun` itself still accepts `succeeded` only from `running`. The composite is the only path from
+`starting` to `succeeded`.
