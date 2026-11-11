@@ -35,7 +35,16 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 	if storageClass != "" {
 		pg["cnpg"].(map[string]any)["storage"].(map[string]any)["storageClass"] = storageClass
 	}
+	// The sandbox admission policies name the OpenShell gateway's ServiceAccount; the chart's defaults name
+	// the shared install's (openshell:openshell), so this gateway's sandboxes would be denied.
+	gwSA := fmt.Sprintf("system:serviceaccount:%s:%s", gw.Namespace, gw.Service)
 	v := map[string]any{
+		"sandboxPolicy": map[string]any{"identities": map[string]any{
+			"supervisorPods": []string{gwSA},
+			"sandboxes":      []string{gwSA, "system:serviceaccount:agent-sandbox-system:agent-sandbox-controller"},
+			"secrets":        []string{gwSA},
+			"namespaces":     []string{gwSA},
+		}},
 		"restoreHold": hold,
 		"postgres":    pg,
 		"egress":      map[string]any{"allowedInternalHosts": []string{fmt.Sprintf("fakemodel.%s.svc:8080", fakesNS)}},
