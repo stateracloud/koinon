@@ -455,7 +455,6 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
-	GetHomeRepositoryProbe(ctx context.Context, arg GetHomeRepositoryProbeParams) (HomeRepositoryProbe, error)
 	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -802,6 +801,9 @@ type Querier interface {
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
+	// The org's probes among @ids, in one query: the keys command polls every pending answer of an org
+	// at once. A probe that is not returned was deleted.
+	ListHomeRepositoryProbes(ctx context.Context, arg ListHomeRepositoryProbesParams) ([]HomeRepositoryProbe, error)
 	// The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
 	// order then org order: the install export writes them as stream lines next to each audit.anchor
 	// event (ADR 0100 decision 5; format koinon.audit.export.v2).

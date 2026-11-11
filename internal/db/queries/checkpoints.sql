@@ -529,8 +529,10 @@ INSERT INTO home_repository_probes (org_id, agent_id, repository_epoch, expires_
 VALUES (@org_id, @agent_id, @repository_epoch, now() + make_interval(secs => @timeout_seconds::int))
 RETURNING *;
 
--- name: GetHomeRepositoryProbe :one
-SELECT * FROM home_repository_probes WHERE org_id = @org_id AND id = @id;
+-- name: ListHomeRepositoryProbes :many
+-- The org's probes among @ids, in one query: the keys command polls every pending answer of an org
+-- at once. A probe that is not returned was deleted.
+SELECT * FROM home_repository_probes WHERE org_id = @org_id AND id = ANY(@ids::uuid[]);
 
 -- name: DeleteHomeRepositoryProbe :exec
 DELETE FROM home_repository_probes WHERE org_id = @org_id AND id = @id;

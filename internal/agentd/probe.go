@@ -10,7 +10,9 @@ package agentd
 // (home_repository_probes: the agent and the candidate epoch) and waits; agentd claims it, lists
 // the agent's epoch folders with the same listing a resync uses (HomeStore.HeldEpochs: any
 // object under r<N>/ means the prefix is taken, whatever its password), and answers in the row:
-// free, taken or error, with a message that carries no secret. A claim is a lease, so a replica
+// free, taken or error, with a message that carries no secret. On taken it first records the next
+// free epoch (home_repositories.next_epoch_at_least, as a resync does), so the command run again
+// probes that epoch instead of being refused for the same prefix. A claim is a lease, so a replica
 // that dies leaves the probe to another; the command stops waiting at its own timeout and refuses
 // the rotation then (fail closed), so an expired probe is never claimed.
 
@@ -105,12 +107,38 @@ func (p *Pool) answerProbe(ctx context.Context, pr store.HomeRepositoryProbe) {
 		p.log.Warn("repository probes: listing the bucket failed", "agent", pr.AgentID.String(), "repository_epoch", pr.RepositoryEpoch, "err", err)
 		outcome, msg = ProbeError, "koinon-agentd could not list the checkpoint bucket (see its log)"
 	case slices.Contains(held, pr.RepositoryEpoch):
-		outcome = ProbeTaken
-		msg = fmt.Sprintf("the prefix of repository epoch %d already holds objects", pr.RepositoryEpoch)
+		outcome, msg = p.recordProbedTaken(ctx, pr, held)
 	}
 	if _, err := p.q.AnswerHomeRepositoryProbe(ctx, store.AnswerHomeRepositoryProbeParams{
 		OrgID: pr.OrgID, ID: pr.ID, Outcome: pgtype.Text{String: outcome, Valid: true}, Message: msg,
 	}); err != nil && ctx.Err() == nil {
 		p.log.Warn("repository probes: recording the answer failed", "agent", pr.AgentID.String(), "err", err)
 	}
+}
+
+// recordProbedTaken records the floor for a probe whose prefix is taken, as a resync does for the
+// folders after the agent's newest epoch (#262): the first free epoch after every held folder from
+// the probed one on, through recordTakenPrefix (its audit event; no row is marked, since the probed
+// epoch is not one the database has). Nothing else writes that floor for a prefix no backup uses,
+// so without it a re-run of the keys command would probe the same epoch and be refused again. It
+// returns the probe's outcome and message: taken once the floor is recorded (or a keys command
+// started the epoch meanwhile, and a re-run reads the new latest epoch), error when recording failed.
+func (p *Pool) recordProbedTaken(ctx context.Context, pr store.HomeRepositoryProbe, held []int32) (string, string) {
+	var after []int32
+	for _, n := range held {
+		if n >= pr.RepositoryEpoch {
+			after = append(after, n)
+		}
+	}
+	free, _, err := p.recordTakenPrefix(ctx, pr.OrgID, pr.AgentID, pr.RepositoryEpoch, false, after)
+	if err != nil {
+		if ctx.Err() == nil {
+			p.log.Warn("repository probes: recording the free epoch after a taken prefix failed", "agent", pr.AgentID.String(), "repository_epoch", pr.RepositoryEpoch, "err", err)
+		}
+		return ProbeError, fmt.Sprintf("the prefix of repository epoch %d already holds objects, and koinon-agentd could not record the next free epoch (see its log)", pr.RepositoryEpoch)
+	}
+	if free == 0 {
+		return ProbeTaken, fmt.Sprintf("the prefix of repository epoch %d already holds objects; a keys command started a repository for the agent meanwhile", pr.RepositoryEpoch)
+	}
+	return ProbeTaken, fmt.Sprintf("the prefix of repository epoch %d already holds objects; koinon-agentd recorded %d as the next free epoch", pr.RepositoryEpoch, free)
 }

@@ -397,19 +397,32 @@ func (p *Pool) Run(ctx context.Context) error {
 
 // RunHeld is Run for restore-hold mode (issue #462): no worker starts, so no run is claimed or taken
 // over, and the checkpoint loop does not start, so no sandbox is checkpointed, stopped or restored.
-// The things it does are the storage probes of keys commands (probe.go) and the checkpoint resync (resync.go): "koinon-api checkpoints resync" is a
-// step of the restore runbook that must finish before the hold is released, and it reads the
-// bucket and writes the database only. It returns when ctx ends.
+// It does two things, both of which read the bucket and write the database only: the checkpoint
+// resync (resync.go), since "koinon-api checkpoints resync" is a step of the restore runbook that
+// must finish before the hold is released, and the storage probes of keys commands (probe.go),
+// beside it. It returns when ctx ends.
 func (p *Pool) RunHeld(ctx context.Context) error {
 	c := p.cfg.Checkpoints
 	if c == nil {
 		<-ctx.Done()
 		return nil
 	}
+	// Keys commands of the restore runbook (keys forget) ask for a storage probe too (probe.go). The
+	// probes have a loop of their own beside the resync's: the command waits for the answer, and a
+	// long resync (one tick lists every agent's repositories) must not hold them past its wait. One
+	// probe tick at a time, as in checkpointLoop.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			safego.Do(p.log, "repository-probe", func() { p.probeTick(ctx) })
+			if !sleep(ctx, c.Poll) {
+				return
+			}
+		}
+	})
 	for ctx.Err() == nil {
 		safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
-		// Keys commands of the restore runbook (keys forget) ask for a storage probe too (probe.go).
-		safego.Do(p.log, "repository-probe", func() { p.probeTick(ctx) })
 		if !sleep(ctx, c.Poll) {
 			break
 		}

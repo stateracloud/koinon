@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -51,6 +52,20 @@ func (s slowEpochs) HeldEpochs(ctx context.Context, org, agent string) ([]int32,
 	return s.HomeStore.HeldEpochs(ctx, org, agent)
 }
 
+// blockingSnapshots is a bucket whose snapshot listing (a resync's) hangs until the spec ends; it
+// closes listing when the first one starts.
+type blockingSnapshots struct {
+	agentd.HomeStore
+	listing chan struct{}
+	once    *sync.Once
+}
+
+func (b blockingSnapshots) Snapshots(ctx context.Context, _, _ string) ([]checkpoint.Snapshot, error) {
+	b.once.Do(func() { close(b.listing) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 // Storage probes of keys new-repositories and keys forget (#285, ADR 0032): koinon-agentd, which
 // holds the bucket's credentials, checks the prefix of the epoch a rotation would start and answers
 // in home_repository_probes; the keys command, which holds the KEKs, waits for the answer.
@@ -80,9 +95,10 @@ var _ = Describe("storage probes", func() {
 	}
 	answer := func(ctx context.Context, p store.HomeRepositoryProbe) func() store.HomeRepositoryProbe {
 		return func() store.HomeRepositoryProbe {
-			got, err := q.GetHomeRepositoryProbe(ctx, store.GetHomeRepositoryProbeParams{OrgID: e.org, ID: p.ID})
+			got, err := q.ListHomeRepositoryProbes(ctx, store.ListHomeRepositoryProbesParams{OrgID: e.org, Ids: []pgtype.UUID{p.ID}})
 			Expect(err).NotTo(HaveOccurred())
-			return got
+			Expect(got).To(HaveLen(1))
+			return got[0]
 		}
 	}
 	answered := func(ctx context.Context, p store.HomeRepositoryProbe) func() bool {
@@ -112,6 +128,36 @@ var _ = Describe("storage probes", func() {
 		got := answer(ctx, taken)()
 		Expect(got.Outcome.String).To(Equal(agentd.ProbeTaken))
 		Expect(got.Message.String).To(ContainSubstring("repository epoch 2"))
+
+		By("the taken answer records the next free epoch, as a resync does, so the command run again probes 3")
+		var floor pgtype.Int4
+		var marked pgtype.Timestamptz
+		Expect(db.QueryRow(ctx, `SELECT next_epoch_at_least, prefix_taken_at FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, e.org, agent).
+			Scan(&floor, &marked)).To(Succeed())
+		Expect(floor).To(Equal(pgtype.Int4{Int32: 3, Valid: true}))
+		Expect(marked.Valid).To(BeFalse(), "the agent's own repository is not marked taken")
+		Expect(got.Message.String).To(ContainSubstring("recorded 3 as the next free epoch"))
+		var audited int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2`, e.org, agentd.PrefixTakenAction).Scan(&audited)).To(Succeed())
+		Expect(audited).To(Equal(1))
+	})
+
+	It("answers probes while a resync is slow in restore-hold mode", func(ctx SpecContext) {
+		// The resync of another agent blocks in its listing; the probe is answered beside it.
+		var other pgtype.UUID
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'resynced', 'opencode') RETURNING id`, e.org).Scan(&other)).To(Succeed())
+		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
+			e.org, other, checkpoint.Prefix(e.org.String(), other.String()))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.RequestHomeCheckpointResync(ctx, store.RequestHomeCheckpointResyncParams{OrgID: e.org, AgentID: other})
+		Expect(err).NotTo(HaveOccurred())
+		listing := make(chan struct{})
+		stop := e.heldPool("agentd-held", cfg(blockingSnapshots{HomeStore: store0, listing: listing, once: &sync.Once{}}))
+		defer stop()
+		Eventually(listing).WithTimeout(racescale.D(20*time.Second)).Should(BeClosed(), "the resync is in its listing")
+		p := request(ctx, 1, 60)
+		Eventually(answered(ctx, p)).WithTimeout(racescale.D(5 * time.Second)).Should(BeTrue())
+		Expect(answer(ctx, p)().Outcome.String).To(Equal(agentd.ProbeFree))
 	})
 
 	It("answers error with a message that carries no endpoint detail when the listing fails", func(ctx SpecContext) {
@@ -250,12 +296,9 @@ var _ = Describe("storage probes", func() {
 			Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2`, e.org, keyscli.NewRepositoriesAction).Scan(&audited)).To(Succeed())
 			Expect(audited).To(BeZero())
 
-			By("a second try is refused the same way: the probe, not a recorded floor, is what stops it")
-			Expect(tool.NewRepositories(ctx, false, []string{agent.String()})).NotTo(Succeed())
+			Expect(err).To(MatchError(ContainSubstring("koinon-agentd recorded the next free epoch")))
 
-			By("once the floor says epoch 2 (agentd recorded it), the probe asks about 2, which is free")
-			_, err = db.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 2 WHERE org_id = $1 AND agent_id = $2`, e.org, agent)
-			Expect(err).NotTo(HaveOccurred())
+			By("the second try: agentd recorded the floor with its answer, so the probe asks about 2, which is free")
 			Expect(tool.NewRepositories(ctx, false, []string{agent.String()})).To(Succeed())
 			Expect(epochs(ctx)).To(Equal(1))
 			var epoch int32

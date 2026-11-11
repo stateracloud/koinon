@@ -508,20 +508,30 @@ may hold both, so the check goes through the database:
 - The command writes a probe request (`home_repository_probes`, keyed `(org_id, id)`: agent and
   candidate epoch) and waits, by default two minutes plus 250 ms per agent (`Tool.ProbeTimeout`,
   `--probe-timeout`). agentd claims pending probes with a lease and answers up to 16 at once, as
-  each is an independent listing, so the wait does not grow with the number of agents (the checkpoint loop and the restore-hold loop, `probeTick`), lists the agent's
-  epoch folders with the listing a resync uses (`HomeStore.HeldEpochs`: any object under `r<N>/` is a
-  taken prefix, whatever its password) and answers in the row: `free`, `taken` or `error`, with a
-  message that carries no endpoint text and no secret.
+  each is an independent listing, so the wait does not grow with the number of agents (`probeTick`,
+  beside the ticks of the checkpoint loop and beside the resync of the restore-hold loop), lists the
+  agent's epoch folders with the listing a resync uses (`HomeStore.HeldEpochs`: any object under
+  `r<N>/` is a taken prefix, whatever its password) and answers in the row: `free`, `taken` or
+  `error`, with a message that carries no endpoint text and no secret.
+- **A `taken` answer records the floor.** Before it answers `taken`, agentd records the first free
+  epoch after every held folder from the probed one on (`next_epoch_at_least`, through the path a
+  resync uses for the folders after the newest epoch, with its `home.repository_prefix_taken` audit
+  event; no row is marked taken, since the probed epoch is not one the database has). A backup writes
+  only into the current epoch and never reaches the probed prefix, so without this nothing would
+  raise the floor and every re-run would probe the same prefix and be refused. If recording fails,
+  the answer is `error`.
 - **Fail closed.** `taken`, `error` and no answer in time each refuse the rotation before anything is
   written: no epoch, no seed request, no `lost` mark, no audit event. There is no override flag; the
-  operator fixes agentd or the bucket and runs the command again, or lets agentd record the floor
-  (a resync or a backup into the prefix) and runs it again.
+  operator fixes agentd or the bucket and runs the command again. After `taken`, agentd has already
+  recorded the next free epoch, so running the command again probes that epoch and, when it is free,
+  rotates there.
 - The epoch probed must be the epoch the transaction starts. The command reads the candidate
   (`LatestHomeRepositoryNextEpoch`) before it probes and compares it with the epoch
   `Passwords.NewEpochIn` picked under the row lock; a difference (another rotation, or agentd
   raising the floor meanwhile) rolls the transaction back and asks for a re-run.
 - The floor of #262 stays as the second guard: the candidate already includes it, and agentd still
-  records it when a backup meets a taken prefix.
+  records it when a backup or a seed meets a taken prefix and when a resync finds folders after the
+  newest epoch.
 - `keys new-repositories` probes every agent before it starts any epoch, so one refused agent refuses
   the command. `keys forget` collects the agents that need an epoch inside its org transaction and
   probes them together on other connections of the pool (hence `forgetMinConns` is 3), so a refusal

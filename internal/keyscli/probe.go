@@ -80,6 +80,12 @@ func (t *Tool) probeEpochs(ctx context.Context, targets []homeTarget) (map[probe
 	epochs := map[probeKey]int32{}
 	for _, h := range targets {
 		next, err := q.LatestHomeRepositoryNextEpoch(ctx, store.LatestHomeRepositoryNextEpochParams{OrgID: h.org, AgentID: h.agent})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The agent's repository was deleted since the targets were read (the agent with it):
+			// nothing to probe, and no epoch is started for it (NewEpochIn reports !started). Should
+			// one start all the same, it is not in the map and checkEpoch refuses it.
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("agent %s: reading the next repository epoch: %w", h.agent, err)
 		}
@@ -100,21 +106,34 @@ func (t *Tool) probeEpochs(ctx context.Context, targets []homeTarget) (map[probe
 	defer tick.Stop()
 	var refused []error
 	for len(reqs) > 0 {
+		// The pending answers in one query per org and poll (the table is keyed (org_id, id)), not
+		// one per agent.
+		ids := map[pgtype.UUID][]pgtype.UUID{}
+		for _, r := range reqs {
+			ids[r.h.org] = append(ids[r.h.org], r.id)
+		}
+		byID := make(map[[2]pgtype.UUID]store.HomeRepositoryProbe, len(reqs))
+		for org, of := range ids {
+			rows, err := q.ListHomeRepositoryProbes(ctx, store.ListHomeRepositoryProbesParams{OrgID: org, Ids: of})
+			if err != nil {
+				return nil, fmt.Errorf("org %s: reading the storage checks: %w", org, err)
+			}
+			for _, row := range rows {
+				byID[[2]pgtype.UUID{row.OrgID, row.ID}] = row
+			}
+		}
 		var waiting []pending
 		for _, r := range reqs {
-			row, err := q.GetHomeRepositoryProbe(ctx, store.GetHomeRepositoryProbeParams{OrgID: r.h.org, ID: r.id})
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return nil, fmt.Errorf("agent %s: reading the storage check: %w", r.h.agent, err)
-			}
+			row, found := byID[[2]pgtype.UUID{r.h.org, r.id}]
 			switch {
-			case errors.Is(err, pgx.ErrNoRows):
+			case !found:
 				refused = append(refused, fmt.Errorf("agent %s: the storage check was deleted before it was answered", r.h.agent))
 			case !row.AnsweredAt.Valid:
 				waiting = append(waiting, r)
 			case row.Outcome.String == probeFree:
 			case row.Outcome.String == probeTaken:
 				refused = append(refused, fmt.Errorf("agent %s: the prefix of repository epoch %d already holds a repository the database does not record: "+
-					"koinon-agentd records it when it next backs up or resyncs the agent (checkpoints resync), then run this command again (%s)",
+					"koinon-agentd recorded the next free epoch for the agent, run this command again to start the repository there (%s)",
 					r.h.agent, r.epoch, project.SecretKeysDocURL))
 			default:
 				refused = append(refused, fmt.Errorf("agent %s: koinon-agentd could not check the storage prefix of repository epoch %d: %s",

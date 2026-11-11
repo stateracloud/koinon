@@ -406,6 +406,28 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 			Expect(tool.NewRepositories(ctx, true, nil)).To(Succeed())
 			Expect(count(ctx).probes).To(BeZero())
 		})
+
+		It("skips a target whose repository was deleted after the targets were read, and probes the rest", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			gone := withRepository(ctx, org)
+			_, err := pool.Exec(ctx, `DELETE FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, org, gone)
+			Expect(err).NotTo(HaveOccurred())
+			var mu sync.Mutex
+			var asked []pgtype.UUID
+			answerWith(func(p store.HomeRepositoryProbe) (string, string) {
+				mu.Lock()
+				defer mu.Unlock()
+				asked = append(asked, p.AgentID)
+				return "free", ""
+			})
+			got, err := tool.ProbeEpochs(ctx, [][2]pgtype.UUID{{org, gone}, {org, a}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(map[[2]pgtype.UUID]int32{{org, a}: 1}), "nothing in the map for the deleted one")
+			mu.Lock()
+			Expect(asked).To(Equal([]pgtype.UUID{a}), "no probe requested for it")
+			mu.Unlock()
+		})
 	})
 
 	Describe("without a terminal", func() {

@@ -904,33 +904,6 @@ func (q *Queries) GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeReposit
 	return i, err
 }
 
-const getHomeRepositoryProbe = `-- name: GetHomeRepositoryProbe :one
-SELECT org_id, id, agent_id, repository_epoch, requested_at, expires_at, probe_after, answered_at, outcome, message FROM home_repository_probes WHERE org_id = $1 AND id = $2
-`
-
-type GetHomeRepositoryProbeParams struct {
-	OrgID pgtype.UUID
-	ID    pgtype.UUID
-}
-
-func (q *Queries) GetHomeRepositoryProbe(ctx context.Context, arg GetHomeRepositoryProbeParams) (HomeRepositoryProbe, error) {
-	row := q.db.QueryRow(ctx, getHomeRepositoryProbe, arg.OrgID, arg.ID)
-	var i HomeRepositoryProbe
-	err := row.Scan(
-		&i.OrgID,
-		&i.ID,
-		&i.AgentID,
-		&i.RepositoryEpoch,
-		&i.RequestedAt,
-		&i.ExpiresAt,
-		&i.ProbeAfter,
-		&i.AnsweredAt,
-		&i.Outcome,
-		&i.Message,
-	)
-	return i, err
-}
-
 const getOpenHomeCheckpoint = `-- name: GetOpenHomeCheckpoint :one
 SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch, snapshot_missing_at FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND status IN ('requested', 'running')
@@ -1590,6 +1563,48 @@ func (q *Queries) ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListH
 			&i.Lost,
 			&i.Due,
 			&i.Taken,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHomeRepositoryProbes = `-- name: ListHomeRepositoryProbes :many
+SELECT org_id, id, agent_id, repository_epoch, requested_at, expires_at, probe_after, answered_at, outcome, message FROM home_repository_probes WHERE org_id = $1 AND id = ANY($2::uuid[])
+`
+
+type ListHomeRepositoryProbesParams struct {
+	OrgID pgtype.UUID
+	Ids   []pgtype.UUID
+}
+
+// The org's probes among @ids, in one query: the keys command polls every pending answer of an org
+// at once. A probe that is not returned was deleted.
+func (q *Queries) ListHomeRepositoryProbes(ctx context.Context, arg ListHomeRepositoryProbesParams) ([]HomeRepositoryProbe, error) {
+	rows, err := q.db.Query(ctx, listHomeRepositoryProbes, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []HomeRepositoryProbe
+	for rows.Next() {
+		var i HomeRepositoryProbe
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.AgentID,
+			&i.RepositoryEpoch,
+			&i.RequestedAt,
+			&i.ExpiresAt,
+			&i.ProbeAfter,
+			&i.AnsweredAt,
+			&i.Outcome,
+			&i.Message,
 		); err != nil {
 			return nil, err
 		}
