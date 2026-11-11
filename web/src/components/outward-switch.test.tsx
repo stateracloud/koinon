@@ -55,7 +55,7 @@ describe('OutwardSwitch on the providers page', () => {
     const calls = setup()
     const card = within(await screen.findByRole('region', { name: 'openrouter' }))
     await userEvent.type(card.getByLabelText('Reason for switching off provider openrouter'), 'restored copy')
-    await userEvent.click(card.getByRole('button', { name: 'Disable outward calls of provider openrouter' }))
+    await userEvent.click(card.getByRole('button', { name: 'Switch off outward calls of provider openrouter' }))
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]).toMatchObject({ kind: OutwardTargetKind.MODEL_PROVIDER, targetId: 'p-1', disabled: true, note: 'restored copy' })
     expect(await card.findByText('Switched off by an admin')).toBeInTheDocument()

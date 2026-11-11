@@ -16,7 +16,7 @@ export type OutwardSwitchProps = {
   kind: OutwardTargetKind
   /** The target's id; empty for the platform trace destination. */
   targetId: string
-  /** Names the target for the buttons' accessible names: "Disable outward calls of provider openrouter". */
+  /** Names the target for the buttons' accessible names: "Switch off outward calls of provider openrouter". */
   subject: string
   /** The target's adminDisabled from Get or List; unset when it is enabled. */
   disabled?: AdminDisabled
@@ -77,7 +77,7 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-            <Button variant="outline" size="sm" disabled={pending} onClick={() => void set(true)} aria-label={`Disable outward calls of ${subject}`}>
+            <Button variant="outline" size="sm" disabled={pending} onClick={() => void set(true)} aria-label={`Switch off outward calls of ${subject}`}>
               Switch off
             </Button>
           </>
