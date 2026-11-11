@@ -34,3 +34,11 @@ held_mounts=$(render "${gw[@]}" --set restoreHold=true | grep -c -E -- '^       
 [[ $held_mounts == 1 ]] || fail "held gateway Deployment mounts the held config once, got $held_mounts"
 lacks "held gateway Deployment does not mount the reconciler's config" '^            name: koinon-gateway-config$' "${gw[@]}" --set restoreHold=true
 lacks "kubernetes gateway mode renders no held gateway config" 'koinon-gateway-config-held' --set gateway.mode=kubernetes --set restoreHold=true
+
+# The held name keeps its "-held" suffix when the fullname is long enough for the 63-character cut to
+# apply (issue #530): 48 characters would make it equal the reconciler's koinon-gateway-config name.
+long48=aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeee
+cfg_names() { render "${gw[@]}" --set restoreHold=true --set fullnameOverride="$long48" | grep -E -- 'name: .*gateway-config' | sort -u; }
+long_names=$(cfg_names)
+grep -q -E -- "name: .*gateway-config-held\$" <<<"$long_names" || fail "long fullname keeps the held config name suffix: $long_names"
+[[ $(grep -c -E -- 'gateway-config-held$' <<<"$long_names") == $(wc -l <<<"$long_names" | tr -d ' ') ]] || fail "long fullname: the held Deployment mounts only the held config: $long_names"

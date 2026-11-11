@@ -604,8 +604,10 @@ helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 {{- end }}
 
 {{/* The deny-all gateway config a held install mounts instead of the reconciler's (restoreHold, issue #530). */}}
+{{/* The suffix is appended after the base is cut, so the 63-character limit cannot drop it and the name always differs from koinon.gatewayConfigName. */}}
 {{- define "koinon.gatewayHeldConfigName" -}}
-{{- include "koinon.componentName" (list . "gateway-config-held") }}
+{{- $suffix := "-gateway-config-held" -}}
+{{- printf "%s%s" (include "koinon.fullname" . | trunc (int (sub 63 (len $suffix))) | trimSuffix "-") $suffix }}
 {{- end }}
 
 {{/* The Secret with the key-encryption keys (KEKs) for provider keys and connection secrets (ADR 0056). */}}
