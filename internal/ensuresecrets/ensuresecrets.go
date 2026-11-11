@@ -36,7 +36,7 @@ const KeyKey = "key"
 const TokenKey = "token"
 
 // KindBearerToken is Spec.Kind of a Secret that holds a random 256-bit bearer token as 64 hex
-// characters under TokenKey (the internal OTLP listener's, ADR 0074). An operator rotates it by
+// characters under TokenKey (the internal OTLP listener's two, ADR 0074). An operator rotates it by
 // moving the old value to a "previous" key and setting a new "token" (internal/otlpauth).
 const KindBearerToken = "bearer-token"
 

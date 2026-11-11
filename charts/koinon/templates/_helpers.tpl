@@ -327,9 +327,12 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # The provider echo check (rc.6) sends one request through the gateway's LLM listener.
 - name: KOINON_GATEWAY_URL
   value: {{ printf "http://%s:%s" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
-# Every request to the internal OTLP listener needs the bearer token in this directory.
+# Every request to the internal OTLP listener needs a bearer token: /v1/logs the gateway's (first directory),
+# /v1/traces the one only koinon-agentd holds (second directory); neither admits the other's path.
 - name: KOINON_OTLP_TOKEN_DIR
   value: {{ include "koinon.otlpTokenDir" . | quote }}
+- name: KOINON_OTLP_TRACES_TOKEN_DIR
+  value: {{ include "koinon.otlpTracesTokenDir" . | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
@@ -382,6 +385,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 
 {{- define "koinon.apiSecretVolumeMounts" -}}
 {{ include "koinon.otlpTokenVolumeMount" . }}
+{{ include "koinon.otlpTracesTokenVolumeMount" . }}
 {{- if .Values.bootstrapAdmin.enabled }}
 - name: bootstrap-admin
   mountPath: /etc/koinon/bootstrap-admin
@@ -396,6 +400,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 
 {{- define "koinon.apiSecretVolumes" -}}
 {{ include "koinon.otlpTokenVolume" . }}
+{{ include "koinon.otlpTracesTokenVolume" . }}
 {{- if .Values.bootstrapAdmin.enabled }}
 - name: bootstrap-admin
   secret:
@@ -484,6 +489,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if not .Values.api.otlpToken.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.otlpTokenName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
 {{- end -}}
+{{- if not .Values.api.otlpTracesToken.existingSecret -}}
+{{- $specs = append $specs (dict "name" (include "koinon.otlpTracesTokenName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
+{{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
 {{- end -}}
@@ -510,10 +518,11 @@ the pod), but it is a Secret so that it is not rendered into a manifest or a Con
 {{- end }}
 
 {{/*
-The Secret with the bearer token of koinon-api's internal OTLP listener (ADR 0074, old issue 52): key
-"token", plus "previous" during a rotation. koinon-api and koinon-agentd mount it; the standalone
-gateway mounts it too, and in kubernetes mode the agentgateway controller reads it by name. Never
-mounted into a sandbox.
+The Secret with the bearer token of koinon-api's internal OTLP listener for /v1/logs (ADR 0074, old issue 52):
+key "token", plus "previous" during a rotation. koinon-api mounts it; the standalone gateway mounts it too, and
+in kubernetes mode the agentgateway controller reads it by name. koinon-agentd does NOT mount it (issue 55):
+agentd's token for /v1/traces is the separate Secret below, so neither token admits the other's path.
+Never mounted into a sandbox.
 */}}
 {{- define "koinon.otlpTokenName" -}}
 {{- .Values.api.otlpToken.existingSecret | default (include "koinon.componentName" (list . "otlp-token")) }}
@@ -533,6 +542,33 @@ mounted into a sandbox.
   secret:
     secretName: {{ include "koinon.otlpTokenName" . }}
     # The keys are the files: token, and previous while a rotation is under way.
+    defaultMode: 0440
+{{- end }}
+
+{{/*
+The Secret with the bearer token for /v1/traces on the same listener (issue 55): key "token", plus "previous"
+during a rotation, the same design as the one above. Only koinon-agentd (the sender) and koinon-api (the checker)
+mount it; the gateway and the sandboxes never do, so a holder of the gateway's token cannot post spans into a run.
+*/}}
+{{- define "koinon.otlpTracesTokenName" -}}
+{{- if and .Values.api.otlpToken.existingSecret (eq .Values.api.otlpToken.existingSecret .Values.api.otlpTracesToken.existingSecret) }}
+{{- fail "api.otlpToken.existingSecret and api.otlpTracesToken.existingSecret name the same Secret: /v1/traces needs a token of its own (issue 55)" }}
+{{- end }}
+{{- .Values.api.otlpTracesToken.existingSecret | default (include "koinon.componentName" (list . "otlp-traces-token")) }}
+{{- end }}
+
+{{- define "koinon.otlpTracesTokenDir" -}}/secrets/otlp-traces{{- end }}
+
+{{- define "koinon.otlpTracesTokenVolumeMount" -}}
+- name: otlp-traces-token
+  mountPath: {{ include "koinon.otlpTracesTokenDir" . }}
+  readOnly: true
+{{- end }}
+
+{{- define "koinon.otlpTracesTokenVolume" -}}
+- name: otlp-traces-token
+  secret:
+    secretName: {{ include "koinon.otlpTracesTokenName" . }}
     defaultMode: 0440
 {{- end }}
 
@@ -880,11 +916,11 @@ it carries no credentials.
 {{- end }}
 
 {{- define "koinon.agentdEnv" -}}
-{{- /* The internal OTLP listener, for the run spans agentd exports (ADR 0074): its address and the bearer token it requires. */}}
+{{- /* The internal OTLP listener, for the run spans agentd exports (ADR 0074): its address and the bearer token it requires for /v1/traces (issue 55: not the gateway's). */}}
 - name: KOINON_OTLP_ENDPOINT
   value: {{ printf "http://%s.%s.svc.%s:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") .Values.api.otlpPort | quote }}
 - name: KOINON_OTLP_TOKEN_FILE
-  value: {{ printf "%s/token" (include "koinon.otlpTokenDir" .) | quote }}
+  value: {{ printf "%s/token" (include "koinon.otlpTracesTokenDir" .) | quote }}
 {{- /* The uncommitted work of a stuck sandbox is posted here to be sealed; agentd holds no KEK (ADR 0054). */}}
 - name: KOINON_SAVED_WORK_KEY_FILE
   value: /secrets/saved-work/key

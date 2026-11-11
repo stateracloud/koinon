@@ -1,6 +1,6 @@
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
-- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
+- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30, 2026-10-31 and 2026-11-11 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), old issue 213
@@ -806,3 +806,37 @@ event classes. The code lands in old issue 344 (items), old issue 345 (business 
   agentd writes is the table in `internal/runoutcome/eventclass.go`; an unlisted kind is business. A
   diagnostic write is tried twice, each try with a 2 s deadline, a business one five times; a write that matches no row fences the
   run whatever its class, since the run is no longer the worker's.
+
+## Amendment (2026-11-11, issue 55): `/v1/traces` has its own token, held only by koinon-agentd
+
+The amendment of 2026-10-30 above put one bearer token on the whole internal OTLP listener, so the
+gateway's token (which only needs `/v1/logs`) also admitted spans. Anything holding it could post spans
+into a traced run whose org, run and trace IDs it knew (the trace IDs reach the sandbox through the
+`traceparent` hint), including a forged root that makes the router build ledger spans. The router trusts
+agentd's spans for structure and attribution, so the credential for that path must be one the gateway
+does not hold.
+
+1. **Two tokens, two scopes.** `/v1/logs` takes the gateway's token (`koinon-otlp-token`, as before).
+   `/v1/traces` takes a second one, the Secret `koinon-otlp-traces-token` (key `token`, plus `previous`
+   while it is rotated), made by the same ensure-secrets hook Job. Each path accepts only its own token:
+   the gateway's token gets 401 on `/v1/traces`, agentd's gets 401 on `/v1/logs` and on every other path.
+   koinon-api's `--otlp-traces-token-dir` (`KOINON_OTLP_TRACES_TOKEN_DIR`) names the directory; it is
+   required with `--otlp-addr` like `--otlp-token-dir`.
+2. **Who mounts what.** koinon-api mounts both at `/secrets/otlp` and `/secrets/otlp-traces`.
+   koinon-agentd mounts only the second (its `--otlp-token-file` now points at
+   `/secrets/otlp-traces/token`); the standalone gateway and the kubernetes-mode controller keep the
+   first. No sandbox mounts either. `api.otlpTracesToken.existingSecret` names your own Secret.
+3. **Rotation** is the same design (current plus previous, files re-read every few seconds). Only
+   koinon-agentd sends the traces token and it reads the file on each export, so no gateway reload is
+   involved.
+4. **Matching is exact on the URL path.** `otlpauth.ScopedMiddleware` looks the path up in a table
+   (`/v1/traces`); every other path, a variant such as `/v1/traces/` included, falls to the gateway's
+   token. A variant therefore never reaches the traces scope with a gateway token, and the handler only
+   serves the exact path.
+5. **Upgrade.** A running install has no `koinon-otlp-traces-token`; the hook Job creates it before the
+   Deployments roll. While old and new pods run together, an old agentd (gateway token) is refused by a
+   new koinon-api, and a new agentd (traces token) by an old one. agentd logs the 401 and drops those
+   spans, which are best effort; the window is one rollout.
+6. **Gateway spans.** If the gateway ever exports model-call spans to `/v1/traces` (decision 1 of the
+   original text), it needs a third credential of its own for that path; it must not be given agentd's.
+   Nothing exports them today.

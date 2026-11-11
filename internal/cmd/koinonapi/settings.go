@@ -109,6 +109,7 @@ var recordedSettings = []platformSetting{
 	// telemetry and scheduling
 	setting("otlp-addr", kindValue),
 	{Flag: "otlp-token-dir", Key: "otlp-auth-dir", Kind: kindRef},
+	{Flag: "otlp-traces-token-dir", Key: "otlp-traces-auth-dir", Kind: kindRef},
 	setting("durable", kindValue),
 	setting("restore-hold", kindValue),
 	setting("run-cap-sweep-interval", kindValue),
