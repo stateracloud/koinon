@@ -14,7 +14,8 @@
 # same holder, so a restarted session keeps its claims. A claim from before ADR 0104
 # (<login>/<host>/<session>[#<lane>]) reads as its login in its lane (none: main); its login may release
 # it from any lane. Limits, best effort (read, then write): one claim per lane (one `take` of several
-# issues counts once), eight held claims per human.
+# issues counts once). A per-human cap on held claims is off (ADR 0104, amendment 2026-11-11); set
+# KOINON_CLAIM_HUMAN_CAP=N to turn it on.
 #
 # Usage:
 #   claim.sh next [--label L]       Ready/In Progress/In Review, agent-ok, current-milestone, unblocked
@@ -45,6 +46,7 @@
 #   KOINON_CLAIM_PROJECT        project number for `next` (default 1)
 #   KOINON_CLAIM_PROJECT_OWNER  project owner (default: the repository owner)
 #   KOINON_CLAIM_HUMAN          your GitHub login (default: the authenticated user)
+#   KOINON_CLAIM_HUMAN_CAP      held claims allowed per human (default: empty or 0, no cap)
 #   KOINON_CLAIM_MILESTONE      milestone title for `next` (default: the open one due first)
 #   KOINON_CLAIM_CODEOWNERS     the CODEOWNERS file of sensitive-paths (default: .github/CODEOWNERS)
 
@@ -53,7 +55,6 @@
 
 set -euo pipefail
 
-HUMAN_CAP=8
 DEFAULT_LANE=main
 EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 
@@ -420,8 +421,10 @@ cmd_take() {
     CLAIM_EXIT=2 die "lane $LANE already holds $lane_held (one claim per lane). Finish or release it, or take this issue in its own lane with --lane <name>."
   fi
   human_held=$(held_of "$claims" "$human" "" "$want" | wc -l | tr -d ' ')
-  if ((human_held + ${#issues[@]} > HUMAN_CAP)); then
-    CLAIM_EXIT=2 die "$human holds $human_held claims; ${#issues[@]} more would pass the cap of $HUMAN_CAP."
+  human_cap=${KOINON_CLAIM_HUMAN_CAP:-0}
+  [[ $human_cap =~ ^[0-9]+$ ]] || die "KOINON_CLAIM_HUMAN_CAP must be a number (is '$human_cap')"
+  if ((human_cap > 0 && human_held + ${#issues[@]} > human_cap)); then
+    CLAIM_EXIT=2 die "$human holds $human_held claims; ${#issues[@]} more would pass the cap of $human_cap."
   fi
   CLOSERS=$(open_pr_closers) || die "cannot list the open pull requests (API error); retry, nothing was claimed"
   TAKE_HOLDER=$holder TAKE_HUMAN=$human

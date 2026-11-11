@@ -196,7 +196,11 @@ r=$(run take 10 --lane l10)
 eq "take: another lane is free" "$(rc_of "$r")" 0
 FIX=$(for i in 1 2 3 4 5 6 7 8; do cl "$i" held "alice#l$i" alice; done | fix)
 r=$(run take 10 --lane l10)
-eq "take: eight claims per human" "$(rc_of "$r")" 2
+eq "take: no per-human cap by default" "$(rc_of "$r")" 0
+r=$(KOINON_CLAIM_HUMAN_CAP=0 run take 10 --lane l10)
+eq "take: a cap of 0 is no cap" "$(rc_of "$r")" 0
+r=$(KOINON_CLAIM_HUMAN_CAP=8 run take 10 --lane l10)
+eq "take: KOINON_CLAIM_HUMAN_CAP=8 refuses the ninth" "$(rc_of "$r")" 2
 FIX=$(fix </dev/null)
 r=$(CLOSERS_FIX='[{"number":50,"author":"bob","issues":[10]}]' run take 10)
 eq "take: another author's open pull request refuses" "$(rc_of "$r")" 2
