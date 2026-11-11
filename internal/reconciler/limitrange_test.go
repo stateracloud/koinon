@@ -148,4 +148,21 @@ var _ = Describe("SandboxLimitRange.Ensure backoff", func() {
 		Expect(p.Ensure(context.Background(), "kw-1")).To(Succeed())
 		Expect(creates.Load()).To(BeZero(), "applied namespaces are not asked again")
 	})
+
+	It("does not back off when the workspace namespace is missing", func() {
+		kube := fake.NewClientset()
+		kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+			creates.Add(1)
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "namespaces"}, "openshell-openshell-kw-1")
+		})
+		p = &reconciler.SandboxLimitRange{
+			Kube: kube, GatewayID: "openshell", Name: "koinon-koinon-sandbox-limitrange",
+			Now: func() time.Time { return now },
+		}
+		Expect(p.Ensure(context.Background(), "kw-1")).To(HaveOccurred())
+		Expect(creates.Load()).To(BeEquivalentTo(1))
+		Expect(p.Ensure(context.Background(), "kw-1")).To(HaveOccurred(), "missing namespace is retried immediately")
+		Expect(creates.Load()).To(BeEquivalentTo(2))
+		Expect(p.Ready(context.Background(), "kw-1")).To(BeFalse())
+	})
 })

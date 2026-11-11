@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,6 +120,11 @@ func (p *SandboxLimitRange) Ensure(ctx context.Context, workspace string) error 
 	case apierrors.IsNotFound(err):
 		_, err = lrs.Create(ctx, want, metav1.CreateOptions{FieldManager: ManagedByValue})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
+			// OpenShell creates the workspace namespace with the first sandbox; do not back off on
+			// a missing namespace so Ensure can run again as soon as CreateSandbox has made it.
+			if limitRangeNamespaceMissing(err) {
+				return err
+			}
 			return p.fail(ns, d, err)
 		}
 		if err == nil {
@@ -193,6 +199,33 @@ func (p *SandboxLimitRange) fail(ns string, d *denial, err error) error {
 	p.count(err)
 	p.log().Warn("sandbox LimitRange could not be applied", "namespace", ns, "err", err)
 	return err
+}
+
+// limitRangeNamespaceMissing reports whether err is a NotFound for the workspace Namespace:
+// OpenShell creates those namespaces with the first sandbox, so Ensure must not hold CreateSandbox
+// or back off on them (#76).
+func limitRangeNamespaceMissing(err error) bool {
+	if !apierrors.IsNotFound(err) {
+		return false
+	}
+	var status apierrors.APIStatus
+	if errors.As(err, &status) {
+		if d := status.Status().Details; d != nil && d.Kind == "namespaces" {
+			return true
+		}
+	}
+	return strings.Contains(err.Error(), `namespaces "`)
+}
+
+// Ready reports whether the LimitRange is already in the workspace namespace.
+func (p *SandboxLimitRange) Ready(ctx context.Context, workspace string) bool {
+	if p.Kube == nil || p.Name == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, limitRangeCallTimeout)
+	defer cancel()
+	_, err := p.Kube.CoreV1().LimitRanges(p.namespace(workspace)).Get(ctx, p.Name, metav1.GetOptions{})
+	return err == nil
 }
 
 func (p *SandboxLimitRange) count(err error) {

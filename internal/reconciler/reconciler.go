@@ -985,10 +985,11 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
 	if r.cfg.LimitRange != nil && ws.Active {
-		// LimitRange sizes pods only at admission (ADR 0083 amendment). Hold CreateSandbox until
-		// Ensure succeeds; a sandbox admitted earlier stays BestEffort until it is recreated.
-		// Mark done only after Ensure so a failed pass does not let another agent skip it.
-		if err := r.cfg.LimitRange.Ensure(ctx, name); err != nil {
+		// LimitRange sizes pods only at admission (ADR 0083 amendment). A missing workspace
+		// namespace is expected until the first CreateSandbox (OpenShell creates it then); other
+		// Ensure failures hold this org so CreateSandbox cannot run without a writable LimitRange.
+		// Mark done only after a definitive outcome so a failed pass does not let another agent skip it.
+		if err := r.cfg.LimitRange.Ensure(ctx, name); err != nil && !limitRangeNamespaceMissing(err) {
 			return "", fmt.Errorf("reconciler: sandbox LimitRange of org %s: %w", org.Slug, err)
 		}
 	}
@@ -1105,11 +1106,28 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 		}
+		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
+		if r.cfg.LimitRange != nil {
+			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
+			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
+			// admits them sized (#76).
+			if err := r.cfg.LimitRange.Ensure(ctx, ws); err != nil {
+				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", err)
+			}
+			if !lrReady {
+				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+					return err
+				}
+				r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
+				sb.Phase = execution.PhaseDeleting
+				return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
+			}
+		}
 		return r.record(ctx, w, sb, hash, "")
 	}
 	if err != nil {

@@ -73,10 +73,11 @@ that cannot be reclaimed.
   RBAC is fenced by a ValidatingAdmissionPolicy to this gateway's workspace namespaces and the
   fixed shape.
 - A LimitRange sizes pods only at admission: only pods admitted after the LimitRange exists get
-  the defaults. Ensure must succeed before CreateSandbox; a failure is logged and counted
-  (`koinon_reconciler_sandbox_limit_range_errors_total`) and holds that org's sandbox work until
-  the next pass. A sandbox that was admitted earlier without the LimitRange stays BestEffort until
-  it is recreated.
+  the defaults. OpenShell creates the workspace namespace with the first sandbox, so a missing
+  namespace does not hold CreateSandbox; Ensure runs again right after create. Other Ensure failures
+  (for example Forbidden) are logged and counted (`koinon_reconciler_sandbox_limit_range_errors_total`)
+  and hold that org's sandbox work. When CreateSandbox ran before the LimitRange existed, the
+  reconciler deletes that sandbox once so the next pass admits supervisors sized.
 - Kata's pod overhead (`podFixed` on the RuntimeClass) is outside these Container defaults. A
   Pod-type LimitRange max would have to include that overhead; this amendment does not add one.
 - Turning `sandboxLimitRange.enabled` off stops the chart from rendering the ClusterRole, binding
