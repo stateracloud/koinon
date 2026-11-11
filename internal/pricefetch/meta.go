@@ -123,8 +123,6 @@ type Endpoint struct {
 	MaxPromptTokens         int      `json:"maxPromptTokens,omitempty"`
 	SupportsImplicitCaching bool     `json:"supportsImplicitCaching,omitempty"`
 	SupportedParameters     []string `json:"supportedParameters,omitempty"`
-	// Uptime30m is the percentage OpenRouter reports for the last 30 minutes; nil when none.
-	Uptime30m *float64 `json:"uptime30m,omitempty"`
 }
 
 // ModelEndpoints is the upstream list of one model at a time.
@@ -148,7 +146,6 @@ type orEndpoints struct {
 			MaxPromptTokens         json.RawMessage `json:"max_prompt_tokens"`
 			SupportsImplicitCaching bool            `json:"supports_implicit_caching"`
 			SupportedParameters     []string        `json:"supported_parameters"`
-			Uptime30m               *float64        `json:"uptime_last_30m"`
 		} `json:"endpoints"`
 	} `json:"data"`
 }
@@ -180,10 +177,6 @@ func ParseOpenRouterEndpoints(model string, body []byte, now time.Time) (ModelEn
 			MaxPromptTokens:         tokensOf(e.MaxPromptTokens),
 			SupportsImplicitCaching: e.SupportsImplicitCaching,
 			SupportedParameters:     cleanList(e.SupportedParameters),
-		}
-		if e.Uptime30m != nil && *e.Uptime30m >= 0 && *e.Uptime30m <= 100 {
-			v := *e.Uptime30m
-			ep.Uptime30m = &v
 		}
 		out.Endpoints = append(out.Endpoints, ep)
 	}

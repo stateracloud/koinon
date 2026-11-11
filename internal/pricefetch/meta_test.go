@@ -70,7 +70,7 @@ func TestSnapshotMetaIsNotInTheFile(t *testing.T) {
 
 const endpointsBody = `{"data":{"id":"fake/model-a","endpoints":[
  {"provider_name":"Fake Up","tag":"fake-up","quantization":"fp8","context_length":200000,"max_completion_tokens":64000,
-  "max_prompt_tokens":null,"supports_implicit_caching":true,"supported_parameters":["tools"],"uptime_last_30m":99.5,
+  "max_prompt_tokens":null,"supports_implicit_caching":true,"supported_parameters":["tools"],
   "pricing":{"prompt":"0.000009","completion":"0.000009"}},
  {"provider_name":"Other","uptime_last_30m":250}
 ]}}`
@@ -84,11 +84,8 @@ func TestParseOpenRouterEndpoints(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 	u := e.Endpoints[0]
-	if u.Provider != "Fake Up" || u.Quantization != "fp8" || u.ContextLength != 200000 || !u.SupportsImplicitCaching || u.Uptime30m == nil || *u.Uptime30m != 99.5 {
+	if u.Provider != "Fake Up" || u.Quantization != "fp8" || u.ContextLength != 200000 || !u.SupportsImplicitCaching {
 		t.Errorf("endpoint: %+v", u)
-	}
-	if e.Endpoints[1].Uptime30m != nil {
-		t.Error("an uptime outside 0..100 is dropped")
 	}
 	for _, bad := range []string{`{}`, `{"data":null}`, `{"data":{}} x`, `nope`} {
 		if _, err := ParseOpenRouterEndpoints("fake/model-a", []byte(bad), time.Now()); err == nil {
