@@ -30,11 +30,15 @@
 //	KOINON_ESCAPE_GITEA_URL     the Gitea base URL the read grant is rendered for (default
 //	                            https://example.com/gitea; the host must resolve in the sandbox and accept
 //	                            a TLS connect on 443: kind.sh points it at escape-gitea-standin, old issue 371)
-//	KOINON_ESCAPE_CLUSTER_DNS   the cluster DNS Service IP (default 10.250.0.10, the kube-dns Service of test/e2e/kind/kind-config.yaml)
-//	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA, KOINON_ESCAPE_API, KOINON_ESCAPE_INTERNAL
+//	KOINON_ESCAPE_CLUSTER_DNS   the cluster DNS Service IP (kube-dns); no default, the DNS spec skips
+//	                            (fails under KOINON_REQUIRE=escape-cluster-ips) without it
+//	KOINON_ESCAPE_API, KOINON_ESCAPE_INTERNAL
+//	                            comma-separated host:port lists of the API server and platform
+//	                            service targets; no default, the specs skip likewise without them.
+//	                            test/escape/kind.sh reads the Service IPs from the cluster it targets
+//	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA
 //	                            comma-separated host:port lists that replace the default
-//	                            targets of the egress, metadata, API server and platform
-//	                            service cases
+//	                            targets of the egress and metadata cases
 //	KOINON_ESCAPE_HOST_KERNEL   the nodes' uname -r; enables the Kata guest case (a manual
 //	                            release gate); the case is skipped without it
 //	KOINON_ESCAPE_NAMESPACE     the workspace's Kubernetes namespace; enables the live

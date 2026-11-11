@@ -78,6 +78,19 @@ K=(kubectl --context "$CTX")
 "${K[@]}" -n openshell get secret openshell-client-tls >/dev/null ||
   { echo "the OpenShell gateway is not installed in $CTX (make dev-kind-up installs it)" >&2; exit 1; }
 
+# The cluster's own Service IPs for the deny checks (they differ per cluster; the suite has no default).
+# Values the caller exported win.
+if [[ -z ${KOINON_ESCAPE_CLUSTER_DNS:-} ]]; then
+  KOINON_ESCAPE_CLUSTER_DNS=$("${K[@]}" -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}') ||
+    { echo "cannot read the kube-dns Service ClusterIP from $CTX" >&2; exit 1; }
+fi
+api_ip=$("${K[@]}" -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}') ||
+  { echo "cannot read the kubernetes Service ClusterIP from $CTX" >&2; exit 1; }
+[[ -n $KOINON_ESCAPE_CLUSTER_DNS && -n $api_ip ]] || { echo "empty kube-dns or kubernetes ClusterIP from $CTX" >&2; exit 1; }
+export KOINON_ESCAPE_CLUSTER_DNS
+export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
+export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=
 diagnostics() {
