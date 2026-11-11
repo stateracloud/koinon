@@ -151,8 +151,20 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider, n.GitHubProfile} {
 			v.names[name] = a.Status
 		}
-		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider, n.GitHubProfile} {
-			v.sandboxState[name] = a.SandboxState
+		// The sandbox state belongs to the names the row holds, which the reconciler acts on
+		// (work.names): for an ephemeral agent a kt- task sandbox and its provider. A leftover object
+		// with the persistent name then gets the agent's status reason, and is never hidden as
+		// waits-for-agent by a state that is not its own.
+		if a.SandboxState.Valid {
+			for _, name := range []string{a.SandboxName.String, a.ProviderName.String} {
+				if name != "" {
+					v.names[name] = a.Status
+					v.sandboxState[name] = a.SandboxState
+				}
+			}
+			for _, name := range []string{n.GitHubProvider, n.GitHubProfile} {
+				v.sandboxState[name] = a.SandboxState
+			}
 		}
 		v.agents[execution.UUIDString(a.ID.Bytes)] = a.Status
 		if v.flavors[a.Flavor] == nil {

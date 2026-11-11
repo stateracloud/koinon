@@ -304,7 +304,7 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 }
 
 const listAgentsForUnmarked = `-- name: ListAgentsForUnmarked :many
-SELECT a.org_id, a.id, a.status, a.flavor, s.state AS sandbox_state
+SELECT a.org_id, a.id, a.status, a.flavor, s.state AS sandbox_state, s.sandbox_name, s.provider_name
 FROM agents a
 JOIN orgs o ON o.id = a.org_id
 LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
@@ -318,11 +318,14 @@ type ListAgentsForUnmarkedRow struct {
 	Status       AgentStatus
 	Flavor       AgentFlavor
 	SandboxState NullSandboxState
+	SandboxName  pgtype.Text
+	ProviderName pgtype.Text
 }
 
 // Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
 // with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
-// the agent to change status from one the reconciler claims.
+// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
+// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
 func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error) {
 	rows, err := q.db.Query(ctx, listAgentsForUnmarked)
 	if err != nil {
@@ -338,6 +341,8 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 			&i.Status,
 			&i.Flavor,
 			&i.SandboxState,
+			&i.SandboxName,
+			&i.ProviderName,
 		); err != nil {
 			return nil, err
 		}

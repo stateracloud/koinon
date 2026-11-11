@@ -698,7 +698,8 @@ type Querier interface {
 	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
 	// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
 	// with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
-	// the agent to change status from one the reconciler claims.
+	// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
+	// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
 	ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
