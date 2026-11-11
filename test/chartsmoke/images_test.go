@@ -35,6 +35,38 @@ func imageName(ref string) string {
 	return name
 }
 
+// envWithoutTestingTag drops the `testing` build tag from GOFLAGS (hack/go-test.sh sets
+// GOFLAGS=-tags=testing for test binaries, #576) and keeps every other flag and tag. The images
+// are what a release build produces, and the tag makes kopia derive keys insecurely.
+func envWithoutTestingTag(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		val, ok := strings.CutPrefix(kv, "GOFLAGS=")
+		if !ok {
+			out = append(out, kv)
+			continue
+		}
+		var flags []string
+		for _, f := range strings.Fields(val) {
+			if tags, ok := strings.CutPrefix(f, "-tags="); ok {
+				var keep []string
+				for _, t := range strings.Split(tags, ",") {
+					if t != "testing" && t != "" {
+						keep = append(keep, t)
+					}
+				}
+				if len(keep) == 0 {
+					continue
+				}
+				f = "-tags=" + strings.Join(keep, ",")
+			}
+			flags = append(flags, f)
+		}
+		out = append(out, "GOFLAGS="+strings.Join(flags, " "))
+	}
+	return out
+}
+
 // buildImages compiles the Koinon binaries for the Docker daemon's architecture and wraps each in
 // a scratch image that starts it as its entrypoint, as the ko images do (ko is not needed: the
 // chart only cares about the binary and its arguments). It returns the local tag per image name.
@@ -51,7 +83,7 @@ func buildImages(ctx context.Context, root string) map[string]string {
 		bin := filepath.Join(tmp, name)
 		build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", bin, "./cmd/"+name)
 		build.Dir = root
-		build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+		build.Env = append(envWithoutTestingTag(os.Environ()), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
 		if out, err := build.CombinedOutput(); err != nil {
 			panic(fmt.Sprintf("go build %s: %v\n%s", name, err, out))
 		}

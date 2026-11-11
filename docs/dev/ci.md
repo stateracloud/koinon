@@ -406,6 +406,7 @@ makes new repositories use kopia's instant, insecure key derivation. The seed sp
 went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
 `make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
 without the tag still passes, only slower (set `GOFLAGS=-tags=testing` yourself for a quick loop).
+Binaries that tests build themselves (the chart smoke images) do not get the tag: they drop it from `GOFLAGS`.
 
 ## What `ci` runs when
 
