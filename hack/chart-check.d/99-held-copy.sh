@@ -34,3 +34,27 @@ n_cp=$(held_notes --set restoreHold=true "${cp_args[@]}")
 grep -q 'checkpoints.readOnly is false' <<<"$n_cp" || fail "NOTES do not warn that a held install with checkpoints writes into its bucket"
 n_ro=$(held_notes --set restoreHold=true "${cp_args[@]}" --set checkpoints.readOnly=true)
 if grep -q 'checkpoints.readOnly is false' <<<"$n_ro"; then fail "NOTES warn about checkpoints although readOnly is true"; fi
+
+# Restore-only checkpoints reach the reconciler too: it must not wait for a backup agentd will not write
+# (ADR 0110 decision 4). The value is in the config file the reconciler reads.
+lacks "the reconciler is not restore-only by default" 'checkpointsReadOnly: true' "${cp_args[@]}"
+has "the reconciler learns that checkpoints are restore-only" 'checkpointsReadOnly: true' "${cp_args[@]}" --set checkpoints.readOnly=true
+
+# The release of a restored copy (ADR 0110 decision 1): the value, the Job and the NOTES warning.
+lacks "no importer accept by default" 'KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS'
+env_is KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS '"true"' --set restore.acceptImporterDeletions=true
+if render --set restore.acceptImporterDeletions=yes-please >/dev/null 2>&1; then fail "restore.acceptImporterDeletions must be a boolean"; fi
+if render --set restore.nonsense=1 >/dev/null 2>&1; then fail "an unknown restore.* value must fail the render"; fi
+rc_job=$(render --show-only templates/restore-release-check.yaml)
+grep -q 'helm.sh/hook: pre-upgrade' <<<"$rc_job" || fail "the restore-release-check Job is not a pre-upgrade hook"
+grep -q 'helm.sh/hook-weight: "10"' <<<"$rc_job" || fail "the restore-release-check Job does not run after the migrate Job (weight 0)"
+grep -q 'argocd.argoproj.io/sync-wave: "2"' <<<"$rc_job" || fail "the restore-release-check Job has no Argo CD sync wave after the migrate Job"
+grep -qE 'args: \["restore", "release-check"\]' <<<"$rc_job" || fail "the restore-release-check Job does not run koinon-api restore release-check"
+grep -q 'optional: true' <<<"$rc_job" || fail "the restore-release-check Job must tolerate a missing install mark Secret (first install under Argo CD)"
+if grep -q 'KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS' <<<"$rc_job"; then fail "the Job sees the accept value without it being set"; fi
+rc_accept=$(render --show-only templates/restore-release-check.yaml --set restore.acceptImporterDeletions=true)
+grep -q 'KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS' <<<"$rc_accept" || fail "the Job does not get restore.acceptImporterDeletions"
+if render --set restoreHold=true --show-only templates/restore-release-check.yaml 2>&1 | grep -q 'kind: Job'; then fail "the restore-release-check Job is rendered on a held install"; fi
+n_acc=$(held_notes --set restore.acceptImporterDeletions=true)
+grep -q 'restore.acceptImporterDeletions is set' <<<"$n_acc" || fail "NOTES do not warn that restore.acceptImporterDeletions is set"
+if grep -q 'restore.acceptImporterDeletions is set' <<<"$n_plain"; then fail "NOTES warn about restore.acceptImporterDeletions when it is false"; fi

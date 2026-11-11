@@ -3,6 +3,7 @@
 package koinonapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,38 +12,56 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/restorestatus"
 )
 
 // newRestoreCommand is "koinon-api restore", the operator's view of a restored copy (ADR 0110 decision
-// 7, issue #516). It reads the database only and calls nothing outward, so it is safe on a held install.
+// 7, issue #516). It reads the database and the declarative Secrets and calls nothing outward, so it is
+// safe on a held install.
 func newRestoreCommand() *cobra.Command {
-	var dbURL, installMark string
-	var asJSON bool
+	var dbURL, installMark, namespace, kubeconfig string
+	var asJSON, accept bool
 	root := &cobra.Command{
 		Use:   "restore",
 		Short: "Inspect a restored install before its hold is released",
 	}
+	report := func(cmd *cobra.Command) (restorestatus.Report, error) {
+		pool, err := pgxpool.New(cmd.Context(), dbURL)
+		if err != nil {
+			return restorestatus.Report{}, fmt.Errorf("connect to postgres: %w", err)
+		}
+		defer pool.Close()
+		owner := ""
+		if installMark != "" {
+			owner = execution.OwnerID(installMark)
+		}
+		opt := restorestatus.Options{AcceptImporterDeletions: accept}
+		kube, err := kubeClient(config{kubeconfig: kubeconfig, secretsNamespace: namespace})
+		if err != nil {
+			return restorestatus.Report{}, err
+		}
+		if kube != nil {
+			opt.PlanRemovals = func(ctx context.Context) ([]installbinding.Removal, error) {
+				return declarative.PlanRemovals(ctx, pool, kube, namespace)
+			}
+		}
+		return restorestatus.Build(cmd.Context(), pool, owner, opt)
+	}
 	status := &cobra.Command{
 		Use:   "status",
 		Short: "Show what the install would do outward and what its release starts",
-		Long: "Prints the install binding state (same, copy or unknown), the API tokens and sessions this install refuses " +
-			"because another install issued them, every outward target with its disabled switch, and the runs a release " +
-			"picks up. It reads only the database. The install mark is read from --install-mark (KOINON_INSTALL_MARK), " +
-			"the value the api Deployment carries.",
+		Long: "Prints the install binding state (same, copy or unknown) and whether a release is pending, the API tokens " +
+			"and sessions this install refuses because another install issued them, every outward target with its " +
+			"disabled switch, the removals the declarative importer would make, and what a release starts: the schedule " +
+			"fires of the first tick, the DBOS workflows, the runs and the run limits that apply, per org. It reads the " +
+			"database and the declarative Secrets (in a cluster). The install mark is read from --install-mark " +
+			"(KOINON_INSTALL_MARK), the value the api Deployment carries.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			pool, err := pgxpool.New(cmd.Context(), dbURL)
-			if err != nil {
-				return fmt.Errorf("connect to postgres: %w", err)
-			}
-			defer pool.Close()
-			owner := ""
-			if installMark != "" {
-				owner = execution.OwnerID(installMark)
-			}
-			r, err := restorestatus.Build(cmd.Context(), pool, owner)
+			r, err := report(cmd)
 			if err != nil {
 				return err
 			}
@@ -56,9 +75,48 @@ func newRestoreCommand() *cobra.Command {
 		},
 	}
 	status.Flags().BoolVar(&asJSON, "json", false, "print the report as JSON")
+	check := &cobra.Command{
+		Use:   "release-check",
+		Short: "Fail when a release would remove declared items and the removals are not accepted",
+		Long: "The pre-upgrade check of the chart (the restore-release-check Job, ADR 0110 decision 1): prints the report and " +
+			"exits non-zero when a release is pending (or removals wait) and the importer plan holds a removal while " +
+			"restore.acceptImporterDeletions is not true, so helm upgrade stops before any Deployment changes. It exits 0 " +
+			"when the schema does not exist yet (a first install) and when nothing blocks.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pool, err := pgxpool.New(cmd.Context(), dbURL)
+			if err != nil {
+				return fmt.Errorf("connect to postgres: %w", err)
+			}
+			var have bool
+			err = pool.QueryRow(cmd.Context(), `SELECT to_regclass('install_binding') IS NOT NULL AND to_regclass('restore_accepted_removals') IS NOT NULL`).Scan(&have)
+			pool.Close()
+			if err != nil {
+				return err
+			}
+			if !have {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "restore release check: the schema does not exist yet (a first install); nothing to check")
+				return nil
+			}
+			r, err := report(cmd)
+			if err != nil {
+				return err
+			}
+			restorestatus.Print(cmd.OutOrStdout(), r)
+			if b := r.Blocking(); len(b) > 0 {
+				return fmt.Errorf("the release would remove %d declared item(s) of the source (listed above) and restore.acceptImporterDeletions is not true: "+
+					"apply their Secrets, or set restore.acceptImporterDeletions=true for this upgrade and remove it afterwards", len(b))
+			}
+			return nil
+		},
+	}
 	root.PersistentFlags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
 	root.PersistentFlags().StringVar(&installMark, "install-mark", "", "this install's mark (the Secret value the api Deployment carries); empty: the state is unknown")
+	root.PersistentFlags().StringVar(&namespace, "secrets-namespace", "", "namespace of the declarative Secrets (default $POD_NAMESPACE); without Kubernetes access the importer plan is left out")
+	root.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
+	root.PersistentFlags().BoolVar(&accept, "restore-accept-importer-deletions", false, "restore.acceptImporterDeletions as the chart has it")
 	cli.EnvAlias(root, "database-url", "DATABASE_URL")
+	cli.EnvAlias(root, "secrets-namespace", "POD_NAMESPACE")
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if err := cli.Resolve(cmd, nil); err != nil {
 			return err
@@ -68,6 +126,6 @@ func newRestoreCommand() *cobra.Command {
 		}
 		return nil
 	}
-	root.AddCommand(status)
+	root.AddCommand(status, check)
 	return root
 }

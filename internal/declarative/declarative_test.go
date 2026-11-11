@@ -33,6 +33,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/restorehold"
@@ -283,6 +284,42 @@ var _ = Describe("Importer", func() {
 		for _, p := range list {
 			Expect(p.Removed).To(Equal(p.Name == "kept"))
 		}
+	})
+
+	It("keeps what the restore brought in until the removals are accepted, and revokes the sessions once (ADR 0110 decision 1)", func(ctx SpecContext) {
+		put(ctx, "kept", declarative.TypeModelProvider, slug, provider("kept"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "kept", metav1.DeleteOptions{})).To(Succeed())
+
+		By("the copy was held: its row is unbound and held_since is set")
+		_, err := pool.Exec(ctx, `DELETE FROM install_binding`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO install_binding (mark, held_since) VALUES (NULL, now())`)
+		Expect(err).NotTo(HaveOccurred())
+		imp.Release = installbinding.New(pool, "hash-copy", false, nil)
+
+		By("the first unheld pass does not remove the provider whose Secret the copy never had")
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ := svc.ListProviders(ctx, org)
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeFalse())
+		Expect(logs.String()).To(ContainSubstring("removal of model-provider kept waits for restore.acceptImporterDeletions"))
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+
+		By("a later pass keeps waiting and does not release again")
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list[0].Removed).To(BeFalse())
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+
+		By("the accept removes it")
+		imp.AcceptRemovals = true
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list[0].Removed).To(BeTrue())
 	})
 
 	It("disables the entries when the Secret is deleted, audited as the Secret, and restores them with it", func(ctx SpecContext) {

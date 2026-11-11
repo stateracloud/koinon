@@ -241,6 +241,7 @@ func serve(ctx context.Context, cfg config) error {
 			ResyncInterval:      cfg.resyncInterval,
 			HomeRetention:       reconciler.Retention(cfg.homeRetention),
 			Checkpoints:         cfg.checkpoints,
+			CheckpointsReadOnly: cfg.checkpointsReadOnly,
 			ToolServers:         cfg.toolServers(),
 			MCPAskURL:           cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the

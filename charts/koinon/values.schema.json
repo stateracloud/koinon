@@ -575,6 +575,11 @@
       }
     },
     "restoreHold": {"type": "boolean"},
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"acceptImporterDeletions": {"type": "boolean"}}
+    },
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "installMark": {
       "type": "object",

@@ -38,6 +38,7 @@ tags:
   - name: prices
   - name: budgets
   - name: audit
+  - name: restore
 paths:
   /providers:
     get:
@@ -1110,6 +1111,30 @@ paths:
                 $ref: "#/components/schemas/AuditEventList"
         default:
           $ref: "#/components/responses/Error"
+  /restore/status:
+    get:
+      tags: [restore]
+      operationId: getRestoreStatus
+      summary: What a restored copy would do outward and what its release starts (platform admin).
+      description: |
+        The report of `koinon-api restore status --json` (ADR 0110 decision 7), for a token whose root
+        user is a platform admin (checked on every request; any other token gets 403). It reads the
+        database and the cluster and calls no outward target, so it is safe on a held install. Sections:
+        `binding` (state and the recorded targets of the install that owns the database), `quarantine`
+        (live tokens and sessions this install refuses), `outwardTargets` (each with its admin switch),
+        `importer` (the removals the importer would make, the restore's `waiting` and `accepted` rows
+        and whether the release needs `restore.acceptImporterDeletions`) and `release` (whether a
+        release is pending, the schedule fires the first tick enqueues, the DBOS workflows ENQUEUED and
+        PENDING, queued and parked runs, and the run limits that apply, per org).
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreStatus"
+        default:
+          $ref: "#/components/responses/Error"
   /audit/export:
     get:
       tags: [audit]
@@ -1527,6 +1552,10 @@ components:
           type: string
           maxLength: 500
           description: Why. Kept while the target is disabled.
+    RestoreStatus:
+      type: object
+      description: The restore status report; its sections are described on the operation.
+      additionalProperties: true
     OutwardTargetState:
       type: object
       required: [kind, targetId, name, disabled]

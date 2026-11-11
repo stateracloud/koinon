@@ -335,6 +335,11 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ include "koinon.otlpTracesTokenDir" . | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
+{{- if (.Values.restore).acceptImporterDeletions }}
+{{- /* ADR 0110 decision 1: accept the declarative removals a restore brought in. NOTES warns while it is set. */}}
+- name: KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS
+  value: "true"
+{{- end }}
 {{- with include "koinon.publicUrl" . }}
 - name: KOINON_PUBLIC_URL
   value: {{ . | quote }}

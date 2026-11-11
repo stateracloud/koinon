@@ -82,6 +82,7 @@ var configKeys = map[string]string{
 	"resync-interval":                      "reconciler.resyncInterval",
 	"home-retention":                       "reconciler.homeRetention",
 	"checkpoints":                          "reconciler.checkpoints",
+	"checkpoints-read-only":                "reconciler.checkpointsReadOnly",
 	"github-tools-url":                     "githubTools.url",
 	"mcp-ask-url":                          "mcpAsk.url",
 	"mcp-guard-url":                        "mcpGuard.url",
@@ -227,6 +228,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	restorehold.Flag(fs, &c.restoreHold)
+	fs.BoolVar(&c.checkpointsReadOnly, "checkpoints-read-only", false, "restore-only checkpoints (checkpoints.readOnly; ADR 0110 decision 4): koinon-agentd writes no backup, so a recreation uses the newest complete snapshot or is blocked with that reason, and nothing waits for a backup")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")

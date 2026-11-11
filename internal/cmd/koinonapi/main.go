@@ -98,6 +98,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -129,6 +130,9 @@ type config struct {
 	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
 	// code-host scope refresh (issue #462).
 	restoreHold bool
+	// restoreAcceptImporterDeletions accepts the declarative removals a restore brought in (ADR 0110
+	// decision 1): the restore's release step records them as accepted instead of waiting.
+	restoreAcceptImporterDeletions bool
 	// installMark is this install's random mark (the chart's koinon-install-mark Secret). Its hash
 	// binds the database to the install: tokens and sessions another install issued are refused
 	// (ADR 0110). Empty turns the binding off.
@@ -217,6 +221,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
 	c.restoreHoldFlag(fs)
+	fs.BoolVar(&c.restoreAcceptImporterDeletions, "restore-accept-importer-deletions", false,
+		"accept the declarative removals a restore brought in (providers, MCP servers and connections whose Secret is missing); without it the importer keeps them until you accept (ADR 0110 decision 1)")
 	fs.StringVar(&c.installMark, "install-mark", "",
 		"this install's random mark (the chart's koinon-install-mark Secret). The database records its hash, and API tokens and sessions that another install issued are refused (a restored copy, ADR 0110); empty turns that off")
 	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
@@ -765,12 +771,29 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), Held: hold, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), Held: hold, Release: binding, AcceptRemovals: cfg.restoreAcceptImporterDeletions, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
+		if !cfg.restoreHold {
+			// The release step still runs: an unheld start after a restore revokes every session once.
+			safego.GoOrStop(bgCtx, slog.Default(), "restore-release", stop, func(ctx context.Context) {
+				if _, err := binding.Settle(ctx, nil, cfg.restoreAcceptImporterDeletions); err != nil && ctx.Err() == nil {
+					slog.Warn("restore release failed", "err", err)
+				}
+			})
+		}
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo).
+		WithRestoreStatus(func(ctx context.Context) (any, error) {
+			opt := restorestatus.Options{AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions}
+			if kube != nil {
+				opt.PlanRemovals = func(ctx context.Context) ([]installbinding.Removal, error) {
+					return declarative.PlanRemovals(ctx, pool, kube, cfg.secretsNamespace)
+				}
+			}
+			return restorestatus.Build(ctx, pool, bindingOwner, opt)
+		})
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)

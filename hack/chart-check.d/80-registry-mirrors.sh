@@ -78,9 +78,9 @@ rendered=$(render "${pull_args[@]}")
 pods=$(grep -cE '^ *(containers|initContainers):' <<<"$rendered" || true)
 withsecrets=$(grep -cE '^ +imagePullSecrets:$' <<<"$rendered" || true)
 # Deployments (api, reconciler, agentd, gateway), the migrate, migrate-grants (cnpg mode, ADR 0100),
-# ensure-secrets and preflight Jobs: 8 pod specs; the CNPG Cluster has its own imagePullSecrets (spec level).
-[[ $withsecrets == 9 ]] || fail "imagePullSecrets on $withsecrets objects, want 9 (8 pod specs and the CNPG Cluster); pod specs: $pods"
-[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 9 ]] || fail "regcred must appear once per object, de-duplicated across the two lists"
+# ensure-secrets, preflight and restore-release-check Jobs: 9 pod specs; the CNPG Cluster has its own imagePullSecrets (spec level).
+[[ $withsecrets == 10 ]] || fail "imagePullSecrets on $withsecrets objects, want 10 (9 pod specs and the CNPG Cluster); pod specs: $pods"
+[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated across the two lists"
 has "pull secrets reach the preflight probe pods" '--probe-image-pull-secrets=regcred,other$' "${pull_args[@]}"
 has "the deprecated top-level list still works alone" '--probe-image-pull-secrets=old$' --set 'imagePullSecrets[0].name=old'
 lacks "no imagePullSecrets without any" 'imagePullSecrets:'

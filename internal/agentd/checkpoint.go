@@ -87,7 +87,7 @@ type Checkpoints struct {
 	// ReadOnly is the restore-only mode (ADR 0110 decision 4): the pool restores homes from existing
 	// snapshots and lists them for checkpoints resync, but creates no snapshot, applies no retention and
 	// deletes no repository, so an install that shares its source's bucket (a restored copy) cannot
-	// change what the source stored. Requests that nothing will take are failed by the stale sweep.
+	// change what the source stored. A request nothing will take is failed at once with checkpoint.ReadOnlyError.
 	ReadOnly bool
 	// Concurrency is how many backups run at once (default 2).
 	Concurrency int
@@ -193,6 +193,16 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 				p.log.Warn("checkpoints: requesting hourly checkpoints failed", "err", err)
 			}
 		}
+		if c.ReadOnly {
+			// Restore-only: no writer will ever take a request (a stop, a recreation or a person asked for
+			// one), so fail it at once with the reason instead of after SandboxWait with a wrong one.
+			if _, err := p.q.FailStaleHomeCheckpoints(ctx, store.FailStaleHomeCheckpointsParams{
+				OrgID: org, WaitSeconds: 0, Error: pgtype.Text{String: checkpoint.ReadOnlyError, Valid: true},
+			}); err != nil && ctx.Err() == nil {
+				p.log.Warn("checkpoints: failing requests in restore-only mode failed", "err", err)
+			}
+			continue
+		}
 		wait := int32(c.SandboxWait.Seconds())
 		if _, err := p.q.FailStaleHomeCheckpoints(ctx, store.FailStaleHomeCheckpointsParams{
 			OrgID: org, WaitSeconds: wait, Error: pgtype.Text{String: fmt.Sprintf("the sandbox was not ready to be read within %s", c.SandboxWait), Valid: true},
@@ -206,9 +216,6 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 			Error: pgtype.Text{String: fmt.Sprintf("the writer stopped and the sandbox was not ready to be read again within %s", c.SandboxWait), Valid: true},
 		}); err != nil && ctx.Err() == nil {
 			p.log.Warn("checkpoints: failing abandoned requests failed", "err", err)
-		}
-		if c.ReadOnly {
-			continue // restore-only: no writer claims a request
 		}
 		for {
 			select {

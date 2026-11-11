@@ -59,6 +59,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -77,6 +78,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/outward"
@@ -100,6 +102,11 @@ type Importer struct {
 	MCP *mcpservers.Service
 	// Outward applies the disabled key of a Secret (ADR 0110 decision 5); nil ignores the key.
 	Outward *outward.Service
+	// Release gates the removals of a restored copy (ADR 0110 decision 1); nil or a binding without a
+	// mark gates nothing.
+	Release *installbinding.Binding
+	// AcceptRemovals is restore.acceptImporterDeletions: the removals of a restore are accepted.
+	AcceptRemovals bool
 	// Held makes a pass plan only (ADR 0110 decision 1): it validates the Secrets and reports what
 	// it would apply and remove, and writes nothing to the database. nil is an install that is not held.
 	Held *restorehold.Guard
@@ -326,9 +333,50 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		}
 	}
 	if i.Held.Held() {
-		return waitingForOrg, i.removeAbsent(ctx, q, seen, true)
+		return waitingForOrg, i.removeAbsent(ctx, q, seen, func(r installbinding.Removal) bool {
+			i.planned(r.Kind, ActionRemove, r.Org, r.Secret)
+			return false
+		})
 	}
-	return waitingForOrg, i.removeAbsent(ctx, q, seen, false)
+	return waitingForOrg, i.removeGated(ctx, q, seen)
+}
+
+// removeGated is the removal pass of an unheld importer (ADR 0110 decision 1). A restored copy has none
+// of its source's declarative Secrets, so the first unheld pass would remove every provider, MCP
+// server and connection of the source. The pass therefore collects what it would remove, hands the
+// list to the release step (Release.Settle), which records it and runs once per restore, and removes only
+// what is not on the restore's list or was accepted. A removal that waits is logged on every pass.
+func (i *Importer) removeGated(ctx context.Context, q *store.Queries, seen map[present]bool) error {
+	if !i.Release.Enabled() {
+		return i.removeAbsent(ctx, q, seen, func(installbinding.Removal) bool { return true })
+	}
+	var plan []installbinding.Removal
+	if err := i.removeAbsent(ctx, q, seen, func(r installbinding.Removal) bool {
+		plan = append(plan, r)
+		return false
+	}); err != nil {
+		return err
+	}
+	st, err := i.Release.Settle(ctx, plan, i.AcceptRemovals)
+	if err != nil {
+		return err
+	}
+	if st.Released {
+		i.log().Warn("restore released: every session was revoked and the removals the restore brought in were recorded",
+			"sessions", st.RevokedSessions, "removals", len(plan), "accepted", i.AcceptRemovals)
+	}
+	if st.Accepted > 0 {
+		i.log().Warn("restore: waiting removals accepted (restore.acceptImporterDeletions)", "removals", st.Accepted)
+	}
+	for _, r := range st.Waiting {
+		i.log().Warn(fmt.Sprintf("restore: removal of %s %s waits for restore.acceptImporterDeletions", r.Kind, r.Secret), "org", r.Org)
+	}
+	if len(plan) == 0 {
+		return nil
+	}
+	// The second walk removes what is allowed; the plan is the same set unless a Secret changed meanwhile,
+	// and then an item not on the list is a normal removal.
+	return i.removeAbsent(ctx, q, seen, st.Allowed)
 }
 
 // syncDisabled applies the Secret's disabled key to the items the Secret manages (the outward switch).
@@ -556,84 +604,156 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 	return nil
 }
 
-// removeAbsent deletes what a Secret declared when the Secret is gone (or no longer carries
-// the label, org or type that declared it). With dry set it only reports each removal (held,
-// ADR 0110 decision 1) and writes nothing: the plan and the removal walk the same items.
-func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[present]bool, dry bool) error {
+// absentItem is one thing a deleted Secret declared, with the call that removes it.
+type absentItem struct {
+	installbinding.Removal
+	remove func(ctx context.Context) error
+}
+
+// listAbsent lists what a Secret declared when the Secret is gone (or no longer carries the label, org
+// or type that declared it), in the order the importer removes it. It reads the database only; the
+// removal closures use the importer's services.
+func (i *Importer) listAbsent(ctx context.Context, q *store.Queries, seen map[present]bool) ([]absentItem, error) {
 	orgIDs, err := q.ListOrgIDs(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var out []absentItem
 	for _, id := range orgIDs {
 		slug, err := orgSlug(ctx, i.Pool, id)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		names, err := i.Catalog.DeclaredProviderSecrets(ctx, id)
+		providers, err := q.ListProviders(ctx, id)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		var names []string
+		for _, p := range providers {
+			if p.Source == store.ConfigSourceSecret && !p.RemovedAt.Valid && !slices.Contains(names, p.ManagedBySecret.String) {
+				names = append(names, p.ManagedBySecret.String)
+			}
 		}
 		for _, name := range names {
 			if !seen[present{slug, TypeModelProvider, name}] {
-				if dry {
-					i.planned(TypeModelProvider, ActionRemove, slug, name)
-					continue
-				}
-				if err := i.Catalog.RemoveDeclared(ctx, id, name); err != nil {
-					return err
-				}
-				i.log().Info("removed the providers of a deleted Secret", "secret", name, "org", slug)
+				out = append(out, absentItem{installbinding.Removal{Kind: TypeModelProvider, Org: slug, Secret: name}, func(ctx context.Context) error {
+					if err := i.Catalog.RemoveDeclared(ctx, id, name); err != nil {
+						return err
+					}
+					i.log().Info("removed the providers of a deleted Secret", "secret", name, "org", slug)
+					return nil
+				}})
 			}
 		}
-		if i.MCP != nil {
-			names, err := i.MCP.DeclaredSecrets(ctx, id)
-			if err != nil {
-				return err
+		mcps, err := q.ListMCPServers(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		names = nil
+		for _, m := range mcps {
+			if m.Source == store.ConfigSourceSecret && !m.RemovedAt.Valid && !slices.Contains(names, m.ManagedBySecret.String) {
+				names = append(names, m.ManagedBySecret.String)
 			}
-			for _, name := range names {
-				if !seen[present{slug, TypeMCPServer, name}] {
-					if dry {
-						i.planned(TypeMCPServer, ActionRemove, slug, name)
-						continue
+		}
+		for _, name := range names {
+			if !seen[present{slug, TypeMCPServer, name}] {
+				out = append(out, absentItem{installbinding.Removal{Kind: TypeMCPServer, Org: slug, Secret: name}, func(ctx context.Context) error {
+					if i.MCP == nil {
+						return nil
 					}
 					if err := i.MCP.RemoveDeclared(ctx, id, name); err != nil {
 						return err
 					}
 					i.log().Info("disabled the MCP servers of a deleted Secret", "secret", name, "org", slug)
-				}
+					return nil
+				}})
 			}
 		}
 		conns, err := q.ListConnections(ctx, id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, c := range conns {
 			if c.Source != store.ConfigSourceSecret || c.RemovedAt.Valid || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
 				continue
 			}
-			if dry {
-				i.planned(TypeConnection, ActionRemove, slug, c.ManagedBySecret.String)
-				continue
-			}
-			// Marked removed, not deleted: agents are bound to it and the audit log names it.
-			_, err := audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
-				if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
+			out = append(out, absentItem{installbinding.Removal{Kind: TypeConnection, Org: slug, Secret: c.ManagedBySecret.String}, func(ctx context.Context) error {
+				// Marked removed, not deleted: agents are bound to it and the audit log names it.
+				_, err := audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
+					if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
+						return err
+					}
+					b.Org(audit.Event{
+						Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
+						TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
+						After: map[string]any{"removed": true},
+					})
+					return nil
+				})
+				if err != nil {
 					return err
 				}
-				b.Org(audit.Event{
-					Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
-					TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
-					After: map[string]any{"removed": true},
-				})
+				i.log().Warn("marked the connection of a deleted Secret removed; agents bound to it report why, and restoring the Secret restores it", "secret", c.ManagedBySecret.String, "org", slug)
 				return nil
-			})
-			if err != nil {
-				return err
-			}
-			i.log().Warn("marked the connection of a deleted Secret removed; agents bound to it report why, and restoring the Secret restores it", "secret", c.ManagedBySecret.String, "org", slug)
+			}})
+		}
+	}
+	return out, nil
+}
+
+// removeAbsent removes what listAbsent finds and allow permits. A held importer (ADR 0110 decision 1)
+// passes an allow that only reports: the plan and the removal walk the same items.
+func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[present]bool, allow func(installbinding.Removal) bool) error {
+	items, err := i.listAbsent(ctx, q, seen)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if !allow(it.Removal) {
+			continue
+		}
+		if err := it.remove(ctx); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// PlanRemovals returns what an unheld importer would remove now, for the restore-release-check Job and
+// restore status: the declared items whose Secret is gone, per Kubernetes' labelled Secrets and the
+// database. It reads and writes nothing else.
+func PlanRemovals(ctx context.Context, pool *pgxpool.Pool, client kubernetes.Interface, namespace string) ([]installbinding.Removal, error) {
+	list, err := client.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{LabelSelector: Selector()})
+	if err != nil {
+		return nil, fmt.Errorf("list declarative Secrets: %w", err)
+	}
+	q := store.New(pool)
+	seen := map[present]bool{}
+	orgs := map[string]bool{}
+	for _, sec := range list.Items {
+		slug := sec.Labels[LabelOrg]
+		ok, done := orgs[slug]
+		if !done {
+			if _, err := q.GetOrgBySlug(ctx, slug); err == nil {
+				ok = true
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			orgs[slug] = ok
+		}
+		if ok {
+			seen[present{slug, sec.Labels[LabelSecretType], sec.Name}] = true
+		}
+	}
+	items, err := (&Importer{Pool: pool}).listAbsent(ctx, q, seen)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]installbinding.Removal, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.Removal)
+	}
+	return out, nil
 }
 
 // reject reports an invalid Secret once per version.

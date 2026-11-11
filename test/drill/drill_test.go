@@ -24,6 +24,7 @@ import (
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/test/drill"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 )
@@ -55,8 +56,10 @@ var (
 	fakeAtRelease int
 	// sourceSession is the source admin's session cookie, for the quarantine check.
 	sourceSession string
-	snapshotUnix  int64 // when the backup began: a fire due after it is not in the dump
-	releasedUnix  int64
+	// sourceMCPServer is the ID of the MCP server the source declares, which the copy disables while held.
+	sourceMCPServer string
+	snapshotUnix    int64 // when the backup began: a fire due after it is not in the dump
+	releasedUnix    int64
 )
 
 const retentionMin = 30 // run-content-retention days: the marker is retentionMin+n
@@ -292,16 +295,6 @@ func secretValue(ctx context.Context, ns, name, key string) string {
 	return string(b)
 }
 
-// knownGap runs a probe of behaviour a product issue will fix. A finding fails the spec with
-// "known gap: #N"; no finding means the gap is closed, which the report says so the marker can go.
-func knownGap(issue, what string, probe func() (finding string)) {
-	GinkgoHelper()
-	if f := probe(); f != "" {
-		Fail(drill.GapMessage(issue, what+": "+f))
-	}
-	AddReportEntry("known-gap-closed", fmt.Sprintf("%s (%s) passes: remove the known-gap label from this spec", issue, what))
-}
-
 var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 	marks := &res.Marks
 
@@ -363,6 +356,13 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		Expect(code).To(Equal(http.StatusCreated), string(body))
 		code, body = admin(ctx, &src, http.MethodPut, "/default-model", fmt.Sprintf(`{"model":%q}`, drill.ModelName))
 		Expect(code).To(Equal(http.StatusOK), string(body))
+
+		By("an MCP server, which the copy turns off while it is held (ADR 0110 decision 5)")
+		code, body = admin(ctx, &src, http.MethodPost, "/mcp-servers", `{"name":"drill-mcp","url":"https://mcp.example.com/mcp"}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+		var mcp struct{ ID string }
+		must(json.Unmarshal(body, &mcp), "mcp server")
+		sourceMCPServer = mcp.ID
 
 		By("an agent with a * * * * * schedule")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
@@ -603,12 +603,21 @@ stringData:
 			Expect(evs).NotTo(BeEmpty(), "the importer left no HeldNotApplied Event on the declared Secret")
 		}, NodeTimeout(5*time.Minute))
 
-		It("can disable its MCP servers", Label("known-gap", "mcp-disable"), func(ctx SpecContext) {
+		It("can disable its MCP servers, and cannot enable one", Label("hold", "mcp-disable"), func(ctx SpecContext) {
 			needs("restore")
-			knownGap("#516", "a held copy can disable the MCP servers it restored", func() string {
-				return "there is no disable flag for MCP servers on a held install"
-			})
-		})
+			Expect(sourceMCPServer).NotTo(BeEmpty(), "the source declared no MCP server")
+			dst.token = src.token // the restored admin token reads the held install
+			openAPI(ctx, &dst)
+			path := "/outward-targets/mcp-server/" + sourceMCPServer + "/disabled"
+			code, body := admin(ctx, &dst, http.MethodPut, path, `{"disabled":true,"note":"restore drill"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			code, body = admin(ctx, &dst, http.MethodGet, "/mcp-servers/"+sourceMCPServer)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			Expect(string(body)).To(ContainSubstring(`"adminDisabled"`), "the MCP server does not show as admin-disabled")
+			code, body = admin(ctx, &dst, http.MethodPut, path, `{"disabled":false}`)
+			Expect(code).To(Equal(http.StatusConflict), "enable while held must be refused: "+string(body))
+			Expect(string(body)).To(ContainSubstring(restorehold.ErrHeld.Error()))
+		}, NodeTimeout(5*time.Minute))
 	})
 
 	step("release: the guide's release block", func(ctx SpecContext) {

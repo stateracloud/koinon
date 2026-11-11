@@ -4,11 +4,13 @@ package restorestatus_test
 
 import (
 	"bytes"
+	"context"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -47,5 +49,44 @@ var _ = Describe("Build", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.Binding.State).To(Equal("unknown"))
 		Expect(r.Quarantine.Tokens + r.Quarantine.Sessions).To(BeZero())
+	})
+
+	It("reports whether a release is pending, the importer's removals and the org limits (ADR 0110 decisions 1 and 7)", func(ctx SpecContext) {
+		for _, stmt := range []string{`DELETE FROM install_binding`, `DELETE FROM restore_accepted_removals`} {
+			_, err := pool.Exec(ctx, stmt)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		_, err := pool.Exec(ctx, `INSERT INTO install_binding (mark, held_since) VALUES (NULL, now())`)
+		Expect(err).NotTo(HaveOccurred())
+		gone := installbinding.Removal{Kind: "model-provider", Org: "default", Secret: "source-provider"}
+		plan := func(context.Context) ([]installbinding.Removal, error) { return []installbinding.Removal{gone}, nil }
+
+		r, err := restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: plan})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Release.Pending).To(BeTrue())
+		Expect(r.Importer.Planned).To(ConsistOf(gone))
+		Expect(r.Importer.NeedsAccept).To(BeTrue())
+		Expect(r.Blocking()).To(ConsistOf(gone))
+		Expect(r.Release.OrgLimits).To(HaveKey(org.String()))
+		Expect(r.Release.OrgLimits[org.String()].MaxConcurrentRuns).To(BeNumerically(">", 0))
+		Expect(r.Release.DueTriggers).NotTo(BeNil())
+
+		By("with the accept value nothing blocks")
+		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: plan, AcceptImporterDeletions: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Blocking()).To(BeEmpty())
+
+		By("after the release the removals wait, and the check still blocks while they are in the plan")
+		_, err = installbinding.New(pool, "own-mark-hash", false, nil).Settle(ctx, []installbinding.Removal{gone}, false)
+		Expect(err).NotTo(HaveOccurred())
+		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: plan})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Release.Pending).To(BeFalse())
+		Expect(r.Importer.Waiting).To(ConsistOf(gone))
+		Expect(r.Blocking()).To(ConsistOf(gone))
+		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: func(context.Context) ([]installbinding.Removal, error) { return nil, nil }})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Blocking()).To(BeEmpty(), "the Secret came back: nothing waits for the accept")
 	})
 })

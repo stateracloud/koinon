@@ -1422,6 +1422,9 @@ type Rates struct {
 	Output    string  `json:"output"`
 }
 
+// RestoreStatus The restore status report; its sections are described on the operation.
+type RestoreStatus map[string]interface{}
+
 // Role defines model for Role.
 type Role string
 
@@ -1878,6 +1881,9 @@ type ServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(w http.ResponseWriter, r *http.Request, providerId ProviderId)
+	// GetRestoreStatus What a restored copy would do outward and what its release starts (platform admin).
+	// (GET /restore/status)
+	GetRestoreStatus(w http.ResponseWriter, r *http.Request)
 	// GetRunContentRetention How long a finished run's stored content is kept (issue
 	// (GET /run-content-retention)
 	GetRunContentRetention(w http.ResponseWriter, r *http.Request)
@@ -3177,6 +3183,20 @@ func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetRestoreStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetRestoreStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRestoreStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRunContentRetention operation middleware
 func (siw *ServerInterfaceWrapper) GetRunContentRetention(w http.ResponseWriter, r *http.Request) {
 
@@ -3466,6 +3486,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/agents/{agentId}/thinking", wrapper.SetAgentThinking)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/agents/{agentId}/triggers/{triggerId}/run", wrapper.RunAgentTrigger)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/restore/status", wrapper.GetRestoreStatus)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit/export", wrapper.ExportAudit)
 
 	return m
@@ -5399,6 +5420,44 @@ func (response CheckProviderEchodefaultJSONResponse) VisitCheckProviderEchoRespo
 	return err
 }
 
+type GetRestoreStatusRequestObject struct {
+}
+
+type GetRestoreStatusResponseObject interface {
+	VisitGetRestoreStatusResponse(w http.ResponseWriter) error
+}
+
+type GetRestoreStatus200JSONResponse RestoreStatus
+
+func (response GetRestoreStatus200JSONResponse) VisitGetRestoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRestoreStatusdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetRestoreStatusdefaultJSONResponse) VisitGetRestoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetRunContentRetentionRequestObject struct {
 }
 
@@ -5779,6 +5838,9 @@ type StrictServerInterface interface {
 	// CheckProviderEcho Check whether the provider changes the text it is sent.
 	// (POST /providers/{providerId}/echo-check)
 	CheckProviderEcho(ctx context.Context, request CheckProviderEchoRequestObject) (CheckProviderEchoResponseObject, error)
+	// GetRestoreStatus What a restored copy would do outward and what its release starts (platform admin).
+	// (GET /restore/status)
+	GetRestoreStatus(ctx context.Context, request GetRestoreStatusRequestObject) (GetRestoreStatusResponseObject, error)
 	// GetRunContentRetention How long a finished run's stored content is kept (issue
 	// (GET /run-content-retention)
 	GetRunContentRetention(ctx context.Context, request GetRunContentRetentionRequestObject) (GetRunContentRetentionResponseObject, error)
@@ -7229,6 +7291,30 @@ func (sh *strictHandler) CheckProviderEcho(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckProviderEchoResponseObject); ok {
 		if err := validResponse.VisitCheckProviderEchoResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRestoreStatus operation middleware
+func (sh *strictHandler) GetRestoreStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetRestoreStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRestoreStatus(ctx, request.(GetRestoreStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRestoreStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRestoreStatusResponseObject); ok {
+		if err := validResponse.VisitGetRestoreStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
