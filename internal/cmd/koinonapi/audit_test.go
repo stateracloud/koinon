@@ -287,6 +287,20 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 	})
 })
 
+// probeRetry is an installRetry whose lines go to its own buffer, not the global slog default, so a retry
+// goroutine that outlives its spec cannot write into another spec's logs. A spec that starts the retry waits
+// for the "recorded after a retry" line (see retryEnded): the goroutine logs it as its last act.
+func probeRetry(anyError bool) (installRetry, *lockedBuffer) {
+	var logs lockedBuffer
+	return installRetry{Goroutine: "probe", What: "probe", AnyError: anyError, Log: slog.New(slog.NewTextHandler(&logs, nil))}, &logs
+}
+
+// retryEnded waits until the retry goroutine has logged that the write landed, which is the last thing it does.
+func retryEnded(logs *lockedBuffer) {
+	GinkgoHelper()
+	Eventually(logs.String).Should(ContainSubstring("recorded after a retry"))
+}
+
 // lockedBuffer is a bytes.Buffer that the retry goroutine and the spec can use together.
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -310,7 +324,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 	It("retries a refused write until it is recorded, and stops with the server", func(ctx SpecContext) {
 		calls := 0
-		installWriteLoop(ctx, "probe", "", time.Millisecond, func(context.Context) error {
+		installWriteLoop(ctx, slog.Default(), "probe", "", time.Millisecond, func(context.Context) error {
 			calls++
 			if calls < 3 {
 				return denied
@@ -321,7 +335,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		stopped, cancel := context.WithCancel(ctx)
 		cancel()
-		installWriteLoop(stopped, "probe", "", time.Hour, func(context.Context) error {
+		installWriteLoop(stopped, slog.Default(), "probe", "", time.Hour, func(context.Context) error {
 			Fail("no write after the server stopped")
 			return nil
 		})
@@ -333,34 +347,32 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		landed := make(chan struct{})
 		write := func(context.Context) error { close(landed); return nil }
 
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, nil, write)).To(Succeed(), "nothing to retry")
+		r, logs := probeRetry(false)
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, nil, write)).To(Succeed(), "nothing to retry")
 
 		other := errors.New("not a refusal")
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, other, write)).To(MatchError(other))
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, other, write)).To(MatchError(other))
 		Consistently(landed, "50ms").ShouldNot(BeClosed(), "another error does not start a retry")
 
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, write)).To(Succeed())
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, denied, write)).To(Succeed())
 		Eventually(landed).Should(BeClosed())
+		retryEnded(logs)
 	})
 
 	It("logs a refused write once for the same state: the first denial, then the landing", func(ctx SpecContext) {
-		var logs lockedBuffer
-		prev := slog.Default()
-		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-		defer slog.SetDefault(prev)
-
+		r, logs := probeRetry(false)
 		bg, cancel := context.WithCancel(ctx)
 		defer cancel()
 		calls := 0
 		// The sequence is denied (the run that has just happened), denied (the first retry), then success.
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, func(context.Context) error {
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, denied, func(context.Context) error {
 			calls++
 			if calls < 2 {
 				return denied
 			}
 			return nil
 		})).To(Succeed())
-		Eventually(logs.String).Should(ContainSubstring("recorded after a retry"))
+		retryEnded(logs)
 
 		lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
 		Expect(lines).To(HaveLen(2), "one line for the first denial, one for the landing: %v", lines)
@@ -373,9 +385,11 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		bg, cancel := context.WithCancel(ctx)
 		defer cancel()
 		landed := make(chan struct{})
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond,
+		r, logs := probeRetry(true)
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond,
 			errors.New("a hiccup"), func(context.Context) error { close(landed); return nil })).To(Succeed())
 		Eventually(landed).Should(BeClosed())
+		retryEnded(logs)
 	})
 
 	It("does not let a hung first attempt hold the start, and still retries in the background", func(ctx SpecContext) {
@@ -384,8 +398,9 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		calls := 0
 		landed := make(chan struct{})
 		returned := make(chan error, 1)
+		r, logs := probeRetry(true)
 		go func() {
-			returned <- startInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond, 50*time.Millisecond,
+			returned <- startInstallWrite(bg, cancel, r, time.Millisecond, 50*time.Millisecond,
 				func(c context.Context) error {
 					calls++
 					if calls == 1 {
@@ -398,6 +413,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		}()
 		Eventually(returned, "2s").Should(Receive(BeNil()), "control returns within about the first-attempt timeout")
 		Eventually(landed).Should(BeClosed(), "the background retry still runs")
+		retryEnded(logs)
 	})
 
 	It("waits in the grant-only migrate for the role, and gives up with the wait", func(ctx SpecContext) {
