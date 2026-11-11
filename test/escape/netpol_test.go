@@ -3,12 +3,8 @@
 package escape_test
 
 import (
-	"bytes"
-	"context"
+	"fmt"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,17 +24,19 @@ import (
 // supervisor proxy (a plain pod that opens sockets directly) blocked. The chart ships a
 // namespace-wide default-deny (sandboxNetworkPolicy, on by default); OpenShell's own workload
 // policy is additive with it. This case applies Koinon's shape when it is missing (as the
-// reconciler SA when the chart VAP is present), creates a compliant workload probe pod as the
-// Agent Sandbox controller (so the chart's VAP admits it), and asserts the API server is
-// unreachable from that pod.
+// reconciler SA when the chart VAP is present), creates a compliant one-shot workload probe pod as
+// the Agent Sandbox controller (so the chart's VAP admits it), and asserts the API server is
+// unreachable from that pod. The probe writes open/blocked to its termination message: the chart's
+// sandbox-connect policy denies pods/exec in sandbox namespaces, so kubectl exec cannot be used.
 //
 //	KOINON_ESCAPE_NAMESPACE     the workspace namespace (required)
+//	KOINON_ESCAPE_CHART_NAMESPACE  the Koinon release namespace (required; chart e2e only)
 //	KOINON_ESCAPE_KUBECONFIG    kubeconfig (default $KUBECONFIG)
 //	KOINON_ESCAPE_KUBE_CONTEXT  context (default current)
 //	KOINON_ESCAPE_NETPOL        NetworkPolicy name (default <chart ns>-koinon-sandbox-default-deny
 //	                            when KOINON_ESCAPE_CHART_NAMESPACE is set, else
 //	                            koinon-sandbox-default-deny)
-//	KOINON_OPENSHELL_IMAGE      probe image with /bin/sh (required)
+//	KOINON_OPENSHELL_IMAGE      probe image with /bin/sh and nc (required)
 //	KOINON_ESCAPE_RUNTIME_CLASS runtime class the pods policy admits (default runc)
 //	KOINON_ESCAPE_API           host:port the probe must not reach (default 10.96.0.1:443)
 var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), SpecPriority(-5), func() {
@@ -89,9 +87,22 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		Expect(np.Spec.Ingress).To(BeEmpty())
 		Expect(np.Spec.Egress).To(BeEmpty())
 
-		By("creating a compliant workload probe pod as the Agent Sandbox controller")
+		By("creating a one-shot workload probe (sandbox-connect denies pods/exec)")
 		podName := "koinon-escape-netpol"
+		_ = cs.CoreV1().Pods(ns).Delete(ctx, podName, metav1.DeleteOptions{})
 		automount := false
+		// Retry inside the pod: kube-network-policies can lag a few seconds after the NetworkPolicy lands.
+		script := fmt.Sprintf(`for i in $(seq 1 60); do
+  if nc -z -w 1 %s %d; then
+    sleep 1
+  else
+    printf blocked >/dev/termination-log
+    exit 0
+  fi
+done
+printf open >/dev/termination-log
+exit 1
+`, apiHost, apiPort)
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   podName,
@@ -104,7 +115,7 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 				Containers: []corev1.Container{{
 					Name:    "probe",
 					Image:   image,
-					Command: []string{"/bin/sleep", "300"},
+					Command: []string{"/bin/sh", "-c", script},
 				}},
 			},
 		}
@@ -120,29 +131,22 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		DeferCleanup(func(ctx SpecContext) {
 			_ = cs.CoreV1().Pods(ns).Delete(ctx, podName, metav1.DeleteOptions{})
 		})
-		Eventually(func() corev1.PodPhase {
+
+		By("the probe cannot reach the API server (result in the termination message)")
+		var last string
+		Eventually(func() string {
 			p, getErr := cs.CoreV1().Pods(ns).Get(ctx, podName, metav1.GetOptions{})
-			if getErr != nil {
+			if getErr != nil || len(p.Status.ContainerStatuses) == 0 {
 				return ""
 			}
-			return p.Status.Phase
-		}).WithContext(ctx).WithTimeout(2*time.Minute).WithPolling(2*time.Second).
-			Should(Equal(corev1.PodRunning), "the NetworkPolicy bypass probe pod becomes Running")
-
-		By("the probe cannot reach the API server (kube-network-policies can lag a few seconds)")
-		script := "nc -z -w 1 " + apiHost + " " + strconv.Itoa(apiPort) + " && echo open || echo blocked"
-		var last string
-		Eventually(func(ctx context.Context) string {
-			last = kubectlExec(ctx, ns, podName, script)
-			if strings.Contains(last, "blocked") {
-				return "blocked"
+			term := p.Status.ContainerStatuses[0].State.Terminated
+			if term == nil {
+				return ""
 			}
-			if strings.Contains(last, "open") {
-				return "open"
-			}
+			last = term.Message
 			return last
-		}).WithContext(ctx).WithTimeout(45*time.Second).WithPolling(time.Second).
-			Should(Equal("blocked"), "last probe output: %s", last)
+		}).WithContext(ctx).WithTimeout(2*time.Minute).WithPolling(2*time.Second).
+			Should(Equal("blocked"), "last probe termination message: %q", last)
 	}, NodeTimeout(5*time.Minute))
 })
 
@@ -151,24 +155,4 @@ func defaultNetPolName() string {
 		return chartNS + "-koinon-sandbox-default-deny"
 	}
 	return "koinon-sandbox-default-deny"
-}
-
-// kubectlExec runs a command in a pod with an explicit kubeconfig and context (AGENTS.md).
-func kubectlExec(ctx context.Context, ns, pod, script string) string {
-	GinkgoHelper()
-	args := []string{"-n", ns, "exec", pod, "--", "/bin/sh", "-c", script}
-	if ctxName := os.Getenv("KOINON_ESCAPE_KUBE_CONTEXT"); ctxName != "" {
-		args = append([]string{"--context", ctxName}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	if kc := os.Getenv("KOINON_ESCAPE_KUBECONFIG"); kc != "" {
-		cmd.Env = append(os.Environ(), "KUBECONFIG="+kc)
-	} else if kc := os.Getenv("KUBECONFIG"); kc != "" {
-		cmd.Env = append(os.Environ(), "KUBECONFIG="+kc)
-	}
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	_ = cmd.Run()
-	return strings.TrimSpace(out.String())
 }
