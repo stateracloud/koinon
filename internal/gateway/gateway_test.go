@@ -5,6 +5,7 @@ package gateway_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -182,5 +183,52 @@ var _ = Describe("AgentRef", func() {
 	It("still allows 63-character agent names", func() {
 		Expect(gateway.AgentRef{Org: "acme", Name: strings.Repeat("a", 63)}.Validate()).To(Succeed())
 		Expect(gateway.AgentRef{Org: "acme", Name: strings.Repeat("a", 64)}.Validate()).NotTo(Succeed())
+	})
+})
+
+// The tool servers trust gateway.AgentHeader, so what they read from it must be exactly one agent (#281).
+var _ = Describe("ParseAgentRef on the agent header", func() {
+	It("accepts what the gateway sets", func() {
+		got, err := gateway.ParseAgentRef(agent.String())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(agent))
+	})
+	DescribeTable("refuses a value that is not one agent",
+		func(v string) {
+			_, err := gateway.ParseAgentRef(v)
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("empty (a request that skipped the gateway)", ""),
+		Entry("a path segment", "acme/repo-helper/extra"),
+		Entry("a newline", "acme/repo-helper\nx-koinon-org: evil"),
+	)
+})
+
+// Go keeps repeated header lines apart and Get returns the first, so a client copy that a driver
+// appended to (instead of overwriting) must make the whole header unusable.
+var _ = Describe("AgentFromHeader", func() {
+	It("accepts the one value the gateway sets", func() {
+		got, err := gateway.AgentFromHeader(http.Header{gateway.AgentHeader: {agent.String()}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(agent))
+	})
+	It("refuses a missing header and a nil one", func() {
+		_, err := gateway.AgentFromHeader(http.Header{})
+		Expect(err).To(HaveOccurred())
+		_, err = gateway.AgentFromHeader(nil)
+		Expect(err).To(HaveOccurred())
+	})
+	It("refuses two separate values, whichever comes first", func() {
+		h := http.Header{}
+		h.Add(gateway.AgentHeader, "evil/victim")
+		h.Add(gateway.AgentHeader, agent.String())
+		_, err := gateway.AgentFromHeader(h)
+		Expect(err).To(HaveOccurred())
+		_, err = gateway.AgentFromHeader(http.Header{gateway.AgentHeader: {agent.String(), "evil/victim"}})
+		Expect(err).To(HaveOccurred())
+	})
+	It("refuses one value that is not an agent", func() {
+		_, err := gateway.AgentFromHeader(http.Header{gateway.AgentHeader: {"acme/a/b"}})
+		Expect(err).To(HaveOccurred())
 	})
 })
