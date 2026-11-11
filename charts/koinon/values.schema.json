@@ -560,6 +560,14 @@
         "enabled": {"type": "boolean"}
       }
     },
+    "sandboxNetworkPolicy": {
+      "description": "Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15). On by default; standard networking.k8s.io/v1 only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
     "restoreHold": {"type": "boolean"},
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "installMark": {

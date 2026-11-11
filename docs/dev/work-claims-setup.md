@@ -54,8 +54,7 @@ current milestone a due date, and put Ready issues in it.
   request without `Closes #N`, a Dependabot one and a `chore` one pass, so no exemption exists.
 - Review on `.github/**` only (ADR 0103 amendment, 2026-11-11): in the `pull_request` rule add **Require reviewers**
   (`required_reviewers`): one approval, from a team holding `@procoduck` and `@ovirandunu`, for the
-  pattern `.github/**` alone (the other sensitive paths of `.github/CODEOWNERS` get the advisory `review`
-  check, not an approval). The updater's
+  pattern `.github/**` alone (the other sensitive paths of `.github/CODEOWNERS` need no approval). The updater's
   CODEOWNERS line (`/hack/pr-updater.sh`) is gone with the updater. Leave the general "required
   approvals" at 0 and "Require review from Code Owners" off. GitHub does not count the pull request
   author, so the other human approves.

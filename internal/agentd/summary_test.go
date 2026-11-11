@@ -11,6 +11,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("The end-of-turn summary", func() {
@@ -20,7 +21,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		summaries, _ := e.harness.summarySnapshot()
 		Expect(summaries).To(HaveLen(1))
@@ -52,7 +53,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(got.AgentSummary.String)).To(BeNumerically("<=", agentd.SummaryMaxBytes))
@@ -69,7 +70,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(during).To(HaveOccurred(), "tools find no running run while the summary is written")
 		Expect(getRun(ctx, r).Summarizing).To(BeFalse())
 	})
@@ -80,7 +81,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		_, answer := e.harness.summarySnapshot()
 		Expect(answer).To(Equal("reject"))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
@@ -98,7 +99,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", func(c *agentd.Config) { c.SummaryTimeout = 300 * time.Millisecond })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(kinds(events(ctx, r))).To(ContainElement("run.summary_failed"))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -110,11 +111,11 @@ var _ = Describe("The end-of-turn summary", func() {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		e.harness.set(func(h *harness) { h.summaryReply = "Second note." })
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		summaries, _ := e.harness.summarySnapshot()
 		Expect(summaries).To(HaveLen(2))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
@@ -130,7 +131,7 @@ var _ = Describe("A fresh session with a handoff", func() {
 		t := e.task(ctx, "first message")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -143,7 +144,7 @@ var _ = Describe("A fresh session with a handoff", func() {
 		Expect(marked).To(HaveLen(1))
 		e.message(ctx, t, "second message")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(BeEmpty(), "the old session is not loaded")
@@ -175,10 +176,10 @@ var _ = Describe("A fresh session with a handoff", func() {
 		t := e.task(ctx, "one")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		e.message(ctx, t, "two")
 		r2 := e.enqueue(ctx, t)
-		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		_, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(HaveLen(1))
 	})

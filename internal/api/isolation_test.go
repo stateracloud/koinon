@@ -44,6 +44,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	orgsettingsv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
+	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
@@ -364,6 +366,12 @@ var isolationCases = map[string]isolationCase{
 			return c.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: f.token})
 		},
 	},
+	// Platform admins only (ADR 0110): no org role, owner included, can re-enable a token.
+	tokenv1alpha1connect.TokenServiceRebindTokenProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tokens.RebindToken(ctx, &tokenv1alpha1.RebindTokenRequest{OrgId: org, TokenId: f.token})
+		},
+	},
 
 	budgetv1alpha1connect.BudgetServiceGetOrgBudgetProcedure: {
 		ownOrgOK: true,
@@ -543,6 +551,33 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	// Every org kind is tried with org A's target ID; the first answer that is not NotFound is
+	// returned. The platform kind takes no org input and needs a platform admin, so a member of org
+	// B is refused before it reads anything; the spec in internal/services covers that.
+	outwardv1alpha1connect.OutwardServiceSetOutwardTargetDisabledProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			var last proto.Message
+			var lastErr error
+			for kind, id := range map[outwardv1alpha1.OutwardTargetKind]string{
+				outwardv1alpha1.OutwardTargetKind_OUTWARD_TARGET_KIND_MCP_SERVER:        f.mcpServer,
+				outwardv1alpha1.OutwardTargetKind_OUTWARD_TARGET_KIND_MODEL_PROVIDER:    f.provider,
+				outwardv1alpha1.OutwardTargetKind_OUTWARD_TARGET_KIND_CONNECTION:        f.connection,
+				outwardv1alpha1.OutwardTargetKind_OUTWARD_TARGET_KIND_TRACE_DESTINATION: f.traceDest,
+			} {
+				resp, err := c.outward.SetOutwardTargetDisabled(ctx, &outwardv1alpha1.SetOutwardTargetDisabledRequest{
+					OrgId: org, Kind: kind, TargetId: id, Disabled: true,
+				})
+				if err == nil {
+					return resp, nil
+				}
+				if connect.CodeOf(err) != connect.CodeNotFound {
+					return nil, err
+				}
+				last, lastErr = nil, err
+			}
+			return last, lastErr
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceListServersProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

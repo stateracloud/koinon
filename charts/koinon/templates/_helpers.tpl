@@ -739,6 +739,15 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- printf "%s-%s-sandbox-observer" .Release.Namespace (include "koinon.fullname" .) -}}
 {{- end }}
 
+{{/*
+The sandbox default-deny NetworkPolicy (spike 8.15, ADR 0045), named
+<namespace>-<fullname>-sandbox-default-deny like the sandbox policies. The reconciler
+creates one of this name in each workspace namespace.
+*/}}
+{{- define "koinon.sandboxDefaultDeny" -}}
+{{- printf "%s-%s-sandbox-default-deny" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
 {{- if eq (include "koinon.kms" .) "openbao" }}
 {{- $o := .Values.secrets.kek.kms.openbao }}
@@ -791,6 +800,14 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- end }}
 {{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.validationActions to include Deny: without it the policy only warns or audits and does not limit where the reconciler may bind the observer role. Set sandboxObserver.enabled=false to run without the observer" }}
+{{- end }}
+{{- end }}
+{{- if .Values.sandboxNetworkPolicy.enabled }}
+{{- if not .Values.sandboxPolicy.enabled }}
+{{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled: the NetworkPolicy writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxNetworkPolicy.enabled=false" }}
+{{- end }}
+{{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
+{{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create NetworkPolicies cluster-wide while the policy only warns or audits. Set sandboxNetworkPolicy.enabled=false to run without the writer" }}
 {{- end }}
 {{- end }}
 {{- if .Values.checkpoints.enabled }}

@@ -1640,6 +1640,7 @@ type ApiToken struct {
 	RevokedAt     pgtype.Timestamptz
 	LastUsedAt    pgtype.Timestamptz
 	CreatedAt     pgtype.Timestamptz
+	InstallMark   pgtype.Text
 }
 
 type ApprovalRequest struct {
@@ -1716,25 +1717,30 @@ type AuditEvent struct {
 }
 
 type Connection struct {
-	OrgID             pgtype.UUID
-	ID                pgtype.UUID
-	Connector         string
-	DisplayName       string
-	Config            []byte
-	SecretName        pgtype.Text
-	SecretFingerprint string
-	Status            ConnectionStatus
-	LastTestedAt      pgtype.Timestamptz
-	LastTest          []byte
-	CreatedBy         pgtype.UUID
-	CreatedAt         pgtype.Timestamptz
-	UpdatedAt         pgtype.Timestamptz
-	SecretEnvelope    []byte
-	Source            ConfigSource
-	ManagedBySecret   pgtype.Text
-	DeclaredVersion   pgtype.Text
-	RemovedAt         pgtype.Timestamptz
-	CredentialLostAt  pgtype.Timestamptz
+	OrgID                  pgtype.UUID
+	ID                     pgtype.UUID
+	Connector              string
+	DisplayName            string
+	Config                 []byte
+	SecretName             pgtype.Text
+	SecretFingerprint      string
+	Status                 ConnectionStatus
+	LastTestedAt           pgtype.Timestamptz
+	LastTest               []byte
+	CreatedBy              pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	SecretEnvelope         []byte
+	Source                 ConfigSource
+	ManagedBySecret        pgtype.Text
+	DeclaredVersion        pgtype.Text
+	RemovedAt              pgtype.Timestamptz
+	CredentialLostAt       pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
 }
 
 type DedupeRecord struct {
@@ -1863,6 +1869,19 @@ type InstallAuditEvent struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type InstallBinding struct {
+	Singleton          bool
+	Mark               pgtype.Text
+	PublicUrl          pgtype.Text
+	OidcRedirectUrl    pgtype.Text
+	CheckpointEndpoint pgtype.Text
+	CheckpointBucket   pgtype.Text
+	HeldSince          pgtype.Timestamptz
+	ReleasedAt         pgtype.Timestamptz
+	ReleasedBy         pgtype.Text
+	CreatedAt          pgtype.Timestamptz
+}
+
 type InstallIdentity struct {
 	Singleton bool
 	InstallID pgtype.UUID
@@ -1936,33 +1955,38 @@ type LocalCredential struct {
 }
 
 type McpServer struct {
-	OrgID                 pgtype.UUID
-	ID                    pgtype.UUID
-	Name                  string
-	Url                   string
-	Transport             McpTransport
-	CredentialHeader      pgtype.Text
-	CredentialPrefix      string
-	Credential            []byte
-	Source                ConfigSource
-	ManagedBySecret       pgtype.Text
-	DeclaredVersion       pgtype.Text
-	RemovedAt             pgtype.Timestamptz
-	DisabledReason        pgtype.Text
-	Health                McpHealth
-	HealthReason          pgtype.Text
-	HealthCheckedAt       pgtype.Timestamptz
-	HealthSince           pgtype.Timestamptz
-	ConsecutiveFailures   int32
-	ToolsSyncedAt         pgtype.Timestamptz
-	CreatedBy             pgtype.UUID
-	CreatedAt             pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
-	Kind                  McpServerKind
-	ExposesUntrustedInput bool
-	ExposesPrivateData    bool
-	CodeHostConnectionID  pgtype.UUID
-	CredentialLostAt      pgtype.Timestamptz
+	OrgID                  pgtype.UUID
+	ID                     pgtype.UUID
+	Name                   string
+	Url                    string
+	Transport              McpTransport
+	CredentialHeader       pgtype.Text
+	CredentialPrefix       string
+	Credential             []byte
+	Source                 ConfigSource
+	ManagedBySecret        pgtype.Text
+	DeclaredVersion        pgtype.Text
+	RemovedAt              pgtype.Timestamptz
+	DisabledReason         pgtype.Text
+	Health                 McpHealth
+	HealthReason           pgtype.Text
+	HealthCheckedAt        pgtype.Timestamptz
+	HealthSince            pgtype.Timestamptz
+	ConsecutiveFailures    int32
+	ToolsSyncedAt          pgtype.Timestamptz
+	CreatedBy              pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	Kind                   McpServerKind
+	ExposesUntrustedInput  bool
+	ExposesPrivateData     bool
+	CodeHostConnectionID   pgtype.UUID
+	CredentialLostAt       pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
 }
 
 type McpTool struct {
@@ -2159,26 +2183,31 @@ type PlatformPriceVersion struct {
 }
 
 type PlatformTraceDestination struct {
-	Singleton          bool
-	Backend            TraceBackend
-	Protocol           string
-	EndpointUrl        string
-	Params             []byte
-	Credentials        []byte
-	SecretFields       []string
-	ResourceAttributes []byte
-	Enabled            bool
-	ConfigVersion      int64
-	LastTestAt         pgtype.Timestamptz
-	LastTestOk         pgtype.Bool
-	LastTestMessage    pgtype.Text
-	LastSuccessAt      pgtype.Timestamptz
-	LastErrorAt        pgtype.Timestamptz
-	LastError          pgtype.Text
-	SpansDropped       int64
-	UpdatedBy          string
-	UpdatedAt          pgtype.Timestamptz
-	CredentialLostAt   pgtype.Timestamptz
+	Singleton              bool
+	Backend                TraceBackend
+	Protocol               string
+	EndpointUrl            string
+	Params                 []byte
+	Credentials            []byte
+	SecretFields           []string
+	ResourceAttributes     []byte
+	Enabled                bool
+	ConfigVersion          int64
+	LastTestAt             pgtype.Timestamptz
+	LastTestOk             pgtype.Bool
+	LastTestMessage        pgtype.Text
+	LastSuccessAt          pgtype.Timestamptz
+	LastErrorAt            pgtype.Timestamptz
+	LastError              pgtype.Text
+	SpansDropped           int64
+	UpdatedBy              string
+	UpdatedAt              pgtype.Timestamptz
+	CredentialLostAt       pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
 }
 
 type PlatformTraceSetting struct {
@@ -2255,26 +2284,31 @@ type PriceSourceObservation struct {
 }
 
 type Provider struct {
-	OrgID                pgtype.UUID
-	ID                   pgtype.UUID
-	Name                 string
-	Type                 string
-	Url                  string
-	ApiKey               []byte
-	Source               ConfigSource
-	ManagedBySecret      pgtype.Text
-	DeclaredVersion      pgtype.Text
-	RemovedAt            pgtype.Timestamptz
-	DisabledReason       pgtype.Text
-	CreatedBy            pgtype.UUID
-	CreatedAt            pgtype.Timestamptz
-	UpdatedAt            pgtype.Timestamptz
-	AnthropicWorkspaceID pgtype.Text
-	CredentialLostAt     pgtype.Timestamptz
-	CostApiKey           []byte
-	CostScope            pgtype.Text
-	CostApiKeyLostAt     pgtype.Timestamptz
-	CostReconcileSince   pgtype.Timestamptz
+	OrgID                  pgtype.UUID
+	ID                     pgtype.UUID
+	Name                   string
+	Type                   string
+	Url                    string
+	ApiKey                 []byte
+	Source                 ConfigSource
+	ManagedBySecret        pgtype.Text
+	DeclaredVersion        pgtype.Text
+	RemovedAt              pgtype.Timestamptz
+	DisabledReason         pgtype.Text
+	CreatedBy              pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	AnthropicWorkspaceID   pgtype.Text
+	CredentialLostAt       pgtype.Timestamptz
+	CostApiKey             []byte
+	CostScope              pgtype.Text
+	CostApiKeyLostAt       pgtype.Timestamptz
+	CostReconcileSince     pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
 }
 
 type ProviderCostReconciliation struct {
@@ -2464,6 +2498,7 @@ type Session struct {
 	IdleExpiresAt pgtype.Timestamptz
 	ExpiresAt     pgtype.Timestamptz
 	RevokedAt     pgtype.Timestamptz
+	InstallMark   pgtype.Text
 }
 
 type SpendEntry struct {
@@ -2576,29 +2611,34 @@ type Template struct {
 }
 
 type TraceDestination struct {
-	OrgID              pgtype.UUID
-	ID                 pgtype.UUID
-	Name               string
-	Backend            TraceBackend
-	Protocol           string
-	EndpointUrl        string
-	Params             []byte
-	Credentials        []byte
-	SecretFields       []string
-	ResourceAttributes []byte
-	Enabled            bool
-	ConfigVersion      int64
-	LastTestAt         pgtype.Timestamptz
-	LastTestOk         pgtype.Bool
-	LastTestMessage    pgtype.Text
-	LastSuccessAt      pgtype.Timestamptz
-	LastErrorAt        pgtype.Timestamptz
-	LastError          pgtype.Text
-	SpansDropped       int64
-	CreatedBy          pgtype.UUID
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
-	CredentialLostAt   pgtype.Timestamptz
+	OrgID                  pgtype.UUID
+	ID                     pgtype.UUID
+	Name                   string
+	Backend                TraceBackend
+	Protocol               string
+	EndpointUrl            string
+	Params                 []byte
+	Credentials            []byte
+	SecretFields           []string
+	ResourceAttributes     []byte
+	Enabled                bool
+	ConfigVersion          int64
+	LastTestAt             pgtype.Timestamptz
+	LastTestOk             pgtype.Bool
+	LastTestMessage        pgtype.Text
+	LastSuccessAt          pgtype.Timestamptz
+	LastErrorAt            pgtype.Timestamptz
+	LastError              pgtype.Text
+	SpansDropped           int64
+	CreatedBy              pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	CredentialLostAt       pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
 }
 
 type User struct {

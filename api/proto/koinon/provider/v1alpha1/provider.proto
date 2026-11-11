@@ -5,6 +5,7 @@ syntax = "proto3";
 package koinon.provider.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/outward/v1alpha1/outward.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1";
 
@@ -99,6 +100,9 @@ message Provider {
   // cost_key_lost_at is set when the cost API key was lost with the key that encrypted it; it must
   // be entered again. Unset otherwise.
   google.protobuf.Timestamp cost_key_lost_at = 18;
+  // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+  // not called, probed or offered to runs. Unset otherwise.
+  koinon.outward.v1alpha1.AdminDisabled admin_disabled = 19;
 }
 
 // EchoCheck is the result of an echo check (CheckProviderEcho).

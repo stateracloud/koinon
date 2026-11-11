@@ -105,6 +105,7 @@ expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
+expect "generate" hack/generate.sh         # make generate delegates here (#349)
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
 
@@ -197,9 +198,20 @@ need_min() {
 
 # generate: the Makefile's recipe names the buf templates, the sqlc config and the oapi-codegen
 # config and spec; the templates and configs name the inputs, the outputs and the local plugin.
+# When make generate delegates to hack/generate.sh (#349), parse that script's body too.
 # Portable sed only (-E; BSD sed has no \|).
 gen_inputs=(buf.yaml buf.gen.yaml sqlc.yaml)
 recipe=$(sed -n '/^generate:/,/^[^[:space:]]/p' Makefile | grep -E '^[[:space:]]' || true)
+# Follow a single-line recipe that is only `GO=… hack/generate.sh` (or bare hack/generate.sh).
+gen_script=""
+if [[ $(grep -c . <<<"$recipe" || true) -lt 4 ]]; then
+	for tok in $recipe; do
+		case $tok in
+		hack/generate.sh | */hack/generate.sh) gen_script=$tok ;;
+		esac
+	done
+	[[ -n $gen_script && -f $gen_script ]] && { recipe=$(cat "$gen_script"); gen_inputs+=("$gen_script"); }
+fi
 need_min "lines in the Makefile generate recipe" 4 "$(grep -c . <<<"$recipe" || true)"
 for tok in $recipe; do
 	[[ -f $tok ]] && gen_inputs+=("$tok")
@@ -239,8 +251,9 @@ while IFS= read -r cfg; do # oapi-codegen -config <file> <spec>: the config, its
 	out=$(sed -n -E 's/^output:[[:space:]]*//p' "$cfg")
 	[[ -n $out ]] && { gen_inputs+=("$out"); oapi=$((oapi + 1)); }
 done < <(grep -oE -- '-config [^ ]+' <<<"$recipe" | awk '{print $2}')
-# The spec is the recipe's last argument of the oapi-codegen line.
-spec=$(grep 'oapi-codegen' <<<"$recipe" | awk '{print $NF}')
+# The spec is the last argument of the oapi-codegen invocation (not a comment that
+# merely mentions the tool). Strip a trailing line-continuation backslash (#349).
+spec=$(grep -E '^[^#]*[[:space:]]oapi-codegen[[:space:]]' <<<"$recipe" | sed -E 's/[[:space:]]*\\$//' | awk '{print $NF}' | tr -d '"')
 [[ -f $spec ]] && { gen_inputs+=("$spec"); oapi=$((oapi + 1)); }
 need_min "oapi-codegen config, output and spec" 3 $oapi
 need_min "generator inputs in all" 15 ${#gen_inputs[@]}

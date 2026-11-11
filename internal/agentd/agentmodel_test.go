@@ -14,6 +14,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // The model of a run: the agent's own setting, then the version's model, then the org default
@@ -60,7 +61,7 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "fake/agent-pick")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/fake/agent-pick"}))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(ConsistOf(ContainElements("--model", "fake/agent-pick")))
@@ -73,7 +74,7 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "claude-agent-pick")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon-anthropic/claude-agent-pick"}))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(ConsistOf(ContainElements("--model", "claude-agent-pick", "--model-format", "anthropic")))
@@ -86,7 +87,7 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "fake/agent-pick")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/fake/agent-pick"}))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(ConsistOf(ContainElements("--model", "fake/agent-pick", "--model-format", "openai")))
@@ -99,7 +100,7 @@ var _ = Describe("The agent's model setting", func() {
 		serveModel(ctx, e, "fake/agent-pick", true)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 	})
 
@@ -109,7 +110,7 @@ var _ = Describe("The agent's model setting", func() {
 		serveModel(ctx, e, "fake/a-first", true)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(HaveLen(1))
 		Expect(e.harness.selectedModels()[0]).To(HavePrefix("koinon/fake/"))
 	})
@@ -120,7 +121,7 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "fake/gone")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(
 			`the agent's model "fake/gone" is not served in this org; pick another on the agent page`))
 		Expect(e.gw.Execs()).To(BeEmpty(), "the harness never starts")
@@ -132,7 +133,7 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "fake/free-ride")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the agent's model "fake/free-ride" has no price, so the gateway does not serve it; ` +
 			"add a price for it on the Prices page or pick another model on the agent page"))
 		Expect(e.gw.Execs()).To(BeEmpty())
@@ -144,10 +145,10 @@ var _ = Describe("The agent's model setting", func() {
 		setModel(ctx, e, "fake/gone")
 		first := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, first)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, first)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		setModel(ctx, e, "")
 		second := e.enqueue(ctx, e.task(ctx, "again"))
-		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, second)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 	})
 
@@ -162,7 +163,7 @@ var _ = Describe("The agent's model setting", func() {
 		}
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the agent's model "fake/agent-pick" is not served in this org; pick another on the agent page`))
 	})
 
@@ -175,7 +176,7 @@ var _ = Describe("The agent's model setting", func() {
 		}
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("session/prompt"))
 	})
 
@@ -210,7 +211,7 @@ var _ = Describe("The agent's model setting", func() {
 			GinkgoHelper()
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			_, _, _, args := e.harness.snapshot()
 			Expect(args).To(HaveLen(1))
 			i := slices.Index(args[0], "--thinking")
@@ -249,7 +250,7 @@ var _ = Describe("The agent's model setting", func() {
 			Expect(thinkingArg(ctx, e)).To(Equal("disabled"))
 			setThinking(ctx, e, "on")
 			second := e.enqueue(ctx, e.task(ctx, "again"))
-			Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(runState(ctx, second)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			_, _, _, args := e.harness.snapshot()
 			Expect(args).To(HaveLen(2))
 			Expect(args[1][slices.Index(args[1], "--thinking")+1]).To(Equal("adaptive-summarized"))

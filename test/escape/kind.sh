@@ -32,12 +32,14 @@
 # KOINON_ESCAPE_LABEL is the Ginkgo label filter (default openshell).
 #
 # Against the chart install (the kind e2e, test/e2e/escape-openshell.sh, #109): KOINON_ESCAPE_CHART_NAMESPACE
-# names the Koinon release namespace. The script then points the suite's live admission case at the
-# workspace namespace and the chart's policy (KOINON_ESCAPE_NAMESPACE, _POLICY, _SUPERVISOR_IMAGE,
-# KOINON_ESCAPE_POLICY_REQUIRED=1), so the real ValidatingAdmissionPolicy is enforced on the real supervisor
-# and workload pods and the case fails, not skips, when it is not. KOINON_ESCAPE_GITEA_STANDIN=0 leaves the
-# Gitea stand-in out: it re-points the gateway at a derived supervisor image, which the chart's policy
-# (pinned supervisor image) refuses; the Gitea cases run in `make test-escape-kind`.
+# names the Koinon release namespace. The script then points the suite's live admission case and the
+# NetworkPolicy bypass case at the workspace namespace and the chart's policy (KOINON_ESCAPE_NAMESPACE,
+# _POLICY, _NETPOL, _SUPERVISOR_IMAGE, KOINON_ESCAPE_POLICY_REQUIRED=1), so the real
+# ValidatingAdmissionPolicy is enforced on the real supervisor and workload pods and the case fails,
+# not skips, when it is not. Bare `make test-escape-kind` leaves those unset (kindnet does not
+# enforce NetworkPolicy). KOINON_ESCAPE_GITEA_STANDIN=0 leaves the Gitea stand-in out: it re-points
+# the gateway at a derived supervisor image, which the chart's policy (pinned supervisor image)
+# refuses; the Gitea cases run in `make test-escape-kind`.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -58,11 +60,16 @@ root="$(cd "$here/../.." && pwd)"
 # Ambient settings must not point the suite's cluster-side cases at another cluster.
 unset KOINON_ESCAPE_NAMESPACE KOINON_ESCAPE_KUBECONFIG
 export KOINON_ESCAPE_KUBE_CONTEXT="$CTX"
+# Live admission, NetworkPolicy bypass and realPods assume the chart install (and, for NetworkPolicy,
+# kube-network-policies from test/e2e/kind/up.sh). Bare `make test-escape-kind` must not export
+# KOINON_ESCAPE_NAMESPACE: kindnet does not enforce NetworkPolicy, and the live specs would run
+# against whatever supervisor image OpenShell actually uses.
 if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
   # OpenShell names a managed workspace's namespace openshell-<gateway id>-<workspace> (the gateway ID is
   # the chart's openshell.gatewayId, default openshell; internal/execution.WorkspaceNamespace).
   export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
+  export KOINON_ESCAPE_NETPOL="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-default-deny"
   export KOINON_ESCAPE_POLICY_REQUIRED=1
   # The class the install's policy admits for workload pods: openshell.runtimeClassName of
   # test/e2e/kind/koinon-values.yaml (runc on kind), which sandboxPolicy.runtimeClasses lists.
@@ -77,6 +84,21 @@ kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || { echo "no kind cluster $
 K=(kubectl --context "$CTX")
 "${K[@]}" -n openshell get secret openshell-client-tls >/dev/null ||
   { echo "the OpenShell gateway is not installed in $CTX (make dev-kind-up installs it)" >&2; exit 1; }
+
+# The cluster's own Service IPs for the deny checks (they differ per cluster; the suite has no default).
+# Values the caller exported win.
+if [[ -z ${KOINON_ESCAPE_CLUSTER_DNS:-} ]]; then
+  KOINON_ESCAPE_CLUSTER_DNS=$("${K[@]}" -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}') ||
+    { echo "cannot read the kube-dns Service ClusterIP from $CTX" >&2; exit 1; }
+fi
+api_ip=$("${K[@]}" -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}') ||
+  { echo "cannot read the kubernetes Service ClusterIP from $CTX" >&2; exit 1; }
+[[ -n $KOINON_ESCAPE_CLUSTER_DNS && -n $api_ip ]] || { echo "empty kube-dns or kubernetes ClusterIP from $CTX" >&2; exit 1; }
+# This script always provides the vars, so the deny specs that read them must fail, not skip, if they are lost.
+export KOINON_REQUIRE="${KOINON_REQUIRE:+$KOINON_REQUIRE,}escape-cluster-ips"
+export KOINON_ESCAPE_CLUSTER_DNS
+export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
+export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=

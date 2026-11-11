@@ -144,7 +144,8 @@ LIMIT @page_size;
 
 -- name: ListInstallAnchorHeadsInRange :many
 -- The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
--- order then org order: the install export's header (ADR 0100 decision 5).
+-- order then org order: the install export writes them as stream lines next to each audit.anchor
+-- event (ADR 0100 decision 5; format koinon.audit.export.v2).
 SELECT h.anchor_event_id::text AS anchor_text, h.org_id::text AS org_text, h.chain_seq, h.hash
 FROM install_audit_anchor_heads h
 JOIN install_audit_events e ON e.id = h.anchor_event_id

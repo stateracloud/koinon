@@ -10,6 +10,8 @@ import { OrgDefaultModel } from '@/components/org-default-model'
 import { ProviderEchoCheck } from '@/components/provider-echo-check'
 import { ProviderForm } from '@/components/provider-form'
 import { RequireAdmin } from '@/components/require-admin'
+import { OutwardSwitch } from '@/components/outward-switch'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -147,7 +149,9 @@ function ProviderCard({
 }) {
   const now = useNow()
   const editable = providerEditable(p)
-  const disabled = p.disabledReason !== '' || p.removed
+  const systemDisabled = p.disabledReason !== '' || p.removed
+  // An admin's outward switch (ADR 0110) also takes the provider out of use: no Active badge and no echo check (the server answers 409).
+  const disabled = systemDisabled || p.adminDisabled !== undefined
   return (
     <section aria-labelledby={`provider-${p.id}`} className="bg-card grid gap-3 rounded-md border p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -186,7 +190,7 @@ function ProviderCard({
           </>
         )}
       </dl>
-      {disabled && (
+      {systemDisabled && (
         <Alert variant="destructive" role="note">
           <AlertDescription>
             {p.removed ? 'Removed' : 'Disabled'}: {p.disabledReason || 'its Kubernetes Secret was deleted'}.
@@ -207,6 +211,7 @@ function ProviderCard({
           This provider and its models are declared by the Secret {p.managedBySecret}. Change or delete that Secret to change them here.
         </p>
       )}
+      <OutwardSwitch kind={OutwardTargetKind.MODEL_PROVIDER} targetId={p.id} subject={`provider ${p.name}`} disabled={p.adminDisabled} />
       {editing?.kind === 'provider' && editing.id === p.id ? (
         <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={closeOnly(setEditing, { kind: 'provider', id: p.id })} onSaved={() => onSaved()} />
       ) : (

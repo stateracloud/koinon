@@ -9,6 +9,7 @@
 package mcpserverv1alpha1
 
 import (
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -173,8 +174,11 @@ type Server struct {
 	// forget`, ADR 0085 decision 13): the server is not served until the credential is entered again; has_credential
 	// is false and credential_header and credential_prefix are kept, so only the value is asked for. Unset otherwise.
 	CredentialLostAt *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=credential_lost_at,json=credentialLostAt,proto3" json:"credential_lost_at,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+	// not called, probed or offered to runs. Unset otherwise.
+	AdminDisabled *v1alpha1.AdminDisabled `protobuf:"bytes,24,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Server) Reset() {
@@ -364,6 +368,13 @@ func (x *Server) GetCodeHostConnectionId() string {
 func (x *Server) GetCredentialLostAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CredentialLostAt
+	}
+	return nil
+}
+
+func (x *Server) GetAdminDisabled() *v1alpha1.AdminDisabled {
+	if x != nil {
+		return x.AdminDisabled
 	}
 	return nil
 }
@@ -2098,7 +2109,7 @@ var File_koinon_mcpserver_v1alpha1_mcpserver_proto protoreflect.FileDescriptor
 
 const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
-	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\a\n" +
+	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\xaf\b\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2126,7 +2137,8 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
 	"data_class\x18\x15 \x03(\tR\tdataClass\x125\n" +
 	"\x17code_host_connection_id\x18\x16 \x01(\tR\x14codeHostConnectionId\x12H\n" +
-	"\x12credential_lost_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\"w\n" +
+	"\x12credential_lost_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12M\n" +
+	"\x0eadmin_disabled\x18\x18 \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\"w\n" +
 	"\vServerClass\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
@@ -2325,6 +2337,7 @@ var file_koinon_mcpserver_v1alpha1_mcpserver_proto_goTypes = []any{
 	(*SetToolTwoApproversRequest)(nil),    // 29: koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
 	(*SetToolTwoApproversResponse)(nil),   // 30: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
 	(*timestamppb.Timestamp)(nil),         // 31: google.protobuf.Timestamp
+	(*v1alpha1.AdminDisabled)(nil),        // 32: koinon.outward.v1alpha1.AdminDisabled
 }
 var file_koinon_mcpserver_v1alpha1_mcpserver_proto_depIdxs = []int32{
 	1,  // 0: koinon.mcpserver.v1alpha1.Server.health:type_name -> koinon.mcpserver.v1alpha1.Health
@@ -2334,56 +2347,57 @@ var file_koinon_mcpserver_v1alpha1_mcpserver_proto_depIdxs = []int32{
 	31, // 4: koinon.mcpserver.v1alpha1.Server.created_at:type_name -> google.protobuf.Timestamp
 	31, // 5: koinon.mcpserver.v1alpha1.Server.updated_at:type_name -> google.protobuf.Timestamp
 	31, // 6: koinon.mcpserver.v1alpha1.Server.credential_lost_at:type_name -> google.protobuf.Timestamp
-	0,  // 7: koinon.mcpserver.v1alpha1.Tool.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
-	31, // 8: koinon.mcpserver.v1alpha1.Tool.first_seen_at:type_name -> google.protobuf.Timestamp
-	31, // 9: koinon.mcpserver.v1alpha1.Tool.last_seen_at:type_name -> google.protobuf.Timestamp
-	31, // 10: koinon.mcpserver.v1alpha1.Tool.tier_set_at:type_name -> google.protobuf.Timestamp
-	5,  // 11: koinon.mcpserver.v1alpha1.Tool.sink:type_name -> koinon.mcpserver.v1alpha1.ToolSink
-	2,  // 12: koinon.mcpserver.v1alpha1.ListServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Server
-	3,  // 13: koinon.mcpserver.v1alpha1.CreateServerRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
-	2,  // 14: koinon.mcpserver.v1alpha1.CreateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
-	2,  // 15: koinon.mcpserver.v1alpha1.UpdateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
-	3,  // 16: koinon.mcpserver.v1alpha1.SetServerClassRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
-	2,  // 17: koinon.mcpserver.v1alpha1.SetServerClassResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
-	4,  // 18: koinon.mcpserver.v1alpha1.ListToolsResponse.tools:type_name -> koinon.mcpserver.v1alpha1.Tool
-	0,  // 19: koinon.mcpserver.v1alpha1.SetToolTierRequest.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
-	5,  // 20: koinon.mcpserver.v1alpha1.SetToolSinkRequest.sink:type_name -> koinon.mcpserver.v1alpha1.ToolSink
-	4,  // 21: koinon.mcpserver.v1alpha1.SetToolSinkResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	4,  // 22: koinon.mcpserver.v1alpha1.SetToolTierResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	4,  // 23: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	6,  // 24: koinon.mcpserver.v1alpha1.GetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	6,  // 25: koinon.mcpserver.v1alpha1.SetAgentServersRequest.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	6,  // 26: koinon.mcpserver.v1alpha1.SetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
-	4,  // 27: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
-	7,  // 28: koinon.mcpserver.v1alpha1.McpServerService.ListServers:input_type -> koinon.mcpserver.v1alpha1.ListServersRequest
-	9,  // 29: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:input_type -> koinon.mcpserver.v1alpha1.CreateServerRequest
-	11, // 30: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:input_type -> koinon.mcpserver.v1alpha1.UpdateServerRequest
-	13, // 31: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:input_type -> koinon.mcpserver.v1alpha1.SetServerClassRequest
-	15, // 32: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:input_type -> koinon.mcpserver.v1alpha1.DeleteServerRequest
-	17, // 33: koinon.mcpserver.v1alpha1.McpServerService.ListTools:input_type -> koinon.mcpserver.v1alpha1.ListToolsRequest
-	19, // 34: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:input_type -> koinon.mcpserver.v1alpha1.SetToolTierRequest
-	29, // 35: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
-	20, // 36: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:input_type -> koinon.mcpserver.v1alpha1.SetToolSinkRequest
-	23, // 37: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:input_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
-	25, // 38: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:input_type -> koinon.mcpserver.v1alpha1.GetAgentServersRequest
-	27, // 39: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:input_type -> koinon.mcpserver.v1alpha1.SetAgentServersRequest
-	8,  // 40: koinon.mcpserver.v1alpha1.McpServerService.ListServers:output_type -> koinon.mcpserver.v1alpha1.ListServersResponse
-	10, // 41: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:output_type -> koinon.mcpserver.v1alpha1.CreateServerResponse
-	12, // 42: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:output_type -> koinon.mcpserver.v1alpha1.UpdateServerResponse
-	14, // 43: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:output_type -> koinon.mcpserver.v1alpha1.SetServerClassResponse
-	16, // 44: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:output_type -> koinon.mcpserver.v1alpha1.DeleteServerResponse
-	18, // 45: koinon.mcpserver.v1alpha1.McpServerService.ListTools:output_type -> koinon.mcpserver.v1alpha1.ListToolsResponse
-	22, // 46: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:output_type -> koinon.mcpserver.v1alpha1.SetToolTierResponse
-	30, // 47: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
-	21, // 48: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:output_type -> koinon.mcpserver.v1alpha1.SetToolSinkResponse
-	24, // 49: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:output_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
-	26, // 50: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:output_type -> koinon.mcpserver.v1alpha1.GetAgentServersResponse
-	28, // 51: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:output_type -> koinon.mcpserver.v1alpha1.SetAgentServersResponse
-	40, // [40:52] is the sub-list for method output_type
-	28, // [28:40] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	32, // 7: koinon.mcpserver.v1alpha1.Server.admin_disabled:type_name -> koinon.outward.v1alpha1.AdminDisabled
+	0,  // 8: koinon.mcpserver.v1alpha1.Tool.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
+	31, // 9: koinon.mcpserver.v1alpha1.Tool.first_seen_at:type_name -> google.protobuf.Timestamp
+	31, // 10: koinon.mcpserver.v1alpha1.Tool.last_seen_at:type_name -> google.protobuf.Timestamp
+	31, // 11: koinon.mcpserver.v1alpha1.Tool.tier_set_at:type_name -> google.protobuf.Timestamp
+	5,  // 12: koinon.mcpserver.v1alpha1.Tool.sink:type_name -> koinon.mcpserver.v1alpha1.ToolSink
+	2,  // 13: koinon.mcpserver.v1alpha1.ListServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Server
+	3,  // 14: koinon.mcpserver.v1alpha1.CreateServerRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
+	2,  // 15: koinon.mcpserver.v1alpha1.CreateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	2,  // 16: koinon.mcpserver.v1alpha1.UpdateServerResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	3,  // 17: koinon.mcpserver.v1alpha1.SetServerClassRequest.class:type_name -> koinon.mcpserver.v1alpha1.ServerClass
+	2,  // 18: koinon.mcpserver.v1alpha1.SetServerClassResponse.server:type_name -> koinon.mcpserver.v1alpha1.Server
+	4,  // 19: koinon.mcpserver.v1alpha1.ListToolsResponse.tools:type_name -> koinon.mcpserver.v1alpha1.Tool
+	0,  // 20: koinon.mcpserver.v1alpha1.SetToolTierRequest.tier:type_name -> koinon.mcpserver.v1alpha1.Tier
+	5,  // 21: koinon.mcpserver.v1alpha1.SetToolSinkRequest.sink:type_name -> koinon.mcpserver.v1alpha1.ToolSink
+	4,  // 22: koinon.mcpserver.v1alpha1.SetToolSinkResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	4,  // 23: koinon.mcpserver.v1alpha1.SetToolTierResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	4,  // 24: koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	6,  // 25: koinon.mcpserver.v1alpha1.GetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	6,  // 26: koinon.mcpserver.v1alpha1.SetAgentServersRequest.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	6,  // 27: koinon.mcpserver.v1alpha1.SetAgentServersResponse.servers:type_name -> koinon.mcpserver.v1alpha1.Allowance
+	4,  // 28: koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse.tool:type_name -> koinon.mcpserver.v1alpha1.Tool
+	7,  // 29: koinon.mcpserver.v1alpha1.McpServerService.ListServers:input_type -> koinon.mcpserver.v1alpha1.ListServersRequest
+	9,  // 30: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:input_type -> koinon.mcpserver.v1alpha1.CreateServerRequest
+	11, // 31: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:input_type -> koinon.mcpserver.v1alpha1.UpdateServerRequest
+	13, // 32: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:input_type -> koinon.mcpserver.v1alpha1.SetServerClassRequest
+	15, // 33: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:input_type -> koinon.mcpserver.v1alpha1.DeleteServerRequest
+	17, // 34: koinon.mcpserver.v1alpha1.McpServerService.ListTools:input_type -> koinon.mcpserver.v1alpha1.ListToolsRequest
+	19, // 35: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:input_type -> koinon.mcpserver.v1alpha1.SetToolTierRequest
+	29, // 36: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:input_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversRequest
+	20, // 37: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:input_type -> koinon.mcpserver.v1alpha1.SetToolSinkRequest
+	23, // 38: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:input_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewRequest
+	25, // 39: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:input_type -> koinon.mcpserver.v1alpha1.GetAgentServersRequest
+	27, // 40: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:input_type -> koinon.mcpserver.v1alpha1.SetAgentServersRequest
+	8,  // 41: koinon.mcpserver.v1alpha1.McpServerService.ListServers:output_type -> koinon.mcpserver.v1alpha1.ListServersResponse
+	10, // 42: koinon.mcpserver.v1alpha1.McpServerService.CreateServer:output_type -> koinon.mcpserver.v1alpha1.CreateServerResponse
+	12, // 43: koinon.mcpserver.v1alpha1.McpServerService.UpdateServer:output_type -> koinon.mcpserver.v1alpha1.UpdateServerResponse
+	14, // 44: koinon.mcpserver.v1alpha1.McpServerService.SetServerClass:output_type -> koinon.mcpserver.v1alpha1.SetServerClassResponse
+	16, // 45: koinon.mcpserver.v1alpha1.McpServerService.DeleteServer:output_type -> koinon.mcpserver.v1alpha1.DeleteServerResponse
+	18, // 46: koinon.mcpserver.v1alpha1.McpServerService.ListTools:output_type -> koinon.mcpserver.v1alpha1.ListToolsResponse
+	22, // 47: koinon.mcpserver.v1alpha1.McpServerService.SetToolTier:output_type -> koinon.mcpserver.v1alpha1.SetToolTierResponse
+	30, // 48: koinon.mcpserver.v1alpha1.McpServerService.SetToolTwoApprovers:output_type -> koinon.mcpserver.v1alpha1.SetToolTwoApproversResponse
+	21, // 49: koinon.mcpserver.v1alpha1.McpServerService.SetToolSink:output_type -> koinon.mcpserver.v1alpha1.SetToolSinkResponse
+	24, // 50: koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview:output_type -> koinon.mcpserver.v1alpha1.AcknowledgeToolReviewResponse
+	26, // 51: koinon.mcpserver.v1alpha1.McpServerService.GetAgentServers:output_type -> koinon.mcpserver.v1alpha1.GetAgentServersResponse
+	28, // 52: koinon.mcpserver.v1alpha1.McpServerService.SetAgentServers:output_type -> koinon.mcpserver.v1alpha1.SetAgentServersResponse
+	41, // [41:53] is the sub-list for method output_type
+	29, // [29:41] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_koinon_mcpserver_v1alpha1_mcpserver_proto_init() }

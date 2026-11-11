@@ -26,6 +26,11 @@ service TokenService {
 
   // RevokeToken revokes a token. Revoking twice is fine.
   rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+
+  // RebindToken re-enables a token that a restored copy refuses because another install issued it
+  // (ADR 0110). Platform admins only: an org owner cannot, the same as for the adopt-restore
+  // recovery action. A revoked or expired token is not re-enabled. Audited as token.rebind.
+  rpc RebindToken(RebindTokenRequest) returns (RebindTokenResponse);
 }
 
 // Token describes an admin API token. It never holds the secret.
@@ -79,5 +84,14 @@ message RevokeTokenRequest {
 }
 
 message RevokeTokenResponse {
+  Token token = 1;
+}
+
+message RebindTokenRequest {
+  string org_id = 1;
+  string token_id = 2;
+}
+
+message RebindTokenResponse {
   Token token = 1;
 }

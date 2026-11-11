@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // The cap on the total wait for a sandbox (old issue 160; ADR 0066 amendment 2026-10-28).
@@ -55,19 +56,19 @@ var _ = Describe("the sandbox wait cap", func() {
 		e.pool("agentd-a", func(c *agentd.Config) {
 			c.SandboxTimeout, c.SandboxWaitCap, c.Now, c.Metrics = 5*time.Minute, 20*time.Minute, clock.Now, m
 		})
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		clock.Advance(5*time.Minute + time.Second)
-		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 
-		Eventually(func() bool { g := getRun(ctx, r); return g.Epoch >= 2 && g.State == store.RunStateStarting }).WithTimeout(10 * time.Second).Should(BeTrue())
+		Eventually(func() bool { g := getRun(ctx, r); return g.Epoch >= 2 && g.State == store.RunStateStarting }).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		clock.Advance(16 * time.Minute)
 		// The cap ran out while the run was queued: its claim gets one nudge and one poll first, which
 		// the clock passes in small steps.
 		Eventually(func() store.RunState {
 			clock.Advance(10 * time.Second)
 			return getRun(ctx, r).State
-		}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(Equal(store.RunStateFailed))
+		}).WithTimeout(racescale.D(10 * time.Second)).WithPolling(100 * time.Millisecond).Should(Equal(store.RunStateFailed))
 
 		failed := getRun(ctx, r)
 		Expect(failed.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
@@ -104,10 +105,10 @@ var _ = Describe("the sandbox wait cap", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout, c.Now = 30*time.Minute, clock.Now })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		clock.Advance(10*time.Minute + time.Second)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(kinds(events(ctx, r))).NotTo(ContainElement("run.requeued"))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("never became ready in 10m"))
@@ -121,10 +122,10 @@ var _ = Describe("the sandbox wait cap", func() {
 		stop := e.pool("agentd-a", func(c *agentd.Config) {
 			c.SandboxTimeout, c.SandboxWaitCap, c.Now = 30*time.Minute, 10*time.Minute, clock.Now
 		})
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		clock.Advance(11 * time.Minute)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		stop()
 
 		// Another run of the agent was waiting too. services.ResumeAgent clears the waits next to the
@@ -159,15 +160,15 @@ var _ = Describe("the sandbox wait cap", func() {
 		e.pool("agentd-a", func(c *agentd.Config) {
 			c.Workers, c.SandboxTimeout, c.SandboxWaitCap, c.Now = 1, 5*time.Minute, 20*time.Minute, clock.Now
 		})
-		Eventually(runState(ctx, sibling)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, sibling)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
-		Eventually(runState(ctx, waiting)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, waiting)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateStarting))
 		// The clock goes forward in steps until the queue wait passes: five minutes of it, not the
 		// two hours the stale start would have counted.
 		Eventually(func() []string {
 			clock.Advance(time.Minute)
 			return kinds(events(ctx, waiting))
-		}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(ContainElement("run.requeued"))
+		}).WithTimeout(racescale.D(10 * time.Second)).WithPolling(100 * time.Millisecond).Should(ContainElement("run.requeued"))
 		Expect(getRun(ctx, waiting).State).NotTo(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, waiting).FailureClass.Valid).To(BeFalse())
 		Expect(waitStart(ctx, waiting).Time).To(BeTemporally("~", clock.Now(), 30*time.Minute), "a fresh wait, not the one from two hours ago")
@@ -184,7 +185,7 @@ var _ = Describe("the sandbox wait cap", func() {
 			WHERE org_id = $1 AND id = $2`, e.org, r.ID)
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(waitStart(ctx, r).Valid).To(BeFalse())
 	})
 
@@ -198,12 +199,12 @@ var _ = Describe("the sandbox wait cap", func() {
 		e.pool("agentd-a", func(c *agentd.Config) {
 			c.SandboxTimeout, c.SandboxWaitCap, c.Now, c.ReconcileNudge = 5*time.Minute, time.Hour, clock.Now, time.Second
 		})
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 		clock.awaitWait()
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"the cap ran out while the run was queued, but the claim gets its nudge and its poll first")
 		clock.Advance(2 * time.Second)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 	})
 })

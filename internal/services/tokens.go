@@ -98,6 +98,8 @@ func (s *Server) tokenError(err error) error {
 	switch {
 	case errors.As(err, &inv):
 		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+	case errors.Is(err, tokens.ErrNoBinding):
+		return connect.NewError(connect.CodeFailedPrecondition, "this install has no install mark (KOINON_INSTALL_MARK), so there is nothing to rebind a token to")
 	case errors.Is(err, tokens.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, "token not found")
 	}
@@ -171,4 +173,31 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 		return nil, s.tokenError(err)
 	}
 	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t, names)}, nil
+}
+
+// RebindToken implements TokenService. Platform admins only: a token that a restored copy refuses
+// because another install issued it is re-enabled here (ADR 0110 decision 3), and an org owner or
+// org admin cannot do it, whatever the token's org.
+func (s *Server) RebindToken(ctx context.Context, req *tokenv1alpha1.RebindTokenRequest) (*tokenv1alpha1.RebindTokenResponse, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
+	}
+	if !p.PlatformAdmin {
+		return nil, connect.NewError(connect.CodePermissionDenied, "only a platform admin re-enables a token of a restored copy")
+	}
+	org, err := parseID("org", req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.tokens.Rebind(requestCtx(ctx), org, audit.User(p.UserID), req.GetTokenId())
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
+	names, err := s.userNames(ctx, []tokens.Token{t})
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
+	s.log.Info("API token rebound to this install", "org", req.GetOrgId(), "token", t.ID, "prefix", t.Prefix, "by", p.UserID)
+	return &tokenv1alpha1.RebindTokenResponse{Token: tokenProto(t, names)}, nil
 }

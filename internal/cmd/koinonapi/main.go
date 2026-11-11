@@ -74,10 +74,12 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
@@ -91,6 +93,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
@@ -125,7 +128,11 @@ type config struct {
 	durable     bool
 	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
 	// code-host scope refresh (issue #462).
-	restoreHold    bool
+	restoreHold bool
+	// installMark is this install's random mark (the chart's koinon-install-mark Secret). Its hash
+	// binds the database to the install: tokens and sessions another install issued are refused
+	// (ADR 0110). Empty turns the binding off.
+	installMark    string
 	executorID     string
 	wait           time.Duration
 	trustedOrigins string
@@ -208,6 +215,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
 	c.restoreHoldFlag(fs)
+	fs.StringVar(&c.installMark, "install-mark", "",
+		"this install's random mark (the chart's koinon-install-mark Secret). The database records its hash, and API tokens and sessions that another install issued are refused (a restored copy, ADR 0110); empty turns that off")
 	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
 		"the scheduled price refresh (ADR 0098): auto fetches OpenRouter's public price list only while some org has an openrouter provider, "+
 			"on always fetches it, off never makes a request to any price source; a fetched change applies by itself only within the bounds below")
@@ -411,7 +420,25 @@ func serve(ctx context.Context, cfg config) error {
 		reportBootstrap(res, cfg.bootstrapLogin)
 	}
 
+	// The install binding (ADR 0110): which install this database belongs to. A held start writes an
+	// unbound row, so a restored copy refuses the source's tokens and sessions from its first request.
+	bindingOwner := ""
+	if cfg.installMark != "" {
+		bindingOwner = execution.OwnerID(cfg.installMark)
+	}
+	binding := installbinding.New(pool, bindingOwner, cfg.restoreHold, slog.Default()).WithScope(installbinding.ScopeEdge)
+	if st, err := binding.Claim(ctx, installbinding.Targets{
+		PublicURL: installbinding.Origin(cfg.publicURL), OIDCRedirectURL: installbinding.Origin(cfg.oidcRedirectURL),
+	}); err != nil {
+		// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+		slog.Warn("install binding: first claim failed, retrying in the background", "err", err)
+	} else if binding.Enabled() {
+		slog.Info("install binding", "state", st, "held", cfg.restoreHold)
+	}
+	safego.Go(ctx, slog.Default(), "install-binding", binding.Run)
+
 	authCfg := auth.Config{
+		Binding:            binding,
 		SessionIdleTimeout: cfg.sessionIdle,
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
@@ -682,7 +709,7 @@ func serve(ctx context.Context, cfg config) error {
 	if !cfg.restoreHold {
 		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
 	}
-	tokenSvc := tokens.New(pool, nil)
+	tokenSvc := tokens.New(pool, nil).WithBinding(binding)
 	var catalogKeys catalog.Keys
 	if keyring != nil {
 		catalogKeys = keyring
@@ -733,12 +760,12 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -763,6 +790,7 @@ func serve(ctx context.Context, cfg config) error {
 	reg.MustRegister(kekMetrics.Collectors()...)
 	reg.MustRegister(guardMetrics.Collectors()...)
 	restorehold.Metric(reg, cfg.restoreHold)
+	binding.Metrics(reg)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())

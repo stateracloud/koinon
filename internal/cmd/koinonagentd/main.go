@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
@@ -278,6 +279,17 @@ func run(ctx context.Context, cfg config) error {
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err
+	}
+	// The install binding (ADR 0110 decision 0). agentd owns the checkpoint target columns, which the
+	// runtime guard of part b2 fills; today it claims the row and a held agentd re-asserts the hold.
+	if cfg.installMark != "" {
+		binding := installbinding.New(db, execution.OwnerID(cfg.installMark), cfg.restoreHold, slog.Default())
+		if _, err := binding.Claim(ctx, installbinding.Targets{}); err != nil {
+			// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
+			slog.Default().Warn("install binding: first claim failed, retrying in the background", "err", err)
+		}
+		binding.StateMetric(reg)
+		safego.Go(ctx, slog.Default(), "install-binding", binding.Run)
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
 	if cfg.restoreHold {

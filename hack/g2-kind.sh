@@ -36,7 +36,7 @@ cleanup() {
 trap cleanup EXIT
 
 kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
-kind create cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" --wait 120s
+kind create cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" --config "$root/test/e2e/kind/kind-config.yaml" --wait 120s
 
 manifest="$OUT/gateway-api.yaml"
 "$(dirname "$0")/fetch-pinned.sh" "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_CRDS_VERSION}/standard-install.yaml" "${GATEWAY_CRDS_SHA256}" "$manifest"

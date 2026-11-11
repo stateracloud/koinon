@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -28,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 
+	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -835,6 +837,152 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 })
 
 // supervisorTokenVolume is the projected volume OpenShell 0.1.7 gives a supervisor pod (sa-token).
+// The sandbox default-deny NetworkPolicy writer's ValidatingAdmissionPolicy (spike 8.15, ADR 0045)
+// as `helm template` renders templates/sandbox-networkpolicy.yaml with default values, against a
+// real API server (envtest). It is the only fence on the reconciler's cluster-wide NetworkPolicy
+// grant: the reconciler may write one fixed name, in the default-deny shape, in this gateway's
+// workspace namespaces only, and nobody else may write that name in a sandbox namespace. Every
+// identity has cluster-admin here, so only admission can say no.
+var _ = Describe("Sandbox NetworkPolicy writer policy", Label("escape", "admission"), Ordered, ContinueOnFailure, func() {
+	const (
+		reconcilerUser = otherUser // system:serviceaccount:koinon:koinon-reconciler, release koinon in koinon
+		name           = "koinon-koinon-sandbox-default-deny"
+	)
+	var (
+		as          map[string]*kubernetes.Clientset
+		ws          = "openshell-openshell-kw-np"   // a workspace namespace of this release's gateway
+		wsB         = "openshell-prod-kw-np"        // a workspace namespace of another gateway (ID prod)
+		noPrefix    = "kw-np-noprefix"              // gateway labels, but not OpenShell's namespace name
+		noWorkspace = "openshell-openshell-kw-np-x" // gateway labels and prefix, no sandbox-workspace label
+		plain       = "koinon-np-plain"             // not a sandbox namespace
+		dryRun      = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
+	)
+	defaultDeny := func(mutate ...func(*networkingv1.NetworkPolicy)) *networkingv1.NetworkPolicy {
+		np := (&reconciler.SandboxNetworkPolicy{Name: name}).Policy("")
+		for _, m := range mutate {
+			m(np)
+		}
+		return np
+	}
+	create := func(ctx context.Context, user, namespace string, np *networkingv1.NetworkPolicy) error {
+		_, err := as[user].NetworkingV1().NetworkPolicies(namespace).Create(ctx, np, dryRun)
+		return err
+	}
+	denied := func(err error, message string) {
+		GinkgoHelper()
+		Expect(err).To(HaveOccurred(), "admitted, want a denial containing %q", message)
+		Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy"))
+		Expect(err.Error()).To(ContainSubstring(message))
+	}
+
+	BeforeAll(func(ctx SpecContext) {
+		testenv.Require(testenv.Envtest)
+		policies, bindings := renderAdmission(ctx, "koinon", "koinon", "templates/sandbox-networkpolicy.yaml", []string{"ClusterRole", "ClusterRoleBinding"})
+		Expect(policies).To(HaveLen(1))
+		Expect(bindings).To(HaveLen(1))
+		Expect(policies[0].Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)))
+		Expect(bindings[0].Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}))
+
+		env := &envtest.Environment{}
+		cfg, err := env.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(env.Stop)
+		admin := kubernetes.NewForConfigOrDie(cfg)
+		as = map[string]*kubernetes.Clientset{"admin": admin}
+		for _, user := range []string{reconcilerUser, gatewayUser} {
+			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "np-" + strings.ReplaceAll(user, ":", "-")},
+				RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+				Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: rbacv1.UserKind, Name: user}},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			c := rest.CopyConfig(cfg)
+			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+			as[user] = kubernetes.NewForConfigOrDie(c)
+		}
+		workspace := func(gateway string) map[string]string {
+			return map[string]string{"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": gateway, "openshell.ai/sandbox-workspace": "kw-np"}
+		}
+		for n, labels := range map[string]map[string]string{
+			ws:          workspace("openshell"),
+			wsB:         workspace("prod"),
+			noPrefix:    workspace("openshell"),
+			noWorkspace: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"},
+			plain:       nil,
+		} {
+			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: n, Labels: labels}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err = admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, policies[0], metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = admin.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Create(ctx, bindings[0], metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		By("waiting until the policy is enforced")
+		Eventually(func() error {
+			return create(ctx, "admin", ws, defaultDeny())
+		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(MatchError(ContainSubstring("ValidatingAdmissionPolicy")))
+	}, NodeTimeout(3*time.Minute))
+
+	It("admits the reconciler's default-deny in this gateway's workspace namespace (control)", func(ctx SpecContext) {
+		Expect(create(ctx, reconcilerUser, ws, defaultDeny())).To(Succeed())
+	})
+
+	It("denies the fixed name in a sandbox namespace to every other identity, cluster admins included", func(ctx SpecContext) {
+		for _, user := range []string{"admin", gatewayUser} {
+			denied(create(ctx, user, ws, defaultDeny()), "only the Koinon reconciler may write the sandbox default-deny NetworkPolicy")
+			denied(create(ctx, user, wsB, defaultDeny()), "only the Koinon reconciler may write the sandbox default-deny NetworkPolicy")
+		}
+	})
+
+	It("denies the reconciler a default-deny that allows anything or selects only some pods", func(ctx SpecContext) {
+		const shape = "must select every pod, list policyTypes Ingress and Egress, and allow no traffic"
+		for what, m := range map[string]func(*networkingv1.NetworkPolicy){
+			"an egress rule":  func(np *networkingv1.NetworkPolicy) { np.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{}} },
+			"an ingress rule": func(np *networkingv1.NetworkPolicy) { np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{}} },
+			"a matchLabels podSelector": func(np *networkingv1.NetworkPolicy) {
+				np.Spec.PodSelector.MatchLabels = map[string]string{"openshell.ai/boundary-role": "supervisor"}
+			},
+			"a matchExpressions podSelector": func(np *networkingv1.NetworkPolicy) {
+				np.Spec.PodSelector.MatchExpressions = []metav1.LabelSelectorRequirement{{Key: "x", Operator: metav1.LabelSelectorOpDoesNotExist}}
+			},
+			"Ingress only": func(np *networkingv1.NetworkPolicy) {
+				np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+			},
+		} {
+			By(what)
+			denied(create(ctx, reconcilerUser, ws, defaultDeny(m)), shape)
+		}
+
+		By("an update that adds an allow rule to the existing default-deny")
+		_, err := as[reconcilerUser].NetworkingV1().NetworkPolicies(ws).Create(ctx, defaultDeny(), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cur, err := as[reconcilerUser].NetworkingV1().NetworkPolicies(ws).Get(ctx, name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cur.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{}}
+		_, err = as[reconcilerUser].NetworkingV1().NetworkPolicies(ws).Update(ctx, cur, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+		denied(err, shape)
+	})
+
+	It("denies the reconciler any other name", func(ctx SpecContext) {
+		denied(create(ctx, reconcilerUser, ws, defaultDeny(func(np *networkingv1.NetworkPolicy) { np.Name = "other" })), "must be named "+name)
+	})
+
+	It("denies the reconciler any namespace but this gateway's workspace namespaces", func(ctx SpecContext) {
+		const where = "may be written only in OpenShell workspace namespaces of gateway openshell"
+		for _, n := range []string{wsB, noPrefix, noWorkspace, plain} {
+			By(n)
+			denied(create(ctx, reconcilerUser, n, defaultDeny()), where)
+		}
+	})
+
+	It("leaves other NetworkPolicies, and the name outside sandbox namespaces, to RBAC (control)", func(ctx SpecContext) {
+		Expect(create(ctx, gatewayUser, ws, defaultDeny(func(np *networkingv1.NetworkPolicy) {
+			np.Name, np.Spec.Egress = "openshell-own", []networkingv1.NetworkPolicyEgressRule{{}}
+		}))).To(Succeed())
+		Expect(create(ctx, "admin", plain, defaultDeny())).To(Succeed())
+	})
+})
+
 func supervisorTokenVolume(aud string, exp int64) corev1.Volume {
 	return corev1.Volume{Name: "sa-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
 		Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: aud, ExpirationSeconds: &exp, Path: "token"}}},
@@ -871,12 +1019,23 @@ func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admission
 // renderSandboxPolicyAs renders the same template as the Helm release `release` in `namespace`.
 func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	GinkgoHelper()
+	policies, bindings := renderAdmission(ctx, release, namespace, "templates/sandbox-policy.yaml", nil, extraArgs...)
+	Expect(policies).To(HaveLen(4), "the pods, objects, connect and namespace label policies")
+	Expect(bindings).To(HaveLen(7), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label, and the namespace label policy's")
+	return policies, bindings
+}
+
+// renderAdmission renders one chart template as the Helm release `release` in `namespace` and
+// returns its ValidatingAdmissionPolicies and bindings. Any other kind fails, except those listed
+// in skip.
+func renderAdmission(ctx context.Context, release, namespace, template string, skip []string, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
+	GinkgoHelper()
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	Expect(err).NotTo(HaveOccurred(), "helm renders the chart's policies")
 	var out, stderr bytes.Buffer
 	args := append([]string{
 		"template", release, "../../charts/koinon", "--namespace", namespace,
-		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-policy.yaml",
+		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", template,
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
@@ -900,11 +1059,11 @@ func renderSandboxPolicyAs(ctx context.Context, release, namespace string, extra
 			bindings = append(bindings, b)
 		case "":
 		default:
-			Fail(fmt.Sprintf("unexpected %s in sandbox-policy.yaml", meta.Kind))
+			if !slices.Contains(skip, meta.Kind) {
+				Fail(fmt.Sprintf("unexpected %s in %s", meta.Kind, template))
+			}
 		}
 	}
-	Expect(policies).To(HaveLen(4), "the pods, objects, connect and namespace label policies")
-	Expect(bindings).To(HaveLen(7), "one per policy for the gateway's namespaces, one per policy for namespaces without a gateway-id label, and the namespace label policy's")
 	return policies, bindings
 }
 

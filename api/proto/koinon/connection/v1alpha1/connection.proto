@@ -6,6 +6,7 @@ package koinon.connection.v1alpha1;
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "koinon/outward/v1alpha1/outward.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1";
 
@@ -185,6 +186,9 @@ message Connection {
   // forget`, ADR 0085 decision 13): the connection is not usable (bound agents report it and runs that need it fail) until the
   // secret is entered again. Unset otherwise.
   google.protobuf.Timestamp credential_lost_at = 15;
+  // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+  // not called, probed or offered to runs. Unset otherwise.
+  koinon.outward.v1alpha1.AdminDisabled admin_disabled = 16;
 
   oneof settings {
     GitHubConnection github = 10;

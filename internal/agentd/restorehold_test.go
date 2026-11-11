@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // Restore-hold (issue #462): a pool that is held claims no run, and neither takes over a run whose
@@ -26,6 +27,6 @@ var _ = Describe("Restore-hold", func() {
 		By("releasing the hold: a pool that runs drives the same run")
 		stopHeld()
 		e.pool("agentd-released")
-		Eventually(runState(ctx, queued)).WithTimeout(30 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, queued)).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 })

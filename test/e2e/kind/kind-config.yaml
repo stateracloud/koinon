@@ -3,8 +3,18 @@
 # The e2e's kind cluster. The kubelet refreshes mounted Secrets and ConfigMaps every syncFrequency
 # (default 1m, plus its cache TTL); the MCP spec (6b) waits for the gateway to see a changed Secret,
 # which took almost four minutes. Five seconds cuts that wait without changing what is tested.
+#
+# The pod and Service subnets are not kind's defaults (10.244.0.0/16 and 10.96.0.0/12): the default
+# Service range equals the one of many host clusters (the home-lab's, #73), so a packet that misses
+# kind's own DNAT is addressed to a Service IP of the host cluster. These two ranges are private,
+# unusual and disjoint from each other. The kube-dns ClusterIP is the 10th address of serviceSubnet
+# (10.250.0.10) and the API server Service the 1st (10.250.0.1); the escape suite's defaults
+# (test/escape/sandbox_test.go) name them, and test/e2e/kind/kindconfig_test.go keeps both in step.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  serviceSubnet: 10.250.0.0/16
+  podSubnet: 10.251.0.0/16
 nodes:
   - role: control-plane
     kubeadmConfigPatches:

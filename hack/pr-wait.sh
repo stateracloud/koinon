@@ -285,7 +285,9 @@ while :; do
           exit 1
         fi
         before=$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")
-        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft)' <<<"$json")
+        # An explicit --require name is judged on its newest run of any event, a dispatched run included.
+        req_json=$(printf '%s\n' ${required[@]+"${required[@]}"} | awk 'NF' | jq -R . | jq -sc .)
+        json=$(jq --argjson runs "$wfruns" --argjson draft "$is_draft" --argjson req "$req_json" "$PRV_JQ"'.statusCheckRollup |= prv_drop($runs; $draft; $req)' <<<"$json")
         if [ "$(jq -r '(.statusCheckRollup // []) | length' <<<"$json")" -lt "$before" ]; then
           if jq -e 'any(.[]; .display_title == "ci (draft)")' <<<"$wfruns" >/dev/null; then ready_dropped=1; else superseded=1; fi
         fi

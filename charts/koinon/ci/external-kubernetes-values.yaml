@@ -13,8 +13,10 @@ networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
-# The observer needs the policy.
+# The observer and the sandbox default-deny NetworkPolicy need the policy.
 sandboxObserver:
+  enabled: false
+sandboxNetworkPolicy:
   enabled: false
 preflight:
   seccompProbe:

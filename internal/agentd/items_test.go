@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 const markChunky = "CHUNKY"
@@ -44,7 +45,7 @@ var _ = Describe("Items, not chunks (old issue 344)", func() {
 		t := e.task(ctx, markChunky)
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		evs := events(ctx, r)
 		expectOrdered(evs)

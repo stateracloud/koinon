@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
@@ -60,6 +61,7 @@ type client struct {
 	questions   questionv1alpha1connect.QuestionServiceClient
 	leakguard   leakguardv1alpha1connect.LeakGuardServiceClient
 	orgsettings orgsettingsv1alpha1connect.OrgSettingsServiceClient
+	outward     outwardv1alpha1connect.OutwardServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -79,6 +81,7 @@ func newClient(b *browser) *client {
 		questions:   questionv1alpha1connect.NewQuestionServiceClient(cc),
 		leakguard:   leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
 		orgsettings: orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
+		outward:     outwardv1alpha1connect.NewOutwardServiceClient(cc),
 	}
 }
 

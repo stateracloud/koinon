@@ -57,6 +57,9 @@ tilt up                   # the current context is kind-koinon-dev
 make dev-kind-down        # delete the cluster
 ```
 
+The cluster uses pod subnet 10.251.0.0/16 and Service subnet 10.250.0.0/16 (`test/e2e/kind/kind-config.yaml`, shared with the e2e),
+not kind's defaults, which equal the ranges of many host clusters.
+
 Another name: `DEV_KIND_CLUSTER=koinon-foo make dev-kind-up`
 and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute with a warm Go cache.
 

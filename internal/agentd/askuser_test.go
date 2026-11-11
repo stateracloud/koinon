@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // markQuestion makes the fake harness call ask_user through Koinon's tool server.
@@ -153,8 +154,8 @@ var _ = Describe("ask_user", func() {
 		t = a.task(ctx, markQuestion+": deploy the app")
 		r = a.enqueue(ctx, t)
 		stop = a.pool("agentd-a")
-		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		return stop
 	}
 
@@ -198,7 +199,7 @@ var _ = Describe("ask_user", func() {
 		t = a.task(ctx, markQuestion)
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
-		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateAsked))
 		inbox, err := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: a.org, UserID: a.user})
 		Expect(err).NotTo(HaveOccurred())
@@ -206,7 +207,7 @@ var _ = Describe("ask_user", func() {
 		got, _ := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
 		Expect(got.State).NotTo(Equal(store.TaskStateInputRequired))
 		close(release)
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateOpen))
 	})
 
@@ -220,7 +221,7 @@ var _ = Describe("ask_user", func() {
 		})).To(Succeed())
 		Expect(row.State).To(Equal(store.QuestionStateAnswered))
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, loads, _, _ := a.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
@@ -243,7 +244,7 @@ var _ = Describe("ask_user", func() {
 		})).To(Succeed())
 		Consistently(runState(ctx, r)).WithTimeout(time.Second).ShouldNot(Equal(store.RunStateSucceeded))
 		a.recordSandbox(ctx, store.SandboxStateReady, "")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, loads, _, _ := a.harness.snapshot()
 		Expect(prompts[1]).To(ContainSubstring(`the person answered: "ap-south-1, please"`))
 		Expect(loads).To(Equal([]string{"ses_1"}))
@@ -255,7 +256,7 @@ var _ = Describe("ask_user", func() {
 			_, err := questions.Dismiss(ctx, q, b, a.org, mustUUID(qid), a.user)
 			return err
 		})).To(Succeed())
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := a.harness.snapshot()
 		Expect(prompts[1]).To(ContainSubstring(`dismissed the question, so your default was applied: "eu-west-1"`))
 		row := a.question(ctx, qid)
@@ -269,7 +270,7 @@ var _ = Describe("ask_user", func() {
 			_, err := questions.Expire(ctx, q, b, a.org, mustUUID(qid))
 			return err
 		})).To(Succeed())
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := a.harness.snapshot()
 		Expect(prompts[1]).To(ContainSubstring(`nobody answered in time, so your default was applied: "eu-west-1"`))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateExpired))
@@ -289,7 +290,7 @@ var _ = Describe("ask_user", func() {
 		t = a.task(ctx, markQuestion+": deploy the app")
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
-		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
 		row = a.question(ctx, qid)
 		Expect(row.RemindAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(2*time.Hour), time.Minute))
 		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(48*time.Hour), time.Minute))
@@ -313,7 +314,7 @@ var _ = Describe("ask_user", func() {
 			Expect(res).To(Equal(questions.SweepResult{}))
 		}
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := a.harness.snapshot()
 		Expect(prompts).To(HaveLen(2), "the one no-answer run, not more")
 		Expect(prompts[1]).To(ContainSubstring(`nobody answered in time, so your default was applied: "eu-west-1"`))
@@ -333,7 +334,7 @@ var _ = Describe("ask_user", func() {
 		_, err := questions.RunOrgTimers(ctx, db, notifier, a.org, time.Now().Add(questions.DefaultTTL+time.Minute))
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.State).To(Equal(store.TaskStateCanceled))
@@ -377,7 +378,7 @@ var _ = Describe("ask_user", func() {
 		Expect(ok).To(Equal(1))
 		Expect(notOpen).To(Equal(3))
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Consistently(func() int { p, _, _, _ := a.harness.snapshot(); return len(p) }).WithTimeout(time.Second).Should(Equal(2), "one prompt for the question, one for the answer")
 		Expect(getRun(ctx, r).Epoch).To(BeEquivalentTo(2), "claimed once more after the park")
 	})
@@ -411,13 +412,13 @@ var _ = Describe("ask_user", func() {
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
 		var got []string
-		Eventually(texts).WithTimeout(10 * time.Second).Should(Receive(&got))
+		Eventually(texts).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&got))
 		Expect(got[0]).To(ContainSubstring(`missing properties: ["default"]`))
 		Expect(got[1]).To(ContainSubstring("default is required"))
 		Expect(got[2]).To(ContainSubstring("is not a member of this org"))
 		Expect(got[3]).To(ContainSubstring("default must be one of the choices"))
 		Expect(got[4]).To(ContainSubstring("question recorded"), "an email names a member, whatever its case")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		inbox, err := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: a.org, UserID: a.user})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(inbox).To(HaveLen(1), "only the valid question exists")
@@ -435,13 +436,13 @@ var _ = Describe("ask_user", func() {
 		a.message(ctx, t, markQuestion)
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
-		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
 		row := a.question(ctx, qid)
 		Expect(row.TargetKind).To(Equal(store.NotifyTargetKindUser))
 		recipients, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: a.org, QuestionID: row.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(recipients).To(Equal([]pgtype.UUID{a.user}))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 	})
 
 	It("finishes the run and cancels the question when the agent cancels the task in the same turn", func(ctx SpecContext) {
@@ -460,8 +461,8 @@ var _ = Describe("ask_user", func() {
 		t = a.task(ctx, markQuestion)
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
-		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-		Eventually(func() store.RunState { return getRun(ctx, r).State }).WithTimeout(10 * time.Second).
+		Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
+		Eventually(func() store.RunState { return getRun(ctx, r).State }).WithTimeout(racescale.D(10 * time.Second)).
 			ShouldNot(Or(Equal(store.RunStateQueued), Equal(store.RunStateStarting), Equal(store.RunStateRunning)))
 		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateParked))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateCanceled))
@@ -522,8 +523,8 @@ var _ = Describe("ask_user", func() {
 		asked := func(ctx SpecContext) string {
 			GinkgoHelper()
 			a.pool("agentd-a")
-			Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+			Eventually(a.ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&qid))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 			return qid
 		}
 		// toolText is the text the harness's ask_user call got back.

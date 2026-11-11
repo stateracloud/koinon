@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/token/v1alpha1/token.proto.
  */
 export const file_koinon_token_v1alpha1_token: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vdG9rZW4vdjFhbHBoYTEvdG9rZW4ucHJvdG8SFWtvaW5vbi50b2tlbi52MWFscGhhMSLmAgoFVG9rZW4SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZwcmVmaXgYAyABKAkSKwoEcm9sZRgEIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKZXhwaXJlc19hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKcmV2b2tlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMbGFzdF91c2VkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjcmVhdGVkX2J5GAkgASgJEhcKD2NyZWF0ZWRfYnlfbmFtZRgKIAEoCRIXCg9wYXJlbnRfdG9rZW5faWQYCyABKAkijgEKEkNyZWF0ZVRva2VuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIrCgRyb2xlGAMgASgOMh0ua29pbm9uLmF1dGgudjFhbHBoYTEuT3JnUm9sZRItCgpleHBpcmVzX2luGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIlIKE0NyZWF0ZVRva2VuUmVzcG9uc2USKwoFdG9rZW4YASABKAsyHC5rb2lub24udG9rZW4udjFhbHBoYTEuVG9rZW4SDgoGc2VjcmV0GAIgASgJIiMKEUxpc3RUb2tlbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJCChJMaXN0VG9rZW5zUmVzcG9uc2USLAoGdG9rZW5zGAEgAygLMhwua29pbm9uLnRva2VuLnYxYWxwaGExLlRva2VuIjYKElJldm9rZVRva2VuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIdG9rZW5faWQYAiABKAkiQgoTUmV2b2tlVG9rZW5SZXNwb25zZRIrCgV0b2tlbhgBIAEoCzIcLmtvaW5vbi50b2tlbi52MWFscGhhMS5Ub2tlbjLCAgoMVG9rZW5TZXJ2aWNlEmQKC0NyZWF0ZVRva2VuEikua29pbm9uLnRva2VuLnYxYWxwaGExLkNyZWF0ZVRva2VuUmVxdWVzdBoqLmtvaW5vbi50b2tlbi52MWFscGhhMS5DcmVhdGVUb2tlblJlc3BvbnNlEmYKCkxpc3RUb2tlbnMSKC5rb2lub24udG9rZW4udjFhbHBoYTEuTGlzdFRva2Vuc1JlcXVlc3QaKS5rb2lub24udG9rZW4udjFhbHBoYTEuTGlzdFRva2Vuc1Jlc3BvbnNlIgOQAgESZAoLUmV2b2tlVG9rZW4SKS5rb2lub24udG9rZW4udjFhbHBoYTEuUmV2b2tlVG9rZW5SZXF1ZXN0Gioua29pbm9uLnRva2VuLnYxYWxwaGExLlJldm9rZVRva2VuUmVzcG9uc2VCUVpPZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdG9rZW4vdjFhbHBoYTE7dG9rZW52MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_koinon_auth_v1alpha1_auth]);
+  fileDesc("CiFrb2lub24vdG9rZW4vdjFhbHBoYTEvdG9rZW4ucHJvdG8SFWtvaW5vbi50b2tlbi52MWFscGhhMSLmAgoFVG9rZW4SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZwcmVmaXgYAyABKAkSKwoEcm9sZRgEIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKZXhwaXJlc19hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKcmV2b2tlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMbGFzdF91c2VkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjcmVhdGVkX2J5GAkgASgJEhcKD2NyZWF0ZWRfYnlfbmFtZRgKIAEoCRIXCg9wYXJlbnRfdG9rZW5faWQYCyABKAkijgEKEkNyZWF0ZVRva2VuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIrCgRyb2xlGAMgASgOMh0ua29pbm9uLmF1dGgudjFhbHBoYTEuT3JnUm9sZRItCgpleHBpcmVzX2luGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIlIKE0NyZWF0ZVRva2VuUmVzcG9uc2USKwoFdG9rZW4YASABKAsyHC5rb2lub24udG9rZW4udjFhbHBoYTEuVG9rZW4SDgoGc2VjcmV0GAIgASgJIiMKEUxpc3RUb2tlbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJCChJMaXN0VG9rZW5zUmVzcG9uc2USLAoGdG9rZW5zGAEgAygLMhwua29pbm9uLnRva2VuLnYxYWxwaGExLlRva2VuIjYKElJldm9rZVRva2VuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIdG9rZW5faWQYAiABKAkiQgoTUmV2b2tlVG9rZW5SZXNwb25zZRIrCgV0b2tlbhgBIAEoCzIcLmtvaW5vbi50b2tlbi52MWFscGhhMS5Ub2tlbiI2ChJSZWJpbmRUb2tlblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCHRva2VuX2lkGAIgASgJIkIKE1JlYmluZFRva2VuUmVzcG9uc2USKwoFdG9rZW4YASABKAsyHC5rb2lub24udG9rZW4udjFhbHBoYTEuVG9rZW4yqAMKDFRva2VuU2VydmljZRJkCgtDcmVhdGVUb2tlbhIpLmtvaW5vbi50b2tlbi52MWFscGhhMS5DcmVhdGVUb2tlblJlcXVlc3QaKi5rb2lub24udG9rZW4udjFhbHBoYTEuQ3JlYXRlVG9rZW5SZXNwb25zZRJmCgpMaXN0VG9rZW5zEigua29pbm9uLnRva2VuLnYxYWxwaGExLkxpc3RUb2tlbnNSZXF1ZXN0Gikua29pbm9uLnRva2VuLnYxYWxwaGExLkxpc3RUb2tlbnNSZXNwb25zZSIDkAIBEmQKC1Jldm9rZVRva2VuEikua29pbm9uLnRva2VuLnYxYWxwaGExLlJldm9rZVRva2VuUmVxdWVzdBoqLmtvaW5vbi50b2tlbi52MWFscGhhMS5SZXZva2VUb2tlblJlc3BvbnNlEmQKC1JlYmluZFRva2VuEikua29pbm9uLnRva2VuLnYxYWxwaGExLlJlYmluZFRva2VuUmVxdWVzdBoqLmtvaW5vbi50b2tlbi52MWFscGhhMS5SZWJpbmRUb2tlblJlc3BvbnNlQlFaT2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3Rva2VuL3YxYWxwaGExO3Rva2VudjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_koinon_auth_v1alpha1_auth]);
 
 /**
  * Token describes an admin API token. It never holds the secret.
@@ -233,6 +233,45 @@ export const RevokeTokenResponseSchema: GenMessage<RevokeTokenResponse> = /*@__P
   messageDesc(file_koinon_token_v1alpha1_token, 6);
 
 /**
+ * @generated from message koinon.token.v1alpha1.RebindTokenRequest
+ */
+export type RebindTokenRequest = Message<"koinon.token.v1alpha1.RebindTokenRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string token_id = 2;
+   */
+  tokenId: string;
+};
+
+/**
+ * Describes the message koinon.token.v1alpha1.RebindTokenRequest.
+ * Use `create(RebindTokenRequestSchema)` to create a new message.
+ */
+export const RebindTokenRequestSchema: GenMessage<RebindTokenRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_token_v1alpha1_token, 7);
+
+/**
+ * @generated from message koinon.token.v1alpha1.RebindTokenResponse
+ */
+export type RebindTokenResponse = Message<"koinon.token.v1alpha1.RebindTokenResponse"> & {
+  /**
+   * @generated from field: koinon.token.v1alpha1.Token token = 1;
+   */
+  token?: Token | undefined;
+};
+
+/**
+ * Describes the message koinon.token.v1alpha1.RebindTokenResponse.
+ * Use `create(RebindTokenResponseSchema)` to create a new message.
+ */
+export const RebindTokenResponseSchema: GenMessage<RebindTokenResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_token_v1alpha1_token, 8);
+
+/**
  * TokenService manages an org's admin API tokens (ADR 0056): bearer tokens for
  * /admin/v1, scoped to one org, with the role admin or owner, never more than
  * the creator's. Admins and owners only. The token itself is returned once, by
@@ -271,6 +310,18 @@ export const TokenService: GenService<{
     methodKind: "unary";
     input: typeof RevokeTokenRequestSchema;
     output: typeof RevokeTokenResponseSchema;
+  },
+  /**
+   * RebindToken re-enables a token that a restored copy refuses because another install issued it
+   * (ADR 0110). Platform admins only: an org owner cannot, the same as for the adopt-restore
+   * recovery action. A revoked or expired token is not re-enabled. Audited as token.rebind.
+   *
+   * @generated from rpc koinon.token.v1alpha1.TokenService.RebindToken
+   */
+  rebindToken: {
+    methodKind: "unary";
+    input: typeof RebindTokenRequestSchema;
+    output: typeof RebindTokenResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_token_v1alpha1_token, 0);

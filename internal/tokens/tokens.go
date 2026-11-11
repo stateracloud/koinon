@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installbinding"
 )
 
 // Lifetimes.
@@ -48,6 +49,8 @@ var (
 	// ErrInvalid means the token is unknown, wrong, expired or revoked. Callers do not say which.
 	ErrInvalid  = errors.New("tokens: invalid, expired or revoked token")
 	ErrNotFound = errors.New("tokens: not found")
+	// ErrNoBinding means this process has no install mark, so there is nothing to rebind a token to.
+	ErrNoBinding = errors.New("tokens: this install has no install mark")
 )
 
 // InvalidError is a validation failure with a message safe to show.
@@ -92,6 +95,16 @@ type Principal struct {
 type Service struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
+	// binding stamps new tokens with the install's mark and refuses tokens another install issued
+	// (ADR 0110 decision 3). Nil or disabled: no mark, nothing refused.
+	binding *installbinding.Binding
+}
+
+// WithBinding makes the Service stamp the tokens it creates with the install's mark and refuse tokens
+// that another install issued (a restored copy, ADR 0110). It returns s.
+func (s *Service) WithBinding(b *installbinding.Binding) *Service {
+	s.binding = b
+	return s
 }
 
 // New returns a Service. now defaults to time.Now.
@@ -214,8 +227,8 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		var err error
 		row, err = q.CreateAPIToken(ctx, store.CreateAPITokenParams{
 			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: by.User,
-			ParentTokenID: parentID,
-			ExpiresAt:     pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			ParentTokenID: parentID, InstallMark: s.binding.Stamp(),
+			ExpiresAt: pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
 			return err
@@ -297,6 +310,31 @@ func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	return toToken(row), nil
 }
 
+// Rebind re-enables a token that a restored copy refuses because another install issued it (ADR 0110
+// decision 3): it stamps the token with this install's mark, audited as token.rebind. The caller must
+// have checked that the actor is a platform admin. A missing, revoked or expired token is ErrNotFound.
+func (s *Service) Rebind(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string) (Token, error) {
+	if !s.binding.Enabled() {
+		return Token{}, ErrNoBinding
+	}
+	found, err := s.binding.RebindToken(ctx, actor, org, id)
+	if err != nil {
+		return Token{}, err
+	}
+	if !found {
+		return Token{}, ErrNotFound
+	}
+	var tid pgtype.UUID
+	if err := tid.Scan(id); err != nil {
+		return Token{}, ErrNotFound
+	}
+	row, err := store.New(s.pool).GetAPIToken(ctx, store.GetAPITokenParams{OrgID: org, ID: tid})
+	if err != nil {
+		return Token{}, err
+	}
+	return toToken(row), nil
+}
+
 // AuthError is a failed authentication. When the token's prefix names a real token, TokenID and
 // Org say which, so the failure can be written to that org's audit trail.
 type AuthError struct {
@@ -338,7 +376,12 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 	case !s.now().Before(row.ExpiresAt.Time):
 		reason = "expired"
 	default:
-		if holds, err := s.holdsRole(ctx, q, row.CreatedBy, row.OrgID, row.Role); err != nil {
+		if ok, err := s.binding.Allows(ctx, row.InstallMark); err != nil {
+			return Principal{}, err
+		} else if !ok {
+			s.binding.Refused("token")
+			reason = installbinding.QuarantineReason
+		} else if holds, err := s.holdsRole(ctx, q, row.CreatedBy, row.OrgID, row.Role); err != nil {
 			return Principal{}, err
 		} else if !holds {
 			reason = "its creator no longer holds the role"
