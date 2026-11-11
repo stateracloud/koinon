@@ -208,7 +208,10 @@ function taskItem(ev: TaskEvent): TimelineItem {
         }
       }
       if (ev.kind === 'run.failed' && str(p.failureClass) === 'loop') {
-        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} was stopped: the agent kept looping after it was asked to change its approach`, runId }
+        // agentd's loopStopReason says when the harness ignored the cancel and the agent was never asked.
+        const asked = !(str(p.reason) ?? '').includes('could not be asked')
+        const how = asked ? 'after it was asked to change its approach' : 'and could not be asked to change its approach (the harness ignored the cancel)'
+        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} was stopped: the agent kept looping ${how}`, runId }
       }
       if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
         const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
