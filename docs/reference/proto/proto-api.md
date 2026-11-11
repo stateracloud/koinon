@@ -475,7 +475,7 @@ FileDiff compares one file with its current version on the base branch.
 | --- | --- | --- | --- | --- | --- |
 | path | 1 | `string` | singular |  |  |
 | status | 2 | `koinon.approval.v1alpha1.FileStatus` | singular |  |  |
-| unified_diff | 3 | `string` | singular |  | A unified diff with three lines of context: "--- a/<path>" and "+++ b/<path>" (/dev/null for an added or deleted file), then "@@" hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a last line without one. Empty when the file is unchanged, binary, or fallback_reason is set. |
+| unified_diff | 3 | `string` | singular |  | A unified diff with three lines of context: "--- a/&lt;path&gt;" and "+++ b/&lt;path&gt;" (/dev/null for an added or deleted file), then "@@" hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a last line without one. Empty when the file is unchanged, binary, or fallback_reason is set. |
 | binary | 4 | `bool` | singular |  | The new or the current version is not text; no content is shown. |
 | fallback_reason | 5 | `string` | singular |  | Why there is no diff, e.g. "the current version is larger than 1 MiB". The card then shows the full new content. |
 | old_mode | 6 | `string` | singular |  | The file's git mode on the base branch ("100644", "100755"; empty for a new file) and the mode Koinon writes it with (empty for a deleted file). Both are empty when the base tree could not be read. A modified file whose modes differ becomes executable. |
@@ -716,7 +716,7 @@ AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} wi
 | org_id | 2 | `string` | singular |  | org_id is empty for an install event. |
 | actor_kind | 3 | `string` | singular |  | actor_kind is user, token, agent, secret, system or cli; actor_id is that actor's ID, the declaring Secret's name for secret, or the command for cli (keys forget). |
 | actor_id | 4 | `string` | singular |  |  |
-| action | 5 | `string` | singular |  | action reads <area>.<verb>, for example approval.approve or agent.archive. |
+| action | 5 | `string` | singular |  | action reads &lt;area&gt;.&lt;verb&gt;, for example approval.approve or agent.archive. |
 | target_kind | 6 | `string` | singular |  |  |
 | target_id | 7 | `string` | singular |  |  |
 | summary | 8 | `google.protobuf.Struct` | singular |  |  |
@@ -731,7 +731,7 @@ AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} wi
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | org_id | 1 | `string` | singular |  | org_id names the org. Only a platform admin may leave it empty, to read every org. With scope AUDIT_SCOPE_INSTALL it must be empty. |
-| since | 2 | `google.protobuf.Timestamp` | singular |  | since and until bound created_at: since <= created_at < until. Both are optional. |
+| since | 2 | `google.protobuf.Timestamp` | singular |  | since and until bound created_at: since &lt;= created_at &lt; until. Both are optional. |
 | until | 3 | `google.protobuf.Timestamp` | singular |  |  |
 | action_prefix | 4 | `string` | singular |  | action_prefix keeps the events whose action starts with it, for example "approval." or "agent.create". Lower-case letters, digits and . _ - only. |
 | actor_kind | 5 | `string` | singular |  | actor_kind keeps the events of one kind of actor; actor_id narrows that to one actor and needs actor_kind. |
@@ -1156,7 +1156,7 @@ and cache writes) exceeds context_over tokens.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
-| id | 1 | `string` | singular |  | id is cited by ledger entries as org#<id>. |
+| id | 1 | `string` | singular |  | id is cited by ledger entries as org#&lt;id&gt;. |
 | name | 2 | `string` | singular |  |  |
 | provider | 3 | `string` | singular |  |  |
 | match | 4 | `koinon.budget.v1alpha1.PriceMatch` | singular |  |  |
@@ -1870,7 +1870,7 @@ Server is a remote MCP server of the org. It never holds the credential.
 | tools_synced_at | 16 | `google.protobuf.Timestamp` | singular |  |  |
 | created_at | 17 | `google.protobuf.Timestamp` | singular |  |  |
 | updated_at | 18 | `google.protobuf.Timestamp` | singular |  |  |
-| gateway_target | 19 | `string` | singular |  | gateway_target is the name of the server's target in the gateway, "<org slug>-<name>", which is also the prefix of its tools in an agent's tool list. |
+| gateway_target | 19 | `string` | singular |  | gateway_target is the name of the server's target in the gateway, "&lt;org slug&gt;-&lt;name&gt;", which is also the prefix of its tools in an agent's tool list. |
 | kind | 20 | `string` | singular |  | kind is "fetch", "search" or "other"; data_class lists the session legs the server's results can set, in the order untrusted_input, private_data (see ServerClass). A server nobody classified is kind "other" with both legs. |
 | data_class | 21 | `string` | repeated |  |  |
 | code_host_connection_id | 22 | `string` | singular |  | code_host_connection_id is the org's code-host connection the server acts through, empty for none. The code-host sink class of its tools is looked up in that connection's repository list only; a server without one is external-high. A changed URL clears it. |
@@ -2151,7 +2151,7 @@ AdminDisabled is the switch as Get and List of a target show it. A target withou
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | at | 1 | `google.protobuf.Timestamp` | singular |  |  |
-| by | 2 | `string` | singular |  | by is the actor as the audit log reads it, for example "token <id>" or "secret <name>". |
+| by | 2 | `string` | singular |  | by is the actor as the audit log reads it, for example "token &lt;id&gt;" or "secret &lt;name&gt;". |
 | note | 3 | `string` | singular |  |  |
 | declared | 4 | `bool` | singular |  | declared is true when the declaring Secret says disabled: true; the API cannot enable such a target. |
 
@@ -2164,7 +2164,7 @@ AdminDisabled is the switch as Get and List of a target show it. A target withou
 | name | 3 | `string` | singular |  |  |
 | disabled | 4 | `bool` | singular |  |  |
 | disabled_at | 5 | `google.protobuf.Timestamp` | singular |  |  |
-| disabled_by | 6 | `string` | singular |  | disabled_by is the actor as the audit log reads it, for example "user <id>" or "secret <name>". |
+| disabled_by | 6 | `string` | singular |  | disabled_by is the actor as the audit log reads it, for example "user &lt;id&gt;" or "secret &lt;name&gt;". |
 | note | 7 | `string` | singular |  |  |
 
 ### Message SetOutwardTargetDisabledRequest
@@ -2389,7 +2389,7 @@ EchoDiffSegment is a run of characters in the sent line, the reply or both.
 | --- | --- | --- | --- | --- | --- |
 | id | 1 | `string` | singular |  |  |
 | provider_id | 2 | `string` | singular |  |  |
-| name | 3 | `string` | singular |  | name is the plain name agents ask for; the gateway serves it as "<org slug>/<name>". |
+| name | 3 | `string` | singular |  | name is the plain name agents ask for; the gateway serves it as "&lt;org slug&gt;/&lt;name&gt;". |
 | guard | 4 | `bool` | singular |  | guard is the routing guard, for OpenRouter providers only. |
 | rates | 5 | `koinon.provider.v1alpha1.Rates` | singular |  | Deprecated. rates is deprecated and never set; prices are org price entries (PriceService). |
 | source | 6 | `string` | singular |  |  |
@@ -2723,7 +2723,7 @@ CancelRunRequest names a run.
 | --- | --- | --- | --- | --- | --- |
 | org_id | 1 | `string` | singular |  |  |
 | run_id | 2 | `string` | singular |  |  |
-| reason | 3 | `string` | singular |  | Shown on the ticket; defaults to "canceled by <user>". |
+| reason | 3 | `string` | singular |  | Shown on the ticket; defaults to "canceled by &lt;user&gt;". |
 
 ### Message CancelRunResponse
 
@@ -3491,7 +3491,7 @@ CreateToken; Koinon keeps only its hash.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | token | 1 | `koinon.token.v1alpha1.Token` | singular |  |  |
-| secret | 2 | `string` | singular |  | secret is the token to send as "Authorization: Bearer <secret>". It is shown only here. |
+| secret | 2 | `string` | singular |  | secret is the token to send as "Authorization: Bearer &lt;secret&gt;". It is shown only here. |
 
 ### Message ListTokensRequest
 
