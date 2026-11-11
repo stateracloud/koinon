@@ -22,7 +22,8 @@
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 #   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
 #     and on that dispatch `decide`, `quickstart` and `result` are skipped; `continue-on-error` keeps the run's
-#     conclusion (which hack/e2e-bisect.sh reads) as the quickstart's.
+#     conclusion (which hack/e2e-bisect.sh reads) as the quickstart's. The `drill issue` job (#572) opens the issue
+#     for a red drill and is `continue-on-error` for the same reason.
 # The `e2e result` job is the one to require: on a queue build, a push, the nightly or a dispatch it passes when
 # the quickstart passed, or was skipped because `decide` said nothing needed it; it fails when the quickstart
 # failed or was cancelled. Trust limit: `result` runs from this very file, so a PR can edit it to drop the
@@ -527,6 +528,9 @@ jobs:
     name: drill issue
     needs: drill
     if: always() && needs.drill.outputs.red == 'true'
+    # Like `drill`, it must never change the run conclusion that hack/e2e-bisect.sh reads: a gh API error here
+    # would otherwise turn a green quickstart's run red and start a false bisect.
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
