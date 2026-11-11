@@ -273,7 +273,7 @@ while :; do
         if [ "$ctx_tried" = 0 ]; then
           load_contexts "$(jq -r '.baseRefName // "main"' <<<"$json")"
         fi
-        want_json=$(printf '%s\n' $ctxs ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"} | awk 'NF' | jq -R . | jq -sc .)
+        want_json=$(printf '%s\n' "$ctxs" ${required[@]+"${required[@]}"} ${req_now[@]+"${req_now[@]}"} | awk 'NF' | jq -R . | jq -sc .)
         # A completed newest run with no jobs at all (startup_failure) never gets checks: a failure, not a wait.
         # Only workflows that carry a required context (or every workflow when none are known, fail closed).
         empty=$(jq -r --argjson runs "$wfruns" --argjson draft "$is_draft" --argjson want "$want_json" \
