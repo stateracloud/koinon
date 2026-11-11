@@ -66,7 +66,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         COALESCE($15::boolean, true),
         COALESCE($16::boolean, true),
         $17)
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type CreateMCPServerParams struct {
@@ -149,6 +149,8 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -210,7 +212,7 @@ func (q *Queries) GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerPa
 }
 
 const getConnectionForMCPLink = `-- name: GetConnectionForMCPLink :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE org_id = $1 AND id = $2
 FOR SHARE
 `
@@ -248,12 +250,14 @@ func (q *Queries) GetConnectionForMCPLink(ctx context.Context, arg GetConnection
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
 
 const getMCPServer = `-- name: GetMCPServer :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -296,6 +300,8 @@ func (q *Queries) GetMCPServer(ctx context.Context, arg GetMCPServerParams) (Mcp
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -388,7 +394,7 @@ func (q *Queries) GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpda
 }
 
 const getServedMCPServerByName = `-- name: GetServedMCPServerByName :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
 WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 `
 
@@ -431,6 +437,8 @@ func (q *Queries) GetServedMCPServerByName(ctx context.Context, arg GetServedMCP
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -618,7 +626,7 @@ func (q *Queries) ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgent
 }
 
 const listMCPServers = `-- name: ListMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -663,6 +671,8 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -675,7 +685,7 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 }
 
 const listMCPServersLinkedToConnectionForUpdate = `-- name: ListMCPServersLinkedToConnectionForUpdate :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
 WHERE org_id = $1 AND code_host_connection_id = $2
 ORDER BY name, id
 FOR UPDATE
@@ -728,6 +738,8 @@ func (q *Queries) ListMCPServersLinkedToConnectionForUpdate(ctx context.Context,
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -954,7 +966,7 @@ func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMiss
 }
 
 const listServedMCPServers = `-- name: ListServedMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
 WHERE org_id = $1 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name
 `
@@ -1001,6 +1013,8 @@ func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) (
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -1119,7 +1133,7 @@ SET consecutive_failures = CASE WHEN $1::boolean THEN 0 ELSE consecutive_failure
     health_checked_at = now(),
     tools_synced_at = CASE WHEN $1::boolean AND $4::boolean THEN now() ELSE tools_synced_at END
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type RecordMCPServerProbeParams struct {
@@ -1174,6 +1188,8 @@ func (q *Queries) RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerP
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -1256,7 +1272,7 @@ SET kind = $1, exposes_untrusted_input = $2,
     exposes_private_data = $3,
     code_host_connection_id = $4
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type SetMCPServerDataClassParams struct {
@@ -1311,6 +1327,8 @@ func (q *Queries) SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDat
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -1543,7 +1561,7 @@ SET url = $1, transport = $2, credential_header = $3,
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $7 AND id = $8 AND source = 'secret'
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type UpdateDeclaredMCPServerParams struct {
@@ -1600,6 +1618,8 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -1621,7 +1641,7 @@ SET url = $1, transport = $2,
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = $8 AND id = $9
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type UpdateMCPServerParams struct {
@@ -1689,6 +1709,8 @@ func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }

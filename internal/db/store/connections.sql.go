@@ -31,7 +31,7 @@ const createConnection = `-- name: CreateConnection :one
 
 INSERT INTO connections (org_id, id, connector, display_name, config, secret_name, secret_fingerprint, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type CreateConnectionParams struct {
@@ -87,6 +87,8 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -94,7 +96,7 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 const createConnectionWithEnvelope = `-- name: CreateConnectionWithEnvelope :one
 INSERT INTO connections (org_id, id, connector, display_name, config, secret_envelope, secret_fingerprint, source, managed_by_secret, declared_version, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type CreateConnectionWithEnvelopeParams struct {
@@ -150,6 +152,8 @@ func (q *Queries) CreateConnectionWithEnvelope(ctx context.Context, arg CreateCo
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -173,7 +177,7 @@ func (q *Queries) DeleteConnection(ctx context.Context, arg DeleteConnectionPara
 }
 
 const getConnection = `-- name: GetConnection :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE org_id = $1 AND id = $2
 `
 
@@ -208,12 +212,14 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (C
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
 
 const getConnectionForUpdate = `-- name: GetConnectionForUpdate :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -249,6 +255,8 @@ func (q *Queries) GetConnectionForUpdate(ctx context.Context, arg GetConnectionF
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -296,7 +304,7 @@ func (q *Queries) ListAgentsBoundToConnection(ctx context.Context, arg ListAgent
 }
 
 const listConnections = `-- name: ListConnections :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -333,6 +341,8 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -345,7 +355,7 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 }
 
 const listConnectionsByConnector = `-- name: ListConnectionsByConnector :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE org_id = $1 AND connector = $2
 ORDER BY created_at, id
 `
@@ -387,6 +397,8 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -399,7 +411,7 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 }
 
 const listConnectionsToMigrate = `-- name: ListConnectionsToMigrate :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
 WHERE secret_name IS NOT NULL
 ORDER BY org_id, id
 `
@@ -438,6 +450,8 @@ func (q *Queries) ListConnectionsToMigrate(ctx context.Context) ([]Connection, e
 			&i.AdminDisabledAt,
 			&i.AdminDisabledBy,
 			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -498,7 +512,7 @@ const recordConnectionTest = `-- name: RecordConnectionTest :one
 UPDATE connections
 SET status = $1, last_tested_at = now(), last_test = $2
 WHERE org_id = $3 AND id = $4
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type RecordConnectionTestParams struct {
@@ -539,6 +553,8 @@ func (q *Queries) RecordConnectionTest(ctx context.Context, arg RecordConnection
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -547,7 +563,7 @@ const setConnectionEnvelope = `-- name: SetConnectionEnvelope :one
 UPDATE connections
 SET secret_envelope = $1
 WHERE org_id = $2 AND id = $3
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type SetConnectionEnvelopeParams struct {
@@ -585,6 +601,8 @@ func (q *Queries) SetConnectionEnvelope(ctx context.Context, arg SetConnectionEn
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -594,7 +612,7 @@ UPDATE connections
 SET config = $1, secret_envelope = $2, secret_fingerprint = $3,
     credential_lost_at = NULL, status = 'untested', last_tested_at = NULL, last_test = '[]'
 WHERE org_id = $4 AND id = $5 AND source = 'ui'
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type SetUIConnectionSecretParams struct {
@@ -639,6 +657,8 @@ func (q *Queries) SetUIConnectionSecret(ctx context.Context, arg SetUIConnection
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -649,7 +669,7 @@ SET display_name = $1, config = $2, secret_envelope = $3,
     secret_fingerprint = $4, declared_version = $5, removed_at = NULL,
     credential_lost_at = NULL
 WHERE org_id = $6 AND id = $7 AND source = 'secret'
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type UpdateDeclaredConnectionParams struct {
@@ -696,6 +716,8 @@ func (q *Queries) UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclar
 		&i.AdminDisabledAt,
 		&i.AdminDisabledBy,
 		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
