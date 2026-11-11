@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -135,6 +135,7 @@ reason() {
 	web) echo "web/ changed" ;;
 	shell | bash5) echo "$n shell scripts changed" ;;
 	actionlint) echo "workflows or the actionlint config changed" ;;
+	zizmor) echo "workflows, composite actions or the zizmor config changed" ;;
 	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
 	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
@@ -283,6 +284,9 @@ g_shell() {
 g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
 	actionlint
 }
+g_zizmor() { # workflow security lint, offline and default persona as in CI (.github/zizmor.yml)
+	zizmor --offline --no-progress .github
+}
 g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
 	hack/runner-lint-test.sh
 	hack/runner-lint.sh
@@ -361,6 +365,7 @@ run_gate() { # <gate>
 	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
+	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; brew install zizmor)"; return; } ;;
 	esac
 	ran=$((ran + 1))
 	start=$SECONDS

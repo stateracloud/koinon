@@ -561,7 +561,7 @@ settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call w
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
-Pinned tools and manifests from GitHub releases (shellcheck, actionlint, gitleaks, kind, ko, the
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, gitleaks, kind, ko, the
 gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
 `hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
 the sha256 check, and a file already there with the right sha256 is not fetched again (#431;

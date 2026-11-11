@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# zizmor, the workflow security lint (docs/dev/ci-rules.md, ADR 0111, #579). Run by the `lint-shell` CI
+# job and by `hack/preflight.sh` (gate `zizmor`), offline, default persona, over `.github/`. The version
+# and checksums are in hack/versions.env. Format: https://docs.zizmor.sh/configuration/
+#
+# Every entry has a reason. An ignore that is a deferred fix names its exit condition. A composite
+# action cannot be ignored here; it carries an inline `# zizmor: ignore[...]` comment instead.
+rules:
+  artipacked:
+    ignore:
+      # Deferred (#579 part 2): the release workflow is changed only with a tagged test. `gate` runs
+      # hack/release-gate.sh, which does `git fetch origin main`; `release` and the others at these lines
+      # check out and never push. Exit: add `persist-credentials: false` once an -rc tag run proves it.
+      - release.yml:46
+      - release.yml:67
+      - release.yml:175
+  cache-poisoning:
+    ignore:
+      # Deferred (#579 part 2): release.yml publishes images and signs them, so its setup-go and pnpm
+      # caches are a real finding. Exit: `cache: false` and `package-manager-cache: false` there, proven
+      # by an -rc tag run.
+      - release.yml:73
+      - release.yml:80
+      # e2e-kind.yml uploads only test logs and publishes no image or binary; the audit matches
+      # `upload-artifact` as "publishing". Its caches speed up the merge queue.
+      - e2e-kind.yml
+  dependabot-cooldown:
+    config:
+      # ADR 0079: a dependency is at least 3 days old before it enters the tree. zizmor's default is 7.
+      days: 3
+  self-repository:
+    # actionlint 1.7.12 rejects `uses: $/...` ("invalid format because ref is missing"), and actionlint is
+    # required (lint-shell). Exit: remove this when actionlint accepts the `$/` syntax, then run
+    # `zizmor --fix` and let it rewrite `./` to `$/`.
+    disable: true
