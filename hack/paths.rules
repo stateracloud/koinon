@@ -82,7 +82,8 @@ job chartsmoke ^(charts/|test/chartsmoke/|hack/versions\.env$|go\.(mod|sum))
 # The go-list graph's package directory `web` would also match web/src and package.json; the suite
 # builds without the `webui` tag, so only the Go stubs under web/ can change a binary.
 except chartsmoke ^web/
-keep chartsmoke ^web/.*\.go$
+# keep wins over except (#524 Bugbot): must not reinclude web/*_test.go (ERE, no lookaround).
+keep chartsmoke ^web/(.*/)?([^/]*[^t]|[^/]*[^s]t|[^/]*[^e]st|[^/]*[^t]est|[^/]*[^_]test|[^/]{1,4})\.go$
 # Test files of other packages are not compiled into a binary or into the suite's imports; the
 # suite's own _test.go files are under test/chartsmoke/ (seed) and stay.
 except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$

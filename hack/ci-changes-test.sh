@@ -80,6 +80,8 @@ expect "go" some-new-top-level-file
 expect "go" hack/pgserver/main.go
 expect "go web chartsmoke" web/webui.go
 expect "go web chartsmoke" web/webui_stub.go
+# keep must not reinclude web/*_test.go over except (#524 Bugbot); chartsmoke stays off.
+expect "go web" web/webui_test.go
 # web: web/ and api/proto (the ts client is generated from them); `go` ignores web/ files. The
 # chart smoke builds without the webui tag, so web/ sources do not reach it.
 expect "web" web/src/app.ts
