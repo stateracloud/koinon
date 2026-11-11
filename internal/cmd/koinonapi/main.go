@@ -765,7 +765,7 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), Held: hold, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
@@ -796,6 +796,7 @@ func serve(ctx context.Context, cfg config) error {
 	reg.MustRegister(guardMetrics.Collectors()...)
 	restorehold.Metric(reg, cfg.restoreHold)
 	binding.Metrics(reg)
+	declarative.RegisterMetrics(reg)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())

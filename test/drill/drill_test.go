@@ -570,7 +570,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			Expect(b).NotTo(Equal(a), "the target must not own the source's OpenShell objects (ADR 0106)")
 		})
 
-		It("only reports what its importer finds while held", Label("known-gap", "importer"), func(ctx SpecContext) {
+		It("only reports what its importer finds while held", Label("hold", "importer"), func(ctx SpecContext) {
 			needs("restore")
 			// A declared provider Secret appears in the target's namespace while it is held.
 			secret := fmt.Sprintf(`apiVersion: v1
@@ -597,12 +597,10 @@ stringData:
 			openAPI(ctx, &dst)
 			code, body := admin(ctx, &dst, http.MethodGet, "/providers")
 			Expect(code).To(Equal(http.StatusOK), string(body))
-			knownGap("#516", "the importer only reports while the install is held", func() string {
-				if strings.Contains(string(body), "drill-declared") {
-					return "the importer created the declared provider while the install was held"
-				}
-				return ""
-			})
+			Expect(string(body)).NotTo(ContainSubstring("drill-declared"), "the importer created the declared provider while the install was held (ADR 0110 decision 1)")
+			evs, err := kube.Kubectl(ctx, "-n", dst.in.Namespace, "get", "events", "--field-selector", "reason=HeldNotApplied", "-o", "name")
+			must(err, "list the HeldNotApplied events")
+			Expect(evs).NotTo(BeEmpty(), "the importer left no HeldNotApplied Event on the declared Secret")
 		}, NodeTimeout(5*time.Minute))
 
 		It("can disable its MCP servers", Label("known-gap", "mcp-disable"), func(ctx SpecContext) {
@@ -765,16 +763,12 @@ stringData:
 			Expect(drill.DiffObjects(baseline, after)).To(BeEmpty(), "the target changed objects of the source's gateway")
 		})
 
-		It("refuses a session token of the source", Label("known-gap", "quarantine"), func(ctx SpecContext) {
+		It("refuses a session token of the source", Label("isolation", "quarantine"), func(ctx SpecContext) {
 			needs("release")
-			knownGap("#516", "a session of the source install is refused on the restored one", func() string {
-				c := e2eclient.New(dst.client.Base)
-				c.SetSession(sourceSession)
-				if _, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{}); err == nil {
-					return "the source's session cookie is accepted by the target"
-				}
-				return ""
-			})
+			c := e2eclient.New(dst.client.Base)
+			c.SetSession(sourceSession)
+			_, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+			Expect(err).To(HaveOccurred(), "the source's session cookie is accepted by the target (ADR 0110 decision 3)")
 		})
 	})
 

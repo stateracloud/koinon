@@ -100,6 +100,9 @@ type Importer struct {
 	MCP *mcpservers.Service
 	// Outward applies the disabled key of a Secret (ADR 0110 decision 5); nil ignores the key.
 	Outward *outward.Service
+	// Held makes a pass plan only (ADR 0110 decision 1): it validates the Secrets and reports what
+	// it would apply and remove, and writes nothing to the database. nil is an install that is not held.
+	Held *restorehold.Guard
 	// URLPolicy decides which hosts a declared connection's base URL may name.
 	URLPolicy catalog.URLPolicy
 	// Sealer seals declared connections' secret fields.
@@ -118,6 +121,9 @@ type Importer struct {
 
 	mu     sync.Mutex
 	warned map[string]string // secret -> version already warned about
+	// planPass counts the changes of the current held pass; planSeen remembers which were logged.
+	planPass map[[2]string]int
+	planSeen map[string]string
 }
 
 // defaultOrgBackoff is the first retry delay for a Secret whose org does not exist yet.
@@ -273,6 +279,10 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 		return o.ID, true, nil
 	}
 
+	if i.Held.Held() {
+		i.beginPlan()
+		defer i.endPlan()
+	}
 	seen := map[present]bool{}
 	for k := range secrets {
 		sec := &secrets[k]
@@ -289,6 +299,12 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 			continue
 		}
 		seen[present{slug, typ, sec.Name}] = true
+		if i.Held.Held() {
+			if err := i.planSecret(ctx, sec, typ, version); err != nil {
+				i.reject(ctx, sec, version, err)
+			}
+			continue
+		}
 		var applyErr error
 		switch typ {
 		case TypeModelProvider:
@@ -309,7 +325,10 @@ func (i *Importer) sync(ctx context.Context) (waitingForOrg bool, err error) {
 			i.reject(ctx, sec, version, applyErr)
 		}
 	}
-	return waitingForOrg, i.removeAbsent(ctx, q, seen)
+	if i.Held.Held() {
+		return waitingForOrg, i.removeAbsent(ctx, q, seen, true)
+	}
+	return waitingForOrg, i.removeAbsent(ctx, q, seen, false)
 }
 
 // syncDisabled applies the Secret's disabled key to the items the Secret manages (the outward switch).
@@ -538,8 +557,9 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 }
 
 // removeAbsent deletes what a Secret declared when the Secret is gone (or no longer carries
-// the label, org or type that declared it).
-func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[present]bool) error {
+// the label, org or type that declared it). With dry set it only reports each removal (held,
+// ADR 0110 decision 1) and writes nothing: the plan and the removal walk the same items.
+func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[present]bool, dry bool) error {
 	orgIDs, err := q.ListOrgIDs(ctx)
 	if err != nil {
 		return err
@@ -555,6 +575,10 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 		}
 		for _, name := range names {
 			if !seen[present{slug, TypeModelProvider, name}] {
+				if dry {
+					i.planned(TypeModelProvider, ActionRemove, slug, name)
+					continue
+				}
 				if err := i.Catalog.RemoveDeclared(ctx, id, name); err != nil {
 					return err
 				}
@@ -568,6 +592,10 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 			}
 			for _, name := range names {
 				if !seen[present{slug, TypeMCPServer, name}] {
+					if dry {
+						i.planned(TypeMCPServer, ActionRemove, slug, name)
+						continue
+					}
 					if err := i.MCP.RemoveDeclared(ctx, id, name); err != nil {
 						return err
 					}
@@ -581,6 +609,10 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 		}
 		for _, c := range conns {
 			if c.Source != store.ConfigSourceSecret || c.RemovedAt.Valid || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
+				continue
+			}
+			if dry {
+				i.planned(TypeConnection, ActionRemove, slug, c.ManagedBySecret.String)
 				continue
 			}
 			// Marked removed, not deleted: agents are bound to it and the audit log names it.
