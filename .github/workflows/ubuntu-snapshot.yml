@@ -77,8 +77,9 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p "$OUT_DIR"
-          hack/ubuntu-snapshot-bump.sh --check --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT"
-          rc=$?
+          # The step runs under bash -e: exit 10 means "changed", so take the code with || instead of $?.
+          rc=0
+          hack/ubuntu-snapshot-bump.sh --check --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT" || rc=$?
           if [ "$rc" -eq 0 ]; then
             echo "changed=false" >>"$GITHUB_OUTPUT"
             echo "No pinned package and no dependency of the pins has a newer version in the snapshot; nothing to do."
@@ -88,8 +89,8 @@ jobs:
             echo "::error::hack/ubuntu-snapshot-bump.sh --check failed (exit $rc)"
             exit 1
           fi
-          hack/ubuntu-snapshot-bump.sh --write --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT" --report "$OUT_DIR/report.md"
-          rc=$?
+          rc=0
+          hack/ubuntu-snapshot-bump.sh --write --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT" --report "$OUT_DIR/report.md" || rc=$?
           if [ "$rc" -ne 10 ]; then
             echo "::error::hack/ubuntu-snapshot-bump.sh --write failed (exit $rc)"
             exit 1
@@ -143,7 +144,7 @@ jobs:
           [ "$BOT_BRANCH" != "$DEFAULT_BRANCH" ] || { echo "::error::refusing to push to the default branch"; exit 1; }
           [[ $SNAPSHOT =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::bad snapshot id '$SNAPSHOT'"; exit 1; }
           git apply --index "$BUMP_DIR/bump.patch"
-          # Only the three expected files may change.
+          # Only the two expected files may change.
           unexpected=$(git diff --cached --name-only | grep -vxE 'flavors/opencode/(Dockerfile|README\.md)' || true)
           [ -z "$unexpected" ] || { echo "::error::the patch touches unexpected files: $unexpected"; exit 1; }
           bot_name='github-actions[bot]'
