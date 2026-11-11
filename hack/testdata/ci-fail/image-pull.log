@@ -1,0 +1,4 @@
+# expect: infra yes
+Warning  Failed  kubelet  Failed to pull image "registry.example.invalid/koinon/agentd:test": toomanyrequests: rate limit
+Warning  Failed  kubelet  Error: ErrImagePull
+--- FAIL: TestQuickstart (300.00s)
