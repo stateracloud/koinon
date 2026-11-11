@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // Drain on SIGTERM (ADR 0085 decision 2, old issue 403): a stopping pool claims nothing more, lets the turn
@@ -50,7 +51,7 @@ var _ = Describe("Draining on stop", func() {
 		first := e.enqueue(ctx, e.task(ctx, "first"))
 		second := e.enqueue(ctx, e.task(ctx, "second")) // same agent: waits for the first to end
 		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = 30 * time.Second })
-		Eventually(started).WithTimeout(10 * time.Second).Should(BeClosed())
+		Eventually(started).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
 		claimed := getRun(ctx, first)
 
 		stopAsync(stop)
@@ -59,7 +60,7 @@ var _ = Describe("Draining on stop", func() {
 		Expect(getRun(ctx, first).LeaseExpiresAt.Time).To(BeTemporally(">", time.Now()), "heartbeats go on while draining")
 
 		close(release)
-		Eventually(runState(ctx, first)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, first)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(getRun(ctx, first).Epoch).To(Equal(claimed.Epoch))
 		Expect(getRun(ctx, first).Takeovers).To(BeZero())
 		Consistently(runState(ctx, second)).WithTimeout(time.Second).Should(Equal(store.RunStateQueued),
@@ -70,7 +71,7 @@ var _ = Describe("Draining on stop", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markHang))
 		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Second })
-		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
+		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
 		claimed := getRun(ctx, r)
 
 		started := time.Now()
@@ -79,7 +80,7 @@ var _ = Describe("Draining on stop", func() {
 		Expect(getRun(ctx, r).LeaseExpiresAt.Time).To(BeTemporally("<", time.Now()), "the lease was released")
 
 		e.pool("agentd-b")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		final := getRun(ctx, r)
 		Expect(final.OwnerID.String).To(HavePrefix("agentd-b/"))
 		Expect(final.Epoch).To(Equal(claimed.Epoch + 1))
@@ -90,7 +91,7 @@ var _ = Describe("Draining on stop", func() {
 		e.recordSandbox(ctx, store.SandboxStateStopped, "") // the run waits for its sandbox
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Minute })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
 
 		started := time.Now()
 		stop() // fails the spec if the pool does not stop within 10 s: the deadline is a minute
@@ -113,7 +114,7 @@ var _ = Describe("Draining on stop", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		// agentd's own retry layer, the one for a flavor whose harness does not retry.
 		stop := e.pool("agentd-a", agentd.OwnRetryLayer, func(c *agentd.Config) { c.DrainDeadline = time.Minute })
-		Eventually(func() int { return len(srv.Requests()) }).WithTimeout(15 * time.Second).Should(BeNumerically(">=", 1))
+		Eventually(func() int { return len(srv.Requests()) }).WithTimeout(racescale.D(15 * time.Second)).Should(BeNumerically(">=", 1))
 		Eventually(func() bool {
 			for _, ev := range events(ctx, r) {
 				if ev.Kind == "run.retry" {
@@ -121,7 +122,7 @@ var _ = Describe("Draining on stop", func() {
 				}
 			}
 			return false
-		}).WithTimeout(10*time.Second).Should(BeTrue(), "the run is in its retry back-off")
+		}).WithTimeout(racescale.D(10*time.Second)).Should(BeTrue(), "the run is in its retry back-off")
 
 		done := make(chan struct{})
 		go func() {
@@ -134,7 +135,7 @@ var _ = Describe("Draining on stop", func() {
 			finished_at = now(), ready_at = NULL, lease_expires_at = NULL, heartbeat_at = NULL
 			WHERE org_id = $1 AND id = $2`, e.org, r.ID)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(done).WithTimeout(15*time.Second).Should(BeClosed(),
+		Eventually(done).WithTimeout(racescale.D(15*time.Second)).Should(BeClosed(),
 			"the fence ends the back-off instead of sleeping out the 30 s Retry-After")
 	})
 })
