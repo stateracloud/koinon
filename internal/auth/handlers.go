@@ -108,6 +108,9 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.afterPasswordCheck != nil {
+		s.afterPasswordCheck()
+	}
 	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}

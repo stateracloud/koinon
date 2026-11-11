@@ -4,10 +4,14 @@ package auth
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -76,5 +81,52 @@ var _ = Describe("password login against a concurrent reset", func() {
 		var pgErr *pgconn.PgError
 		Expect(errors.As(err, &pgErr)).To(BeTrue(), "the reset fails on the lock: %v", err)
 		Expect(pgErr.Code).To(Equal("55P03"), "lock_not_available")
+	})
+
+	// changePassword is the operator reset: it replaces the hash behind the service's back.
+	changePassword := func(ctx SpecContext) {
+		hash, err := HashPasswordContext(ctx, "koinon_test_not-a-real-password-reset")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(store.New(pool).SetLocalPassword(ctx, store.SetLocalPasswordParams{
+			UserID: verified.UserID, PasswordHash: hash, MustChangePassword: true,
+			PasswordChangedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})).To(Succeed())
+	}
+
+	It("answers 401 and creates no session when the password changes between check and session", func(ctx SpecContext) {
+		svc, err := New(pool, Config{BootstrapLogin: true, PublicURL: "http://koinon.test"})
+		Expect(err).NotTo(HaveOccurred())
+		svc.afterPasswordCheck = func() { changePassword(ctx) }
+
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login",
+			strings.NewReader(`{"username":"admin","password":"`+fakeLoginPassword+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		svc.handleLogin(rec, req)
+
+		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec.Result().Cookies()).To(BeEmpty())
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, verified.UserID).Scan(&n)).To(Succeed())
+		Expect(n).To(BeZero())
+	})
+
+	It("refuses a password change when an operator reset the password after the old one was checked", func(ctx SpecContext) {
+		svc, err := New(pool, Config{BootstrapLogin: true, PublicURL: "http://koinon.test"})
+		Expect(err).NotTo(HaveOccurred())
+		svc.afterPasswordCheck = func() { changePassword(ctx) }
+
+		p := &Principal{UserID: verified.UserID, AuthMethod: store.AuthMethodPassword}
+		_, err = rpcHandler{s: svc}.ChangePassword(WithPrincipal(ctx, p), &authv1alpha1.ChangePasswordRequest{
+			CurrentPassword: fakeLoginPassword, NewPassword: "koinon_test_not-a-real-password-mine",
+		})
+		Expect(connect.CodeOf(err)).To(Equal(connect.CodeAborted))
+
+		// The reset's hash stands: the user's new password did not overwrite it.
+		cur, err := store.New(pool).GetLocalCredentialByUsername(ctx, "admin")
+		Expect(err).NotTo(HaveOccurred())
+		ok, err := VerifyPassword(cur.PasswordHash, "koinon_test_not-a-real-password-reset")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
 	})
 })

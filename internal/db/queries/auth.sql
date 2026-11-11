@@ -135,6 +135,12 @@ SELECT * FROM local_credentials WHERE user_id = @user_id;
 -- login either sees the new hash and is refused, or commits first and the reset revokes its session.
 SELECT * FROM local_credentials WHERE user_id = @user_id FOR SHARE;
 
+-- name: LockLocalCredentialUpdate :one
+-- A password change locks the credential row before it writes, so it can refuse when an operator
+-- reset changed the hash after the old password was checked. Lock order: the credential, then the
+-- sessions (as the reset does).
+SELECT * FROM local_credentials WHERE user_id = @user_id FOR UPDATE;
+
 -- name: CreateLocalCredential :exec
 INSERT INTO local_credentials (user_id, username, password_hash, must_change_password)
 VALUES (@user_id, @username, @password_hash, true)

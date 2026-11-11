@@ -236,6 +236,7 @@ func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch,
 	id := pgtype.UUID{Bytes: uid, Valid: true}
 	var row store.ApiToken
 	err = func() error {
+		parentRequiresAdmin := false
 		if by.Parent != nil {
 			// Share-lock the parent until the child is committed: a concurrent revoke locks the tree
 			// for update first, so it waits and then sees (and revokes) the child. A parent revoked
@@ -247,8 +248,9 @@ func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch,
 			if cur.RevokedAt.Valid || !now.Before(cur.ExpiresAt.Time) {
 				return &InvalidError{"the creating token has been revoked or has expired"}
 			}
+			parentRequiresAdmin = cur.RequiresPlatformAdmin
 		}
-		requiresAdmin := by.PlatformAdmin || (by.Parent != nil && by.Parent.RequiresPlatformAdmin)
+		requiresAdmin := by.PlatformAdmin || parentRequiresAdmin
 		if by.PlatformAdmin {
 			admin, err := q.IsPlatformAdmin(ctx, by.User)
 			if err != nil {

@@ -1016,6 +1016,10 @@ type Querier interface {
 	// change or reset (an UPDATE of the row) cannot commit between the check and the session: the
 	// login either sees the new hash and is refused, or commits first and the reset revokes its session.
 	LockLocalCredentialShare(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	// A password change locks the credential row before it writes, so it can refuse when an operator
+	// reset changed the hash after the old password was checked. Lock order: the credential, then the
+	// sessions (as the reset does).
+	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0

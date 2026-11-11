@@ -578,6 +578,28 @@ func (q *Queries) LockLocalCredentialShare(ctx context.Context, userID pgtype.UU
 	return i, err
 }
 
+const lockLocalCredentialUpdate = `-- name: LockLocalCredentialUpdate :one
+SELECT user_id, username, password_hash, must_change_password, password_changed_at, created_at, updated_at FROM local_credentials WHERE user_id = $1 FOR UPDATE
+`
+
+// A password change locks the credential row before it writes, so it can refuse when an operator
+// reset changed the hash after the old password was checked. Lock order: the credential, then the
+// sessions (as the reset does).
+func (q *Queries) LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error) {
+	row := q.db.QueryRow(ctx, lockLocalCredentialUpdate, userID)
+	var i LocalCredential
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.MustChangePassword,
+		&i.PasswordChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const recordUserLogin = `-- name: RecordUserLogin :exec
 UPDATE users
 SET email = $1, display_name = $2, last_login_at = $3
