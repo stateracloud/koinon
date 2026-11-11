@@ -17,6 +17,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/pricing"
@@ -241,6 +242,7 @@ func newRefresher(ctx context.Context, pool *pgxpool.Pool, metrics *prices.Metri
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
 		Bounds:   bounds,
 		Metrics:  metrics,
+		Catalog:  orcatalog.New(pool),
 	})
 }
 
