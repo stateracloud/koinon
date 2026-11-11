@@ -131,23 +131,25 @@ printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/helm"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/go"
 printf '#!/bin/sh\nexit 1\n' >"$tmp/bin-down/docker"
 chmod +x "$tmp/bin-up/helm" "$tmp/bin-up/go" "$tmp/bin-up/docker" "$tmp/bin-down/docker"
+# Escape and chartsmoke need helm/go on PATH; put $tmp/bin-up first so the cases run offline
+# without the host's tools (#349). bin-down's docker (exit 1) must precede bin-up's docker.
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke flavors escape"
 expect "jobs pass" 0 '^gate=chartsmoke .*verdict=pass' '^gate=flavors .*verdict=pass' '^gate=escape .*verdict=pass'
-run PATH="$tmp/bin-down:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke escape"
+run PATH="$tmp/bin-down:$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke escape"
 expect "no docker daemon" 3 '^gate=chartsmoke rc=0 .*verdict=notrun reason="docker unavailable"' '^gate=escape .*verdict=pass'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=fail
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=fail
 expect "job fail" 1 '^gate=escape rc=1 .*verdict=fail'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=nodocker
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=nodocker
 expect "job no docker" 3 '^gate=escape rc=1 .*verdict=notrun reason="docker unavailable"'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=sandbox
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=sandbox
 expect "job sandbox" 3 '^gate=escape rc=1 .*verdict=notrun reason="sandbox denial"'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=dockerperm
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=dockerperm
 expect "job docker socket denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="docker unavailable"'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=network
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=network
 expect "job network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=netallow
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=netallow
 expect "job allowed_domains denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
-run STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
 expect "a real failure beats a network line" 1 '^gate=escape rc=1 .*verdict=fail'
 
 # A failing log that merely says "Sandbox admission policy" is a failure, not a machine problem.
@@ -159,7 +161,7 @@ echo "FAIL	github.com/stateracloud/koinon/internal/sandbox"
 exit 1
 EOF2
 chmod +x "$tmp/make-sbx"
-out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-sbx" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-sbx" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "sandbox word is a failure" 1 '^gate=escape rc=1 .*verdict=fail'
 
 # ci-changes turns on go while preflight does not select it: the go gate still runs.
@@ -176,8 +178,47 @@ echo "--- FAIL: TestReal (0.1s)"
 exit 1
 EOF2
 chmod +x "$tmp/make-mixed"
-out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-mixed" STUB_GATES="" STUB_JOBS="escape" bash "$script" "$nonempty_base" 2>&1); rc=$?
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-mixed" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "failure beats docker text" 1 '^gate=escape rc=1 .*verdict=fail'
+
+# Helm / gitleaks failure markers beat EPERM text (#349).
+cat >"$tmp/make-helmerr" <<'EOF2'
+#!/usr/bin/env bash
+echo "Error: INSTALLATION FAILED: open /tmp/x: operation not permitted"
+exit 1
+EOF2
+chmod +x "$tmp/make-helmerr"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-helmerr" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "helm Error beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
+cat >"$tmp/make-gitleaks" <<'EOF2'
+#!/usr/bin/env bash
+echo "open /x: operation not permitted"
+echo "WRN leaks found: 1"
+exit 1
+EOF2
+chmod +x "$tmp/make-gitleaks"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-gitleaks" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "gitleaks leaks found beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
+cat >"$tmp/make-bufnet" <<'EOF2'
+#!/usr/bin/env bash
+echo "Failure: the server hosted at that remote is unavailable."
+exit 1
+EOF2
+chmod +x "$tmp/make-bufnet"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-bufnet" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "buf remote unavailable is network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+
+# A parallel preflight holding the worktree pid file: fail with a reason that says why (#349).
+cat >"$tmp/preflight-busy" <<'EOF2'
+#!/usr/bin/env bash
+case $1 in --base) shift 2 ;; esac
+if [[ $1 == --list ]]; then echo "gitleaks: always"; echo "e2e: informational, always"; exit 0; fi
+echo "preflight: a run (12345) is already in progress for /tmp/x; stop it with hack/preflight.sh --stop (lane-gates and preflight share this worktree's pid file, so a parallel run fails every gate)" >&2
+exit 2
+EOF2
+chmod +x "$tmp/preflight-busy"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight-busy" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_JOBS="" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "parallel preflight is named" 1 '^gate=gitleaks rc=2 .*verdict=fail reason="preflight already running in this worktree"'
 
 # ci-changes failing: the command fails loudly, never passes.
 cat >"$tmp/changes-bad" <<'EOF2'

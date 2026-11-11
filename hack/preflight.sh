@@ -332,7 +332,9 @@ g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 mkdir -p "$logdir"
 oldpid=$(cat "$pidfile" 2>/dev/null || true)
 if [[ -n $oldpid ]] && kill -0 "$oldpid" 2>/dev/null; then
-	echo "preflight: a run ($oldpid) is already in progress for $root (hack/preflight.sh --stop)" >&2
+	# lane-gates calls preflight once per gate and shares this worktree's pid file, so a parallel
+	# preflight (or a stuck one) turns every gate into fail with this message (#349).
+	echo "preflight: a run ($oldpid) is already in progress for $root; stop it with hack/preflight.sh --stop (lane-gates and preflight share this worktree's pid file, so a parallel run fails every gate)" >&2
 	exit 2
 fi
 echo $$ >"$pidfile"
@@ -364,9 +366,13 @@ run_gate() { # <gate>
 	if [[ $rc -eq 0 ]]; then
 		echo "$g ok $((SECONDS - start))s"
 		[[ $verbose == 1 ]] && sed 's/^/  | /' "$log"
-	elif [[ $g == go && $rc -eq 3 ]]; then
+	elif [[ $rc -eq 3 ]]; then
+		# Exit 3 is the missing-requirement code (go-test, chart-check when helm cannot run, …).
 		local names
 		names=$(sed -n 's/.*INCOMPLETE (missing \([^)]*\)).*/\1/p' "$log" | tail -1)
+		if [[ -z $names ]] && grep -qiE 'cannot run .*helm|helm: .*not found|operation not permitted' "$log"; then
+			names=helm
+		fi
 		echo "$g INCOMPLETE $((SECONDS - start))s (skipped: ${names:-see log}) log=$log"
 		if [[ $verbose == 1 ]]; then sed 's/^/  | /' "$log"; else tail -n 5 "$log" | sed 's/^/  | /'; fi
 		incomplete="$incomplete${incomplete:+,}$g"
