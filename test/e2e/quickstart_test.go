@@ -981,7 +981,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
-		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
+		// 30 s, not the 2 minutes this step used to wait out in every run (#572). The cap counts from the
+		// run's first claim (internal/agentd/sandbox.go), and the failure names its cause from the last pod
+		// reason the observer read, so the cap must outlast: the sandbox render and reconcile (a healthy
+		// sandbox in this cluster is ready in about 3 s), the kubelet's first failed pull of an image on
+		// a host that does not exist (ErrImagePull, seconds), and one observer read per 1 s poll (the org's
+		// workspace namespace already has its RoleBinding, so the 10 s RoleBinding backoff does not apply).
+		// That chain is well under 10 s; 30 s leaves three times that. A cap that is too short fails here
+		// as cause "unknown" instead of "image_pull". Only CI can show that 30 s is stable on its runners.
+		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=30s")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 

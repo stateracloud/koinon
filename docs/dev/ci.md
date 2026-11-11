@@ -260,7 +260,9 @@ drill job (`decide`, `quickstart` and `result` skip on a tag push and on that di
 merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
-commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
+commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). A red drill opens one issue
+with the label `drill-red`, or comments on the open one (the `drill issue` job, `hack/drill-issue.sh`; only that job
+has `issues: write`; close the issue when a nightly run is green). `test/e2e/run.sh` writes
 `junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
 Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session come back; needs the drill's
 SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
@@ -785,3 +787,12 @@ every required check green. Auto-merge then never fires, and nothing in the chec
 `.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
 publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
 in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
+
+## CodeQL
+
+`.github/workflows/codeql.yml` is CodeQL's advanced setup (#572); the default setup is off. It scans a pull request
+only when it changes Go or web code (a `paths` filter, allowed because the check is advisory), and `main` once a week
+(and on a dispatch). There is no `push` or `merge_group` trigger, and it saves no database or TRAP cache. Languages
+and query suite are the default setup's (actions, go, javascript-typescript, python; `default`). Not in
+`hack/ci-required.txt`. Switching over: merge the workflow, switch the default setup off in Settings right after
+(both cannot upload for one language), then run the workflow once by hand.

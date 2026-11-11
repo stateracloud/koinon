@@ -5,7 +5,8 @@
 #
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
-#      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
+#      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes. The build
+#      (kind/images.sh build) runs while step 1 creates the cluster; only the load waits for it;
 #   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
 #      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site
 #      (stateracloud/koinon-docs) shows the same commands and its CI compares its page with that file. They create the namespace, copy the OpenShell client
@@ -157,16 +158,39 @@ trap cleanup EXIT
 
 t_all=$(date +%s)
 
+# Building the images needs the Docker daemon and not the cluster (images.sh build), so it runs while kind/up.sh
+# creates the cluster; only the load into the node waits for it (#572). With SKIP_UP=1 the cluster exists
+# already and the build runs in line with the load.
+build_pid=""
+if [[ "$SKIP_BUILD" != 1 && "$SKIP_UP" != 1 ]]; then
+  t_build=$(date +%s)
+  echo "== $(date -u +%H:%M:%SZ) images (kind/images.sh build), in the background while the cluster is created"
+  CLUSTER="$CLUSTER" "$here/kind/images.sh" build >"$OUT/images-build.log" 2>&1 &
+  build_pid=$!
+  pids+=("$build_pid")
+fi
+
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell"
+  done_step "Prerequisites: kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell (the image build ran at the same time)"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
-  step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
-  CLUSTER="$CLUSTER" "$here/kind/images.sh"
-  done_step "Images: ko build and load (6 binaries), OpenCode flavor (pull or buildx) and kind load"
+  if [[ -n $build_pid ]]; then
+    step "images: wait for the build that ran during the prerequisites"
+    wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
+    cat "$OUT/images-build.log"
+    echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
+    done_step "Images: ko build and flavor pull or buildx (7 images; started with the prerequisites, this is only the wait that was left)"
+    step "images (kind/images.sh load): kind load"
+    CLUSTER="$CLUSTER" "$here/kind/images.sh" load
+    done_step "Images: kind load (7 images)"
+  else
+    step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
+    CLUSTER="$CLUSTER" "$here/kind/images.sh"
+    done_step "Images: ko build, OpenCode flavor (pull or buildx) and kind load"
+  fi
 fi
 
 step "fakes ($FAKES)"
