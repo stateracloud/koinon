@@ -22,6 +22,17 @@ CRDS_CATALOG=501527ab9c40c827144c8f45945b25a023e344ce
 HELM=${HELM:-helm}
 KUBECONFORM=(go run "github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_VERSION}")
 
+# helm >= 4: --dry-run=client under helm 3 still contacts the cluster and fails with
+# "Kubernetes cluster unreachable" when KUBECONFIG=/dev/null, which the NOTES assertions then
+# misreport as missing text (#349 / old #420). CI pins HELM_VERSION in hack/versions.env.
+helm_ver=$("$HELM" version --template '{{.Version}}' 2>/dev/null || true)
+helm_major=${helm_ver#v}
+helm_major=${helm_major%%.*}
+if ! [[ ${helm_major:-} =~ ^[0-9]+$ ]] || ((helm_major < 4)); then
+	echo "chart-check: need helm 4 or newer (got ${helm_ver:-unknown}); CI pins HELM_VERSION=$HELM_VERSION" >&2
+	exit 1
+fi
+
 out=$(mktemp -d "${TMPDIR:-/tmp}/chart-check.XXXXXX")
 trap 'rm -rf "$out"' EXIT
 
