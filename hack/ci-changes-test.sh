@@ -180,9 +180,20 @@ need_min() {
 
 # generate: the Makefile's recipe names the buf templates, the sqlc config and the oapi-codegen
 # config and spec; the templates and configs name the inputs, the outputs and the local plugin.
+# When make generate delegates to hack/generate.sh (#349), parse that script's body too.
 # Portable sed only (-E; BSD sed has no \|).
 gen_inputs=(buf.yaml buf.gen.yaml sqlc.yaml)
 recipe=$(sed -n '/^generate:/,/^[^[:space:]]/p' Makefile | grep -E '^[[:space:]]' || true)
+# Follow a single-line recipe that is only `GO=… hack/generate.sh` (or bare hack/generate.sh).
+gen_script=""
+if [[ $(grep -c . <<<"$recipe" || true) -lt 4 ]]; then
+	for tok in $recipe; do
+		case $tok in
+		hack/generate.sh | */hack/generate.sh) gen_script=$tok ;;
+		esac
+	done
+	[[ -n $gen_script && -f $gen_script ]] && recipe=$(cat "$gen_script")
+fi
 need_min "lines in the Makefile generate recipe" 4 "$(grep -c . <<<"$recipe" || true)"
 for tok in $recipe; do
 	[[ -f $tok ]] && gen_inputs+=("$tok")
