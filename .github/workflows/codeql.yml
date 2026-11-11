@@ -23,6 +23,8 @@ name: codeql
 on:
   pull_request:
     branches: [main]
+    # ready_for_review is not a default type: without it a draft marked ready with no new push is never scanned.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "**.go"
       - go.mod
