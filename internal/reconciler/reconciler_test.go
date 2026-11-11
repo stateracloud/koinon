@@ -768,7 +768,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(lr.Spec.Limits[0].Type).To(Equal(corev1.LimitTypeContainer))
 			})
 
-			It("counts a refused Create and retries it after the backoff", func(ctx SpecContext) {
+			It("counts a refused Create, holds the pass, and retries after the backoff", func(ctx SpecContext) {
 				var refuse atomic.Bool
 				refuse.Store(true)
 				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -777,11 +777,11 @@ var _ = Describe("Reconciler", func() {
 					}
 					return false, nil, nil
 				})
-				pass(ctx, r)
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox LimitRange")))
 				Expect(testutil.ToFloat64(metrics.LimitRangeErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
 				By("the next pass does not ask again inside the backoff")
 				before := len(kube.Actions())
-				pass(ctx, r)
+				Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
 				creates := 0
 				for _, a := range kube.Actions()[before:] {
 					if a.Matches("create", "limitranges") {

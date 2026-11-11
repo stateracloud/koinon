@@ -976,7 +976,6 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	}); err != nil {
 		return "", fmt.Errorf("reconciler: record workspace of org %s: %w", org.Slug, err)
 	}
-	done[id] = name
 	if r.cfg.Observer != nil && ws.Active {
 		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
 		_ = r.cfg.Observer.EnsureAccess(ctx, name)
@@ -986,11 +985,14 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
 	if r.cfg.LimitRange != nil && ws.Active {
-		// Defense in depth: a missing LimitRange is counted and logged there, never fatal here.
-		// A LimitRange sizes pods only at admission: a sandbox created while Ensure failed stays
-		// BestEffort until it is recreated (ADR 0083 amendment).
-		_ = r.cfg.LimitRange.Ensure(ctx, name)
+		// LimitRange sizes pods only at admission (ADR 0083 amendment). Hold CreateSandbox until
+		// Ensure succeeds; a sandbox admitted earlier stays BestEffort until it is recreated.
+		// Mark done only after Ensure so a failed pass does not let another agent skip it.
+		if err := r.cfg.LimitRange.Ensure(ctx, name); err != nil {
+			return "", fmt.Errorf("reconciler: sandbox LimitRange of org %s: %w", org.Slug, err)
+		}
 	}
+	done[id] = name
 	return name, nil
 }
 
