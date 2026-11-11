@@ -1008,7 +1008,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		By("pointing the flavor at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
-		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}kind.local/koinon-escape/agent:nope")
+		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
 		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
 		Expect(err).NotTo(HaveOccurred())
