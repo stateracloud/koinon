@@ -35,6 +35,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -501,6 +503,14 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				warm++
 			}
 			items = append(items, w)
+		}
+		if err := r.claimFlavorProfiles(ctx, org, agents); err != nil {
+			if errors.Is(err, errAbortPass) {
+				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+				return errors.Join(append(errs, err)...)
+			}
+			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
+			errs = append(errs, err)
 		}
 	}
 
@@ -1451,9 +1461,6 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	if err := r.deleteGitHub(ctx, ws, w.names()); err != nil {
 		return err
 	}
-	if err := r.claimFlavorProfile(ctx, w, ws); err != nil {
-		return err
-	}
 	if err := r.secrets.Delete(ctx, w.sb.KeySecretName); err != nil {
 		return err
 	}
@@ -1474,30 +1481,50 @@ type profileClaimer interface {
 	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
 }
 
-// claimFlavorProfile marks the flavor profile (koinon-agentgateway-<flavor>) of an archived agent
-// instead of deleting it (issue 511). The profile belongs to the workspace and the flavor, not to the
-// agent: every agent of the flavor in the org uses it, and a profile in use cannot go. The cleanup of
-// an archived agent also runs once, because the agent leaves the reconcile list when it ends, so this
-// is the last chance to mark a profile that no active agent of the flavor re-imports. An archived
-// agent keeps its data, so nothing of it is deleted that another agent or an un-archive needs; the
-// mark only says the profile is this install's. A missing profile is not created.
-func (r *Reconciler) claimFlavorProfile(ctx context.Context, w *work, ws string) error {
+// claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)
+// that no active or draft agent keeps current (issue 511). A profile belongs to the workspace and the
+// flavor, not to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to
+// delete one a provider uses. An active agent re-imports it with the mark and a draft agent's claim
+// does the same (claimDraft), so what is left are the flavors whose agents are all archived, or that
+// have none. An archived agent leaves the reconcile list once its cleanup ends, so a claim made only
+// while cleaning it up would miss every agent archived before the mark was on; the org pass sees them
+// all. The mark is the whole claim: archiving keeps the org's data and must not remove what a sibling
+// agent or an un-archive needs. A profile that does not exist is not created, and an org with no
+// recorded workspace has none to claim in. Idempotent: a marked profile is left alone.
+func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
 	c, ok := r.backend.(profileClaimer)
 	if !ok || !r.owns() {
 		return nil
 	}
-	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+	kept := map[store.AgentFlavor]bool{}
+	for _, a := range agents {
+		if a.Status != store.AgentStatusArchived {
+			kept[a.Flavor] = true
+		}
+	}
+	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
-	claimed, err := c.ClaimProviderProfile(ctx, ws, r.profile(w.agent.Flavor, flavor))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
 	}
-	if claimed {
-		r.log.Info("marked the flavor profile of an archived agent", append(w.logAttrs(), "flavor", string(w.agent.Flavor))...)
+	var errs []error
+	for _, flavor := range slices.Sorted(maps.Keys(r.cfg.Flavors)) {
+		f := r.cfg.Flavors[flavor]
+		if kept[flavor] || f.Image == "" || len(f.Binaries) == 0 {
+			continue
+		}
+		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, r.profile(flavor, f))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("reconciler: claim flavor profile %s of org %s: %w", flavor, org.Slug, err))
+			continue
+		}
+		if claimed {
+			r.log.Info("marked a flavor profile no active or draft agent keeps current", "org", org.Slug, "flavor", string(flavor))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell

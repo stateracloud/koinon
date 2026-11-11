@@ -100,14 +100,16 @@ objects were. Decision 5's claim ran only for active agents, so three groups wer
   rule about attached providers holds); that record is claimed when the agent is active again. With no
   sandbox the agent's GitHub provider and profile are dropped, because `reconcileActive` makes them again,
   marked, before it creates a sandbox.
-- **Archived agents: the flavor profile is marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
+- **Flavor profiles of archived agents are marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
   the workspace and the flavor, not to the agent: every agent of that flavor in the org shares it, and
   OpenShell refuses to delete a profile a provider uses. An archived agent also leaves the reconcile list
-  once its cleanup ends, so the cleanup (`reconcileArchived`) is the last chance to mark a profile that no
-  active agent of the flavor re-imports. The mark is the whole claim: archiving keeps the org's data and
-  must not remove what a sibling agent or an un-archive needs. A profile that does not exist is not
-  created. A retained sandbox of an archived agent is still claimed only when it is recreated (see the
-  consequences above).
+  once its cleanup ends, and agents archived before the mark was on are already gone from it, so the claim
+  is made per org, not per archived agent: in the org pass (`claimFlavorProfiles`) every configured flavor
+  that no active or draft agent of the org keeps current has its existing profile marked. Active agents
+  re-import the profile with the mark and draft agents claim it (above). The mark is the whole claim:
+  archiving keeps the org's data and must not remove what a sibling agent or an un-archive needs. A profile
+  that does not exist is not created, and an org without a recorded workspace is skipped. A retained sandbox
+  of an archived agent is still claimed only when it is recreated (see the consequences above).
 - **Workspaces of orgs that are not in this database, objects the reconciler did not make.** Nothing
   claims these, by design: they are not this install's to change. They are reported instead.
 

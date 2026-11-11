@@ -349,6 +349,28 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(gauge("sandbox")).To(BeZero())
 		})
 
+		It("marks the flavor profile of an agent archived and cleaned up before the mark was on", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // made before the install mark
+			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // cleans up; the row is 'deleted' and leaves the list
+			Expect(row(ctx, agent).State).To(Equal(store.SandboxStateDeleted))
+			Expect(osg.Provider(ws, names.Provider)).To(BeNil())
+			Expect(list(ctx)).To(ContainElement(line{"profile", profileID, reconciler.ReasonArchivedAgent}))
+
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(osg.Profile(ws, profileID).GetAnnotations()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
+			Expect(list(ctx)).To(BeEmpty())
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(gauge(kind)).To(BeZero(), kind)
+			}
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
+		})
+
 		It("keeps the flavor profile of an archived agent for an active agent of the same flavor", func(ctx SpecContext) {
 			keep, gone := newAgent(ctx, org, user), newAgent(ctx, org, user)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())

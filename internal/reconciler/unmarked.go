@@ -34,8 +34,8 @@ const (
 	// a draft agent keeps its provider attached and is claimed when the agent is active again.
 	ReasonDraftAgent = "draft-agent"
 	// ReasonArchivedAgent: the object belongs to an archived agent, or is the flavor profile that only
-	// archived agents of the org use. The reconciler claims the profile while it cleans an archived
-	// agent up (reconcileArchived); a retained sandbox is claimed when the agent is unarchived.
+	// archived agents of the org use. The org pass claims such a profile (claimFlavorProfiles), whenever
+	// the archived agent was cleaned up; a retained sandbox is claimed when the agent is unarchived.
 	ReasonArchivedAgent = "archived-agent"
 	// ReasonNotReconcilerMade: the reconciler did not make it, or this database has no record of it
 	// (a sandbox without the managed-by label, a profile that is not one the reconciler renders, a
@@ -184,7 +184,8 @@ func statusReason(st store.AgentStatus) string {
 // flavorReason is the reason of a flavor profile, which every agent of the flavor in the workspace
 // shares: any active agent re-imports it on its next pass, so it is pending; otherwise a draft
 // agent's claim comes first, then an archived agent's. A profile of a flavor no agent of the org
-// has was not left by one of this database's agents.
+// has was not left by one of this database's agents (a configured flavor's profile with no agent is
+// claimed by the org pass, so it leaves the list on the next pass).
 func flavorReason(statuses map[store.AgentStatus]bool) string {
 	switch {
 	case statuses[store.AgentStatusActive]:
