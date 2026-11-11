@@ -113,7 +113,8 @@ func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 	GinkgoHelper()
 	ensureNamespace(ctx, in.GatewayNamespace)
 	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, top.GatewayChart, "--version", top.GatewayVersion,
-		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
+		// The OpenShell chart has no top-level gatewayId; its gateway_id comes from server.sandboxJwt.gatewayId (default: the release name).
+		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "server.sandboxJwt.gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
 	must(err, "install the OpenShell gateway "+in.GatewayRelease)
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
