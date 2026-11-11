@@ -82,11 +82,21 @@ and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute wi
   pulls third-party images from (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies,
   agentgateway). Each node's containerd (`/etc/containerd/certs.d/<host>/hosts.toml`) asks the cache
   first and falls back to the upstream, without rewriting the reference: names and digests are
-  the ones production uses, and no admission policy list differs. They are anonymous, on the kind network only,
-  and never hold a credential. `KIND_PROXY_HOSTS="ghcr.io registry.k8s.io docker.io"` changes the list.
+  the ones production uses, and no admission policy list differs. They never hold a credential and publish no
+  port. `KIND_PROXY_HOSTS="ghcr.io registry.k8s.io docker.io"` changes the list.
 
-The registries outlive the cluster (`make dev-kind-down` keeps them, so the next cluster starts warm);
-`test/e2e/kind/registry.sh stop` removes them and `KIND_PROXY_PURGE=1` also the cached blobs. Running `up.sh`
+None of the three authenticates, and `kind-registry` accepts pushes from anything on the kind network, which
+includes every pod (the nodes are on it). That is fine for a disposable dev or CI cluster and is why this
+setup is not for anything else. What is tested: a sandbox cannot connect to them, by name or by address on the
+kind network (the escape case "cannot reach the kind local registry or its caches", whose targets
+`test/escape/kind.sh` reads from Docker, so the e2e's escape step runs it). The platform's own pods can reach
+them; nothing tests or prevents that.
+
+The registries outlive the cluster (`make dev-kind-down` keeps them, so the next cluster starts warm).
+`test/e2e/kind/registry.sh stop` removes them once no kind cluster is left on the host (another lane's run
+may be using them; `--force` stops them anyway), and `KIND_PROXY_PURGE=1` also removes the cached blobs and
+the pushed images. Each run overwrites its cluster's tags and a layer is stored once, so the push registry
+grows only by layers no tag names any more; purge it now and then. Running `up.sh`
 again reuses them. The registry port is `KIND_REGISTRY_PORT` (default 5001). The e2e sets the pull policy of
 its images to `Always`, so a reused cluster never runs an older image under the same tag. A flavor changed
 on a reused cluster needs a new tag (the content tag of `hack/flavor-tag.sh` does that).

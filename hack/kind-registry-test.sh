@@ -16,6 +16,9 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/state"
 
 # docker: a container exists once `run` made it; `exec -i ... sh -c "cat > <file>"` stores stdin under state/node.
+# state/race-<name> makes the next `run` of <name> lose to another lane: the container appears, created but
+# not started, and the run fails on the name. state/netrace-<name> makes the next `network connect` find
+# the container already connected by another lane.
 cat >"$tmp/bin/docker" <<'SH'
 #!/usr/bin/env bash
 echo "docker $*" >>"$STATE/calls.log"
@@ -23,12 +26,31 @@ case "$1" in
 inspect)
   name=${*: -1}
   [[ -e $STATE/c-$name ]] || exit 1
-  case "$*" in *Networks*) cat "$STATE/c-$name" ;; *) echo true ;; esac ;;
+  status=$(cat "$STATE/s-$name" 2>/dev/null || echo running)
+  case "$*" in
+  *Networks*) cat "$STATE/c-$name" ;;
+  *State.Status*) echo "$status" ;;
+  *) [[ $status == running ]] && echo true || echo false ;;
+  esac ;;
 run)
   while (($#)); do [[ $1 == --name ]] && name=$2; shift; done
-  echo '{"bridge":{}}' >"$STATE/c-$name" ;;
+  echo '{"bridge":{}}' >"$STATE/c-$name"
+  if [[ -e $STATE/race-$name ]]; then
+    rm "$STATE/race-$name"
+    echo created >"$STATE/s-$name"
+    echo "Conflict. The container name \"/$name\" is already in use" >&2
+    exit 125
+  fi ;;
+start)
+  echo running >"$STATE/s-${*: -1}" ;;
 network)
-  echo '{"bridge":{},"kind":{}}' >"$STATE/c-${*: -1}" ;;
+  name=${*: -1}
+  echo '{"bridge":{},"kind":{}}' >"$STATE/c-$name"
+  if [[ -e $STATE/netrace-$name ]]; then
+    rm "$STATE/netrace-$name"
+    echo "endpoint with name $name already exists in network kind" >&2
+    exit 1
+  fi ;;
 exec)
   if [[ $2 == -i ]]; then
     file=$(sed -n "s/.*cat > '\(.*\)'.*/\1/p" <<<"$*")
@@ -37,7 +59,11 @@ exec)
   fi ;;
 esac
 SH
-printf '#!/usr/bin/env bash\necho koinon-test-control-plane\n' >"$tmp/bin/kind"
+# kind: `get clusters` lists state/clusters (none when it is missing), `get nodes` one node.
+cat >"$tmp/bin/kind" <<'SH'
+#!/usr/bin/env bash
+if [[ "$*" == "get clusters" ]]; then cat "$STATE/clusters" 2>/dev/null || true; else echo koinon-test-control-plane; fi
+SH
 cat >"$tmp/bin/kubectl" <<'SH'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STATE/calls.log"
@@ -92,6 +118,25 @@ for f in test/e2e/kind/images.sh test/e2e/run.sh test/drill/run.sh test/e2e/esca
   check "$f takes the image repository from imagerepo.sh" grep -q 'imagerepo.sh' "$f"
 done
 check "images.sh pushes nothing outside the cluster's path" bash -c "! grep -v '^ *#' test/e2e/kind/images.sh | grep -q 'KO_DOCKER_REPO=\$REGISTRY\|\$REGISTRY/flavors'"
+
+# Two lanes at once (#600 review).
+rm "$STATE/c-kind-registry"
+: >"$STATE/race-kind-registry"
+check "start succeeds when another lane's run wins the registry's name" "$reg" start
+check "the loser starts the winner's created container" test "$(cat "$STATE/s-kind-registry")" = running
+
+echo '{"bridge":{}}' >"$STATE/c-kind-proxy-ghcr-io"
+: >"$STATE/netrace-kind-proxy-ghcr-io"
+check "attach succeeds when another lane connects a cache first" bash -c "'$reg' attach koinon-test >/dev/null"
+
+echo koinon-test >"$STATE/clusters"
+: >"$STATE/calls.log"
+check "stop refuses while a kind cluster exists" bash -c "! '$reg' stop 2>/dev/null"
+check "a refused stop removes nothing" bash -c "! grep -q '^docker rm' '$STATE/calls.log'"
+check "stop --force stops them anyway" bash -c "'$reg' stop --force && grep -q '^docker rm -f kind-registry' '$STATE/calls.log'"
+rm "$STATE/clusters"
+: >"$STATE/calls.log"
+check "stop with no cluster left removes the registry and the caches" bash -c "'$reg' stop && grep -q '^docker rm -f kind-registry kind-proxy-ghcr-io kind-proxy-registry-k8s-io' '$STATE/calls.log'"
 
 ((fail == 0)) || exit 1
 echo "kind-registry-test: all passed"

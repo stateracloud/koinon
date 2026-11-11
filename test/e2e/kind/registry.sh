@@ -13,8 +13,13 @@
 #     containerd (/etc/containerd/certs.d/<host>/hosts.toml), which does not rewrite the reference:
 #     every image name and digest is the one production uses (ADR 0061 decision 5), so no chart
 #     value and no admission policy list changes. A dead cache costs speed only, containerd falls
-#     back to the upstream. No credentials: every image is public, and the caches are on the kind
-#     network only (no published port), out of any sandbox's reach.
+#     back to the upstream. No credentials: every image is public, and the caches publish no port.
+#
+# None of them authenticates, and the push registry accepts pushes: anything on the kind network can
+# overwrite an image, so this is for disposable dev and CI clusters only. Pods are on that network too
+# (the nodes are). A sandbox cannot reach them: OpenShell refuses the connect, which the escape suite
+# asserts by name and by address ("cannot reach the kind local registry or its caches", test/escape,
+# KOINON_ESCAPE_REGISTRIES from test/escape/kind.sh); the platform's own pods can.
 #
 # containerd v2 reads certs.d by default (kind-config.yaml names it anyway); never the legacy
 # `registry.mirrors` patch, which turns that default off. The ConfigMap
@@ -23,7 +28,9 @@
 #   registry.sh start            create or start the registry and the caches (idempotent; no cluster needed)
 #   registry.sh attach <cluster> join the cluster's kind network, write the nodes' hosts.toml files and the
 #                                ConfigMap (idempotent); the kube context is kind-<cluster>
-#   registry.sh stop             remove the containers; the cached blobs stay (KIND_PROXY_PURGE=1 also removes the volumes)
+#   registry.sh stop [--force]   remove the containers; the cached blobs stay (KIND_PROXY_PURGE=1 also removes the volumes).
+#                                Every kind cluster on the host shares them, so stop refuses while one exists
+#                                (another lane's run may be using them); --force stops them anyway
 #
 #   KIND_REGISTRY_PORT=5001  KIND_PROXY_HOSTS="ghcr.io registry.k8s.io"
 #   KIND_PROXY_CACHE=<dir>    keep each cache's storage in <dir>/<host> (CI restores and saves it) instead
@@ -70,10 +77,19 @@ ensure() {
   [[ -z $publish ]] || args+=(-p "$publish")
   local e
   for e in "$@"; do args+=(-e "$e"); done
-  # Two up.sh runs on one host can both find no container: the loser's docker run fails on the name,
-  # and it uses the winner's container once that one is running.
   docker run "${args[@]}" "$REGISTRY_IMAGE" >/dev/null 2>&1 && return 0
-  [[ $(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true) == true ]] && return 0
+  # Two up.sh runs on one host can both find no container: the loser's docker run fails on the name.
+  # It waits for the winner's container (which may still be created, not running) and starts it if needed.
+  local _
+  for _ in $(seq 30); do
+    state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || true)
+    case "$state" in
+    running) return 0 ;;
+    "") break ;; # no container: the run failed for another reason, the last run below reports it
+    created | exited) docker start "$name" >/dev/null 2>&1 || true ;;
+    esac
+    sleep 1
+  done
   docker run "${args[@]}" "$REGISTRY_IMAGE" >/dev/null
 }
 
@@ -118,14 +134,18 @@ write_hosts() {
     docker exec -i "$node" sh -c "cat > '$dir/hosts.toml'"
 }
 
+# on_kind_net <container>: the container is on the kind network.
+on_kind_net() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$1" 2>/dev/null | grep -q "\"$KIND_NET\""; }
+
 cmd_attach() {
   local cluster=${1:?usage: registry.sh attach <cluster>}
   local ctx="kind-$cluster" t0 c h node nodes
   t0=$(date +%s)
   for c in $(all_names); do
-    if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$c" | grep -q "\"$KIND_NET\""; then
-      docker network connect "$KIND_NET" "$c"
-    fi
+    on_kind_net "$c" && continue
+    # Another lane's attach may connect it between the check and the connect: "already exists" is success.
+    docker network connect "$KIND_NET" "$c" 2>/dev/null || on_kind_net "$c" ||
+      { echo "cannot connect $c to the $KIND_NET network" >&2; return 1; }
   done
   mapfile -t nodes < <(kind get nodes --name "$cluster")
   [[ ${#nodes[@]} -gt 0 ]] || { echo "kind cluster $cluster has no nodes" >&2; return 1; }
@@ -151,7 +171,16 @@ EOF
 }
 
 cmd_stop() {
-  local names
+  local names clusters
+  if [[ ${1:-} != --force ]]; then
+    clusters=$(kind get clusters 2>/dev/null) ||
+      { echo "registry.sh stop: cannot list the kind clusters; --force stops the registries anyway" >&2; return 1; }
+    # kind prints "No kind clusters found." on stderr and nothing on stdout when there are none.
+    if [[ -n $clusters ]]; then
+      echo "registry.sh stop: kind clusters still use the shared registries ($(tr '\n' ' ' <<<"$clusters")); delete them first or pass --force" >&2
+      return 1
+    fi
+  fi
   mapfile -t names < <(all_names)
   docker rm -f "${names[@]}" >/dev/null 2>&1 || true
   if [[ ${KIND_PROXY_PURGE:-0} == 1 ]]; then
@@ -162,6 +191,6 @@ cmd_stop() {
 case "${1:-}" in
 start) cmd_start ;;
 attach) cmd_attach "${2:-}" ;;
-stop) cmd_stop ;;
-*) echo "usage: registry.sh start | attach <cluster> | stop" >&2; exit 2 ;;
+stop) cmd_stop "${2:-}" ;;
+*) echo "usage: registry.sh start | attach <cluster> | stop [--force]" >&2; exit 2 ;;
 esac

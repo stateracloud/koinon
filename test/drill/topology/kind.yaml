@@ -5,6 +5,10 @@
 # Each gateway has its own gatewayId, so the workspace namespaces openshell-<gatewayId>-* do not collide.
 # Namespaces must start with koinon-drill-. Releases contain "koinon" so the chart names its objects
 # <release>-api and so on. Checkpoints are on (phase 2): the object store is SeaweedFS (Apache-2.0) in the fakes namespace.
+# run.sh installs a copy of this file with localhost:5001 replaced by the cluster's path on the shared registry
+# (test/e2e/kind/imagerepo.sh) and an `imageRegistry:` line, which drill_test.go passes as image.registry. A
+# DRILL_TOPOLOGY file (the lab) sets imageRegistry only to override the chart's image.registry; `registry` is
+# descriptive and changes nothing.
 name: kind
 context: kind-koinon-e1
 source:

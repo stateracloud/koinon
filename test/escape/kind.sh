@@ -100,6 +100,22 @@ export KOINON_REQUIRE="${KOINON_REQUIRE:+$KOINON_REQUIRE,}escape-cluster-ips"
 export KOINON_ESCAPE_CLUSTER_DNS
 export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
 export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}
+# The kind local registry and its pull-through caches (test/e2e/kind/registry.sh, #45) authenticate nobody and
+# the push registry accepts pushes, so a sandbox must not reach them: by container name and by address on the
+# kind network. Read from Docker; a host without them (an older up.sh) leaves the case skipped.
+if [[ -z ${KOINON_ESCAPE_REGISTRIES:-} ]]; then
+  regs=()
+  while read -r name; do
+    regs+=("$name:5000")
+    ip=$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || true)
+    [[ -z $ip ]] || regs+=("$ip:5000")
+  done < <(docker ps --filter network=kind --format '{{.Names}}' | grep -E '^kind-(registry|proxy-)' || true)
+  KOINON_ESCAPE_REGISTRIES=$(IFS=,; echo "${regs[*]}")
+fi
+if [[ -n $KOINON_ESCAPE_REGISTRIES ]]; then
+  export KOINON_ESCAPE_REGISTRIES
+  KOINON_REQUIRE="$KOINON_REQUIRE,escape-kind-registry"
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=
