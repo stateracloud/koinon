@@ -95,18 +95,23 @@ objects were. Decision 5's claim ran only for active agents, so three groups wer
 - **Draft agents.** `reconcileDraft` now claims the agent's gateway-key provider and flavor profile. The
   provider is ensured with the key the agent kept (a draft agent keeps its key for a quick re-activation;
   if the key Secret no longer matches the recorded key nothing is touched and no key is issued), which
-  imports the flavor profile with the mark. The provider record itself is recreated with the mark only
+  imports the flavor profile with the mark; without the key the org pass below marks the profile. The provider record itself is recreated with the mark only
   when no sandbox attaches it (the stopped sandbox of a draft agent keeps it attached, and decision 5's
   rule about attached providers holds); that record is claimed when the agent is active again. With no
   sandbox the agent's GitHub provider and profile are dropped, because `reconcileActive` makes them again,
   marked, before it creates a sandbox.
-- **Flavor profiles of archived agents are marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
+- **Flavor profiles no active agent uses are marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
   the workspace and the flavor, not to the agent: every agent of that flavor in the org shares it, and
   OpenShell refuses to delete a profile a provider uses. An archived agent also leaves the reconcile list
   once its cleanup ends, and agents archived before the mark was on are already gone from it, so the claim
   is made per org, not per archived agent: in the org pass (`claimFlavorProfiles`) every configured flavor
-  that no active or draft agent of the org keeps current has its existing profile marked. Active agents
-  re-import the profile with the mark and draft agents claim it (above). The mark is the whole claim:
+  that no active agent of the org keeps current has its existing profile marked. Active agents re-import
+  the profile with the mark on every pass. A draft agent does not count as keeping it: its claim imports
+  the profile only while its key Secret matches, and a draft agent without a sandbox row is not reconciled
+  at all. The profile needs no key, so the org pass marks it either way. A profile found marked or missing
+  is remembered per workspace and not asked for again until an active agent of the flavor imports it, so
+  an idle org costs no gateway call per flavor and pass. A failed claim counts as a `sandbox` pass error,
+  the kind of the provider record and profile an agent's sandbox converges. The mark is the whole claim:
   archiving keeps the org's data and must not remove what a sibling agent or an un-archive needs. A profile
   that does not exist is not created, and an org without a recorded workspace is skipped. A retained sandbox
   of an archived agent is still claimed only when it is recreated (see the consequences above).
@@ -119,8 +124,8 @@ and only reads. An object that carries another install's mark is never listed. T
 
 | Reason | Meaning |
 |--------|---------|
-| `pending-claim` | An active agent's object. Its next reconcile claims it. |
-| `draft-agent` | A draft agent's object. Claimed as above. |
+| `pending-claim` | An active agent's object, or the profile of a configured flavor no agent of the org has. Its next reconcile claims it. |
+| `draft-agent` | A draft agent's object, or a flavor profile only draft and archived agents use. Claimed as above. |
 | `archived-agent` | An archived agent's object, or a flavor profile only archived agents use. |
 | `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing claims it. |
 | `not-reconciler-made` | Not made by the reconciler, or this database has no record of it. Nothing claims it. |

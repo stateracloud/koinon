@@ -29,9 +29,11 @@ const (
 	// install or by an e2e run on the same gateway; an org that is deleted counts too). Nothing
 	// claims it.
 	ReasonOrgNotInDB = "org-not-in-db"
-	// ReasonDraftAgent: the object belongs to a draft agent. The reconciler claims a draft agent's
-	// provider and profile (reconcileDraft) when no sandbox attaches the provider; a stopped sandbox of
-	// a draft agent keeps its provider attached and is claimed when the agent is active again.
+	// ReasonDraftAgent: the object belongs to a draft agent, or is the flavor profile that only draft
+	// (and archived) agents of the org use. The reconciler claims a draft agent's provider
+	// (reconcileDraft) when no sandbox attaches it; a stopped sandbox of a draft agent keeps its
+	// provider attached and is claimed when the agent is active again. The org pass marks such a
+	// flavor profile (claimFlavorProfiles).
 	ReasonDraftAgent = "draft-agent"
 	// ReasonArchivedAgent: the object belongs to an archived agent, or is the flavor profile that only
 	// archived agents of the org use. The org pass claims such a profile (claimFlavorProfiles), whenever
@@ -43,6 +45,7 @@ const (
 	ReasonNotReconcilerMade = "not-reconciler-made"
 	// ReasonPendingClaim: the object belongs to an active agent; its next reconcile claims it
 	// (a sandbox is recreated, a provider recreated once no sandbox attaches it, a profile imported).
+	// The profile of a configured flavor no agent of the org has is pending too: the org pass marks it.
 	ReasonPendingClaim = "pending-claim"
 )
 
@@ -65,9 +68,11 @@ type unmarkedLister interface {
 }
 
 // ListUnmarked lists the unmarked objects with their reasons. The gateway side is the backend's
-// (read-only), the database side the orgs and agents of q. It fails when the backend cannot list
-// (no install mark, a failed list), so it never answers with a partial list.
-func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backend) ([]UnmarkedObject, error) {
+// (read-only), the database side the orgs and agents of q. flavors are the configured flavors (the
+// reconciler's [Config.Flavors]): the org pass claims the profile of a rendered one even when the org
+// has no agent of it. It fails when the backend cannot list (no install mark, a failed list), so it
+// never answers with a partial list.
+func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backend, flavors map[store.AgentFlavor]Flavor) ([]UnmarkedObject, error) {
 	l, ok := backend.(unmarkedLister)
 	if !ok {
 		return nil, errors.New("reconciler: the backend cannot list unmarked objects")
@@ -84,7 +89,11 @@ func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backe
 	if err != nil {
 		return nil, fmt.Errorf("reconciler: list agents: %w", err)
 	}
-	return classifyUnmarked(objs, orgs, agents), nil
+	rendered := map[store.AgentFlavor]bool{}
+	for name, f := range flavors {
+		rendered[name] = f.rendered()
+	}
+	return classifyUnmarked(objs, orgs, agents, rendered), nil
 }
 
 // orgView is what the database says about one org's objects.
@@ -101,7 +110,8 @@ type orgView struct {
 // classifyUnmarked gives every unmarked object its reason. The order of the checks is the order of
 // the reasons' certainty: a workspace nobody owns is an orphan whatever is in it; inside an org's
 // workspace an object the reconciler did not make comes next; the rest follows the agent.
-func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorkspacesForUnmarkedRow, agents []store.ListAgentsForUnmarkedRow) []UnmarkedObject {
+// rendered names the flavors the reconciler renders a profile for.
+func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorkspacesForUnmarkedRow, agents []store.ListAgentsForUnmarkedRow, rendered map[store.AgentFlavor]bool) []UnmarkedObject {
 	byWorkspace := map[string]*orgView{} // workspace -> org
 	byOrg := map[pgtype.UUID]*orgView{}
 	for _, o := range orgs {
@@ -136,19 +146,19 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 	for _, o := range objs {
 		out = append(out, UnmarkedObject{
 			Workspace: o.Workspace, Kind: o.Kind, Name: o.Name,
-			Reason: reasonOf(o, byWorkspace[o.Workspace]),
+			Reason: reasonOf(o, byWorkspace[o.Workspace], rendered),
 		})
 	}
 	return out
 }
 
-func reasonOf(o execution.UnmarkedObject, v *orgView) string {
+func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[store.AgentFlavor]bool) string {
 	if v == nil {
 		return ReasonOrgNotInDB
 	}
 	if o.Kind == "profile" {
 		if flavor, ok := strings.CutPrefix(o.Name, profilePrefix); ok {
-			return flavorReason(v.flavors[store.AgentFlavor(flavor)])
+			return flavorReason(v.flavors[store.AgentFlavor(flavor)], rendered[store.AgentFlavor(flavor)])
 		}
 		if st, ok := v.names[o.Name]; ok {
 			return statusReason(st)
@@ -182,11 +192,11 @@ func statusReason(st store.AgentStatus) string {
 }
 
 // flavorReason is the reason of a flavor profile, which every agent of the flavor in the workspace
-// shares: any active agent re-imports it on its next pass, so it is pending; otherwise a draft
-// agent's claim comes first, then an archived agent's. A profile of a flavor no agent of the org
-// has was not left by one of this database's agents (a configured flavor's profile with no agent is
-// claimed by the org pass, so it leaves the list on the next pass).
-func flavorReason(statuses map[store.AgentStatus]bool) string {
+// shares: any active agent re-imports it on its next pass, so it is pending; otherwise the draft
+// agents' reason comes first, then the archived agents'. With no agent of the flavor in the org, the
+// profile of a rendered flavor is pending too (the org pass marks it on its next run), and that of a
+// flavor this install does not render was not left by its reconciler.
+func flavorReason(statuses map[store.AgentStatus]bool, rendered bool) string {
 	switch {
 	case statuses[store.AgentStatusActive]:
 		return ReasonPendingClaim
@@ -194,6 +204,8 @@ func flavorReason(statuses map[store.AgentStatus]bool) string {
 		return ReasonDraftAgent
 	case statuses[store.AgentStatusArchived]:
 		return ReasonArchivedAgent
+	case rendered:
+		return ReasonPendingClaim
 	default:
 		return ReasonNotReconcilerMade
 	}

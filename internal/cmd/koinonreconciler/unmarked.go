@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -19,20 +20,21 @@ import (
 )
 
 // unmarkedConfig is what "koinon-reconciler unmarked list" needs: the database (to know which orgs and
-// agents exist), the OpenShell gateway (to list its objects) and the install mark (to tell this
-// install's objects from another's). The Deployment already gives the reconciler all of them, so
+// agents exist), the OpenShell gateway (to list its objects), the install mark (to tell this
+// install's objects from another's) and the configured flavors (whose profiles the reconciler claims). The Deployment already gives the reconciler all of them, so
 // `kubectl exec deploy/<reconciler> -- koinon-reconciler unmarked list` needs nothing more.
 type unmarkedConfig struct {
 	databaseURL      string
 	openshellAddress string
 	openshellTLSDir  string
 	installMark      string
+	flavors          map[store.AgentFlavor]reconciler.Flavor
 	json             bool
 }
 
 // newUnmarkedCommand is "koinon-reconciler unmarked" (issue 511, ADR 0106). list is
 // its work, so a test can read the settings it resolved.
-func newUnmarkedCommand(list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
+func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unmarked",
 		Short: "Inspect the OpenShell objects that carry no install mark",
@@ -47,18 +49,31 @@ func newUnmarkedCommand(list func(context.Context, unmarkedConfig, io.Writer) er
 			"one per line: workspace, kind, name, reason. It only reads; it changes nothing on the gateway and never lists an " +
 			"object that carries another install's mark.\n\n" +
 			"Reasons:\n" +
-			"  " + reconciler.ReasonPendingClaim + "      an active agent's object; its next reconcile claims it (a sandbox is recreated, " +
-			"a provider recreated once no sandbox attaches it)\n" +
-			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object; claimed when no sandbox attaches the provider, otherwise " +
-			"when the agent is active again\n" +
-			"  " + reconciler.ReasonArchivedAgent + "     an archived agent's object, or a flavor profile only archived agents use; " +
-			"claimed while the agent is cleaned up, a retained sandbox when the agent is unarchived\n" +
+			"  " + reconciler.ReasonPendingClaim + "      an active agent's object, or the profile of a configured flavor no agent of the " +
+			"org has; its next reconcile claims it (a sandbox is recreated, a provider recreated once no sandbox attaches it, " +
+			"a profile marked)\n" +
+			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object, or a flavor profile only draft and archived agents use; " +
+			"a provider is claimed when no sandbox attaches it, otherwise when the agent is active again; the profile is marked " +
+			"by the reconcile pass of the org\n" +
+			"  " + reconciler.ReasonArchivedAgent + "     an archived agent's object, or a flavor profile only archived agents use; the " +
+			"profile is marked by the reconcile pass of the org, the agent's provider and sandbox are deleted by its cleanup, " +
+			"a retained sandbox is claimed when the agent is unarchived\n" +
 			"  " + reconciler.ReasonOrgNotInDB + "       in a workspace no org of this database owns (left by an earlier install or an e2e " +
 			"run on the same gateway); nothing claims it\n" +
 			"  " + reconciler.ReasonNotReconcilerMade + "  not made by the reconciler, or not known to this database; nothing claims it\n\n" +
 			"Run it in the reconciler pod, which has the settings: kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list",
-		Args:    cobra.NoArgs,
-		PreRunE: func(cmd *cobra.Command, _ []string) error { return cmd.ValidateRequiredFlags() },
+		Args: cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cmd.ValidateRequiredFlags(); err != nil {
+				return err
+			}
+			images, err := flavorImages(v)
+			if err != nil {
+				return err
+			}
+			c.flavors = flavorsOf(images)
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return list(cmd.Context(), c, cmd.OutOrStdout())
 		},
@@ -95,7 +110,7 @@ func listUnmarked(ctx context.Context, c unmarkedConfig, out io.Writer) error {
 	defer func() { _ = backend.Close() }()
 	backend.WithOwner(execution.OwnerID(c.installMark))
 
-	objs, err := reconciler.ListUnmarked(ctx, store.New(pool), backend)
+	objs, err := reconciler.ListUnmarked(ctx, store.New(pool), backend, c.flavors)
 	if err != nil {
 		return err
 	}

@@ -196,9 +196,12 @@ func (c *config) toolServers() map[string]string {
 }
 
 // flavors combines the configured images with each flavor's binaries.
-func (c *config) flavors() map[store.AgentFlavor]reconciler.Flavor {
+func (c *config) flavors() map[store.AgentFlavor]reconciler.Flavor { return flavorsOf(c.flavorImages) }
+
+// flavorsOf combines flavor images with each flavor's binaries.
+func flavorsOf(images map[string]string) map[store.AgentFlavor]reconciler.Flavor {
 	out := map[store.AgentFlavor]reconciler.Flavor{}
-	for name, img := range c.flavorImages {
+	for name, img := range images {
 		f := store.AgentFlavor(name)
 		out[f] = reconciler.Flavor{Image: img, Binaries: reconciler.DefaultBinaries[f]}
 	}

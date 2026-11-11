@@ -214,6 +214,11 @@ type Reconciler struct {
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
 	draftGitHubDropped map[string]bool
+	// flavorProfileSettled holds the flavor profiles, by workspace and profile ID (flavorProfileKey),
+	// that claimFlavorProfiles found marked or missing (under mu), so an org whose flavors no active
+	// agent keeps current does not cost a gateway call per flavor every pass. reconcileActive clears
+	// the entry when it imports the profile again; a new workspace is a new key.
+	flavorProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -319,7 +324,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
-		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		flavorProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
@@ -509,6 +514,8 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return errors.Join(append(errs, err)...)
 			}
+			// A flavor profile is part of what an agent's sandbox converges (reconcileActive and
+			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
 			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 			errs = append(errs, err)
 		}
@@ -1020,7 +1027,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		return w.keyErr
 	}
 	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+	if !ok || !flavor.rendered() {
 		return fmt.Errorf("flavor %q has no image or binaries configured", w.agent.Flavor)
 	}
 	ws, err := r.ensureWorkspace(ctx, w.org, workspaces)
@@ -1043,6 +1050,11 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err := ensureKey(false); err != nil {
 		return err
 	}
+	// The ensure imported the flavor profile: once no active agent keeps it current, the org pass
+	// looks at it again.
+	r.mu.Lock()
+	delete(r.flavorProfileSettled, flavorProfileKey(ws, r.profile(w.agent.Flavor, flavor).ID))
+	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
 	baseURL, err := r.baseURLOf(ctx, w)
@@ -1367,7 +1379,8 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 //
 // The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
 // re-activation; without a Secret that still matches it nothing is touched and no key is issued).
-// The ensure imports the flavor profile with the mark. The provider record itself is recreated with
+// The ensure imports the flavor profile with the mark; without it the org pass marks the profile
+// (claimFlavorProfiles), which needs no key. The provider record itself is recreated with
 // the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
 // OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
 // claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
@@ -1378,7 +1391,7 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 		return nil
 	}
 	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+	if !ok || !flavor.rendered() {
 		return nil
 	}
 	_, material, ok, err := r.recordedMaterial(ctx, w)
@@ -1482,15 +1495,18 @@ type profileClaimer interface {
 }
 
 // claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)
-// that no active or draft agent keeps current (issue 511). A profile belongs to the workspace and the
-// flavor, not to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to
-// delete one a provider uses. An active agent re-imports it with the mark and a draft agent's claim
-// does the same (claimDraft), so what is left are the flavors whose agents are all archived, or that
-// have none. An archived agent leaves the reconcile list once its cleanup ends, so a claim made only
-// while cleaning it up would miss every agent archived before the mark was on; the org pass sees them
-// all. The mark is the whole claim: archiving keeps the org's data and must not remove what a sibling
-// agent or an un-archive needs. A profile that does not exist is not created, and an org with no
-// recorded workspace has none to claim in. Idempotent: a marked profile is left alone.
+// that no active agent keeps current (issue 511). A profile belongs to the workspace and the flavor, not
+// to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to delete one a
+// provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
+// flavors whose agents are all draft or archived, or that have none. A draft agent does not count as
+// keeping its flavor: claimDraft imports the profile only when the agent's key Secret still matches
+// the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
+// archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
+// it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
+// is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
+// un-archive needs. A profile that does not exist is not created, and an org with no recorded
+// workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
+// missing is not asked for again (flavorProfileSettled) until an active agent imports it.
 func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
 	c, ok := r.backend.(profileClaimer)
 	if !ok || !r.owns() {
@@ -1498,7 +1514,7 @@ func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgs
 	}
 	kept := map[store.AgentFlavor]bool{}
 	for _, a := range agents {
-		if a.Status != store.AgentStatusArchived {
+		if a.Status == store.AgentStatusActive {
 			kept[a.Flavor] = true
 		}
 	}
@@ -1512,20 +1528,34 @@ func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgs
 	var errs []error
 	for _, flavor := range slices.Sorted(maps.Keys(r.cfg.Flavors)) {
 		f := r.cfg.Flavors[flavor]
-		if kept[flavor] || f.Image == "" || len(f.Binaries) == 0 {
+		if kept[flavor] || !f.rendered() {
 			continue
 		}
-		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, r.profile(flavor, f))
+		p := r.profile(flavor, f)
+		k := flavorProfileKey(row.Workspace, p.ID)
+		r.mu.Lock()
+		settled := r.flavorProfileSettled[k]
+		r.mu.Unlock()
+		if settled {
+			continue
+		}
+		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("reconciler: claim flavor profile %s of org %s: %w", flavor, org.Slug, err))
 			continue
 		}
 		if claimed {
-			r.log.Info("marked a flavor profile no active or draft agent keeps current", "org", org.Slug, "flavor", string(flavor))
+			r.log.Info("marked a flavor profile no active agent keeps current", "org", org.Slug, "flavor", string(flavor))
 		}
+		r.mu.Lock()
+		r.flavorProfileSettled[k] = true
+		r.mu.Unlock()
 	}
 	return errors.Join(errs...)
 }
+
+// flavorProfileKey is the key of a flavor profile in flavorProfileSettled.
+func flavorProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
