@@ -52,14 +52,18 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 			"  " + reconciler.ReasonPendingClaim + "      an active agent's object, or the profile of a configured flavor no agent of the " +
 			"org has; its next reconcile claims it (a sandbox is recreated, a provider recreated once no sandbox attaches it, " +
 			"a profile marked)\n" +
-			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object, or a flavor profile only draft and archived agents use; " +
-			"a provider is claimed when no sandbox attaches it, otherwise when the agent is active again; the profile is marked " +
-			"by the reconcile pass of the org\n" +
+			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object, or a flavor profile only draft and archived agents use, " +
+			"that the reconciler claims on its next pass; if it is still listed after a pass, the agent's key Secret no longer " +
+			"matches its recorded key: activate or archive the agent\n" +
 			"  " + reconciler.ReasonArchivedAgent + "     an archived agent's object, or a flavor profile only archived agents use; the " +
-			"profile is marked by the reconcile pass of the org, the agent's provider and sandbox are deleted by its cleanup, " +
-			"a retained sandbox is claimed when the agent is unarchived\n" +
+			"profile is marked by the reconcile pass of the org, the agent's provider and sandbox are deleted by its cleanup\n" +
+			"  " + reconciler.ReasonWaitsForAgent + "    the reconciler cannot claim it while the agent keeps its status: a draft agent's " +
+			"stopped sandbox and the providers it attaches (claimed when the agent is activated, removed when it is archived), an " +
+			"archived agent's retained sandbox (claimed when the agent is unarchived, or delete it by hand when its home is no " +
+			"longer wanted)\n" +
 			"  " + reconciler.ReasonOrgNotInDB + "       in a workspace no org of this database owns (left by an earlier install or an e2e " +
-			"run on the same gateway); nothing claims it\n" +
+			"run on the same gateway); nothing of this install claims it. On a gateway shared with another install it can be that " +
+			"install's, which has not claimed its objects yet: check with it before deleting\n" +
 			"  " + reconciler.ReasonNotReconcilerMade + "  not made by the reconciler, or not known to this database; nothing claims it\n\n" +
 			"Run it in the reconciler pod, which has the settings: kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list",
 		Args: cobra.NoArgs,

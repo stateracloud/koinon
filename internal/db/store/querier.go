@@ -696,7 +696,9 @@ type Querier interface {
 	// Agents that are not archived and whose active or latest version binds the connection
 	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
 	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
-	// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511).
+	// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
+	// with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
+	// the agent to change status from one the reconciler claims.
 	ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.

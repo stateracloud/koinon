@@ -27,18 +27,31 @@ import (
 const (
 	// ReasonOrgNotInDB: the object is in a workspace no org of this database owns (left by an earlier
 	// install or by an e2e run on the same gateway; an org that is deleted counts too). Nothing
-	// claims it.
+	// of this install claims it. On a gateway shared with another install that has its own database,
+	// the line can belong to that install, which has not claimed its objects yet (its workspace
+	// carries no mark yet): do not delete it then, check with that install first (it lists the
+	// object under one of its own reasons).
 	ReasonOrgNotInDB = "org-not-in-db"
 	// ReasonDraftAgent: the object belongs to a draft agent, or is the flavor profile that only draft
-	// (and archived) agents of the org use. The reconciler claims a draft agent's provider
-	// (reconcileDraft) when no sandbox attaches it; a stopped sandbox of a draft agent keeps its
-	// provider attached and is claimed when the agent is active again. The org pass marks such a
-	// flavor profile (claimFlavorProfiles).
+	// (and archived) agents of the org use, and the reconciler claims it on its next pass: the
+	// provider of a draft agent with no sandbox (reconcileDraft), the flavor profile (the org pass,
+	// claimFlavorProfiles). If it is still listed after a pass, the agent's key Secret no longer
+	// matches its recorded key (the database cannot show that), so nothing is touched: activate or
+	// archive the agent. A draft agent's existing sandbox and the providers it attaches are
+	// [ReasonWaitsForAgent] instead.
 	ReasonDraftAgent = "draft-agent"
 	// ReasonArchivedAgent: the object belongs to an archived agent, or is the flavor profile that only
 	// archived agents of the org use. The org pass claims such a profile (claimFlavorProfiles), whenever
-	// the archived agent was cleaned up; a retained sandbox is claimed when the agent is unarchived.
+	// the archived agent was cleaned up. An archived agent's retained sandbox is
+	// [ReasonWaitsForAgent] instead.
 	ReasonArchivedAgent = "archived-agent"
+	// ReasonWaitsForAgent: the reconciler cannot claim the object while the agent stays in its
+	// status. A draft agent's stopped sandbox (and the provider that sandbox attaches) is claimed
+	// when the agent is activated, or removed when it is archived; an archived agent's retained
+	// sandbox is claimed when the agent is unarchived. The operator activates or archives the draft
+	// agent, unarchives the archived one, or deletes the retained sandbox by hand once its home is no
+	// longer wanted.
+	ReasonWaitsForAgent = "waits-for-agent"
 	// ReasonNotReconcilerMade: the reconciler did not make it, or this database has no record of it
 	// (a sandbox without the managed-by label, a profile that is not one the reconciler renders, a
 	// name that matches no agent of the org).
@@ -50,7 +63,7 @@ const (
 )
 
 // UnmarkedReasons are the values of [UnmarkedObject.Reason].
-var UnmarkedReasons = []string{ReasonOrgNotInDB, ReasonDraftAgent, ReasonArchivedAgent, ReasonNotReconcilerMade, ReasonPendingClaim}
+var UnmarkedReasons = []string{ReasonOrgNotInDB, ReasonDraftAgent, ReasonArchivedAgent, ReasonWaitsForAgent, ReasonNotReconcilerMade, ReasonPendingClaim}
 
 // UnmarkedObject is one line of the list.
 type UnmarkedObject struct {
@@ -101,6 +114,8 @@ type orgView struct {
 	// names maps an agent-bound object name (sandbox, provider, GitHub provider and profile) to the
 	// agent's status.
 	names map[string]store.AgentStatus
+	// sandboxState maps a sandbox or provider name to the state of the agent's sandbox row.
+	sandboxState map[string]store.NullSandboxState
 	// agents maps an agent ID to its status, for the task sandboxes, which carry the agent label.
 	agents map[string]store.AgentStatus
 	// flavors maps a flavor to the statuses of the org's agents of that flavor.
@@ -116,7 +131,7 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 	byOrg := map[pgtype.UUID]*orgView{}
 	for _, o := range orgs {
 		v := &orgView{
-			names: map[string]store.AgentStatus{}, agents: map[string]store.AgentStatus{},
+			names: map[string]store.AgentStatus{}, sandboxState: map[string]store.NullSandboxState{}, agents: map[string]store.AgentStatus{},
 			flavors: map[store.AgentFlavor]map[store.AgentStatus]bool{},
 		}
 		byOrg[o.OrgID] = v
@@ -134,6 +149,9 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 		n := execution.AgentObjectNames(a.OrgID.Bytes, a.ID.Bytes)
 		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider, n.GitHubProfile} {
 			v.names[name] = a.Status
+		}
+		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider} {
+			v.sandboxState[name] = a.SandboxState
 		}
 		v.agents[execution.UUIDString(a.ID.Bytes)] = a.Status
 		if v.flavors[a.Flavor] == nil {
@@ -169,7 +187,7 @@ func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[store.AgentFl
 		return ReasonNotReconcilerMade
 	}
 	if st, ok := v.names[o.Name]; ok {
-		return statusReason(st)
+		return agentObjectReason(st, v.sandboxState[o.Name], o.Kind)
 	}
 	if st, ok := v.agents[o.Labels[LabelAgent]]; ok && strings.HasPrefix(o.Name, taskSandboxPrefix) {
 		return statusReason(st)
@@ -179,6 +197,21 @@ func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[store.AgentFl
 
 // taskSandboxPrefix starts the names execution.TaskSandboxName returns.
 const taskSandboxPrefix = "kt-"
+
+// agentObjectReason is the reason of a sandbox or provider named after an agent. The sandbox row's
+// state tells whether the sandbox exists on the gateway: for a draft agent that is the sandbox and the
+// provider it attaches, for an archived agent the retained sandbox. Neither is claimed until the
+// agent leaves that status.
+func agentObjectReason(st store.AgentStatus, sb store.NullSandboxState, kind string) string {
+	exists := sb.Valid && sb.SandboxState != store.SandboxStatePending && sb.SandboxState != store.SandboxStateDeleted
+	switch {
+	case st == store.AgentStatusDraft && exists:
+		return ReasonWaitsForAgent
+	case st == store.AgentStatusArchived && kind == "sandbox" && sb.Valid && sb.SandboxState == store.SandboxStateRetained:
+		return ReasonWaitsForAgent
+	}
+	return statusReason(st)
+}
 
 func statusReason(st store.AgentStatus) string {
 	switch st {

@@ -80,8 +80,11 @@ name. Velero's restore marks restored objects the same way.
   several passes (held runs, the cap, attached providers). A restored copy may run on the same gateway only
   when every sandbox, provider and provider profile of the live install carries the mark: the gauge
   `koinon_openshell_unmarked_objects` is 0 for every kind and `koinon_openshell_unmarked_objects_stale` is 0.
-  A retained (archived) sandbox is counted and is claimed only when it is recreated, so the operator unarchives
-  its agent on the live install first, or deletes the sandbox when its home volume is not needed.
+  That is reached only when the install has no orphans (`org-not-in-db`, `not-reconciler-made`) and no
+  `waits-for-agent` object (amendment for issue 511): a retained (archived) sandbox and the stopped sandbox of
+  a draft agent are counted and are claimed only when the agent changes status, so the operator unarchives the
+  archived agent on the live install first, activates or archives the draft agent, or deletes the sandbox when
+  its home volume is not needed.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
@@ -125,18 +128,26 @@ and only reads. An object that carries another install's mark is never listed. T
 | Reason | Meaning |
 |--------|---------|
 | `pending-claim` | An active agent's object, or the profile of a configured flavor no agent of the org has. Its next reconcile claims it. |
-| `draft-agent` | A draft agent's object, or a flavor profile only draft and archived agents use. Claimed as above. |
-| `archived-agent` | An archived agent's object, or a flavor profile only archived agents use. |
-| `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing claims it. |
+| `draft-agent` | A draft agent's object, or a flavor profile only draft and archived agents use, that the reconciler claims on its next pass (a provider with no sandbox, the profile). If it is still listed after a pass, the agent's key Secret no longer matches its recorded key (the database cannot show that) and nothing is touched: activate or archive the agent. |
+| `archived-agent` | An archived agent's object, or a flavor profile only archived agents use. The org pass marks the profile; the agent's own provider and sandbox are deleted by its cleanup. |
+| `waits-for-agent` | The reconciler cannot claim it while the agent stays in its status: a draft agent's stopped sandbox and the providers that sandbox attaches (claimed when the agent is activated, removed when it is archived), and an archived agent's retained sandbox (claimed when the agent is unarchived). |
+| `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing of this install claims it. On a gateway shared with another install, the line can belong to that install, which has not claimed its objects yet (its workspace carries no mark yet): do not delete it, check with that install first. |
 | `not-reconciler-made` | Not made by the reconciler, or this database has no record of it. Nothing claims it. |
 
-An operator reads the gauge as before; a kind above 0 with only `pending-claim`, `draft-agent` and
-`archived-agent` lines is still being claimed, and `org-not-in-db` or `not-reconciler-made` lines are what
-stops it reaching 0. The command runs in the reconciler pod (`kubectl exec deploy/<release>-reconciler --
-koinon-reconciler unmarked list`) and needs the settings the Deployment already gives it: the database URL,
-the OpenShell address and TLS directory, and the install mark. Removing the orphans (`--delete-orphans`) and
-a gauge labeled by reason (ADR 0023 would fix the label values above) are not built; the operator deletes
-an orphan on the gateway by hand until they are.
+An operator reads the gauge as before. A kind above 0 with only `pending-claim`, `draft-agent` and
+`archived-agent` lines is still being claimed (it clears within a few passes), unless a `draft-agent` line stays
+after a pass (the key Secret case above). Three kinds of line do not clear by themselves and need the
+operator: `waits-for-agent` (activate or archive the draft agent; unarchive the archived agent, or delete its
+retained sandbox by hand once its home is no longer wanted), `org-not-in-db` (delete the object on the
+gateway by hand if it is a leftover of an earlier install or an e2e run; first check it is not another
+install's on a shared gateway) and `not-reconciler-made` (delete or leave). The gauge therefore reaches 0
+only on an install with no orphans and no `waits-for-agent` object. The command runs in the reconciler pod
+(`kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list`) and needs the settings the
+Deployment already gives it: the database URL, the OpenShell address and TLS directory, and the install
+mark. Removing the orphans (`--delete-orphans`) and a gauge labeled by reason (ADR 0023 would fix the label
+values above) are not built; the operator deletes an orphan on the gateway by hand until they are. The
+provider claim (delete by name, then create) has no precondition, because OpenShell's delete request has no
+version field; that window is the one decision 5 already documents.
 
 ## Links
 

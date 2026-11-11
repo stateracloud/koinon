@@ -38,6 +38,8 @@ var _ = Describe("Reconciler install ownership", func() {
 		// secrets are shared by the reconcilers of one spec, as the real ones share the cluster's Secrets:
 		// a reconciler of the same install made after another one finds the first one's agent keys.
 		secrets *fake.Clientset
+		// retention is the home retention of the reconcilers mk makes.
+		retention reconciler.Retention
 	)
 	flavors := map[store.AgentFlavor]reconciler.Flavor{
 		store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
@@ -61,6 +63,7 @@ var _ = Describe("Reconciler install ownership", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		secrets = fake.NewClientset()
+		retention = ""
 		osg = fakegateway.New()
 		cc, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -88,6 +91,7 @@ var _ = Describe("Reconciler install ownership", func() {
 				Flavors:             flavors,
 				RuntimeClassName:    "kata",
 				MaxRecreatesPerPass: maxRecreates,
+				HomeRetention:       retention,
 				Metrics:             m,
 				Logger:              slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 			})
@@ -257,8 +261,8 @@ var _ = Describe("Reconciler install ownership", func() {
 			}
 			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(active).Sandbox, reconciler.ReasonPendingClaim))
 			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(active).Provider, reconciler.ReasonPendingClaim))
-			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(draft).Sandbox, reconciler.ReasonDraftAgent))
-			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(draft).Provider, reconciler.ReasonDraftAgent))
+			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(draft).Sandbox, reconciler.ReasonWaitsForAgent))
+			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(draft).Provider, reconciler.ReasonWaitsForAgent))
 			Expect(got).To(HaveKeyWithValue(ws+"/profile/"+profileID, reconciler.ReasonPendingClaim), "an active agent of the flavor imports it")
 			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/ka-handmade", reconciler.ReasonNotReconcilerMade))
 			Expect(got).To(HaveKeyWithValue(orphanWS+"/sandbox/ka-orphan", reconciler.ReasonOrgNotInDB))
@@ -283,14 +287,23 @@ var _ = Describe("Reconciler install ownership", func() {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // provider and profile, no sandbox (on demand)
 			Expect(osg.Sandbox(ws, names.Sandbox)).To(BeNil())
+			// The agent had a GitHub grant while it was active: its provider and profile are still there.
+			Expect(bk("").EnsureProvider(ctx, ws, execution.Provider{
+				Name:        names.GitHubProvider,
+				Profile:     reconciler.GitHubProfile(names.GitHubProfile, reconciler.GitHubRead{Provider: "GitHub"}, reconciler.DefaultGitBinaries),
+				Credentials: map[string]string{"GH_TOKEN": "koinon_test_not-a-real-token"},
+			})).To(Succeed())
+			Expect(osg.Provider(ws, names.GitHubProvider)).NotTo(BeNil())
+			Expect(osg.Profile(ws, names.GitHubProfile)).NotTo(BeNil())
 			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: agent.ID})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(list(ctx)).To(ConsistOf(line{"profile", profileID, reconciler.ReasonDraftAgent}, line{"provider", names.Provider, reconciler.ReasonDraftAgent}))
 			keyBefore := row(ctx, agent).GatewayKeyID
 
 			live := mk("mark-live", 0)
 			Expect(live.ReconcileAll(ctx)).To(Succeed())
 			Expect(list(ctx)).To(BeEmpty())
+			Expect(osg.Provider(ws, names.GitHubProvider)).To(BeNil(), "a draft agent with no sandbox keeps no GitHub provider")
+			Expect(osg.Profile(ws, names.GitHubProfile)).To(BeNil(), "nor a GitHub profile")
 			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 			Expect(osg.Profile(ws, profileID).GetAnnotations()).To(HaveKey(execution.LabelInstall))
 			Expect(row(ctx, agent).GatewayKeyID).To(Equal(keyBefore), "the key survives for re-activation, none was issued")
@@ -335,7 +348,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(live.ReconcileAll(ctx)).To(Succeed()) // stops the sandbox
 			Expect(osg.Sandbox(ws, names.Sandbox)).NotTo(BeNil())
 			Expect(osg.Calls("DeleteProvider")).To(Equal(deletes), "an attached provider is not deleted")
-			Expect(list(ctx)).To(ConsistOf(line{"sandbox", names.Sandbox, reconciler.ReasonDraftAgent}, line{"provider", names.Provider, reconciler.ReasonDraftAgent}))
+			Expect(list(ctx)).To(ConsistOf(line{"sandbox", names.Sandbox, reconciler.ReasonWaitsForAgent}, line{"provider", names.Provider, reconciler.ReasonWaitsForAgent}))
 
 			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 				OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,
@@ -444,6 +457,48 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(reasonOf(nil)).To(Equal(reconciler.ReasonNotReconcilerMade), "an unconfigured flavor")
 			Expect(reasonOf(map[store.AgentFlavor]reconciler.Flavor{store.AgentFlavorOpencode: {}})).To(Equal(reconciler.ReasonNotReconcilerMade),
 				"a flavor without an image is not rendered")
+		})
+
+		It("lists a draft agent's stopped sandbox and an archived agent's retained sandbox as waits-for-agent, and the rest reaches 0", func(ctx SpecContext) {
+			draft, archived := newAgent(ctx, org, user), newAgent(ctx, org, user)
+			retention = reconciler.RetentionRetain
+			for range 2 { // old objects, no install mark; every sandbox is created and ready
+				Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			}
+			Expect(osg.Sandbox(ws, execution.AgentObjectNames(org.Bytes, archived.ID.Bytes).Sandbox)).NotTo(BeNil())
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: draft.ID})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: archived.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // stops the draft's sandbox, retains the archived agent's
+			Expect(row(ctx, archived).State).To(Equal(store.SandboxStateRetained))
+
+			live := mk("mark-live", 0)
+			for range 3 {
+				Expect(live.ReconcileAll(ctx)).To(Succeed())
+			}
+			dn, an := execution.AgentObjectNames(org.Bytes, draft.ID.Bytes), execution.AgentObjectNames(org.Bytes, archived.ID.Bytes)
+			Expect(list(ctx)).To(ConsistOf(
+				line{"sandbox", dn.Sandbox, reconciler.ReasonWaitsForAgent},
+				line{"provider", dn.Provider, reconciler.ReasonWaitsForAgent},
+				line{"sandbox", an.Sandbox, reconciler.ReasonWaitsForAgent},
+			))
+			Expect(gauge("sandbox")).To(Equal(2.0), "the gauge counts what waits for an agent")
+			Expect(gauge("provider")).To(Equal(1.0))
+			Expect(gauge("profile")).To(BeZero())
+
+			By("activating the draft agent and unarchiving the archived one clears it")
+			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: org, AgentID: draft.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: draft.ID, VersionID: version.ID, ActivatedBy: user})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bk("mark-live").DeleteSandbox(ctx, ws, an.Sandbox)).To(Succeed(), "or the operator deletes the retained sandbox by hand")
+			for range 3 {
+				Expect(live.ReconcileAll(ctx)).To(Succeed())
+			}
+			Expect(list(ctx)).To(BeEmpty())
 		})
 
 		It("reaches 0 on an install with no orphans", func(ctx SpecContext) {

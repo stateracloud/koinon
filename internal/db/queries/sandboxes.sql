@@ -23,10 +23,13 @@ WHERE o.deleted_at IS NULL
 ORDER BY o.id;
 
 -- name: ListAgentsForUnmarked :many
--- Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511).
-SELECT a.org_id, a.id, a.status, a.flavor
+-- Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
+-- with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
+-- the agent to change status from one the reconciler claims.
+SELECT a.org_id, a.id, a.status, a.flavor, s.state AS sandbox_state
 FROM agents a
 JOIN orgs o ON o.id = a.org_id
+LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
 WHERE o.deleted_at IS NULL
 ORDER BY a.org_id, a.id;
 

@@ -177,6 +177,10 @@ func (b *Backend) ClaimProviderProfile(ctx context.Context, workspace string, p 
 	if b.owner == "" {
 		return false, nil
 	}
+	// One read under profileMu serves the check and the write, so the update goes against the
+	// version the check looked at and no concurrent ensureProfile slips in between.
+	b.profileMu.Lock()
+	defer b.profileMu.Unlock()
 	got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: p.ID})
 	if err != nil {
 		if errors.Is(wrap(op, err), execution.ErrNotFound) {
@@ -191,7 +195,7 @@ func (b *Backend) ClaimProviderProfile(ctx context.Context, workspace string, p 
 	if !b.unlabeled(labels) {
 		return false, nil
 	}
-	if err := b.ensureProfile(ctx, workspace, p); err != nil {
+	if err := b.writeProfile(ctx, workspace, p, got); err != nil {
 		return false, err
 	}
 	return true, nil
