@@ -289,7 +289,7 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 
 // probeRetry is an installRetry whose lines go to its own buffer, not the global slog default, so a retry
 // goroutine that outlives its spec cannot write into another spec's logs. A spec that starts the retry waits
-// for the "recorded after a retry" line (see retryEnded): the goroutine logs it as its last act.
+// for the "recorded after a retry" line (see retryEnded): on the success path the goroutine logs it as its last act.
 func probeRetry(anyError bool) (installRetry, *lockedBuffer) {
 	var logs lockedBuffer
 	return installRetry{Goroutine: "probe", What: "probe", AnyError: anyError, Log: slog.New(slog.NewTextHandler(&logs, nil))}, &logs
