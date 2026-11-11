@@ -508,15 +508,16 @@ jobs:
 
   # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
   # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
-  # The browser download is cached by @playwright/test version; system libraries are installed on
-  # every run (cheap), the browser binary only on a cache miss.
-  # ubuntu-24.04: ubuntu-latest is migrating to 26.04 (actions/runner-images#14748); install-deps
-  # was failing on the new image. Pin until warm-caches-web and the cache key also name the image.
+  # Run in the Playwright image so browsers and system libraries match @playwright/test without
+  # apt on the runner (install --with-deps was failing on ubuntu-latest→26 and on ubuntu-24.04).
+  # Keep the image tag in lockstep with web/package.json's @playwright/test.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
     defaults:
       run:
         working-directory: web
@@ -531,20 +532,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-      # apt through Playwright needs the same retries as Dockerfiles (docs/dev/ci.md, #149 / #141).
-      # Always --with-deps: install-deps alone was exiting 1 on cache hits (ubuntu-latest→26 and
-      # ubuntu-24.04). With a warm browser cache the download is a no-op; apt still runs.
-      - name: playwright chromium
-        run: |
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAPT::Update::Error-Mode "any";\n' | sudo tee /etc/apt/apt.conf.d/80-koinon-retries >/dev/null
-          pnpm exec playwright install --with-deps chromium
       - run: pnpm exec vite build
       - run: pnpm test:e2e
         env:
