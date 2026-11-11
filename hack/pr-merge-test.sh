@@ -494,11 +494,41 @@ v=$(prv_judge "$rows" "$(jq -c '[.workflow_runs[] | {id, path, name, event, disp
 
 # #133, ADR 0105: e2e-kind is judged like any workflow. A dispatched run (81) re-run to green does not outvote the
 # newer PR run (82): the newest run of the workflow decides, so its red `e2e result` is the verdict.
+# (#399 comment fix: the green row is in run 81, not 82.)
 e2e_row() { printf '{"name":"e2e result","status":"COMPLETED","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/o/r/actions/runs/%s/job/9","workflowName":""}' "$1" "$2" "$2" "$3"; }
 e2e_rows=$(printf '%s\n' "$(e2e_row FAILURE 2026-11-01T10:20:00Z 81)" "$(e2e_row FAILURE 2026-11-01T10:50:00Z 82)" "$(e2e_row SUCCESS 2026-11-01T11:00:00Z 81)" | jq -sc .)
 e2e_runs="[$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z 2),$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)]"
 v=$(prv_judge "$e2e_rows" "$e2e_runs" false "e2e result")
 [ "$v" = "$(printf 'e2e result\tfailure\t82')" ] || { echo "FAIL: the newest e2e-kind run decides, an older run's re-run green does not: $v" >&2; fail=1; }
+
+# #399: within one run the newest finished row decides, cancelled included (an older green must not win).
+setup false "$(r go 2026-11-01T10:00:00Z success 72)
+$(r go 2026-11-01T11:00:00Z cancelled 72)
+$(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
+wfruns "$ci_old" "$ci_new"
+run 7 --admin
+check "#399: a newer cancelled row in the same run beats an older green" 1 nomerge
+grep -q 'NOT GREEN go (cancelled, run 72)' <<<"$out" || { echo "FAIL: newest cancelled decides: $out" >&2; fail=1; }
+
+# #399: prv_empty only covers workflows that carry a required context (advisory startup_failure is ignored).
+setup false "$(r go 2026-11-01T10:00:00Z success 72)
+$(r 'quick checks' 2026-11-01T10:05:00Z success 72)"
+wfruns "$ci_new" "$(wfrun 90 mirror.yml mirror 2026-11-01T10:06:00Z 1 completed startup_failure)"
+run 7 --admin
+check "#399: an advisory workflow's empty run does not block the merge" 0 merge
+
+# #399: a commit status whose target_url contains /runs/<id> is not dropped by the run filter.
+rows=$(jq -nc '[
+  {"name":"go","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:05:00Z","completedAt":"2026-11-01T10:05:00Z","detailsUrl":"https://github.com/o/r/actions/runs/72/job/1","workflowName":"ci"},
+  {"name":"quick checks","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-01T10:05:00Z","completedAt":"2026-11-01T10:05:00Z","detailsUrl":"https://github.com/o/r/actions/runs/72/job/2","workflowName":"ci"},
+  {"name":"dco","state":"SUCCESS","startedAt":"2026-11-01T10:00:00Z","targetUrl":"https://github.com/o/r/actions/runs/71/job/1"}
+]')
+v=$(prv_judge "$rows" "[$(wfrun 71 ci.yml ci 2026-11-01T10:00:00Z),$(wfrun 72 ci.yml ci 2026-11-01T10:05:00Z)]" false go "quick checks" dco)
+if [ "$v" = "$(printf 'go\tsuccess\t72\nquick checks\tsuccess\t72\ndco\tsuccess\t71')" ]; then
+  echo "ok: #399 status with /runs/id is kept by the run filter"
+else
+  echo "FAIL: #399 status with /runs/id is kept: $v" >&2; fail=1
+fi
 
 # #133: what GitHub did is what is printed. A queue repository, auto-merge accepted, but the PR waits for a required
 # review (required_reviewers): it is NOT in the queue (2026-11-07 printed "added to the merge queue" for it).

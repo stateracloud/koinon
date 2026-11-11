@@ -472,6 +472,20 @@ printf 'go\n' >"$FAKE_DIR/rules"
 wfruns "$(wfrun 62 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 81 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 82 e2e-kind.yml e2e-kind 2026-11-01T10:30:00Z)"
 run 7 --checks --require "e2e result" --interval 0
 expect "#133: a re-run green e2e result of the PR run outranks a red dispatched run" 0 "checks 2/2 green"
+# #399: within one run a newer cancelled row beats an older green of the same name
+g_same=$(cr_ci go SUCCESS 72 2026-11-01T10:00:00Z)
+c_same=$(cr_ci go CANCELLED 72 2026-11-01T11:00:00Z)
+seq_set "$(rdh "$g_same,$c_same")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z)"
+run 7 --checks --interval 0
+expect "#399: a newer cancelled row in the same run beats an older green" 1 "FAILED go (run 72)"
+# #399: an advisory workflow's startup_failure empty run does not fail when go is the only required context
+seq_set "$(rdh "$r_go")"
+printf 'go\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 62 ci.yml ci 2026-11-01T10:00:00Z)" "$(wfrun 90 mirror.yml mirror 2026-11-01T10:06:00Z 1 completed startup_failure)"
+run 7 --checks --interval 0
+expect "#399: an advisory empty run does not fail pr-wait" 0 "checks 1/1 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
 
 # 7d. (old issue 661) a stale PR head: GitHub's headRefOid is not origin's branch tip
