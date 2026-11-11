@@ -341,6 +341,13 @@ var _ = Describe("Reconciler install ownership", func() {
 			agent := newAgent(ctx, org, user)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			// The agent had a GitHub grant while it was active: its provider and profile are still there.
+			Expect(bk("").EnsureProvider(ctx, ws, execution.Provider{
+				Name:        names.GitHubProvider,
+				Profile:     reconciler.GitHubProfile(names.GitHubProfile, reconciler.GitHubRead{Provider: "GitHub"}, reconciler.DefaultGitBinaries),
+				Labels:      map[string]string{reconciler.LabelManagedBy: reconciler.ManagedByValue},
+				Credentials: map[string]string{"GH_TOKEN": "koinon_test_not-a-real-token"},
+			})).To(Succeed())
 			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: agent.ID})
 			Expect(err).NotTo(HaveOccurred())
 			live := mk("mark-live", 0)
@@ -348,7 +355,8 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(live.ReconcileAll(ctx)).To(Succeed()) // stops the sandbox
 			Expect(osg.Sandbox(ws, names.Sandbox)).NotTo(BeNil())
 			Expect(osg.Calls("DeleteProvider")).To(Equal(deletes), "an attached provider is not deleted")
-			Expect(list(ctx)).To(ConsistOf(line{"sandbox", names.Sandbox, reconciler.ReasonWaitsForAgent}, line{"provider", names.Provider, reconciler.ReasonWaitsForAgent}))
+			Expect(list(ctx)).To(ConsistOf(line{"sandbox", names.Sandbox, reconciler.ReasonWaitsForAgent}, line{"provider", names.Provider, reconciler.ReasonWaitsForAgent},
+				line{"provider", names.GitHubProvider, reconciler.ReasonWaitsForAgent}, line{"profile", names.GitHubProfile, reconciler.ReasonWaitsForAgent}))
 
 			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 				OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,

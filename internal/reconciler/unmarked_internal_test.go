@@ -63,3 +63,36 @@ func TestClassifyUnmarked(t *testing.T) {
 		})
 	}
 }
+
+// The GitHub profile of a draft agent whose stopped sandbox still exists waits for the agent like the
+// sandbox and the providers beside it: only reconcileActive (ensureGitHub) marks it again.
+func TestClassifyUnmarkedGitHubProfile(t *testing.T) {
+	org := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	orgs := []store.ListOrgWorkspacesForUnmarkedRow{{OrgID: org}}
+	ws := execution.WorkspaceName(org.Bytes)
+	sb := func(s store.SandboxState) store.NullSandboxState {
+		return store.NullSandboxState{SandboxState: s, Valid: true}
+	}
+	cases := []struct {
+		name   string
+		status store.AgentStatus
+		sb     store.NullSandboxState
+		want   string
+	}{
+		{"draft with a stopped sandbox", store.AgentStatusDraft, sb(store.SandboxStateStopped), ReasonWaitsForAgent},
+		{"draft with no sandbox", store.AgentStatusDraft, store.NullSandboxState{}, ReasonDraftAgent},
+		{"archived with a retained sandbox", store.AgentStatusArchived, sb(store.SandboxStateRetained), ReasonArchivedAgent},
+		{"active", store.AgentStatusActive, sb(store.SandboxStateStopped), ReasonPendingClaim},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: pgtype.UUID{Bytes: [16]byte{2, 1}, Valid: true}, Status: tc.status, Flavor: store.AgentFlavorOpencode, SandboxState: tc.sb}
+			n := execution.AgentObjectNames(org.Bytes, a.ID.Bytes)
+			objs := []execution.UnmarkedObject{{Workspace: ws, Kind: "profile", Name: n.GitHubProfile}}
+			got := classifyUnmarked(objs, orgs, []store.ListAgentsForUnmarkedRow{a}, nil)
+			if got[0].Reason != tc.want {
+				t.Errorf("profile reason = %s, want %s", got[0].Reason, tc.want)
+			}
+		})
+	}
+}

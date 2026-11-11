@@ -37,7 +37,7 @@ const (
 	// provider of a draft agent with no sandbox (reconcileDraft), the flavor profile (the org pass,
 	// claimFlavorProfiles). If it is still listed after a pass, the agent's key Secret no longer
 	// matches its recorded key (the database cannot show that), so nothing is touched: activate or
-	// archive the agent. A draft agent's existing sandbox and the providers it attaches are
+	// archive the agent. A draft agent's existing sandbox, the providers it attaches and its GitHub profile are
 	// [ReasonWaitsForAgent] instead.
 	ReasonDraftAgent = "draft-agent"
 	// ReasonArchivedAgent: the object belongs to an archived agent, or is the flavor profile that only
@@ -150,7 +150,7 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider, n.GitHubProfile} {
 			v.names[name] = a.Status
 		}
-		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider} {
+		for _, name := range []string{n.Sandbox, n.Provider, n.GitHubProvider, n.GitHubProfile} {
 			v.sandboxState[name] = a.SandboxState
 		}
 		v.agents[execution.UUIDString(a.ID.Bytes)] = a.Status
@@ -179,7 +179,7 @@ func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[store.AgentFl
 			return flavorReason(v.flavors[store.AgentFlavor(flavor)], rendered[store.AgentFlavor(flavor)])
 		}
 		if st, ok := v.names[o.Name]; ok {
-			return statusReason(st)
+			return agentObjectReason(st, v.sandboxState[o.Name], o.Kind)
 		}
 		return ReasonNotReconcilerMade
 	}
