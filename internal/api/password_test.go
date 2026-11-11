@@ -8,12 +8,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	"github.com/stateracloud/koinon/internal/installbinding"
@@ -63,11 +65,12 @@ var _ = Describe("bootstrap password login", func() {
 	// ADR 0110 decision 3: a session another install issued is refused on a restored copy and never
 	// comes back; a new login on the copy works.
 	It("refuses a session another install issued, and accepts a new login", func(ctx SpecContext) {
+		var cp *installbinding.Binding
 		e := newEnv(ctx, envOptions{binding: func(p *pgxpool.Pool) *installbinding.Binding {
 			quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 			_, err := installbinding.New(p, "hash-source", false, quiet).Claim(ctx, installbinding.Targets{})
 			Expect(err).NotTo(HaveOccurred())
-			cp := installbinding.New(p, "hash-copy", false, quiet)
+			cp = installbinding.New(p, "hash-copy", false, quiet)
 			st, err := cp.Claim(ctx, installbinding.Targets{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(st).To(Equal(installbinding.StateCopy))
@@ -84,8 +87,18 @@ var _ = Describe("bootstrap password login", func() {
 		By("the session came with the dump of the source")
 		_, err = e.pool.Exec(ctx, `UPDATE sessions SET install_mark = 'hash-source'`)
 		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `UPDATE sessions SET last_seen_at = last_seen_at - interval '1 hour'`)
+		Expect(err).NotTo(HaveOccurred())
+		var seenBefore, idleBefore time.Time
+		Expect(e.pool.QueryRow(ctx, `SELECT last_seen_at, idle_expires_at FROM sessions`).Scan(&seenBefore, &idleBefore)).To(Succeed())
 		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
 		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated))
+
+		By("a refused session is not touched: its idle deadline does not move")
+		var seenAfter, idleAfter time.Time
+		Expect(e.pool.QueryRow(ctx, `SELECT last_seen_at, idle_expires_at FROM sessions`).Scan(&seenAfter, &idleAfter)).To(Succeed())
+		Expect(seenAfter).To(Equal(seenBefore))
+		Expect(idleAfter).To(Equal(idleBefore))
 
 		By("a legacy session without a mark is refused on a copy too")
 		_, err = e.pool.Exec(ctx, `UPDATE sessions SET install_mark = NULL`)
@@ -96,6 +109,15 @@ var _ = Describe("bootstrap password login", func() {
 		By("a new login works")
 		b2 := e.browser()
 		Expect(b2.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+		_, err = b2.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("adopt-restore removes the refused session instead of re-enabling it, and keeps the new one")
+		res, err := cp.Adopt(ctx, audit.System("test-recovery"), installbinding.Targets{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RevokedSessions).To(Equal(1))
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated))
 		_, err = b2.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
 		Expect(err).NotTo(HaveOccurred())
 	})

@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -113,6 +114,20 @@ var _ = Describe("Binding", func() {
 		Expect(r.Bound).To(BeFalse())
 	})
 
+	It("sets held_since at start when the row already exists", func(ctx SpecContext) {
+		src := newBinding("hash-a", false)
+		_, err := src.Claim(ctx, installbinding.Targets{})
+		Expect(err).NotTo(HaveOccurred())
+		r, _ := row(ctx, src)
+		Expect(r.HeldSince).To(BeNil())
+
+		held := newBinding("hash-a", true)
+		_, err = held.Claim(ctx, installbinding.Targets{})
+		Expect(err).NotTo(HaveOccurred())
+		r, _ = row(ctx, held)
+		Expect(r.HeldSince).NotTo(BeNil())
+	})
+
 	It("lets two processes that start at once agree on one row", func(ctx SpecContext) {
 		a, b := newBinding("hash-a", false), newBinding("hash-b", false)
 		errs := make(chan error, 2)
@@ -158,7 +173,7 @@ var _ = Describe("Binding", func() {
 		Expect(r.HeldSince).NotTo(BeNil())
 
 		By("the release clears held_since and sets released_at; this old held process may not set it again")
-		_, err = pool.Exec(ctx, `UPDATE install_binding SET held_since = NULL, released_at = now() + interval '1 minute', released_by = 'hash-a'`)
+		_, err = pool.Exec(ctx, `UPDATE install_binding SET held_since = NULL, released_at = $1, released_by = 'hash-a'`, time.Now().Add(time.Minute))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(b.Reassert(ctx)).To(Succeed())
 		r, _ = row(ctx, b)

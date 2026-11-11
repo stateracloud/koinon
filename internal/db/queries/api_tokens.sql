@@ -11,15 +11,6 @@ INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, 
 VALUES (@org_id, @id, @name, @prefix, @token_hash, @role, @created_by, sqlc.narg(parent_token_id), @expires_at, @created_at, sqlc.narg(install_mark))
 RETURNING *;
 
--- name: RebindAPIToken :one
--- Re-enables a token that a restored copy refuses (ADR 0110 decision 3): stamps it with this
--- install's mark. A revoked or expired token is not re-enabled.
-UPDATE api_tokens
-SET install_mark = @install_mark
-WHERE org_id = @org_id AND id = @id
-  AND revoked_at IS NULL AND expires_at > @now::timestamptz
-RETURNING *;
-
 -- name: GetAPITokenByPrefix :one
 -- Authentication: the org is not known before the token is. Looked up by the unique prefix
 -- and then compared by hash in constant time.

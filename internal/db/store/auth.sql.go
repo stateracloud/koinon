@@ -374,6 +374,39 @@ func (q *Queries) GetUserByIdentity(ctx context.Context, arg GetUserByIdentityPa
 	return i, err
 }
 
+const getValidSession = `-- name: GetValidSession :one
+SELECT id, token_hash, user_id, auth_method, created_at, last_seen_at, idle_expires_at, expires_at, revoked_at, install_mark FROM sessions
+WHERE token_hash = $1
+  AND revoked_at IS NULL
+  AND expires_at > $2::timestamptz
+  AND idle_expires_at > $2::timestamptz
+`
+
+type GetValidSessionParams struct {
+	TokenHash []byte
+	Now       pgtype.Timestamptz
+}
+
+// The session if it is still valid at @now, without touching it: the install binding check runs
+// before the touch, so a refused session's idle deadline does not move (ADR 0110).
+func (q *Queries) GetValidSession(ctx context.Context, arg GetValidSessionParams) (Session, error) {
+	row := q.db.QueryRow(ctx, getValidSession, arg.TokenHash, arg.Now)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.UserID,
+		&i.AuthMethod,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.IdleExpiresAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.InstallMark,
+	)
+	return i, err
+}
+
 const grantPlatformAdmin = `-- name: GrantPlatformAdmin :execrows
 INSERT INTO platform_admins (user_id, granted_by, source)
 VALUES ($1, $2, 'bootstrap')

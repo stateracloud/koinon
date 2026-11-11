@@ -574,6 +574,9 @@ type Querier interface {
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
+	// The session if it is still valid at @now, without touching it: the install binding check runs
+	// before the touch, so a refused session's idle deadline does not move (ADR 0110).
+	GetValidSession(ctx context.Context, arg GetValidSessionParams) (Session, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) (int64, error)
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
@@ -1133,9 +1136,6 @@ type Querier interface {
 	// The prefixes of the agent's epochs below @next_epoch hold repositories this database has no
 	// password for (#262): the next repository epoch starts at @next_epoch or later. Monotonic.
 	RaiseHomeRepositoryNextEpoch(ctx context.Context, arg RaiseHomeRepositoryNextEpochParams) (int64, error)
-	// Re-enables a token that a restored copy refuses (ADR 0110 decision 3): stamps it with this
-	// install's mark. A revoked or expired token is not re-enabled.
-	RebindAPIToken(ctx context.Context, arg RebindAPITokenParams) (ApiToken, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
 	// transition into ready and stopped. An empty home_generation (no sandbox
 	// observed) keeps the recorded one.

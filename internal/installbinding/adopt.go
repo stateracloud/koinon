@@ -24,6 +24,8 @@ type AdoptResult struct {
 	PreviousMark string `json:"previousMark,omitempty"`
 	// RebindTokens is the number of tokens re-enabled.
 	RebindTokens int `json:"rebindTokens"`
+	// RevokedSessions is the number of sessions deleted because they carry another mark or none.
+	RevokedSessions int `json:"revokedSessions"`
 	// Conflicts are the isolation conflicts (decision 4) that the adopt clears: the targets of this
 	// install that equalled the recorded ones of the previous binding. The guards turn off for them.
 	Conflicts []Conflict `json:"conflicts,omitempty"`
@@ -39,7 +41,9 @@ type AdoptResult struct {
 //   - records one install event, recovery.adopt-restore, that lists the isolation conflicts it
 //     clears (checkpoints, public-url, oidc-redirect, each with the shared value).
 //
-// It does not touch sessions: a refused session is never re-enabled. The actor must be a platform
+// It deletes every session whose mark is not this install's (including NULL-mark ones): a refused
+// session is never re-enabled, and stampLegacy would otherwise stamp it with this mark. The count is
+// in the recovery.adopt-restore event. The actor must be a platform
 // admin's or the reconciler's; Adopt checks nothing about who calls it, the caller does (an org owner
 // can never reach it).
 func (b *Binding) Adopt(ctx context.Context, actor audit.Actor, own Targets) (AdoptResult, error) {
@@ -69,6 +73,11 @@ func (b *Binding) Adopt(ctx context.Context, actor audit.Actor, own Targets) (Ad
 			b.mark, own.PublicURL, own.OIDCRedirectURL, own.CheckpointEndpoint, own.CheckpointBucket); err != nil {
 			return err
 		}
+		ct, err := tx.Exec(ctx, `DELETE FROM sessions WHERE install_mark IS DISTINCT FROM $1`, b.mark)
+		if err != nil {
+			return err
+		}
+		res.RevokedSessions = int(ct.RowsAffected())
 		rows, err := tx.Query(ctx,
 			`UPDATE api_tokens AS t SET install_mark = $1
 			 FROM (SELECT org_id, id, install_mark AS old FROM api_tokens
@@ -108,7 +117,7 @@ func (b *Binding) Adopt(ctx context.Context, actor audit.Actor, own Targets) (Ad
 		ab.Install(audit.InstallEvent{
 			Actor: actor, Action: "recovery.adopt-restore", TargetKind: "install", TargetID: "install_binding",
 			Before: map[string]any{"state": string(res.PreviousState), "installMark": res.PreviousMark},
-			After:  map[string]any{"state": string(StateSame), "installMark": b.mark, "rebound": res.RebindTokens, "conflicts": res.Conflicts},
+			After:  map[string]any{"state": string(StateSame), "installMark": b.mark, "rebound": res.RebindTokens, "sessionsRemoved": res.RevokedSessions, "conflicts": res.Conflicts},
 		})
 		return nil
 	})

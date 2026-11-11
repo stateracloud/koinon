@@ -244,11 +244,8 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, e
 		return nil, ErrUnauthenticated
 	}
 	now := s.now()
-	sess, err := s.q.TouchSession(ctx, store.TouchSessionParams{
-		Now:           ts(now),
-		IdleExpiresAt: ts(now.Add(s.cfg.SessionIdleTimeout)),
-		TokenHash:     hashToken(token),
-	})
+	hash := hashToken(token)
+	cur, err := s.q.GetValidSession(ctx, store.GetValidSessionParams{Now: ts(now), TokenHash: hash})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -256,13 +253,25 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, e
 		return nil, fmt.Errorf("load session: %w", err)
 	}
 	// A session another install issued (a restored copy) is refused and never comes back: the user
-	// logs in again, which makes a session of this install.
-	if ok, err := s.cfg.Binding.Allows(ctx, sess.InstallMark); err != nil {
+	// logs in again, which makes a session of this install. The check runs before the touch, so a
+	// refused session's idle deadline does not move.
+	if ok, err := s.cfg.Binding.Allows(ctx, cur.InstallMark); err != nil {
 		return nil, fmt.Errorf("check session mark: %w", err)
 	} else if !ok {
 		s.cfg.Binding.Refused("session")
 		s.log.Debug("session refused", "reason", installbinding.QuarantineReason)
 		return nil, ErrUnauthenticated
+	}
+	sess, err := s.q.TouchSession(ctx, store.TouchSessionParams{
+		Now:           ts(now),
+		IdleExpiresAt: ts(now.Add(s.cfg.SessionIdleTimeout)),
+		TokenHash:     hash,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUnauthenticated
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session: %w", err)
 	}
 	return s.loadPrincipal(ctx, sess)
 }

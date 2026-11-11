@@ -260,49 +260,6 @@ func (q *Queries) LockAPITokenTree(ctx context.Context, arg LockAPITokenTreePara
 	return items, nil
 }
 
-const rebindAPIToken = `-- name: RebindAPIToken :one
-UPDATE api_tokens
-SET install_mark = $1
-WHERE org_id = $2 AND id = $3
-  AND revoked_at IS NULL AND expires_at > $4::timestamptz
-RETURNING org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark
-`
-
-type RebindAPITokenParams struct {
-	InstallMark pgtype.Text
-	OrgID       pgtype.UUID
-	ID          pgtype.UUID
-	Now         pgtype.Timestamptz
-}
-
-// Re-enables a token that a restored copy refuses (ADR 0110 decision 3): stamps it with this
-// install's mark. A revoked or expired token is not re-enabled.
-func (q *Queries) RebindAPIToken(ctx context.Context, arg RebindAPITokenParams) (ApiToken, error) {
-	row := q.db.QueryRow(ctx, rebindAPIToken,
-		arg.InstallMark,
-		arg.OrgID,
-		arg.ID,
-		arg.Now,
-	)
-	var i ApiToken
-	err := row.Scan(
-		&i.OrgID,
-		&i.ID,
-		&i.Name,
-		&i.Prefix,
-		&i.TokenHash,
-		&i.Role,
-		&i.CreatedBy,
-		&i.ParentTokenID,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.LastUsedAt,
-		&i.CreatedAt,
-		&i.InstallMark,
-	)
-	return i, err
-}
-
 const revokeAPITokenTree = `-- name: RevokeAPITokenTree :many
 WITH RECURSIVE tree AS (
     SELECT r.id FROM api_tokens r WHERE r.org_id = $1 AND r.id = $2

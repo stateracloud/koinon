@@ -182,7 +182,8 @@ func (b *Binding) Stamp() pgtype.Text {
 // readRow reads the row; found is false when there is none.
 func readRow(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, lock bool) (Row, bool, error) {
+}, lock bool,
+) (Row, bool, error) {
 	sql := `SELECT mark, public_url, oidc_redirect_url, checkpoint_endpoint, checkpoint_bucket,
 	               held_since, released_at, released_by
 	        FROM install_binding WHERE singleton`
@@ -273,6 +274,12 @@ func (b *Binding) Claim(ctx context.Context, own Targets) (State, error) {
 	if err := b.insertIfAbsent(ctx); err != nil {
 		return "", err
 	}
+	if b.held {
+		// A held process checks at start, not only after the first interval (decision 0).
+		if err := b.setHeldSince(ctx); err != nil {
+			return "", err
+		}
+	}
 	_, st, err := b.Read(ctx)
 	if err != nil {
 		return "", err
@@ -350,13 +357,21 @@ func (b *Binding) Reassert(ctx context.Context) error {
 	if err := b.insertIfAbsent(ctx); err != nil {
 		return err
 	}
+	if err := b.setHeldSince(ctx); err != nil {
+		return err
+	}
+	_, _, err := b.Read(ctx)
+	return err
+}
+
+// setHeldSince sets held_since when it is NULL and this process started after released_at.
+func (b *Binding) setHeldSince(ctx context.Context) error {
 	if _, err := b.pool.Exec(ctx,
 		`UPDATE install_binding SET held_since = now()
 		 WHERE singleton AND held_since IS NULL AND (released_at IS NULL OR released_at < $1)`, b.started); err != nil {
 		return fmt.Errorf("re-assert hold: %w", err)
 	}
-	_, _, err := b.Read(ctx)
-	return err
+	return nil
 }
 
 func (b *Binding) isClaimed() bool {
