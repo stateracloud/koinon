@@ -46,6 +46,7 @@ answers 403.
 - [0044](0044-in-sandbox-credential-exception.md) adds one gated exception: for auth types the
   platform admin allows, a credential may live inside the sandbox (for example a Copilot
   device-flow login), obtained through human takeover.
+  Amended 2026-11-11: only for a named auth type that cannot be held outside the sandbox.
 
 ```mermaid
 sequenceDiagram
