@@ -27,11 +27,8 @@ import (
 // template are the names in its structured spec.tools list, so a tool the instructions only
 // describe in prose ("the search and fetch tools") is still read.
 
-// toolCall matches a tool the instructions tell the agent to call, written in backticks.
-//
-// TODO(koinon#129 follow-up): the backticked-name scan is the old form, kept so a template without
-// spec.tools still works (expand only). Remove it, and make spec.tools required where a template
-// uses tools, once every template declares its tools. The parent session files the issue.
+// toolCall matches a tool the instructions tell the agent to call, written in backticks. It is a
+// drift check only: every name found must be in spec.tools. The legs come from spec.tools alone.
 var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
 // The org the classifier runs for: one code-host connection that lists one private repository, the
@@ -119,15 +116,23 @@ func toolLegs(name string) []string {
 	return legs
 }
 
-// toolsOf are the tool names of a template: its structured spec.tools, plus (old form, see the TODO
-// at toolCall) the backticked names in its instructions.
+// toolsOf are the tool names of a template: its structured spec.tools list.
 func toolsOf(t *templates.Template) []string {
 	names := slices.Clone(t.Spec.Tools)
-	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
-		names = append(names, m[1])
-	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+// undeclaredCalls are the backticked tool names in a template's instructions that spec.tools does
+// not list.
+func undeclaredCalls(t *templates.Template) []string {
+	var missing []string
+	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
+		if !slices.Contains(t.Spec.Tools, m[1]) && !slices.Contains(missing, m[1]) {
+			missing = append(missing, m[1])
+		}
+	}
+	return missing
 }
 
 type templateLegs struct {
@@ -193,6 +198,14 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		}
 	})
 
+	It("lists in spec.tools every tool the instructions call in backticks", func() {
+		all, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		for _, t := range all {
+			Expect(undeclaredCalls(t)).To(BeEmpty(), t.Metadata.ID+": add the tool to spec.tools")
+		}
+	})
+
 	It("reports a template that holds all three legs (negative fixture)", func() {
 		t, err := templates.Parse(readFile("testdata/legs/all-three.yaml"))
 		Expect(err).NotTo(HaveOccurred())
@@ -241,6 +254,10 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		changed, err := templates.Parse([]byte(raw))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changed.Metadata.ID).To(Equal(r.Metadata.ID))
+		Expect(undeclaredCalls(changed)).To(Equal([]string{"web_url_read"}), "the drift check fails")
+		Expect(legsOf(changed).bothInputLegs()).To(BeFalse(), "spec.tools alone decides the legs")
+		changed.Spec.Tools = append(changed.Spec.Tools, "web_url_read")
+		Expect(undeclaredCalls(changed)).To(BeEmpty())
 		Expect(legsOf(changed).bothInputLegs()).To(BeTrue())
 	})
 
