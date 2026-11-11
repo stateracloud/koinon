@@ -620,12 +620,31 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			delete(n.Labels, "openshell.ai/gateway-id")
 		}), msg)
 
-		By("a namespace object without a labels map is not a CEL error")
+		// The apiserver's namespace strategy puts kubernetes.io/metadata.name back before admission, so
+		// neither object reaches the policy without labels: the has() == false branch of the
+		// matchCondition and the variables is not reachable here (envtest does not cover it).
+		By("clearing the labels of a namespace outside the policies is admitted (the apiserver keeps kubernetes.io/metadata.name)")
 		Expect(update(otherUser, plain, func(n *corev1.Namespace) {
 			n.Labels = nil
 			annotate(n)
 		})).To(Succeed())
 		Expect(update(otherUser, plain, func(n *corev1.Namespace) { n.Labels = nil })).To(Succeed())
+	})
+
+	It("renders no matchConditions pre-filter when the selector has only negative requirements", func(ctx SpecContext) {
+		// A NotIn / DoesNotExist selector alone covers namespaces without the guarded keys, so those
+		// namespaces must still reach the validation (issue 507).
+		ps, _ := renderSandboxPolicy(ctx,
+			"--set", "sandboxPolicy.namespaceSelector.matchLabels=null",
+			"--set-json", `sandboxPolicy.namespaceSelector.matchExpressions=[{"key":"team","operator":"DoesNotExist"}]`)
+		found := false
+		for _, p := range ps {
+			if strings.HasSuffix(p.Name, "-sandbox-namespaces") {
+				found = true
+				Expect(p.Spec.MatchConditions).To(BeEmpty(), p.Name)
+			}
+		}
+		Expect(found).To(BeTrue())
 	})
 
 	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
