@@ -32,8 +32,9 @@ const dbSecretPassword = "koinon_test_not-a-real-password"
 // wholeSecretKeys are the keys of a Secret that a pod mounts as a whole directory (no items),
 // by volume name: the chart documents them in values.yaml.
 var wholeSecretKeys = map[string][]string{
-	"openshell-tls": {"tls.crt", "tls.key", "ca.crt"},
-	"otlp-token":    {"token"},
+	"openshell-tls":     {"tls.crt", "tls.key", "ca.crt"},
+	"otlp-token":        {"token"},
+	"otlp-traces-token": {"token"},
 }
 
 // databaseKeys are the keys of the operator's database Secret, as values.yaml documents them
@@ -184,7 +185,13 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 				panic(fmt.Sprintf("Secret %s is mounted as a whole directory (volume %s): add its keys to wholeSecretKeys", s.SecretName, v.Name))
 			}
 			for _, k := range keys {
-				want(s.SecretName, k, fakeValue(k))
+				v := fakeValue(k)
+				if k == "token" {
+					// A bearer token differs per Secret: koinon-api refuses the same token for
+					// /v1/logs and /v1/traces (issue 55).
+					v = "koinon_test_not-a-real-" + s.SecretName + "-token-0123456789"
+				}
+				want(s.SecretName, k, v)
 			}
 		}
 	}

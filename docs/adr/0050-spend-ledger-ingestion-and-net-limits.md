@@ -173,6 +173,7 @@ koinon-agentd as well as the gateway.
   the access-log policy refers to an AgentgatewayBackend (`<gateway>-otlp`) whose auth `secretRef` names the
   Secret, so the controller hands the value to the proxy as it does provider keys. The token is in no
   ConfigMap and in no sandbox.
+  *Amended by 0074 (2026-11-11, #55): `/v1/traces` has its own token, `koinon-otlp-traces-token`, mounted only by koinon-agentd and koinon-api. This token admits `/v1/logs` and every other path, not `/v1/traces`.*
 - **koinon-api** checks it in a middleware around the whole listener, comparing SHA-256 digests in
   constant time. A refusal is a 401 without a body; `koinon_api_otlp_auth_rejected_total{reason}`
   (`missing` or `invalid`) counts them. The token is never logged. Without `--otlp-token-dir` the

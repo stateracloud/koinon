@@ -27,7 +27,7 @@ set -euo pipefail
 # comments there say why each exists. A path is relevant when it matches e2e-forced, or matches
 # e2e-needed and no e2e-ignored; failing both, when its directory (or an ancestor, for embedded
 # files) is a package directory in the build graph of a binary (`go list -deps`, this module only).
-# hack/needs-e2e-test.sh checks the binaries against run.sh's `ko build` line.
+# hack/needs-e2e-test.sh checks the binaries against images.sh's `ko build` line.
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/paths-lib.sh" || exit 2
 paths_load || exit 2

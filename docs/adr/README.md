@@ -93,7 +93,7 @@ are in [0046](0046-adr-conventions.md).
 | [0071](0071-skill-library.md) | The skill library: pinned, scanned skills delivered by agentd | Accepted (procoduck, 2026-10-28; built with the UI milestone after v0.1.0) |
 | [0072](0072-agent-model-run-now-echo-check.md) | The agent's model setting, "run now" for schedules, and the provider echo check | Accepted |
 | [0073](0073-agent-passport.md) | Agent passport: a verifiable identity for every agent call | Accepted (delivery after v0.1.0) |
-| [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30 and 2026-10-31 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
+| [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30, 2026-10-31 and 2026-11-11 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
 | [0075](0075-isolation-tiers.md) | Isolation tiers: vm, hardened and dev | Accepted (pending qualification on Bottlerocket) |
 | [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
@@ -127,4 +127,5 @@ are in [0046](0046-adr-conventions.md).
 | [0106](0106-install-mark-owns-openshell-objects.md) | An install mark decides which OpenShell objects an install owns | Accepted |
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
 | [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |
+| [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted |
 | [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, |

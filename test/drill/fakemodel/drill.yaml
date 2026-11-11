@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The drill's fake model (ADR 0109): one model that answers every request with a short text, so a
+# run of any agent that takes the org default model ends. The restore drill counts the requests this
+# server gets (none while the restored install is held) and reads the Authorization header of the
+# ones after the release (the provider key decrypted on the target).
+model: drill
+turns:
+  - text: "drill ok"
+    usage:
+      inputTokens: 100
+      outputTokens: 5

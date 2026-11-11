@@ -217,7 +217,7 @@ script-skip - hack/adr-lint.sh
 # (old issue 281 changed branch naming in githubtools; old issue 284 a startup flag the chart's
 # migrate Job lacked). Unit and package tests cannot see those.
 #
-# Go code is not listed by directory: the binaries are the commands test/e2e/run.sh builds with ko
+# Go code is not listed by directory: the binaries are the commands test/e2e/kind/images.sh (run.sh and the drill) builds with ko
 # (the three services and the three fakes it deploys; hack/needs-e2e-test.sh checks them against
 # its `ko build` line). A non-test file in the directory of a package in their dependency graph
 # (`go list -deps`, this module only), or below it (embedded files), is relevant.
