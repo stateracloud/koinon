@@ -6,10 +6,9 @@
 # summary ($GITHUB_STEP_SUMMARY). The workflow runs the BASE branch's copy of this script and of
 # hack/needs-e2e.sh, so a pull request cannot change the rule that decides whether it is tested.
 #
-#   pull_request       advisory (ADR 0105): needed when the full rule (needs-e2e.sh) says the change is
-#                      e2e-relevant, when the PR touches the e2e's own files (--forced-only) or when it carries
-#                      the `e2e` label. A fork PR (HEAD_REPO != BASE_REPO) runs it only with the label: the
-#                      flavor images on GHCR are private until v0.3. The labels are the
+#   pull_request       advisory (ADR 0105, amended by #572): needed only when the PR carries the `e2e` label, a
+#                      fork PR included. No path rule runs on a pull request; the merge queue applies the full
+#                      rule (needs-e2e.sh) and is the only e2e proof. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
 #                      then labels it (two events, old issue 468), and the run of `opened` should already see
 #                      the label. Label events do not start the workflow.
@@ -29,7 +28,7 @@
 #
 # Environment: EVENT, BASE (pull request base branch), MG_BASE (merge group base sha), QUEUE_REF (the merge group
 # ref), LABELS (JSON array of the PR's label names), PR (its number), HEAD_REPO and BASE_REPO (pull request, to
-# tell a fork), PUSH_SHA (the pushed commit, push events), NEEDS_E2E (path of the rule script, default
+# tell a fork; no longer read), PUSH_SHA (the pushed commit, push events), NEEDS_E2E (path of the rule script, default
 # hack/needs-e2e.sh), GH (the gh command), GH_REPO.
 # Any failure of the rule script other than "not needed" reads as needed.
 
@@ -71,43 +70,20 @@ rule() {
 
 case $EVENT in
 pull_request)
-  base="origin/${BASE:?BASE}"
+  # #572 (ADR 0105, amendment): a pull request runs the kind e2e only with the `e2e` label. The merge queue
+  # runs it on every e2e-relevant entry and is the only merge evidence, so an automatic run on the pull
+  # request repeated the queue's work. Fork pull requests are no different (and the flavor images are
+  # private until v0.3, so the label is the maintainer's decision for them too).
   labelled=1
   if jq -e 'index("e2e")' <<<"$LABELS" >/dev/null 2>&1 || jq -e 'index("e2e")' <<<"$(live_labels)" >/dev/null 2>&1; then
     labelled=0
   fi
-  if [[ -n ${HEAD_REPO:-} && -n ${BASE_REPO:-} && $HEAD_REPO != "$BASE_REPO" ]]; then
-    if [[ $labelled -eq 0 ]]; then
-      summary "Runs (advisory): a maintainer added the \`e2e\` label to this fork pull request."
-      emit true
-    else
-      summary "Does not run: a fork pull request runs the kind e2e only with the \`e2e\` label (the flavor images are private until v0.3). The merge queue runs it."
-      emit false
-    fi
-    exit 0
-  fi
-  rule --forced-only "$base"
-  if [[ $rc -ge 2 ]]; then
-    echo "::warning::needs-e2e.sh exited $rc; running the e2e to be safe"
-    emit true
-    exit 0
-  fi
-  forced=$rc
-  if [[ $forced -eq 0 ]]; then
-    summary "Runs (advisory): this pull request changes the e2e's own files."$'\n\n'"$text"
-    emit true
-  elif [[ $labelled -eq 0 ]]; then
+  if [[ $labelled -eq 0 ]]; then
     summary "Runs (advisory): the pull request has the \`e2e\` label."
     emit true
   else
-    rule "$base"
-    if [[ $rc -ne 1 ]]; then
-      summary "Runs (advisory): this pull request is e2e-relevant per hack/needs-e2e.sh (or the rule could not be evaluated, exit $rc):"$'\n\n'"$text"
-      emit true
-    else
-      summary "Does not run: nothing in this pull request needs the kind e2e."
-      emit false
-    fi
+    summary "Does not run: a pull request runs the kind e2e only with the \`e2e\` label. The merge queue runs it on every e2e-relevant entry and is the merge evidence."
+    emit false
   fi
   ;;
 merge_group)

@@ -84,15 +84,16 @@ example() { # <name> <want jobs> <want e2e exit> <paths...>
 	ge=$(e2e_for "$@")
 	if [[ $got == "$wj" && $ge == "$we" ]]; then ok; else bad "$name: jobs [${got% }] want [${wj% }]; e2e exit $ge want $we"; fi
 }
-example "one hack script" "" 1 hack/ship.sh
-example "a workflow other than ci.yml" "" 1 .github/workflows/dco.yml
-example "the Go test wrapper" "go" 1 hack/go-test.sh
-example "e2e driver script" "go" 0 test/e2e/run.sh
-example "a chart template" "chart chartsmoke escape go" 0 charts/koinon/templates/api.yaml
+example "one hack script" "scripts shell" 1 hack/ship.sh
+example "a workflow other than ci.yml" "scripts shell" 1 .github/workflows/dco.yml
+example "the Go test wrapper" "go scripts shell" 1 hack/go-test.sh
+example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
+example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
 example "a web source file" "web" 1 web/src/app.ts
-example "a Go test file of the reconciler" "go" 1 internal/reconciler/reconcile_test.go
-example "the rules themselves" "chart chartsmoke escape flavors generate go web" 1 hack/paths.rules
-example "documentation" "" 1 docs/dev/ci.md
+example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
+example "the rules themselves" "chart chartsmoke escape flavors generate go scripts shell tidy web" 1 hack/paths.rules
+example "documentation" "" 1 docs/design.md
+example "the CI documentation, read by ci-cache-test" "scripts" 1 docs/dev/ci.md
 
 if [[ $fails -ne 0 ]]; then
 	echo "paths-test: $fails of $total checks failed"

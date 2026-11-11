@@ -221,7 +221,7 @@ BUILDX_BUILDER=dryrun hack/release-flavor.sh 0.0.0-rc.0 localhost:5000 "$(git re
 ```
 
 It prints the pushed index's digest reference. The gate does not check the flavor contract suite
-(`flavors` in `ci.yml` is the one advisory job, see `hack/ci-required.txt`, and runs only when flavor files change), and CI
+(`flavors` in `ci.yml` is required but runs only in the merge queue and on main, and only when flavor files change; see `hack/ci-required.txt`), and CI
 builds only the runner's own platform, so the release's QEMU build of the other platform is the
 first one: dry-run it on an x86 host (where arm64 is emulated, as in the release) before an rc that
 changes `flavors/`.

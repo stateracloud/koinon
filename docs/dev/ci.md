@@ -237,10 +237,9 @@ request-log assertion goes red.
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~12-15 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
-(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
-needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
-it. It also runs batched on main (each push that changed something
+e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` label (advisory; ADR 0105
+amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
+`hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
@@ -270,9 +269,9 @@ waits about 5 minutes for the source to archive an idle agent (`reconciler.idleT
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
 queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts
-(ADR 0105); the PR's own run is advisory feedback and a green one is not merge evidence. The `e2e`
-label is for a change the rule thinks irrelevant but you want tested: the queue reads it when it
-builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
+(ADR 0105); a pull request runs the quickstart only with the `e2e` label (#572), as advisory feedback, and a
+green one is not merge evidence. The `e2e` label is also for a change the rule thinks irrelevant but you want
+tested: the queue reads it when it builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
 merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
 
 ### The `e2e result` gate
@@ -348,11 +347,14 @@ processes, and fewer processes would make the job slower for the same risk.
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors`. `changes` and
+`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors` (not on a pull request, #572), plus
+`lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
+`go.mod`, `go.sum`, the lint config). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
-`e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
-are skipped only on a push to main whose heavy jobs are skipped; a draft skips the heavy jobs too. A skipped heavy job reports
+`e2e result`) always run; `lint-shell` and `scripts` run when the path rules say a change can affect them, and
+are skipped on a draft and on a push to main whose heavy jobs are skipped (#572); the heavy jobs follow the
+same draft rule. A skipped heavy job reports
 success, so every required check still reports.
 
 ### Path rules
@@ -370,7 +372,9 @@ that file and nowhere else.
   `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
   `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
   `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
-  the `scripts` job, which is always on, so a shell-only change runs them and not go-test.
+  the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
+  own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
+  (`.sh` files, `.github/`, the tool pins); a docs-only or web-only pull request runs neither (#572).
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
@@ -378,7 +382,7 @@ that file and nowhere else.
   like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
   `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
-- **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
+- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy` and `scripts` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
@@ -403,8 +407,8 @@ skipped `go-test` on main only through the queue build or a change with no Go. T
 
 ### Draft pull request (old issue 593)
 
-A draft runs nothing heavy. Only `changes`, `quick checks`, `lint-shell`, `scripts`, `dco`, `gitleaks` and
-`claim` run; `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
+A draft runs nothing heavy. Only `changes`, `quick checks`, `dco`, `gitleaks` and
+`claim` run (`lint-shell` and `scripts` too until #572); `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
 is green anyway). That green is vacuous, so it must never count as evidence. A draft cannot be enqueued or
 merged (`pr-merge.sh` and `pr-wait.sh --checks` exit 5), and marking it ready fires `ready_for_review`, which
 runs everything on the same head. But between `gh pr ready` and that run's first check the draft run is the
@@ -447,8 +451,8 @@ Tests: `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/ship-te
 Everything runs, except when a successful `merge_group` `ci` run (the merge queue's build) tested a commit with
 the pushed commit's tree (`hack/ci-skip-heavy.sh decide_push` lists the last 30 queue runs and compares trees).
 Then the heavy jobs are skipped: the queue already ran the whole suite on exactly these files. `flavors`
-(advisory, but `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
-it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594).
+(required, and `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
+it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594, #572).
 A pull request head's green never counts (a draft run is green by skipping). Any doubt (an admin or direct push,
 which has no queue run; an API error; no matching run) runs everything. `flavor-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the nightly and
@@ -581,8 +585,9 @@ pull request workflows is a setting, not a file; it is tracked as
 
 ## Required status checks
 
-`hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is the only advisory job
-on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` (CI job
+`hack/ci-required.txt` is the list the `main` ruleset mirrors. `flavors` is required but runs only in the merge
+queue and on pushes to main (#572, #128): on a pull request its job-level `if:` skips it, which reports success,
+so the name exists on every build. `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` (CI job
 `scripts`) fails when a `ci.yml` job is neither required nor advisory;
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
 list in the same PR, and a required job must report on every pull request and push (a job-level
@@ -662,7 +667,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
 merges with `--admin`, and opens a `break-glass` issue with the reason.
-`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
+`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10; a pull request runs the quickstart only with the `e2e` label, so add it with `hack/ship.sh --e2e` or `gh pr edit --add-label e2e`, or use the queue) and for `flavors` (the base's `hack/ci-changes.sh` runs with `CI_CHANGES_IGNORE_PLUMBING=1`, which ignores the CI-plumbing files `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, `paths.rules` and `paths-lib.sh` and decides on the real flavor inputs only; a plumbing-only change is not held, and the push run on main runs `flavors` after the merge, a break is fixed forward. When real flavor inputs changed, the head needs a real, not skipped, `flavors` success, else exit 10: `ci.yml` has no trigger that runs `flavors` for a branch, so split the pull request, the flavor change through the merge queue; see the ADR 0105 amendment of #572) Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`; the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.. Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
 (`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
@@ -733,6 +738,11 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   `ci-supersede.sh`, commit subjects, dependency age and the waiver are pull-request-only steps and are
   skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
+  On the push to main that the queue made, `gitleaks` does not scan again (#572): `hack/secrets-skip.sh` finds a
+  successful `merge_group` run of `secrets.yml` whose `head_sha` is the pushed commit (the queue
+  fast-forwards main to that head). It matches the commit, not the tree: gitleaks scans commits, and an equal tree can hide other commits. The job still runs and reports success. An admin or break-glass merge, a
+  direct push and any API doubt scan as before. The workflow runs the script only on a `push` event (an `if:` on the step),
+  so a changed script cannot switch off the scan of a pull request or a queue build.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
   waited fails the entry. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)
@@ -792,6 +802,6 @@ every required check green. Auto-merge then never fires, and nothing in the chec
 
 ## OpenSSF Scorecard
 
-`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
+`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly (and on dispatch; #572 removed the push trigger),
 publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
 in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
