@@ -62,6 +62,11 @@ data:
       {{- if .Values.sandboxNetworkPolicy.enabled }}
       name: {{ include "koinon.sandboxDefaultDeny" . | quote }}
       {{- end }}
+    sandboxLimitRange:
+      enabled: {{ .Values.sandboxLimitRange.enabled }}
+      {{- if .Values.sandboxLimitRange.enabled }}
+      name: {{ include "koinon.sandboxLimitRange" . | quote }}
+      {{- end }}
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}
       parkWarm: {{ .Values.reconciler.parkWarm }}

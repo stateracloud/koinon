@@ -170,6 +170,9 @@ type Config struct {
 	// NetworkPolicy applies the chart's default-deny NetworkPolicy in each workspace namespace
 	// (spike 8.15, ADR 0045). Nil turns it off (sandboxNetworkPolicy.enabled=false).
 	NetworkPolicy *SandboxNetworkPolicy
+	// LimitRange applies the chart's LimitRange in each workspace namespace (#76, ADR 0083 follow-up).
+	// Nil turns it off (sandboxLimitRange.enabled=false).
+	LimitRange *SandboxLimitRange
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -307,6 +310,15 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		}
 		if cfg.NetworkPolicy.Log == nil {
 			cfg.NetworkPolicy.Log = cfg.Logger
+		}
+	}
+	if cfg.LimitRange != nil {
+		if err := cfg.LimitRange.validate(); err != nil {
+			return nil, err
+		}
+		cfg.LimitRange.Errors = cfg.Metrics.LimitRangeErrors
+		if cfg.LimitRange.Log == nil {
+			cfg.LimitRange.Log = cfg.Logger
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
@@ -964,7 +976,6 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	}); err != nil {
 		return "", fmt.Errorf("reconciler: record workspace of org %s: %w", org.Slug, err)
 	}
-	done[id] = name
 	if r.cfg.Observer != nil && ws.Active {
 		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
 		_ = r.cfg.Observer.EnsureAccess(ctx, name)
@@ -973,6 +984,16 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		// Defense in depth: a missing NetworkPolicy is counted and logged there, never fatal here.
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
+	if r.cfg.LimitRange != nil && ws.Active {
+		// LimitRange sizes pods only at admission (ADR 0083 amendment). A missing workspace
+		// namespace is expected until the first CreateSandbox (OpenShell creates it then); other
+		// Ensure failures hold this org so CreateSandbox cannot run without a writable LimitRange.
+		// Mark done only after a definitive outcome so a failed pass does not let another agent skip it.
+		if err := r.cfg.LimitRange.Ensure(ctx, name); err != nil && !limitRangeNamespaceMissing(err) {
+			return "", fmt.Errorf("reconciler: sandbox LimitRange of org %s: %w", org.Slug, err)
+		}
+	}
+	done[id] = name
 	return name, nil
 }
 
@@ -1085,11 +1106,34 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 		}
+		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
+		if r.cfg.LimitRange != nil {
+			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
+			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
+			// admits them sized (#76). Delete even when Ensure fails: otherwise the sandbox stays
+			// BestEffort forever on the sandbox-exists branch, and a missing-namespace Ensure
+			// error on this path would never be counted.
+			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
+			if !lrReady {
+				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+					return err
+				}
+				if ensureErr != nil {
+					return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+				}
+				r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
+				sb.Phase = execution.PhaseDeleting
+				return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
+			}
+			if ensureErr != nil {
+				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+			}
+		}
 		return r.record(ctx, w, sb, hash, "")
 	}
 	if err != nil {
