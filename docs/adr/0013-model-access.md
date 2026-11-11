@@ -46,6 +46,9 @@ Three things changed during grilling on 2026-10-21:
    Both ship in v0.2, not v1.0. Subscriptions remain personal-only by default, and the
    terms-of-service review still comes first.
 
+   ADR 0044's amendment of 2026-11-11 narrows the second way: it holds only if Koinon's gateway
+   cannot hold the login, and no release is assigned.
+
 ```mermaid
 flowchart LR
   H[Harness in sandbox<br/>base URL = gateway<br/>key = placeholder] --> SV[OpenShell supervisor<br/>swaps agent key]
