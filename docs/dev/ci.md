@@ -298,8 +298,8 @@ One source, `hack/paths.rules`. Which paths turn on which job or gate is data, i
 `hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
 e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
 `lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
-the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
-graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds the `go list` build
+graphs of the flavors and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
 that file and nowhere else.
 
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
@@ -311,11 +311,10 @@ that file and nowhere else.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
-  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
-  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
-  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
-  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
-  list cannot name, so it is not done.
+  tags. `hack/ci-changes.sh` derives the Go packages those commands and the suite import (`go list`,
+  like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
+  `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
+  `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
