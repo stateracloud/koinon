@@ -492,7 +492,7 @@ Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then
 `apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
 later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
 snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
-another tool (a tool that runs `apt-get` itself) writes an `apt.conf.d` snippet with all three
+another tool (for example `playwright install --with-deps` in `hack/e2e-toolchain/web.Dockerfile`) writes an `apt.conf.d` snippet with all three
 settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.

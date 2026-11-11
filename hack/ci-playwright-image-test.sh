@@ -7,7 +7,8 @@
 #   - the image tag carries exactly the @playwright/test version of web/package.json
 #   - the image is pinned by sha256 digest
 #   - no workflow runs `--with-deps`, `playwright install-deps` or `apt-get install` in a step
-#     (workflow files are searched; a Dockerfile's apt is covered by apt-retries-test.sh)
+#     (workflow files are searched; a Dockerfile's apt is out of scope here: it is built only on change,
+#     and apt-retries-test.sh checks its retry settings)
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
