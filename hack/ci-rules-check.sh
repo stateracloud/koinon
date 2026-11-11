@@ -18,8 +18,8 @@
 #   T1  no automatic test retry: no ginkgo flake attempts, no retry action. Playwright `retries` above 0
 #       is only reported until part 2 of #579 removes it.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
-#   T7  every job of ci.yml sets `timeout-minutes`. Report mode while hack/runner-lint.sh has no timeout
-#       rule; once it has (#572), that script is the check and this line says so.
+#   T7  every job of ci.yml sets `timeout-minutes`. hack/runner-lint.sh is the check and this line says so;
+#       while it has no timeout rule, this script counts the jobs and reports.
 #
 # Not here, because another script already decides it: W3 (hack/runner-lint.sh), Q2 and Q3
 # (hack/ci-required-test.sh, hack/ci-merge-group-test.sh), the 3-day age of dependencies and the
@@ -94,11 +94,20 @@ else
 fi
 
 # --- W5 -------------------------------------------------------------------------------------------
+# Every way to reach the secrets context in a workflow: `secrets.NAME`, `secrets['NAME']`, `secrets["NAME"]`
+# (any `secrets[...]`), `secrets: inherit`, and the bare object (`toJSON(secrets)`, `fromJSON(secrets)`,
+# `format(..., secrets)`). Only a literal GITHUB_TOKEN passes. A YAML key `secrets:` followed by a map is not
+# a read: its values are expressions and are scanned on their own lines.
+w5_re='(^|[^[:alnum:]_.-])secrets(\.[[:alnum:]_*]+|\[[^]]*\]|:[[:space:]]*inherit|[[:space:]]*[,)}])'
 bad=()
 for f in "${workflows[@]}"; do
 	while IFS= read -r name; do
-		[[ $name == secrets.GITHUB_TOKEN ]] || bad+=("$(basename "$f"): $name")
-	done < <(code_lines "$f" | grep -o -E 'secrets\.[A-Za-z0-9_]+|secrets:[[:space:]]*inherit' || true)
+		name=${name#[!a-zA-Z0-9_]}
+		case ${name,,} in
+		secrets.github_token | "secrets['github_token']" | 'secrets["github_token"]') ;;
+		*) bad+=("$(basename "$f"): $name") ;;
+		esac
+	done < <(code_lines "$f" | grep -o -i -E "$w5_re" || true)
 done
 if [[ ${#bad[@]} -eq 0 ]]; then
 	verdict W5 pass "no workflow reads a secret besides GITHUB_TOKEN"
@@ -119,17 +128,42 @@ if [[ -f $list ]]; then
 	done <"$list"
 fi
 
-# defines_required FILE: succeeds when a job of FILE has a `name:` (4 spaces) or an id (2 spaces) in the list.
+# yaml_scalar VALUE: a plain or quoted YAML scalar as text. A quoted value ends at its closing quote (so a
+# trailing comment is dropped); a plain one loses a trailing ` # comment` and trailing blanks.
+yaml_scalar() {
+	local v=$1
+	v=${v#"${v%%[![:space:]]*}"}
+	if [[ $v == \"* ]]; then
+		v=${v#\"}
+		v=${v%%\"*}
+	elif [[ $v == \'* ]]; then
+		v=${v#\'}
+		v=${v%%\'*}
+	else
+		v=${v%%[[:space:]]#*}
+		v=${v%"${v##*[![:space:]]}"}
+	fi
+	printf '%s' "$v"
+}
+
+# defines_required FILE: succeeds when a job of FILE has a `name:` (4 spaces, plain or quoted) or an id
+# (2 spaces; the check name when the job has no `name:`) that is in the list.
 defines_required() {
-	local n
-	for n in "${required[@]}"; do
-		local l
-		while IFS= read -r l; do
-			l=${l%%[[:space:]]#*}
-			l=${l%"${l##*[![:space:]]}"}
-			[[ $l == "    name: $n" || $l == "    name: $n:" || $l == "  $n" || $l == "  $n:" ]] && return 0
-		done < <(code_lines "$1")
-	done
+	local n l v
+	while IFS= read -r l; do
+		if [[ $l =~ ^"    name:"(.*)$ ]]; then
+			v=$(yaml_scalar "${BASH_REMATCH[1]}")
+		elif [[ $l =~ ^"  "[^[:space:]#][^:]*:[[:space:]]*(#.*)?$ ]]; then
+			v=${l#  }
+			v=${v%%:*}
+			v=$(yaml_scalar "$v")
+		else
+			continue
+		fi
+		for n in "${required[@]}"; do
+			[[ $v == "$n" || $v == "$n:" ]] && return 0
+		done
+	done < <(code_lines "$1")
 	return 1
 }
 

@@ -95,6 +95,20 @@ case_ "W5: secrets: inherit fails" 1 'rule=W5 verdict=fail' \
 	'printf "  call:\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n" >>"$r/.github/workflows/ci.yml"'
 case_ "W5: GITHUB_TOKEN passes" 0 'rule=W5 verdict=pass' \
 	'printf "      - run: echo\n        env:\n          T: \${{ secrets.GITHUB_TOKEN }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets['NAME'] fails" 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ secrets['"'"'OPENROUTER_API_KEY'"'"'] }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ 'W5: secrets["NAME"] fails' 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ secrets[\"OPENROUTER_API_KEY\"] }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets[expression] fails" 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ secrets[env.NAME] }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: toJSON(secrets) fails" 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ toJSON(secrets) }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: toJson(secrets) fails" 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ toJson(secrets) }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: a bare secrets object passed to a function fails" 1 'rule=W5 verdict=fail' \
+	'printf "      - run: echo\n        env:\n          K: \${{ format('"'"'{0}'"'"', secrets) }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "W5: secrets['GITHUB_TOKEN'] passes" 0 'rule=W5 verdict=pass' \
+	'printf "      - run: echo\n        env:\n          T: \${{ secrets['"'"'GITHUB_TOKEN'"'"'] }}\n" >>"$r/.github/workflows/ci.yml"'
 
 # Q1
 case_ "Q1: a workflow-level paths filter on a required workflow fails" 1 'rule=Q1 verdict=fail' \
@@ -105,6 +119,12 @@ case_ "Q1: a paths filter on a workflow with no required check is fine" 0 'rule=
 	'printf "name: o\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  o:\n    name: optional thing\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/o.yml"'
 case_ "Q1: a required name with parentheses is matched as plain text" 1 'rule=Q1 verdict=fail' \
 	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  e:\n    name: escape (admission)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
+case_ "Q1: a double-quoted required name is matched" 1 'rule=Q1 verdict=fail' \
+	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  e:\n    name: \"escape (admission)\"  # note\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
+case_ "Q1: a single-quoted required name is matched" 1 'rule=Q1 verdict=fail' \
+	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  e:\n    name: '"'"'escape (admission)'"'"'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
+case_ "Q1: a job with no name is matched by its id" 1 'rule=Q1 verdict=fail' \
+	'printf "escape-admission\n" >>"$r/hack/ci-required.txt"; printf "name: e\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  escape-admission:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
 case_ "Q1: a job-level if is fine" 0 'rule=Q1 verdict=pass' \
 	'sed -i.bak "s|^    name: go|    name: go\n    if: \${{ github.event_name == '"'"'push'"'"' }}|" "$r/.github/workflows/ci.yml"'
 
@@ -121,6 +141,11 @@ case_ "Q6: pull_request inside a longer expression passes" 0 'rule=Q6 verdict=pa
 	'sed -i.bak "s|cancel-in-progress: false|cancel-in-progress: \${{ github.event_name == '"'"'pull_request'"'"' \&\& github.ref != '"'"'refs/heads/main'"'"' }}|" "$r/.github/workflows/ci.yml"'
 case_ "Q6: cancel-in-progress true on a workflow without a required check passes" 0 'rule=Q6 verdict=pass' \
 	'printf "name: o\non: push\npermissions:\n  contents: read\nconcurrency:\n  group: g\n  cancel-in-progress: true\njobs:\n  o:\n    name: optional thing\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n" >"$r/.github/workflows/o.yml"'
+
+case_ "Q6: cancel-in-progress true on a double-quoted required name fails" 1 'rule=Q6 verdict=fail' \
+	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non: push\npermissions:\n  contents: read\nconcurrency:\n  group: g\n  cancel-in-progress: true\njobs:\n  e:\n    name: \"escape (admission)\"\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
+case_ "Q6: cancel-in-progress true on a single-quoted required name fails" 1 'rule=Q6 verdict=fail' \
+	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non: push\npermissions:\n  contents: read\nconcurrency:\n  group: g\n  cancel-in-progress: true\njobs:\n  e:\n    name: '"'"'escape (admission)'"'"'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
 
 # T1
 case_ "T1: ginkgo flake attempts in a script fail" 1 'rule=T1 verdict=fail' \

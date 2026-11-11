@@ -93,7 +93,7 @@ Check: review. Source: Firecracker README (as S4). Scope: general pattern. In fo
 ### Stage table: a new check, which stage
 
 Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs and never blocks, "-" does not run.
-A cell with "(with #572)" shows the decided state of the parts of the CI speed work that are not yet merged (parts 2 and 3).
+A cell with "(with #572)" shows the decided state of the parts of the CI speed work that are not yet merged (part 3).
 
 | Kind of check | Example here | Pull request | Merge queue | Push to main | Nightly | Release | Lab | Time limit | Blocks merge |
 |---|---|---|---|---|---|---|---|---|---|
@@ -201,9 +201,9 @@ Source: Koinon decision. Scope: Koinon only. In force: now.
 
 **T7. MUST** set `timeout-minutes` on every job.
 Why: the default is 360 minutes (#572 review); a hung job holds a runner and a queue slot for six hours.
-Check: `hack/ci-rules-check.sh` (rule T7) reports the count: 14 of 21 `ci.yml` jobs had none on 2026-11-11.
-With #572 `hack/runner-lint.sh` fails a job without one and this script defers to it. Until then the rule is a report.
-Source: Koinon decision (#572). Scope: general pattern. In force: now (report mode; failing with #572).
+Check: `hack/runner-lint.sh` fails a `ci.yml` or `release.yml` job without one. `hack/ci-rules-check.sh` (rule T7)
+defers to it and gives `pass` while that script has the rule.
+Source: Koinon decision (#572). Scope: general pattern. In force: now.
 
 **T8. MUST** pin the node image of a cluster job, and export and upload the logs with `if: always()`.
 Why: an unpinned image changes the test; lost logs make a red run unreadable.
