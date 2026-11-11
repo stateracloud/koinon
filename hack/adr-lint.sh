@@ -115,15 +115,25 @@ all_nums() {
   while [[ $t =~ \[([0-9]{4})\]\( ]]; do REPLY+="${BASH_REMATCH[1]} "; t=${t/"${BASH_REMATCH[0]}"/}; done
 }
 
+declare -A exists=()
+for f in "${files[@]}"; do exists[${f:0:4}]=1; done
+# need_exist <ADR> <numbers>: each number named on an Amends / Supersedes / Reduces / Amended by /
+# Superseded by / Reduced by line must be an ADR file (the Status and Relates to links are checked above).
+need_exist() {
+  local t
+  for t in $2; do
+    [[ -n ${exists[$t]:-} ]] || err "ADR $1 names ADR $t on its $key line, but no ADR file $t exists"
+  done
+}
 declare -A outs=() ptr_strict=() ptr_any=()
 while IFS=$'\t' read -r n item; do
   [[ -n $n && $n != 0000 ]] || continue
   key=${item#- } key=${key%%:*} text=${item#*: }
   case $key in
     Amends | Supersedes | "Supersedes in part" | Reduces)
-      if [[ $text != none* ]]; then adr_nums "$text"; outs[$n]+="$REPLY"; fi ;;
+      if [[ $text != none* ]]; then adr_nums "$text"; outs[$n]+="$REPLY"; need_exist "$n" "$REPLY"; fi ;;
     "Amended by" | "Superseded by" | "Reduced by")
-      adr_nums "$text"; ptr_strict[$n]+="$REPLY"
+      adr_nums "$text"; ptr_strict[$n]+="$REPLY"; need_exist "$n" "$REPLY"
       all_nums "$text"; ptr_any[$n]+="$REPLY" ;;
     Status)
       all_nums "$text"; ptr_any[$n]+="$REPLY"
@@ -137,11 +147,9 @@ while IFS=$'\t' read -r n item; do
   esac
 done < <(header_items "${files[@]}")
 has_num() { [[ " $1" == *" $2 "* ]]; } # has_num "<numbers>" <number>
-declare -A exists=()
-for f in "${files[@]}"; do exists[${f:0:4}]=1; done
 for s in "${!outs[@]}"; do
   for t in ${outs[$s]}; do
-    [[ -n ${exists[$t]:-} ]] || continue # a missing target is reported by the link check
+    [[ -n ${exists[$t]:-} ]] || continue # a missing target is reported when the header line is read
     has_num "${ptr_any[$t]:-}" "$s" ||
       err "ADR $s amends, supersedes or reduces ADR $t, but ADR $t does not name $s in its Status or Amended by / Superseded by / Reduced by line"
   done

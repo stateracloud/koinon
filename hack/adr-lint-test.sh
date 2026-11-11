@@ -185,4 +185,19 @@ adr 0001 "First | pipe" Accepted a
 reindex
 expect 0 "clean again"
 
+# A target that is not an ADR file fails, for every link kind.
+for fwd in "Amends" "Supersedes" "Supersedes in part" "Reduces" "Amended by" "Superseded by" "Reduced by"; do
+  adr 0009 Ninth Accepted i
+  printf -- '- %s: [0099](0099-nowhere.md)\n' "$fwd" >>"$work/0009-i.md"
+  reindex
+  expect_out 1 "$fwd with a missing target" "ADR 0009 names ADR 0099 on its $fwd line, but no ADR file 0099 exists"
+done
+adr 0009 Ninth Accepted i
+printf -- '- Amends: none (implements ADR 0099)\n' >>"$work/0009-i.md"
+reindex
+expect 0 "a missing number after none or in a parenthetical is a note"
+adr 0009 Ninth Accepted i
+reindex
+expect 0 "clean at the end"
+
 exit "$fail"
