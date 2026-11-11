@@ -27,6 +27,10 @@ type Flavor struct {
 	Binaries []string
 }
 
+// rendered reports whether the reconciler renders the flavor: it has an image and binaries. Only a
+// rendered flavor gets a profile (koinon-agentgateway-<flavor>), so only its profile is claimed.
+func (f Flavor) rendered() bool { return f.Image != "" && len(f.Binaries) > 0 }
+
 // DefaultBinaries are the network-calling executables of each flavor Koinon ships
 // (flavor.Descriptor.DefaultBinaries).
 var DefaultBinaries = func() map[store.AgentFlavor][]string {

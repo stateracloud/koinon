@@ -115,7 +115,7 @@ var _ = Describe("install audit anchors", func() {
 		GinkgoHelper()
 		res := verifyLines(lines, audit.ExportVerifyOptions{CollectAnchors: true})
 		Expect(res.Break).To(BeNil())
-		return &audit.ExportAnchorSet{InstallID: res.Header.InstallID, Anchors: res.StreamAnchors}
+		return res.AnchorSet()
 	}
 	// anchorHeadsLine returns the index of the anchor_heads stream line for the given event id.
 	anchorHeadsLine := func(lines []string, eventID string) int {
@@ -392,6 +392,15 @@ var _ = Describe("install audit anchors", func() {
 			})
 			Expect(verifyLines(short, audit.ExportVerifyOptions{}).Break).NotTo(BeNil())
 
+			By("a key twice in the anchor_heads line names the anchor event")
+			dup := append([]string{}, lines...)
+			dup[hi] = strings.TrimSuffix(lines[hi], "}") + `,"heads_root":"` + strings.Repeat("ab", 32) + `"}`
+			r = verifyLines(dup, audit.ExportVerifyOptions{})
+			Expect(r.Break).NotTo(BeNil())
+			Expect(r.Break.Seq).To(Equal(a.ChainSeq))
+			Expect(r.Break.Reason).To(ContainSubstring("after the anchor event " + a.EventID))
+			Expect(r.Break.Reason).To(ContainSubstring(`"heads_root" twice`))
+
 			By("anchors left in the header are refused")
 			_, err := audit.VerifyExport(strings.NewReader(editLine(lines[0], func(m map[string]any) {
 				m["anchors"] = []any{map[string]any{"chain_seq": 1}}
@@ -451,6 +460,17 @@ var _ = Describe("install audit anchors", func() {
 		_, err := audit.VerifyExport(strings.NewReader(strings.Join(orgExport(ctx, q, orgs[0]), "\n")+"\n"),
 			audit.ExportVerifyOptions{Anchors: &audit.ExportAnchorSet{InstallID: "another-install"}})
 		Expect(err).To(MatchError(ContainSubstring("another install")))
+
+		By("anchors kept for one org are refused for another org's export, which they would pass unchecked")
+		other := verifyLines(lines, audit.ExportVerifyOptions{CollectAnchors: true, AnchorOrgID: orgs[1].String()})
+		Expect(other.Break).To(BeNil())
+		otherSet := other.AnchorSet()
+		Expect(otherSet.OrgID).To(Equal(orgs[1].String()))
+		_, err = audit.VerifyExport(strings.NewReader(strings.Join(orgExport(ctx, q, orgs[0]), "\n")+"\n"), audit.ExportVerifyOptions{Anchors: otherSet})
+		Expect(err).To(MatchError(ContainSubstring("keep the heads of org " + orgs[1].String() + " only")))
+		ownRes := verifyLines(orgExport(ctx, q, orgs[1]), audit.ExportVerifyOptions{Anchors: otherSet})
+		Expect(ownRes.Break).To(BeNil())
+		Expect(ownRes.Anchors).To(Equal(2), "the set holds for the org it was kept for")
 		_, err = audit.VerifyExport(strings.NewReader(strings.Join(lines, "\n")+"\n"), audit.ExportVerifyOptions{Anchors: set})
 		Expect(err).To(HaveOccurred())
 	})

@@ -219,6 +219,7 @@ script-check - hack/paths-test.sh
 script-check - hack/runner-lint-test.sh
 script-check - hack/runner-lint.sh
 script-check - hack/go-test-host-test.sh
+script-check - hack/ci-playwright-image-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh

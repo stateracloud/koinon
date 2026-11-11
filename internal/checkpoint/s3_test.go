@@ -5,52 +5,15 @@ package checkpoint_test
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"io"
 	"strings"
-	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
-	"github.com/stateracloud/koinon/internal/testing/containerhost"
+	"github.com/stateracloud/koinon/internal/testing/s3test"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
-
-// seaweedImage is the S3 server of the spike (ADR 0032): plain HTTP, path-style, no checksum
-// trailers. Pulled through the Docker Hub prefix when TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX is set.
-const seaweedImage = "chrislusf/seaweedfs:4.50"
-
-const seaweedIdentities = `{"identities":[{"name":"test","credentials":[{"accessKey":"koinon_test_not-a-real-key","secretKey":"koinon_test_not-a-real-secret"}],"actions":["Admin","Read","Write","List","Tagging"]}]}`
-
-// s3Ready reports nil once the server serves the calls the writer makes: it creates the bucket
-// when missing, then writes, reads and deletes a probe object (the write path needs the volume
-// servers, which come up after the S3 port).
-func s3Ready(ctx context.Context, mc *minio.Client, bucket, region string) error {
-	if err := mc.MakeBucket(ctx, bucket, minio.MakeBucketOptions{Region: region}); err != nil {
-		if resp := minio.ToErrorResponse(err); resp.Code != "BucketAlreadyOwnedByYou" && resp.Code != "BucketAlreadyExists" {
-			return err
-		}
-	}
-	const probe = ".readiness-probe"
-	if _, err := mc.PutObject(ctx, bucket, probe, strings.NewReader("ok"), 2, minio.PutObjectOptions{}); err != nil {
-		return err
-	}
-	obj, err := mc.GetObject(ctx, bucket, probe, minio.GetObjectOptions{})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = obj.Close() }()
-	if _, err := io.Copy(io.Discard, obj); err != nil {
-		return err
-	}
-	return mc.RemoveObject(ctx, bucket, probe, minio.RemoveObjectOptions{})
-}
 
 // The S3 path of the writer (checkpoint.S3: minio-go through kopia) against a real S3 server.
 var _ = Describe("Writer on S3", Ordered, func() {
@@ -63,43 +26,9 @@ var _ = Describe("Writer on S3", Ordered, func() {
 
 	BeforeAll(func(sctx SpecContext) {
 		testenv.Require(testenv.Docker)
-		ctr, err := testcontainers.GenericContainer(sctx, testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        seaweedImage,
-				Cmd:          []string{"server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data", "-volume.max=8", "-master.volumeSizeLimitMB=64"},
-				ExposedPorts: []string{"8333/tcp"},
-				Files: []testcontainers.ContainerFile{{
-					Reader: strings.NewReader(seaweedIdentities), ContainerFilePath: "/etc/seaweedfs/s3.json", FileMode: 0o644,
-				}},
-				WaitingFor: wait.ForListeningPort("8333/tcp").WithStartupTimeout(2 * time.Minute),
-			},
-			Started: true,
-		})
+		var err error
+		s3, err = s3test.Start(sctx, func(f func(context.Context) error) { DeferCleanup(f) })
 		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-		// SeaweedFS listens on IPv4 only (old issue 290): dial the IPv4 loopback.
-		host, err := containerhost.Host(sctx, ctr)
-		Expect(err).NotTo(HaveOccurred())
-		port, err := ctr.MappedPort(sctx, "8333/tcp")
-		Expect(err).NotTo(HaveOccurred())
-		s3 = checkpoint.S3{
-			Endpoint: fmt.Sprintf("http://%s:%s", host, port.Port()), Region: "us-east-1", Bucket: "koinon-homes",
-			AccessKeyID: "koinon_test_not-a-real-key", SecretAccessKey: "koinon_test_not-a-real-secret",
-		}
-		Expect(s3.Validate()).To(Succeed())
-
-		mc, err := minio.New(fmt.Sprintf("%s:%s", host, port.Port()), &minio.Options{Creds: credentials.NewStaticV4(s3.AccessKeyID, s3.SecretAccessKey, "")})
-		Expect(err).NotTo(HaveOccurred())
-		// The port answers before the S3 gateway, the filer and the volume servers are ready
-		// (#37). Wait on real S3 calls succeeding, a bucket create and an object
-		// write/read/delete, not on the bare port.
-		// Each attempt has its own deadline, so a hung call (a half-open connection after a reset)
-		// cannot stall Eventually past its window.
-		Eventually(func() error {
-			actx, cancel := context.WithTimeout(sctx, 10*time.Second)
-			defer cancel()
-			return s3Ready(actx, mc, s3.Bucket, s3.Region)
-		}, 2*time.Minute, time.Second).Should(Succeed())
 	})
 
 	It("backs up, restores and verifies through the S3 client", func() {

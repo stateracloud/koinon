@@ -135,6 +135,21 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	const op = "EnsureProviderProfile"
 	b.profileMu.Lock()
 	defer b.profileMu.Unlock()
+	got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: p.ID})
+	if err != nil {
+		if !errors.Is(wrap(op, err), execution.ErrNotFound) {
+			return wrap(op, err)
+		}
+		got = nil
+	}
+	return b.writeProfile(ctx, workspace, p, got)
+}
+
+// writeProfile is ensureProfile after the read: got is the profile as the gateway has it now, nil
+// when it has none. The caller holds profileMu and read got under it, so the version it updates
+// against is the one it looked at (the claim of issue 511 reads once, checks the mark and writes).
+func (b *Backend) writeProfile(ctx context.Context, workspace string, p execution.ProviderProfile, got *openshellv1.ProviderProfileResponse) error {
+	const op = "EnsureProviderProfile"
 	profile, err := renderProfile(p)
 	if err != nil {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}
@@ -152,11 +167,7 @@ func (b *Backend) ensureProfile(ctx context.Context, workspace string, p executi
 	profile.Annotations = b.stamp(map[string]string{SpecHashAnnotation: hash})
 	item := &openshellv1.ProviderProfileImportItem{Profile: profile, Source: profileSource}
 
-	got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: p.ID})
-	found := err == nil
-	if err != nil && !errors.Is(wrap(op, err), execution.ErrNotFound) {
-		return wrap(op, err)
-	}
+	found := got != nil
 	if found {
 		if err := b.check(op, "provider profile", p.ID, got.GetProfile().GetAnnotations()); err != nil {
 			return err

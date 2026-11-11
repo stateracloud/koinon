@@ -519,13 +519,20 @@ jobs:
 
   # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
   # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
-  # The browser download is cached by @playwright/test version; system libraries are installed on
-  # every run (cheap), the browser binary only on a cache miss.
+  # The job runs in the official Playwright image, by digest: the browser and its system libraries
+  # are in the image, so no run installs OS packages from a live apt mirror or downloads a browser
+  # (#569; run 43041438017 failed on `playwright install --with-deps` when security.ubuntu.com did not
+  # resolve). The image tag must carry the exact @playwright/test version of web/package.json
+  # (hack/ci-playwright-image-test.sh checks it); a Playwright bump changes both in one change.
+  # --ipc=host and --init are what the Playwright CI docs ask of a Chromium container.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      options: --init --ipc=host
     defaults:
       run:
         working-directory: web
@@ -540,17 +547,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-      - if: steps.pwcache.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
       - run: pnpm exec vite build
       - run: pnpm test:e2e
         env:
@@ -848,6 +844,7 @@ jobs:
       - run: hack/ci-merge-group-test.sh
       - run: hack/secrets-skip-test.sh
       - run: hack/ci-cache-test.sh
+      - run: hack/ci-playwright-image-test.sh
       - run: hack/chart-check-test.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
@@ -915,8 +912,7 @@ jobs:
   # pnpm stores, one job per lockfile (no matrix: hack/ci-required-test.sh cannot name matrix checks), each
   # with the cache-dependency-path the consuming jobs use: setup-node hashes the listed files into its
   # key, so a combined list would never match a consumer. setup-node saves the store after a job that
-  # missed it, so installing is all a job does. `warm-caches-web` also warms the Playwright browser, by
-  # @playwright/test version (the key web-e2e restores). Never skipped by `changes`.
+  # missed it, so installing is all a job does. Never skipped by `changes`.
   warm-caches-web:
     name: warm-caches-web
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -934,24 +930,6 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
-      # The Playwright browser, by @playwright/test version (the key web-e2e restores).
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-        working-directory: web
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-          lookup-only: true
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install chromium
-        working-directory: web
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
 
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as

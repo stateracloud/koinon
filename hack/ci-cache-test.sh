@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Checks the cache ownership rule of the workflows (old issue 147, docs/dev/ci.md#cache-ownership):
-# main's `warm-caches` job saves the Go, envtest and Playwright caches, every other job in ci.yml only
+# main's `warm-caches` job saves the Go and envtest caches, every other job in ci.yml only
 # restores them, there is one Go cache scheme (`go-ci`), `go-vet` is gone, and the e2e Go key has no run id.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -33,8 +33,7 @@ for k in 'go-ci-' 'envtest-'; do
   check "warm-caches saves $k only on a miss" has "$warm" "cache-hit != 'true'"
 done
 check "warm-caches uses actions/cache/save" has "$warm" 'actions/cache/save@'
-check "warm-caches-web saves playwright- only on a miss" has "$warmweb" "key: playwright-"
-check "warm-caches-web saves with actions/cache/save" has "$warmweb" 'actions/cache/save@'
+check "warm-caches-web saves no Playwright cache (web-e2e runs in the Playwright image, #569)" hasnt "$warmweb" 'playwright'
 check "warm-caches-web runs on pushes to main only" has "$warmweb" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
 check "warm-caches-web does not wait for changes" hasnt "$warmweb" 'needs:'
 check "warm-caches-web is advisory" grep -qx "advisory warm-caches-web" "$repo/hack/ci-required.txt"
@@ -53,7 +52,7 @@ done < <(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /cache-dependency-path:/ { sub(/
 saving=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache@/ { print job }' "$wf")
 check "no ci.yml job restores-and-saves with actions/cache@" test -z "$saving"
 saves=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache\/save@/ { print job }' "$wf" | sort -u | tr '\n' ' ')
-check "only the warm-caches jobs and the flavor jobs save a cache (got: $saves)" test "$saves" = "flavor-publish: flavors: warm-caches-web: warm-caches: "
+check "only the warm-caches jobs and the flavor jobs save a cache (got: $saves)" test "$saves" = "flavor-publish: flavors: warm-caches: "
 
 # One Go cache scheme: every setup-go in ci.yml has cache: false (the go-ci restore is explicit).
 total=$(grep -c 'uses: actions/setup-go@' "$wf")

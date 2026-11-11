@@ -1,6 +1,6 @@
 # 0085. Upgrade, compatibility and recovery policy
 
-- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md))
+- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285)
 - Date: 2026-11-01
 - Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)
 - Relates to: [0027](0027-repo-and-versioning.md) (forward-only migrations, upgrade test), [0030](0030-run-state-machine.md) (leases, epoch, takeover), [0032](0032-agent-home-checkpoints.md) (home checkpoints), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (KEK and envelopes), [0060](0060-migrations-as-a-job.md) (migration Job), [0066](0066-triggers-and-scheduling.md) (DBOS), [0076](0076-database-modes.md) (database modes, backups), [0077](0077-pinned-openshell-and-installer.md) (OpenShell pins), [0045](0045-openshell-hardening-defaults.md) (pinned supervisor image)
@@ -494,6 +494,54 @@ decision 1 on v0.1.0 no longer includes the schema decisions; it still covers ba
 runbook and the restore drill (decisions 13 to 16), and the drain and rollout decisions 2 to 4.
 The marker `hack/migrate-patch-line` stays `none` until v0.3.0 ships, and a `release/*` base is not
 a patch line by its name.
+
+## Amendment (2026-11-11): keys commands ask agentd to probe the storage before they pick an epoch (#285)
+
+Maintainer decision of 2026-11-07, built for v0.2. `keys forget` and `keys new-repositories` start the
+agent's next repository epoch at `max(current + 1, home_repositories.next_epoch_at_least)`. The floor
+(#262, `next_epoch_at_least`) is recorded only after agentd has met a taken prefix, so a rotation
+before any resync or backup could still land on a prefix that holds a repository the database has no
+password for, and the next backup then fails with `ErrPrefixTaken`. The keys command holds the KEKs
+and never the bucket's credentials; agentd holds the credentials and no KEK (ADR 0032). No process
+may hold both, so the check goes through the database:
+
+- The command writes a probe request (`home_repository_probes`, keyed `(org_id, id)`: agent and
+  candidate epoch) and waits, by default two minutes plus 250 ms per agent (`Tool.ProbeTimeout`,
+  `--probe-timeout`). agentd claims pending probes with a lease and answers up to 16 at once, as
+  each is an independent listing, so the wait does not grow with the number of agents (`probeTick`,
+  beside the ticks of the checkpoint loop and beside the resync of the restore-hold loop), lists the
+  agent's epoch folders with the listing a resync uses (`HomeStore.HeldEpochs`: any object under
+  `r<N>/` is a taken prefix, whatever its password) and answers in the row: `free`, `taken` or
+  `error`, with a message that carries no endpoint text and no secret.
+- **A `taken` answer records the floor.** Before it answers `taken`, agentd records the first free
+  epoch after every held folder from the probed one on (`next_epoch_at_least`, through the path a
+  resync uses for the folders after the newest epoch, with its `home.repository_prefix_taken` audit
+  event; no row is marked taken, since the probed epoch is not one the database has). A backup writes
+  only into the current epoch and never reaches the probed prefix, so without this nothing would
+  raise the floor and every re-run would probe the same prefix and be refused. If recording fails,
+  the answer is `error`.
+- **Fail closed.** `taken`, `error` and no answer in time each refuse the rotation before anything is
+  written: no epoch, no seed request, no `lost` mark, no audit event. There is no override flag; the
+  operator fixes agentd or the bucket and runs the command again. After `taken`, agentd has already
+  recorded the next free epoch, so running the command again probes that epoch and, when it is free,
+  rotates there.
+- The epoch probed must be the epoch the transaction starts. The command reads the candidate
+  (`LatestHomeRepositoryNextEpoch`) before it probes and compares it with the epoch
+  `Passwords.NewEpochIn` picked under the row lock; a difference (another rotation, or agentd
+  raising the floor meanwhile) rolls the transaction back and asks for a re-run.
+- The floor of #262 stays as the second guard: the candidate already includes it, and agentd still
+  records it when a backup or a seed meets a taken prefix and when a resync finds folders after the
+  newest epoch.
+- `keys new-repositories` probes every agent before it starts any epoch, so one refused agent refuses
+  the command. `keys forget` reads the agents of an org that need an epoch (their current
+  repository is sealed with the lost KEK or already lost) and probes them together before the org's
+  transaction, so a refusal comes before any lost mark. The probe must not run inside that
+  transaction: it locks the agents' repository rows, and the floor of a `taken` answer is recorded
+  under that lock, so agentd would wait for the command and the command for agentd until the probe
+  timed out. The transaction collects the agents again under its locks; one the probe did not
+  cover is refused like a changed epoch, and the org rolls back.
+- The probe table is ephemeral: the command deletes the rows it read, agentd deletes rows an hour
+  after they expire, and agentd never claims an expired probe.
 
 ## Implementation sub-issues
 
