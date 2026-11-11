@@ -45,18 +45,15 @@ var _ = Describe("kind-config.yaml", func() {
 		Expect(svc.Overlaps(pod)).To(BeFalse())
 	})
 
-	It("matches the Service IPs the escape suite defaults to", func() {
-		// kube-dns is the 10th and the API server the 1st address of the Service range.
-		api := svc.Masked().Addr().Next()
-		dns := api
-		for range 9 {
-			dns = dns.Next()
+	It("is not copied into the escape suite or its runner as a fixed Service IP", func() {
+		// The escape suite reads the cluster's kube-dns and kubernetes Service IPs from the cluster it
+		// targets (test/escape/kind.sh), so a fixed IP would silently probe nothing elsewhere.
+		for _, f := range []string{"../../escape/sandbox_test.go", "../../escape/kind.sh"} {
+			src, err := os.ReadFile(f)
+			Expect(err).NotTo(HaveOccurred())
+			for _, p := range []string{"10.96.", svc.Masked().Addr().String()[:strings.LastIndex(svc.Masked().Addr().String(), ".")+1]} {
+				Expect(string(src)).NotTo(ContainSubstring(p), "%s hard-codes a Service IP", f)
+			}
 		}
-		src, err := os.ReadFile("../../escape/sandbox_test.go")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(string(src)).To(ContainSubstring(`"`+dns.String()+`"`), "cluster DNS default")
-		Expect(string(src)).To(ContainSubstring(api.String() + ":443"))
-		Expect(string(src)).To(ContainSubstring(api.String() + ":6443"))
-		Expect(strings.Contains(string(src), "10.96.")).To(BeFalse(), "a hard-coded default-kind Service IP")
 	})
 })
