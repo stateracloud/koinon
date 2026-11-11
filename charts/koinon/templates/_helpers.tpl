@@ -598,6 +598,11 @@ helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 {{- include "koinon.componentName" (list . "gateway-config") }}
 {{- end }}
 
+{{/* The deny-all gateway config a held install mounts instead of the reconciler's (restoreHold, issue #530). */}}
+{{- define "koinon.gatewayHeldConfigName" -}}
+{{- include "koinon.componentName" (list . "gateway-config-held") }}
+{{- end }}
+
 {{/* The Secret with the key-encryption keys (KEKs) for provider keys and connection secrets (ADR 0056). */}}
 {{- define "koinon.kekSecretName" -}}
 {{- .Values.secrets.kek.existingSecret | default (include "koinon.componentName" (list . "kek")) }}

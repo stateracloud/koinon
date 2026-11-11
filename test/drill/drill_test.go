@@ -166,21 +166,24 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 		"install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
 		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
 	}
-	if !hold {
-		args = append(args, "--wait")
-	}
+	// --wait for held and unheld alike (issue #530): a held install's gateway is ready but deny-all (ADR 0107).
+	args = append(args, "--wait")
 	_, err = kube.Helm(ctx, args...)
 	must(err, "helm install "+in.Release)
 	if hold {
-		// A held reconciler converges nothing (ADR 0107), so it never makes the gateway's ConfigMap and the gateway
-		// Deployment cannot become ready until the hold is released: `helm --wait` would wait for it for ever.
-		// TODO(#530): exit condition: when a held install reaches ready (or #530 decides it must not), put
-		// `--wait` back for the held install, or keep this and point to the decision.
-		// What a held install must reach is its three binaries, ready. The hooks (preflight, migrate) ran above.
-		for _, c := range []string{"api", "reconciler", "agentd"} {
-			out, err := kube.Kubectl(ctx, "-n", in.Namespace, "rollout", "status", "deploy/"+s.name(c), "--timeout=10m")
-			must(err, "the held "+c+" becomes ready: "+out)
-		}
+		// The held gateway is ready (the wait above) and refuses a model request.
+		addr, stop, err := kube.PortForward(context.WithoutCancel(ctx), in.Namespace, "svc/"+s.name("gateway"), 8080)
+		must(err, "port-forward the held gateway of "+in.Release)
+		defer stop()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/v1/chat/completions",
+			strings.NewReader(`{"model":"koinon/any","messages":[{"role":"user","content":"hi"}]}`))
+		must(err, "build the request")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer koinon_test_not-a-real-token")
+		resp, err := http.DefaultClient.Do(req)
+		must(err, "ask the held gateway for a model call")
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(BeElementOf(http.StatusUnauthorized, http.StatusForbidden), "the held gateway refuses a model request")
 	}
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
