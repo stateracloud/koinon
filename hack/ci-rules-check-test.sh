@@ -176,6 +176,34 @@ case_ "T1: Playwright retries above 0 fails" 1 'rule=T1 verdict=fail' \
 	'printf "export default {\n  retries: process.env.CI ? 1 : 0,\n};\n" >"$r/web/playwright.config.ts"'
 case_ "T1: Playwright retries 0 passes" 0 'rule=T1 verdict=pass' \
 	'printf "export default {\n  retries: 0,\n};\n" >"$r/web/playwright.config.ts"'
+case_ "T1: Playwright retries 0 with a trailing // comment and no comma passes" 0 'rule=T1 verdict=pass' \
+	'printf "export default {\n  retries: 0 // none\n};\n" >"$r/web/playwright.config.ts"'
+case_ "T1: Playwright retries inline in an object fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { retries: 2 }\n" >"$r/web/playwright.config.ts"'
+case_ "T1: Playwright retries inside projects fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default {\n  projects: [{ name: \"a\", retries: 2 }],\n};\n" >"$r/web/playwright.config.ts"'
+case_ "T1: a .mts Playwright config fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { retries: 1 }\n" >"$r/web/playwright.extra.config.mts"'
+case_ "T1: a Playwright config outside web fails" 1 'rule=T1 verdict=fail' \
+	'mkdir -p "$r/apps/x"; printf "export default { retries: 1 }\n" >"$r/apps/x/playwright.config.js"'
+case_ "T1: test.describe.configure retries in a spec fails" 1 'rule=T1 verdict=fail' \
+	'mkdir -p "$r/web/e2e"; printf "test.describe.configure({ retries: 2 })\n" >"$r/web/e2e/a.spec.ts"'
+case_ "T1: a commented-out retries passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/web/e2e"; printf "// test.describe.configure({ retries: 2 })\n" >"$r/web/e2e/a.spec.ts"'
+case_ "T1: --retries=2 in package.json fails" 1 'rule=T1 verdict=fail' \
+	'printf "{\"scripts\":{\"e2e\":\"playwright test --retries=2\"}}\n" >"$r/web/package.json"'
+case_ "T1: --retries N in a workflow fails" 1 'rule=T1 verdict=fail' \
+	'printf "      - run: pnpm exec playwright test --retries 3\n" >>"$r/.github/workflows/ci.yml"'
+case_ "T1: --retries=0 passes" 0 'rule=T1 verdict=pass' \
+	'printf "      - run: pnpm exec playwright test --retries=0\n" >>"$r/.github/workflows/ci.yml"'
+case_ "T1: gotestsum --rerun-fails fails" 1 'rule=T1 verdict=fail' \
+	'printf "gotestsum --rerun-fails=2 ./...\n" >"$r/hack/go-test.sh"'
+case_ "T1: Vitest retry in a config fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { test: { retry: 2 } }\n" >"$r/web/vitest.config.ts"'
+case_ "T1: react-query retry in web/src passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/web/src/lib"; printf "export const q = { retry: 2, retry: (n) => n < 3 };\n" >"$r/web/src/lib/query.ts"'
+case_ "T1: download retries pass" 0 'rule=T1 verdict=pass' \
+	'printf "curl --retry 5 --retry-all-errors -fsSL x\napt-get -o Acquire::Retries=5 update\n" >"$r/hack/fetch.sh"'
 case_ "T1: the word in docs is ignored" 0 'rule=T1 verdict=pass' \
 	'mkdir -p "$r/docs"; printf "no flake-attempts please\n" >"$r/docs/x.md"'
 

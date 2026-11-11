@@ -15,7 +15,8 @@
 #       `paths:` or `paths-ignore:` filter under `on:`. The job-level `if:` form is fine.
 #   Q6  a workflow that defines a required check never cancels runs of a queue or main build: a literal
 #       `cancel-in-progress: true` fails; an expression must name `pull_request`.
-#   T1  no automatic test retry: no ginkgo flake attempts, no retry action, no Playwright `retries` above 0.
+#   T1  no automatic test retry: no ginkgo flake attempts, no retry action, no Playwright `retries` above 0 (config or
+#       `test.describe.configure`), no `--retries N`, no gotestsum `--rerun-fails`, no Vitest `retry`.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
 #   T7  every job of ci.yml sets `timeout-minutes`. hack/runner-lint.sh is the check and this line says so;
 #       while it has no timeout rule, this script counts the jobs and reports.
@@ -218,34 +219,46 @@ fi
 
 # --- T1 -------------------------------------------------------------------------------------------
 # Scan the files that run tests; docs are excluded (they explain the rule), and so are this script and its test.
+# t1_files GLOB...: the matching files under the tree, without .git, node_modules, docs, testdata and the two rule files.
+t1_files() {
+	local args=() g
+	for g in "$@"; do args+=(-o -name "$g"); done
+	find "$root" \( -name .git -o -name node_modules -o -name docs -o -name testdata \) -prune -o \
+		-type f \( "${args[@]:1}" \) ! -name ci-rules-check.sh ! -name ci-rules-check-test.sh -print 2>/dev/null
+}
+# t1_grep PATTERN FILE...: "file:line: text" for each line that matches PATTERN once a whole-line comment
+# (//, *, #) and a trailing `//` comment are dropped. A trailing `//` comment is cut so `retries: 0 // none` is clean.
+t1_grep() {
+	local pat=$1
+	shift
+	[[ $# -gt 0 ]] || return 0
+	awk -v pat="$pat" -v root="$root/" '
+		/^[[:space:]]*(\/\/|\*|\/\*|#)/ { next }
+		{ l = $0; sub(/[[:space:]]\/\/.*/, "", l); if (l ~ pat) { f = FILENAME; sub("^" root, "", f); print f ":" FNR ": " $0 } }
+	' "$@"
+}
 scan() { # PATTERN [grep options...]: matching lines of the scanned files
 	local pat=$1
 	shift
 	grep -r -I -n -E "$@" --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=docs --exclude-dir=testdata \
 		--exclude=ci-rules-check.sh --exclude=ci-rules-check-test.sh "$pat" "$root" 2>/dev/null || true
 }
-hits=$(scan 'flake-attempts|[Ff]lakeAttempts' --include='*.go' --include='*.sh' --include='*.yml' --include='*.yaml' --include='Makefile' --include='*.mk')
-hits+=$'\n'$(scan 'nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action' --include='*.yml' --include='*.yaml')
+mapfile -t f_flake < <(t1_files '*.go' '*.sh' '*.yml' '*.yaml' 'Makefile' '*.mk' 'package.json')
+mapfile -t f_action < <(t1_files '*.yml' '*.yaml')
+mapfile -t f_cli < <(t1_files '*.sh' '*.yml' '*.yaml' 'Makefile' '*.mk' 'package.json')
+mapfile -t f_web < <(t1_files '*.ts' '*.tsx' '*.mts' '*.js' '*.mjs' | grep -E "^$root/web/|/playwright[^/]*\.config\.[a-z]+$" || true)
+mapfile -t f_vitest < <(t1_files 'vite.config.*' 'vitest.config.*' 'vitest.workspace.*' 'vite.*.config.*' 'vitest.*.config.*')
+hits=$(
+	t1_grep 'flake-attempts|[Ff]lakeAttempts|--rerun-fails' "${f_flake[@]}"
+	t1_grep 'nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action' "${f_action[@]}"
+	t1_grep '--retries[= ][[:space:]]*[1-9]' "${f_cli[@]}"
+	t1_grep 'retries:[[:space:]]*[^0[:space:]]' "${f_web[@]}"
+	t1_grep '(^|[^a-zA-Z])retry:[[:space:]]*[^0[:space:]]' "${f_vitest[@]}"
+)
 if [[ -n ${hits//[[:space:]]/} ]]; then
-	verdict T1 fail "automatic test retry: $(tr '\n' ' ' <<<"$hits" | cut -c1-300)"
+	verdict T1 fail "automatic test retry (rule T1; file:line): $(tr '\n' ' ' <<<"$hits" | cut -c1-400)"
 else
-	pw=()
-	for f in "$root"/web/playwright*.ts; do
-		[[ -f $f ]] || continue
-		while IFS= read -r line; do
-			ln=${line%%:*}
-			line=${line#*:}
-			val=${line#*retries:}
-			val=${val%%,*}
-			val=${val#"${val%%[![:space:]]*}"}
-			[[ $val == 0 ]] || pw+=("web/$(basename "$f"):$ln retries: $val")
-		done < <(grep -n -E '^[[:space:]]*retries:' "$f" || true)
-	done
-	if [[ ${#pw[@]} -eq 0 ]]; then
-		verdict T1 pass "no automatic test retry"
-	else
-		verdict T1 fail "Playwright retries above 0 (rule T1, no automatic test retry): ${pw[*]}"
-	fi
+	verdict T1 pass "no automatic test retry"
 fi
 
 # --- T2 -------------------------------------------------------------------------------------------

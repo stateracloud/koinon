@@ -160,7 +160,11 @@ Source: Koinon decision (no official text found). Scope: Koinon only. In force: 
 **T1. MUST NOT** retry a failed test automatically: no ginkgo flake attempts, no retry action, no Playwright
 `retries` above 0.
 Why: a retry turns a real intermittent defect into a green run, and the retry rate becomes the only number.
-Check: `hack/ci-rules-check.sh` (rule T1). A Playwright `retries` above 0 fails it with file and line.
+Check: `hack/ci-rules-check.sh` (rule T1). It fails with file and line on: Ginkgo `--flake-attempts` or `FlakeAttempts`;
+gotestsum `--rerun-fails`; a retry action in a workflow; `--retries N` above 0 in `package.json`, a workflow, a script or a
+Makefile; Playwright `retries` above 0 in any `playwright*.config.*` or any `web/` TypeScript or JavaScript file (so also
+`test.describe.configure`); a Vitest `retry` above 0 in a `vite*` or `vitest*` config. It does not fire on download retries
+(`curl --retry`, apt `Acquire::Retries`) or on react-query `retry` settings in `web/src`.
 Source: [Kubernetes, flaky tests](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/flaky-tests.md)
 (test jobs must not retry automatically); [DORA, test automation](https://dora.dev/capabilities/test-automation/)
 (do not tolerate flaky tests). Maintainer decision 2026-11-11. Scope: general pattern. In force: now.
