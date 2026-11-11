@@ -49,14 +49,15 @@ spec:
     # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
     # to be sealed (an HMAC credential per upload). Home checkpoints (ADR 0032) also ask here for
     # each repository's password, which koinon-api opens with the KEK (an HMAC credential per request). Its own port, so agentd cannot reach the tools
-    # below, which trust agentgateway's agent header. Sandboxes cannot reach it.
+    # below, which trust the gateway's agent header. Sandboxes cannot reach it.
     - ports:
         - port: savedwork
       from:
         - podSelector:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
-    # The GitHub tools trust agentgateway's agent header, so only the gateway may reach them.
+    # The GitHub tools trust the gateway's agent header (gateway.AgentHeader, X-Koinon-Agent; the gateway
+    # overwrites a client's copy), so only the gateway may reach them: a request that skips it never arrives.
     - ports:
         - port: tools
       from:

@@ -109,7 +109,7 @@ type caller struct {
 }
 
 func (s *Server) identify(ctx context.Context, header http.Header, serverName string) (caller, error) {
-	ref, err := gateway.ParseAgentRef(header.Get(gateway.AgentHeader))
+	ref, err := gateway.AgentFromHeader(header)
 	if err != nil {
 		return caller{}, errNoIdentity
 	}
