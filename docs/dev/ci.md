@@ -365,8 +365,9 @@ its offline self-test (stubbed gates, run by the `scripts` job; escape cases put
 
 ## The race detector
 
-The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
-its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+The `go-race-serial` and `go-race-parallel` jobs (parts of the required `go` check, so they are already in
+`hack/ci-required.txt` through its aggregator; two jobs so they run side by side, not one after the other,
+issue 572) run `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
 `internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
 suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
 runs without it, because the race build is several times slower. Add a package here when it starts
@@ -393,7 +394,7 @@ processes, and fewer processes would make the job slower for the same risk.
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
 `go.mod`, `go.sum`, the lint config). `changes` and
@@ -517,14 +518,15 @@ work that fills it, then saves:
 
 | Cache | Key | Filled by |
 | --- | --- | --- |
-| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>-<week>` (`<week>` = whole 7-day periods since the epoch; defined once in `.github/actions/setup-go-cache`) | `go build ./...`, `go test -run '^$' ./...`, the same with `-race` for the go-race packages, one lint run |
 | Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
-| golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
+| golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
 
-Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with
-`cache: false` plus an explicit `actions/cache/restore`), and `e2e-go` is one entry per `go.sum`
+Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
+`setup-go-cache`: `setup-go` with `cache: false` plus the `actions/cache/restore` with the weekly key; a
+week without a go.sum change still gets a fresh build cache, and a pull request falls back to the previous week's entry until main has saved the new one), and `e2e-go` is one entry per `go.sum`
 (no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
 `flavors` and `flavor-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
 reports on pushes only. A new key goes into the warm job and the restoring jobs together;
