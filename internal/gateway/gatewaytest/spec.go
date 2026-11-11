@@ -81,13 +81,12 @@ type Gateway struct {
 	URL string
 	// Logs returns the gateway's recent log, for failure reports. Optional.
 	Logs func(ctx context.Context) string
-	// Observe returns what the gateway recorded about the requests of one key (Key.ID), oldest
-	// first. Optional: when nil the specs read it from Logs as agentgateway's access log
-	// ([ObservedFromAgentgatewayLog]); a gateway of Koinon's own sets it to read its usage record.
-	// These are the gateway's own totals (input including cache, output including reasoning), not
-	// the disjoint UsageRecord: a driver that reads its usage record adds the parts back. The
-	// ledger prices the disjoint record that the driver maps from this log.
-	Observe func(ctx context.Context, keyID string) ([]Observed, error)
+	// Usage returns the usage records the gateway kept of the requests of one key (Key.ID), oldest
+	// first: the gateway.UsageRecord the spend ledger reads (ADR 0097 decision 3), with disjoint
+	// token buckets. Optional: when nil the specs read it from Logs as agentgateway's access log
+	// ([UsageFromAgentgatewayLog]). A gateway of Koinon's own sets it to read the records it pushes
+	// to the ledger, so both gateways are judged on the record and never on a gateway's own fields.
+	Usage func(ctx context.Context, keyID string) ([]gateway.UsageRecord, error)
 	// Stop tears the gateway down. Optional.
 	Stop func(ctx context.Context) error
 }
@@ -974,4 +973,15 @@ func loneTargetSpec(env Env) {
 			}
 		})
 	})
+}
+
+// usage returns the usage records of keyID, from the driver's Usage or from its log.
+func (g *Gateway) usage(ctx context.Context, keyID string) ([]gateway.UsageRecord, error) {
+	switch {
+	case g.Usage != nil:
+		return g.Usage(ctx, keyID)
+	case g.Logs != nil:
+		return UsageFromAgentgatewayLog(g.Logs(ctx), keyID)
+	}
+	return nil, fmt.Errorf("the driver exposes neither Usage nor Logs")
 }
