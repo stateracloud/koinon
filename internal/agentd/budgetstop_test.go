@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // A spent budget revokes the agent's key while the harness is mid-turn: the harness sees the
@@ -42,7 +43,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 			t := e.task(ctx, "hello")
 			r := e.enqueue(ctx, t)
 			e.pool("agentd-a")
-			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 
 			got := getRun(ctx, r)
 			Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
@@ -75,7 +76,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
 	})
 
@@ -87,7 +88,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
 	})
 
@@ -105,7 +106,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
@@ -134,12 +135,12 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		}
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(requested).WithTimeout(15 * time.Second).Should(BeClosed())
+		Eventually(requested).WithTimeout(racescale.D(15 * time.Second)).Should(BeClosed())
 		n, err := ledger.StopSpent(ctx, db, e.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(Equal(1))
 		close(stopped)
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateCanceled))
 		Consistently(func() int { return len(eventOf(events(ctx, r), "run.canceled")) }, 500*time.Millisecond).Should(Equal(1))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
@@ -152,7 +153,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 		Expect(got.OutcomeReason.String).To(ContainSubstring("Authentication required"))
@@ -164,7 +165,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e.harness.modelFault = func(context.Context, string) error { return &sdk.RequestError{Code: -32603, Message: "boom"} }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))
 	})
 })

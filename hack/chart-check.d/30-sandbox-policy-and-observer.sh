@@ -130,6 +130,16 @@ has "the namespace label policy judges the old object" 'variables.oldLabels\[\\"
 has "the namespace label policy follows openshell.gatewayId" 'variables.oldLabels\[\\"openshell.ai/gateway-id\\"\] == \\"prod\\"' --set openshell.gatewayId=prod --show-only "$nsp"
 has "the namespace label policy follows sandboxPolicy.identities.namespaces" 'request.userInfo.username in \[\\"system:serviceaccount:ns:own\\"\]' --set-json 'sandboxPolicy.identities.namespaces=["system:serviceaccount:ns:own"]' --show-only "$nsp"
 has "a key of sandboxPolicy.namespaceSelector is guarded" '\[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\",\\"team\\"\]' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$nsp"
+# Issue 507: a pre-filter on the OLD object, so namespaces without a guarded label never reach the CEL.
+has "the namespace label policy pre-filters on the old object's guarded labels" 'name: old-object-has-a-guarded-label' --show-only "$nsp"
+has "the pre-filter reads the old labels map with has()" 'has\(oldObject.metadata.labels\) && \[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\"\]\.exists\(k, k in oldObject.metadata.labels\)' --show-only "$nsp"
+has "the pre-filter follows sandboxPolicy.namespaceSelector" 'has\(oldObject.metadata.labels\) && \[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\",\\"team\\"\]\.exists' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$nsp"
+# A selector with only NotIn / DoesNotExist covers a namespace without the keys, so no pre-filter (review of 507).
+neg='sandboxPolicy.namespaceSelector={"matchLabels":null,"matchExpressions":[{"key":"koinon.dev/exempt","operator":"DoesNotExist"}]}'
+lacks "a negative-only selector renders no pre-filter" 'old-object-has-a-guarded-label|matchConditions' --set sandboxPolicy.scopeToGateway=false --set-json "$neg" --show-only "$nsp"
+has "a negative-only selector still renders the namespace label policy" '^  name: koinon-koinon-sandbox-namespaces$' --set sandboxPolicy.scopeToGateway=false --set-json "$neg" --show-only "$nsp"
+lacks "a negative-only selector scoped to the gateway renders no pre-filter" 'old-object-has-a-guarded-label' --set-json "$neg" --show-only "$nsp"
+has "an Exists selector keeps the pre-filter" 'name: old-object-has-a-guarded-label' --set-json 'sandboxPolicy.namespaceSelector={"matchLabels":null,"matchExpressions":[{"key":"koinon.dev/sb","operator":"Exists"}]}' --set sandboxPolicy.scopeToGateway=false --show-only "$nsp"
 nsb=$(render --show-only "$nsp" | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/ && /sandbox-namespaces/')
 [[ -n $nsb ]] || fail "the namespace label policy has a binding"
 ! grep -Eq -- 'namespaceSelector|objectSelector' <<<"$nsb" || fail "the namespace label policy binds without a selector (it reads the old object itself)"

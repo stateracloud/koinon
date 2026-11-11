@@ -4,6 +4,9 @@
 # The review workflow's `review` job (ADR 0103): does this pull request need a recorded review, and
 # when it does, does its head carry one?
 #
+# Advisory since 2026-11-11 (ADR 0103 amendment): the `review` check is information. The ruleset does
+# not require it and hack/pr-merge.sh does not run this script; only review.yml calls it.
+#
 #   - A pull request that touches none of the sensitive paths passes. The paths are the ones
 #     `hack/claim.sh sensitive-paths` prints (the `# Sensitive paths` section of .github/CODEOWNERS,
 #     the one source of ADR 0082 decision 9), matched as ruleset patterns (`dir/**` or an exact path;

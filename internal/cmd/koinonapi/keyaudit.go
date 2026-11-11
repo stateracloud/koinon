@@ -35,10 +35,13 @@ type keyAudit struct {
 	firstAttempt time.Duration
 }
 
-func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace, kekSecret string, secretNames ...string) *keyAudit {
+func newKeyAudit(pool *pgxpool.Pool, kube kubernetes.Interface, namespace, release, kekSecret string, secretNames ...string) *keyAudit {
 	k := &keyAudit{pool: pool, kube: kube, namespace: namespace, kekSecret: kekSecret, firstAttempt: installWriteFirstAttempt}
 	if kube != nil {
-		k.generated = keyscli.GeneratedReader{Client: kube, Namespace: namespace, ListLabelled: true, Names: append([]string{kekSecret}, secretNames...)}.Read
+		k.generated = keyscli.GeneratedReader{
+			Client: kube, Namespace: namespace, ListLabelled: true, Release: release,
+			Names: append([]string{kekSecret}, secretNames...),
+		}.Read
 	}
 	return k
 }

@@ -265,6 +265,32 @@ crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, 
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
 
+## The race detector
+
+The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
+its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+`internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
+suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
+runs without it, because the race build is several times slower. Add a package here when it starts
+goroutines or shares state behind a lock; `hack/go-test-test.sh` checks the list. A reported race is
+fixed, never suppressed. Run it locally with `go tool ginkgo -race ./internal/<pkg>/` (Docker for the
+Postgres suites).
+
+Timing under `-race`: the race build is slower and the runner has fewer cores than a laptop, so a
+fixed wall-clock window that is fine on a laptop times out on the runner without any race report (the
+first `go-race` run of agentd failed on 9 specs, all "Timed out after 20s"). Every `Eventually` window
+in `internal/agentd` therefore goes through `racescale.D` (`internal/testing/racescale`: 1x normally,
+5x under `-race`), so normal timing is unchanged. Write new windows the same way. `Consistently`
+windows are not scaled: they assert that nothing happens, and a longer window only slows the suite.
+The same goes for the config budgets a spec lets real work run under (the pool's `Lease` and `Heartbeat`
+together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`, `GatewayRecordWait`, the
+checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
+short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
+fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
+a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
+processes, and fewer processes would make the job slower for the same risk.
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
@@ -283,8 +309,8 @@ One source, `hack/paths.rules`. Which paths turn on which job or gate is data, i
 `hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
 e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
 `lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
-the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
-graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds the `go list` build
+graphs of the flavors and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
 that file and nowhere else.
 
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
@@ -296,11 +322,10 @@ that file and nowhere else.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
-  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
-  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
-  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
-  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
-  list cannot name, so it is not done.
+  tags. `hack/ci-changes.sh` derives the Go packages those commands and the suite import (`go list`,
+  like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
+  `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
+  `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
@@ -575,7 +600,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 (ADR 0105): `hack/pr-merge.sh <PR>` enqueues; the queue builds main plus the PR and its `quickstart`
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
-runs the review gate, merges with `--admin`, and opens a `break-glass` issue with the reason.
+merges with `--admin`, and opens a `break-glass` issue with the reason.
 `--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
@@ -667,14 +692,20 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; `review` pinned to the
   Actions app; required checks on `merge_group`). PR B merges only with or after it.
 - Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
-  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks and `review` opens none.
+  successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks opens none (`review` is advisory and not read).
   The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
 - `--admin` (only for a PR that changes at least one `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
   `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the
   queue-commit quickstart, so `pr-merge.sh --admin` exits 9 for a PR with no `.github/` path; `--break-glass` is
-  the audited exception for anything else. Both run `pr-wait.sh --checks` and the review gate first.
+  the audited exception for anything else. Both run `pr-wait.sh --checks` first; neither reads the `review` verdict (advisory, see "The `review` check").
 
 ### The `review` check (ADR 0103)
+
+**Advisory since 2026-11-11** (ADR 0103 amendment, procoduck): the verdict no longer gates a merge. The `main`
+ruleset does not require `review` and `hack/pr-merge.sh` (`--admin`, `--break-glass`) does not read it. Independent
+reviews still run and their findings are still fixed; `review.yml` still posts the check as information. The text
+below says how the check works; read "required" and "refuses" in it as historical, and the closing paragraph as
+superseded.
 
 `review` (`.github/workflows/review.yml`, `hack/review-gate.sh`) records the independent review of a
 sensitive-path pull request as a check. A pull request that touches none of the patterns of `hack/claim.sh
@@ -705,14 +736,13 @@ that run is still going, use "Re-run all jobs" when it ends.
 - A `merge_group` build judges the queued pull request's head and files, with the gate from
   `merge_group.base_sha`, and fails unless that head is a parent of the queue commit.
 - An exact pattern also matches `<pattern>/*`. Every read error fails the check.
-- `hack/pr-merge.sh --admin` runs the gate on the head itself and refuses with exit 9 (naming
-  `hack/review-verdict.sh`), with the base's gate; an admin merge in the web UI skips it.
+- `hack/pr-merge.sh` no longer runs the gate (advisory since 2026-11-11); `hack/review-gate.sh` is called only by `review.yml`.
 - A listed owner posts the status, so it records a review; it is no separation of duties.
 
-The check is advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
+(Superseded by the 2026-11-11 amendment: the ruleset step was done, then `review` was removed from the required contexts on 2026-11-11; the check is advisory again.) The check was to be advisory until the owner's step (ADR 0103 decision 4, after its precondition): one ruleset
 PUT adds the context `review`, pinned to the GitHub Actions app (`integration_id: 15368`, so a status
 posted by a user cannot satisfy it), and cuts `required_reviewers` to `.github/**`, and `review` moves to
-`external review` in `hack/ci-required.txt`. Until then a sensitive-path pull request still needs the approval or `--admin`.
+`external review` in `hack/ci-required.txt`.
 
 ### Review threads (#187)
 

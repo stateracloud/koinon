@@ -54,7 +54,7 @@ var _ = Describe("koinon-api's key events", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		kube = fake.NewClientset()
-		keyAud = newKeyAudit(pgtest.Start(ctx), kube, ns, "koinon-kek", "koinon-saved-work")
+		keyAud = newKeyAudit(pgtest.Start(ctx), kube, ns, "", "koinon-kek", "koinon-saved-work")
 		raw := make([]byte, secretstore.KeySize)
 		copy(raw, "koinon_test_not-a-real-kek")
 		_, err := kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
@@ -143,7 +143,7 @@ var _ = Describe("koinon-api's key events", func() {
 
 	It("writes keys.observed on a first start even with no KEK and no generated Secret", func(ctx SpecContext) {
 		// The chain holds no key event yet (a new database), and this koinon-api has no key set.
-		empty := newKeyAudit(keyAud.pool, nil, ns, "koinon-kek")
+		empty := newKeyAudit(keyAud.pool, nil, ns, "", "koinon-kek")
 		Expect(empty.observe(ctx)).To(Succeed())
 		Expect(count(ctx, "keys.observed", 0)).To(Equal(1))
 		var raw string
@@ -283,11 +283,11 @@ var _ = Describe("koinon-api's key events", func() {
 			fresh := fake.NewClientset()
 			mirror := fake.NewClientset()
 			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
-			a := newKeyAudit(keyAud.pool, fresh, ns, "koinon-kek", "koinon-saved-work")
+			a := newKeyAudit(keyAud.pool, fresh, ns, "", "koinon-kek", "koinon-saved-work")
 			a.keySet = store
 			// The second replica's start-up check reads the mirror: the fake clientset holds its lock
 			// while a reactor runs.
-			b := newKeyAudit(keyAud.pool, mirror, ns, "koinon-kek", "koinon-saved-work")
+			b := newKeyAudit(keyAud.pool, mirror, ns, "", "koinon-kek", "koinon-saved-work")
 			b.keySet = keyscli.KubeStore{Client: mirror, Namespace: ns, Name: "koinon-kek"}
 
 			observed := make(chan error, 1)

@@ -27,11 +27,10 @@ func TestAWSKMS(t *testing.T) {
 	RunSpecs(t, "AWS KMS Suite")
 }
 
-// image is the LocalStack the adapter is tested against: 4.14.0 is the last release that runs
-// without a LocalStack account (later ones need an auth token). It does not check signatures or
-// IAM policies, so rights and signing are covered against a fake (hardening_test.go) and AWS's
-// SigV4 test vectors (sigv4_test.go).
-const image = "docker.io/localstack/localstack:4.14.0"
+// image is the LocalStack the adapter is tested against. It does not check signatures or IAM
+// policies, so rights and signing are covered against a fake (hardening_test.go) and AWS's SigV4
+// test vectors (sigv4_test.go).
+const image = containerhost.LocalStackImage
 
 const region = "us-east-1"
 

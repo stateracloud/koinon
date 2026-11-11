@@ -785,6 +785,9 @@ sandboxPolicy:
   # (scopeToGateway), so a release's policies cover only its own gateway's workspace namespaces: two
   # Koinon releases with their own gateways on one cluster do not block each other's sandboxes
   # (old issue 460).
+  # A selector with no matchLabels, In or Exists requirement (only NotIn / DoesNotExist) turns off the
+  # namespace label policy's matchConditions pre-filter, so that policy then judges every namespace
+  # update in the cluster (issue 507).
   namespaceSelector:
     matchLabels:
       openshell.ai/managed-by: openshell

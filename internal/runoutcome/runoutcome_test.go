@@ -258,6 +258,33 @@ var _ = Describe("Succeed", func() {
 	})
 })
 
+var _ = Describe("Supersede", func() {
+	It("ends the turn row, then the run, then completes the task, from starting", func(ctx SpecContext) {
+		w := newWorld(ctx, false)
+		turn := w.openTurn(ctx)
+		Expect(w.own.Supersede(ctx, turn, "read already")).To(Succeed())
+		Expect(w.turnRow(ctx).EndReason.String).To(Equal("superseded"))
+		run := w.current(ctx)
+		Expect(run.State).To(Equal(store.RunStateSucceeded))
+		Expect(run.OutcomeReason.String).To(Equal("read already"))
+		Expect(w.runKinds(ctx)).To(Equal([]string{"run.succeeded"}))
+		Expect(w.taskKinds(ctx)).NotTo(ContainElement("message"))
+		Expect(w.taskState(ctx)).To(Equal(store.TaskStateCompleted))
+		Expect(w.metrics.finished).To(Equal([]store.RunState{store.RunStateSucceeded}))
+	})
+
+	It("writes nothing for a stale epoch, the turn row included", func(ctx SpecContext) {
+		w := newWorld(ctx, false)
+		turn := w.openTurn(ctx)
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "canceled"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.own.Supersede(ctx, turn, "late")).To(MatchError(runoutcome.ErrFenced))
+		Expect(w.current(ctx).State).To(Equal(store.RunStateCanceled))
+		Expect(w.runKinds(ctx)).To(BeEmpty())
+		Expect(w.metrics.finished).To(BeEmpty())
+	})
+})
+
 var _ = Describe("Fail", func() {
 	It("fails the task of a fatal failure after the run's failure on its timeline", func(ctx SpecContext) {
 		w := newWorld(ctx, true)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("A refused permission request", func() {
@@ -17,7 +18,7 @@ var _ = Describe("A refused permission request", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		r := e.enqueue(ctx, e.task(ctx, markRefuse+" write the notes"))
 		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
 		prompts, _, _, _ := e.harness.snapshot()
 		Expect(prompts).To(HaveLen(2), "the task's prompt, then the note")
@@ -39,7 +40,7 @@ var _ = Describe("A refused permission request", func() {
 		e.harness.set(func(h *harness) { h.refuseAll = true })
 		r := e.enqueue(ctx, e.task(ctx, "write the notes"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MaxRefusedTurns = 2 })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 
 		prompts, _, _, _ := e.harness.snapshot()
 		Expect(prompts).To(HaveLen(3), "the task's prompt and two notes")

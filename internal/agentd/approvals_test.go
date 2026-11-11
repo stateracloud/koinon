@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // markAsk makes the fake harness call create_pull_request through Koinon's tool server.
@@ -177,8 +178,8 @@ var _ = Describe("Parking on approvals", func() {
 		g.pool("agentd-a")
 
 		var id string
-		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 		By("the instructions list the granted repository with its clone URL on the default host")
 		written, _ := g.files.get(instructionsFile)
 		Expect(string(written)).To(ContainSubstring("`acme/widgets` on GitHub (connector `github`, host `github.com`): `git clone https://github.com/acme/widgets`"))
@@ -198,7 +199,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(decided.Status).To(Equal(store.ApprovalStatusExecuted), decided.Error.String)
 		const url = "https://github.test/acme/widgets/pull/1"
 
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, loads, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
@@ -227,17 +228,46 @@ var _ = Describe("Parking on approvals", func() {
 		r := g.enqueue(ctx, t)
 		g.pool("agentd-a")
 		var id string
-		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		Eventually(ids).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateParked))
 
 		_, err := g.svc.Deny(ctx, g.org, mustUUID(id), g.user, "touch only the docs")
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: touch only the docs"))
 		Expect(chunks(events(ctx, r))).To(ContainElement(ContainSubstring("status=denied")))
 		Expect(g.gh.Mints()).To(BeZero(), "nothing reached GitHub")
 		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
+	})
+
+	It("ends a run queued behind the parked run without a turn once the resumed run read its message (#21)", func(ctx SpecContext) {
+		g := newGitHubEnv(ctx)
+		ids := g.script()
+		t := g.task(ctx, markAsk+": fix the typo")
+		r := g.enqueue(ctx, t)
+		g.pool("agentd-a")
+		var id string
+		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+
+		By("a message arrives while the run is parked, and queues a run behind it")
+		g.message(ctx, t, "Also mention the README.")
+		queued := g.enqueue(ctx, t)
+
+		_, err := g.svc.Deny(ctx, g.org, mustUUID(id), g.user, "touch only the docs")
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, queued)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+
+		By("the resumed run took the message, and the queued run did not spend a model turn")
+		prompts, _, _, _ := g.harness.snapshot()
+		Expect(prompts).To(HaveLen(2))
+		Expect(prompts[1]).To(ContainSubstring("Also mention the README."))
+		Expect(kinds(events(ctx, queued))).NotTo(ContainElement("run.prompt"))
+		Expect(getRun(ctx, queued).OutcomeReason.String).To(ContainSubstring("already read"))
+		By("the task still ends, which the queued run was holding back")
+		Eventually(g.taskStatus(ctx, t)).WithTimeout(10 * time.Second).Should(Equal(store.TaskStateCompleted))
 	})
 
 	It("does not wait when the request was decided before the turn ended", func(ctx SpecContext) {
@@ -258,7 +288,7 @@ var _ = Describe("Parking on approvals", func() {
 		t := g.task(ctx, markAsk)
 		r := g.enqueue(ctx, t)
 		g.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: no"))

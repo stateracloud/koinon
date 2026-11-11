@@ -26,38 +26,31 @@
 #                  the entry; on a PR that is already queued it is not (the output says to dequeue and enqueue again).
 #   --break-glass "<reason>"
 #                  emergency, for a queue that cannot merge anything (GitHub's queue or the hosted runners down). Needs
-#                  --approved-at (the owner approves; exit 64 without). Runs the checks above and the review gate,
+#                  --approved-at (the owner approves; exit 64 without). Runs the checks above,
 #                  merges with `gh pr merge --admin --merge`, and opens a `break-glass` issue (sha, reason, approver).
 #   --admin        merge now with admin rights, for a pull request that changes at least one path under `.github/`: a
-#                  workflow file runs from the pull request and could fake the `review` check, so those keep the
+#                  workflow file runs from the pull request, so those keep the
 #                  CODEOWNERS approval, which one human cannot give (ADR 0103, ADR 0105). Any other pull request is
 #                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
 #                  e2e, so it is fail-closed for it: when the base's needs-e2e.sh says the change needs the e2e (or cannot
 #                  say), the head needs a green `quickstart` of its own, else exit 10. Exit 2 when the file list cannot
 #                  be read.
-#   Both --admin and --break-glass run hack/review-gate.sh on the head first (the `review` check they bypass, ADR 0103)
-#   and refuse with exit 9 when a sensitive-path PR has no success review-verdict from a listed owner.
-#                  The gate, claim.sh and CODEOWNERS are the base branch's (origin/<base>, fetched), not this
-#                  checkout's; only when the base has no gate yet does it use the local copy, and says so.
-#                  That fallback also runs for a PR whose base branch has no gate (a base other than main), and
-#                  the local copy can then be the PR's own; harmless while the ruleset protects only main.
+#   The `review` check (the independent review verdict, ADR 0103) is advisory since 2026-11-11: neither --admin
+#   nor --break-glass reads it, and no mode needs a recorded verdict.
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
 #   --approved-at  when the human approved the merge; recorded in the comment (required by --break-glass)
 # Exit: 0 merged (or auto-merge enabled, or queued), 1 a required context is not green, 2 the wait timed out or
-#       a tool failed (also: the repository name, the base fetch or the gate copy for --admin, a file list that cannot
-#       be read, --jump without a queue), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
-#       9 --admin on a PR without a `.github/` path, or without a review verdict (ADR 0103), 10 --admin on an
+#       a tool failed (also: a file list that cannot
+#       be read, --jump without a queue, the base fetch or a rule file for --admin), 3 closed, 4 conflict, 5 draft, 6 stale head, 7 unresolved review threads,
+#       9 --admin on a PR without a `.github/` path (ADR 0105), 10 --admin on an
 #       e2e-relevant PR without a green quickstart on the head, 64 usage
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS replace the helper scripts; PR_MERGE_NEEDS_E2E replaces needs-e2e.sh
 # (with PR_MERGE_TEST=1).
-# PR_MERGE_REVIEW_GATE replaces the review gate only when PR_MERGE_TEST=1 is set too (a test hook). Not a
-# security boundary: whoever runs this script can set both variables or edit it. The boundary is the required
-# `review` check in the `main` ruleset; `--admin` and the web UI bypass it (ADR 0103).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -69,8 +62,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 wait_sh=${PR_MERGE_WAIT:-$here/pr-wait.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
 required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
-review_gate=""
-[ "${PR_MERGE_TEST:-}" != 1 ] || review_gate=${PR_MERGE_REVIEW_GATE:-}
 # shellcheck source=/dev/null
 . "$here/lib/pr-verdict.sh"
 
@@ -242,34 +233,7 @@ if [ "$jump" = 1 ] && [ "$queue" != 1 ]; then
 fi
 if [ $((admin + glass)) != 0 ]; then
   mode=--admin
-  # --admin bypasses the ruleset, so the `review` check too (ADR 0103): run the gate on the head here. A
-  # sensitive-path PR without a success review-verdict from a listed owner is refused (exit 9).
-  repo=${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}
-  [ -n "$repo" ] || { echo "pr-merge: cannot read the repository name for the review gate; not merging" >&2; exit 2; }
-  if [ -z "$review_gate" ]; then
-    # The base's gate, claim.sh and CODEOWNERS: this checkout can be stale or the PR's own worktree.
-    git fetch -q --no-tags origin "$base" 2>/dev/null || { echo "pr-merge: git fetch origin $base failed; cannot run the review gate; not merging" >&2; exit 2; }
-    if git cat-file -e "refs/remotes/origin/$base:hack/review-gate.sh" 2>/dev/null; then
-      gate_dir=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-gate.XXXXXX") || { echo "pr-merge: mktemp failed; not merging" >&2; exit 2; }
-      trap 'rm -rf "$gate_dir"' EXIT
-      mkdir -p "$gate_dir/hack" "$gate_dir/.github"
-      for f in hack/review-gate.sh hack/claim.sh .github/CODEOWNERS; do
-        git show "refs/remotes/origin/$base:$f" >"$gate_dir/$f" 2>/dev/null || { echo "pr-merge: cannot read $f from origin/$base; not merging" >&2; exit 2; }
-      done
-      chmod +x "$gate_dir/hack/review-gate.sh" "$gate_dir/hack/claim.sh"
-      review_gate=$gate_dir/hack/review-gate.sh
-    else
-      echo "pr-merge: origin/$base has no hack/review-gate.sh yet (this PR adds it?): using the local copy" >&2
-      review_gate=$here/review-gate.sh
-    fi
-  fi
-  grc=0
-  gate_out=$(env -u CLAIM -u CODEOWNERS -u KOINON_CLAIM_CODEOWNERS EVENT=pull_request PR="$pr" SHA="$sha" GH_REPO="$repo" "$review_gate" 2>&1) || grc=$?
-  if [ "$grc" != 0 ]; then
-    printf '%s\n' "$gate_out" >&2
-    echo "pr-merge: --admin: the review gate (hack/review-gate.sh) fails on ${sha:0:7}; record the independent review with hack/review-verdict.sh $pr ready <reviewer> $sha, then run this again; not merging" >&2
-    exit 9
-  fi
+  # The independent review verdict is advisory since 2026-11-11 (ADR 0103 amendment): no review gate here.
   if [ "$glass" = 1 ]; then
     echo "pr-merge: BREAK GLASS: merging PR $pr without the queue (approved at $approved): $reason" >&2
   else
@@ -278,8 +242,10 @@ if [ $((admin + glass)) != 0 ]; then
     needs_sh=""
     [ "${PR_MERGE_TEST:-}" != 1 ] || needs_sh=${PR_MERGE_NEEDS_E2E:-}
     if [ -z "$needs_sh" ]; then
+      # The base's rule, not this checkout's (it can be stale or the PR's own worktree).
+      git fetch -q --no-tags origin "$base" 2>/dev/null || { echo "pr-merge: git fetch origin $base failed; cannot decide the e2e; not merging" >&2; exit 2; }
       ne_dir=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-ne.XXXXXX") || { echo "pr-merge: mktemp failed; not merging" >&2; exit 2; }
-      trap 'rm -rf "$ne_dir" "${gate_dir:-}"' EXIT
+      trap 'rm -rf "$ne_dir"' EXIT
       mkdir -p "$ne_dir/hack"
       for f in hack/needs-e2e.sh hack/paths-lib.sh hack/paths.rules; do
         git show "refs/remotes/origin/$base:$f" >"$ne_dir/$f" 2>/dev/null || { echo "pr-merge: cannot read $f from origin/$base to decide the e2e; not merging" >&2; exit 2; }

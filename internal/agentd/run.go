@@ -78,6 +78,11 @@ type requeued struct{ reason string }
 
 func (q *requeued) Error() string { return q.reason }
 
+// supersededRun ends the run as succeeded without a turn: its messages were read already (#21).
+type supersededRun struct{ reason string }
+
+func (e *supersededRun) Error() string { return e.reason }
+
 // canceled cancels the run as its owner, for example at the wall-clock cap, or on a spent
 // budget (budgetstop.go).
 type canceled struct {
@@ -413,6 +418,11 @@ func (r *runner) execute(ctx context.Context) error {
 	task, err := r.q.GetTask(fctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
 	if err != nil {
 		return r.dbErr(ctx, "load task", err)
+	}
+	if reason, err := r.superseded(fctx, task); err != nil {
+		return err
+	} else if reason != "" {
+		return &supersededRun{reason: reason}
 	}
 	// An unreadable config would leave the run without its instructions (and model): it fails
 	// before anything starts.
@@ -983,6 +993,58 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
 }
 
+// supersededReason is the outcome reason of a run that ended without a turn because the task's
+// earlier run had read its messages already.
+const supersededReason = "its messages were already read by the task's earlier run"
+
+// superseded says whether a run has nothing new to say (#21): it returns the outcome reason, or "" when the run goes on. A message sent
+// while a run is parked queues a run behind it; the parked run resumes, reads that message, and the
+// queued run then starts with no unread message, which would cost a model turn that only says
+// "Continue with the task." execute returns supersededRun and conclude drops the run instead (Owner.Supersede), and only when all hold:
+// it is a fresh run (a resumed or taken-over one has work), the task has been prompted before
+// (a first run with an empty message is a scheduled task), no session restart is pending (its
+// handoff prompt is not made of messages), nothing is unread, and the task's previous run
+// succeeded. After a failed or canceled run, a run with no new message is a person's retry and
+// still runs; ending it as a success would also complete a task whose last run failed.
+func (r *runner) superseded(ctx context.Context, task store.Task) (string, error) {
+	if r.run.PromptThroughSeq.Valid || (task.HarnessSessionID.Valid && task.SessionRestartPending) {
+		return "", nil
+	}
+	after, err := r.q.GetTaskPromptedThrough(ctx, store.GetTaskPromptedThroughParams{
+		OrgID: r.run.OrgID, TaskID: task.ID, RunID: r.run.ID,
+	})
+	if err != nil {
+		return "", r.dbErr(ctx, "check for unread messages", err)
+	}
+	if after == 0 {
+		return "", nil
+	}
+	msgs, err := r.q.ListTaskMessagesAfter(ctx, store.ListTaskMessagesAfterParams{
+		OrgID: r.run.OrgID, TaskID: task.ID, AfterSeq: after,
+	})
+	if err != nil {
+		return "", r.dbErr(ctx, "check for unread messages", err)
+	}
+	if len(msgs) > 0 {
+		return "", nil
+	}
+	runs, err := r.q.ListRunsForTask(ctx, store.ListRunsForTaskParams{OrgID: r.run.OrgID, TaskID: task.ID})
+	if err != nil {
+		return "", r.dbErr(ctx, "list the task's runs", err)
+	}
+	var prev *store.Run
+	for i := range runs {
+		if runs[i].ID != r.run.ID && !runs[i].CreatedAt.Time.After(r.run.CreatedAt.Time) {
+			prev = &runs[i]
+		}
+	}
+	if prev == nil || prev.State != store.RunStateSucceeded {
+		return "", nil
+	}
+	r.log.Info("the run has no unread message; ending it without a turn", "previous", prev.ID.String())
+	return supersededReason, nil
+}
+
 // promptMode says which of the turn's prompt shapes assemblePrompt builds.
 type promptMode int
 
@@ -1062,8 +1124,13 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 	var f *failure
 	var c *canceled
 	var rq *requeued
+	var sr *supersededRun
 	switch {
 	case err == nil:
+	case errors.As(err, &sr):
+		if serr := r.own.Supersede(ctx, turn, sr.reason); serr != nil && !errors.Is(serr, errFenced) {
+			r.log.Warn("ending the superseded run failed", "reason", sr.reason, "err", serr)
+		}
 	case errors.As(err, &rq):
 		if rerr := r.own.Requeue(ctx, turn, rq.reason); errors.Is(rerr, errFenced) {
 			r.log.Warn("the run could not be requeued: it was taken over, canceled or is no longer starting", "state", r.run.State, "reason", rq.reason)
