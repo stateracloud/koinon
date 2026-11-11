@@ -465,14 +465,14 @@ func (t *Tool) forgetRotateTargets(ctx context.Context, org pgtype.UUID, id stri
 	rows, err := t.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT h.agent_id FROM %[1]s h
 		LEFT JOIN LATERAL (
-			SELECT e.%[3]s AS envelope, e.credential_lost_at FROM %[2]s e
+			SELECT e.repository_epoch, e.%[3]s AS envelope, e.credential_lost_at FROM %[2]s e
 			WHERE e.org_id = h.org_id AND e.agent_id = h.agent_id
 			ORDER BY e.repository_epoch DESC LIMIT 1
 		) cur ON true
 		WHERE h.org_id = $1
 		  AND (h.%[3]s->>'kek_id' = $2 OR EXISTS (
 			SELECT 1 FROM %[2]s e WHERE e.org_id = h.org_id AND e.agent_id = h.agent_id AND e.%[3]s->>'kek_id' = $2))
-		  AND CASE WHEN cur.credential_lost_at IS NULL AND cur.envelope IS NULL
+		  AND CASE WHEN cur.repository_epoch IS NULL -- no epoch row: epoch 0 is current
 			THEN h.credential_lost_at IS NOT NULL OR h.%[3]s->>'kek_id' = $2
 			ELSE cur.credential_lost_at IS NOT NULL OR cur.envelope->>'kek_id' = $2 END
 		ORDER BY h.agent_id`, checkpoint.Table, checkpoint.EpochsTable, checkpoint.Column), org, id)

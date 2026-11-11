@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -494,6 +495,40 @@ var _ = Describe("koinon-api keys forget", func() {
 			answerWith(func(store.HomeRepositoryProbe) (string, string) { return "error", "could not list" })
 			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("could not check the storage prefix")))
 			unchanged(ctx, o, agent)
+		})
+
+		It("refuses when the agent's next epoch changed between the probe and the transaction, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) {
+				// koinon-agentd raised the floor meanwhile: the epoch probed is not the one that would start.
+				_, _ = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 5 WHERE org_id = $1 AND agent_id = $2`, o.org, agent)
+				return "free", ""
+			})
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("changed while the storage was checked (checked 1, would start 5)")))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses an agent whose repository came to need an epoch after the probe, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			var other pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'late', 'opencode') RETURNING id`, o.org).Scan(&other)).To(Succeed())
+			var lateErr atomic.Pointer[error]
+			answerWith(func(store.HomeRepositoryProbe) (string, string) {
+				// A second agent's repository, sealed with the lost KEK, appears after the probe's
+				// targets were read: the transaction would start an epoch nobody checked.
+				_, err := pool.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
+					SELECT org_id, $3, $4, password_envelope FROM home_repositories WHERE org_id = $1 AND agent_id = $2
+					ON CONFLICT DO NOTHING`, o.org, agent, other, checkpoint.Prefix(o.org.String(), other.String()))
+				lateErr.Store(&err)
+				return "free", ""
+			})
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("agent "+other.String()), ContainSubstring("its storage was not checked"))))
+			Expect(*lateErr.Load()).NotTo(HaveOccurred())
+			unchanged(ctx, o, agent)
+			var lateLost bool
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, o.org, other).Scan(&lateLost)).To(Succeed())
+			Expect(lateLost).To(BeFalse())
 		})
 
 		It("refuses when koinon-agentd does not answer in time, and marks nothing lost", func(ctx SpecContext) {
