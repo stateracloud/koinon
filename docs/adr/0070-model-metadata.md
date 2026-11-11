@@ -521,7 +521,7 @@ The amendment above leaves these points open; this is what the code does.
    the price fetch.
 3. **Storage.** `openrouter_catalog` (the last store, `openrouter@<fetched_at>`),
    `openrouter_models` (display fields, the fetched limits, endpoints), `openrouter_limit_proposals`
-   and `openrouter_limit_values` (migration 00073, install-wide, no org column). A model missing
+   and `openrouter_limit_values` (migration 00074, install-wide, no org column). A model missing
    from a later list keeps its row; nothing is retired. A store takes a transaction-scoped advisory
    lock, so two replicas that both find the catalog due store one after the other, and the second
    refreshes the first one's proposals instead of failing on a duplicate.
