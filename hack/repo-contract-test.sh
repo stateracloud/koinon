@@ -32,6 +32,7 @@ done
 # `go list` fail before any test starts, and that exit still goes through the trap.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/rc.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+export KOINON_GO_SLOTS_DIR=$tmp/slots KOINON_DOCKER=koinon-no-such-docker
 REPORT_DIR=$tmp/reports KOINON_RC_FILE=$tmp/rc bash hack/go-test.sh ./internal/contract-missing-package >/dev/null 2>&1 || true
 if [[ -s $tmp/rc && $(<"$tmp/rc") =~ ^[0-9]+$ ]]; then ok "hack/go-test.sh writes the status file on exit"; else bad "hack/go-test.sh does not write KOINON_RC_FILE on exit"; fi
 

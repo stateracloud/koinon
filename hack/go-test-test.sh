@@ -11,6 +11,10 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+# Offline: no machine-wide slot shared with other runs, no real Docker ping.
+KOINON_GO_SLOTS_DIR=$(mktemp -d "${TMPDIR:-/tmp}/go-test-slots.XXXXXX")
+export KOINON_GO_SLOTS_DIR KOINON_DOCKER=koinon-no-such-docker
+
 suites=$(hack/go-test.sh --list)
 [[ -n $suites ]] || { echo "FAIL: hack/go-test.sh lists no parallel suites"; exit 1; }
 for s in $suites; do
@@ -71,6 +75,7 @@ echo "ok: go-race covers reconciler, ledger, agentd and durable"
 # One EXIT trap removes every fixture dir and file this script makes. Each path is registered in
 # fixtures right after its mktemp, so an early exit (set -u or a failed check) still removes it.
 fixtures=()
+fixtures+=("$KOINON_GO_SLOTS_DIR")
 cleanup_fixtures() {
 	local p
 	for p in "${fixtures[@]}"; do

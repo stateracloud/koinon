@@ -99,9 +99,7 @@ host_cleanup() {
 # shellcheck disable=SC2154 # rc_ is set inside the trap string
 trap 'rc_=$?; host_cleanup; on_exit $rc_' EXIT
 
-host_acquire_slot
 host_keep_awake $$
-host_docker_preflight || exit 3
 run_start=$(date '+%Y-%m-%d %H:%M:%S')
 
 # Four processes per run on a Mac (two runs at once), Ginkgo's default (one per core) elsewhere.
@@ -151,6 +149,13 @@ while IFS= read -r dir; do
 		plain+=("$dir")
 	fi
 done <<<"$dirs"
+
+# A heavy run (Ginkgo suites, the shared Postgres) takes one of the machine's slots and checks Docker
+# first; a bad package argument or a plain-only run does neither (issue 551).
+if ((${#parallel[@]} + ${#ginkgo_rest[@]})); then
+	host_acquire_slot
+	host_docker_preflight || exit 3
+fi
 
 # One testcontainers session for the whole run (#171). By default every test process is its own
 # session lead and shares the run's single Ryuk reaper by name; Ryuk exits 10 s after its last

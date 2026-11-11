@@ -112,19 +112,27 @@ host_slept_between() {
 # set: those runs are alone on their machine.
 host_acquire_slot() {
 	if ! host_is_mac && [[ -z ${KOINON_GO_SLOTS:-} ]]; then return 0; fi
-	local n=${KOINON_GO_SLOTS:-2} base=${KOINON_GO_SLOTS_DIR:-${TMPDIR:-/tmp}/koinon-go-slots} i d owner told=0
+	local n=${KOINON_GO_SLOTS:-2} base=${KOINON_GO_SLOTS_DIR:-${TMPDIR:-/tmp}/koinon-go-slots} i d owner err told=0 tmp
 	mkdir -p "$base"
 	while :; do
 		for ((i = 1; i <= n; i++)); do
 			d=$base/slot.$i
 			if mkdir "$d" 2>/dev/null; then
-				echo "$$" >"$d/pid"
+				# The pid appears whole: a reader never sees an empty file.
+				tmp=$d/pid.$$
+				echo "$$" >"$tmp" && mv -f "$tmp" "$d/pid"
 				host_slot_dir=$d
 				return 0
 			fi
 			owner=$(cat "$d/pid" 2>/dev/null || true)
-			if [[ -n $owner ]] && ! kill -0 "$owner" 2>/dev/null; then
-				rm -rf "$d"
+			[[ -n $owner ]] || continue
+			# Dead only on ESRCH: in a sandbox kill -0 on another run's process fails with EPERM and
+			# that process is alive.
+			err=$(kill -0 "$owner" 2>&1) && continue
+			[[ $err == *'No such process'* ]] || continue
+			# Atomic takeover: of several waiters only one mv wins; the others retry the mkdir.
+			if mv "$d" "$d.stale.$$" 2>/dev/null; then
+				rm -rf "$d.stale.$$"
 				continue 2
 			fi
 		done
@@ -133,7 +141,10 @@ host_acquire_slot() {
 	done
 }
 
+# Free the slot only while it is still ours.
 host_release_slot() {
-	[[ -z ${host_slot_dir:-} ]] || rm -rf "$host_slot_dir"
+	if [[ -n ${host_slot_dir:-} && $(cat "$host_slot_dir/pid" 2>/dev/null || true) == "$$" ]]; then
+		rm -rf "$host_slot_dir"
+	fi
 	host_slot_dir=
 }

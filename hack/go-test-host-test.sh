@@ -110,6 +110,27 @@ wait "$waiter" || fail "waiter failed"
 unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
 echo "ok: at most N runs hold a slot, a dead owner's slot is reused, release frees it"
 
+# An owner that is alive but cannot be signalled (EPERM, as in a sandbox; pid 1 is such a process for a
+# normal user) keeps its slot; a slot is also not freed by a run that does not own it.
+export KOINON_GO_SLOTS=1 KOINON_GO_SLOTS_DIR=$tmp/slots-eperm KOINON_GO_SLOT_POLL=0.2
+mkdir -p "$KOINON_GO_SLOTS_DIR/slot.1"
+echo 1 >"$KOINON_GO_SLOTS_DIR/slot.1/pid"
+(
+	host_slot_dir=
+	host_acquire_slot 2>/dev/null
+	echo got >"$tmp/got-eperm"
+) &
+waiter=$!
+bg+=("$waiter")
+sleep 1
+[[ ! -e $tmp/got-eperm ]] || fail "a live owner that kill -0 cannot signal lost its slot"
+[[ $(<"$KOINON_GO_SLOTS_DIR/slot.1/pid") == 1 ]] || fail "the EPERM owner's slot was changed"
+kill "$waiter" 2>/dev/null || true
+host_slot_dir=$KOINON_GO_SLOTS_DIR/slot.1 host_release_slot
+[[ -d $KOINON_GO_SLOTS_DIR/slot.1 ]] || fail "release removed a slot owned by another pid"
+unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
+echo "ok: a live owner we cannot signal keeps its slot, release only frees our own"
+
 # Wiring in go-test.sh.
 for pat in 'host_keep_awake' 'host_docker_preflight' 'host_acquire_slot' 'host_slept_between' 'reason="host slept"' '-timeout "\$go_timeout"' '--timeout="\$ginkgo_timeout"' '--procs=4'; do
 	grep -q -- "$pat" hack/go-test.sh || fail "go-test.sh does not use $pat"
