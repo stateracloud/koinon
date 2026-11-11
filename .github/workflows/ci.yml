@@ -910,8 +910,9 @@ jobs:
           key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
       # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
       # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
-      # Only entries created before this run's entry go: pushes to main do not cancel each other, and an
-      # older run that prunes last must not delete a newer commit's entry. Fractional seconds are cut
+      # Only entries created before this run's entry go: pushes to main do not cancel each other. createdAt
+      # follows the save order, not the commit order, so a prune keeps the entries saved at or after its own;
+      # the worst case is a lost cache hit, never a stale pass. Fractional seconds are cut
       # before the string compare (RFC 3339 drops trailing zeros, so they do not sort).
       - name: Prune older test-result caches
         continue-on-error: true

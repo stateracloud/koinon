@@ -228,3 +228,14 @@ out=$(env -u CI CI=true KOINON_GO_TEST_CACHE=1 REPORT_DIR="$rd4" hack/go-test.sh
 grep -q "cacheable Ginkgo suite .*zzempty.*no 'Ran N of M Specs' line" <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the empty cacheable suite is not named"; exit 1; }
 rm -rf "$rd4" "$fx"
 echo "ok: a cacheable Ginkgo suite with no specs fails the run"
+
+# "Ran 0 of 1 Specs": a suite whose only spec is pending ran nothing, and must fail the run too.
+fx=$(mktemp -d "$root/internal/zzpendingfixture.XXXXXX")
+fixtures+=("$fx")
+printf '// SPDX-License-Identifier: Apache-2.0\npackage zzpending\n\nimport (\n\t"testing"\n\n\t"github.com/onsi/ginkgo/v2"\n)\n\nfunc TestPending(t *testing.T) { ginkgo.RunSpecs(t, "pending") }\n\nvar _ = ginkgo.PIt("is pending", func() {})\n' >"$fx/pending_suite_test.go"
+rc=0
+out=$(env -u CI CI=true KOINON_GO_TEST_CACHE=1 REPORT_DIR="$rd4" hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
+[[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a cacheable Ginkgo suite where no spec ran must exit 1, got $rc"; exit 1; }
+grep -q "cacheable Ginkgo suite .*zzpending.*no 'Ran N of M Specs' line" <<<"$out" || { echo "$out" | tail -20; echo "FAIL: the pending-only cacheable suite is not named"; exit 1; }
+rm -rf "$fx"
+echo "ok: a cacheable Ginkgo suite where no spec ran fails the run"

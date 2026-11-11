@@ -11,7 +11,8 @@
 #   - its test binary does not link internal/testing/* (pgtest, testenv, containerhost, ...) except
 #     fakemodel, an in-process fake;
 #   - it does not link testcontainers-go or controller-runtime's envtest;
-#   - the package or its tests do not import os/exec (git, helm, kubectl, ... are not tracked).
+#   - the package or its tests do not import os/exec (git, helm, kubectl, ... are not tracked). This checks
+#     only the package's own imports and its in-module imports, not third-party dependencies that can exec.
 # The rule over-approximates on purpose: a package that is wrongly kept out only loses a cache hit,
 # one that is wrongly let in could report a stale pass. hack/go-test-test.sh keeps the rule honest.
 

@@ -32,7 +32,7 @@ the network, a cluster or a binary the test starts, so the three kinds of packag
 | Kind | Reuse on a pull request | Why |
 | --- | --- | --- |
 | Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
-| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with M > 0. |
+| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with N > 0. |
 | Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
 
 A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
@@ -62,7 +62,7 @@ same-size edit. A directory that gets untracked entries (the root: `.git`, `repo
 package that lists it only misses. The script is for a throw-away checkout only. Retention: every
 `go-testres-` entry holds the whole build cache (a few hundred MB), so `warm-caches` deletes the
 `go-testres-` entries created before the one it just saved (`actions: write`, `continue-on-error`; by
-`createdAt`, so an older run that prunes last never deletes a newer commit's entry) and the repository
+`createdAt`, which follows the save order, not the commit order: a prune keeps the entries saved at or after its own, and the worst case is a lost cache hit, never a stale pass) and the repository
 keeps about one, away from the 10 GB quota that go-ci, envtest and the pnpm stores share.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`

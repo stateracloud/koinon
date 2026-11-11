@@ -249,12 +249,12 @@ run_plain() {
 # `go test` packages: one test row per suite in ginkgo-cached.xml, no per-spec report, no verdict entry.
 ((${#ginkgo_pure[@]})) && run_plain ginkgo-cached "cacheable Ginkgo suites" "" "${ginkgo_pure[@]}"
 # -ginkgo.fail-on-empty for them, from the output: Ginkgo prints "Ran N of M Specs" at the end of a
-# suite, and go test replays it on a `(cached)` result. No line, or M = 0, fails the run.
+# suite, and go test replays it on a `(cached)` result. No line, or N = 0 (no spec ran), fails the run.
 if ((${#ginkgo_pure[@]})); then
 	while IFS= read -r ipath; do
 		# One grep, no pipe: grep -q stops early, and pipefail would read the writer's SIGPIPE as a miss.
-		grep -Eq "\"Package\":\"${ipath//./\\.}\",.*Ran [0-9]+ of [1-9][0-9]* Specs" "$report_dir/ginkgo-cached.gotest.jsonl" 2>/dev/null ||
-			{ rc=1; failed+=("cacheable Ginkgo suite $ipath: no 'Ran N of M Specs' line with M > 0 (no specs, or no RunSpecs)"); }
+		grep -Eq "\"Package\":\"${ipath//./\\.}\",.*Ran [1-9][0-9]* of [0-9]+ Specs" "$report_dir/ginkgo-cached.gotest.jsonl" 2>/dev/null ||
+			{ rc=1; failed+=("cacheable Ginkgo suite $ipath: no 'Ran N of M Specs' line with N > 0 (no specs, or no RunSpecs)"); }
 	done < <(go list -f '{{.ImportPath}}' "${ginkgo_pure[@]}")
 fi
 # Plain packages: -count=1 in CI (main and the merge queue never reuse a result), Go's default locally.
