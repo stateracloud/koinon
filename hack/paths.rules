@@ -188,6 +188,7 @@ script-check - hack/git-identity-check-test.sh
 script-check - hack/git-identity-check.sh range @BASE@ HEAD
 script-check - hack/koinon-fetch-test.sh
 script-check - hack/fetch-pinned-test.sh
+script-check - hack/e2e-parts-test.sh
 script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh

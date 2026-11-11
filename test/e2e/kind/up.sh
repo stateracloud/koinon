@@ -35,9 +35,11 @@ CNPG_IMAGE_DIGEST=sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4
 CNPG_URL="https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v${CNPG_VERSION}/cnpg-${CNPG_VERSION}.yaml"
 
 here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=test/e2e/kind/parts.sh
+source "$here/parts.sh"
 K=(kubectl --context "$CTX")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/up.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+trap 'kill_parts; rm -rf "$tmp"' EXIT
 
 t0=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
@@ -45,31 +47,8 @@ done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 
 # The add-ons do not depend on each other once the cluster is up (#572): fetch the three manifests together,
 # apply them, then wait for the rollouts together. Only OpenShell still waits for Agent Sandbox (and the
-# RuntimeClass, applied before). `bg` starts a part, `wait_all` fails when any part failed.
-bg_pids=()
-bg_names=()
-bg() { "$@" & bg_pids+=($!); bg_names+=("$*"); }
-# Waits for the parts as they finish (bash 5.1 `wait -n -p`). When one fails it stops the others at once and exits
-# with a message that names the failed part, instead of waiting for the slow ones first.
-wait_all() {
-  local done_pid rc i
-  while [[ ${#bg_pids[@]} -gt 0 ]]; do
-    rc=0
-    wait -n -p done_pid "${bg_pids[@]}" || rc=$?
-    for i in "${!bg_pids[@]}"; do
-      [[ ${bg_pids[i]} == "${done_pid:-}" ]] || continue
-      if [[ $rc -ne 0 ]]; then
-        echo "up.sh: background part failed (exit $rc): ${bg_names[i]}" >&2
-        kill "${bg_pids[@]}" 2>/dev/null || true
-        exit 1
-      fi
-      unset 'bg_pids[i]' 'bg_names[i]'
-    done
-    bg_pids=(${bg_pids[@]+"${bg_pids[@]}"})
-    bg_names=("${bg_names[@]+"${bg_names[@]}"}")
-  done
-}
-
+# RuntimeClass, applied before). `bg` starts a part in its own process group, `wait_all` fails when any part
+# failed and then ends every other part's whole process tree (parts.sh).
 install_openshell() {
   "${K[@]}" -n agent-sandbox-system rollout status deploy/agent-sandbox-controller --timeout=180s
   helm --kube-context "$CTX" upgrade --install openshell \

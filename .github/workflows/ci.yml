@@ -753,6 +753,7 @@ jobs:
           hack/flavor-tag-test.sh
       - run: hack/koinon-fetch-test.sh
       - run: hack/fetch-pinned-test.sh
+      - run: hack/e2e-parts-test.sh
       - run: hack/pinned-download-lint.sh
       - run: hack/apt-retries-test.sh --self-test
       - run: hack/apt-retries-test.sh
