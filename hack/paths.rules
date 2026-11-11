@@ -34,7 +34,7 @@
 # in an `except` rule and say why in the comment above it.
 
 # --- Changes that run everything: CI itself, the Makefile, the Go module, and these rules ---------
-everything - ^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh|Makefile|go\.mod|go\.sum)$
+everything - ^(\.github/workflows/ci\.yml|\.github/actions/setup-go-cache/action\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh|Makefile|go\.mod|go\.sum)$
 
 # --- go: go-tidy, go-lint, go-test (Postgres), go-race --------------------------------------------
 # Any path can affect them, except what is listed here. Not listed on purpose: charts/, test/,
