@@ -993,6 +993,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
+		missingImageStart := time.Now()
 		By("a task for a new agent: its sandbox is rendered with the broken image")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1022,6 +1023,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return terminal(r.GetState())
 		})
 
+		// Data for the KOINON_SANDBOX_WAIT_CAP above: how long the image_pull failure took on this runner.
+		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 30 s)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
 		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))

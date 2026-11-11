@@ -7,7 +7,8 @@
 #
 #   hack/drill-issue.sh [--dry-run]
 #
-# Environment: GH (the gh command, default gh), GH_REPO, GITHUB_RUN_URL, GITHUB_SHA, GITHUB_EVENT_NAME,
+# Environment: GH (the gh command, default gh), GH_REPO, GITHUB_RUN_URL, DRILL_COMMIT (the commit the drill
+# tested; default GITHUB_SHA), GITHUB_EVENT_NAME,
 # GITHUB_REF_NAME. --dry-run calls no GitHub API and prints what it would do.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -26,7 +27,7 @@ done
 GH=${GH:-gh}
 label=drill-red
 run_url=${GITHUB_RUN_URL:-unknown}
-sha=${GITHUB_SHA:-unknown}
+sha=${DRILL_COMMIT:-${GITHUB_SHA:-unknown}}
 event=${GITHUB_EVENT_NAME:-unknown}
 ref=${GITHUB_REF_NAME:-unknown}
 

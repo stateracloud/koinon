@@ -149,6 +149,8 @@ diagnostics() {
 
 cleanup() {
   for p in ${pids[@]+"${pids[@]}"}; do kill "$p" 2>/dev/null || true; done
+  # The image build has children (ko, go, docker): stop its whole process group, not only the bash.
+  if [[ -n ${build_pid:-} ]]; then kill -- "-$build_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 ]]; then diagnostics; fi
   if [[ "$KEEP" != 1 ]]; then "$here/kind/down.sh" || true; fi
   echo "logs and timings in $OUT"
@@ -165,9 +167,12 @@ build_pid=""
 if [[ "$SKIP_BUILD" != 1 && "$SKIP_UP" != 1 ]]; then
   t_build=$(date +%s)
   echo "== $(date -u +%H:%M:%SZ) images (kind/images.sh build), in the background while the cluster is created"
+  # `set -m` gives the background job its own process group (pgid = its pid), portable to macOS where setsid is
+  # missing; cleanup() kills that group.
+  set -m
   CLUSTER="$CLUSTER" "$here/kind/images.sh" build >"$OUT/images-build.log" 2>&1 &
   build_pid=$!
-  pids+=("$build_pid")
+  set +m
 fi
 
 if [[ "$SKIP_UP" != 1 ]]; then

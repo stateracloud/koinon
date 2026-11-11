@@ -474,6 +474,9 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
 
       - name: Restore drill (test/drill/run.sh)
+        # A little below the job's 120: a hung drill is then a failed step, so the verdict step below sees it. A job
+        # timeout would end as `cancelled`, which `red` must not count: a person or the concurrency group cancels too.
+        timeout-minutes: 110
         env:
           OUT: ${{ runner.temp }}/drill
           KEEP: "0"
@@ -516,7 +519,8 @@ jobs:
         if: always()
         run: test/e2e/kind/down.sh
 
-      # Last step, after the cleanup: `job.status` is failure when any step above failed or timed out.
+      # Last step, after the cleanup: `job.status` is failure when any step above failed, the drill step's own
+      # timeout included. A cancel of the whole run (a person, the concurrency group) is `cancelled`, not red.
       - name: Record the verdict
         id: verdict
         if: always()
@@ -527,7 +531,11 @@ jobs:
   drill-issue:
     name: drill issue
     needs: drill
-    if: always() && needs.drill.outputs.red == 'true'
+    # Only a red drill of the nightly schedule or of an rc tag push; never a dispatch on a branch (the commit may be
+    # a work in progress, and the issue would be noise).
+    if: >-
+      always() && needs.drill.outputs.red == 'true'
+      && (github.event_name == 'schedule' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')))
     # Like `drill`, it must never change the run conclusion that hack/e2e-bisect.sh reads: a gh API error here
     # would otherwise turn a green quickstart's run red and start a false bisect.
     continue-on-error: true
@@ -540,6 +548,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DRILL_COMMIT: ${{ inputs.commit || github.sha }} # the commit the drill tested
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

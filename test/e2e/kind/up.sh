@@ -47,12 +47,27 @@ done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 # apply them, then wait for the rollouts together. Only OpenShell still waits for Agent Sandbox (and the
 # RuntimeClass, applied before). `bg` starts a part, `wait_all` fails when any part failed.
 bg_pids=()
-bg() { "$@" & bg_pids+=($!); }
+bg_names=()
+bg() { "$@" & bg_pids+=($!); bg_names+=("$*"); }
+# Waits for the parts as they finish (bash 5.1 `wait -n -p`). When one fails it stops the others at once and exits
+# with a message that names the failed part, instead of waiting for the slow ones first.
 wait_all() {
-  local p rc=0
-  for p in "${bg_pids[@]}"; do wait "$p" || rc=1; done
-  bg_pids=()
-  return $rc
+  local done_pid rc i
+  while [[ ${#bg_pids[@]} -gt 0 ]]; do
+    rc=0
+    wait -n -p done_pid "${bg_pids[@]}" || rc=$?
+    for i in "${!bg_pids[@]}"; do
+      [[ ${bg_pids[i]} == "${done_pid:-}" ]] || continue
+      if [[ $rc -ne 0 ]]; then
+        echo "up.sh: background part failed (exit $rc): ${bg_names[i]}" >&2
+        kill "${bg_pids[@]}" 2>/dev/null || true
+        exit 1
+      fi
+      unset 'bg_pids[i]' 'bg_names[i]'
+    done
+    bg_pids=(${bg_pids[@]+"${bg_pids[@]}"})
+    bg_names=("${bg_names[@]+"${bg_names[@]}"}")
+  done
 }
 
 install_openshell() {

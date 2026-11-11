@@ -37,8 +37,9 @@ check "$out" "gh issue comment 42" "comments on the open issue"
 nocheck "$out" "gh issue create" "and opens no second one"
 check "$out" "runs/1" "the comment links the run"
 
-out=$(OPEN="" run)
-check "$out" "gh issue create --title Restore drill red on main (012345678)" "opens an issue when none is open"
+out=$(OPEN="" DRILL_COMMIT=fedcba9876543210 run)
+check "$out" "(fedcba987," "the issue names the commit the drill tested, not GITHUB_SHA"
+check "$out" "gh issue create --title Restore drill red on main (fedcba987)" "opens an issue when none is open"
 check "$out" "--label drill-red" "labels it"
 nocheck "$out" "gh issue comment" "and does not comment"
 
