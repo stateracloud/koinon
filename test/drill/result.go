@@ -40,6 +40,9 @@ type Marks struct {
 	Released        time.Time `json:"released"`
 	FirstRunDone    time.Time `json:"firstRunDone"`
 	QueueDrained    time.Time `json:"queueDrained"`
+	// DeadExecutorRecovered is when the workflow the source left pending finished on the target: the
+	// DBOS recovery wait (the dead-executor job recovers it after the executor's heartbeat is stale).
+	DeadExecutorRecovered time.Time `json:"deadExecutorRecovered"`
 	// AllChecksPassed is when the last released check passed.
 	AllChecksPassed time.Time `json:"allChecksPassed"`
 	// LatestMarker is the time of the newest RPO marker present in the target.
@@ -70,6 +73,7 @@ func (m Marks) Compute() Timings {
 	add("release", m.HeldChecksDone, m.Released)
 	add("firstRun", m.Released, m.FirstRunDone)
 	add("queueDrained", m.Released, m.QueueDrained)
+	add("dbosRecovery", m.Released, m.DeadExecutorRecovered)
 	if !m.Disaster.IsZero() && !m.AllChecksPassed.IsZero() {
 		t.RTOSeconds = m.AllChecksPassed.Sub(m.Disaster).Seconds()
 	}

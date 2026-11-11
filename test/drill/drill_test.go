@@ -16,11 +16,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/project"
@@ -57,6 +60,18 @@ var (
 	sourceSession string
 	snapshotUnix  int64 // when the backup began: a fire due after it is not in the dump
 	releasedUnix  int64
+
+	// archive is the agent the archive check restores: no trigger, one task that wrote the marker into its home.
+	archive struct {
+		agent, task string
+		session     string // the task's harness session ID on the source
+		snapshot    string // the stop checkpoint's snapshot ID on the source
+	}
+	// dead are the notification workflows the source left PENDING, and the executor that ran them.
+	dead struct {
+		workflows []string
+		executor  string
+	}
 )
 
 const retentionMin = 30 // run-content-retention days: the marker is retentionMin+n
@@ -68,13 +83,25 @@ func needs(steps ...string) {
 	}
 }
 
-// step names a step of the drill in the report; check names come from the label.
-func step(name string, body func(ctx SpecContext)) {
+// stepTimeout is the node timeout of a step that does not name its own.
+const stepTimeout = 20 * time.Minute
+
+// seedTimeout covers the seed step's waits with margin: the scheduled run and the marker run (each
+// up to releasedWait, 8m in topology/kind.yaml) and 20m for archived_at, about 36m, plus the API calls.
+const seedTimeout = 45 * time.Minute
+
+// step names a step of the drill in the report; check names come from the label. A step whose
+// waits add up to more than stepTimeout passes its own budget.
+func step(name string, body func(ctx SpecContext), timeout ...time.Duration) {
 	id := strings.TrimSuffix(strings.Fields(name)[0], ":")
+	budget := stepTimeout
+	if len(timeout) > 0 {
+		budget = timeout[0]
+	}
 	It(name, Label("step", id), func(ctx SpecContext) {
 		body(ctx)
 		done[id] = true
-	}, NodeTimeout(20*time.Minute))
+	}, NodeTimeout(budget))
 }
 
 func must(err error, what string) {
@@ -143,7 +170,11 @@ func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 }
 
 // installKoinon installs the chart under test into a fresh namespace with the install's own gateway.
-func installKoinon(ctx context.Context, s *side, hold bool) {
+// A source that is archived within minutes: the sandbox stops after 2 minutes without activity and is deleted
+// 1 minute later, once its stop checkpoint is complete. The target keeps the chart's defaults.
+var sourceCheckpoints = &drill.Checkpoints{ArchiveAfter: "1m", IdleTimeout: "2m"}
+
+func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoints) {
 	GinkgoHelper()
 	in := s.in
 	ensureNamespace(ctx, in.Namespace)
@@ -158,7 +189,11 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 	_, err = kube.KubectlStdin(ctx, string(b), "apply", "-f", "-")
 	must(err, "copy the client certificate")
 
-	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass)
+	// Home checkpoints (phase 2): the Secret of the object store's endpoint and fake keys, before the chart needs it.
+	_, err = kube.KubectlStdin(ctx, drill.CheckpointSecretManifest(in.Namespace, runID, top.FakesNamespace), "apply", "-f", "-")
+	must(err, "create the checkpoint storage Secret")
+
+	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass, cp)
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
@@ -321,6 +356,25 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		must(err, "apply the fake model")
 		_, err = kube.Kubectl(ctx, "-n", top.FakesNamespace, "rollout", "status", "deploy/fakemodel", "--timeout=3m")
 		must(err, "fake model rollout")
+
+		By("an S3 server for home checkpoints, and the bucket")
+		_, err = kube.KubectlStdin(ctx, drill.ObjectStoreManifest(top.FakesNamespace, runID, top.ObjectStoreImage), "apply", "-f", "-")
+		must(err, "apply the object store")
+		_, err = kube.Kubectl(ctx, "-n", top.FakesNamespace, "rollout", "status", "deploy/"+drill.ObjectStoreName, "--timeout=5m")
+		must(err, "object store rollout")
+		addr, stop, err := kube.PortForward(ctx, top.FakesNamespace, "svc/"+drill.ObjectStoreName, drill.ObjectStorePort)
+		must(err, "port-forward the object store")
+		defer stop()
+		// SeaweedFS listens on IPv4 only; the forward is 127.0.0.1. Its S3 gateway can be slow to accept the first call.
+		mc, err := minio.New(addr, &minio.Options{Creds: credentials.NewStaticV4(drill.ObjectStoreAccessKey, drill.ObjectStoreSecretKey, "")})
+		must(err, "S3 client")
+		Eventually(func() error {
+			err := mc.MakeBucket(ctx, drill.CheckpointBucket, minio.MakeBucketOptions{Region: drill.ObjectStoreRegion})
+			if resp := minio.ToErrorResponse(err); resp.Code == "BucketAlreadyOwnedByYou" || resp.Code == "BucketAlreadyExists" {
+				return nil
+			}
+			return err
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	})
 
 	step("gateways: one OpenShell gateway for each install", func(ctx SpecContext) {
@@ -332,7 +386,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 
 	step("source: install the Koinon under test", func(ctx SpecContext) {
 		needs("gateways")
-		installKoinon(ctx, &src, false)
+		installKoinon(ctx, &src, false, sourceCheckpoints)
 	})
 
 	step("seed: the source, through the supported APIs only", func(ctx SpecContext) {
@@ -399,6 +453,33 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		Eventually(func() int { return sqlInt(ctx, &src, "SELECT count(*) FROM runs WHERE state = 'succeeded'") }).
 			WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10 * time.Second).Should(BeNumerically(">=", 1))
 
+		By("an archive agent: no trigger, one task that writes a marker into its home")
+		made, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+			OrgId: src.org, TemplateId: tmpl, DisplayName: "Archive agent", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+		})
+		must(err, "create the archive agent")
+		archive.agent = made.GetAgent().GetId()
+		_, err = c.Agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: src.org, AgentId: archive.agent, Version: made.GetAgent().GetLatestVersion()})
+		must(err, "activate the archive agent")
+		first, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: src.org, AgentId: archive.agent, Title: "Write the marker", Message: "drill-archive-write: write the marker file into your working directory.",
+		})
+		must(err, "create the archive agent's task")
+		archive.task = first.GetTask().GetId()
+		Eventually(func() int {
+			return sqlInt(ctx, &src, fmt.Sprintf("SELECT count(*) FROM runs WHERE task_id = '%s' AND state = 'succeeded'", archive.task))
+		}).WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10*time.Second).Should(Equal(1), "the marker run succeeds")
+
+		By("the archive agent goes idle, stops with a stop checkpoint, and is archived")
+		// idleTimeout 2m, then archiveAfter 1m once the stop checkpoint is complete (sourceCheckpoints).
+		Eventually(func() int {
+			return sqlInt(ctx, &src, fmt.Sprintf("SELECT count(*) FROM agent_sandboxes WHERE agent_id = '%s' AND archived_at IS NOT NULL", archive.agent))
+		}).WithContext(ctx).WithTimeout(20*time.Minute).WithPolling(15*time.Second).Should(Equal(1), "agent_sandboxes.archived_at is set")
+		archive.snapshot = sql(ctx, &src, fmt.Sprintf("SELECT snapshot_id FROM home_checkpoints WHERE agent_id = '%s' AND status = 'complete' AND snapshot_id IS NOT NULL ORDER BY id DESC LIMIT 1", archive.agent))
+		Expect(archive.snapshot).NotTo(BeEmpty(), "the archived agent has a complete checkpoint")
+		archive.session = sql(ctx, &src, fmt.Sprintf("SELECT harness_session_id FROM tasks WHERE id = '%s'", archive.task))
+		Expect(archive.session).NotTo(BeEmpty(), "the marker run made a harness session")
+
 		By("low org trigger limits, then Run now N times: N-1 stay ENQUEUED")
 		out, err := kube.Exec(ctx, src.in.Namespace, "deploy/"+src.name("api"), "koinon-api", "org-limits", "set", "--org", "default",
 			"--trigger-concurrency", "1", "--trigger-rate-per-minute", "1")
@@ -439,7 +520,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 		Expect(accepted).To(BeNumerically(">=", 1), "no Run now call was accepted: %v", replies)
 		AddReportEntry("run-now replies", fmt.Sprintf("%v", replies))
-	})
+	}, seedTimeout)
 
 	step("backup: the guide's backup blocks, then the source is lost", func(ctx SpecContext) {
 		needs("seed")
@@ -465,6 +546,34 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}()
 		Eventually(func() bool { _, ok := markers.Load(retentionMin + 1); return ok }).WithTimeout(time.Minute).Should(BeTrue(), "the marker writer works")
 
+		// A notification the source cannot finish (ADR 0109, phase 2). No Koinon notification posts to an HTTP
+		// endpoint a fake could hold (the only kinds write to the database), so the hold is a row lock: a
+		// session of the drill locks the scheduled agent's sandbox row, a new task starts the "wake.agent"
+		// notification, whose one step is an UPDATE of that row. The step waits on the lock, so the DBOS
+		// workflow is PENDING under the source api's executor ID. The dump below holds it so; the disaster
+		// kills the pod, and the lock session with it (a database restore carries no lock).
+		holdCtx, stopHold := context.WithCancel(context.WithoutCancel(ctx))
+		onSuiteEnd(func(context.Context) { stopHold() })
+		pod, err := kube.Primary(ctx, src.in.Namespace, src.in.Release)
+		must(err, "find the source database")
+		go func() {
+			_, _ = kube.Kubectl(holdCtx, "-n", src.in.Namespace, "exec", pod, "-c", "postgres", "--", "psql", "--dbname=dbname=koinon application_name=drill-hold",
+				"-v", "ON_ERROR_STOP=1", "-Atq", "-c",
+				fmt.Sprintf("BEGIN; SELECT 1 FROM agent_sandboxes WHERE agent_id = '%s' FOR UPDATE; SELECT pg_sleep(900); COMMIT", src.agent))
+		}()
+		Eventually(func() int {
+			return sqlInt(ctx, &src, "SELECT count(*) FROM pg_stat_activity WHERE application_name = 'drill-hold' AND wait_event = 'PgSleep'")
+		}).WithContext(ctx).WithTimeout(2*time.Minute).WithPolling(3*time.Second).Should(Equal(1), "the drill holds the sandbox row lock")
+		_, err = src.client.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{OrgId: src.org, AgentId: src.agent, Title: "Held notification", Message: "Answer with one short sentence."})
+		must(err, "create the task whose pre-wake notification is held")
+		const pendingQ = "SELECT workflow_uuid FROM dbos.workflow_status WHERE name = 'koinon.notify' AND status = 'PENDING' AND workflow_uuid LIKE 'wake.agent:%' ORDER BY created_at"
+		Eventually(func() []string { return strings.Fields(sql(ctx, &src, pendingQ)) }).
+			WithContext(ctx).WithTimeout(2*time.Minute).WithPolling(3*time.Second).ShouldNot(BeEmpty(), "a pre-wake notification is PENDING")
+		dead.workflows = strings.Fields(sql(ctx, &src, pendingQ))
+		dead.executor = sql(ctx, &src, fmt.Sprintf("SELECT DISTINCT executor_id FROM dbos.workflow_status WHERE workflow_uuid = '%s'", dead.workflows[0]))
+		Expect(dead.executor).NotTo(BeEmpty(), "the pending workflow has an executor")
+		AddReportEntry("pending at backup (dead executor)", fmt.Sprintf("%s on %s", dead.workflows, dead.executor))
+
 		// The snapshot: what is ENQUEUED now is what the dump will hold, and a trigger fire due after this
 		// instant is not in it. Both are read just before the backup-db block, not at the end of the seed.
 		snapshotUnix = time.Now().Unix()
@@ -485,7 +594,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		close(stopMarkers)
 		wg.Wait()
 		marks.Disaster = time.Now()
-		_, err := kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("agentd"), "deployment/"+src.name("reconciler"), "deployment/"+src.name("api"), "--replicas=0")
+		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("agentd"), "deployment/"+src.name("reconciler"), "deployment/"+src.name("api"), "--replicas=0")
 		must(err, "scale the source to zero")
 		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "wait", "--for=delete", "pod", "-l", "app.kubernetes.io/instance="+src.in.Release+",app.kubernetes.io/component in (api,reconciler,agentd)", "--timeout=5m")
 		must(err, "the source pods stop")
@@ -494,6 +603,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			src.stopFwd = nil
 		}
 
+		stopHold()
 		var err2 error
 		baseline, err2 = drill.SnapshotGateway(ctx, kube, src.gw, os.Getenv("KOINON_DRILL_OPENSHELL_SERVERNAME"))
 		must(err2, "snapshot the source gateway")
@@ -508,7 +618,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 
 	step("target: a fresh namespace, its own gateway, held", func(ctx SpecContext) {
 		needs("backup")
-		installKoinon(ctx, &dst, true)
+		installKoinon(ctx, &dst, true, &drill.Checkpoints{})
 		marks.TargetInstalled = time.Now()
 	})
 
@@ -521,11 +631,14 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		renamed, err := drill.RenameKEKSecret(readFile(file), src.name("kek"), dst.name("kek"))
 		must(err, "rename the KEK Secret in the export")
 		must(os.WriteFile(file, []byte(renamed), 0o600), "write the export")
-		// The guide's resync block needs the checkpoint bucket; phase 1 runs with checkpoints off, so it
-		// has no snapshots to list and the block is left for phase 2 (ADR 0109).
-		for _, b := range []string{"stop", "restore-db", "restore-keys", "start"} {
+		// The blocks run in the guide's order: resync follows start and runs while the install is held. The
+		// request persists in home_checkpoint_resyncs; agentd answers it after the release (the archive check).
+		for _, b := range []string{"stop", "restore-db", "restore-keys", "start", "resync"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, dst.in.Namespace, dst.in.Release)
 			must(err, out)
+			if b == "resync" {
+				Expect(out).To(MatchRegexp(`Requested a checkpoint resync for [1-9]`), "the resync request on a held install")
+			}
 		}
 		marks.Restored = time.Now()
 	})
@@ -764,6 +877,58 @@ stringData:
 				Expect(terminal).To(Equal(1), "workflow %s: its run is terminal", id)
 			}
 			marks.QueueDrained = time.Now()
+		}, NodeTimeout(30*time.Minute))
+
+		It("recovers a workflow that was pending with a dead executor, once", Label("workflow-dead-executor"), func(ctx SpecContext) {
+			needs("release")
+			Expect(dead.workflows).NotTo(BeEmpty())
+			// The source's executor stopped heartbeating at the disaster. DBOS recovers only its own executor's
+			// workflows at launch, and the target's executor is another pod: the dead-executor job takes the
+			// workflow over once the heartbeat in the dump is stale (90 s, checked every 30 s). The dump is
+			// older than that when the target is released, so the wait is the job's next pass at most.
+			Eventually(func(g Gomega) {
+				for _, id := range dead.workflows {
+					row := sql(ctx, &dst, fmt.Sprintf("SELECT status || '|' || coalesce(executor_id, '') FROM dbos.workflow_status WHERE workflow_uuid = '%s'", id))
+					status, executor, _ := strings.Cut(row, "|")
+					g.Expect(status).To(Equal("SUCCESS"), "workflow %s", id)
+					g.Expect(executor).NotTo(Equal(dead.executor), "workflow %s ran on the dead executor", id)
+				}
+			}).WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10 * time.Second).Should(Succeed())
+			marks.DeadExecutorRecovered = time.Now()
+			for _, id := range dead.workflows {
+				// One workflow ID is one workflow; its one delivery step ran once on the target.
+				Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM dbos.workflow_status WHERE workflow_uuid = '%s'", id))).To(Equal(1))
+				Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM dbos.operation_outputs WHERE workflow_uuid = '%s' AND function_name LIKE 'deliver:%%'", id))).To(Equal(1), "workflow %s delivered once", id)
+			}
+			AddReportEntry("recovered after the release (seconds)", marks.DeadExecutorRecovered.Sub(marks.Released).Seconds())
+		}, NodeTimeout(15*time.Minute))
+
+		It("restores an archived agent's home and resumes its session", Label("archive"), func(ctx SpecContext) {
+			needs("release")
+			Expect(archive.snapshot).NotTo(BeEmpty(), "the seed did not archive the agent")
+			Expect(dst.org).NotTo(BeEmpty(), "the sign-in check did not finish")
+			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM agent_sandboxes WHERE agent_id = '%s' AND archived_at IS NOT NULL", archive.agent))).To(Equal(1), "the dump holds the agent archived")
+
+			By("agentd answers the resync requested while held, and lists the snapshot")
+			Eventually(func(g Gomega) {
+				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM audit_events WHERE action = 'home.checkpoints_resynced' AND target_kind = 'agent' AND target_id = '%s'", archive.agent))).To(BeNumerically(">=", 1), "agentd finished the archive agent's resync")
+				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM home_checkpoints WHERE agent_id = '%s' AND status = 'complete' AND snapshot_id = '%s'", archive.agent, archive.snapshot))).To(Equal(1), "the source's snapshot is listed")
+			}).WithContext(ctx).WithTimeout(top.ReleasedWait).WithPolling(10 * time.Second).Should(Succeed())
+
+			By("the next message starts a run that restores the home and loads the session")
+			_, err := dst.client.Tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: dst.org, TaskId: archive.task, Text: "drill-archive-read: is the marker file there?"})
+			must(err, "append a message to the archive agent's task")
+			q := fmt.Sprintf("SELECT id FROM runs WHERE task_id = '%s' ORDER BY id DESC LIMIT 1", archive.task)
+			Eventually(func(g Gomega) {
+				g.Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM runs WHERE task_id = '%s'", archive.task))).To(BeNumerically(">=", 2), "a second run")
+				g.Expect(sql(ctx, &dst, fmt.Sprintf("SELECT state FROM runs WHERE id = (%s)", q))).To(Equal("succeeded"))
+			}).WithContext(ctx).WithTimeout(2 * top.ReleasedWait).WithPolling(10 * time.Second).Should(Succeed())
+			run := sql(ctx, &dst, q)
+			// The run printed "drill-marker-found" through its shell tool: the home came back from the bucket.
+			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM run_events WHERE run_id = '%s' AND payload::text LIKE '%%drill-marker-found%%'", run))).To(BeNumerically(">=", 1), "the run read the marker")
+			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM run_events WHERE run_id = '%s' AND payload::text LIKE '%%drill-marker-missing%%'", run))).To(BeZero())
+			Expect(sql(ctx, &dst, fmt.Sprintf("SELECT harness_session_id FROM tasks WHERE id = '%s'", archive.task))).To(Equal(archive.session), "the run loaded the task's session, not a new one")
+			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM agent_sandboxes WHERE agent_id = '%s' AND archived_at IS NOT NULL", archive.agent))).To(BeZero(), "the agent is no longer archived")
 		}, NodeTimeout(30*time.Minute))
 
 		It("keeps the source's sandboxes and providers as they were", Label("isolation"), func(ctx SpecContext) {

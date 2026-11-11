@@ -485,7 +485,141 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(kept.StreamAnchors).To(HaveLen(n))
 	})
+
+	It("keeps only the --file org's heads of each anchor when AnchorOrgID is set", func() {
+		const orgs, anchors = 60, 80
+		lines, orgIDs := syntheticAnchorExport(orgs, anchors)
+		stream := strings.Join(lines, "\n") + "\n"
+
+		all, err := audit.VerifyExport(strings.NewReader(stream), audit.ExportVerifyOptions{CollectAnchors: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all.Break).To(BeNil())
+		Expect(all.StreamAnchors).To(HaveLen(anchors))
+		for _, a := range all.StreamAnchors {
+			Expect(a.Heads).To(HaveLen(orgs), "without a filter every org's head is kept")
+		}
+
+		one, err := audit.VerifyExport(strings.NewReader(stream), audit.ExportVerifyOptions{CollectAnchors: true, AnchorOrgID: orgIDs[7]})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(one.Break).To(BeNil(), "the heads are all checked against heads_root before the others are dropped")
+		Expect(one.Anchors).To(Equal(anchors))
+		Expect(one.StreamAnchors).To(HaveLen(anchors))
+		retained := 0
+		for _, a := range one.StreamAnchors {
+			Expect(a.OrgCount).To(Equal(orgs), "the anchor still names the org count it commits to")
+			Expect(a.Heads).To(HaveLen(1))
+			Expect(a.Heads[0].OrgID).To(Equal(orgIDs[7]))
+			retained += cap(a.Heads)
+		}
+		Expect(retained).To(BeNumerically("<=", anchors), "the kept slices are not backed by the full per-anchor head lists")
+
+		By("an org that no anchor holds keeps no head")
+		none, err := audit.VerifyExport(strings.NewReader(stream), audit.ExportVerifyOptions{CollectAnchors: true, AnchorOrgID: "00000000-0000-4000-8000-ffffffffffff"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(none.Break).To(BeNil())
+		for _, a := range none.StreamAnchors {
+			Expect(a.Heads).To(BeEmpty())
+		}
+	})
+
+	It("retains far less heap with AnchorOrgID than without it, for many orgs x anchors", func() {
+		const orgs, anchors = 200, 300
+		lines, orgIDs := syntheticAnchorExport(orgs, anchors)
+		stream := strings.Join(lines, "\n") + "\n"
+
+		// retained is the heap still held after a collecting verify, with its result kept alive.
+		retained := func(opt audit.ExportVerifyOptions) int64 {
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			res, err := audit.VerifyExport(strings.NewReader(stream), opt)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Break).To(BeNil())
+			runtime.GC()
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(res)
+			return int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		}
+		all := retained(audit.ExportVerifyOptions{CollectAnchors: true})
+		one := retained(audit.ExportVerifyOptions{CollectAnchors: true, AnchorOrgID: orgIDs[3]})
+		// 60,000 kept heads (an org ID and a hash each) are several MiB; one org's 300 heads are tens of KiB.
+		Expect(all).To(BeNumerically(">", 1<<20), "without a filter every org's head is retained")
+		Expect(one).To(BeNumerically("<", all/10), "with AnchorOrgID the retained heap does not grow with the org count (all=%d one=%d)", all, one)
+	})
+
+	It("refuses an anchor_heads line with a key twice, at the top level or inside a head", func() {
+		lines, _ := syntheticAnchorExport(3, 2)
+		Expect(audit.VerifyExport(strings.NewReader(strings.Join(lines, "\n")+"\n"), audit.ExportVerifyOptions{})).To(
+			HaveField("Break", BeNil()), "the unedited export holds")
+		idx := -1
+		for i, l := range lines {
+			if strings.Contains(l, `"line":"`+audit.ExportAnchorLineKind+`"`) {
+				idx = i
+				break
+			}
+		}
+		Expect(idx).To(BeNumerically(">", 0))
+		for name, edit := range map[string]func(string) string{
+			"top-level org_count": func(l string) string { return strings.Replace(l, `{`, `{"org_count":3,`, 1) },
+			"top-level line":      func(l string) string { return strings.Replace(l, `{`, `{"line":"`+audit.ExportAnchorLineKind+`",`, 1) },
+			"inside a head":       func(l string) string { return strings.Replace(l, `"heads":[{`, `"heads":[{"chain_seq":1,`, 1) },
+		} {
+			edited := append([]string{}, lines...)
+			edited[idx] = edit(lines[idx])
+			Expect(edited[idx]).NotTo(Equal(lines[idx]), name)
+			res := verifyLines(edited, audit.ExportVerifyOptions{})
+			Expect(res.Break).NotTo(BeNil(), name)
+			Expect(res.Break.Reason).To(ContainSubstring("twice"), name)
+		}
+	})
 })
+
+// syntheticAnchorExport builds a verifying install export with the given number of anchors, each
+// followed by an anchor_heads line that holds one head per org. It returns the lines (header first)
+// and the org IDs.
+func syntheticAnchorExport(orgs, anchors int) ([]string, []string) {
+	GinkgoHelper()
+	const install = "00000000-0000-4000-8000-0000000000aa"
+	orgIDs := make([]string, orgs)
+	heads := make([]audit.AnchorHead, orgs)
+	exportHeads := make([]audit.ExportAnchorHead, orgs)
+	for i := range orgIDs {
+		orgIDs[i] = fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1)
+		h := bytes.Repeat([]byte{byte(i + 1)}, 32)
+		heads[i] = audit.AnchorHead{OrgID: orgIDs[i], ChainSeq: 1, Hash: h}
+		exportHeads[i] = audit.ExportAnchorHead{OrgID: orgIDs[i], ChainSeq: 1, Hash: hex.EncodeToString(h)}
+	}
+	root := hex.EncodeToString(audit.HeadsRoot(install, heads))
+	summary := fmt.Sprintf(`{"after":{"org_count":%d,"heads_root":"%s"}}`, orgs, root)
+	prev := audit.ZeroHash
+	var events []string
+	for seq := int64(1); seq <= int64(anchors); seq++ {
+		row := store.ListInstallAuditChainRowsRow{
+			ScopeText: install, IDText: fmt.Sprintf("00000001-0000-4000-8000-%012d", seq), ChainSeq: seq,
+			ActorKind: "system", ActorID: "koinon-api:audit-anchor", Action: audit.ActionAnchor, TargetKind: "install", TargetID: install,
+			SummaryText: summary, CreatedMicros: 1700000000000000 + seq, PrevHash: prev,
+		}
+		row.Hash = audit.InstallRowHash(row)
+		prev = row.Hash
+		ev, err := json.Marshal(audit.ExportEvent{
+			ChainSeq: seq, ID: row.IDText, ActorKind: row.ActorKind, ActorID: row.ActorID, Action: row.Action,
+			TargetKind: row.TargetKind, TargetID: row.TargetID, SummaryText: row.SummaryText, Summary: json.RawMessage(row.SummaryText),
+			CreatedAtMicros: row.CreatedMicros, PrevHash: hex.EncodeToString(row.PrevHash), Hash: hex.EncodeToString(row.Hash),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		al, err := json.Marshal(audit.ExportAnchorLine{
+			Line: audit.ExportAnchorLineKind, ChainSeq: seq, EventID: row.IDText, OrgCount: orgs, HeadsRoot: root, Heads: exportHeads,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		events = append(events, string(ev), string(al))
+	}
+	hdr, err := json.Marshal(audit.ExportHeader{
+		Format: audit.ExportFormat, Chain: "install", InstallID: install, FromSeq: 1,
+		Head: audit.ExportHead{ChainSeq: int64(anchors), Hash: hex.EncodeToString(prev)},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return append([]string{string(hdr)}, events...), orgIDs
+}
 
 // manyAnchorReader yields a header then event/anchor_heads pairs without joining them into one string.
 type manyAnchorReader struct {

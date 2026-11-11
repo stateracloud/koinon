@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
+    "test:isolated": "VITEST_ISOLATE=true vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {

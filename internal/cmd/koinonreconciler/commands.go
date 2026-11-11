@@ -5,6 +5,7 @@ package koinonreconciler
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,11 +28,16 @@ func NewRootCommand() *cobra.Command { return newRootCommand(serve) }
 // newRootCommand builds the tree with run as the work of serve, so a test can read the settings
 // the command resolved.
 func newRootCommand(run func(context.Context, config) error) *cobra.Command {
+	return newRootCommandWith(run, listUnmarked)
+}
+
+// newRootCommandWith also takes the work of "unmarked list".
+func newRootCommandWith(run func(context.Context, config) error, list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "koinon-reconciler",
 		Short: "Koinon's reconciler",
 		Long: "koinon-reconciler renders agents into OpenShell sandboxes, provider records and agentgateway keys (serve, " +
-			"also what runs without a subcommand).\n\n" +
+			"also what runs without a subcommand). unmarked lists the OpenShell objects that carry no install mark.\n\n" +
 			"Settings come from the chart's config file (--config, KOINON_CONFIG) and can be overridden by flags; every flag " +
 			"can also be set by an environment variable: KOINON_ plus the flag name in upper case with dashes as underscores " +
 			"(--idle-timeout is KOINON_IDLE_TIMEOUT). Secrets are never flags: the database password comes from PGPASSWORD, " +
@@ -42,6 +48,7 @@ func newRootCommand(run func(context.Context, config) error) *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(v, run))
+	root.AddCommand(newUnmarkedCommand(v, list))
 	return root
 }
 
@@ -59,6 +66,8 @@ var configKeys = map[string]string{
 	"sandbox-observer-service-account":     "sandboxObserver.serviceAccount",
 	"sandbox-network-policy":               "sandboxNetworkPolicy.enabled",
 	"sandbox-network-policy-name":          "sandboxNetworkPolicy.name",
+	"sandbox-limit-range":                  "sandboxLimitRange.enabled",
+	"sandbox-limit-range-name":             "sandboxLimitRange.name",
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-config-map":                   "gateway.configMap",
@@ -140,6 +149,9 @@ func (c *config) finish(v *viper.Viper) error {
 	if c.sandboxNetworkPolicy && c.sandboxNetworkPolicyName == "" {
 		return fmt.Errorf("--sandbox-network-policy-name is required with --sandbox-network-policy")
 	}
+	if c.sandboxLimitRange && c.sandboxLimitRangeName == "" {
+		return fmt.Errorf("--sandbox-limit-range-name is required with --sandbox-limit-range")
+	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return fmt.Errorf("--gateway-config-map is required in standalone mode")
 	}
@@ -155,17 +167,27 @@ func (c *config) finish(v *viper.Viper) error {
 	if err := c.sandboxResources.Validate(); err != nil {
 		return fmt.Errorf("config sandboxResources: %w", err)
 	}
+	images, err := flavorImages(v)
+	if err != nil {
+		return err
+	}
+	c.flavorImages = images
+	return nil
+}
+
+// flavorImages reads the config file's flavors section: each flavor's image.
+func flavorImages(v *viper.Viper) (map[string]string, error) {
 	var flavors map[string]struct {
 		Image string `mapstructure:"image"`
 	}
 	if err := v.UnmarshalKey("flavors", &flavors); err != nil {
-		return fmt.Errorf("config flavors: %w", err)
+		return nil, fmt.Errorf("config flavors: %w", err)
 	}
-	c.flavorImages = map[string]string{}
+	images := map[string]string{}
 	for name, f := range flavors {
-		c.flavorImages[name] = f.Image
+		images[name] = f.Image
 	}
-	return nil
+	return images, nil
 }
 
 func orDefault[T comparable](v *T, def T) {
@@ -191,6 +213,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
 	fs.BoolVar(&c.sandboxNetworkPolicy, "sandbox-network-policy", false, "apply a default-deny NetworkPolicy in each OpenShell workspace namespace (spike 8.15, ADR 0045)")
 	fs.StringVar(&c.sandboxNetworkPolicyName, "sandbox-network-policy-name", "", "name of the default-deny NetworkPolicy in each workspace namespace")
+	fs.BoolVar(&c.sandboxLimitRange, "sandbox-limit-range", false, "apply a LimitRange in each OpenShell workspace namespace so the supervisor and init containers are sized (#76)")
+	fs.StringVar(&c.sandboxLimitRangeName, "sandbox-limit-range-name", "", "name of the LimitRange in each workspace namespace")
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
