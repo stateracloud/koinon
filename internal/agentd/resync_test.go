@@ -82,7 +82,7 @@ var _ = Describe("home checkpoint resync", func() {
 			c.Metrics = m
 			c.Checkpoints = &agentd.Checkpoints{
 				Store: writer, Repositories: fixedRepo{current: current, lost: lost}, Interval: 24 * time.Hour,
-				Poll: 50 * time.Millisecond, Sweep: time.Hour, Attempts: 2, Retry: 10 * time.Millisecond, Timeout: 20 * time.Second,
+				Poll: 50 * time.Millisecond, Sweep: time.Hour, Attempts: 2, Retry: 10 * time.Millisecond, Timeout: racescale.D(20 * time.Second),
 				Lease: 20 * time.Minute,
 			}
 			for _, x := range extra {

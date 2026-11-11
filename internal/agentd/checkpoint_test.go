@@ -218,7 +218,7 @@ var _ = Describe("home checkpoints", func() {
 		return func(c *agentd.Config) {
 			c.Checkpoints = &agentd.Checkpoints{
 				Store: writer, Repositories: fixedRepo{}, Interval: 24 * time.Hour, Poll: 50 * time.Millisecond,
-				Attempts: 2, Retry: 10 * time.Millisecond, RestoreTries: 1, RestoreFallbacks: 2, Timeout: 20 * time.Second,
+				Attempts: 2, Retry: 10 * time.Millisecond, RestoreTries: 1, RestoreFallbacks: 2, Timeout: racescale.D(20 * time.Second),
 			}
 			for _, x := range extra {
 				x(c.Checkpoints)

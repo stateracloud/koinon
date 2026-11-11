@@ -112,7 +112,7 @@ var _ = Describe("home repository seeds", func() {
 			c.Checkpoints = &agentd.Checkpoints{
 				Store: writer, Repositories: fixedRepo{current: current}, Interval: 24 * time.Hour, Poll: 50 * time.Millisecond,
 				Sweep: 50 * time.Millisecond, Attempts: 2, Retry: 10 * time.Millisecond, RestoreTries: 1, RestoreFallbacks: 2,
-				Timeout: 20 * time.Second,
+				Timeout: racescale.D(20 * time.Second),
 			}
 			for _, x := range extra {
 				x(c.Checkpoints)
