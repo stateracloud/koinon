@@ -253,7 +253,9 @@ g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
 	buf lint
-	buf breaking --against ".git#branch=${base#origin/}"
+	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
+	against=$(hack/buf-breaking-against.sh "$base")
+	buf breaking --against ".git#ref=$against"
 }
 
 tree_state() { git status --porcelain; git diff | cksum; }
