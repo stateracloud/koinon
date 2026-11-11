@@ -242,9 +242,35 @@ func (o *Owner) Succeed(ctx context.Context, turn Turn) error {
 // Supersede ends a run that has nothing left to do as succeeded, without a turn: the task's earlier
 // run already read every message this run was queued for (#21). The reason is the run's outcome
 // reason. Like any success it completes the task, which the queued run was holding open (EndTaskFrom
-// waits for the queue to empty); the run has no reply of its own.
-func (o *Owner) Supersede(ctx context.Context, reason string) error {
-	return o.end(ctx, Turn{}, store.RunStateSucceeded, reason, "", nil)
+// waits for the queue to empty); the run has no reply of its own. The run is still starting (no
+// harness session was made), and FinishRun ends a run as succeeded only from running, so in one
+// transaction under the run's lock the verb takes the starting -> running step and the end together:
+// nothing ever sees a running run without a harness.
+func (o *Owner) Supersede(ctx context.Context, turn Turn, reason string) error {
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: o.run.OrgID, ID: o.run.ID})
+		if err != nil {
+			return err
+		}
+		if run.Epoch != o.run.Epoch {
+			return pgx.ErrNoRows
+		}
+		if err := o.endRow(ctx, q, turn, "superseded"); err != nil {
+			return err
+		}
+		if run.State == store.RunStateStarting {
+			if _, err := q.MarkRunRunning(ctx, store.MarkRunRunningParams{OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch}); err != nil {
+				return err
+			}
+		}
+		return o.finishIn(ctx, q, src, store.RunStateSucceeded, reason, "", nil)
+	})
+	if err != nil {
+		return o.failed(ctx, turn, "supersede the run", err)
+	}
+	o.finished(store.RunStateSucceeded)
+	o.cfg.Log.Info("run finished", "outcome", store.RunStateSucceeded, "reason", reason)
+	return nil
 }
 
 // Fail ends the run as failed with a reason and a failure class. A fatal class fails the task too
