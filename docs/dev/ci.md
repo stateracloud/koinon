@@ -48,7 +48,8 @@ with stubs for `uname`, `pmset`, `docker` and `caffeinate`.
   result into exit 3 with `go-test verdict: notrun reason="host slept"` (lane-gates: `verdict=notrun
   reason="host slept"`), whatever the suites reported: the results mean nothing.
 - **Deadlines.** `testenv`'s Docker check (`GetProvider()` and `Health`) shares one 30 s deadline.
-  `go test` and `ginkgo` get `-timeout` / `--timeout` from `GO_TEST_TIMEOUT` (default 20m).
+  `go test` gets `-timeout` from `GO_TEST_TIMEOUT` (default 20m per package). `ginkgo` gets `--timeout`
+  from `GINKGO_TIMEOUT` (default 1h); Ginkgo applies it to the whole `-p` run, not to each package.
 - **Heavy runs per Mac.** At most `KOINON_GO_SLOTS` (default 2) `go-test.sh` runs at once on one Mac:
   a slot is a directory under `$TMPDIR/koinon-go-slots` (`KOINON_GO_SLOTS_DIR`) holding the owner's pid;
   a dead owner's slot is taken over, and a waiting run prints one line. Each run uses `PROCS=4` unless

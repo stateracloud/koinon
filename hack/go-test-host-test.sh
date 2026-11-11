@@ -111,7 +111,7 @@ unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
 echo "ok: at most N runs hold a slot, a dead owner's slot is reused, release frees it"
 
 # Wiring in go-test.sh.
-for pat in 'host_keep_awake' 'host_docker_preflight' 'host_acquire_slot' 'host_slept_between' 'reason="host slept"' '-timeout "\$go_timeout"' '--timeout="\$go_timeout"' '--procs=4'; do
+for pat in 'host_keep_awake' 'host_docker_preflight' 'host_acquire_slot' 'host_slept_between' 'reason="host slept"' '-timeout "\$go_timeout"' '--timeout="\$ginkgo_timeout"' '--procs=4'; do
 	grep -q -- "$pat" hack/go-test.sh || fail "go-test.sh does not use $pat"
 done
 grep -q 'host slept' hack/lane-gates.sh || fail "lane-gates does not classify host slept"

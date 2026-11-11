@@ -44,7 +44,8 @@
 # must answer and its clock agree with the host's within 2 s (exit 3 otherwise); a run during which
 # `pmset -g log` shows a Sleep ends with exit 3 and `go-test verdict: notrun reason="host slept"`, not
 # with test failures; at most KOINON_GO_SLOTS (default 2) runs share a Mac, with PROCS=4 each unless
-# PROCS is set; `go test` gets -timeout (GO_TEST_TIMEOUT, default 20m per package).
+# PROCS is set; `go test` gets -timeout (GO_TEST_TIMEOUT, default 20m per package);
+# ginkgo gets --timeout from GINKGO_TIMEOUT (default 1h), one budget for the whole `ginkgo -p` run.
 #
 # KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
 # failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; a wrapper
@@ -112,6 +113,8 @@ elif host_is_mac; then
 fi
 # An explicit timeout so a stall fails as one clear package, not at go test's silent 10 m default.
 go_timeout=${GO_TEST_TIMEOUT:-20m}
+# Ginkgo v2 --timeout is one budget for the whole invocation (all parallel suites), not per package.
+ginkgo_timeout=${GINKGO_TIMEOUT:-1h}
 
 report_dir=${REPORT_DIR:-reports/go}
 mkdir -p "$report_dir"
@@ -181,7 +184,7 @@ failed=()
 # Run all parts so one CI run reports every failing package.
 if ((${#parallel[@]})); then
 	# shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
-	go tool ginkgo "${procs[@]}" --timeout="$go_timeout" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
+	go tool ginkgo "${procs[@]}" --timeout="$ginkgo_timeout" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
 fi
 if ((${#ginkgo_rest[@]})); then
 	for dir in "${ginkgo_rest[@]}"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
