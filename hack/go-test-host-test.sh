@@ -86,12 +86,17 @@ echo "ok: host slept is read from pmset Sleep events inside the run window"
 # Slots: two at once, a third waits and gets a slot when an owner ends; release frees it.
 export KOINON_GO_SLOTS=2 KOINON_GO_SLOTS_DIR=$tmp/slots KOINON_GO_SLOT_POLL=0.2
 mkdir -p "$KOINON_GO_SLOTS_DIR/slot.1" "$KOINON_GO_SLOTS_DIR/slot.2"
+# Two owners, one process each: slot.2 must survive the end of slot.1's owner. (One pid in both slots
+# made the result depend on when the owner was seen dead: the waiter could take both slots as stale.)
 exec 9< <(exec sleep 30)
 owner=$!
 exec 9<&-
-bg+=("$owner")
+exec 8< <(exec sleep 30)
+owner2=$!
+exec 8<&-
+bg+=("$owner" "$owner2")
 echo "$owner" >"$KOINON_GO_SLOTS_DIR/slot.1/pid"
-echo "$owner" >"$KOINON_GO_SLOTS_DIR/slot.2/pid"
+echo "$owner2" >"$KOINON_GO_SLOTS_DIR/slot.2/pid"
 (
 	host_slot_dir=
 	host_acquire_slot 2>"$tmp/wait.err"
@@ -107,6 +112,7 @@ kill "$owner"
 wait "$waiter" || fail "waiter failed"
 [[ -e $tmp/got ]] || fail "waiter never got a slot after the owners ended"
 [[ $(/bin/ls "$KOINON_GO_SLOTS_DIR") == slot.2 ]] || fail "slot not released: $(/bin/ls "$KOINON_GO_SLOTS_DIR")"
+[[ $(<"$KOINON_GO_SLOTS_DIR/slot.2/pid") == "$owner2" ]] || fail "a live owner lost its slot"
 unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
 echo "ok: at most N runs hold a slot, a dead owner's slot is reused, release frees it"
 
@@ -178,10 +184,17 @@ grep -q 'host slept' hack/lane-gates.sh || fail "lane-gates does not classify ho
 echo "ok: go-test.sh and lane-gates are wired to the host guards"
 
 # End to end with stubs: a Darwin host whose log shows a Sleep makes a run exit 3 with the verdict line.
-stub pmset-slept 'case "$1 $2" in "-g batt") ;; *) echo "$(date "+%Y-%m-%d %H:%M:%S") +0000 Sleep Entering Sleep";; esac'
+# The clock is fixed for the run: go-test.sh reads it for the window start and end, so the Sleep event
+# is inside the window whatever the real time is (a stub that printed "now" fell outside it when the
+# second changed between the window end and the pmset call).
+fixed_now='2026-11-11 10:00:00'
+mkdir -p "$tmp/fakedate"
+printf '#!/usr/bin/env bash\n[[ "$*" == "+%%Y-%%m-%%d %%H:%%M:%%S" ]] && { echo "%s"; exit 0; }\nexec /bin/date "$@"\n' "$fixed_now" >"$tmp/fakedate/date"
+chmod +x "$tmp/fakedate/date"
+stub pmset-slept 'case "$1 $2" in "-g batt") ;; *) echo "'"$fixed_now"' +0000 Sleep Entering Sleep";; esac'
 stub caffeinate-quick 'exit 0'
 rc=0
-out=$(KOINON_UNAME=$bin/uname-mac KOINON_PMSET=$bin/pmset-slept KOINON_CAFFEINATE=$bin/caffeinate-quick KOINON_DOCKER=$bin/docker-off \
+out=$(PATH="$tmp/fakedate:$PATH" KOINON_UNAME=$bin/uname-mac KOINON_PMSET=$bin/pmset-slept KOINON_CAFFEINATE=$bin/caffeinate-quick KOINON_DOCKER=$bin/docker-off \
 	KOINON_GO_SLOTS_DIR=$tmp/slots2 REPORT_DIR=$tmp/reports hack/go-test.sh ./internal/project 2>&1) || rc=$?
 [[ $rc == 3 ]] || { echo "$out" | tail -10; fail "a run that slept must exit 3, got $rc"; }
 grep -q 'go-test verdict: notrun reason="host slept"' <<<"$out" || { echo "$out" | tail -10; fail "no host slept verdict"; }
