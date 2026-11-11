@@ -4,7 +4,9 @@ package outward_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -228,6 +230,15 @@ var _ = Describe("the outward switch", func() {
 		_, err = svc.SetDisabled(ctx, org, actor, outward.ModelProvider, id, false, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(woken()).To(BeTrue())
+	})
+
+	It("counts the note in characters, not bytes", func(ctx SpecContext) {
+		id := mcp(ctx, "docs", "")
+		_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, strings.Repeat("é", outward.MaxNoteLen))
+		Expect(err).NotTo(HaveOccurred())
+		var inv *outward.InvalidError
+		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, strings.Repeat("é", outward.MaxNoteLen+1))
+		Expect(errors.As(err, &inv)).To(BeTrue())
 	})
 
 	It("changes the note when the same owner disables again, and audits it", func(ctx SpecContext) {

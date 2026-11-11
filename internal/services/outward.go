@@ -72,6 +72,12 @@ func (s *Server) SetOutwardTargetDisabled(ctx context.Context, req *outwardv1alp
 	if err != nil {
 		return nil, s.outwardError(err)
 	}
+	if kind == outward.CodeHostConnection && !st.Disabled {
+		// A disabled connection was not read; its stored reading aged. Ask for a fresh one now.
+		if row, gerr := s.q.GetConnection(requestCtx(ctx), store.GetConnectionParams{OrgID: org, ID: id}); gerr == nil {
+			s.syncScope(requestCtx(ctx), row, actor)
+		}
+	}
 	out := &outwardv1alpha1.OutwardTargetState{
 		Kind: outwardKindToProto[kind], TargetId: id.String(), Name: st.Name, Disabled: st.Disabled, DisabledBy: st.By, Note: st.Note,
 	}

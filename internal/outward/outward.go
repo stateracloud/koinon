@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -205,7 +206,7 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 		}
 	}
 	note = strings.TrimSpace(note)
-	if len(note) > MaxNoteLen {
+	if utf8.RuneCountInString(note) > MaxNoteLen {
 		return State{}, &InvalidError{Msg: fmt.Sprintf("note is at most %d characters", MaxNoteLen)}
 	}
 	var out State

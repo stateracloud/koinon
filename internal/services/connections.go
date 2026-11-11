@@ -643,6 +643,14 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection, actor
 	}
 	var results []connections.CheckResult
 	conn, err := connections.Load(ctx, s.keys, row)
+	if errors.Is(err, outward.ErrDisabled) {
+		// Not a failure of the connection: say so without recording a failing status that enabling would not clear.
+		step := "generate-key"
+		if p.ID() != providers.GitHub {
+			step = "create-tokens"
+		}
+		return row, checksProto([]connections.CheckResult{{Check: "secret", Step: step, Message: "this connection is disabled by an admin (outward switch); enable it to test it"}}), nil
+	}
 	if err == nil {
 		err = p.Validate(conn)
 	}
@@ -654,9 +662,6 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection, actor
 		}
 		if errors.Is(err, connections.ErrCredentialLost) {
 			res.Message = "this connection's stored credential was lost with a key-encryption key; " + connections.LostRemedy(row)
-		}
-		if errors.Is(err, outward.ErrDisabled) {
-			res.Message = "this connection is disabled by an admin (outward switch); enable it to test it"
 		}
 		results = []connections.CheckResult{res}
 	} else {

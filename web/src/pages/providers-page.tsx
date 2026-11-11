@@ -149,7 +149,9 @@ function ProviderCard({
 }) {
   const now = useNow()
   const editable = providerEditable(p)
-  const disabled = p.disabledReason !== '' || p.removed
+  const systemDisabled = p.disabledReason !== '' || p.removed
+  // An admin's outward switch (ADR 0110) also takes the provider out of use: no Active badge and no echo check (the server answers 409).
+  const disabled = systemDisabled || p.adminDisabled !== undefined
   return (
     <section aria-labelledby={`provider-${p.id}`} className="bg-card grid gap-3 rounded-md border p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +190,7 @@ function ProviderCard({
           </>
         )}
       </dl>
-      {disabled && (
+      {systemDisabled && (
         <Alert variant="destructive" role="note">
           <AlertDescription>
             {p.removed ? 'Removed' : 'Disabled'}: {p.disabledReason || 'its Kubernetes Secret was deleted'}.
