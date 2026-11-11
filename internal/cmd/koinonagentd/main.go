@@ -88,7 +88,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.otlpEndpoint, "otlp-endpoint", "",
 		"base URL of koinon-api's internal OTLP/HTTP listener (for example http://koinon-api.koinon.svc:4318), where run spans are exported; empty: not exported")
 	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
-		"file with the bearer token that listener requires (the Secret koinon-otlp-token, key token, mounted read-only); required with --otlp-endpoint")
+		"file with the bearer token that listener requires (the Secret koinon-otlp-traces-token, key token, mounted read-only; not the gateway's token, issue 55); required with --otlp-endpoint")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")

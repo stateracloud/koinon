@@ -160,3 +160,96 @@ var _ = Describe("otlpauth", func() {
 		Expect(err.Error()).NotTo(ContainSubstring("short"))
 	})
 })
+
+// Two scopes on one listener (issue 55): the gateway's token for /v1/logs, agentd's for /v1/traces.
+var _ = Describe("otlpauth scopes", func() {
+	const (
+		gateway = "koinon_test_not-a-real-token-gateway-0001"
+		agentd  = "koinon_test_not-a-real-token-agentd-00001"
+	)
+	var (
+		srv     *httptest.Server
+		reached int
+		metrics *otlpauth.Metrics
+	)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	set := func(token string) *otlpauth.Tokens {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, otlpauth.TokenFile), []byte(token), 0o600)).To(Succeed())
+		t, err := otlpauth.NewTokens(dir, quiet)
+		Expect(err).NotTo(HaveOccurred())
+		return t
+	}
+	status := func(path, token string) int {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+path, nil)
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(resp.Body.Close)
+		return resp.StatusCode
+	}
+
+	BeforeEach(func() {
+		reached = 0
+		metrics = otlpauth.NewMetrics(prometheus.NewRegistry())
+		mux := http.NewServeMux()
+		for _, p := range []string{"/v1/logs", "/v1/traces"} {
+			mux.HandleFunc("POST "+p, func(w http.ResponseWriter, _ *http.Request) { reached++ })
+		}
+		srv = httptest.NewServer(otlpauth.ScopedMiddleware(set(gateway), map[string]*otlpauth.Tokens{"/v1/traces": set(agentd)}, metrics)(mux))
+		DeferCleanup(srv.Close)
+	})
+
+	It("admits each token on its own path", func() {
+		Expect(status("/v1/logs", gateway)).To(Equal(http.StatusOK))
+		Expect(status("/v1/traces", agentd)).To(Equal(http.StatusOK))
+		Expect(reached).To(Equal(2))
+	})
+
+	It("refuses the gateway's token on /v1/traces", func() {
+		Expect(status("/v1/traces", gateway)).To(Equal(http.StatusUnauthorized))
+		Expect(reached).To(BeZero())
+	})
+
+	It("refuses agentd's token on /v1/logs and on every other path", func() {
+		for _, p := range []string{"/v1/logs", "/anything"} {
+			Expect(status(p, agentd)).To(Equal(http.StatusUnauthorized), p)
+		}
+		Expect(reached).To(BeZero())
+		Expect(testutil.ToFloat64(metrics.Rejected.WithLabelValues("invalid"))).To(Equal(2.0))
+	})
+
+	It("does not let a path variant of /v1/traces fall back to agentd's scope", func() {
+		Expect(status("/v1/traces/", agentd)).To(Equal(http.StatusUnauthorized))
+		Expect(status("//v1/traces", agentd)).To(Equal(http.StatusUnauthorized))
+	})
+})
+
+var _ = Describe("SharesToken", func() {
+	const (
+		one   = "koinon_test_not-a-real-token-share-0001"
+		two   = "koinon_test_not-a-real-token-share-0002"
+		three = "koinon_test_not-a-real-token-share-0003"
+	)
+	newTokens := func(token, previous string) *otlpauth.Tokens {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "token"), []byte(token), 0o600)).To(Succeed())
+		if previous != "" {
+			Expect(os.WriteFile(filepath.Join(dir, "previous"), []byte(previous), 0o600)).To(Succeed())
+		}
+		t, err := otlpauth.NewTokens(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		Expect(err).NotTo(HaveOccurred())
+		return t
+	}
+
+	It("is false for two different tokens", func() {
+		Expect(newTokens(one, "").SharesToken(newTokens(two, ""))).To(BeFalse())
+	})
+	It("is true for the same current token", func() {
+		Expect(newTokens(one, "").SharesToken(newTokens(one, ""))).To(BeTrue())
+	})
+	It("is true when one scope's previous token is the other's current", func() {
+		Expect(newTokens(one, two).SharesToken(newTokens(two, three))).To(BeTrue())
+	})
+})

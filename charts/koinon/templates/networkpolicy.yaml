@@ -30,7 +30,8 @@ spec:
               {{- toYaml $release | nindent 14 }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    # The internal OTLP receiver needs a bearer token (koinon.otlpTokenName). As a second layer only
+    # The internal OTLP receiver needs a bearer token: koinon.otlpTokenName for /v1/logs (the gateway's) and
+    # koinon.otlpTracesTokenName for /v1/traces (koinon-agentd's only). As a second layer only
     # its two senders may reach it: agentgateway (access log) and koinon-agentd (run spans).
     - ports:
         - port: otlp

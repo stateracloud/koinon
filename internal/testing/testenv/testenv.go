@@ -165,24 +165,45 @@ func Required(value, name string) bool {
 	return false
 }
 
-var docker = sync.OnceValue(func() (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("docker provider panicked: %v", r)
+// dockerDeadline bounds the whole Docker check: the provider lookup (it reads the Docker host
+// settings and may contact the daemon) and the health call. A stuck daemon, for example after the
+// host slept, otherwise holds a test process for as long as the suite timeout (issue 551).
+const dockerDeadline = 30 * time.Second
+
+var docker = sync.OnceValue(func() error { return dockerCheck(dockerDeadline, testcontainers.ProviderDocker.GetProvider) })
+
+// dockerCheck runs the provider lookup and Health under one deadline. The lookup has no context of
+// its own, so it runs in a goroutine; on a timeout that goroutine is abandoned (the process is a
+// test binary and ends soon).
+func dockerCheck(limit time.Duration, get func(...testcontainers.GenericProviderOption) (testcontainers.GenericProvider, error)) error {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		var err error
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("docker provider panicked: %v", r)
+			}
+			done <- err
+		}()
+		p, perr := get()
+		if perr != nil {
+			err = fmt.Errorf("docker is not available: %w", perr)
+			return
+		}
+		defer func() { _ = p.Close() }()
+		if herr := p.Health(ctx); herr != nil {
+			err = fmt.Errorf("docker is not available: %w", herr)
 		}
 	}()
-	p, err := testcontainers.ProviderDocker.GetProvider()
-	if err != nil {
-		return fmt.Errorf("docker is not available: %w", err)
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("docker is not available: no answer within %s", limit)
 	}
-	defer func() { _ = p.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := p.Health(ctx); err != nil {
-		return fmt.Errorf("docker is not available: %w", err)
-	}
-	return nil
-})
+}
 
 func dockerErr() error { return docker() }
 

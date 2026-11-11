@@ -152,7 +152,7 @@ spec:
             {{- end }}
             {{- end }}
             {{- if eq $component "agentd" }}
-            {{- include "koinon.otlpTokenVolumeMount" $ | nindent 12 }}
+            {{- include "koinon.otlpTracesTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
             {{- if $.Values.checkpoints.enabled }}
             - name: checkpoints
@@ -182,7 +182,7 @@ spec:
         {{- end }}
         {{- end }}
         {{- if eq $component "agentd" }}
-        {{- include "koinon.otlpTokenVolume" $ | nindent 8 }}
+        {{- include "koinon.otlpTracesTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
         {{- if $.Values.checkpoints.enabled }}
         - name: checkpoints

@@ -182,7 +182,7 @@ func describeMode(name, valuesFile string) {
 				// supplies, as in external-operator-secrets mode, is not the Job's to create). The
 				// reconciler and agentd read the install mark from its Secret (issue 461).
 				generated := r.generatedSecretNames()
-				for _, name := range []string{"koinon-otlp-token", "koinon-install-mark"} {
+				for _, name := range []string{"koinon-otlp-token", "koinon-otlp-traces-token", "koinon-install-mark"} {
 					if generated[name] {
 						Expect(cl.Secret(ctx, name)).NotTo(BeNil(), name)
 						Expect(cl.Secret(ctx, name).Data).To(HaveKey("token"), name)
