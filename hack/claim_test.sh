@@ -12,6 +12,7 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+unset KOINON_CLAIM_HUMAN_CAP # the default is no cap; cases set it explicitly
 
 here=$(cd "$(dirname "$0")" && pwd)
 claim=$here/claim.sh
@@ -201,6 +202,13 @@ r=$(KOINON_CLAIM_HUMAN_CAP=0 run take 10 --lane l10)
 eq "take: a cap of 0 is no cap" "$(rc_of "$r")" 0
 r=$(KOINON_CLAIM_HUMAN_CAP=8 run take 10 --lane l10)
 eq "take: KOINON_CLAIM_HUMAN_CAP=8 refuses the ninth" "$(rc_of "$r")" 2
+r=$(KOINON_CLAIM_HUMAN_CAP=010 run take 10 --lane l10)
+eq "take: a cap of 010 is ten, not octal" "$(rc_of "$r")" 0
+r=$(KOINON_CLAIM_HUMAN_CAP=08 run take 10 --lane l10)
+eq "take: a cap of 08 is eight" "$(rc_of "$r")" 2
+FIX=$(for i in 1 2 3 4 5 6 7 8 9; do cl "$i" held "alice#l$i" alice; done | fix)
+r=$(KOINON_CLAIM_HUMAN_CAP=8 run take 9 --lane l9)
+eq "take: an issue already held is not refused by the cap" "$(rc_of "$r")" 0
 FIX=$(fix </dev/null)
 r=$(CLOSERS_FIX='[{"number":50,"author":"bob","issues":[10]}]' run take 10)
 eq "take: another author's open pull request refuses" "$(rc_of "$r")" 2
