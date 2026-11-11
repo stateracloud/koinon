@@ -39,10 +39,12 @@ chmod +x "$tmp/bin/gh"
 export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r
 
 echo '{"tree":{"sha":"tree-main"}}' >"$tmp/commit.json"
-# one queue run on the tree of the push, one on another tree, one that failed on the push's tree
-runs_match='{"workflow_runs":[{"head_sha":"q1","conclusion":"success","head_commit":{"tree_id":"tree-other"}},{"head_sha":"q2","conclusion":"success","head_commit":{"tree_id":"tree-main"}}]}'
+# one queue run on the pushed commit, one on another commit, one that failed on the pushed commit;
+# runs_sametree: a successful queue run with the pushed tree but another head_sha (other commits)
+runs_match='{"workflow_runs":[{"head_sha":"q1","conclusion":"success","head_commit":{"tree_id":"tree-other"}},{"head_sha":"abc123","conclusion":"success","head_commit":{"tree_id":"tree-main"}}]}'
 runs_none='{"workflow_runs":[{"head_sha":"q1","conclusion":"success","head_commit":{"tree_id":"tree-other"}}]}'
-runs_failed='{"workflow_runs":[{"head_sha":"q3","conclusion":"failure","head_commit":{"tree_id":"tree-main"}}]}'
+runs_failed='{"workflow_runs":[{"head_sha":"abc123","conclusion":"failure","head_commit":{"tree_id":"tree-main"}}]}'
+runs_sametree='{"workflow_runs":[{"head_sha":"q9","conclusion":"success","head_commit":{"tree_id":"tree-main"}}]}'
 
 fails=0
 # expect NAME WANT_SKIP REASON_SUBSTRING RUNS_JSON [env...]
@@ -61,14 +63,15 @@ expect() {
 }
 
 push=(EVENT_NAME=push REF=refs/heads/main SHA=abc123)
-expect "queue-made push to main is skipped" true "q2" "$runs_match" "${push[@]}"
-expect "admin or direct push (no queue run on the tree) scans" false "no successful merge_group" "$runs_none" "${push[@]}"
+expect "queue-made push to main is skipped" true "scanned commit abc123" "$runs_match" "${push[@]}"
+expect "admin or direct push (no queue run on the commit) scans" false "no successful merge_group" "$runs_none" "${push[@]}"
+expect "a queue run with the same tree but another head_sha scans" false "no successful merge_group" "$runs_sametree" "${push[@]}"
 expect "a failed queue run does not count" false "no successful merge_group" "$runs_failed" "${push[@]}"
 expect "pull_request scans" false "event 'pull_request'" "$runs_match" EVENT_NAME=pull_request REF=refs/pull/1/merge SHA=abc123
 expect "merge_group scans" false "event 'merge_group'" "$runs_match" EVENT_NAME=merge_group REF=refs/heads/gh-readonly-queue/main/x SHA=abc123
 expect "push to another branch scans" false "not a push to main" "$runs_match" EVENT_NAME=push REF=refs/heads/other SHA=abc123
 expect "no event scans" false "event ''" "$runs_match" SHA=abc123
-expect "gh failing on the commit scans" false "cannot read the tree" "$runs_match" "${push[@]}" FAKE_FAIL=1
+expect "gh failing scans" false "cannot list the merge_group runs" "$runs_match" "${push[@]}" FAKE_FAIL=1
 expect "gh failing on the runs scans" false "cannot list the merge_group runs" "$runs_match" "${push[@]}" FAKE_FAIL_RUNS=1
 
 # the workflow wires the decision in and keeps the required check reporting

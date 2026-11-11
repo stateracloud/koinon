@@ -407,4 +407,11 @@ and 147 runner minutes for one merged pull request. Two decisions above repeated
 Also in the same change (no decision of this ADR, recorded for the route): `lint-shell` and `scripts` are
 path-gated and off on drafts, `go-tidy` and `go-lint` run only when Go files, `go.mod`, `go.sum` or the lint
 config change, `gitleaks` is not run again on a push to main that the queue made (`hack/secrets-skip.sh`: the
-queue run of the same workflow scanned the same tree), and the OpenSSF Scorecard runs weekly, not on every push.
+queue run of the same workflow scanned that exact commit), and the OpenSSF Scorecard runs weekly, not on every push.
+
+Gap and its closure: `flavors` reports a green skip on every pull request head, and `--admin` skips the queue, so a
+`.github/**` pull request that also changes flavor inputs could merge with no `flavors` run. `hack/pr-merge.sh --admin`
+now refuses (exit 10) when `hack/ci-changes.sh` says `flavors=true` and the head has no real `flavors` success. `ci.yml`
+has no `workflow_dispatch` trigger that runs `flavors` for a branch, and none is added here, so in practice the answer
+is "use the merge queue". The push to main still builds and tests the flavors after an `--admin` merge of a
+pull request that does not affect them.

@@ -90,8 +90,13 @@ cat >/dev/null
 echo "needs $*" >>"$FAKE_DIR/calls"
 exit "${NEEDS_RC:-1}"
 SH
+cat >"$tmp/bin/cich" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "flavors=${FLAVORS:-false}"
+SH
 chmod +x "$tmp/bin"/*
-export PR_MERGE_NEEDS_E2E="$tmp/bin/needs"
+export PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CI_CHANGES="$tmp/bin/cich"
 
 fail=0
 setup() { # <isDraft> <runs rows, one JSON object per line>
@@ -207,6 +212,20 @@ check "--admin, needs-e2e cannot say (2): treated as needed, refused (10)" 10 no
 setup false "$green"
 NEEDS_RC=1 run 7 --admin
 check "--admin, .github only, e2e not needed: merges without a quickstart" 0 merge
+# --admin and flavors: the head only has the green skip, so a change that affects the flavors suite is refused
+setup false "$green
+$(r flavors 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 FLAVORS=true run 7 --admin
+check "--admin, flavors affected, skipped flavors: refused (10)" 10 nomerge
+grep -q 'use the merge queue' <<<"$out" || { echo "FAIL: flavors refusal says use the merge queue: $out" >&2; fail=1; }
+setup false "$green
+$(r flavors 2026-11-01T10:00:00Z success)"
+NEEDS_RC=1 FLAVORS=true run 7 --admin
+check "--admin, flavors affected, real flavors success: merges" 0 merge
+setup false "$green
+$(r flavors 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 FLAVORS=false run 7 --admin
+check "--admin, flavors not affected: merges" 0 merge
 setup false "$green"
 NEEDS_RC=0 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass does not need the quickstart" 0 merge

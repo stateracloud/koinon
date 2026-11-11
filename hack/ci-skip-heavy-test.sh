@@ -176,7 +176,7 @@ expect "an API error on the runs list runs everything" false "cannot list" $(pus
 expect "an unknown commit runs everything" false "cannot read" $(push 0000000000000000000000000000000000000000)
 expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push REF=refs/tags/v1 SHA="$merge_same"
 expect "no repo runs everything" false "not a push to main" EVENT_NAME=push REF=refs/heads/main SHA="$merge_same" REPO=
-# flavors is advisory but flavor-publish ships what it tested: judged on the queue head.
+# flavors is required (a queue check, #572) and flavor-publish ships what it tested: judged on the queue head.
 checks flavors:failure
 # shellcheck disable=SC2046
 expect "flavors red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")

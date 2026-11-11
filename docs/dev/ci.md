@@ -657,7 +657,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
 merges with `--admin`, and opens a `break-glass` issue with the reason.
-`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
+`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10; a pull request runs the quickstart only with the `e2e` label, so add it with `hack/ship.sh --e2e` or `gh pr edit --add-label e2e`, or use the queue) and for `flavors` (when `hack/ci-changes.sh` says the flavors suite is affected, the head needs a real, not skipped, `flavors` success, else exit 10: `ci.yml` has no trigger that runs `flavors` for a branch, so use the merge queue; a gap this refusal closes, see the ADR 0105 amendment of #572). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
 (`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
@@ -729,8 +729,8 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
   On the push to main that the queue made, `gitleaks` does not scan again (#572): `hack/secrets-skip.sh` finds a
-  successful `merge_group` run of `secrets.yml` on a commit with the pushed commit's tree (the rule of
-  `ci-skip-heavy.sh decide_push`). The job still runs and reports success. An admin or break-glass merge, a
+  successful `merge_group` run of `secrets.yml` whose `head_sha` is the pushed commit (the queue
+  fast-forwards main to that head). It matches the commit, not the tree: gitleaks scans commits, and an equal tree can hide other commits. The job still runs and reports success. An admin or break-glass merge, a
   direct push and any API doubt scan as before.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR

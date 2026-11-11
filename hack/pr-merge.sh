@@ -33,8 +33,9 @@
 #                  CODEOWNERS approval, which one human cannot give (ADR 0105). Any other pull request is
 #                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
 #                  e2e, so it is fail-closed for it: when the base's needs-e2e.sh says the change needs the e2e (or cannot
-#                  say), the head needs a green `quickstart` of its own, else exit 10. Exit 2 when the file list cannot
-#                  be read.
+#                  say), the head needs a green `quickstart` of its own, else exit 10. Likewise for `flavors` (exit 10): when hack/ci-changes.sh says the flavors
+#                  suite is affected, the head needs a real, not skipped, flavors success. Exit 2 when the file list
+#                  cannot be read.
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
 #   looks again right before merging (mergeStateStatus BLOCKED). It never replies to or resolves a thread.
@@ -256,7 +257,21 @@ if [ $((admin + glass)) != 0 ]; then
       # 0 = needed; anything else = the rule could not be applied: needed.
       qv=$(prv_judge "$rows" "$wfruns" false quickstart | awk -F'\t' 'NR == 1 { print $2 }')
       if [ "$qv" != success ]; then
-        echo "pr-merge: --admin: this change needs the kind e2e (hack/needs-e2e.sh on origin/$base, exit $nrc) and the head ${sha:0:7} has no green quickstart (${qv:-missing}); run it (the PR's own run, or hack/e2e-remote.sh then a green quickstart), or use the queue; not merging" >&2
+        echo "pr-merge: --admin: this change needs the kind e2e (hack/needs-e2e.sh on origin/$base, exit $nrc) and the head ${sha:0:7} has no green quickstart (${qv:-missing}); add the e2e label (hack/ship.sh --e2e or gh pr edit $pr --add-label e2e) to get a quickstart on the head, or use the queue; not merging" >&2
+        exit 10
+      fi
+    fi
+    # The same for `flavors`: it is required, but a pull request head only has its green skip (the job runs on the
+    # queue commit and on pushes to main, and ci.yml has no workflow_dispatch trigger to run it for a branch). When
+    # hack/ci-changes.sh says the flavors suite is affected, the head needs a real (not skipped) success (exit 10).
+    ci_sh=${here}/ci-changes.sh
+    [ "${PR_MERGE_TEST:-}" != 1 ] || ci_sh=${PR_MERGE_CI_CHANGES:-$ci_sh}
+    fl=$("$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^flavors=//p') || fl=""
+    if [ "$fl" != false ]; then
+      # true, or the rule could not be applied: needed.
+      fv=$(prv_judge "$rows" "$wfruns" false flavors | awk -F'\t' 'NR == 1 { print $2 }')
+      if [ "$fv" != success ]; then
+        echo "pr-merge: --admin: this change affects the flavors suite (hack/ci-changes.sh says flavors=${fl:-unknown}) and the head ${sha:0:7} has no successful flavors run (${fv:-missing}); flavors runs only on the queue commit and on main, so use the merge queue; not merging" >&2
         exit 10
       fi
     fi
