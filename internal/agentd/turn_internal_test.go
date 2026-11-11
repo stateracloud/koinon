@@ -44,3 +44,14 @@ func TestLoopStopReasonSaysWhetherTheNudgeWentOut(t *testing.T) {
 		}
 	}
 }
+
+// A turn cancelled for a loop records the fixed reason "loop", on the nudge turn and on the final
+// turn before the loop failure alike (both end with turnpolicy.EndedLoop), even with no prompt error.
+func TestLoopCancelledTurnRecordsLoopReason(t *testing.T) {
+	d := &turnDriver{}
+	for _, name := range []string{"nudge turn", "final turn"} {
+		if got := d.reason(turnpolicy.EndedLoop); got != "loop" {
+			t.Errorf("%s: reason = %q, want loop", name, got)
+		}
+	}
+}

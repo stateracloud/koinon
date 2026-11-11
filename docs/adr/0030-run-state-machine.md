@@ -299,7 +299,7 @@ text is one message.
    the turns with `OutLoop`. `conclude` fails the run with class `loop` and the reason "the agent kept
    looping after it was asked to change its approach: ...".
 
-**Where the class goes.** `run_failure_class` gets the value `loop` (migration 00073, expand only,
+**Where the class goes.** `run_failure_class` gets the value `loop` (migration 00074, expand only,
 ADR 0085) and the API enum `FAILURE_CLASS_LOOP = 8`. `runoutcome` treats it like every class except
 `fatal`: the run is `failed` and the task stays open, so a person can answer and start a new run
 (`Owner.endTask`, ADR 0065). The class is never retried (ADR 0030 table). The web timeline shows both

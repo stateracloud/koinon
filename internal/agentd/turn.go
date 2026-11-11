@@ -153,6 +153,9 @@ func (d *turnDriver) reason(e turnpolicy.Ended) string {
 		return "fenced"
 	case turnpolicy.EndedShutdown:
 		return "shutdown"
+	case turnpolicy.EndedLoop:
+		// The turn was cancelled for a loop: the nudge turn and the final turn before the loop failure.
+		return "loop"
 	}
 	return turnReason(d.err)
 }
