@@ -89,6 +89,9 @@ type Principal struct {
 	// CreatedBy is the root user of the token's chain.
 	CreatedBy pgtype.UUID
 	ExpiresAt time.Time
+	// RequiresPlatformAdmin is set on a platform admin token (a recovery token, ADR 0110 decision 6)
+	// and on every token it creates: it works only while CreatedBy holds a platform admin grant.
+	RequiresPlatformAdmin bool
 }
 
 // Service issues and verifies tokens.
@@ -160,12 +163,33 @@ type Creator struct {
 	Role store.OrgRole
 	// Parent is the creating token, nil for a session.
 	Parent *Principal
+	// PlatformAdmin makes a platform admin token: User must be a platform admin, and the token works
+	// only while User still is one, whatever User's role in the org (ADR 0110 decision 6). A child of
+	// such a token is one too, whatever this field says.
+	PlatformAdmin bool
 }
 
 // Create issues a token for org with role, expiring after ttl (zero means DefaultTTL, or the
 // parent's remaining life if shorter). The token cannot carry more than the creator's role, and
 // a child cannot outlive its parent.
 func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, by Creator, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
+	var created Created
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+		var err error
+		created, err = s.CreateTx(ctx, q, b, org, actor, by, name, role, ttl)
+		return err
+	})
+	if err != nil {
+		return Created{}, err
+	}
+	return created, nil
+}
+
+// CreateTx is Create inside the caller's audit transaction: q and b belong to it, the token row and
+// its token.create event commit or roll back with the caller's other writes. The recovery actions use
+// it to commit a token with the nonce row and the install event of the same request (ADR 0110
+// decision 6). The raw secret in Created is valid only once the caller's transaction commits.
+func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, by Creator, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case name == "" || len(name) > 200:
@@ -211,7 +235,8 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	id := pgtype.UUID{Bytes: uid, Valid: true}
 	var row store.ApiToken
-	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+	err = func() error {
+		parentRequiresAdmin := false
 		if by.Parent != nil {
 			// Share-lock the parent until the child is committed: a concurrent revoke locks the tree
 			// for update first, so it waits and then sees (and revokes) the child. A parent revoked
@@ -223,11 +248,22 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			if cur.RevokedAt.Valid || !now.Before(cur.ExpiresAt.Time) {
 				return &InvalidError{"the creating token has been revoked or has expired"}
 			}
+			parentRequiresAdmin = cur.RequiresPlatformAdmin
+		}
+		requiresAdmin := by.PlatformAdmin || parentRequiresAdmin
+		if by.PlatformAdmin {
+			admin, err := q.IsPlatformAdmin(ctx, by.User)
+			if err != nil {
+				return err
+			}
+			if !admin {
+				return &InvalidError{"only a platform admin can create a platform admin token"}
+			}
 		}
 		var err error
 		row, err = q.CreateAPIToken(ctx, store.CreateAPITokenParams{
 			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: by.User,
-			ParentTokenID: parentID, InstallMark: s.binding.Stamp(),
+			ParentTokenID: parentID, InstallMark: s.binding.Stamp(), RequiresPlatformAdmin: requiresAdmin,
 			ExpiresAt: pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
@@ -237,11 +273,14 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if parentID.Valid {
 			after["parentTokenId"] = parentID.String()
 		}
+		if requiresAdmin {
+			after["requiresPlatformAdmin"] = true
+		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(), After: after,
 		})
 		return nil
-	})
+	}()
 	if err != nil {
 		return Created{}, err
 	}
@@ -349,7 +388,8 @@ func (e *AuthError) Error() string { return ErrInvalid.Error() }
 func (e *AuthError) Unwrap() error { return ErrInvalid }
 
 // Authenticate verifies a bearer token and records its use. A token also needs its root user to
-// still hold at least the token's role in the org (a demoted or removed creator voids the chain).
+// still hold at least the token's role in the org (a demoted or removed creator voids the chain); a
+// platform admin token needs its root user to still be a platform admin, and org roles do not count.
 // A failure that names a real token is recorded in that token's org audit trail.
 func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, error) {
 	rest, ok := strings.CutPrefix(raw, Prefix)
@@ -381,6 +421,12 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 		} else if !ok {
 			s.binding.Refused("token")
 			reason = installbinding.QuarantineReason
+		} else if row.RequiresPlatformAdmin {
+			if admin, err := q.IsPlatformAdmin(ctx, row.CreatedBy); err != nil {
+				return Principal{}, err
+			} else if !admin {
+				reason = "its creator is no longer a platform admin"
+			}
 		} else if holds, err := s.holdsRole(ctx, q, row.CreatedBy, row.OrgID, row.Role); err != nil {
 			return Principal{}, err
 		} else if !holds {
@@ -395,6 +441,7 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 	_ = q.TouchAPIToken(ctx, store.TouchAPITokenParams{OrgID: row.OrgID, ID: row.ID})
 	return Principal{
 		TokenID: row.ID, Org: row.OrgID, OrgSlug: row.OrgSlug, Role: row.Role, CreatedBy: row.CreatedBy, ExpiresAt: row.ExpiresAt.Time,
+		RequiresPlatformAdmin: row.RequiresPlatformAdmin,
 	}, nil
 }
 

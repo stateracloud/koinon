@@ -1628,19 +1628,20 @@ type AgentVersion struct {
 }
 
 type ApiToken struct {
-	OrgID         pgtype.UUID
-	ID            pgtype.UUID
-	Name          string
-	Prefix        string
-	TokenHash     []byte
-	Role          OrgRole
-	CreatedBy     pgtype.UUID
-	ParentTokenID pgtype.UUID
-	ExpiresAt     pgtype.Timestamptz
-	RevokedAt     pgtype.Timestamptz
-	LastUsedAt    pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	InstallMark   pgtype.Text
+	OrgID                 pgtype.UUID
+	ID                    pgtype.UUID
+	Name                  string
+	Prefix                string
+	TokenHash             []byte
+	Role                  OrgRole
+	CreatedBy             pgtype.UUID
+	ParentTokenID         pgtype.UUID
+	ExpiresAt             pgtype.Timestamptz
+	RevokedAt             pgtype.Timestamptz
+	LastUsedAt            pgtype.Timestamptz
+	CreatedAt             pgtype.Timestamptz
+	InstallMark           pgtype.Text
+	RequiresPlatformAdmin bool
 }
 
 type ApprovalRequest struct {

@@ -1185,7 +1185,7 @@ components:
       description: |
         An error. 400 invalid request, 401 missing, wrong, expired or revoked token, 403 the
         token's role is too low, 404 not found, 409 the entry is declared by a Secret or
-        the name is taken.
+        the name is taken, 503 the service is temporarily unavailable (Retry-After may be set).
       content:
         application/json:
           schema:
@@ -1203,7 +1203,7 @@ components:
             message: {type: string}
     ErrorCode:
       type: string
-      enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, internal]
+      enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, unavailable, internal]
     Source:
       type: string
       enum: [ui, secret]

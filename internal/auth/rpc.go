@@ -129,9 +129,21 @@ func (h rpcHandler) ChangePassword(ctx context.Context, req *authv1alpha1.Change
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
+	if s.afterPasswordCheck != nil {
+		s.afterPasswordCheck()
+	}
 	now := ts(s.now())
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
+		// Lock the credential first (the order ResetPassword uses), then refuse when the hash is no
+		// longer the one the old password was checked against: an operator reset in between wins.
+		cur, err := q.LockLocalCredentialUpdate(ctx, p.UserID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && cur.PasswordHash != cred.PasswordHash) {
+			return errCredentialChanged
+		}
+		if err != nil {
+			return err
+		}
 		if err := q.SetLocalPassword(ctx, store.SetLocalPasswordParams{
 			UserID: p.UserID, PasswordHash: hash, MustChangePassword: false, PasswordChangedAt: now,
 		}); err != nil {
@@ -141,6 +153,9 @@ func (h rpcHandler) ChangePassword(ctx context.Context, req *authv1alpha1.Change
 			Now: now, UserID: p.UserID, KeepSessionID: p.SessionID,
 		})
 	})
+	if errors.Is(err, errCredentialChanged) {
+		return nil, connect.NewError(connect.CodeAborted, "the password changed while this request ran; sign in again")
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
