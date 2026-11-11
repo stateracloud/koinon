@@ -1,6 +1,6 @@
 # 0044. In-sandbox credentials as a gated exception
 
-- Status: Accepted; amended 2026-11-11 (below)
+- Status: Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md)
 - Date: 2026-10-21
 - Amends: ADR 0006 (identity layers), ADR 0013 (model access, GitHub Copilot), ADR 0015 (agent
   environment and browser)
@@ -144,6 +144,15 @@ No tracking issue exists yet for these; each needs one (ADR 0046, decision 7).
 - Negative: until a gateway-held sign-in for model providers exists, personal subscriptions cannot
   be used at all. Before the amendment they were planned for v0.2.
 - Negative: every new auth type costs a decision instead of a configuration entry.
+
+### Follow-up (2026-11-11): [0114](0114-model-credentials-by-type.md)
+
+ADR 0114 answers the first two pending points above. A GitHub Copilot token can be held by the gateway,
+so `copilot-device-flow` is not a qualifying type. A Claude plan with Claude Code and a ChatGPT plan with
+Codex cannot be held outside the sandbox, technically or under the vendor's terms; each becomes a named
+type under decision 2 only after a legal read, by its own decision. Sign-in for those is relayed by
+Koinon, which is the human takeover of decision 3 without a live view. The third point (a model-provider
+sign-in held by the gateway) is covered by ADR 0114's credential types.
 
 ## Upstream verification
 
