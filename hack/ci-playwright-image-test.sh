@@ -36,9 +36,31 @@ check "image is pinned by digest" digest_pinned
 # shellcheck disable=SC2016
 check "web-e2e installs no browser or OS packages" bash -c '! grep -Eq "playwright install|install-deps|--with-deps|apt-get" <<<"$1"' _ "$body"
 
-# Every other place: a workflow step that installs OS packages from a live mirror.
-hits=$(grep -nE '^\s*(- )?(run: )?.*(--with-deps|playwright install-deps|apt-get +(-[^ ]+ +)*install|apt +install)' "$wfdir"/*.yml | grep -vE '^[^:]+:[0-9]+:\s*#' || true)
+# Every other place: a workflow step that installs OS packages from a live mirror. Options may take
+# a separate value (`apt-get -o Acquire::Retries=5 install`); comment lines are not hits.
+scan() {
+  local d=$1 f=() g
+  for g in "$d"/*.yml "$d"/*.yaml; do [ -e "$g" ] && f+=("$g"); done
+  [ "${#f[@]}" -gt 0 ] || return 0
+  grep -HnE '(--with-deps|playwright install-deps|apt(-get)?( +-[^ ]+( +[^- ][^ ]*)?)* +install)' "${f[@]}" | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true
+}
+hits=$(scan "$wfdir")
 check "no workflow step installs OS packages from a live apt mirror ($hits)" test -z "$hits"
+
+# Self-test of the scan on a fixture directory.
+fx=$(mktemp -d "${TMPDIR:-/tmp}/ci-playwright-scan.XXXXXX")
+trap 'rm -rf "$fx"' EXIT
+printf 'jobs:\n  a:\n    steps:\n      - run: sudo apt-get install -y xz-utils\n' >"$fx/one.yaml"
+check "scan catches apt-get install in a .yaml workflow" test -n "$(scan "$fx")"
+rm "$fx/one.yaml"
+printf 'jobs:\n  a:\n    steps:\n      - run: sudo apt-get -o Acquire::Retries=5 install -y xz-utils\n' >"$fx/two.yml"
+check "scan catches apt-get -o K=V install" test -n "$(scan "$fx")"
+printf '      - run: sudo apt -o Acquire::Retries=5 install -y jq\n' >"$fx/two.yml"
+check "scan catches apt -o K=V install" test -n "$(scan "$fx")"
+printf '      # sudo apt-get install -y xz-utils\n      - run: apt-get update\n' >"$fx/two.yml"
+check "scan ignores a comment line" test -z "$(scan "$fx")"
+rm "$fx/two.yml"
+check "scan of a directory with no workflow files is not an error" test -z "$(scan "$fx")"
 
 echo "ci-playwright-image-test: $pass ok, $fail failed"
 [ "$fail" -eq 0 ]
