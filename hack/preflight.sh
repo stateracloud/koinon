@@ -365,7 +365,9 @@ run_gate() { # <gate>
 	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
-	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; brew install zizmor)"; return; } ;;
+	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; CI pins $ZIZMOR_VERSION: brew install zizmor, or the release binary, see hack/versions.env)"; return; }
+		have=$(zizmor --version 2>/dev/null | awk '{print $2}')
+		[[ $have == "$ZIZMOR_VERSION" ]] || echo "zizmor warn: CI pins $ZIZMOR_VERSION (hack/versions.env), this is ${have:-unknown}; findings can differ" ;;
 	esac
 	ran=$((ran + 1))
 	start=$SECONDS

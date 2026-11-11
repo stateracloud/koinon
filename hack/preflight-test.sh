@@ -41,7 +41,7 @@ stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
 stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
-stub zizmor '[[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
+stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
@@ -376,7 +376,11 @@ export FAKE_ZIZMOR_RC=1
 rc=$(pf "$tmp/c4z")
 check "a failing zizmor fails preflight" eq "$rc" 1
 check "zizmor FAIL line" has '^zizmor FAIL' "$tmp/c4z"
-unset FAKE_ZIZMOR_RC
+check "no version warning when zizmor is the pinned version" hasnt '^zizmor warn' "$tmp/c4z"
+export FAKE_ZIZMOR_VERSION=0.0.1
+pf "$tmp/c4w" >/dev/null
+check "a zizmor other than the pinned one warns" has '^zizmor warn: CI pins ' "$tmp/c4w"
+unset FAKE_ZIZMOR_RC FAKE_ZIZMOR_VERSION
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1

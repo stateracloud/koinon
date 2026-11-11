@@ -79,8 +79,8 @@ job tidy ^go\.(mod|sum)$
 job tidy ^\.golangci\.ya?ml$
 
 # --- shell: lint-shell (#572) --------------------------------------------------------------------------
-# shellcheck over `git ls-files '*.sh'` (any directory) and actionlint over .github/ (workflows, the
-# composite actions it reads, its config). The tool versions and checksums are in hack/versions.env,
+# shellcheck over `git ls-files '*.sh'` (any directory), and actionlint and zizmor over .github/ (workflows,
+# the composite actions they read, their config). The tool versions and checksums are in hack/versions.env,
 # read through hack/versions-env.sh.
 job shell \.sh$
 job shell ^\.github/
