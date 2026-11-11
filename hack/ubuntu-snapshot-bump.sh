@@ -33,7 +33,9 @@
 # What is verified
 #   - InRelease is checked with gpgv against the Ubuntu archive keyring (--keyring, default
 #     /usr/share/keyrings/ubuntu-archive-keyring.gpg). Without a keyring the run fails unless
-#     --no-gpg is given (tests and fixtures only).
+#     --no-gpg is given (tests and fixtures only). A good signature is not enough: gpgv's VALIDSIG
+#     status must name one of the pinned Ubuntu archive signing keys (ARCHIVE_SIGNERS below; --signer
+#     replaces them, for tests), so another key that happens to be in the keyring is refused.
 #   - Every Packages index is checked against the SHA256 the verified InRelease lists for it.
 #   - Not verified: the .deb files themselves (apt does that at build time against the same keys),
 #     and a USN's claim of which version fixes what.
@@ -49,6 +51,7 @@
 #   --dockerfile FILE    default flavors/opencode/Dockerfile
 #   --readme FILE        default flavors/opencode/README.md
 #   --keyring FILE       archive keyring for gpgv      --no-gpg   skip the signature check (says so)
+#   --signer FPR         accept only this primary key fingerprint (repeatable; default ARCHIVE_SIGNERS)
 #   --usn-dir DIR        a checkout of canonical/ubuntu-security-notices (or its osv/usn directory)
 #   --usn-commit SHA     the commit of that checkout, for the report
 #   --report FILE        write the markdown report (table, USNs, snapshot, USN commit)
@@ -185,6 +188,19 @@ fetch() {
 	fi
 }
 
+# signed_by_pinned STATUS: true when a VALIDSIG line of gpgv's status output names a pinned primary
+# key. VALIDSIG <fpr> <date> <ts> <expire> <ver> <reserved> <algo> <hash> <class> <primary-fpr>: the
+# primary fingerprint (field 12 with the "[GNUPG:]" prefix) is compared, since a subkey may sign.
+signed_by_pinned() {
+	local got f
+	while read -r got; do
+		for f in "${signers[@]}"; do
+			[[ $got == "$f" ]] && return 0
+		done
+	done < <(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print ($12 != "" ? $12 : $3) }' "$1")
+	return 1
+}
+
 # release_hash INRELEASE PATH: the SHA256 InRelease lists for PATH (relative to the suite).
 release_hash() {
 	awk -v want="$2" '
@@ -228,7 +244,8 @@ load_snapshot() {
 			# BEGIN PGP SIGNED MESSAGE or after the signature) do not affect gpgv's verdict, so the raw
 			# file could carry an unsigned SHA256 list that release_hash would otherwise read.
 			rm -f "$work/Release.$snap.$suite"
-			gpgv --keyring "$keyring" --output "$work/Release.$snap.$suite" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
+			gpgv --keyring "$keyring" --status-fd 3 --output "$work/Release.$snap.$suite" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 3>"$work/gpgv.status" || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
+			signed_by_pinned "$work/gpgv.status" || { echo "ubuntu-snapshot-bump: InRelease of $suite is not signed by a pinned Ubuntu archive key (${signers[*]})" >&2; return 1; }
 		else
 			# --no-gpg (fixtures only): nothing is verified, the file is read as it is.
 			cp "$work/InRelease.$snap.$suite" "$work/Release.$snap.$suite"
@@ -296,6 +313,12 @@ usage() {
 	exit 2
 }
 
+# The primary keys that sign Ubuntu archive InRelease files: "Ubuntu Archive Automatic Signing Key"
+# (2012) and (2018), as in /usr/share/keyrings/ubuntu-archive-keyring.gpg of ubuntu-keyring
+# 2023.11.28.1. The CD image key in the same keyring is deliberately not accepted.
+ARCHIVE_SIGNERS=(790BC7277767219C42C86F933B4FE6ACC0B21F32 F6ECB3762474EDA9D21B7022871920D1991BC93C)
+signers=()
+
 mode='' snapshot_arg='' today='' base='https://snapshot.ubuntu.com/ubuntu'
 dockerfile=flavors/opencode/Dockerfile readme=flavors/opencode/README.md
 keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg no_gpg=0 usn_dir='' usn_commit='' report=''
@@ -309,6 +332,7 @@ while (($#)); do
 	--readme) readme=${2:?}; shift ;;
 	--keyring) keyring=${2:?}; shift ;;
 	--no-gpg) no_gpg=1 ;;
+	--signer) signers+=("${2:?}"); shift ;;
 	--usn-dir) usn_dir=${2:?}; shift ;;
 	--usn-commit) usn_commit=${2:?}; shift ;;
 	--report) report=${2:?}; shift ;;
@@ -318,6 +342,10 @@ while (($#)); do
 done
 [[ -n $mode ]] || usage
 base=${base%/}
+((${#signers[@]})) || signers=("${ARCHIVE_SIGNERS[@]}")
+for f in "${signers[@]}"; do
+	[[ $f =~ ^[0-9A-F]{40}$ ]] || { echo "ubuntu-snapshot-bump: --signer wants a 40-digit upper-case fingerprint, got '$f'" >&2; exit 2; }
+done
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

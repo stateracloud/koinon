@@ -287,6 +287,7 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 	mkdir -m 700 "$gh"
 	if GNUPGHOME=$gh gpg --batch --quiet --pinentry-mode loopback --passphrase '' --quick-generate-key 'koinon test <test@example.invalid>' ed25519 sign never >/dev/null 2>&1; then
 		GNUPGHOME=$gh gpg --batch --quiet --export >"$tmp/test-keyring.gpg"
+		fpr=$(GNUPGHOME=$gh gpg --batch --with-colons --fingerprint 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
 		cp -r "$repo" "$tmp/repo-signed"
 		for snap in "$SNAP" "$CUR"; do for suite in "${suites[@]}"; do
 			ir=$tmp/repo-signed/$snap/dists/$suite/InRelease
@@ -297,9 +298,16 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 			GNUPGHOME=$gh gpg --batch --quiet --pinentry-mode loopback --passphrase '' --clearsign -o "$ir" "$tmp/plain.txt"
 		done; done
 		fresh_files "$tmp/s"
-		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --signer "$fpr" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a signed InRelease verifies" "$rc" 10
 		lacks "and no-gpg is not announced" "$out" "NOT verified"
+		# A good signature from a key that is in the keyring but not pinned is refused (here: the
+		# default pins, the Ubuntu archive keys, which did not sign the fixture).
+		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		eq "a valid signature from a key that is not pinned fails" "$rc" 1
+		has "and says so" "$out" "is not signed by a pinned Ubuntu archive key"
+		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --signer 0000000000000000000000000000000000000000 --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		eq "an explicit pin of another key fails too" "$rc" 1
 		# Text outside the clearsigned block does not change gpgv's verdict, so an unsigned SHA256
 		# list put before BEGIN PGP SIGNED MESSAGE must not be read: the signed hash is the one checked.
 		cp -r "$tmp/repo-signed" "$tmp/repo-prepend"
@@ -310,11 +318,11 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 		{ echo "SHA256:"; printf ' %s %s %s\n' "${h%% *}" "$(wc -c <"$pk")" main/binary-amd64/Packages.xz; cat "$ir"; } >"$tmp/ir.new"
 		mv "$tmp/ir.new" "$ir"
 		if gpgv --keyring "$tmp/test-keyring.gpg" "$ir" >/dev/null 2>&1; then ok "gpgv accepts text before the signed block (the case this guards)"; else bad "gpgv rejected the prepended InRelease; the case no longer tests the parser"; fi
-		run --check --base-url "$tmp/repo-prepend" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		run --check --base-url "$tmp/repo-prepend" --keyring "$tmp/test-keyring.gpg" --signer "$fpr" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "an unsigned SHA256 list before the signed block is ignored" "$rc" 1
 		has "and the signed hash is the one checked" "$out" "main/binary-amd64/Packages.xz SHA256"
 		sed -i.bak 's/^Suite: noble-security/Suite: noble-securitx/' "$tmp/repo-signed/$SNAP/dists/noble-security/InRelease"
-		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --signer "$fpr" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a tampered InRelease fails" "$rc" 1
 		has "and says which" "$out" "InRelease of noble-security does not verify"
 	else
