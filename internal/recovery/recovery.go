@@ -6,6 +6,7 @@
 // the PlatformAdminRecovery request object, a later change of issue #516) authorises the request with
 // Kubernetes RBAC and passes the requester's Kubernetes identity as the actor. There is no pod-exec
 // command for them: clusters can forbid exec and the images are distroless (issue #512).
+// Issue #512 stays open until the request object of #516 part (d) calls these functions end to end.
 //
 // Both write locally, so the restore hold (ADR 0107) does not refuse them: after a restore the
 // operator needs them most. The secrets they make are returned to the caller, never logged and never
