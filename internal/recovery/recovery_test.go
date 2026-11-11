@@ -4,6 +4,7 @@ package recovery_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,6 +45,21 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 		return id
 	}
 
+	reset := func(ctx context.Context, username string) (res recovery.ResetResult, err error) {
+		_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+			res, err = recovery.ResetPassword(ctx, q, b, requester, username, time.Now())
+			return err
+		})
+		return res, err
+	}
+	mint := func(ctx context.Context, svc *tokens.Service, p recovery.MintTokenParams) (c tokens.Created, err error) {
+		_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+			c, err = recovery.MintAdminToken(ctx, svc, q, b, requester, p)
+			return err
+		})
+		return c, err
+	}
+
 	Describe("ResetPassword", func() {
 		It("sets a one-time password, requires a change, ends the sessions and audits it", func(ctx SpecContext) {
 			uid := userID(ctx)
@@ -55,7 +71,7 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			res, err := recovery.ResetPassword(ctx, pool, requester, "admin", time.Now())
+			res, err := reset(ctx, "admin")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.RevokedSessions).To(BeEquivalentTo(2))
 			Expect(res.Password).NotTo(BeEmpty())
@@ -81,18 +97,36 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 			Expect(raw).NotTo(ContainSubstring(hash))
 		})
 
+		It("rolls back with the caller's transaction", func(ctx SpecContext) {
+			uid := userID(ctx)
+			var oldHash string
+			Expect(pool.QueryRow(ctx, `SELECT password_hash FROM local_credentials WHERE user_id = $1`, uid).Scan(&oldHash)).To(Succeed())
+			_, err := audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
+				_, err := recovery.ResetPassword(ctx, q, b, requester, "admin", time.Now())
+				Expect(err).NotTo(HaveOccurred())
+				return errors.New("a later step of the request failed")
+			})
+			Expect(err).To(HaveOccurred())
+			var hash string
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT password_hash FROM local_credentials WHERE user_id = $1`, uid).Scan(&hash)).To(Succeed())
+			Expect(hash).To(Equal(oldHash))
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'auth.password.reset'`).Scan(&n)).To(Succeed())
+			Expect(n).To(BeZero())
+		})
+
 		It("gives a different password every time", func(ctx SpecContext) {
-			a, err := recovery.ResetPassword(ctx, pool, requester, "admin", time.Now())
+			a, err := reset(ctx, "admin")
 			Expect(err).NotTo(HaveOccurred())
-			b, err := recovery.ResetPassword(ctx, pool, requester, "admin", time.Now())
+			b, err := reset(ctx, "admin")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Password).NotTo(Equal(b.Password))
 		})
 
 		It("refuses an unknown user and writes nothing", func(ctx SpecContext) {
-			_, err := recovery.ResetPassword(ctx, pool, requester, "nobody", time.Now())
+			_, err := reset(ctx, "nobody")
 			Expect(err).To(MatchError(recovery.ErrNoLocalUser))
-			_, err = recovery.ResetPassword(ctx, pool, requester, "", time.Now())
+			_, err = reset(ctx, "")
 			Expect(err).To(HaveOccurred())
 			var n int
 			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'auth.password.reset'`).Scan(&n)).To(Succeed())
@@ -104,8 +138,7 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 		It("mints a hashed token for a platform admin, audited, and refuses a longer life", func(ctx SpecContext) {
 			uid := userID(ctx)
 			svc := tokens.New(pool, nil)
-			q := store.New(pool)
-			created, err := recovery.MintAdminToken(ctx, svc, q, requester, recovery.MintTokenParams{
+			created, err := mint(ctx, svc, recovery.MintTokenParams{
 				Username: "admin", Org: "default", Name: "restore-drill", TTL: 2 * time.Hour,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -121,7 +154,7 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 			Expect([]string{kind, actor}).To(Equal([]string{requester.Kind, requester.ID}))
 			Expect(raw).NotTo(ContainSubstring(created.Secret))
 
-			_, err = recovery.MintAdminToken(ctx, svc, q, requester, recovery.MintTokenParams{
+			_, err = mint(ctx, svc, recovery.MintTokenParams{
 				Username: "admin", Org: "default", Name: "too-long", TTL: recovery.MaxTokenTTL + time.Hour,
 			})
 			Expect(err).To(MatchError(ContainSubstring("at most")))
@@ -129,16 +162,15 @@ var _ = Describe("platform admin recovery actions (issue #512, ADR 0110 decision
 
 		It("refuses a user who is not a platform admin, an unknown user and an unknown org", func(ctx SpecContext) {
 			svc := tokens.New(pool, nil)
-			q := store.New(pool)
 			_, err := pool.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, userID(ctx))
 			Expect(err).NotTo(HaveOccurred())
-			_, err = recovery.MintAdminToken(ctx, svc, q, requester, recovery.MintTokenParams{Username: "admin", Org: "default", Name: "n"})
+			_, err = mint(ctx, svc, recovery.MintTokenParams{Username: "admin", Org: "default", Name: "n"})
 			Expect(err).To(MatchError(recovery.ErrNotPlatformAdmin))
-			_, err = recovery.MintAdminToken(ctx, svc, q, requester, recovery.MintTokenParams{Username: "nobody", Org: "default", Name: "n"})
+			_, err = mint(ctx, svc, recovery.MintTokenParams{Username: "nobody", Org: "default", Name: "n"})
 			Expect(err).To(MatchError(recovery.ErrNoLocalUser))
 			_, err = pool.Exec(ctx, `INSERT INTO platform_admins (user_id, source) SELECT user_id, 'bootstrap' FROM local_credentials WHERE username = 'admin'`)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = recovery.MintAdminToken(ctx, svc, q, requester, recovery.MintTokenParams{Username: "admin", Org: "no-such-org", Name: "n"})
+			_, err = mint(ctx, svc, recovery.MintTokenParams{Username: "admin", Org: "no-such-org", Name: "n"})
 			Expect(err).To(MatchError(recovery.ErrNoOrg))
 		})
 	})

@@ -8,6 +8,14 @@
 // command for them: clusters can forbid exec and the images are distroless (issue #512).
 // Issue #512 stays open until the request object of #516 part (d) calls these functions end to end.
 //
+// Both run inside the caller's audit transaction (q and b belong to it). The caller, the handler of
+// part (d), adds the recovery_requests nonce row and the canonical install chain event
+// recovery.<action> (actor kubernetes:<requester>, groups, CR UID, nonce) in that same transaction,
+// so an action, its nonce and its event commit together or not at all and a retry after a crash
+// cannot act twice. The org events these functions add (auth.password.reset in the user's personal
+// org, token.create in the token's org) are the per-org trail of the change; the install event is
+// the canonical record of the request.
+//
 // Both write locally, so the restore hold (ADR 0107) does not refuse them: after a restore the
 // operator needs them most. The secrets they make are returned to the caller, never logged and never
 // put in an audit event.
@@ -52,11 +60,10 @@ type ResetResult struct {
 }
 
 // ResetPassword gives the local login username a new random one-time password, makes the user choose
-// another at the next login (must_change_password) and ends every session of the user, in one
-// transaction with the auth.password.reset audit event, so the change commits with its event or not at
-// all. It needs no session and no current password. The password is hashed here and is in neither the
+// another at the next login (must_change_password) and ends every session of the user, in the
+// caller's transaction with the auth.password.reset org event. It needs no session and no current password. The password is hashed here and is in neither the
 // log nor the event.
-func ResetPassword(ctx context.Context, db audit.Beginner, actor audit.Actor, username string, now time.Time) (ResetResult, error) {
+func ResetPassword(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, username string, now time.Time) (ResetResult, error) {
 	if username == "" {
 		return ResetResult{}, errors.New("a username is required")
 	}
@@ -71,44 +78,36 @@ func ResetPassword(ctx context.Context, db audit.Beginner, actor audit.Actor, us
 	if err != nil {
 		return ResetResult{}, fmt.Errorf("hash password: %w", err)
 	}
-	res := ResetResult{Password: password}
-	_, err = audit.InTx(ctx, db, func(q *store.Queries, b audit.Batch) error {
-		cred, err := q.GetLocalCredentialByUsername(ctx, username)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNoLocalUser
-		}
-		if err != nil {
-			return err
-		}
-		user, err := q.GetActiveUser(ctx, cred.UserID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNoLocalUser
-		}
-		if err != nil {
-			return err
-		}
-		at := pgtype.Timestamptz{Time: now, Valid: true}
-		if err := q.SetLocalPassword(ctx, store.SetLocalPasswordParams{
-			UserID: cred.UserID, PasswordHash: hash, MustChangePassword: true, PasswordChangedAt: at,
-		}); err != nil {
-			return err
-		}
-		n, err := q.RevokeUserSessions(ctx, store.RevokeUserSessionsParams{Now: at, UserID: cred.UserID})
-		if err != nil {
-			return err
-		}
-		res.UserID, res.RevokedSessions = cred.UserID, n
-		// The event sits in the user's personal org, where the user's login events are.
-		b.Org(audit.Event{
-			Org: user.PersonalOrgID, Actor: actor, Action: "auth.password.reset", TargetKind: "user", TargetID: cred.UserID.String(),
-			After: map[string]any{"username": username, "changeRequired": true, "revokedSessions": n},
-		})
-		return nil
-	})
+	cred, err := q.GetLocalCredentialByUsername(ctx, username)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ResetResult{}, ErrNoLocalUser
+	}
 	if err != nil {
 		return ResetResult{}, err
 	}
-	return res, nil
+	user, err := q.GetActiveUser(ctx, cred.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ResetResult{}, ErrNoLocalUser
+	}
+	if err != nil {
+		return ResetResult{}, err
+	}
+	at := pgtype.Timestamptz{Time: now, Valid: true}
+	if err := q.SetLocalPassword(ctx, store.SetLocalPasswordParams{
+		UserID: cred.UserID, PasswordHash: hash, MustChangePassword: true, PasswordChangedAt: at,
+	}); err != nil {
+		return ResetResult{}, err
+	}
+	n, err := q.RevokeUserSessions(ctx, store.RevokeUserSessionsParams{Now: at, UserID: cred.UserID})
+	if err != nil {
+		return ResetResult{}, err
+	}
+	// The event sits in the user's personal org, where the user's login events are.
+	b.Org(audit.Event{
+		Org: user.PersonalOrgID, Actor: actor, Action: "auth.password.reset", TargetKind: "user", TargetID: cred.UserID.String(),
+		After: map[string]any{"username": username, "changeRequired": true, "revokedSessions": n},
+	})
+	return ResetResult{UserID: cred.UserID, Password: password, RevokedSessions: n}, nil
 }
 
 // newOneTimePassword is 24 random bytes, URL-safe: far above the minimum length, nothing to escape.
@@ -134,10 +133,10 @@ type MintTokenParams struct {
 
 // MintAdminToken makes an owner-role API token for an existing platform admin, through the tokens
 // service, so it is hashed at rest, stamped with the install mark (svc.WithBinding) and audited as
-// token.create with actor. The token is as valid as its creator: it stops working when the user stops
+// token.create with actor, in the caller's transaction. The token is as valid as its creator: it stops working when the user stops
 // being a platform admin. An org owner who is not a platform admin is refused (ErrNotPlatformAdmin):
 // recovery is never an org owner's job.
-func MintAdminToken(ctx context.Context, svc *tokens.Service, q *store.Queries, actor audit.Actor, p MintTokenParams) (tokens.Created, error) {
+func MintAdminToken(ctx context.Context, svc *tokens.Service, q *store.Queries, b audit.Batch, actor audit.Actor, p MintTokenParams) (tokens.Created, error) {
 	ttl := p.TTL
 	switch {
 	case ttl == 0:
@@ -172,7 +171,7 @@ func MintAdminToken(ctx context.Context, svc *tokens.Service, q *store.Queries, 
 		return tokens.Created{}, err
 	}
 	// A platform admin counts as owner of every org.
-	return svc.Create(ctx, org, actor, tokens.Creator{User: cred.UserID, Role: store.OrgRoleOwner}, p.Name, store.OrgRoleOwner, ttl)
+	return svc.CreateTx(ctx, q, b, org, actor, tokens.Creator{User: cred.UserID, Role: store.OrgRoleOwner}, p.Name, store.OrgRoleOwner, ttl)
 }
 
 // resolveOrg takes ref as an org ID, else as a slug.

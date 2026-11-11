@@ -166,6 +166,23 @@ type Creator struct {
 // parent's remaining life if shorter). The token cannot carry more than the creator's role, and
 // a child cannot outlive its parent.
 func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, by Creator, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
+	var created Created
+	_, err := audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+		var err error
+		created, err = s.CreateTx(ctx, q, b, org, actor, by, name, role, ttl)
+		return err
+	})
+	if err != nil {
+		return Created{}, err
+	}
+	return created, nil
+}
+
+// CreateTx is Create inside the caller's audit transaction: q and b belong to it, the token row and
+// its token.create event commit or roll back with the caller's other writes. The recovery actions use
+// it to commit a token with the nonce row and the install event of the same request (ADR 0110
+// decision 6). The raw secret in Created is valid only once the caller's transaction commits.
+func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, actor audit.Actor, by Creator, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case name == "" || len(name) > 200:
@@ -211,7 +228,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	id := pgtype.UUID{Bytes: uid, Valid: true}
 	var row store.ApiToken
-	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+	err = func() error {
 		if by.Parent != nil {
 			// Share-lock the parent until the child is committed: a concurrent revoke locks the tree
 			// for update first, so it waits and then sees (and revokes) the child. A parent revoked
@@ -241,7 +258,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(), After: after,
 		})
 		return nil
-	})
+	}()
 	if err != nil {
 		return Created{}, err
 	}
