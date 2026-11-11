@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // gatedStore holds the first backup of checkpoint id until release is closed: a backup that is
@@ -379,7 +380,7 @@ var _ = Describe("home repository seeds", func() {
 			c.Store = &flakyStore{HomeStore: writer, fail: 1}
 		}))
 
-		Eventually(seeded(ctx)).WithTimeout(20 * time.Second).Should(BeTrue())
+		Eventually(seeded(ctx)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
 		r := seedRow(ctx)()
 		Expect(r.SeedAttempts).To(Equal(int32(2)))
 		Expect(r.SeedError.Valid).To(BeFalse(), "the error of the failed try is cleared")

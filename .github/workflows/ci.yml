@@ -275,9 +275,15 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
-      # A Ginkgo suite: ginkgo writes one testcase per spec to the report.
-      - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race.xml --output-dir=reports/go ./internal/reconciler/
+      # The concurrent packages run under the race detector (docs/dev/ci.md#the-race-detector): the
+      # reconciler runs per-sandbox jobs concurrently (LT1), agentd, ledger and durable hold shared
+      # state behind locks and channels. Each is a Ginkgo suite, so ginkgo writes one testcase per
+      # spec to the report. The reconciler and the ledger share fixed state and run one process; agentd and durable
+      # are parallel suites (see hack/go-test.sh) and run with -p, as in go-test. hack/go-test-test.sh keeps the lists whole.
+      - run: mkdir -p reports/go && go tool ginkgo -race --procs=1 --junit-report=go-race-serial.xml --output-dir=reports/go ./internal/reconciler/ ./internal/ledger/
+        env:
+          KOINON_REQUIRE: docker
+      - run: go tool ginkgo -race -p --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
       - name: Upload test reports

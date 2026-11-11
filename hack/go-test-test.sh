@@ -53,6 +53,18 @@ grep -q -- '-ginkgo.junit-report' hack/go-test.sh || { echo "FAIL: serial Ginkgo
 grep -q 'ginkgo -race.*--junit-report' .github/workflows/ci.yml || { echo "FAIL: go-race does not use ginkgo for its per-spec report"; exit 1; }
 echo "ok: serial Ginkgo suites and go-race report per spec"
 
+# Issue 44: the race detector covers the concurrent packages, and the parallel ones run with -p only
+# when hack/go-test.sh lists them as parallel suites.
+race=$(sed -n '/^  go-race:$/,/^  go:$/p' "$wf")
+for pkg in reconciler ledger agentd durable; do
+	grep -q "ginkgo -race.* ./internal/$pkg/" <<<"$race" || { echo "FAIL: go-race does not run ./internal/$pkg under -race"; exit 1; }
+done
+for pkg in agentd durable; do
+	grep -q "ginkgo -race -p .*./internal/$pkg/" <<<"$race" || { echo "FAIL: go-race runs $pkg without -p"; exit 1; }
+	grep -q "^	./internal/$pkg\$" hack/go-test.sh || { echo "FAIL: go-race runs $pkg with -p but go-test.sh does not list it as parallel"; exit 1; }
+done
+echo "ok: go-race covers reconciler, ledger, agentd and durable"
+
 # One EXIT trap removes every fixture dir and file this script makes. Each path is registered in
 # fixtures right after its mktemp, so an early exit (set -u or a failed check) still removes it.
 fixtures=()

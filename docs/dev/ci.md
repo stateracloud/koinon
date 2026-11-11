@@ -265,6 +265,17 @@ crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, 
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job).
 
+## The race detector
+
+The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
+its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+`internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
+suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
+runs without it, because the race build is several times slower. Add a package here when it starts
+goroutines or shares state behind a lock; `hack/go-test-test.sh` checks the list. A reported race is
+fixed, never suppressed. Run it locally with `go tool ginkgo -race ./internal/<pkg>/` (Docker for the
+Postgres suites).
+
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and

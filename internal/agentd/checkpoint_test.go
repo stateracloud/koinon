@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // fakeHome is the sandbox's home as the fake tar sees it: paths under /sandbox and their bytes.
@@ -454,10 +455,10 @@ var _ = Describe("home checkpoints", func() {
 		id := request(ctx, store.CheckpointReasonStop)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = lateStore{HomeStore: writer}
-			c.Timeout = 5 * time.Second
+			c.Timeout = racescale.D(5 * time.Second)
 			c.Attempts = 1
 		}))
-		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
 		Expect(checkpointOf(ctx, id)().SnapshotID.Valid).To(BeTrue())
 	})
 
