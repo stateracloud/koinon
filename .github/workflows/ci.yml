@@ -44,11 +44,11 @@ jobs:
   # commit's tree passed in the merge queue. A job skipped by its `if:` reports success,
   # so required checks still pass when it does not apply.
   #
-  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (`go` and `web` then report success with
+  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, tidy, web, generate,
+  # chart, chartsmoke, escape, flavors, shell and scripts outputs) in two cases, so those jobs are skipped: a draft pull request (`go` and `web` then report success with
   # "draft: not run"; marking it ready runs everything on the same head), and a push to main whose
-  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
-  # `lint-shell` run except on that push to main (old issue 594). Read the script's header before changing this.
+  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run.
+  # `tidy` (go-tidy, go-lint), `shell` (lint-shell) and `scripts` are path-gated too (#572). Read the script's header before changing this.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -74,6 +74,9 @@ jobs:
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
+      tidy: ${{ steps.paths.outputs.tidy }}
+      shell: ${{ steps.paths.outputs.shell }}
+      scripts: ${{ steps.paths.outputs.scripts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,7 +148,7 @@ jobs:
   # and keeps the required check name stable: branch protection names `go`, not the parts.
   go-tidy:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.tidy == 'true'
     name: go-tidy
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -161,7 +164,7 @@ jobs:
 
   go-lint:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.tidy == 'true'
     name: go-lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -292,6 +295,9 @@ jobs:
       - env:
           CHANGES: ${{ needs.changes.result }}
           GO: ${{ needs.changes.outputs.go }}
+          TIDY: ${{ needs.changes.outputs.tidy }}
+          TIDY_RESULT: ${{ needs.go-tidy.result }}
+          LINT_RESULT: ${{ needs.go-lint.result }}
           SKIP: ${{ needs.changes.outputs.skip }}
           REASON: ${{ needs.changes.outputs.reason }}
           EVENT: ${{ github.event_name }}
@@ -309,15 +315,24 @@ jobs:
             exit 0
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
-          # go-test skipped because an external run proved it (old issue 610): that one skip counts as success. Any other
-          # skipped part stays a failure, and so does a go-test skip with no green lab status.
+          # A skip counts as success only when its reason is known: go-test skipped because an external run proved it
+          # (old issue 610), go-tidy or go-lint skipped because no Go file, go.mod, go.sum or lint config changed (#572,
+          # the `tidy` output). Any other skipped part stays a failure, and so does a skip with no such reason.
+          excused=0
           if [[ $GO_TEST == skipped && $LAB == true ]]; then
             echo "go-test passed in an external run: $LAB_REASON"
-            RESULTS=${RESULTS/skipped/success}
+            excused=$((excused + 1))
           fi
+          if [[ $TIDY != true ]]; then
+            [[ $TIDY_RESULT != skipped ]] || excused=$((excused + 1))
+            [[ $LINT_RESULT != skipped ]] || excused=$((excused + 1))
+          fi
+          skipped=0
           for r in $RESULTS; do
+            [[ $r != skipped ]] || { skipped=$((skipped + 1)); continue; }
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
+          ((skipped <= excused)) || { echo "::error::a Go job was skipped without a reason (results: $RESULTS)"; exit 1; }
 
   # The short checks in one job (old issue 594). Every job pays a fixed start-up cost (runner, checkout,
   # toolchain) and each of these did about 10 s of work, so five jobs (proto, migrations, adr-lint,
@@ -382,6 +397,10 @@ jobs:
       - name: adr-lint
         if: ${{ !cancelled() }}
         run: hack/adr-lint.sh
+      # Scans every tracked file, Markdown included, so it cannot sit in the path-gated `scripts` job (#572).
+      - name: old-issue references
+        if: ${{ !cancelled() }}
+        run: hack/old-issue-refs-lint.sh
       # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
       # here: CI must not mutate GitHub.
       - name: claim-tests
@@ -488,14 +507,21 @@ jobs:
 
   # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
   # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
-  # The browser download is cached by @playwright/test version; system libraries are installed on
-  # every run (cheap), the browser binary only on a cache miss.
+  # The job runs in the official Playwright image, by digest: the browser and its system libraries
+  # are in the image, so no run installs OS packages from a live apt mirror or downloads a browser
+  # (#569; run 43041438017 failed on `playwright install --with-deps` when security.ubuntu.com did not
+  # resolve). The image tag must carry the exact @playwright/test version of web/package.json
+  # (hack/ci-playwright-image-test.sh checks it); a Playwright bump changes both in one change.
+  # --ipc=host and --init are what the Playwright CI docs ask of a Chromium container.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      options: --init --ipc=host
     defaults:
       run:
         working-directory: web
@@ -510,17 +536,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-      - if: steps.pwcache.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
       - run: pnpm exec vite build
       - run: pnpm test:e2e
         env:
@@ -663,13 +678,13 @@ jobs:
   # keeps the lint result separate from the script tests. Both tools are release binaries checked
   # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
   # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
-  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594): the pull request head passed it.
   lint-shell:
     name: lint-shell
     needs: changes
-    # !cancelled() and no outputs-based gate on the way in: when `changes` itself fails, this still
-    # runs (empty output is not 'true'), so a red `changes` cannot turn this check into a skip.
-    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
+    # Path-gated (#572: the `shell` output of the path rules) and off on a draft and on a push to main whose heavy
+    # jobs are off (`apply` switches the output). `!= 'false'`, not `== 'true'`: when `changes` itself fails, this
+    # still runs (empty output is not 'false'), so a red `changes` cannot turn this check into a skip.
+    if: ${{ !cancelled() && needs.changes.outputs.shell != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -702,11 +717,12 @@ jobs:
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
-  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594); see lint-shell.
+  # Path-gated and skipped like lint-shell.
   scripts:
     name: scripts
     needs: changes
-    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
+    # Path-gated like lint-shell (#572: the `scripts` output of the path rules).
+    if: ${{ !cancelled() && needs.changes.outputs.scripts != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -746,7 +762,6 @@ jobs:
       - run: hack/runner-lint-test.sh
       - run: hack/runner-lint.sh
       - run: hack/old-issue-refs-lint-test.sh
-      - run: hack/old-issue-refs-lint.sh
       - run: hack/audit-batch-lint-test.sh
       - run: hack/audit-batch-lint.sh
       - run: hack/bash5-lint-test.sh
@@ -772,7 +787,9 @@ jobs:
       - run: hack/ci-supersede-test.sh
       - run: hack/ci-concurrency-test.sh
       - run: hack/ci-merge-group-test.sh
+      - run: hack/secrets-skip-test.sh
       - run: hack/ci-cache-test.sh
+      - run: hack/ci-playwright-image-test.sh
       - run: hack/chart-check-test.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
@@ -838,8 +855,7 @@ jobs:
   # pnpm stores, one job per lockfile (no matrix: hack/ci-required-test.sh cannot name matrix checks), each
   # with the cache-dependency-path the consuming jobs use: setup-node hashes the listed files into its
   # key, so a combined list would never match a consumer. setup-node saves the store after a job that
-  # missed it, so installing is all a job does. `warm-caches-web` also warms the Playwright browser, by
-  # @playwright/test version (the key web-e2e restores). Never skipped by `changes`.
+  # missed it, so installing is all a job does. Never skipped by `changes`.
   warm-caches-web:
     name: warm-caches-web
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -857,32 +873,16 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
-      # The Playwright browser, by @playwright/test version (the key web-e2e restores).
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-        working-directory: web
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-          lookup-only: true
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install chromium
-        working-directory: web
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
 
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
-  # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
+  # a fake key; it never reaches a real or paid model. Required, but it runs in the merge queue and on main only, not on pull requests (#572, #128); flavor-publish below is push-only.
   flavors:
     needs: changes
-    if: needs.changes.outputs.flavors == 'true'
+    # Not on a pull request (#572, #128): the merge queue and main run it, and the queue run is the required one.
+    # A job-level skip reports success, so the required name still reports on a pull request.
+    if: github.event_name != 'pull_request' && needs.changes.outputs.flavors == 'true'
     name: flavors
     runs-on: ubuntu-latest
     timeout-minutes: 60

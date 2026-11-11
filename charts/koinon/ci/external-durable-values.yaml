@@ -15,10 +15,12 @@ networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
-# The observer and the sandbox default-deny NetworkPolicy need the policy.
+# The observer, NetworkPolicy writer and LimitRange writer need the policy.
 sandboxObserver:
   enabled: false
 sandboxNetworkPolicy:
+  enabled: false
+sandboxLimitRange:
   enabled: false
 preflight:
   seccompProbe:

@@ -99,7 +99,7 @@ including how to point Tilt at a remote cluster of your own.
   `buf breaking`, generated code up to date, migration lint, DCO, and the gitleaks secret scan.
   The full list of required checks is `hack/ci-required.txt` (it also covers the docs build, the
   chart smoke test, the dependency age check and the script tests); a check that does not apply to
-  your change reports success. `flavors` is the only advisory job on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` keeps
+  your change reports success. `flavors` is required but runs only in the merge queue and on main (on a pull request its job is skipped, which reports success); `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` keeps
   the list and `ci.yml` in step.
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no

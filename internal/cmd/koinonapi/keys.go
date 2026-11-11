@@ -24,6 +24,7 @@ import (
 )
 
 type keysOptions struct {
+	probeTimeout                                        time.Duration
 	dbURL, kekSecret, kekDir, namespace, kubeconfig, id string
 	period                                              time.Duration
 	yes                                                 bool
@@ -63,6 +64,7 @@ func newKeysCommand() *cobra.Command {
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
 	pf.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	pf.DurationVar(&o.period, "kek-active-period", keyscli.DefaultActivePeriod, "status warns when the active KEK is older than this")
+	pf.DurationVar(&o.probeTimeout, "probe-timeout", 0, "how long new-repositories and forget wait for koinon-agentd to check the storage before they refuse (default 2m plus 250ms per agent)")
 	o.wrapping.Flags(pf)
 	cli.EnvAlias(keys, "database-url", "DATABASE_URL")
 	cli.EnvAlias(keys, "namespace", "POD_NAMESPACE")
@@ -159,7 +161,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers}
+	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
 	// With the database, every command that changes the key set also records it in the install audit chain
 	// (actor cli, "keys <command>").

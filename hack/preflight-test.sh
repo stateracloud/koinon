@@ -430,9 +430,12 @@ check "scripts FAIL line" has '^scripts FAIL' "$tmp/s2"
 unset FAKE_SCRIPT_CHECK_FAKE_RC
 reset_state
 w=$(fresh); cd "$w"
-echo "package foo // y" >>internal/foo/a.go; commit_all
+mkdir -p docs/dev; echo "# notes" >docs/dev/notes.md; commit_all
 pf "$tmp/s3" --list >/dev/null
-check "a Go-only change does not select scripts" hasnt '^scripts:' "$tmp/s3"
+check "a Markdown-only change does not select scripts (the job rule, #572)" hasnt '^scripts:' "$tmp/s3"
+echo "package foo // y" >>internal/foo/a.go; commit_all
+pf "$tmp/s3b" --list >/dev/null
+check "a Go change selects scripts (the checks read Go sources, #572)" has '^scripts:' "$tmp/s3b"
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

@@ -175,6 +175,7 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	netpol := newSandboxNetworkPolicy(cfg, kube, log)
+	limitRange := newSandboxLimitRange(cfg, kube, log)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -251,6 +252,7 @@ func serve(ctx context.Context, cfg config) error {
 			},
 			Observer:      observer,
 			NetworkPolicy: netpol,
+			LimitRange:    limitRange,
 			Logger:        log,
 			Metrics:       reconciler.NewMetrics(reg),
 		})
@@ -321,6 +323,17 @@ func newSandboxNetworkPolicy(cfg config, kube kubernetes.Interface, log *slog.Lo
 	}
 	return &reconciler.SandboxNetworkPolicy{
 		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxNetworkPolicyName, Log: log,
+	}
+}
+
+// newSandboxLimitRange builds the sandbox LimitRange writer (#76), or nil when it is off.
+func newSandboxLimitRange(cfg config, kube kubernetes.Interface, log *slog.Logger) *reconciler.SandboxLimitRange {
+	if !cfg.sandboxLimitRange {
+		log.Warn("the sandbox LimitRange is off: OpenShell supervisor and init containers stay BestEffort")
+		return nil
+	}
+	return &reconciler.SandboxLimitRange{
+		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxLimitRangeName, Log: log,
 	}
 }
 
