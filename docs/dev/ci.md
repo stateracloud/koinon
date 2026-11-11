@@ -626,10 +626,14 @@ green passed). The rule:
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
    outranks every finished one, a green included; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
-   never-started cancelled job with a null `startedAt`), then job id.
-3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins.
+   never-started cancelled job with a null `startedAt`), then job id. The newest finished row decides even when it is
+   cancelled or skipped (#399): a re-run that was then cancelled must not read as green to `pr-merge --admin`.
+3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins. Statuses are
+   never dropped by the run filter, even when their `target_url` happens to contain `/runs/<id>` (#399).
 4. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
-   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come.
+   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come. Only
+   workflows that have produced a required context on this head are considered; when the required set is empty every
+   empty current run fails closed (#399).
 6. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
 
 A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.
