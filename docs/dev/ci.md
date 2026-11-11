@@ -283,8 +283,8 @@ One source, `hack/paths.rules`. Which paths turn on which job or gate is data, i
 `hack/paths-lib.sh` by `hack/ci-changes.sh` (the `changes` outputs), `hack/needs-e2e.sh` (the kind
 e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
 `lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
-the comment above each rule says why it exists. `hack/ci-changes.sh` adds only the `go list` build
-graph of the flavors suite; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+the comment above each rule says why it exists. `hack/ci-changes.sh` adds the `go list` build
+graphs of the flavors and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
 that file and nowhere else.
 
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
@@ -296,11 +296,10 @@ that file and nowhere else.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
-  tags, so `web/` without Go files, `api/proto/` (its output is committed under `internal/gen`, and
-  `generate` fails on a stale one) and `_test.go` files of other packages cannot change the result and
-  are `except` lines. `internal/`, `cmd/`, `api/`, `pricing/`, `connectors/` and `templates/` stay broad:
-  narrowing them to the build graph, as flavors does, is possible but the suite also reads files the
-  list cannot name, so it is not done.
+  tags. `hack/ci-changes.sh` derives the Go packages those commands and the suite import (`go list`,
+  like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
+  `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
+  `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
@@ -611,10 +610,14 @@ green passed). The rule:
    `pending`/`missing`, and `pr-wait.sh` prints `waiting for the newest run of each workflow`).
 2. Inside the chosen run a check name is judged by its newest row. A row that has not finished (a live re-run attempt)
    outranks every finished one, a green included; else the newest by `startedAt`, falling back to `completedAt` (the GraphQL rollup reports a
-   never-started cancelled job with a null `startedAt`), then job id.
-3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins.
+   never-started cancelled job with a null `startedAt`), then job id. The newest finished row decides even when it is
+   cancelled or skipped (#399): a re-run that was then cancelled must not read as green to `pr-merge --admin`.
+3. Commit statuses and check runs without a run have nothing to choose: the newest row of that name wins. Statuses are
+   never dropped by the run filter, even when their `target_url` happens to contain `/runs/<id>` (#399).
 4. A completed newest run with no check run at all (for example `startup_failure`) is a failure: both scripts print
-   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come.
+   `<workflow>: run has no jobs (<conclusion>)` with the run id instead of waiting for jobs that never come. Only
+   workflows that have produced a required context on this head are considered; when the required set is empty every
+   empty current run fails closed (#399).
 6. When gh cannot list the runs nothing is dropped, so the verdict only gets stricter.
 
 A verdict word per context: `success skipped pending failure cancelled missing`; only `success` and `skipped` merge.

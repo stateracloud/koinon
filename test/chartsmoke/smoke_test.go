@@ -270,6 +270,18 @@ func describeMode(name, valuesFile string) {
 			Expect(ids).To(ContainElement(string(s.Data["active"])))
 		})
 
+		// The start-up check scopes its generated-Secret list to this Helm release (#375), so two
+		// releases in one namespace do not see each other's ensure-secrets Secrets.
+		It("gives koinon-api the Helm release name to scope generated Secrets", func() {
+			api := r.deployment("koinon-api")
+			Expect(api).NotTo(BeNil())
+			args := api.Spec.Template.Spec.Containers[0].Args
+			i := slices.Index(args, "--release")
+			Expect(i).To(BeNumerically(">=", 0), "koinon-api has --release")
+			Expect(i + 1).To(BeNumerically("<", len(args)))
+			Expect(args[i+1]).To(Equal(release), "the chart passes .Release.Name")
+		})
+
 		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
 		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
 		// needs before koinon-api starts.

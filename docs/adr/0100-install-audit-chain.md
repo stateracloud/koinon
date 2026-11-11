@@ -516,11 +516,10 @@ be read or the lock is not free within the first-attempt budget, the Secret is m
 and the event follows it (start never blocks on the database); the start-up check then records
 anything lost as `keys.observed`.
 
-`koinon-api` does not know its Helm release name (no flag or environment variable carries it), so its
-label-selected list of generated Secrets (`koinon.dev/generated`) is not scoped by the chart's
-`koinon.dev/release` label: two releases in one namespace see each other's generated Secrets in their
-`keys.observed` state. Scoping it needs a new start-up input; release identity is #375 (v0.2). Until
-then one Koinon release per namespace stays the rule (maintainer decision 2026-11-08).
+`koinon-api` takes the Helm release name as `--release` (the chart passes `.Release.Name`) and scopes
+its label-selected list of generated Secrets to `koinon.dev/generated,koinon.dev/release=<release>`
+(#375). Two releases in one namespace each see only their own ensure-secrets Secrets in
+`keys.observed`. An empty `--release` (a local run) leaves the list unscoped.
 
 **Helm-set settings.** `koinon-api` builds, on start, a fixed list of install-wide settings from its
 flags. For a flag that names a Secret, a file or a directory it records the name only, never the
@@ -536,7 +535,7 @@ contents. The list:
 - keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
   `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
 - telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
-- the chart and image version.
+- the chart (`chart-version`, `release`) and image version.
 
 The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR
 0098 decision 5), and one change is recorded once. In one transaction under a fixed advisory lock

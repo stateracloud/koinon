@@ -131,10 +131,12 @@ var _ = Describe("the Helm-set platform settings", func() {
 		It("follows the flags the process was started with", func() {
 			fs := serveFlags()
 			Expect(fs.Set("chart-version", "0.3.1")).To(Succeed())
+			Expect(fs.Set("release", "koinon-prod")).To(Succeed())
 			Expect(fs.Set("public-url", "https://koinon.example.test/")).To(Succeed())
 			settings, err := platformSettings(fs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(settings).To(HaveKeyWithValue("chart-version", "0.3.1"))
+			Expect(settings).To(HaveKeyWithValue("release", "koinon-prod"))
 			Expect(settings).To(HaveKeyWithValue("public-url", "https://koinon.example.test"))
 		})
 	})
