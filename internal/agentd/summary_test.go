@@ -135,13 +135,15 @@ var _ = Describe("A fresh session with a handoff", func() {
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		// A run that succeeded completed its task (old issue 324); the restart marks open tasks, so a
-		// follow-up reopens it first.
-		_, err = db.Exec(ctx, `UPDATE tasks SET state = 'submitted', finished_at = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
-		Expect(err).NotTo(HaveOccurred())
+		// The run that succeeded completed its task (old issue 324). A chat thread sits completed
+		// between turns, and the restart still marks it, because its run completed it (#81).
+		Expect(before.State).To(Equal(store.TaskStateCompleted))
 		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(marked).To(HaveLen(1))
+		Expect(marked).To(ConsistOf(t.ID))
+		// The follow-up reopens it, as the message service does.
+		_, err = db.Exec(ctx, `UPDATE tasks SET state = 'submitted', finished_at = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
+		Expect(err).NotTo(HaveOccurred())
 		e.message(ctx, t, "second message")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))

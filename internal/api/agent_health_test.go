@@ -5,6 +5,7 @@ package api_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	connect "connectrpc.com/connect/v2"
@@ -150,6 +151,21 @@ var _ = Describe("agent health and fresh sessions", func() {
 			}
 			return t.GetId()
 		}
+		// statusChanged appends a status.changed event to the task, by actor ("system", as a run that
+		// ends the task writes it, or "user", the person who created the ticket) with an optional reason.
+		statusChanged := func(ctx SpecContext, id, actor, to, reason string) {
+			payload := map[string]string{"to": to}
+			if reason != "" {
+				payload["reason"] = reason
+			}
+			raw, err := json.Marshal(payload)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = e.pool.Exec(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload)
+				SELECT t.org_id, t.id, COALESCE((SELECT max(seq) FROM task_events WHERE org_id = t.org_id AND task_id = t.id), 0) + 1,
+					'status.changed', $2::task_actor_kind, CASE WHEN $2 = 'user' THEN (SELECT c.actor_user_id FROM task_events c WHERE c.org_id = t.org_id AND c.task_id = t.id AND c.kind = 'task.created') END, $3::jsonb
+				FROM tasks t WHERE t.id = $1`, id, actor, raw)
+			Expect(err).NotTo(HaveOccurred())
+		}
 		reactivate := func(ctx SpecContext, apply bool) *agentv1alpha1.ActivateAgentResponse {
 			_, err := e.pool.Exec(ctx, `UPDATE agents SET status = 'draft' WHERE id = $1`, agent.GetId())
 			Expect(err).NotTo(HaveOccurred())
@@ -187,6 +203,29 @@ var _ = Describe("agent health and fresh sessions", func() {
 			var after string
 			Expect(e.pool.QueryRow(ctx, `SELECT summary->'after'::text FROM audit_events WHERE org_id = $1 AND action = 'agent.activate' ORDER BY created_at DESC LIMIT 1`, org).Scan(&after)).To(Succeed())
 			Expect(after).To(And(ContainSubstring(`"applyToOpenTickets": true`), ContainSubstring(`"ticketsRestarting": 2`)))
+		})
+
+		It("marks a chat thread a run completed and not one a person completed after it (#81)", func(ctx SpecContext) {
+			byRun := open(ctx, "run-completed", "done")
+			statusChanged(ctx, byRun, "system", "completed", "run_succeeded")
+			byPerson := open(ctx, "person-completed", "done")
+			statusChanged(ctx, byPerson, "user", "completed", "")
+			// A run completed it, a follow-up reopened it, and then a person closed it.
+			closedLater := open(ctx, "closed-after-run", "done")
+			statusChanged(ctx, closedLater, "system", "completed", "run_succeeded")
+			statusChanged(ctx, closedLater, "user", "submitted", "follow_up")
+			statusChanged(ctx, closedLater, "user", "completed", "")
+			failed := open(ctx, "run-failed", "todo")
+			_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'failed', finished_at = now() WHERE id = $1`, failed)
+			Expect(err).NotTo(HaveOccurred())
+			statusChanged(ctx, failed, "system", "failed", "run_failed")
+
+			res := reactivate(ctx, true)
+			Expect(res.GetTicketsRestarting()).To(Equal(int32(1)))
+			Expect(pending(ctx, byRun)).To(BeTrue())
+			Expect(pending(ctx, byPerson)).To(BeFalse())
+			Expect(pending(ctx, closedLater)).To(BeFalse())
+			Expect(pending(ctx, failed)).To(BeFalse())
 		})
 
 		It("leaves other agents' tickets alone", func(ctx SpecContext) {

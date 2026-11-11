@@ -1236,7 +1236,11 @@ type Querier interface {
 	// become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 	RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestHourlyHomeCheckpointsParams) ([]HomeCheckpoint, error)
 	// Activating a version with "apply to open tasks": every open task of the agent that has a
-	// session starts a new one at its next run.
+	// session starts a new one at its next run. A task a run completed counts as open: a chat thread is
+	// completed by each turn's run and reopened by the next message, so it is still in use. Its last
+	// status.changed event tells it apart from one a person completed: the system's, with the reason
+	// run_succeeded (runoutcome.ReasonRunSucceeded). A person's own change, a later reopen or no event at
+	// all leaves a completed task alone.
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 	// org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
