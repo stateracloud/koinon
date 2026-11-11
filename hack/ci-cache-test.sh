@@ -94,6 +94,12 @@ check "go-test restores test results by prefix on pull requests" has "$gotest" '
 check "go-ci save does not depend on the test run (comes first, no testres condition)" test "$(awk '/actions\/cache\/save@/{s++} /id: testres/{t=NR} /key: go-ci-/{if(s&&!k){k=NR}} END{print (k&&t&&k<t)?1:0}' <<<"$warm")" = 1
 check "warm-caches does not run the cacheable packages with -count=1" hasnt "$warm" 'go-test.sh.*-count=1'
 check "no workflow sets KOINON_GO_TEST_CACHE to 1 outside a pull_request condition" test "$(grep -h 'KOINON_GO_TEST_CACHE' "$wf" | grep -vc "pull_request\|warm-caches\|KOINON_GO_TEST_CACHE: '1'\|^ *#")" = 0
+check "go-test stamps file mtimes before the tests" has "$gotest" 'hack/ci-stamp-mtime\.sh'
+check "warm-caches stamps file mtimes (same stamps as go-test)" has "$warm" 'hack/ci-stamp-mtime\.sh'
+check "warm-caches may delete caches (actions: write)" has "$warm" 'actions: write'
+check "warm-caches prunes older go-testres entries" has "$warm" 'gh cache delete'
+check "the prune keeps the entry just saved" has "$warm" 'select\(\.key != env\.KEEP_KEY\)'
+check "the prune cannot fail the job" test "$(awk '/Prune older test-result caches/{f=1} f&&/continue-on-error: true/{print 1; exit}' <<<"$warm")" = 1
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

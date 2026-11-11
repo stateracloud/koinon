@@ -23,8 +23,8 @@ in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` eve
 Every package runs with `-count=1`, so main and the merge queue run everything every time. A pull
 request run sets `KOINON_GO_TEST_CACHE=1` (the `go-test` job, `pull_request` events only) and the
 packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
-test binary, the command line, the environment variables the test read and the files it opened are the
-same, and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
+test binary, the command line, the environment variables the test read and the size, mode and mtime of
+the files it opened are the same (Go does not hash file content), and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
 the network, a cluster or a binary the test starts, so the three kinds of package split like this:
 
 | Kind | Reuse on a pull request | Why |
@@ -48,6 +48,16 @@ build cache, and an empty list fails the step instead of running `./...`. It sav
 request restores the newest entry by the `go-testres-` prefix. The script and flags are the same (they are
 part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
 look for `(cached)` on lines such as `internal/money (cached)`.
+
+Why the mtime step: `actions/checkout` stamps every file with the checkout time, so a package that opens a
+file (testdata, golden files, the chart, templates) would never hit on a CI run. The `go-test` and
+`warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It sets each tracked file's mtime
+from its git blob id, so the same content has the same mtime on main and on a pull request, and a changed
+file (even one of the same size) gets another mtime. A fixed epoch would show a stale pass for a same-size
+edit. The script is for a throw-away checkout only. Retention: every `go-testres-` entry holds the whole build
+cache (a few hundred MB), so `warm-caches` deletes all older `go-testres-` entries after it saves the new one
+(`actions: write`, `continue-on-error`) and the repository keeps one, away from the 10 GB quota that go-ci,
+envtest and the pnpm stores share.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
@@ -498,7 +508,7 @@ work that fills it, then saves:
 | Cache | Key | Filled by |
 | --- | --- | --- |
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
-| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main |
+| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |

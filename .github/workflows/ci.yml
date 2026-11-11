@@ -205,6 +205,10 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
       - id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -850,8 +854,15 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: write # prunes older go-testres- cache entries
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
       - id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -897,6 +908,16 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+      # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
+      # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
+      - name: Prune older test-result caches
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_KEY: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+        run: |
+          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,key --jq '.[] | select(.key != env.KEEP_KEY) | .id' |
+            while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY"; done
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
       # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action
       # skips the save on an exact hit and downloads modules itself when go-ci was only looked up.
