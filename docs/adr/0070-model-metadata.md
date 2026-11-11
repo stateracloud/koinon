@@ -448,8 +448,9 @@ is not needed any more.
    - **One switch, one parser.** The fetch uses the shared OpenRouter adapter and parser of ADR 0098
      decision 2.1, not a second client. It follows the three-mode setting of ADR 0098 decision 2.2
      (amendment of 2026-11-07), the one flag `--prices-refresh=auto|off|on` (Helm
-     `prices.refresh.enabled`; unset renders `auto`). `auto`, the default, fetches while an enabled
-     `openrouter` provider exists, checked on every tick. `off` makes no request to OpenRouter, so a
+     `prices.refresh.enabled`; unset renders `auto`). `auto`, the default, fetches while any org has an
+     `openrouter` provider that is not disabled (`disabled_reason` empty; the check is
+     `ProviderTypeInUse`, a yes or no across all orgs), checked on every tick. `off` makes no request to OpenRouter, so a
      zero-request install is still one value away, and decision 8's "an install that must not call
      out relies on the setting being off" holds. `on` fetches whatever providers exist. Decision 8's
      `modelMetadata.refresh.enabled` (default false) stays the switch for models.dev and the
@@ -458,7 +459,7 @@ is not needed any more.
      This replaces the commit in the source tag of decision 5.
    - **Review.** The stored catalog feeds discovery and the metadata page. Two rules apply, by field.
      Prices from the fetch follow ADR 0098 (decision 2.4 and decision 3): the 24-hour stability
-     rule, bounded auto-apply in `auto` mode, and a proposal for a platform admin above the bounds.
+     rule, bounded auto-apply in `auto` and `on` modes, and a proposal for a platform admin above the bounds.
      This amendment adds no second price rule. Metadata fields that change behaviour, such as the
      context and output limits that set a compaction threshold, become decision 8 proposals and
      wait for a person; they change nothing until a platform admin accepts them.
@@ -469,7 +470,9 @@ is not needed any more.
      produce proposals against the effective values.
 3. **No offline path.** An air-gapped install has no OpenRouter catalog, because OpenRouter needs
    connectivity for every request anyway. The `koinon-api model-metadata fetch --out <file>` import of
-   decision 8 stays for models.dev, and does not carry OpenRouter data.
+   decision 8 stays for models.dev, and does not carry OpenRouter data. This rule is about model
+   metadata only. The existing offline price path stays: `koinon-api prices fetch --out` and
+   `prices import` create price proposals that an admin accepts, with no per-install fetch.
 4. **No fallback copy.** Until the first fetch succeeds, and for behaviour-changing fields until a person
    accepts the fetched values (Review), OpenRouter models use models.dev's `openrouter` provider
    (MIT) for metadata. That provider loses the per-upstream data,
