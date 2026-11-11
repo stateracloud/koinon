@@ -29,7 +29,7 @@ Instructions for coding agents working on Koinon.
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADRs: `hack/adr-lint.sh`, `hack/adr-index.sh`.
 - Before you hand over or push: `hack/lane-gates.sh` (blocks; the gates your change touches, one
   `gate=… verdict=pass|fail|notrun` line each, `docs/dev/ci.md#the-local-gate-command`) or
-  `hack/preflight.sh` (the lint-level subset).
+  `hack/preflight.sh` (the diff-selected gates without the heavy jobs).
   Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
   push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`
   (in the background) and merge it with `hack/pr-merge.sh <PR>` (refuses a draft, reads every required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees: `hack/wt.sh`.
