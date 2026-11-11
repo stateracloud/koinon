@@ -9,7 +9,8 @@
   (park reasons in use), [0032](0032-agent-home-checkpoints.md) (checkpoints in v0.1),
   [0049](0049-v01-scope-decisions.md) (board columns, sandbox idle), [0055](0055-chat-as-its-own-object.md)
   (chat next to tasks), [0051](0051-session-home-generations.md) (restored homes resume the session),
-  [0006](0006-identity-layers.md), [0018](0018-v1-screens.md), [0019](0019-personal-agents-and-teams.md),
+  [0006](0006-identity-layers.md), [0012](0012-cross-org-sharing.md) (the called agent spends its own budget),
+  [0018](0018-v1-screens.md), [0019](0019-personal-agents-and-teams.md),
   [0036](0036-v01-demo.md), [0042](0042-ask-tier-park-and-execute.md) (safe defaults, scoped
   approvals); supersedes the rest of [0017](0017-board-and-chat-interaction-model.md)
 - Triggers and latency: [0066](0066-triggers-and-scheduling.md)

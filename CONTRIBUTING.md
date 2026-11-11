@@ -116,7 +116,9 @@ including how to point Tilt at a remote cluster of your own.
   names the holder and what to do. There is no updater bot: merge `main` into
   your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
   `origin/main` and wait for green first.
-- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
+- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it. An ADR that
+  amends another is named in that one's header, and it puts a one-line marker at each decision it changes
+  (ADR 0046 decision 4); the lint checks the links both ways, review checks the markers.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
   published.

@@ -207,6 +207,7 @@ script-check - hack/agentgateway-pin.sh --check
 script-check - hack/golangci-lint-test.sh
 script-check - hack/preflight-stop-test.sh
 script-check - hack/e2e-decide-test.sh
+script-check - hack/kind-registry-test.sh
 script-check - hack/drill-issue-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh

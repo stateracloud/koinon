@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentmodel"
+	"github.com/stateracloud/koinon/internal/agentresources"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
@@ -66,6 +67,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
@@ -99,6 +101,9 @@ const DefaultWatchCancelGrace = 10 * time.Second
 
 // Options configures a Server.
 type Options struct {
+	// SandboxResources is the platform's sandbox sizing policy (ADR 0083), which a per-agent override
+	// must stay inside. Nil is sandboxres.DefaultPolicy.
+	SandboxResources *sandboxres.Policy
 	// Hub wakes WatchRun streams. Required.
 	Hub *runwatch.Hub
 	// WatchPollInterval defaults to DefaultWatchPollInterval.
@@ -187,9 +192,11 @@ type Server struct {
 	urlPolicy catalog.URLPolicy
 	// agentModels changes agents' model settings; modelCheck runs the provider echo check.
 	agentModels *agentmodel.Service
-	modelCheck  *modelcheck.Service
-	runNow      *RunNowQueue
-	traces      *tracedest.Service
+	// agentResources changes agents' sandbox resource overrides (ADR 0083).
+	agentResources *agentresources.Service
+	modelCheck     *modelcheck.Service
+	runNow         *RunNowQueue
+	traces         *tracedest.Service
 	// leakGuard changes the org's leak-guard threshold and fetch-trusted host list (old issue 350).
 	leakGuard *orgsettings.Service
 	// hold refuses the code-host calls the handlers make themselves (refuseWhileHeld).
@@ -228,7 +235,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
 		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
-		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
+		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), agentResources: agentresources.New(pool, sandboxPolicy(opts)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 		hold: opts.RestoreHold, outward: outward.New(pool).WithRestoreHold(opts.RestoreHold),
 	}
 	if s.dm != nil {
@@ -355,4 +362,12 @@ func (s *Server) inAuditTx(ctx context.Context, fn func(q *store.Queries, b audi
 func (s *Server) inSnapshot(ctx context.Context, fn func(q *store.Queries) error) error {
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
 		func(tx pgx.Tx) error { return fn(store.New(tx)) })
+}
+
+// sandboxPolicy is the policy overrides are checked against: the options' or the built-in one.
+func sandboxPolicy(opts Options) sandboxres.Policy {
+	if opts.SandboxResources != nil {
+		return *opts.SandboxResources
+	}
+	return sandboxres.DefaultPolicy()
 }

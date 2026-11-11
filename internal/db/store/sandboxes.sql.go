@@ -355,7 +355,7 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 }
 
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
-SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm FROM agents a
+SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit FROM agents a
 WHERE a.org_id = $1
   AND (a.status <> 'archived' OR EXISTS (
       SELECT 1 FROM agent_sandboxes s
@@ -397,6 +397,10 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.Model,
 			&i.Thinking,
 			&i.KeepWarm,
+			&i.SandboxCpuRequest,
+			&i.SandboxCpuLimit,
+			&i.SandboxMemoryRequest,
+			&i.SandboxMemoryLimit,
 		); err != nil {
 			return nil, err
 		}

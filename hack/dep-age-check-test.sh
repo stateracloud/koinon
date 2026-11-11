@@ -16,7 +16,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/dep-age-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Only the function: the script itself needs git and the network.
-eval "$(sed -n '/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p' "$repo/hack/dep-age-check.sh")"
+eval "$(sed -n '/^image_location() {/,/^}/p; /^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p' "$repo/hack/dep-age-check.sh")"
 
 fail=0
 # The URLs are assembled from parts so that no release-asset URL literal appears in this file:
@@ -63,6 +63,20 @@ selected=$(git -C "$repo" ls-files -- "${dockerfile_specs[@]}")
 for want_file in hack/e2e-toolchain/Dockerfile hack/e2e-toolchain/web.Dockerfile; do
 	if grep -qxF "$want_file" <<<"$selected"; then echo "ok   dockerfile specs select $want_file"; else echo "FAIL dockerfile specs miss $want_file"; fail=1; fi
 done
+
+# image_location: Docker Hub names reach registry-1.docker.io whatever their prefix (docker.io serves a web page).
+loc() { # loc <name> <expected "host repo">
+	local got
+	got=$(image_location "$1")
+	if [[ $got == "$2" ]]; then echo "ok   image_location $1"; else echo "FAIL image_location $1: got '$got', want '$2'"; fail=1; fi
+}
+loc registry "registry-1.docker.io library/registry"
+loc docker.io/library/registry "registry-1.docker.io library/registry"
+loc docker.io/registry "registry-1.docker.io library/registry"
+loc index.docker.io/bitnami/redis "registry-1.docker.io bitnami/redis"
+loc bitnami/redis "registry-1.docker.io bitnami/redis"
+loc ghcr.io/o/r "ghcr.io o/r"
+loc localhost:5001/x "localhost:5001 x"
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"

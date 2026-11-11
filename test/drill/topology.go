@@ -64,6 +64,9 @@ type Topology struct {
 	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
 	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
 	Registry string `yaml:"registry,omitempty" json:"registry,omitempty"`
+	// ImageRegistry, when set, is passed to the chart as image.registry. Only run.sh writes it, for the kind
+	// topology copy: the cluster's path on the shared local registry (test/e2e/kind/imagerepo.sh).
+	ImageRegistry string `yaml:"imageRegistry,omitempty" json:"imageRegistry,omitempty"`
 	// StorageClass for the databases; empty is the cluster default.
 	StorageClass string `yaml:"storageClass,omitempty" json:"storageClass,omitempty"`
 	// RunNowCalls is N: the number of Run-now calls; N-1 stay ENQUEUED behind the low trigger limits.

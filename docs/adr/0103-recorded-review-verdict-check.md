@@ -274,7 +274,7 @@ What stays:
 - Independent Opus reviews of a pull request's head keep running, and their findings are still fixed.
 - `review.yml` still posts the `review` check, `hack/review-gate.sh` still computes it, and
   `hack/review-verdict.sh` still records a verdict. The check is information on the pull request.
-- ADR 0105 is unchanged: `--admin` stays for a pull request with a `.github/` path (exit 9 otherwise), and
+- ADR 0105 is changed in two decisions only (its amendment of 2026-11-11 removes the review gate from decisions 5 and 6): `--admin` stays for a pull request with a `.github/` path (exit 9 otherwise), and
   the CODEOWNERS approval on `.github/**` stays.
 
 What goes:
@@ -288,10 +288,10 @@ What goes:
 Cost: nothing in the repository now stops a sensitive-path pull request that nobody reviewed. The queue's
 required checks and the owner's habit of running the review are the guard.
 
-## 2026-11-11 (#546): superseded, the check is removed
+## 2026-11-11 (#546): deprecated, the check is removed
 
 procoduck decided on 2026-11-11 to remove the sensitive-path review requirement fully. This ADR is
-superseded: nothing in the repository records, checks or gates a review verdict any more. The
+deprecated (no ADR replaces it): nothing in the repository records, checks or gates a review verdict any more. The
 decisions above stay as the record of what was tried; do not follow them.
 
 Removed: `.github/workflows/review.yml` (the `review` job), `hack/review-gate.sh`, `hack/review-gate-test.sh`,
