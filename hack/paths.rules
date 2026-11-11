@@ -114,7 +114,7 @@ job web ^(web/|api/proto/)
 # spec and its config, the sqlc inputs, the buf and sqlc configs, protoc-gen-es (web/package.json,
 # its lockfile) and the outputs.
 # hack/generate.sh is the body of `make generate` (#349): a wrapper-only edit must still run the job.
-job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$)
+job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
 job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
