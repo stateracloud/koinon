@@ -100,7 +100,7 @@ type Descriptor struct {
 	// flavor's titles cannot be told apart, and every call of kind other then sets both legs.
 	MCPToolPrefix string
 	// Tools are the command-line tools the flavor's image ships for the agent to use, by the
-	// name of the command (rg, fd, jq, yq, ast-grep, duckdb, sqlite3, pdftotext, python3, git).
+	// name of the command (rg, fd, jq, yq, ast-grep, duckdb, sqlite3, pdftotext, pdfinfo, python3, python, file, git).
 	// agentd's "Working with large data" section names a tool only when the flavor lists it, so
 	// a flavor must list exactly what its image has (flavors/<flavor>/README.md). Empty when the
 	// image ships none the agent should rely on.
@@ -145,7 +145,7 @@ var table = []Descriptor{
 		RetriesModelRequests: true,
 		MCPToolPrefix:        "koinon_",
 		// The tools of the OpenCode image (flavors/opencode/README.md).
-		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "python3", "git"},
+		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"},
 		// OpenCode saves the full output of a cut tool result to a file.
 		TruncatedOutputSaved: true,
 	},

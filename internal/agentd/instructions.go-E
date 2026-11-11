@@ -1,0 +1,335 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package agentd
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/flavor"
+)
+
+// instructionsPath is where a flavor reads Koinon's instructions for the run (for OpenCode,
+// the "instructions" key of its config names it; flavors/opencode/README.md, ADR 0052). The agent can write
+// the home, so agentd writes the file before every harness start and restores it before every
+// prompt.
+const instructionsPath = "/sandbox/.koinon/AGENTS.md"
+
+// instructionLink is the path a flavor's harness reads its instructions from: a symbolic link
+// to instructionsPath. agentd checks it with the file before every prompt and puts it back if
+// the agent changed it. A link in the image's read-only file system cannot change; one in the
+// home can.
+func instructionLink(f store.AgentFlavor) string {
+	d, _ := flavor.Lookup(f)
+	return d.InstructionLink
+}
+
+// instructionsPreamble opens the file, ahead of the agent version's instructions.
+const instructionsPreamble = "# Koinon\n\n" +
+	"These are your instructions from Koinon for this run. Koinon writes this file before the " +
+	"run and restores it before every prompt, so changing it has no effect.\n\n"
+
+// dataBullet is one line of the "Working with large data" section. It is shown only when the
+// flavor's image ships every tool in needs (flavor.Descriptor.Tools); a line with no needs
+// holds for any flavor. A line with savesOutput is also shown only for a harness that saves a
+// cut tool result to a file (flavor.Descriptor.TruncatedOutputSaved).
+//
+// A text that names a tool the line does not require is built by render instead, which asks
+// whether the flavor ships that tool; text is then empty.
+type dataBullet struct {
+	needs       []string
+	savesOutput bool
+	text        string
+	render      func(has func(tool string) bool) string
+}
+
+// dataBullets is Koinon's guidance on how to read large inputs, with the tools the flavor image
+// ships (flavors/opencode/README.md). The section follows the preamble in every run, whatever the
+// agent version says. The image has no network, no pip and no package manager the agent may use.
+//
+// The flavor decides which tools exist and how its harness cuts output, not this file: a flavor
+// that lacks a tool never hears about it, and a line that names several tools needs all of them.
+// OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full output to a file; a
+// harness with that behaviour (TruncatedOutputSaved) tells the agent to query the file rather
+// than run the command again.
+var dataBullets = []dataBullet{
+	{nil, false, "", func(has func(string) bool) string {
+		cmds := "`wc -c FILE`, `ls -l`"
+		if has("file") {
+			cmds += ", `file FILE`"
+		}
+		return "- Check size before reading: " + cmds + ". Read in ranges, not whole files.\n"
+	}},
+	{[]string{"rg", "fd", "ast-grep"}, false, "- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
+		"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n"},
+	{[]string{"jq", "yq"}, false, "- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
+		"Select fields; do not `cat` a large file.\n"},
+	{[]string{"duckdb"}, false, "- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
+		"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
+		"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n"},
+	{[]string{"sqlite3"}, false, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n"},
+	{[]string{"pdftotext", "pdfinfo"}, false, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
+		"PDF with the read tool.\n", nil},
+	{[]string{"git"}, false, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n"},
+	{[]string{"rg", "jq", "duckdb"}, true, "- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
+		"`duckdb`; do not run the command again.\n"},
+	{[]string{"python3"}, false, "", func(has func(string) bool) string {
+		name := "`python3`"
+		if has("python") {
+			name += " (also `python`)"
+		}
+		return "- " + name + " has the standard library only: json, csv, sqlite3, re, gzip, " +
+			"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
+			"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n"
+	}},
+	{nil, false, "- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
+		"Use what is installed, or say what is missing.\n"},
+}
+
+// workingWithData renders the section for a flavor. A flavor that declares no tools gets the
+// neutral form: the lines that name no tool (check the size, never install). The section is
+// never dropped, because those two rules hold on any image.
+func workingWithData(f store.AgentFlavor) string {
+	d, _ := flavor.Lookup(f)
+	return workingWithDataFor(d.Tools, d.TruncatedOutputSaved)
+}
+
+func workingWithDataFor(tools []string, truncatedOutputSaved bool) string {
+	var b strings.Builder
+	b.WriteString("## Working with large data\n\n")
+	for _, l := range dataBullets {
+		if l.savesOutput && !truncatedOutputSaved {
+			continue
+		}
+		if slices.ContainsFunc(l.needs, func(t string) bool { return !slices.Contains(tools, t) }) {
+			continue
+		}
+		if l.render != nil {
+			b.WriteString(l.render(func(t string) bool { return slices.Contains(tools, t) }))
+			continue
+		}
+		b.WriteString(l.text)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// writeScript replaces the file in one rename, so a harness never reads a half-written file;
+// umask 077 keeps it and its directory private to the sandbox user. $1 is the directory, $2
+// the file; the content arrives on stdin.
+//
+// Whatever the agent put at $2 goes first, a directory or a link included: mv would move the
+// file into a directory, or through a link. writeInstructions reads the file back and checks
+// its hash, which catches a directory the agent recreates between rm and mv.
+const writeScript = `umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.AGENTS.md.XXXXXX") && cat > "$t" && ` +
+	`rm -rf -- "$2" && mv -f -- "$t" "$2"`
+
+// readScript prints the file if it is a regular file, not a link.
+const readScript = `test -f "$1" && test ! -L "$1" && exec cat "$1"`
+
+// linkScript makes $1 a symbolic link to $2. It exits 0 when it already is, and 3 when it
+// replaced what was there, printing the old link's target (nothing if $1 was no link). It
+// removes whatever is at $1 first, and checks the new link before it reports the restore: ln
+// would put the link inside a directory recreated meanwhile.
+const linkScript = `t=$(readlink -- "$1") && [ "$t" = "$2" ] && exit 0; ` +
+	`mkdir -p -- "$(dirname -- "$1")" && rm -rf -- "$1" && ln -s -- "$2" "$1" && ` +
+	`[ "$(readlink -- "$1")" = "$2" ] && printf '%s' "$t" && exit 3`
+
+// repository is a repository the agent is granted on its code host.
+type repository struct {
+	// Name is owner/name, as the grant's target names it.
+	Name string
+	// Connector is the connector type ID of the code host (github, gitea).
+	Connector string
+	// Provider is the code host's display name.
+	Provider string
+	// Host is the host (and port, when not 443) git talks to.
+	Host string
+	// CloneURL is the HTTPS URL to clone from: the connection's base URL plus the name.
+	CloneURL string
+}
+
+// repositories lists the repositories of the agent's code-host grant with their clone URLs. Which
+// host they live on is the connection's (ADR 0062), so the list is the same for GitHub, GitHub
+// Enterprise Server and Gitea. An agent without a code-host binding has none.
+func (r *runner) repositories(ctx context.Context) ([]repository, error) {
+	_, b, ok := providers.Default().Binding(r.vcfg)
+	if !ok || len(b.Targets) == 0 {
+		return nil, nil
+	}
+	h, err := r.codeHost(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if h.loc.Web.Host == "" {
+		return nil, nil
+	}
+	provider := h.connector
+	if t, found := providers.Default().Type(h.connector); found {
+		if c, err := codehost.CapabilitiesOf(t); err == nil && c.DisplayName != "" {
+			provider = c.DisplayName
+		}
+	}
+	out := make([]repository, 0, len(b.Targets))
+	for _, name := range b.Targets {
+		out = append(out, repository{
+			Name: name, Connector: h.connector, Provider: provider,
+			Host: h.loc.Web.Authority(), CloneURL: h.loc.BaseURL() + "/" + name,
+		})
+	}
+	return out, nil
+}
+
+// workspaceSection tells the agent where it may work. Koinon refuses a request for any other path
+// (permission.go), which costs the agent a turn, so the instructions say it up front.
+func workspaceSection(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	dir := strings.TrimSuffix(cwd, "/")
+	return "## Your workspace\n\n" +
+		"Your session directory is `" + dir + "`. You can read and change files only under it; " +
+		"Koinon refuses a request for any other path (your home directory included). " +
+		"Keep notes and scratch files under `" + dir + "/notes/`, not in `~`.\n\n"
+}
+
+// webSection tells an agent without web egress how it reaches the web. The harness's built-in web
+// fetch is not offered to it (flavor.Descriptor.NoWebToolsArg, ADR 0080), and curl fails the same
+// way, so the instructions send it to the org's MCP tools, which run outside the sandbox.
+func webSection(webEgress bool) string {
+	if webEgress {
+		return ""
+	}
+	return "## Web access\n\n" +
+		"The sandbox cannot reach the web, so there is no built-in web fetch or web search, and `curl` " +
+		"and `git` reach only the hosts of your repositories, if you have any. Web access goes through the " +
+		"organization's MCP tools: use the ones your tool list offers for searching and reading " +
+		"pages. If none is offered, say that you cannot reach the web instead of trying other routes.\n\n"
+}
+
+// repositoriesSection lists the repositories the agent has access to and where to clone them
+// from. A task names a repository as owner/name; without the host the agent guesses github.com.
+func repositoriesSection(repos []repository) string {
+	if len(repos) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Your repositories\n\n" +
+		"You have access to these repositories. A task names one as `owner/name`: clone it from the URL " +
+		"below, over HTTPS. Git already holds the credentials for the host, so do not ask for a token, " +
+		"and do not clone from any other host; it is not reachable.\n\n")
+	for _, r := range repos {
+		fmt.Fprintf(&b, "- `%s` on %s (connector `%s`, host `%s`): `git clone %s`\n", r.Name, r.Provider, r.Connector, r.Host, r.CloneURL)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// instructionsFile is the file's content for a version's instructions. It is never empty,
+// which the flavors' entry scripts require. cwd is the session directory, repos the agent's
+// granted repositories, f the flavor whose image runs the agent and webEgress whether it may reach arbitrary web hosts.
+func instructionsFile(f store.AgentFlavor, instructions, cwd string, repos []repository, webEgress bool) []byte {
+	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + webSection(webEgress) + workingWithData(f)
+	if instructions = strings.TrimSpace(instructions); instructions == "" {
+		return []byte(head + "The agent version has no instructions of its own.\n")
+	}
+	return []byte(head + instructions + "\n")
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// writeInstructions writes content to instructionsPath in the sandbox. Any failure fails the
+// run: a harness must not start on stale or missing instructions.
+func (r *runner) writeInstructions(ctx context.Context, workspace, sandbox string, content []byte) error {
+	_, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox,
+		[]string{"/bin/sh", "-c", writeScript, "sh", dirOf(instructionsPath), instructionsPath}, content)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return &failure{reason: fmt.Sprintf("write the instructions to %s: exit %d: %s", instructionsPath, code, strings.TrimSpace(stderr))}
+	}
+	// Only a regular file with this content counts as written.
+	got, code, _, err := r.sandboxExec(ctx, workspace, sandbox, []string{"/bin/sh", "-c", readScript, "sh", instructionsPath}, nil)
+	if err != nil {
+		return err
+	}
+	if code != 0 || sha256Hex(got) != sha256Hex(content) {
+		return &failure{reason: fmt.Sprintf("write the instructions to %s: the path does not hold the file agentd wrote", instructionsPath)}
+	}
+	return nil
+}
+
+// checkInstructions restores the instruction file if its hash is not content's or it is
+// gone, and the flavor's link to it if the link changed, and records each restore.
+func (r *runner) checkInstructions(ctx context.Context, workspace, sandbox string, flavor store.AgentFlavor, content []byte) error {
+	if err := r.checkInstructionFile(ctx, workspace, sandbox, content); err != nil {
+		return err
+	}
+	if link := instructionLink(flavor); link != "" {
+		return r.checkInstructionLink(ctx, workspace, sandbox, link, content)
+	}
+	return nil
+}
+
+func (r *runner) checkInstructionFile(ctx context.Context, workspace, sandbox string, content []byte) error {
+	got, code, _, err := r.sandboxExec(ctx, workspace, sandbox, []string{"/bin/sh", "-c", readScript, "sh", instructionsPath}, nil)
+	if err != nil {
+		return err
+	}
+	if code == 0 && sha256Hex(got) == sha256Hex(content) {
+		return nil
+	}
+	reason, found := "changed", ""
+	if code != 0 {
+		reason = "missing"
+	} else {
+		found = sha256Hex(got)
+	}
+	r.log.Warn("restoring the instruction file", "reason", reason)
+	if err := r.writeInstructions(ctx, workspace, sandbox, content); err != nil {
+		return err
+	}
+	payload := map[string]any{"path": instructionsPath, "reason": reason, "sha256": sha256Hex(content)}
+	if found != "" {
+		payload["foundSha256"] = found
+	}
+	return r.own.Record(ctx, "run.instructions_restored", payload)
+}
+
+// checkInstructionLink restores link, the flavor's path to the instruction file, if it is no
+// longer a symbolic link to it. A link that cannot be restored fails the run.
+func (r *runner) checkInstructionLink(ctx context.Context, workspace, sandbox, link string, content []byte) error {
+	found, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox,
+		[]string{"/bin/sh", "-c", linkScript, "sh", link, instructionsPath}, nil)
+	switch {
+	case err != nil:
+		return err
+	case code == 0:
+		return nil
+	case code != 3:
+		return &failure{reason: fmt.Sprintf("restore the instruction link %s: exit %d: %s", link, code, strings.TrimSpace(stderr))}
+	}
+	reason := "changed"
+	if len(found) == 0 {
+		reason = "missing"
+	}
+	r.log.Warn("restored the instruction link", "path", link, "reason", reason)
+	payload := map[string]any{"path": link, "reason": reason, "target": instructionsPath, "sha256": sha256Hex(content)}
+	if len(found) > 0 {
+		payload["foundTarget"] = string(found)
+	}
+	return r.own.Record(ctx, "run.instructions_restored", payload)
+}
+
+func dirOf(path string) string { return path[:strings.LastIndexByte(path, '/')] }

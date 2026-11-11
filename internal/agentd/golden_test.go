@@ -155,6 +155,20 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(some).NotTo(ContainSubstring("duckdb"))
 		Expect(some).NotTo(ContainSubstring("python3"))
 	})
+	It("a bullet that names an optional tool drops that part when the flavor lacks the tool", func() {
+		withoutFile := agentd.WorkingWithData("python3")
+		Expect(withoutFile).To(ContainSubstring("- Check size before reading: `wc -c FILE`, `ls -l`. Read in ranges"))
+		Expect(withoutFile).NotTo(ContainSubstring("file FILE"))
+		Expect(agentd.WorkingWithData("file")).To(ContainSubstring("`ls -l`, `file FILE`. Read"))
+
+		Expect(agentd.WorkingWithData("pdftotext")).NotTo(ContainSubstring("PDFs:"))
+		Expect(agentd.WorkingWithData("pdftotext", "pdfinfo")).To(ContainSubstring("PDFs: `pdfinfo FILE`"))
+
+		noAlias := agentd.WorkingWithData("python3")
+		Expect(noAlias).To(ContainSubstring("- `python3` has the standard library only"))
+		Expect(noAlias).NotTo(ContainSubstring("also `python`"))
+		Expect(agentd.WorkingWithData("python3", "python")).To(ContainSubstring("- `python3` (also `python`) has"))
+	})
 	It("the saved-output line needs the harness property, not only the tools", func() {
 		tools := []string{"rg", "jq", "duckdb"}
 		Expect(agentd.WorkingWithDataSaved(tools...)).To(ContainSubstring("full output saved to FILE"))

@@ -40,7 +40,7 @@ func TestOpenCodeDeclaresItsTools(t *testing.T) {
 	if !ok {
 		t.Fatal("no opencode flavor")
 	}
-	for _, tool := range []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "python3", "git"} {
+	for _, tool := range []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"} {
 		found := false
 		for _, have := range d.Tools {
 			found = found || have == tool

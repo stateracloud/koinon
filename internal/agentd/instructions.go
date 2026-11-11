@@ -40,10 +40,14 @@ const instructionsPreamble = "# Koinon\n\n" +
 // flavor's image ships every tool in needs (flavor.Descriptor.Tools); a line with no needs
 // holds for any flavor. A line with savesOutput is also shown only for a harness that saves a
 // cut tool result to a file (flavor.Descriptor.TruncatedOutputSaved).
+//
+// A text that names a tool the line does not require is built by render instead, which asks
+// whether the flavor ships that tool; text is then empty.
 type dataBullet struct {
 	needs       []string
 	savesOutput bool
 	text        string
+	render      func(has func(tool string) bool) string
 }
 
 // dataBullets is Koinon's guidance on how to read large inputs, with the tools the flavor image
@@ -56,25 +60,37 @@ type dataBullet struct {
 // harness with that behaviour (TruncatedOutputSaved) tells the agent to query the file rather
 // than run the command again.
 var dataBullets = []dataBullet{
-	{nil, false, "- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.\n"},
+	{nil, false, "", func(has func(string) bool) string {
+		cmds := "`wc -c FILE`, `ls -l`"
+		if has("file") {
+			cmds += ", `file FILE`"
+		}
+		return "- Check size before reading: " + cmds + ". Read in ranges, not whole files.\n"
+	}},
 	{[]string{"rg", "fd", "ast-grep"}, false, "- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
-		"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n"},
+		"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n", nil},
 	{[]string{"jq", "yq"}, false, "- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
-		"Select fields; do not `cat` a large file.\n"},
+		"Select fields; do not `cat` a large file.\n", nil},
 	{[]string{"duckdb"}, false, "- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
 		"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
-		"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n"},
-	{[]string{"sqlite3"}, false, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n"},
-	{[]string{"pdftotext"}, false, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
-		"PDF with the read tool.\n"},
-	{[]string{"git"}, false, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n"},
+		"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n", nil},
+	{[]string{"sqlite3"}, false, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n", nil},
+	{[]string{"pdftotext", "pdfinfo"}, false, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
+		"PDF with the read tool.\n", nil},
+	{[]string{"git"}, false, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n", nil},
 	{[]string{"rg", "jq", "duckdb"}, true, "- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
-		"`duckdb`; do not run the command again.\n"},
-	{[]string{"python3"}, false, "- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, " +
-		"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
-		"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n"},
+		"`duckdb`; do not run the command again.\n", nil},
+	{[]string{"python3"}, false, "", func(has func(string) bool) string {
+		name := "`python3`"
+		if has("python") {
+			name += " (also `python`)"
+		}
+		return "- " + name + " has the standard library only: json, csv, sqlite3, re, gzip, " +
+			"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
+			"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n"
+	}},
 	{nil, false, "- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
-		"Use what is installed, or say what is missing.\n"},
+		"Use what is installed, or say what is missing.\n", nil},
 }
 
 // workingWithData renders the section for a flavor. A flavor that declares no tools gets the
@@ -93,6 +109,10 @@ func workingWithDataFor(tools []string, truncatedOutputSaved bool) string {
 			continue
 		}
 		if slices.ContainsFunc(l.needs, func(t string) bool { return !slices.Contains(tools, t) }) {
+			continue
+		}
+		if l.render != nil {
+			b.WriteString(l.render(func(t string) bool { return slices.Contains(tools, t) }))
 			continue
 		}
 		b.WriteString(l.text)
