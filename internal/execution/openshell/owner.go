@@ -3,10 +3,12 @@
 package openshell
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/execution"
@@ -52,17 +54,36 @@ var UnmarkedKinds = []string{"sandbox", "provider", "profile"}
 
 // CountUnmarked counts, from the gateway and not from what a reconcile pass touched, the sandboxes,
 // providers and provider profiles in this install's workspaces that carry no install mark (issue 461).
-// This install's workspaces are the ones named like [execution.WorkspaceName] whose mark is empty
-// or its own; a workspace marked by another install is left out, and so are the objects in it.
-// Inside them an object with another install's mark is not counted either: it is not this install's
-// to claim. Sandboxes and providers come from one all-workspaces list each, filtered to those
-// workspaces by their metadata; profiles are listed per workspace (the API has no all-workspaces
-// selector for them) and only the workspace's own custom profiles count: the platform and built-in
-// profiles a workspace listing also returns carry no mark and are not Koinon's. Every list runs to the
-// last page. Any failed list returns an error and no counts, so a caller never publishes a partial
+// It is the length, by kind, of what [Backend.ListUnmarked] returns, so the gauge and the list command
+// always agree. Any failed list returns an error and no counts, so a caller never publishes a partial
 // number. Without an owner nothing is stamped, and it returns an error.
 func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
-	const op = "CountUnmarked"
+	objs, err := b.ListUnmarked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]int{}
+	for _, k := range UnmarkedKinds {
+		counts[k] = 0
+	}
+	for _, o := range objs {
+		counts[o.Kind]++
+	}
+	return counts, nil
+}
+
+// ListUnmarked lists, from the gateway, the sandboxes, providers and provider profiles in this
+// install's workspaces that carry no install mark (issue 511). This install's workspaces are the ones
+// named like [execution.WorkspaceName] whose mark is empty or its own; a workspace marked by another
+// install is left out, and so are the objects in it. Inside them an object with another install's mark
+// is not listed either: it is not this install's to claim. Sandboxes and providers come from one
+// all-workspaces list each, filtered to those workspaces by their metadata; profiles are listed per
+// workspace (the API has no all-workspaces selector for them) and only the workspace's own custom
+// profiles count: the platform and built-in profiles a workspace listing also returns carry no mark and
+// are not Koinon's. Every list runs to the last page. Any failed list returns an error and no objects.
+// The result is sorted by workspace, kind and name. It only reads. Without an owner it returns an error.
+func (b *Backend) ListUnmarked(ctx context.Context) ([]execution.UnmarkedObject, error) {
+	const op = "ListUnmarked"
 	if b.owner == "" {
 		return nil, &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: errors.New("no install mark is set")}
 	}
@@ -88,10 +109,7 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 		}
 	}
 
-	counts := map[string]int{}
-	for _, k := range UnmarkedKinds {
-		counts[k] = 0
-	}
+	var out []execution.UnmarkedObject
 	all := &datamodelv1.WorkspaceSelector{Selection: &datamodelv1.WorkspaceSelector_AllWorkspaces{AllWorkspaces: &datamodelv1.AllWorkspaces{}}}
 	for {
 		resp, err := b.c.ListSandboxes(ctx, &openshellv1.ListSandboxesRequest{WorkspaceScope: all, PageSize: 1000, PageToken: token})
@@ -100,7 +118,9 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 		}
 		for _, s := range resp.GetSandboxes() {
 			if workspaces[s.GetMetadata().GetWorkspace()] && unmarked(s.GetMetadata().GetLabels()) {
-				counts["sandbox"]++
+				out = append(out, execution.UnmarkedObject{
+					Workspace: s.GetMetadata().GetWorkspace(), Kind: "sandbox", Name: s.GetMetadata().GetName(), Labels: s.GetMetadata().GetLabels(),
+				})
 			}
 		}
 		if token = resp.GetNextPageToken(); token == "" {
@@ -114,7 +134,9 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 		}
 		for _, p := range resp.GetProviders() {
 			if workspaces[p.GetMetadata().GetWorkspace()] && unmarked(p.GetMetadata().GetLabels()) {
-				counts["provider"]++
+				out = append(out, execution.UnmarkedObject{
+					Workspace: p.GetMetadata().GetWorkspace(), Kind: "provider", Name: p.GetMetadata().GetName(), Labels: p.GetMetadata().GetLabels(),
+				})
 			}
 		}
 		if token = resp.GetNextPageToken(); token == "" {
@@ -129,7 +151,9 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 			}
 			for _, p := range resp.GetProfiles() {
 				if p.GetScope() == "workspace" && p.GetSource() != "builtin" && unmarked(p.GetAnnotations()) {
-					counts["profile"]++
+					out = append(out, execution.UnmarkedObject{
+						Workspace: ws, Kind: "profile", Name: p.GetId(), Labels: p.GetAnnotations(),
+					})
 				}
 			}
 			if token = resp.GetNextPageToken(); token == "" {
@@ -137,7 +161,40 @@ func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {
 			}
 		}
 	}
-	return counts, nil
+	slices.SortFunc(out, func(a, c execution.UnmarkedObject) int {
+		return cmp.Or(strings.Compare(a.Workspace, c.Workspace), strings.Compare(a.Kind, c.Kind), strings.Compare(a.Name, c.Name))
+	})
+	return out, nil
+}
+
+// ClaimProviderProfile marks a workspace profile that exists without an install mark (issue 511): it
+// imports the profile again as p, which stamps the mark (the owner is part of the profile's spec
+// hash). A missing profile is not created (false, nil), and a profile that carries a mark is left as
+// it is: the active agents of its flavor keep it current through [Backend.EnsureProvider]. A profile
+// marked by another install fails with [execution.ErrForeign]. It reports whether it claimed one.
+func (b *Backend) ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error) {
+	const op = "ClaimProviderProfile"
+	if b.owner == "" {
+		return false, nil
+	}
+	got, err := b.c.GetProviderProfile(ctx, &openshellv1.GetProviderProfileRequest{WorkspaceScope: scope(workspace), Id: p.ID})
+	if err != nil {
+		if errors.Is(wrap(op, err), execution.ErrNotFound) {
+			return false, nil
+		}
+		return false, wrap(op, err)
+	}
+	labels := got.GetProfile().GetAnnotations()
+	if err := b.check(op, "provider profile", p.ID, labels); err != nil {
+		return false, err
+	}
+	if !b.unlabeled(labels) {
+		return false, nil
+	}
+	if err := b.ensureProfile(ctx, workspace, p); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // stamp returns labels with the owner label added.

@@ -5,6 +5,7 @@ package koinonreconciler
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,11 +28,16 @@ func NewRootCommand() *cobra.Command { return newRootCommand(serve) }
 // newRootCommand builds the tree with run as the work of serve, so a test can read the settings
 // the command resolved.
 func newRootCommand(run func(context.Context, config) error) *cobra.Command {
+	return newRootCommandWith(run, listUnmarked)
+}
+
+// newRootCommandWith also takes the work of "unmarked list".
+func newRootCommandWith(run func(context.Context, config) error, list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "koinon-reconciler",
 		Short: "Koinon's reconciler",
 		Long: "koinon-reconciler renders agents into OpenShell sandboxes, provider records and agentgateway keys (serve, " +
-			"also what runs without a subcommand).\n\n" +
+			"also what runs without a subcommand). unmarked lists the OpenShell objects that carry no install mark.\n\n" +
 			"Settings come from the chart's config file (--config, KOINON_CONFIG) and can be overridden by flags; every flag " +
 			"can also be set by an environment variable: KOINON_ plus the flag name in upper case with dashes as underscores " +
 			"(--idle-timeout is KOINON_IDLE_TIMEOUT). Secrets are never flags: the database password comes from PGPASSWORD, " +
@@ -42,6 +48,7 @@ func newRootCommand(run func(context.Context, config) error) *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(v, run))
+	root.AddCommand(newUnmarkedCommand(list))
 	return root
 }
 

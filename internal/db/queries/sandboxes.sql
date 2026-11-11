@@ -12,6 +12,24 @@ SELECT id, slug FROM orgs
 WHERE deleted_at IS NULL
 ORDER BY id;
 
+-- name: ListOrgWorkspacesForUnmarked :many
+-- The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
+-- unmarked list command (issue 511). An org that is deleted counts as not in the database: the
+-- reconciler does not walk it.
+SELECT o.id AS org_id, w.workspace
+FROM orgs o
+LEFT JOIN org_workspaces w ON w.org_id = o.id
+WHERE o.deleted_at IS NULL
+ORDER BY o.id;
+
+-- name: ListAgentsForUnmarked :many
+-- Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511).
+SELECT a.org_id, a.id, a.status, a.flavor
+FROM agents a
+JOIN orgs o ON o.id = a.org_id
+WHERE o.deleted_at IS NULL
+ORDER BY a.org_id, a.id;
+
 -- name: GetOrgWorkspace :one
 SELECT * FROM org_workspaces
 WHERE org_id = @org_id;

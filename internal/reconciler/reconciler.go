@@ -208,6 +208,10 @@ type Reconciler struct {
 	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
+	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
+	// record again.
+	draftGitHubDropped map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -312,7 +316,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
-		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
+		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
 		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
@@ -900,17 +904,31 @@ func recordedKey(org store.ListOrgsToReconcileRow, sb store.AgentSandbox) (gatew
 	return gateway.Key{ID: sb.GatewayKeyID.String, Agent: agentRef(org, sb.AgentID), Hash: sb.GatewayKeyHash.String}, true
 }
 
+// recordedMaterial returns the agent's recorded key and its material when the key Secret holds
+// that key (same ID, same hash); ok is false when there is no recorded key or the Secret does not
+// match it.
+func (r *Reconciler) recordedMaterial(ctx context.Context, w *work) (gateway.Key, string, bool, error) {
+	sec, found, err := r.secrets.Get(ctx, w.sb.KeySecretName)
+	if err != nil {
+		return gateway.Key{}, "", false, err
+	}
+	if recorded, ok := recordedKey(w.org, w.sb); ok && found &&
+		sec.KeyID == recorded.ID && gateway.HashKey(sec.Material) == recorded.Hash {
+		return recorded, sec.Material, true, nil
+	}
+	return gateway.Key{}, "", false, nil
+}
+
 // ensureKey returns the agent's key and its material from the key Secret, issuing a new key
 // when there is none or the Secret no longer matches the recorded hash (a hand edit or a
 // deleted Secret: the old material is gone, so the key is rotated).
 func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, string, error) {
-	sec, found, err := r.secrets.Get(ctx, w.sb.KeySecretName)
+	recorded, material, ok, err := r.recordedMaterial(ctx, w)
 	if err != nil {
 		return gateway.Key{}, "", err
 	}
-	if recorded, ok := recordedKey(w.org, w.sb); ok && found &&
-		sec.KeyID == recorded.ID && gateway.HashKey(sec.Material) == recorded.Hash {
-		return recorded, sec.Material, nil
+	if ok {
+		return recorded, material, nil
 	}
 	reason := "no key yet"
 	if w.sb.GatewayKeyID.Valid {
@@ -1308,10 +1326,14 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 }
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
-// for its re-activation. Runs cannot be queued for a draft agent.
+// for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
+// provider and flavor profile for this install (claimDraft), which no other path does for a draft.
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
 	if errors.Is(err, execution.ErrNotFound) {
+		if err := r.claimDraft(ctx, w, true); err != nil {
+			return err
+		}
 		return r.recordState(ctx, w, store.SandboxStatePending, "", "")
 	}
 	if err != nil {
@@ -1323,7 +1345,67 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
 	}
+	if err := r.claimDraft(ctx, w, false); err != nil {
+		return err
+	}
 	return r.record(ctx, w, sb, w.sb.SpecHash, "")
+}
+
+// claimDraft marks a draft agent's objects with the install mark (issue 511, ADR 0106 decision 5).
+// Only reconcileActive claimed them before, so the objects of an agent that went back to draft stayed
+// unmarked for good and the unmarked gauge never reached 0.
+//
+// The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
+// re-activation; without a Secret that still matches it nothing is touched and no key is issued).
+// The ensure imports the flavor profile with the mark. The provider record itself is recreated with
+// the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
+// OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
+// claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
+// provider and profile are dropped: the agent has no use for them until it is active, and
+// reconcileActive makes them again, marked, before it creates a sandbox.
+func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) error {
+	if !r.owns() || w.key.ID == "" {
+		return nil
+	}
+	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
+	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+		return nil
+	}
+	_, material, ok, err := r.recordedMaterial(ctx, w)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		r.log.Debug("not claiming the objects of a draft agent: its key Secret does not match the recorded key", w.logAttrs()...)
+		return nil
+	}
+	ws, names := w.sb.Workspace, w.names()
+	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
+		Name:               names.Provider,
+		Profile:            r.profile(w.agent.Flavor, flavor),
+		Credentials:        map[string]string{keyEnvVar: material},
+		CredentialRevision: w.key.ID,
+		Labels:             ownerLabels(w.org.ID, w.agent.ID),
+		ClaimLegacy:        noSandbox,
+	}); err != nil {
+		return err
+	}
+	if !noSandbox {
+		return nil
+	}
+	r.mu.Lock()
+	done := r.draftGitHubDropped[names.GitHubProvider]
+	r.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := r.deleteGitHub(ctx, ws, names); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.draftGitHubDropped[names.GitHubProvider] = true
+	r.mu.Unlock()
+	return nil
 }
 
 // reconcileArchived deletes the agent's sandbox (or, with RetentionRetain, stops it), then its
@@ -1369,6 +1451,9 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	if err := r.deleteGitHub(ctx, ws, w.names()); err != nil {
 		return err
 	}
+	if err := r.claimFlavorProfile(ctx, w, ws); err != nil {
+		return err
+	}
 	if err := r.secrets.Delete(ctx, w.sb.KeySecretName); err != nil {
 		return err
 	}
@@ -1381,6 +1466,38 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		phase = string(execution.PhaseStopped)
 	}
 	return r.recordState(ctx, w, final, phase, "")
+}
+
+// profileClaimer is implemented by a backend that marks an existing provider profile
+// (the OpenShell backend with an owner).
+type profileClaimer interface {
+	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
+}
+
+// claimFlavorProfile marks the flavor profile (koinon-agentgateway-<flavor>) of an archived agent
+// instead of deleting it (issue 511). The profile belongs to the workspace and the flavor, not to the
+// agent: every agent of the flavor in the org uses it, and a profile in use cannot go. The cleanup of
+// an archived agent also runs once, because the agent leaves the reconcile list when it ends, so this
+// is the last chance to mark a profile that no active agent of the flavor re-imports. An archived
+// agent keeps its data, so nothing of it is deleted that another agent or an un-archive needs; the
+// mark only says the profile is this install's. A missing profile is not created.
+func (r *Reconciler) claimFlavorProfile(ctx context.Context, w *work, ws string) error {
+	c, ok := r.backend.(profileClaimer)
+	if !ok || !r.owns() {
+		return nil
+	}
+	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
+	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+		return nil
+	}
+	claimed, err := c.ClaimProviderProfile(ctx, ws, r.profile(w.agent.Flavor, flavor))
+	if err != nil {
+		return err
+	}
+	if claimed {
+		r.log.Info("marked the flavor profile of an archived agent", append(w.logAttrs(), "flavor", string(w.agent.Flavor))...)
+	}
+	return nil
 }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell

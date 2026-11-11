@@ -696,6 +696,8 @@ type Querier interface {
 	// Agents that are not archived and whose active or latest version binds the connection
 	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
 	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
+	// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511).
+	ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
@@ -871,6 +873,10 @@ type Querier interface {
 	ListOrgIDsWithRunWork(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
+	// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
+	// unmarked list command (issue 511). An org that is deleted counts as not in the database: the
+	// reconciler does not walk it.
+	ListOrgWorkspacesForUnmarked(ctx context.Context) ([]ListOrgWorkspacesForUnmarkedRow, error)
 	// Orgs whose default model migration 00045 left for BackfillDefaults.
 	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0

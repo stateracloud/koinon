@@ -32,7 +32,11 @@ var _ = Describe("Reconciler install ownership", func() {
 		user pgtype.UUID
 		ws   string
 		mk   func(owner string, maxRecreates int) *reconciler.Reconciler
+		bk   func(owner string) *openshell.Backend
 		m    *reconciler.Metrics
+		// secrets are shared by the reconcilers of one spec, as the real ones share the cluster's Secrets:
+		// a reconciler of the same install made after another one finds the first one's agent keys.
+		secrets *fake.Clientset
 	)
 	sandboxOf := func(agent store.Agent) string { return execution.AgentSandboxName(org.Bytes, agent.ID.Bytes) }
 	sandboxProviderName := func(agent store.Agent) string {
@@ -52,6 +56,7 @@ var _ = Describe("Reconciler install ownership", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
+		secrets = fake.NewClientset()
 		osg = fakegateway.New()
 		cc, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -60,12 +65,16 @@ var _ = Describe("Reconciler install ownership", func() {
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		m = reconciler.NewMetrics(nil)
-		mk = func(owner string, maxRecreates int) *reconciler.Reconciler {
+		bk = func(owner string) *openshell.Backend {
 			b := openshell.New(cc)
 			if owner != "" {
 				b = b.WithOwner(execution.OwnerID(owner))
 			}
-			r, err := reconciler.New(pool, b, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			return b
+		}
+		mk = func(owner string, maxRecreates int) *reconciler.Reconciler {
+			b := bk(owner)
+			r, err := reconciler.New(pool, b, &fakeModelGateway{}, reconciler.KubeSecrets{Client: secrets, Namespace: namespace}, reconciler.Config{
 				Prices:         prices.NewResolver(pricing.Embedded()),
 				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 				Keys:           ring,
@@ -190,6 +199,189 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(1), "one recreate in a pass")
 			msgs := []string{row(ctx, agent).Message, row(ctx, second).Message}
 			Expect(msgs).To(ContainElement(ContainSubstring("waiting for a free recreate slot")))
+		})
+	})
+
+	// The objects of draft and archived agents, and what lists the rest (issue 511).
+	Describe("the unmarked list and the claim of draft and archived agents", func() {
+		type line struct{ Kind, Name, Reason string }
+		list := func(ctx context.Context) []line {
+			GinkgoHelper()
+			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"))
+			Expect(err).NotTo(HaveOccurred())
+			var out []line
+			for _, o := range objs {
+				if o.Workspace == ws {
+					out = append(out, line{o.Kind, o.Name, o.Reason})
+				}
+			}
+			return out
+		}
+		gauge := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind)) }
+		profileID := "koinon-agentgateway-opencode"
+
+		It("gives every unmarked object its reason, and lists nothing of another install", func(ctx SpecContext) {
+			active, draft, archived := newAgent(ctx, org, user), newAgent(ctx, org, user), newAgent(ctx, org, user)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // made before the install mark
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: draft.ID})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: archived.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // stops the draft's sandbox, cleans up the archived agent
+
+			// A sandbox nobody labeled, in a workspace of this database.
+			_, err = bk("").CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "ka-handmade", Image: image})
+			Expect(err).NotTo(HaveOccurred())
+			// Objects of a workspace no org owns.
+			orphanWS := execution.WorkspaceName([16]byte{9, 9, 9})
+			_, err = bk("").EnsureWorkspace(ctx, orphanWS, nil)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = bk("").CreateSandbox(ctx, orphanWS, execution.SandboxSpec{Name: "ka-orphan", Image: image})
+			Expect(err).NotTo(HaveOccurred())
+			// Another install's object in this database's workspace.
+			theirs := reconciler.GatewayProfile(store.AgentFlavorOpencode, reconciler.Flavor{Binaries: []string{"/bin/x"}}, reconciler.Endpoint{Host: "h", Port: 1}, false)
+			theirs.ID = "koinon-theirs"
+			Expect(bk("mark-other").EnsureProvider(ctx, ws, execution.Provider{
+				Name: "kp-theirs", Profile: theirs,
+				Credentials: map[string]string{reconciler.GatewayKeyEnvVar: "koinon_test_not-a-real-token"},
+			})).To(Succeed())
+
+			names := func(a store.Agent) execution.AgentNames { return execution.AgentObjectNames(org.Bytes, a.ID.Bytes) }
+			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"))
+			Expect(err).NotTo(HaveOccurred())
+			got := map[string]string{}
+			for _, o := range objs {
+				got[o.Workspace+"/"+o.Kind+"/"+o.Name] = o.Reason
+			}
+			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(active).Sandbox, reconciler.ReasonPendingClaim))
+			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(active).Provider, reconciler.ReasonPendingClaim))
+			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(draft).Sandbox, reconciler.ReasonDraftAgent))
+			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(draft).Provider, reconciler.ReasonDraftAgent))
+			Expect(got).To(HaveKeyWithValue(ws+"/profile/"+profileID, reconciler.ReasonPendingClaim), "an active agent of the flavor imports it")
+			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/ka-handmade", reconciler.ReasonNotReconcilerMade))
+			Expect(got).To(HaveKeyWithValue(orphanWS+"/sandbox/ka-orphan", reconciler.ReasonOrgNotInDB))
+			Expect(got).NotTo(HaveKey(ws + "/provider/kp-theirs"))
+			Expect(got).NotTo(HaveKey(ws + "/profile/koinon-theirs"))
+			for k, reason := range got {
+				Expect(reconciler.UnmarkedReasons).To(ContainElement(reason), k)
+			}
+			Expect(got).NotTo(HaveKey(ContainSubstring(names(archived).Provider)), "the archived agent's objects are gone")
+
+			By("listing only reads")
+			creates, deletes := osg.Calls("CreateProvider")+osg.Calls("CreateSandbox"), osg.Calls("DeleteProvider")+osg.Calls("DeleteSandbox")
+			_ = list(ctx)
+			Expect(osg.Calls("CreateProvider") + osg.Calls("CreateSandbox")).To(Equal(creates))
+			Expect(osg.Calls("DeleteProvider") + osg.Calls("DeleteSandbox")).To(Equal(deletes))
+			_, err = reconciler.ListUnmarked(ctx, q, bk(""))
+			Expect(err).To(HaveOccurred(), "without an install mark nothing is safe to say")
+		})
+
+		It("claims the provider and profile of a draft agent with no sandbox", func(ctx SpecContext) {
+			agent := newOnDemandAgent(ctx, org, user, `{"instructions":"help"}`)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // provider and profile, no sandbox (on demand)
+			Expect(osg.Sandbox(ws, names.Sandbox)).To(BeNil())
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list(ctx)).To(ConsistOf(line{"profile", profileID, reconciler.ReasonDraftAgent}, line{"provider", names.Provider, reconciler.ReasonDraftAgent}))
+			keyBefore := row(ctx, agent).GatewayKeyID
+
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(list(ctx)).To(BeEmpty())
+			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
+			Expect(osg.Profile(ws, profileID).GetAnnotations()).To(HaveKey(execution.LabelInstall))
+			Expect(row(ctx, agent).GatewayKeyID).To(Equal(keyBefore), "the key survives for re-activation, none was issued")
+
+			By("the gauge reaches 0 and stays there")
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(gauge(kind)).To(BeZero(), kind)
+			}
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
+			id := osg.Provider(ws, names.Provider).GetMetadata().GetId()
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetId()).To(Equal(id), "a marked provider is not recreated")
+		})
+
+		It("marks the profile of a draft agent whose stopped sandbox still attaches the provider, and the provider on re-activation", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			live := mk("mark-live", 0)
+			deletes := osg.Calls("DeleteProvider")
+			Expect(live.ReconcileAll(ctx)).To(Succeed()) // stops the sandbox
+			Expect(osg.Sandbox(ws, names.Sandbox)).NotTo(BeNil())
+			Expect(osg.Calls("DeleteProvider")).To(Equal(deletes), "an attached provider is not deleted")
+			Expect(list(ctx)).To(ConsistOf(line{"sandbox", names.Sandbox, reconciler.ReasonDraftAgent}, line{"provider", names.Provider, reconciler.ReasonDraftAgent}))
+
+			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
+			Expect(err).NotTo(HaveOccurred())
+			for range 3 {
+				Expect(live.ReconcileAll(ctx)).To(Succeed())
+			}
+			Expect(list(ctx)).To(BeEmpty())
+		})
+
+		It("marks the flavor profile of an archived agent and does not delete it", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list(ctx)).To(ContainElement(line{"profile", profileID, reconciler.ReasonArchivedAgent}))
+
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(osg.Provider(ws, names.Provider)).To(BeNil(), "the archive deletes the agent's provider")
+			Expect(osg.Profile(ws, profileID)).NotTo(BeNil(), "the shared flavor profile stays")
+			Expect(osg.Profile(ws, profileID).GetAnnotations()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
+			Expect(list(ctx)).To(BeEmpty())
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(gauge("profile")).To(BeZero())
+			Expect(gauge("provider")).To(BeZero())
+			Expect(gauge("sandbox")).To(BeZero())
+		})
+
+		It("keeps the flavor profile of an archived agent for an active agent of the same flavor", func(ctx SpecContext) {
+			keep, gone := newAgent(ctx, org, user), newAgent(ctx, org, user)
+			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
+			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: gone.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mk("mark-live", 0).ReconcileAll(ctx)).To(Succeed())
+			Expect(osg.Profile(ws, profileID)).NotTo(BeNil())
+			Expect(osg.Provider(ws, execution.AgentObjectNames(org.Bytes, keep.ID.Bytes).Provider)).NotTo(BeNil())
+		})
+
+		It("does not create a profile for an archived agent when there is none", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			Expect(mk("mark-live", 0).ReconcileAll(ctx)).To(Succeed())
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			Expect(bk("mark-live").DeleteSandbox(ctx, ws, names.Sandbox)).To(Succeed())
+			Expect(bk("mark-live").DeleteProvider(ctx, ws, names.Provider)).To(Succeed())
+			Expect(bk("mark-live").DeleteProviderProfile(ctx, ws, profileID)).To(Succeed())
+			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mk("mark-live", 0).ReconcileAll(ctx)).To(Succeed())
+			Expect(osg.Profile(ws, profileID)).To(BeNil())
+		})
+
+		It("reaches 0 on an install with no orphans", func(ctx SpecContext) {
+			Expect(newAgent(ctx, org, user).ID.Valid).To(BeTrue())
+			live := mk("mark-live", 0)
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(live.ReconcileAll(ctx)).To(Succeed())
+			Expect(list(ctx)).To(BeEmpty())
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(gauge(kind)).To(BeZero(), kind)
+			}
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
 		})
 	})
 })

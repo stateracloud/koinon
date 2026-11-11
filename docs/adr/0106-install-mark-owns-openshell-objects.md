@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-10
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0051](0051-session-home-generations.md), [0045](0045-openshell-hardening-defaults.md), [0046](0046-adr-conventions.md)
-- Issues: #461, #275 (the restore drill)
+- Issues: #461, #275 (the restore drill), #511 (the unmarked list)
 
 ## Context
 
@@ -86,6 +86,50 @@ name. Velero's restore marks restored objects the same way.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
   too. If OpenShell allows it, the claim order stays correct and the assumption only costs a clearer error.
+
+## Amendment (issue 511): draft and archived agents, and the unmarked list
+
+On the lab install the gauge stayed flat at profile=28, provider=62, sandbox=1 and nothing said what the
+objects were. Decision 5's claim ran only for active agents, so three groups were never claimed:
+
+- **Draft agents.** `reconcileDraft` now claims the agent's gateway-key provider and flavor profile. The
+  provider is ensured with the key the agent kept (a draft agent keeps its key for a quick re-activation;
+  if the key Secret no longer matches the recorded key nothing is touched and no key is issued), which
+  imports the flavor profile with the mark. The provider record itself is recreated with the mark only
+  when no sandbox attaches it (the stopped sandbox of a draft agent keeps it attached, and decision 5's
+  rule about attached providers holds); that record is claimed when the agent is active again. With no
+  sandbox the agent's GitHub provider and profile are dropped, because `reconcileActive` makes them again,
+  marked, before it creates a sandbox.
+- **Archived agents: the flavor profile is marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
+  the workspace and the flavor, not to the agent: every agent of that flavor in the org shares it, and
+  OpenShell refuses to delete a profile a provider uses. An archived agent also leaves the reconcile list
+  once its cleanup ends, so the cleanup (`reconcileArchived`) is the last chance to mark a profile that no
+  active agent of the flavor re-imports. The mark is the whole claim: archiving keeps the org's data and
+  must not remove what a sibling agent or an un-archive needs. A profile that does not exist is not
+  created. A retained sandbox of an archived agent is still claimed only when it is recreated (see the
+  consequences above).
+- **Workspaces of orgs that are not in this database, objects the reconciler did not make.** Nothing
+  claims these, by design: they are not this install's to change. They are reported instead.
+
+`koinon-reconciler unmarked list [--json]` lists the unmarked objects, one per line: workspace, kind, name
+and reason. It reads the same gateway lists as the gauge (the gauge is the length of the list, by kind)
+and only reads. An object that carries another install's mark is never listed. The reasons are fixed:
+
+| Reason | Meaning |
+|--------|---------|
+| `pending-claim` | An active agent's object. Its next reconcile claims it. |
+| `draft-agent` | A draft agent's object. Claimed as above. |
+| `archived-agent` | An archived agent's object, or a flavor profile only archived agents use. |
+| `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing claims it. |
+| `not-reconciler-made` | Not made by the reconciler, or this database has no record of it. Nothing claims it. |
+
+An operator reads the gauge as before; a kind above 0 with only `pending-claim`, `draft-agent` and
+`archived-agent` lines is still being claimed, and `org-not-in-db` or `not-reconciler-made` lines are what
+stops it reaching 0. The command runs in the reconciler pod (`kubectl exec deploy/<release>-reconciler --
+koinon-reconciler unmarked list`) and needs the settings the Deployment already gives it: the database URL,
+the OpenShell address and TLS directory, and the install mark. Removing the orphans (`--delete-orphans`) and
+a gauge labeled by reason (ADR 0023 would fix the label values above) are not built; the operator deletes
+an orphan on the gateway by hand until they are.
 
 ## Links
 
