@@ -160,11 +160,10 @@ Source: Koinon decision (no official text found). Scope: Koinon only. In force: 
 **T1. MUST NOT** retry a failed test automatically: no ginkgo flake attempts, no retry action, no Playwright
 `retries` above 0.
 Why: a retry turns a real intermittent defect into a green run, and the retry rate becomes the only number.
-Check: `hack/ci-rules-check.sh` (rule T1). The Playwright retry (`web/playwright.config.ts`) is reported now and removed with #579 part 2,
-when the report becomes a failure.
+Check: `hack/ci-rules-check.sh` (rule T1). A Playwright `retries` above 0 fails it with file and line.
 Source: [Kubernetes, flaky tests](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/flaky-tests.md)
 (test jobs must not retry automatically); [DORA, test automation](https://dora.dev/capabilities/test-automation/)
-(do not tolerate flaky tests). Maintainer decision 2026-11-11. Scope: general pattern. In force: now (Playwright: with #579 part 2).
+(do not tolerate flaky tests). Maintainer decision 2026-11-11. Scope: general pattern. In force: now.
 
 **T2. MUST** give a flaky test one issue, take it out of the merge checks, and give it an expiry date. A waiver
 past its date fails.

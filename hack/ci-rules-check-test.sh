@@ -172,8 +172,10 @@ case_ "T1: FlakeAttempts in Go code fails" 1 'rule=T1 verdict=fail' \
 	'mkdir -p "$r/internal/x"; printf "var _ = It(\"x\", FlakeAttempts(2), func() {})\n" >"$r/internal/x/x_test.go"'
 case_ "T1: a retry action in a workflow fails" 1 'rule=T1 verdict=fail' \
 	'printf "      - uses: nick-fields/retry@$sha\n" >>"$r/.github/workflows/ci.yml"'
-case_ "T1: Playwright retries above 0 is only reported" 0 'rule=T1 verdict=report' \
+case_ "T1: Playwright retries above 0 fails" 1 'rule=T1 verdict=fail' \
 	'printf "export default {\n  retries: process.env.CI ? 1 : 0,\n};\n" >"$r/web/playwright.config.ts"'
+case_ "T1: Playwright retries 0 passes" 0 'rule=T1 verdict=pass' \
+	'printf "export default {\n  retries: 0,\n};\n" >"$r/web/playwright.config.ts"'
 case_ "T1: the word in docs is ignored" 0 'rule=T1 verdict=pass' \
 	'mkdir -p "$r/docs"; printf "no flake-attempts please\n" >"$r/docs/x.md"'
 

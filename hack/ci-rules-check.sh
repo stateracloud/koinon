@@ -15,8 +15,7 @@
 #       `paths:` or `paths-ignore:` filter under `on:`. The job-level `if:` form is fine.
 #   Q6  a workflow that defines a required check never cancels runs of a queue or main build: a literal
 #       `cancel-in-progress: true` fails; an expression must name `pull_request`.
-#   T1  no automatic test retry: no ginkgo flake attempts, no retry action. Playwright `retries` above 0
-#       is only reported until part 2 of #579 removes it.
+#   T1  no automatic test retry: no ginkgo flake attempts, no retry action, no Playwright `retries` above 0.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
 #   T7  every job of ci.yml sets `timeout-minutes`. hack/runner-lint.sh is the check and this line says so;
 #       while it has no timeout rule, this script counts the jobs and reports.
@@ -234,16 +233,18 @@ else
 	for f in "$root"/web/playwright*.ts; do
 		[[ -f $f ]] || continue
 		while IFS= read -r line; do
+			ln=${line%%:*}
+			line=${line#*:}
 			val=${line#*retries:}
 			val=${val%%,*}
 			val=${val#"${val%%[![:space:]]*}"}
-			[[ $val == 0 ]] || pw+=("$(basename "$f") retries: $val")
-		done < <(grep -E '^[[:space:]]*retries:' "$f" || true)
+			[[ $val == 0 ]] || pw+=("web/$(basename "$f"):$ln retries: $val")
+		done < <(grep -n -E '^[[:space:]]*retries:' "$f" || true)
 	done
 	if [[ ${#pw[@]} -eq 0 ]]; then
 		verdict T1 pass "no automatic test retry"
 	else
-		verdict T1 report "Playwright retry still on, removed by part 2 of #579: ${pw[*]}"
+		verdict T1 fail "Playwright retries above 0 (rule T1, no automatic test retry): ${pw[*]}"
 	fi
 fi
 
