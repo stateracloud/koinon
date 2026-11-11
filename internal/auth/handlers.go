@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installbinding"
 )
 
 // Mount registers the login endpoints on mux:
@@ -117,6 +118,11 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		token, _, err = s.createSession(r.Context(), q, b, cred.UserID, store.AuthMethodPassword)
 		return err
 	})
+	if errors.Is(err, installbinding.ErrReleasePending) {
+		s.log.Warn("password login refused: the restore release step has not run")
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{installbinding.ErrReleasePending.Error()})
+		return
+	}
 	if err != nil {
 		s.log.Error("creating session failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{"internal error"})

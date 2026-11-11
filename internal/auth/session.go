@@ -177,6 +177,11 @@ func hashToken(token string) []byte {
 
 // createSession stores a new session for user and returns the cookie token.
 func (s *Service) createSession(ctx context.Context, q *store.Queries, b audit.Batch, userID pgtype.UUID, method store.AuthMethod) (string, store.Session, error) {
+	// While the restore release step has not run, the release would delete the new session, and the
+	// sessions of the dump are refused: no sign-in makes a session (ADR 0110 decision 1).
+	if s.cfg.Binding.SessionsHeld() {
+		return "", store.Session{}, installbinding.ErrReleasePending
+	}
 	token, hash, err := newToken()
 	if err != nil {
 		return "", store.Session{}, err
@@ -245,6 +250,11 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, e
 	}
 	now := s.now()
 	hash := hashToken(token)
+	// Until the restore release step has revoked the sessions of the dump, no session is served.
+	if s.cfg.Binding.SessionsHeld() {
+		s.cfg.Binding.Refused("session")
+		return nil, ErrUnauthenticated
+	}
 	cur, err := s.q.GetValidSession(ctx, store.GetValidSessionParams{Now: ts(now), TokenHash: hash})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated

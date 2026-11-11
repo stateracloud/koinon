@@ -10,6 +10,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -57,6 +60,38 @@ var _ = Describe("Build", func() {
 		restorestatus.Print(&out, r)
 		Expect(out.String()).To(ContainSubstring("binding:    copy"))
 		Expect(strings.Count(out.String(), "refused:")).To(Equal(1))
+
+		By("without a held record the dump time is unknown and every active token is listed")
+		Expect(r.DumpTokens.DumpTime).To(BeNil())
+		Expect(r.DumpTokens.Tokens).To(HaveLen(1))
+		Expect(r.DumpTokens.Tokens[0].Prefix).To(Equal("abcdefgh"))
+
+		By("a configured host that equals the source's recorded one is marked")
+		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{Configured: restorestatus.ConfiguredTargets{
+			PublicURL: "https://source.example", OIDCRedirectURL: "https://copy.example",
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Hosts).To(ConsistOf(
+			restorestatus.HostTarget{Name: "public-url", Value: "https://source.example", EqualsSource: true},
+			restorestatus.HostTarget{Name: "oidc-redirect-url", Value: "https://copy.example"},
+		))
+
+		By("with held_since the dump time is the newest event before it; a token made after it is left out")
+		_, err = audit.InPgTx(ctx, pool, func(_ pgx.Tx, ab audit.Batch) error {
+			ab.Install(audit.InstallEvent{Actor: audit.System("test"), Action: "test.marker", TargetKind: "install", TargetID: "install_binding"})
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE install_binding SET held_since = now() + interval '1 minute'`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO api_tokens (org_id, name, prefix, token_hash, role, created_by, created_at, expires_at)
+			VALUES ($1, 'later', 'ijklmnop', sha256('u'), 'admin', $2, now() + interval '2 minutes', now() + interval '1 day')`, org, user)
+		Expect(err).NotTo(HaveOccurred())
+		r, err = restorestatus.Build(ctx, pool, "own-mark-hash")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.DumpTokens.DumpTime).NotTo(BeNil())
+		Expect(r.DumpTokens.Tokens).To(HaveLen(1), "the token made after the dump time is left out")
+		Expect(r.DumpTokens.Tokens[0].Prefix).To(Equal("abcdefgh"))
 
 		By("without a mark the state is unknown and nothing is counted")
 		r, err = restorestatus.Build(ctx, pool, "")

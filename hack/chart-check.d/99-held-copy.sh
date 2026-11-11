@@ -58,3 +58,10 @@ if render --set restoreHold=true --show-only templates/restore-release-check.yam
 n_acc=$(held_notes --set restore.acceptImporterDeletions=true)
 grep -q 'restore.acceptImporterDeletions is set' <<<"$n_acc" || fail "NOTES do not warn that restore.acceptImporterDeletions is set"
 if grep -q 'restore.acceptImporterDeletions is set' <<<"$n_plain"; then fail "NOTES warn about restore.acceptImporterDeletions when it is false"; fi
+
+# The release-pending alert (ADR 0110 decision 1): koinon-api's gauge, 15 minutes.
+rp=(--set metrics.prometheusRule.enabled=true --api-versions monitoring.coreos.com/v1/PrometheusRule --show-only templates/prometheusrule.yaml)
+has "release-pending alert renders" 'alert: KoinonRestoreReleasePending$' "${rp[@]}"
+has "release-pending alert renders without durable" 'alert: KoinonRestoreReleasePending$' "${rp[@]}" --set api.durable.enabled=false
+has "release-pending alert reads the max of the gauge" 'expr: max\(koinon_restore_release_pending\) == 1$' "${rp[@]}"
+has "release-pending alert waits 15m" 'for: 15m$' "${rp[@]}"

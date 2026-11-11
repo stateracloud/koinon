@@ -786,7 +786,9 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo).
 		WithRestoreStatus(func(ctx context.Context) (any, error) {
-			opt := restorestatus.Options{AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions}
+			opt := restorestatus.Options{AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions, Configured: restorestatus.ConfiguredTargets{
+				PublicURL: installbinding.Origin(cfg.publicURL), OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: installbinding.Origin(cfg.oidcRedirectURL),
+			}}
 			if kube != nil {
 				opt.PlanRemovals = func(ctx context.Context) ([]installbinding.Removal, error) {
 					return declarative.PlanRemovals(ctx, pool, kube, cfg.secretsNamespace)
@@ -819,6 +821,7 @@ func serve(ctx context.Context, cfg config) error {
 	reg.MustRegister(guardMetrics.Collectors()...)
 	restorehold.Metric(reg, cfg.restoreHold)
 	binding.Metrics(reg)
+	binding.ReleasePendingMetric(reg)
 	declarative.RegisterMetrics(reg)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).

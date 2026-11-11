@@ -6,6 +6,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -50,10 +52,26 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 	It("revokes the sessions and keeps the removals waiting without the accept; the hold is released once", func(ctx SpecContext) {
 		seedCopy(ctx)
 		api := newBinding("hash-copy", false)
+		reg := prometheus.NewRegistry()
+		api.ReleasePendingMetric(reg)
+		gauge := func() float64 {
+			GinkgoHelper()
+			mfs, err := reg.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mfs).To(HaveLen(1))
+			return mfs[0].GetMetric()[0].GetGauge().GetValue()
+		}
+		Expect(gauge()).To(BeEquivalentTo(1), "pending before the release")
+		pending, err := api.ReleasePending(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pending).To(BeTrue(), "the session gate stays closed while the step fails")
 		res, err := api.Settle(ctx, []installbinding.Removal{prov, conn}, false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Released).To(BeTrue())
 		Expect(res.RevokedSessions).To(Equal(1))
+		pending, err = api.ReleasePending(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pending).To(BeFalse(), "a replica whose step fails after another one released opens its gate")
 		Expect(res.Allowed(prov)).To(BeFalse())
 		Expect(res.Allowed(conn)).To(BeFalse())
 		Expect(res.Allowed(installbinding.Removal{Kind: "mcp-server", Org: "default", Secret: "declared-later"})).To(BeTrue(), "an item the restore did not bring in follows the normal rules")
@@ -62,6 +80,9 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 		Expect(count(ctx, `SELECT count(*) FROM install_binding WHERE held_since IS NULL AND released_by = 'hash-copy'`)).To(Equal(1))
 		Expect(count(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`)).To(Equal(1))
 		Expect(count(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.sessions_revoked'`)).To(Equal(1))
+		Expect(count(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release' AND summary->'after'->>'planHash' = $1`,
+			installbinding.PlanHash([]installbinding.Removal{conn, prov}))).To(Equal(1), "the release records the plan hash")
+		Expect(gauge()).To(BeEquivalentTo(1), "removals wait for the accept")
 
 		By("a later pass is not a release and the removals still wait")
 		res, err = api.Settle(ctx, []installbinding.Removal{prov, conn}, false)
@@ -76,6 +97,7 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 		Expect(res.Accepted).To(Equal(2))
 		Expect(res.Allowed(prov)).To(BeTrue())
 		Expect(count(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.removals_accepted'`)).To(Equal(1))
+		Expect(gauge()).To(BeZero(), "nothing pending, nothing waiting")
 
 		By("a Secret that came back, or a removal that was done, leaves the list")
 		_, err = api.Settle(ctx, nil, true)

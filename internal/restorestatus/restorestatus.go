@@ -12,11 +12,13 @@ package restorestatus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -35,19 +37,61 @@ type Options struct {
 	PlanRemovals func(ctx context.Context) ([]installbinding.Removal, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Configured are the outward hosts this process is configured with (public URL, OIDC issuer and
+	// redirect URL, checkpoint endpoint and bucket); each is compared with the binding row's recorded
+	// value and marked when a copy has the source's (ADR 0110 decisions 4 and 7).
+	Configured ConfiguredTargets
 	// BestEffort makes a failure of a section that gates nothing (the refused credentials, the outward
 	// targets, the release preview) a line in Report.Warnings instead of an error. The importer section
 	// and the binding row stay errors: the release gate decides on them.
 	BestEffort bool
 }
 
+// ConfiguredTargets are the hosts a process sends outward requests or logins to.
+type ConfiguredTargets struct {
+	PublicURL          string
+	OIDCIssuer         string
+	OIDCRedirectURL    string
+	CheckpointEndpoint string
+	CheckpointBucket   string
+}
+
+// HostTarget is one configured outward host. EqualsSource is true when this install is a copy and the
+// value is the one the binding row recorded for the install the database came from.
+type HostTarget struct {
+	Name         string `json:"name"`
+	Value        string `json:"value"`
+	EqualsSource bool   `json:"equalsSource"`
+}
+
+// DumpToken is an API token that was active at the dump time (ADR 0110 decision 2). The release does
+// not revoke it; a platform admin re-checks the list.
+type DumpToken struct {
+	Org        string     `json:"org"`
+	Name       string     `json:"name"`
+	Prefix     string     `json:"prefix"`
+	CreatedBy  string     `json:"createdBy"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+}
+
+// DumpTokens is the tokens-at-dump section. DumpTime is nil when it is unknown (no held record): then
+// Tokens lists every active token.
+type DumpTokens struct {
+	DumpTime *time.Time  `json:"dumpTime,omitempty"`
+	Tokens   []DumpToken `json:"tokens"`
+}
+
 // Report is the whole status. It is the JSON the command prints with --json.
 type Report struct {
-	Binding    Binding     `json:"binding"`
-	Quarantine Quarantine  `json:"quarantine"`
-	Targets    []Target    `json:"outwardTargets"`
-	Importer   Importer    `json:"importer"`
-	Release    ReleasePlan `json:"release"`
+	Binding    Binding      `json:"binding"`
+	Quarantine Quarantine   `json:"quarantine"`
+	DumpTokens DumpTokens   `json:"tokensAtDump"`
+	Hosts      []HostTarget `json:"configuredHosts,omitempty"`
+	Targets    []Target     `json:"outwardTargets"`
+	Importer   Importer     `json:"importer"`
+	Release    ReleasePlan  `json:"release"`
 	// Warnings are the sections a BestEffort build could not read.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -114,6 +158,8 @@ type ReleasePlan struct {
 	// Pending is true while a release is pending (ADR 0110 decision 1): the hold left held_since set,
 	// or this is a copy that has not run its release step.
 	Pending bool `json:"pending"`
+	// PlanHash is the plan hash the newest restore.release recorded; empty before the first release.
+	PlanHash string `json:"releasedPlanHash,omitempty"`
 	// QueuedRuns are runs in state queued, starting, running or parked, by org ID.
 	QueuedRuns map[string]int `json:"runsByOrg"`
 	// ParkedRuns are the parked ones among them, by org ID.
@@ -163,6 +209,10 @@ func Build(ctx context.Context, pool *pgxpool.Pool, ownerID string, optional ...
 	if err := soft("refused credentials", quarantineSection(ctx, pool, &r, ownerID, st)); err != nil {
 		return r, err
 	}
+	if err := soft("tokens at the dump time", dumpTokensSection(ctx, pool, &r, row)); err != nil {
+		return r, err
+	}
+	hostsSection(&r, row, st, opt.Configured)
 	if err := soft("outward targets", targetsSection(ctx, pool, &r)); err != nil {
 		return r, err
 	}
@@ -190,6 +240,68 @@ func quarantineSection(ctx context.Context, pool *pgxpool.Pool, r *Report, owner
 	}
 
 	return nil
+}
+
+// dumpTokensSection lists the tokens active at the dump time. The dump time is the newest audit or
+// install chain event older than held_since: an upper bound, since the data can be a little older than
+// its last event. Without held_since it is unknown and every active token is listed.
+func dumpTokensSection(ctx context.Context, pool *pgxpool.Pool, r *Report, row installbinding.Row) error {
+	r.DumpTokens.Tokens = []DumpToken{}
+	if row.HeldSince != nil {
+		var t pgtype.Timestamptz
+		if err := pool.QueryRow(ctx, `SELECT GREATEST(
+				(SELECT max(created_at) FROM audit_events WHERE created_at < $1),
+				(SELECT max(created_at) FROM install_audit_events WHERE created_at < $1))`, *row.HeldSince).Scan(&t); err != nil {
+			return fmt.Errorf("read the dump time: %w", err)
+		}
+		if t.Valid {
+			r.DumpTokens.DumpTime = &t.Time
+		}
+	}
+	// Active at the dump time: created before it, not revoked before it, not expired at it. With an
+	// unknown dump time: active now.
+	at := pgtype.Timestamptz{}
+	if r.DumpTokens.DumpTime != nil {
+		at = pgtype.Timestamptz{Time: *r.DumpTokens.DumpTime, Valid: true}
+	}
+	rows, err := pool.Query(ctx, `SELECT o.slug, t.name, t.prefix, COALESCE(NULLIF(u.display_name, ''), u.email, u.id::text), t.created_at, t.expires_at, t.last_used_at
+		FROM api_tokens t JOIN orgs o ON o.id = t.org_id JOIN users u ON u.id = t.created_by
+		WHERE CASE WHEN $1::timestamptz IS NULL THEN t.revoked_at IS NULL AND t.expires_at > now()
+		           ELSE t.created_at <= $1 AND (t.revoked_at IS NULL OR t.revoked_at > $1) AND t.expires_at > $1 END
+		ORDER BY 1, 2, 3`, at)
+	if err != nil {
+		return fmt.Errorf("list the tokens at the dump time: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d DumpToken
+		var last pgtype.Timestamptz
+		if err := rows.Scan(&d.Org, &d.Name, &d.Prefix, &d.CreatedBy, &d.CreatedAt, &d.ExpiresAt, &last); err != nil {
+			return err
+		}
+		if last.Valid {
+			d.LastUsedAt = &last.Time
+		}
+		r.DumpTokens.Tokens = append(r.DumpTokens.Tokens, d)
+	}
+	return rows.Err()
+}
+
+// hostsSection lists the configured outward hosts and marks each one a copy shares with the install
+// the database came from. The OIDC issuer has no recorded value; it is listed for the operator to check.
+func hostsSection(r *Report, row installbinding.Row, st installbinding.State, c ConfiguredTargets) {
+	copyState := st == installbinding.StateCopy
+	add := func(name, value, recorded string) {
+		if value == "" {
+			return
+		}
+		r.Hosts = append(r.Hosts, HostTarget{Name: name, Value: value, EqualsSource: copyState && recorded != "" && value == recorded})
+	}
+	add("public-url", c.PublicURL, row.Targets.PublicURL)
+	add("oidc-issuer", c.OIDCIssuer, "")
+	add("oidc-redirect-url", c.OIDCRedirectURL, row.Targets.OIDCRedirectURL)
+	add("checkpoint-endpoint", c.CheckpointEndpoint, row.Targets.CheckpointEndpoint)
+	add("checkpoint-bucket", c.CheckpointBucket, row.Targets.CheckpointBucket)
 }
 
 func targetsSection(ctx context.Context, pool *pgxpool.Pool, r *Report) error {
@@ -257,6 +369,12 @@ func (r Report) Blocking() []installbinding.Removal {
 }
 
 func releaseSection(ctx context.Context, pool *pgxpool.Pool, r *Report, opt Options) error {
+	var hash pgtype.Text
+	if err := pool.QueryRow(ctx, `SELECT summary->'after'->>'planHash' FROM install_audit_events
+		WHERE action = 'restore.release' ORDER BY chain_seq DESC LIMIT 1`).Scan(&hash); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("read the last release: %w", err)
+	}
+	r.Release.PlanHash = hash.String
 	r.Release.QueuedRuns = map[string]int{}
 	r.Release.ParkedRuns = map[string]int{}
 	runs, err := pool.Query(ctx, `SELECT org_id::text, count(*), count(*) FILTER (WHERE state = 'parked') FROM runs
@@ -359,6 +477,26 @@ func Print(w io.Writer, r Report) {
 		p("warning:    %s\n", w)
 	}
 	p("refused:     %d live API tokens, %d live sessions\n", r.Quarantine.Tokens, r.Quarantine.Sessions)
+	switch {
+	case r.DumpTokens.DumpTime != nil:
+		p("tokens active at the dump time (%s, an upper bound; the release does not revoke them): %d\n", r.DumpTokens.DumpTime.UTC().Format(time.RFC3339), len(r.DumpTokens.Tokens))
+	default:
+		p("tokens active now (the dump time is unknown: no held record): %d\n", len(r.DumpTokens.Tokens))
+	}
+	for _, t := range r.DumpTokens.Tokens {
+		last := "never used"
+		if t.LastUsedAt != nil {
+			last = "last used " + t.LastUsedAt.UTC().Format(time.RFC3339)
+		}
+		p("  org=%s %s (%s…) by %s, %s\n", t.Org, t.Name, t.Prefix, t.CreatedBy, last)
+	}
+	for _, h := range r.Hosts {
+		mark := ""
+		if h.EqualsSource {
+			mark = "  EQUALS THE SOURCE'S"
+		}
+		p("configured %-20s %s%s\n", h.Name, h.Value, mark)
+	}
 	p("outward targets (%d):\n", len(r.Targets))
 	for _, t := range r.Targets {
 		state := "ENABLED"
@@ -368,6 +506,9 @@ func Print(w io.Writer, r Report) {
 		p("  %-8s %-26s org=%-36s %s\n", state, t.Kind, t.Org, t.Name)
 	}
 	p("release:     %s\n", map[bool]string{true: "PENDING (the next unheld start of koinon-api runs it)", false: "not pending"}[r.Release.Pending])
+	if r.Release.PlanHash != "" {
+		p("last release plan hash: %s\n", r.Release.PlanHash)
+	}
 	p("importer:    %d removals planned, %d waiting, %d accepted; restore.acceptImporterDeletions=%t\n",
 		len(r.Importer.Planned), len(r.Importer.Waiting), len(r.Importer.Accepted), r.Importer.AcceptImporterDeletions)
 	for _, g := range []struct {

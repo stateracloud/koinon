@@ -4,11 +4,18 @@ package installbinding
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/audit"
 )
@@ -39,6 +46,38 @@ func Pending(ownerID string, r Row, found bool) bool {
 		return true
 	}
 	return StateOf(ownerID, r, found) == StateCopy && r.ReleasedBy != ownerID
+}
+
+// ErrReleasePending is returned for a sign-in while [Binding.SessionsHeld] is true.
+var ErrReleasePending = errors.New("sign-in is paused until the restore release step has run")
+
+// ReleasePending reads the row and says whether a release is pending for this process. A disabled
+// Binding is never pending.
+func (b *Binding) ReleasePending(ctx context.Context) (bool, error) {
+	if !b.Enabled() {
+		return false, nil
+	}
+	r, found, err := readRow(ctx, b.pool, false)
+	if err != nil {
+		return false, fmt.Errorf("read install_binding: %w", err)
+	}
+	return Pending(b.mark, r, found), nil
+}
+
+// HoldSessions sets the session gate of an unheld start (ADR 0110 decision 1: an unheld koinon-api
+// never serves the sessions of the dump). While it is set, every session is refused and no sign-in
+// makes a new one, so the gate fails closed when the release step cannot run yet (a Kubernetes List
+// or a database error). The release step clears it when it succeeds, or when the row shows that no
+// release is pending (another replica ran it).
+func (b *Binding) HoldSessions(on bool) {
+	if b != nil {
+		b.sessionsHeld.Store(on)
+	}
+}
+
+// SessionsHeld says whether the session gate is set. A nil Binding is never held.
+func (b *Binding) SessionsHeld() bool {
+	return b != nil && b.sessionsHeld.Load()
 }
 
 // SettleResult says what Settle did.
@@ -123,7 +162,7 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 			ab.Install(audit.InstallEvent{
 				Actor: actor, Action: "restore.release", TargetKind: "install", TargetID: "install_binding",
 				Before: map[string]any{"state": string(StateOf(b.mark, row, found)), "heldSince": row.HeldSince},
-				After:  map[string]any{"releaseId": releaseID.String(), "removals": sortedRemovals(plan), "removalState": state, "acceptImporterDeletions": accept},
+				After:  map[string]any{"releaseId": releaseID.String(), "planHash": PlanHash(plan), "removals": sortedRemovals(plan), "removalState": state, "acceptImporterDeletions": accept},
 			})
 		} else {
 			// Forget items whose Secret is back or whose removal is done.
@@ -206,6 +245,18 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 	return res, nil
 }
 
+// PlanHash is the hex SHA-256 of the sorted plan as JSON, recorded in restore.release so a later
+// reader can tell which plan the release settled. An empty plan hashes the empty list.
+func PlanHash(plan []Removal) string {
+	b, err := json.Marshal(append([]Removal{}, sortedRemovals(plan)...))
+	if err != nil {
+		// A struct of three strings always marshals.
+		panic(err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // StateWaitingOrAccepted is the state a removal gets at the release.
 func StateWaitingOrAccepted(accept bool) string {
 	if accept {
@@ -232,7 +283,8 @@ func sortedRemovals(in []Removal) []Removal {
 // ListRemovals returns the restore's removal list with its states, for restore status.
 func ListRemovals(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
-}) (waiting, accepted []Removal, err error) {
+},
+) (waiting, accepted []Removal, err error) {
 	rows, err := q.Query(ctx, `SELECT kind, org_slug, secret_name, state FROM restore_accepted_removals ORDER BY 1, 2, 3`)
 	if err != nil {
 		return nil, nil, err
@@ -251,4 +303,51 @@ func ListRemovals(ctx context.Context, q interface {
 		}
 	}
 	return waiting, accepted, rows.Err()
+}
+
+// ReleasePendingMetric registers koinon_restore_release_pending on reg (ADR 0110 decision 1): 1 while
+// this process is unheld and a release is pending or removals of a restore wait for
+// restore.acceptImporterDeletions, else 0. Only koinon-api registers it; a held process reports 0 (the
+// hold has its own gauge). The value is read from the database at scrape time; a failed read keeps
+// the last value.
+func (b *Binding) ReleasePendingMetric(reg prometheus.Registerer) {
+	var mu sync.Mutex
+	last := 0.0
+	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "koinon_restore_release_pending",
+		Help: "1 while koinon-api is unheld and a restore release is pending or its removals wait for restore.acceptImporterDeletions, else 0.",
+	}, func() float64 {
+		mu.Lock()
+		defer mu.Unlock()
+		if !b.Enabled() || b.held {
+			return 0
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		v, err := b.releasePendingValue(ctx)
+		if err != nil {
+			b.log.Debug("koinon_restore_release_pending: read failed, keeping the last value", "err", err)
+			return last
+		}
+		last = v
+		return v
+	}))
+}
+
+func (b *Binding) releasePendingValue(ctx context.Context) (float64, error) {
+	pending, err := b.ReleasePending(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if pending {
+		return 1, nil
+	}
+	var waiting bool
+	if err := b.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM restore_accepted_removals WHERE state = 'waiting')`).Scan(&waiting); err != nil {
+		return 0, err
+	}
+	if waiting {
+		return 1, nil
+	}
+	return 0, nil
 }
