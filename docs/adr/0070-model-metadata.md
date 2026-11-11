@@ -1,6 +1,6 @@
 # 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
 
-- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
+- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts amended 2026-11-11 (never embedded)
 - Date: 2026-10-28
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
@@ -425,3 +425,47 @@ agentgateway v1.7.0 accepts a `cacheWrite1h` rate in the model catalog and count
 it next to `cacheWrite` (ADR 0069 keeps writes at the 5-minute rate until then), and the ledger should
 store the 1-hour write tokens as their own column so that the price version and the raw usage stay
 reproducible.
+
+## Amendment (2026-11-11): never embed OpenRouter's catalog; the operator's cluster fetches it
+
+Maintainer decision of 2026-10-31, recorded for issue #68. This amendment replaces the OpenRouter
+parts of decisions 1, 2, 3 and 9. Why: OpenRouter's terms (§12 "Materials", §7 no scraping) give no
+licence to redistribute its catalog (see Context), and the written answer that decision 9 waited for
+is not needed any more.
+
+1. **Koinon never embeds OpenRouter's catalog.** `modelmeta/snapshot/openrouter.json` is dropped from
+   the design. Koinon ships only its own reviewed lists: prices in `pricing/default.yaml`, and model
+   metadata from models.dev (MIT) in `modelmeta/snapshot/models.dev.json`. Decision 1 ("one file per
+   source") now names one embedded source for model metadata. The Pending item under Consequences and
+   the "ask OpenRouter in writing" step of decision 9 are void.
+2. **The operator's cluster fetches it.** When an OpenRouter provider is added, `koinon-api` calls
+   `GET /api/v1/models` (and the endpoints route, `GET /api/v1/models/{author}/{slug}/endpoints`) on
+   OpenRouter and stores the result per install, in the install's database and not in a Koinon
+   release. That is an operator's own use of the documented API, which the terms allow.
+   - **Refresh: weekly.** The fetch runs again each week while an enabled provider of type
+     `openrouter` exists. It stops when none exists.
+   - **Source record.** Each stored row keeps the fetch time as its source, `openrouter@<fetched_at>`.
+     This replaces the commit in the source tag of decision 5.
+   - **Review.** The stored catalog feeds discovery and the metadata page. A change in it does not
+     change a compaction threshold or a price until a person accepts it, as decision 8 and ADR 0098
+     already require for fetched data.
+3. **No offline path.** An air-gapped install has no OpenRouter catalog, because OpenRouter needs
+   connectivity for every request anyway. The `koinon-api model-metadata fetch --out <file>` import of
+   decision 8 stays for models.dev, and does not carry OpenRouter data.
+4. **No fallback copy.** Until the first fetch succeeds, OpenRouter models use models.dev's
+   `openrouter` provider (MIT) for metadata. That provider loses the per-upstream data,
+   `supported_parameters`, `input_cache_write_1h` and the models models.dev lacks, until the fetch
+   runs.
+5. **Costs come from `/generation`.** The ledger takes the cost of an OpenRouter request from
+   OpenRouter's `/generation` record (the #47 decision). OpenRouter list prices only feed estimates.
+6. **Later and optional.** A Koinon-published, signed metadata feed for updates between releases, in
+   the style of LiteLLM's model map. It needs its own ADR.
+7. **Tests (decision 10).** The `modelmeta` tests cover models.dev only. The fetch, the weekly
+   refresh and the source record get their own tests with the fake model server when the OpenRouter
+   provider code is written.
+
+Follow-up code work this implies (not part of #68): `modelmeta/snapshot/openrouter.json` was never
+added to the tree (no `modelmeta/` package exists yet), so nothing is removed today. #265 and #305
+must build `modelmeta` with one embedded source and must not add the file. The per-install OpenRouter
+fetch, its table and the weekly job belong to the model-discovery work (decision 8); file a Backlog
+issue for it if none exists.
