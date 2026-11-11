@@ -229,6 +229,17 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 			s.audit(b, org, actor, kind, id, cur, out)
 			return nil
 		}
+		if disabled && cur.Disabled && cur.Declared() && !strings.HasPrefix(actor.String(), DeclaredActorPrefix) {
+			// An admin disables an item the Secret already holds disabled: remember the admin under the Secret,
+			// so the item stays off, owned by the admin, when the Secret drops the field.
+			if _, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_under_by = $%d, admin_disabled_under_note = NULLIF($%d, '') WHERE %s`,
+				t.name, len(args)+1, len(args)+2, w), append(args, actor.String(), note)...); err != nil {
+				return err
+			}
+			out = cur
+			s.audit(b, org, actor, kind, id, cur, out)
+			return nil
+		}
 		if cur.Disabled == disabled {
 			out = cur
 			return nil
@@ -303,10 +314,39 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 			return err // DisableDeclared wakes the reconciler
 		}
 		// An admin's disable that the Secret claimed comes back to the admin; the item stays disabled.
-		if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_by = admin_disabled_under_by, admin_disabled_note = admin_disabled_under_note,
+		back, err := tx.Query(ctx, fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_by = admin_disabled_under_by, admin_disabled_note = admin_disabled_under_note,
 			admin_disabled_under_by = NULL, admin_disabled_under_note = NULL
-			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 AND admin_disabled_under_by IS NOT NULL`, t.name), org, secretName, actor.String()); err != nil {
+			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 AND admin_disabled_under_by IS NOT NULL
+			RETURNING id, %[2]s::text, admin_disabled_by, admin_disabled_note`, t.name, t.nameExpr()), org, secretName, actor.String())
+		if err != nil {
 			return err
+		}
+		type handed struct {
+			id       pgtype.UUID
+			name, by string
+			note     pgtype.Text
+		}
+		var handedBack []handed
+		for back.Next() {
+			var h handed
+			if err := back.Scan(&h.id, &h.name, &h.by, &h.note); err != nil {
+				back.Close()
+				return err
+			}
+			handedBack = append(handedBack, h)
+		}
+		back.Close()
+		if err := back.Err(); err != nil {
+			return err
+		}
+		for _, h := range handedBack {
+			s.audit(b, org, actor, kind, h.id, State{Disabled: true, Name: h.name, By: actor.String(), Note: declaredNote},
+				State{Disabled: true, Name: h.name, By: h.by, Note: h.note.String})
+		}
+		if len(handedBack) > 0 {
+			if err := notifyProvider(ctx, tx, kind, org); err != nil {
+				return err
+			}
 		}
 		q := fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL
 			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 RETURNING id, %[2]s::text`, t.name, t.nameExpr())
@@ -356,8 +396,8 @@ func DisableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.U
 			SELECT id, admin_disabled_at, admin_disabled_by FROM %[1]s
 			WHERE org_id = $1 AND managed_by_secret = $2 AND (admin_disabled_at IS NULL OR admin_disabled_by IS DISTINCT FROM $3) FOR UPDATE)
 		UPDATE %[1]s AS t SET admin_disabled_at = COALESCE(t.admin_disabled_at, now()),
-			admin_disabled_under_by = CASE WHEN t.admin_disabled_at IS NOT NULL AND t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_by END,
-			admin_disabled_under_note = CASE WHEN t.admin_disabled_at IS NOT NULL AND t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_note END,
+			admin_disabled_under_by = CASE WHEN t.admin_disabled_at IS NULL THEN NULL WHEN t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_by ELSE t.admin_disabled_under_by END,
+			admin_disabled_under_note = CASE WHEN t.admin_disabled_at IS NULL THEN NULL WHEN t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_note ELSE t.admin_disabled_under_note END,
 			admin_disabled_by = $3, admin_disabled_note = $4
 		FROM old WHERE t.org_id = $1 AND t.id = old.id RETURNING t.id, %[2]s::text, old.admin_disabled_at IS NOT NULL`, t.name, t.nameExpr())
 	rows, err := tx.Query(ctx, q, org, secretName, actor.String(), declaredNote, DeclaredActorPrefix+"%")

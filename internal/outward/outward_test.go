@@ -70,6 +70,29 @@ var _ = Describe("the outward switch", func() {
 		return out
 	}
 
+	// listen returns a function that waits for a koinon_reconcile notification naming org.
+	listen := func(ctx SpecContext) func() bool {
+		GinkgoHelper()
+		conn, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(conn.Release)
+		_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+		Expect(err).NotTo(HaveOccurred())
+		return func() bool {
+			wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			for {
+				n, err := conn.Conn().WaitForNotification(wctx)
+				if err != nil {
+					return false
+				}
+				if n.Payload == org.String() {
+					return true
+				}
+			}
+		}
+	}
+
 	It("takes a disabled MCP server out of what is served and audits the pair", func(ctx SpecContext) {
 		id := mcp(ctx, "docs", "")
 		served, err := q.ListServedMCPServers(ctx, org)
@@ -278,6 +301,65 @@ var _ = Describe("the outward switch", func() {
 			Expect(st.Note).To(Equal("by hand"))
 			Expect(st.Declared()).To(BeFalse())
 			st, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, false, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Disabled).To(BeFalse())
+		})
+
+		It("keeps an admin's disable made while the Secret already holds the item disabled", func(ctx SpecContext) {
+			id := mcp(ctx, "wiki", "wiki-secret")
+			_, err := svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			st, err := svc.Get(ctx, outward.MCPServer, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Declared()).To(BeTrue())
+			before := len(events(ctx, outward.ActionDisable))
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", false)
+			Expect(err).NotTo(HaveOccurred())
+			st, err = svc.Get(ctx, outward.MCPServer, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Disabled).To(BeTrue())
+			Expect(st.By).To(Equal(actor.String()))
+			Expect(st.Note).To(Equal("by hand"))
+			// The hand-back to the admin is audited as a disable.
+			Expect(events(ctx, outward.ActionDisable)).To(HaveLen(before + 1))
+		})
+
+		It("keeps the admin underneath when another Secret claims the item again", func(ctx SpecContext) {
+			id := mcp(ctx, "wiki", "wiki-secret")
+			_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE mcp_servers SET managed_by_secret = 'other-secret' WHERE id = $1`, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "other-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE mcp_servers SET managed_by_secret = 'wiki-secret' WHERE id = $1`, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", false)
+			Expect(err).NotTo(HaveOccurred())
+			st, err := svc.Get(ctx, outward.MCPServer, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.By).To(Equal(actor.String()))
+			Expect(st.Note).To(Equal("by hand"))
+		})
+
+		It("wakes the reconciler when a Secret disables or releases a model provider", func(ctx SpecContext) {
+			id := insert(ctx, `INSERT INTO providers (org_id, name, type, url, source, managed_by_secret) VALUES ($1, 'declared-wake', 'openai', 'https://api.example.com/v1', 'secret', 'prov-secret') RETURNING id`, org)
+			woken := listen(ctx)
+			n, err := svc.SyncDeclared(ctx, org, outward.ModelProvider, "prov-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			Expect(woken()).To(BeTrue())
+			n, err = svc.SyncDeclared(ctx, org, outward.ModelProvider, "prov-secret", false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			Expect(woken()).To(BeTrue())
+			st, err := svc.Get(ctx, outward.ModelProvider, org, id)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(st.Disabled).To(BeFalse())
 		})
