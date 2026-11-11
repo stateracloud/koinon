@@ -24,10 +24,8 @@ import (
 // reviewed like code (ADR 0097 decision 4). The issues are in stateracloud/koinon.
 var AgentgatewayV170Gaps = map[string]string{
 	"#78": "agentgateway v1.7.0 ignores Messages output_tokens_details.thinking_tokens, so the thinking split is never recorded for Claude",
-	gapErrorEvent: "agentgateway v1.7.0 forwards a provider's mid-stream error event as ordinary data: the response is not recorded " +
-		"as failed, so the ledger charges the partial usage as final (#279; unverified until the suite runs against it, see the PR)",
-	gapClientCancel: "agentgateway v1.7.0 is not known to record a stream the client cancelled once, as failed, with the usage seen " +
-		"(#279; unverified until the suite runs against it, see the PR)",
+	"#550": "agentgateway v1.7.0 records a provider's mid-stream error event, and a stream the client cancels, with status 200 and " +
+		"no error reason: the record is not marked failed, so the ledger charges the partial usage as a completed call",
 	"#254": "agentgateway v1.7.0 sends the leak guard only tools/call replies: tools/list descriptions, JSON-RPC error " +
 		"replies, notifications and server-initiated requests reach the agent unseen (upstream agentgateway#4245)",
 }

@@ -63,14 +63,9 @@ func viewOf(r gateway.UsageRecord) wantUsage {
 	}
 }
 
-const (
-	// gapErrorEvent and gapClientCancel are the KnownGaps keys of the cases that ADR 0097 step 2 adds
-	// beside the old matrix (#279) and that agentgateway v1.7.0 is believed to fail (see
-	// AgentgatewayV170Gaps; the split-reads cases run plainly). The keys carry the issue until a gap
-	// is filed on its own.
-	gapErrorEvent   = "#279:error-event"
-	gapClientCancel = "#279:client-cancel"
-)
+// gapAgentgatewayFailed is the KnownGaps key of the error-event and client-cancel cases: agentgateway
+// v1.7.0 does not mark their records failed (#550).
+const gapAgentgatewayFailed = "#550"
 
 // usageSpec is the usage contract of ADR 0097 decision 4: per API format and provider dialect Koinon
 // routes (chat completions and Messages; streamed and not; cache read and write; reasoning; a stream
@@ -158,24 +153,24 @@ func usageSpec(env Env) {
 			want:   wantUsage{Format: modelformat.Anthropic, Stream: true, Status: 200, Failed: true, Input: 100, Output: 1},
 		},
 		{
-			name: "a chat completions stream with an error event mid-way", format: modelformat.OpenAI, model: "oai-errevent", stream: true, gap: gapErrorEvent,
+			name: "a chat completions stream with an error event mid-way", format: modelformat.OpenAI, model: "oai-errevent", stream: true, gap: gapAgentgatewayFailed,
 			script: fakemodel.Script{Model: "oai-errevent", Faults: fakemodel.Faults{OverloadedMidStream: true}, Turns: turn(plain)},
 			want:   wantUsage{Format: modelformat.OpenAI, Stream: true, Status: 200, Failed: true},
 		},
 		{
-			name: "a Messages stream with an error event mid-way", format: modelformat.Anthropic, model: "claude-errevent", stream: true, gap: gapErrorEvent,
+			name: "a Messages stream with an error event mid-way", format: modelformat.Anthropic, model: "claude-errevent", stream: true, gap: gapAgentgatewayFailed,
 			script: fakemodel.Script{Model: "claude-errevent", Faults: fakemodel.Faults{OverloadedMidStream: true}, Turns: turn(plain)},
 			want:   wantUsage{Format: modelformat.Anthropic, Stream: true, Status: 200, Failed: true, Input: 100, Output: 1},
 		},
 		// The client gives up after the first bytes of a stream the provider holds open: the gateway
 		// must record what it saw, once, as a failed response. The status is the gateway's to state.
 		{
-			name: "a chat completions stream the client cancels", format: modelformat.OpenAI, model: "oai-cancel", stream: true, cancel: true, gap: gapClientCancel,
+			name: "a chat completions stream the client cancels", format: modelformat.OpenAI, model: "oai-cancel", stream: true, cancel: true, gap: gapAgentgatewayFailed,
 			script: fakemodel.Script{Model: "oai-cancel", Faults: fakemodel.Faults{StallMidStream: true}, Turns: turn(plain)},
 			want:   wantUsage{Format: modelformat.OpenAI, Stream: true, Failed: true},
 		},
 		{
-			name: "a Messages stream the client cancels", format: modelformat.Anthropic, model: "claude-cancel", stream: true, cancel: true, gap: gapClientCancel,
+			name: "a Messages stream the client cancels", format: modelformat.Anthropic, model: "claude-cancel", stream: true, cancel: true, gap: gapAgentgatewayFailed,
 			script: fakemodel.Script{Model: "claude-cancel", Faults: fakemodel.Faults{StallMidStream: true}, Turns: turn(plain)},
 			want:   wantUsage{Format: modelformat.Anthropic, Stream: true, Failed: true, Input: 100, Output: 1},
 		},

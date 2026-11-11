@@ -515,7 +515,7 @@ func anthropicSpec(env Env) {
 			Expect(rec.Status).To(BeEquivalentTo(http.StatusOK))
 			Expect(rec.Error).NotTo(BeEmpty(), "a cut stream is a failed response")
 			Expect(rec.OutputTokens).To(BeEquivalentTo(1))
-			Expect(rec.InputTokens).To(BeEquivalentTo(100))
+			Expect(rec.InputTokens).To(BeEquivalentTo(50), "100 reported input less 30 cache read and 20 cache write: the buckets are disjoint")
 		})
 
 		It("keeps the cache tokens in their own buckets, apart from the input", func(ctx SpecContext) {
