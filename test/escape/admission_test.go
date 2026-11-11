@@ -983,6 +983,141 @@ var _ = Describe("Sandbox NetworkPolicy writer policy", Label("escape", "admissi
 	})
 })
 
+// The sandbox LimitRange writer's ValidatingAdmissionPolicy (#76, ADR 0083 follow-up) as
+// `helm template` renders templates/sandbox-limitrange.yaml with default values, against a real
+// API server (envtest). It fences the reconciler's cluster-wide LimitRange grant: the reconciler
+// may write one fixed name, in the sized shape, in this gateway's workspace namespaces only, and
+// nobody else may write that name in a sandbox namespace.
+var _ = Describe("Sandbox LimitRange writer policy", Label("escape", "admission"), Ordered, ContinueOnFailure, func() {
+	const (
+		reconcilerUser = otherUser // system:serviceaccount:koinon:koinon-reconciler, release koinon in koinon
+		name           = "koinon-koinon-sandbox-limitrange"
+	)
+	var (
+		as          map[string]*kubernetes.Clientset
+		ws          = "openshell-openshell-kw-lr"   // a workspace namespace of this release's gateway
+		wsB         = "openshell-prod-kw-lr"        // a workspace namespace of another gateway (ID prod)
+		noPrefix    = "kw-lr-noprefix"              // gateway labels, but not OpenShell's namespace name
+		noWorkspace = "openshell-openshell-kw-lr-x" // gateway labels and prefix, no sandbox-workspace label
+		plain       = "koinon-lr-plain"             // not a sandbox namespace
+		dryRun      = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
+	)
+	sized := func(mutate ...func(*corev1.LimitRange)) *corev1.LimitRange {
+		lr := (&reconciler.SandboxLimitRange{Name: name}).LimitRange("")
+		for _, m := range mutate {
+			m(lr)
+		}
+		return lr
+	}
+	create := func(ctx context.Context, user, namespace string, lr *corev1.LimitRange) error {
+		_, err := as[user].CoreV1().LimitRanges(namespace).Create(ctx, lr, dryRun)
+		return err
+	}
+	denied := func(err error, message string) {
+		GinkgoHelper()
+		Expect(err).To(HaveOccurred(), "admitted, want a denial containing %q", message)
+		Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy"))
+		Expect(err.Error()).To(ContainSubstring(message))
+	}
+
+	BeforeAll(func(ctx SpecContext) {
+		testenv.Require(testenv.Envtest)
+		policies, bindings := renderAdmission(ctx, "koinon", "koinon", "templates/sandbox-limitrange.yaml", []string{"ClusterRole", "ClusterRoleBinding"})
+		Expect(policies).To(HaveLen(1))
+		Expect(bindings).To(HaveLen(1))
+		Expect(policies[0].Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)))
+		Expect(bindings[0].Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}))
+
+		env := &envtest.Environment{}
+		cfg, err := env.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(env.Stop)
+		admin := kubernetes.NewForConfigOrDie(cfg)
+		as = map[string]*kubernetes.Clientset{"admin": admin}
+		for _, user := range []string{reconcilerUser, gatewayUser} {
+			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "lr-" + strings.ReplaceAll(user, ":", "-")},
+				RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+				Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: rbacv1.UserKind, Name: user}},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			c := rest.CopyConfig(cfg)
+			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+			as[user] = kubernetes.NewForConfigOrDie(c)
+		}
+		workspace := func(gateway string) map[string]string {
+			return map[string]string{"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": gateway, "openshell.ai/sandbox-workspace": "kw-lr"}
+		}
+		for n, labels := range map[string]map[string]string{
+			ws:          workspace("openshell"),
+			wsB:         workspace("prod"),
+			noPrefix:    workspace("openshell"),
+			noWorkspace: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"},
+			plain:       nil,
+		} {
+			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: n, Labels: labels}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err = admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, policies[0], metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = admin.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Create(ctx, bindings[0], metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		By("waiting until the policy is enforced")
+		Eventually(func() error {
+			return create(ctx, "admin", ws, sized())
+		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(MatchError(ContainSubstring("ValidatingAdmissionPolicy")))
+	}, NodeTimeout(3*time.Minute))
+
+	It("admits the reconciler's sized LimitRange in this gateway's workspace namespace (control)", func(ctx SpecContext) {
+		Expect(create(ctx, reconcilerUser, ws, sized())).To(Succeed())
+	})
+
+	It("denies the fixed name in a sandbox namespace to every other identity, cluster admins included", func(ctx SpecContext) {
+		for _, user := range []string{"admin", gatewayUser} {
+			denied(create(ctx, user, ws, sized()), "only the Koinon reconciler may write the sandbox LimitRange")
+			denied(create(ctx, user, wsB, sized()), "only the Koinon reconciler may write the sandbox LimitRange")
+		}
+	})
+
+	It("denies the reconciler a LimitRange that drifts from the sized shape", func(ctx SpecContext) {
+		const shape = "must set Container defaults to 50m/64Mi requests and 250m/256Mi limits"
+		for what, m := range map[string]func(*corev1.LimitRange){
+			"a larger memory default": func(lr *corev1.LimitRange) {
+				lr.Spec.Limits[0].Default[corev1.ResourceMemory] = resource.MustParse("1Gi")
+			},
+			"a lower CPU request": func(lr *corev1.LimitRange) {
+				lr.Spec.Limits[0].DefaultRequest[corev1.ResourceCPU] = resource.MustParse("10m")
+			},
+			"a max": func(lr *corev1.LimitRange) {
+				lr.Spec.Limits[0].Max = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}
+			},
+		} {
+			By(what)
+			denied(create(ctx, reconcilerUser, ws, sized(m)), shape)
+		}
+	})
+
+	It("denies the reconciler any other name", func(ctx SpecContext) {
+		denied(create(ctx, reconcilerUser, ws, sized(func(lr *corev1.LimitRange) { lr.Name = "other" })), "must be named "+name)
+	})
+
+	It("denies the reconciler any namespace but this gateway's workspace namespaces", func(ctx SpecContext) {
+		const where = "may be written only in OpenShell workspace namespaces of gateway openshell"
+		for _, n := range []string{wsB, noPrefix, noWorkspace, plain} {
+			By(n)
+			denied(create(ctx, reconcilerUser, n, sized()), where)
+		}
+	})
+
+	It("leaves other LimitRanges, and the name outside sandbox namespaces, to RBAC (control)", func(ctx SpecContext) {
+		Expect(create(ctx, gatewayUser, ws, sized(func(lr *corev1.LimitRange) {
+			lr.Name = "openshell-own"
+			lr.Spec.Limits[0].Default[corev1.ResourceMemory] = resource.MustParse("1Gi")
+		}))).To(Succeed())
+		Expect(create(ctx, "admin", plain, sized())).To(Succeed())
+	})
+})
+
 func supervisorTokenVolume(aud string, exp int64) corev1.Volume {
 	return corev1.Volume{Name: "sa-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
 		Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: aud, ExpirationSeconds: &exp, Path: "token"}}},

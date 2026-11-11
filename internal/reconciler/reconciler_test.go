@@ -735,6 +735,116 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
+		Describe("the sandbox LimitRange (#76)", func() {
+			var (
+				metrics *reconciler.Metrics
+				ns      string
+				lrNow   atomic.Pointer[time.Time]
+			)
+			const lrName = "koinon-koinon-sandbox-limitrange"
+			BeforeEach(func() {
+				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				metrics = reconciler.NewMetrics(nil)
+				cfg.Metrics = metrics
+				cfg.LimitRange = &reconciler.SandboxLimitRange{
+					Kube: kube, GatewayID: "openshell", Name: lrName,
+					Now: func() time.Time { return *lrNow.Load() },
+				}
+				t0 := time.Now()
+				lrNow.Store(&t0)
+				r = newReconciler()
+			})
+
+			It("applies the LimitRange once per workspace namespace", func(ctx SpecContext) {
+				pass(ctx, r)
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1))
+				lr := list.Items[0]
+				Expect(lr.Name).To(Equal(lrName))
+				Expect(lr.Labels).To(HaveKeyWithValue(reconciler.LimitRangeLabel, "true"))
+				Expect(lr.Spec.Limits).To(HaveLen(1))
+				Expect(lr.Spec.Limits[0].Type).To(Equal(corev1.LimitTypeContainer))
+			})
+
+			It("counts a refused Create, holds the pass, and retries after the backoff", func(ctx SpecContext) {
+				var refuse atomic.Bool
+				refuse.Store(true)
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if refuse.Load() {
+						return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "limitranges"}, "lr", errors.New("policy"))
+					}
+					return false, nil, nil
+				})
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox LimitRange")))
+				Expect(testutil.ToFloat64(metrics.LimitRangeErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				By("the next pass does not ask again inside the backoff")
+				before := len(kube.Actions())
+				Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+				creates := 0
+				for _, a := range kube.Actions()[before:] {
+					if a.Matches("create", "limitranges") {
+						creates++
+					}
+				}
+				Expect(creates).To(BeZero())
+				refuse.Store(false)
+				later := lrNow.Load().Add(11 * time.Second)
+				lrNow.Store(&later)
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1))
+			})
+
+			It("is off when no LimitRange writer is configured", func(ctx SpecContext) {
+				cfg.LimitRange = nil
+				r = newReconciler()
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(BeEmpty())
+			})
+
+			It("deletes the first sandbox when the LimitRange was missing at CreateSandbox", func(ctx SpecContext) {
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				deletes := osg.Calls("DeleteSandbox")
+				var creates atomic.Int32
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if creates.Add(1) == 1 {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return false, nil, nil
+				})
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(deletes+1), "BestEffort admission is discarded once")
+				Expect(sandboxRow(ctx, agent.ID).Phase).To(Equal(string(execution.PhaseDeleting)))
+				Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("recreating sandbox after the LimitRange was applied"))
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1), "Ensure after CreateSandbox wrote the LimitRange")
+			})
+
+			It("deletes the first sandbox even when Ensure after CreateSandbox fails", func(ctx SpecContext) {
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				deletes := osg.Calls("DeleteSandbox")
+				var creates atomic.Int32
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					n := creates.Add(1)
+					if n == 1 {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "limitranges"}, lrName, errors.New("policy"))
+				})
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox LimitRange after create")))
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(deletes+1), "must not leave a BestEffort sandbox when Ensure fails")
+				Expect(testutil.ToFloat64(metrics.LimitRangeErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+			})
+		})
+
 		Describe("a sandbox in Error or Completed", func() {
 			var names execution.AgentNames
 			fail := func(phase openshellv1.SandboxPhase) {

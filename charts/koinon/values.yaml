@@ -767,10 +767,21 @@ sandboxObserver:
 sandboxNetworkPolicy:
   enabled: true
 
+# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default. OpenShell
+# cannot size the supervisor or its init containers; the reconciler applies a LimitRange named
+# <namespace>-<release>-sandbox-limitrange in each workspace namespace of openshell.gatewayId
+# (defaultRequest 50m/64Mi, default 250m/256Mi for type Container, covering init containers too). The chart renders
+# a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-limitrange.yaml). Off, the
+# chart renders none of it and the reconciler applies nothing new; existing LimitRanges stay until
+# removed (`kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`). Needs
+# sandboxPolicy.enabled.
+sandboxLimitRange:
+  enabled: true
+
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
-# clamped). The supervisor pod of OpenShell 0.1.7 stays unsized (BestEffort): see the ADR. Changing
+# clamped). The supervisor and init containers are sized by sandboxLimitRange (#76). Changing
 # a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
 # Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
 # start on a bad quantity, a minimum above its maximum, or a default request above its limit.

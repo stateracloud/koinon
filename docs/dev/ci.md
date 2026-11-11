@@ -468,7 +468,6 @@ work that fills it, then saves:
 | --- | --- | --- |
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
-| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
 
@@ -497,7 +496,7 @@ Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then
 `apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
 later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
 snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
-another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with all three
+another tool (for example `playwright install --with-deps` in `hack/e2e-toolchain/web.Dockerfile`) writes an `apt.conf.d` snippet with all three
 settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
@@ -561,7 +560,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
-| `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
+| `scorecard.yml`, `govulncheck.yml`, `web-isolated.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml`, `web-isolated.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
 Checks behind the table:
 
