@@ -25,26 +25,25 @@ Greets people.
 
 ### Message HelloReply
 
+Request to greet.
+
 No fields.
 
 ### Message HelloRequest
 
-Request to greet.
-
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | name | 1 | `string` | singular |  |  |
-| tags | 2 | `string` | repeated |  | Who to greet. |
+| tags | 2 | `string` | repeated |  |  |
 | labels | 3 | `map<string, string>` | map |  |  |
 | mode | 4 | `demo.v1.Mode` | singular |  |  |
 | note | 5 | `string` | optional |  |  |
 | by_id | 6 | `string` | singular | target |  |
 | by_name | 7 | `demo.v1.HelloRequest.Inner` | singular | target |  |
 | old | 8 | `string` | singular |  | Deprecated. |
+| created | 9 | `google.protobuf.Timestamp` | singular |  |  |
 
 ### Message HelloRequest.Inner
-
-Nested type.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |

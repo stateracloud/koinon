@@ -10,7 +10,9 @@ import (
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
@@ -50,12 +52,15 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 	byName := fd("by_name", 7, msg)
 	byName.TypeName = proto.String(".demo.v1.HelloRequest.Inner")
 	byName.OneofIndex = proto.Int32(0)
+	created := fd("created", 9, msg)
+	created.TypeName = proto.String(".google.protobuf.Timestamp")
 	old := fd("old", 8, str)
 	old.Options = &descriptorpb.FieldOptions{Deprecated: proto.Bool(true)}
 
 	demo := &descriptorpb.FileDescriptorProto{
 		Name: proto.String("demo/v1/demo.proto"), Package: proto.String("demo.v1"), Syntax: proto.String("proto3"),
-		Options: &descriptorpb.FileOptions{GoPackage: proto.String("example.com/demo/v1;demov1")},
+		Dependency: []string{"google/protobuf/timestamp.proto"},
+		Options:    &descriptorpb.FileOptions{GoPackage: proto.String("example.com/demo/v1;demov1")},
 		EnumType: []*descriptorpb.EnumDescriptorProto{{
 			Name: proto.String("Mode"),
 			Value: []*descriptorpb.EnumValueDescriptorProto{
@@ -64,10 +69,9 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 			},
 		}},
 		MessageType: []*descriptorpb.DescriptorProto{
-			{Name: proto.String("HelloReply")},
 			{
 				Name:  proto.String("HelloRequest"),
-				Field: []*descriptorpb.FieldDescriptorProto{old, fd("name", 1, str), tags, labels, mode, byID, byName, note},
+				Field: []*descriptorpb.FieldDescriptorProto{old, fd("name", 1, str), tags, labels, mode, byID, byName, note, created},
 				OneofDecl: []*descriptorpb.OneofDescriptorProto{
 					{Name: proto.String("target")}, {Name: proto.String("_note")},
 				},
@@ -79,6 +83,7 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 					},
 				},
 			},
+			{Name: proto.String("HelloReply")},
 		},
 		Service: []*descriptorpb.ServiceDescriptorProto{{
 			Name: proto.String("Greeter"),
@@ -98,6 +103,10 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 			loc(" Mode picks the speed.\n It has a | pipe.\n", 5, 0),
 			loc(" The fast mode.\n", 5, 0, 2, 1),
 			loc(" Request to greet.\n", 4, 1),
+			{
+				Path: []int32{4, 1}, Span: []int32{0, 0, 1},
+				LeadingDetachedComments: []string{" DETACHED must not appear.\n"},
+			},
 			loc(" Who to greet.\n", 4, 1, 2, 2),
 			loc(" Nested type.\n", 4, 1, 3, 0),
 			loc(" Greets people.\n", 6, 0),
@@ -113,7 +122,7 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 	}
 	return &pluginpb.CodeGeneratorRequest{
 		FileToGenerate: []string{"demo/v1/demo.proto", "alpha/v1/alpha.proto"},
-		ProtoFile:      []*descriptorpb.FileDescriptorProto{demo, alpha},
+		ProtoFile:      []*descriptorpb.FileDescriptorProto{protodesc.ToFileDescriptorProto(timestamppb.File_google_protobuf_timestamp_proto), demo, alpha},
 	}
 }
 

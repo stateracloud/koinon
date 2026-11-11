@@ -58,7 +58,7 @@
           "name": "HelloReply",
           "fullName": "demo.v1.HelloReply",
           "file": "demo/v1/demo.proto",
-          "description": "",
+          "description": "Request to greet.",
           "deprecated": false,
           "fields": []
         },
@@ -66,7 +66,7 @@
           "name": "HelloRequest",
           "fullName": "demo.v1.HelloRequest",
           "file": "demo/v1/demo.proto",
-          "description": "Request to greet.",
+          "description": "",
           "deprecated": false,
           "fields": [
             {
@@ -85,7 +85,7 @@
               "label": "repeated",
               "oneof": "",
               "deprecated": false,
-              "description": "Who to greet."
+              "description": ""
             },
             {
               "name": "labels",
@@ -140,6 +140,15 @@
               "oneof": "",
               "deprecated": true,
               "description": ""
+            },
+            {
+              "name": "created",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -147,7 +156,7 @@
           "name": "HelloRequest.Inner",
           "fullName": "demo.v1.HelloRequest.Inner",
           "file": "demo/v1/demo.proto",
-          "description": "Nested type.",
+          "description": "",
           "deprecated": false,
           "fields": [
             {

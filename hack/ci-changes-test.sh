@@ -123,6 +123,7 @@ expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "generate" hack/generate.sh         # make generate delegates here (#349)
+expect "generate go" cmd/protoc-gen-koinon-doc/doc.go
 expect "generate" docs/reference/proto/proto-api.md   # buf.gen.docs.yaml output
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
