@@ -339,6 +339,9 @@ inside a transaction would roll back and be retried on the next pass: agentd stu
 transaction, so those events would be lost, and for `sandbox.archive` the pass would also abort before it marks
 the sandbox archived. `token.use_failed` is best effort and would be dropped. With the CHECK one release later,
 every pod that can write an unnamed system actor is gone before it applies.
+The CHECK shipped after v0.1.0-rc.10, the first release with the named actors, as migration
+`00071_audit_system_actor_named.sql` (#359). It stays `NOT VALID`: the append-only log may still hold empty
+system IDs written before rc.10, and every new insert is checked.
 A `cli` actor keeps the command as its ID (`keys forget`).
 
 **The ID format is frozen** (maintainer decision 2026-11-07, after review): `<component>:<function>`,
