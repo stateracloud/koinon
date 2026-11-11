@@ -48,7 +48,7 @@ hits=$(scan "$wfdir")
 check "no workflow step installs OS packages from a live apt mirror ($hits)" test -z "$hits"
 
 # Self-test of the scan on a fixture directory.
-fx=$(mktemp -d "${TMPDIR:-/tmp}/ci-playwright-scan.XXXXXX")
+fx=$(mktemp -d "${TMPDIR:-/tmp}/ci-playwright-scan.XXXXXX") || exit 1
 trap 'rm -rf "$fx"' EXIT
 printf 'jobs:\n  a:\n    steps:\n      - run: sudo apt-get install -y xz-utils\n' >"$fx/one.yaml"
 check "scan catches apt-get install in a .yaml workflow" test -n "$(scan "$fx")"
