@@ -45,6 +45,9 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 			"secrets":        []string{gwSA},
 			"namespaces":     []string{gwSA},
 		}},
+		// Schedule triggers, Run now and the workflow queue all run on the DBOS runtime (off by default); the
+		// drill's schedule, catch-up and ENQUEUED checks need it.
+		"api":         map[string]any{"durable": map[string]any{"enabled": true}},
 		"restoreHold": hold,
 		"postgres":    pg,
 		"egress":      map[string]any{"allowedInternalHosts": []string{fmt.Sprintf("fakemodel.%s.svc:8080", fakesNS)}},

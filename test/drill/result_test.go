@@ -180,7 +180,7 @@ func TestValuesOverlayHoldsAndNamesTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"restoreHold: true", "openshell-dst-a1b2c3.koinon-drill-os-dst-a1b2c3.svc:8080", "fakemodel.koinon-drill-fakes-a1b2c3.svc:8080", "openshell-dst-a1b2c3-client-tls", "gatewayId: drill-dst-a1b2c3", "configMap: openshell-dst-a1b2c3-config", "workload: openshell-dst-a1b2c3", "system:serviceaccount:koinon-drill-os-dst-a1b2c3:openshell-dst-a1b2c3"} {
+	for _, want := range []string{"restoreHold: true", "durable:\n        enabled: true", "openshell-dst-a1b2c3.koinon-drill-os-dst-a1b2c3.svc:8080", "fakemodel.koinon-drill-fakes-a1b2c3.svc:8080", "openshell-dst-a1b2c3-client-tls", "gatewayId: drill-dst-a1b2c3", "configMap: openshell-dst-a1b2c3-config", "workload: openshell-dst-a1b2c3", "system:serviceaccount:koinon-drill-os-dst-a1b2c3:openshell-dst-a1b2c3"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in:\n%s", want, s)
 		}
