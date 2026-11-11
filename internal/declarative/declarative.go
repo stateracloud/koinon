@@ -131,6 +131,8 @@ type Importer struct {
 	// planPass counts the changes of the current held pass; planSeen remembers which were logged.
 	planPass map[[2]string]int
 	planSeen map[string]string
+	// planMarked holds the keys of planSeen the current pass marked; endPlan prunes the others.
+	planMarked map[string]bool
 }
 
 // defaultOrgBackoff is the first retry delay for a Secret whose org does not exist yet.

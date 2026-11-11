@@ -13,8 +13,6 @@ postgres:
       storageClass: fast
 checkpoints:
   enabled: true
-  # Restore-only mode too (ADR 0110): the chart smoke test starts koinon-agentd with the flag it sets.
-  readOnly: true
   s3:
     existingSecret: koinon-homes-s3
     bucket: koinon-homes

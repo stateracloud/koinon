@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Home checkpoints on in restore-only mode (ADR 0110 decision 4, checkpoints.readOnly): koinon-agentd
+# and the reconciler start with the read-only flag. No client TLS Secret: the mesh provides mTLS.
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+gateway:
+  mode: kubernetes
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      storageClass: fast
+checkpoints:
+  enabled: true
+  # Restore-only mode (ADR 0110): the chart smoke test starts koinon-agentd and the reconciler with the flag it sets.
+  readOnly: true
+  s3:
+    existingSecret: koinon-homes-s3
+    bucket: koinon-homes

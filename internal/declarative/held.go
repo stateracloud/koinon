@@ -92,6 +92,9 @@ func (i *Importer) markPlanned(kind, action, org, name, version string) bool {
 	}
 	i.planPass[[2]string{kind, action}]++
 	key := fmt.Sprintf("%s/%s/%s/%s", kind, action, org, name)
+	if i.planMarked != nil {
+		i.planMarked[key] = true
+	}
 	if i.planSeen == nil {
 		i.planSeen = map[string]string{}
 	}
@@ -107,6 +110,7 @@ func (i *Importer) markPlanned(kind, action, org, name, version string) bool {
 func (i *Importer) beginPlan() {
 	i.mu.Lock()
 	i.planPass = map[[2]string]int{}
+	i.planMarked = map[string]bool{}
 	i.mu.Unlock()
 }
 
@@ -117,6 +121,16 @@ func (i *Importer) endPlan() {
 		for _, a := range []string{ActionApply, ActionRemove} {
 			heldChanges.WithLabelValues(k, a).Set(float64(i.planPass[[2]string{k, a}]))
 		}
+	}
+	// A change this pass did not see is gone: forget it, so the map does not grow with every Secret
+	// version and a change that comes back is logged again.
+	if i.planMarked != nil {
+		for key := range i.planSeen {
+			if !i.planMarked[key] {
+				delete(i.planSeen, key)
+			}
+		}
+		i.planMarked = nil
 	}
 }
 
