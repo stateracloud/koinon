@@ -16,6 +16,20 @@ import (
 )
 
 var _ = Describe("Build", func() {
+	It("a BestEffort build keeps going when a section that gates nothing cannot be read; the importer section still fails", func(ctx SpecContext) {
+		_, err := pool.Exec(ctx, `ALTER TABLE platform_trace_destination RENAME TO platform_trace_destination_x`)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) {
+			_, err := pool.Exec(ctx, `ALTER TABLE platform_trace_destination_x RENAME TO platform_trace_destination`)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		_, err = restorestatus.Build(ctx, pool, "own-mark-hash")
+		Expect(err).To(HaveOccurred(), "the full status fails on the unreadable section")
+		r, err := restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{BestEffort: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Warnings).To(ConsistOf(ContainSubstring("outward targets")))
+	})
+
 	It("reports a copy: the credentials it refuses, the outward targets and the work a release starts", func(ctx SpecContext) {
 		for _, stmt := range []string{`DELETE FROM install_binding`, `DELETE FROM api_tokens`, `DELETE FROM sessions`} {
 			_, err := pool.Exec(ctx, stmt)

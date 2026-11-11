@@ -28,7 +28,7 @@ func newRestoreCommand() *cobra.Command {
 		Use:   "restore",
 		Short: "Inspect a restored install before its hold is released",
 	}
-	report := func(cmd *cobra.Command) (restorestatus.Report, error) {
+	report := func(cmd *cobra.Command, bestEffort bool) (restorestatus.Report, error) {
 		pool, err := pgxpool.New(cmd.Context(), dbURL)
 		if err != nil {
 			return restorestatus.Report{}, fmt.Errorf("connect to postgres: %w", err)
@@ -38,7 +38,7 @@ func newRestoreCommand() *cobra.Command {
 		if installMark != "" {
 			owner = execution.OwnerID(installMark)
 		}
-		opt := restorestatus.Options{AcceptImporterDeletions: accept}
+		opt := restorestatus.Options{AcceptImporterDeletions: accept, BestEffort: bestEffort}
 		kube, err := kubeClient(config{kubeconfig: kubeconfig, secretsNamespace: namespace})
 		if err != nil {
 			return restorestatus.Report{}, err
@@ -61,7 +61,7 @@ func newRestoreCommand() *cobra.Command {
 			"(KOINON_INSTALL_MARK), the value the api Deployment carries.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			r, err := report(cmd)
+			r, err := report(cmd, false)
 			if err != nil {
 				return err
 			}
@@ -90,15 +90,36 @@ func newRestoreCommand() *cobra.Command {
 			}
 			var have bool
 			err = pool.QueryRow(cmd.Context(), `SELECT to_regclass('install_binding') IS NOT NULL AND to_regclass('restore_accepted_removals') IS NOT NULL`).Scan(&have)
+			if err != nil {
+				pool.Close()
+				return err
+			}
+			if !have {
+				pool.Close()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "restore release check: the schema does not exist yet (a first install); nothing to check")
+				return nil
+			}
+			// The gate reads only the binding row and the removal list. On a live install with no
+			// pending release and no waiting removal the Job exits 0 here, so no unrelated read can block
+			// an upgrade (ADR 0110 decision 1: the Job refuses nothing else).
+			owner := ""
+			if installMark != "" {
+				owner = execution.OwnerID(installMark)
+			}
+			row, st, err := installbinding.New(pool, owner, false, nil).Read(cmd.Context())
+			var waiting []installbinding.Removal
+			if err == nil {
+				waiting, _, err = installbinding.ListRemovals(cmd.Context(), pool)
+			}
 			pool.Close()
 			if err != nil {
 				return err
 			}
-			if !have {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "restore release check: the schema does not exist yet (a first install); nothing to check")
+			if !installbinding.Pending(owner, row, st != installbinding.StateUnknown) && len(waiting) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "restore release check: no release is pending and no removal waits; nothing to check")
 				return nil
 			}
-			r, err := report(cmd)
+			r, err := report(cmd, true)
 			if err != nil {
 				return err
 			}

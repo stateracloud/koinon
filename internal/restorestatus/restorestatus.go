@@ -35,6 +35,10 @@ type Options struct {
 	PlanRemovals func(ctx context.Context) ([]installbinding.Removal, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// BestEffort makes a failure of a section that gates nothing (the refused credentials, the outward
+	// targets, the release preview) a line in Report.Warnings instead of an error. The importer section
+	// and the binding row stay errors: the release gate decides on them.
+	BestEffort bool
 }
 
 // Report is the whole status. It is the JSON the command prints with --json.
@@ -44,6 +48,8 @@ type Report struct {
 	Targets    []Target    `json:"outwardTargets"`
 	Importer   Importer    `json:"importer"`
 	Release    ReleasePlan `json:"release"`
+	// Warnings are the sections a BestEffort build could not read.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Importer is the declarative importer's part of the release (ADR 0110 decision 1).
@@ -147,18 +153,46 @@ func Build(ctx context.Context, pool *pgxpool.Pool, ownerID string, optional ...
 	r.Binding.RecordedHost.CheckpointEndpoint = row.Targets.CheckpointEndpoint
 	r.Binding.RecordedHost.CheckpointBucket = row.Targets.CheckpointBucket
 
+	soft := func(section string, err error) error {
+		if err == nil || !opt.BestEffort {
+			return err
+		}
+		r.Warnings = append(r.Warnings, fmt.Sprintf("%s: %v", section, err))
+		return nil
+	}
+	if err := soft("refused credentials", quarantineSection(ctx, pool, &r, ownerID, st)); err != nil {
+		return r, err
+	}
+	if err := soft("outward targets", targetsSection(ctx, pool, &r)); err != nil {
+		return r, err
+	}
+
+	if err := importerSection(ctx, pool, &r, opt); err != nil {
+		return r, err
+	}
+	if err := soft("release preview", releaseSection(ctx, pool, &r, opt)); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+func quarantineSection(ctx context.Context, pool *pgxpool.Pool, r *Report, ownerID string, st installbinding.State) error {
 	if ownerID != "" && st != installbinding.StateSame {
 		// Not "same": a credential with no mark or another mark is refused (decision 3).
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM api_tokens
 			WHERE revoked_at IS NULL AND expires_at > now() AND install_mark IS DISTINCT FROM $1`, ownerID).Scan(&r.Quarantine.Tokens); err != nil {
-			return r, fmt.Errorf("count refused tokens: %w", err)
+			return fmt.Errorf("count refused tokens: %w", err)
 		}
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions
 			WHERE revoked_at IS NULL AND expires_at > now() AND idle_expires_at > now() AND install_mark IS DISTINCT FROM $1`, ownerID).Scan(&r.Quarantine.Sessions); err != nil {
-			return r, fmt.Errorf("count refused sessions: %w", err)
+			return fmt.Errorf("count refused sessions: %w", err)
 		}
 	}
 
+	return nil
+}
+
+func targetsSection(ctx context.Context, pool *pgxpool.Pool, r *Report) error {
 	rows, err := pool.Query(ctx, `
 		SELECT 'mcp-server', org_id::text, name, admin_disabled_at IS NOT NULL FROM mcp_servers
 		UNION ALL SELECT 'model-provider', org_id::text, name, admin_disabled_at IS NOT NULL FROM providers
@@ -167,27 +201,21 @@ func Build(ctx context.Context, pool *pgxpool.Pool, ownerID string, optional ...
 		UNION ALL SELECT 'platform-trace-destination', '', 'platform', admin_disabled_at IS NOT NULL FROM platform_trace_destination
 		ORDER BY 1, 2, 3`)
 	if err != nil {
-		return r, fmt.Errorf("list outward targets: %w", err)
+		return fmt.Errorf("list outward targets: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var t Target
 		if err := rows.Scan(&t.Kind, &t.Org, &t.Name, &t.Disabled); err != nil {
-			return r, err
+			return err
 		}
 		r.Targets = append(r.Targets, t)
 	}
 	if err := rows.Err(); err != nil {
-		return r, err
+		return err
 	}
 
-	if err := importerSection(ctx, pool, &r, opt); err != nil {
-		return r, err
-	}
-	if err := releaseSection(ctx, pool, &r, opt); err != nil {
-		return r, err
-	}
-	return r, nil
+	return nil
 }
 
 func importerSection(ctx context.Context, pool *pgxpool.Pool, r *Report, opt Options) error {
@@ -327,6 +355,9 @@ func Print(w io.Writer, r Report) {
 	rt := r.Binding.RecordedHost
 	p("recorded outward targets of the binding install: public url %q, oidc redirect %q, checkpoints %q bucket %q\n",
 		rt.PublicURL, rt.OIDCRedirectURL, rt.CheckpointEndpoint, rt.CheckpointBucket)
+	for _, w := range r.Warnings {
+		p("warning:    %s\n", w)
+	}
 	p("refused:     %d live API tokens, %d live sessions\n", r.Quarantine.Tokens, r.Quarantine.Sessions)
 	p("outward targets (%d):\n", len(r.Targets))
 	for _, t := range r.Targets {

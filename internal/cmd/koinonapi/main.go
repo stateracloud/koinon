@@ -766,6 +766,14 @@ func serve(ctx context.Context, cfg config) error {
 		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
 		slog.Info("schedule triggers started")
 	}
+	if !cfg.restoreHold {
+		// The release step (revoke every session, record restore.release) runs here, before the
+		// listeners start, and is retried until it succeeds; it does not wait for an importer pass.
+		rel := newReleaseAtStart(binding, pool, kube, cfg.secretsNamespace, cfg.restoreAcceptImporterDeletions)
+		if !rel.Try(ctx, 15*time.Second) {
+			safego.GoOrStop(bgCtx, slog.Default(), "restore-release", stop, func(ctx context.Context) { rel.Retry(ctx) })
+		}
+	}
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
@@ -775,14 +783,6 @@ func serve(ctx context.Context, cfg config) error {
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
-		if !cfg.restoreHold {
-			// The release step still runs: an unheld start after a restore revokes every session once.
-			safego.GoOrStop(bgCtx, slog.Default(), "restore-release", stop, func(ctx context.Context) {
-				if _, err := binding.Settle(ctx, nil, cfg.restoreAcceptImporterDeletions); err != nil && ctx.Err() == nil {
-					slog.Warn("restore release failed", "err", err)
-				}
-			})
-		}
 	}
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo).
 		WithRestoreStatus(func(ctx context.Context) (any, error) {
