@@ -62,7 +62,7 @@ runs fast, reliable tests; slow ones run after submit); [Rust compiler guide, CI
 (the full suite runs on the merge candidate before main moves). Scope: general pattern. In force: now.
 
 **S2. MUST** treat the merge queue build as the gate for the cluster e2e. A pull request runs the kind e2e
-only when it has the `e2e` label (with #572).
+only when it has the `e2e` label (ADR 0105 amendment, #572).
 Why: the queue tests main plus the pull request. The pull request's own run is not merge evidence (ADR 0105).
 Check: `hack/e2e-decide-test.sh`, `hack/ci-skip-heavy-test.sh`.
 Source: Koinon decision, ADR 0105 and its 2026-11-11 amendment. Scope: Koinon only. In force: now.
@@ -93,7 +93,7 @@ Check: review. Source: Firecracker README (as S4). Scope: general pattern. In fo
 ### Stage table: a new check, which stage
 
 Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs and never blocks, "-" does not run.
-A cell with "(with #572)" shows the decided state of the CI speed pull requests, not yet merged.
+A cell with "(with #572)" shows the decided state of the parts of the CI speed work that are not yet merged (parts 2 and 3).
 
 | Kind of check | Example here | Pull request | Merge queue | Push to main | Nightly | Release | Lab | Time limit | Blocks merge |
 |---|---|---|---|---|---|---|---|---|---|
@@ -104,8 +104,8 @@ A cell with "(with #572)" shows the decided state of the CI speed pull requests,
 | Chart render and smoke | `chart`, `chart smoke` | yes | yes | as above | - | - | - | up to 35 min job limit | yes |
 | Web unit | `web-test` | yes | yes | as above | - | - | - | minutes | yes (`web`) |
 | Web e2e (mocked) | `web-e2e` | yes | yes | as above | - | - | - | minutes | yes (`web`) |
-| Kind e2e quickstart | `quickstart`, gate `e2e result` | label `e2e` only (with #572) | yes, when relevant | batched | yes | tag needs a green one | optional | about 15 min | yes, in the queue |
-| Flavors image build | `flavors` | - (with #572) | yes (with #572) | publish | - | - | - | up to 60 min job limit | yes in the queue (with #572) |
+| Kind e2e quickstart | `quickstart`, gate `e2e result` | label `e2e` only | yes, when relevant | batched | yes | tag needs a green one | optional | about 15 min | yes, in the queue |
+| Flavors image build | `flavors` | - | yes | publish | - | - | - | up to 60 min job limit | yes in the queue |
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
 | CodeQL | `codeql` workflow (with #572) | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
 | govulncheck | `govulncheck.yml` | with #579 part 2, if `go.mod` or `go.sum` changed | - | - | yes | - | - | minutes | decided in part 2 |
@@ -242,6 +242,15 @@ Scope: general pattern. In force: with #579 part 2.
 a secret besides `GITHUB_TOKEN`.
 Check: `hack/ci-rules-check.sh` (rule W5). Source: GitHub security hardening. Scope: general pattern. In force: now.
 
+**W6. MUST** make the decision to skip a required check in the workflow file, not in a script that the change
+under test can edit.
+Why: workflow files are code-owner protected; scripts under `hack/` are not. A pull request that edits the deciding
+script could make its own required check green with no run.
+Koinon example: in `.github/workflows/secrets.yml` the `skip` step has `if: github.event_name == 'push'`, so
+`pull_request` and `merge_group` always scan. Only the scan of a push to main can be skipped.
+Check: `hack/secrets-skip-test.sh` for this instance; no general machine check.
+Source: Koinon decision (#572). Scope: general pattern. In force: now.
+
 ### Data and compatibility (D)
 
 **D1. MUST** never change a merged migration; keep the numbers contiguous; within a shipped minor line only expand.
@@ -319,6 +328,10 @@ Scope: general pattern. In force: now.
    in the issue and in the code.
 5. Never raise a timeout to hide a flake without a cause. Use `racescale.D` for windows under `-race`
    (`docs/dev/ci.md`, "The race detector").
+
+Worked example: issue 586, pull request 587. A script test failed about 1 run in 4. A re-run would have hidden the
+cause: the test asserted a promise that the code does not make. The fix removed the dependence on time. It uses one
+owner process per slot and a fixed clock. It adds no longer sleep and no retry.
 
 ## Waivers and exceptions
 
