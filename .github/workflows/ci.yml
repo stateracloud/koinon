@@ -539,12 +539,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
       # apt through Playwright needs the same retries as Dockerfiles (docs/dev/ci.md, #149 / #141).
-      - name: apt retries for playwright
-        run: printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAPT::Update::Error-Mode "any";\n' | sudo tee /etc/apt/apt.conf.d/80-koinon-retries >/dev/null
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-      - if: steps.pwcache.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
+      # Always --with-deps: install-deps alone was exiting 1 on cache hits (ubuntu-latest→26 and
+      # ubuntu-24.04). With a warm browser cache the download is a no-op; apt still runs.
+      - name: playwright chromium
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAPT::Update::Error-Mode "any";\n' | sudo tee /etc/apt/apt.conf.d/80-koinon-retries >/dev/null
+          pnpm exec playwright install --with-deps chromium
       - run: pnpm exec vite build
       - run: pnpm test:e2e
         env:
