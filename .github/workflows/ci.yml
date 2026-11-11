@@ -191,6 +191,10 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
       # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
         uses: ./.github/actions/setup-go-cache
@@ -198,6 +202,15 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
+      # Test results of the cacheable packages (issue 43), saved by warm-caches on every push to main
+      # under a per-commit key; the newest entry for this Go version is restored by prefix.
+      - if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-none
+          restore-keys: |
+            go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
       # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
       # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
@@ -209,6 +222,8 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
+          # Pull requests reuse the results of packages with no Docker, database or cluster input (hack/go-test-cacheable.sh); main and the merge queue run everything with -count=1 (issue 43).
+          KOINON_GO_TEST_CACHE: ${{ github.event_name == 'pull_request' && '1' || '' }}
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (old issue 507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
@@ -805,8 +820,15 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: write # prunes older go-testres- cache entries
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
       # The weekly go-ci key (.github/actions/setup-go-cache): looked up only, work and save on a miss.
       - id: go
         uses: ./.github/actions/setup-go-cache
@@ -829,6 +851,41 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: ${{ steps.go.outputs.key }}
+      # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
+      # (same script, same flags: they are part of Go's test cache key), without -count=1. Their own
+      # cache entry, saved on every push to main under a per-commit key; pull requests restore it by the
+      # `go-testres-` prefix. Separate from go-ci so a failing test never costs the build cache. Go
+      # caches only passing packages, so a failure only loses hits.
+      - id: testres
+        continue-on-error: true
+        env:
+          KOINON_GO_TEST_CACHE: '1'
+        run: |
+          pkgs=$(hack/go-test-cacheable.sh)
+          [ -n "$pkgs" ] || { echo "no cacheable packages listed" >&2; exit 1; }
+          # shellcheck disable=SC2086 # pkgs is a word list
+          hack/go-test.sh $pkgs
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+      # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
+      # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
+      # Only entries created before this run's entry go: pushes to main do not cancel each other. createdAt
+      # follows the save order, not the commit order, so a prune keeps the entries saved at or after its own;
+      # the worst case is a lost cache hit, never a stale pass. Fractional seconds are cut
+      # before the string compare (RFC 3339 drops trailing zeros, so they do not sort).
+      - name: Prune older test-result caches
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_KEY: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+        run: |
+          MINE=$(gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEEP_KEY" --limit 100 --json key,createdAt --jq '.[] | select(.key == env.KEEP_KEY) | .createdAt | sub("\\.[0-9]+"; "")')
+          [ -n "$MINE" ] || { echo "no $KEEP_KEY entry; nothing pruned"; exit 0; }
+          export MINE
+          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,createdAt --jq '.[] | select((.createdAt | sub("\\.[0-9]+"; "")) < env.MINE) | .id' |
+            while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY"; done
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
       # go.mod. The go-ci key carries the same 7-day interval (setup-go-cache), so a go-ci miss is also the
       # first push of a new interval: run the full lint (it fills the new lint cache) only then, and not
