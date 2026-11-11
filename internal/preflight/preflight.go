@@ -20,7 +20,9 @@ import (
 	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -404,7 +406,56 @@ func (c *Checker) checkRuntimeClass(ctx context.Context) Result {
 			Fix:     fmt.Sprintf("kubectl label runtimeclass %s %s=true", name, AttachableLabel),
 		}
 	}
+	if isKataHandler(rc.Handler) {
+		if msg := podFixedGap(rc); msg != "" {
+			return Result{
+				Check: check, Status: Warn,
+				Message: fmt.Sprintf("handler %s has no overhead.podFixed %s (ADR 0075)", rc.Handler, msg),
+				Fix: fmt.Sprintf("set overhead.podFixed memory and cpu on RuntimeClass %s to what one sandbox uses on the node "+
+					"beyond its container limits: the guest kernel and kata-agent plus the shim, VMM and virtiofsd (not "+
+					"default_memory, which the host charges only as the guest touches it). Start from kata-deploy's values, "+
+					"memory: 130Mi, cpu: 250m for Cloud Hypervisor or memory: 320Mi, cpu: 250m for QEMU, then measure "+
+					"as Kata's sizing guide says (host side: the pod cgroup's memory.current minus the nominal VM size, "+
+					"under load)", name),
+			}
+		}
+	}
 	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("handler %s, %s=true", rc.Handler, AttachableLabel)}
+}
+
+// podFixedGap says which overhead.podFixed resources a Kata RuntimeClass lacks and what that costs,
+// or "" when it charges both. Kubernetes adds podFixed to the scheduler's and ResourceQuota's view of
+// every pod and to the pod cgroup's limits; Kata's own processes and the guest's fixed cost live in
+// that cgroup.
+func podFixedGap(rc *nodev1.RuntimeClass) string {
+	mem, cpu := hasPodFixed(rc, corev1.ResourceMemory), hasPodFixed(rc, corev1.ResourceCPU)
+	switch {
+	case !mem && !cpu:
+		return "memory and cpu: the scheduler and ResourceQuota undercount every vm sandbox by its VM's fixed cost, " +
+			"and a sandbox near its memory limit can get the VMM OOM-killed"
+	case !mem:
+		return "memory: the scheduler and ResourceQuota undercount every vm sandbox by its VM's fixed memory, " +
+			"and a sandbox near its memory limit can get the VMM OOM-killed"
+	case !cpu:
+		return "cpu: the scheduler and ResourceQuota undercount every vm sandbox by its VM's fixed cpu, and the " +
+			"guest kernel's and VMM's work comes out of the workload's cpu limit, so a busy sandbox is throttled"
+	}
+	return ""
+}
+
+// hasPodFixed reports whether the RuntimeClass charges a non-zero pod overhead for the resource.
+func hasPodFixed(rc *nodev1.RuntimeClass, name corev1.ResourceName) bool {
+	if rc.Overhead == nil {
+		return false
+	}
+	q, ok := rc.Overhead.PodFixed[name]
+	return ok && !q.IsZero()
+}
+
+// isKataHandler reports whether a RuntimeClass handler is a Kata runtime (kata, kata-qemu,
+// kata-qemu-runtime-rs, kata-clh and the like), the vm tier of ADR 0075.
+func isKataHandler(handler string) bool {
+	return strings.HasPrefix(handler, "kata")
 }
 
 func (c *Checker) checkCNPG(ctx context.Context) Result {
