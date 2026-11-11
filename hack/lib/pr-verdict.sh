@@ -74,17 +74,33 @@ def prv_stamp($runs):
 def prv_pr_event: ((.event // "") | IN("", "pull_request", "pull_request_target", "merge_group", "push"));
 def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select($draft or (.display_title != "ci (draft)"))];
 def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring);
-def prv_drop($runs; $draft):
+# $req: names the caller asked for explicitly (pr-wait --require). Such a name is judged on its newest run of any event
+# (created_at, then run_attempt, per workflow path), so a failed workflow_dispatch run of it (hack/e2e-remote.sh) is read,
+# not hidden behind an older pull_request run. Every other name keeps the rule above: events outside the PR never decide.
+def prv_drop($runs; $draft; $req):
   if $runs == null then . else
     ($runs | map(.id | tostring)) as $known
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
+    | ([$runs[] | select($draft or (.display_title != "ci (draft)"))]) as $any
+    | . as $rows
+    | ([$rows[] | select(prv_is_status | not) | select((prv_name as $n | $req | index($n)) != null)
+          | {n: prv_name, id: prv_rid} | select(.id != null)] | unique) as $asked
+    | (reduce $asked[] as $a ({};
+        ([$any[] | select((.id | tostring) == $a.id)] | first // null) as $r
+        | if $r == null then . else
+            .["\($a.n)\t\($r.path)"] = ([(.["\($a.n)\t\($r.path)"] // null), $r] | map(select(. != null))
+              | max_by([.created_at, .run_attempt])) end)) as $win
     | map(if prv_is_status then .
-        else prv_rid as $id
-          | select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null)
+        else prv_rid as $id | prv_name as $n
+          | if $id != null and ($known | index($id)) != null and ($req | index($n)) != null then
+              select(([$any[] | select((.id | tostring) == $id)] | first // null) as $r
+                | $r != null and ($win["\($n)\t\($r.path)"].id | tostring) == $id)
+            else select($id == null or ($known | index($id)) == null or ($cur | index($id)) != null) end
         end)
     | prv_stamp($runs)
   end;
+def prv_drop($runs; $draft): prv_drop($runs; $draft; []);
 # The newest run of a workflow that completed and has no check run at all
 # (startup_failure, a workflow file that failed to parse): nothing would ever arrive, so it is a failure, not a wait.
 # A run that ended success or skipped is not such a case: its jobs ran but are not in the PR's rollup (for

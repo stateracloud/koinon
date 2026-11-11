@@ -402,6 +402,27 @@ run 7 --checks --interval 1 --timeout 3s
 expect "#521: a newer workflow_dispatch run does not hide the pull_request run's required row" 0 "checks 1/1 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
 
+# (PR #545) an explicit --require name is judged on its newest run of any event: a newer FAILED workflow_dispatch run
+# (hack/e2e-remote.sh) is read, not hidden behind the older green pull_request run; a dispatch-only run is found.
+qs_pr=$(cr quickstart COMPLETED SUCCESS 500)
+qs_dx=$(cr quickstart COMPLETED FAILURE 501)
+seq_set "$(rdh "$qs_pr")"
+printf '%s\n%s\n' "$qs_pr" "$qs_dx" >"$FAKE_DIR/rows"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 500 e2e-kind.yml e2e-kind 2026-11-11T10:00:00Z)" \
+  "$(wfrun 501 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed failure workflow_dispatch)"
+run 7 --checks --require quickstart --interval 1 --timeout 3s
+expect "#545: --require reads a newer failed workflow_dispatch run, not the older green pull_request run" 1 "FAILED quickstart (run 501)
+REQUIRED quickstart failed"
+seq_set "$(rdh "")"
+printf '%s\n' "$qs_dx" >"$FAKE_DIR/rows"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 501 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed failure workflow_dispatch)"
+run 7 --checks --require quickstart --interval 1 --timeout 3s
+expect "#545: --require finds a check that only a workflow_dispatch run has" 1 "FAILED quickstart (run 501)
+REQUIRED quickstart failed"
+rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns" "$FAKE_DIR/rows"
+
 # (#133) one verdict per workflow run: the newest run of a workflow decides, not the newest row of a name.
 # The bug these pin: an older green `go` outvoted a newer cancelled run, because a cancelled row never counts as a failure.
 o_go=$(cr_ci go SUCCESS 71 2026-11-01T10:00:00Z)
