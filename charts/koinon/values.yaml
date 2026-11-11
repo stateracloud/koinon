@@ -505,6 +505,12 @@ checkpoints:
     pathStyle: true
   # Time between a running sandbox's checkpoints.
   interval: 1h
+  # Restore-only mode (ADR 0110 decision 4): koinon-agentd restores homes from the bucket and lists
+  # its snapshots, but creates no snapshot, applies no retention and deletes no repository. Set it on
+  # a restored copy that still points at its source's bucket (a drill or staging copy): without it the
+  # copy writes into the source's kopia repositories and prunes them. Leave it false on a live install
+  # and on a replacement that owns the bucket.
+  readOnly: false
   # Size limit of the emptyDir where koinon-agentd stages a home while it is saved or restored.
   # A home stages up to 4Gi (checkpoint.DefaultLimits); 2 backups and 1 restore run at once
   # (agentd Checkpoints.Concurrency and RestoreConcurrency), plus about 2Gi for kopia's caches:

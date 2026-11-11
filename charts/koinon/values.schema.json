@@ -487,6 +487,7 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
+        "readOnly": {"type": "boolean"},
         "s3": {
           "type": "object",
           "additionalProperties": false,

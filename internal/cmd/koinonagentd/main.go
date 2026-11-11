@@ -68,6 +68,7 @@ type config struct {
 	checkpoints          bool
 	checkpointScratch    string
 	checkpointInterval   time.Duration
+	checkpointReadOnly   bool
 	s3Endpoint, s3Region string
 	s3Bucket             string
 
@@ -109,6 +110,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "save each agent's home to S3 (kopia) hourly, before stops and recreations, and restore it into recreated sandboxes")
 	fs.StringVar(&c.checkpointScratch, "checkpoints-scratch-dir", "/var/lib/koinon/checkpoints", "scratch space for staging a home (about the size of the largest home)")
+	fs.BoolVar(&c.checkpointReadOnly, "checkpoints-read-only", false, "restore-only checkpoints: restore homes from the bucket and list its snapshots, but write no snapshot, apply no retention and delete no repository (a restored copy that shares its source's bucket)")
 	fs.DurationVar(&c.checkpointInterval, "checkpoints-interval", time.Hour, "time between a sandbox's periodic checkpoints")
 	fs.StringVar(&c.s3Endpoint, "checkpoints-s3-endpoint", "", "S3 endpoint of the checkpoint bucket, host:port or an http(s) URL")
 	fs.StringVar(&c.s3Region, "checkpoints-s3-region", "", "S3 region")
@@ -317,7 +319,7 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 		return nil, fmt.Errorf("checkpoint storage: %w", err)
 	}
 	// Never the key: its ID's fingerprint, to check a rotation took (the secret keys page of the docs site, project.SecretKeysDocURL).
-	slog.Info("checkpoint storage", "bucket", s3.Bucket, "access_key", s3.AccessKeyFingerprint())
+	slog.Info("checkpoint storage", "bucket", s3.Bucket, "access_key", s3.AccessKeyFingerprint(), "read_only", cfg.checkpointReadOnly)
 	if err := os.MkdirAll(cfg.checkpointScratch, 0o700); err != nil {
 		return nil, fmt.Errorf("checkpoint scratch directory: %w", err)
 	}
@@ -332,6 +334,7 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 			Key: func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) },
 		},
 		Interval: cfg.checkpointInterval,
+		ReadOnly: cfg.checkpointReadOnly,
 	}, nil
 }
 

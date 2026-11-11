@@ -956,6 +956,10 @@ it carries no credentials.
   value: "true"
 - name: KOINON_CHECKPOINTS_INTERVAL
   value: {{ .Values.checkpoints.interval | quote }}
+{{- if .Values.checkpoints.readOnly }}
+- name: KOINON_CHECKPOINTS_READ_ONLY
+  value: "true"
+{{- end }}
 - name: KOINON_CHECKPOINTS_S3_BUCKET
   value: {{ .Values.checkpoints.s3.bucket | quote }}
 {{- range $env, $key := dict "KOINON_CHECKPOINTS_S3_ENDPOINT" "endpoint" "KOINON_CHECKPOINTS_S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}
