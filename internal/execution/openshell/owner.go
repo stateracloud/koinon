@@ -29,7 +29,7 @@ import (
 // [execution.Provider.ClaimLegacy] is set (until then it is taken as this install's), and a profile's owner is part of its spec
 // hash so it is re-imported with the annotation. Workspaces are the exception: they hold sandboxes
 // and homes and are not recreated, so an old workspace stays unmarked; a new one is stamped and checked. Until the
-// live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind and koinon_openshell_unmarked_objects_stale is 0), a second
+// live install has recreated them all (koinon_openshell_unmarked_objects is 0 for every kind and koinon_openshell_unmarked_objects_stale is 0; waits-for-agent objects are counted apart, see ADR 0106), a second
 // install on the gateway can still touch its unlabeled objects; the upgrading page of the docs site, https://koinon.stateracloud.com/docs/operate/upgrading/, says so. An empty id turns
 // the checks off (a dev setup without an install mark). koinon-reconciler and koinon-agentd both
 // set it: agentd execs and uploads into sandboxes, and a restored database carries the live install's
@@ -54,7 +54,8 @@ var UnmarkedKinds = []string{"sandbox", "provider", "profile"}
 
 // CountUnmarked counts, from the gateway and not from what a reconcile pass touched, the sandboxes,
 // providers and provider profiles in this install's workspaces that carry no install mark (issue 461).
-// It is the length, by kind, of what [Backend.ListUnmarked] returns, so the gauge and the list command
+// It is the length, by kind, of what [Backend.ListUnmarked] returns, without reasons; the reconciler's
+// gauges count the classified list instead (reconciler.ListUnmarked), so they and the list command
 // always agree. Any failed list returns an error and no counts, so a caller never publishes a partial
 // number. Without an owner nothing is stamped, and it returns an error.
 func (b *Backend) CountUnmarked(ctx context.Context) (map[string]int, error) {

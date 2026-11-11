@@ -163,6 +163,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(Equal(1.0))
 			for _, kind := range []string{"sandbox", "provider", "profile"} {
 				Expect(testutil.ToFloat64(m.UnmarkedObjects.WithLabelValues(kind))).To(BeZero(), kind)
+				Expect(testutil.ToFloat64(m.UnmarkedWaiting.WithLabelValues(kind))).To(BeZero(), kind)
 			}
 		})
 
@@ -491,9 +492,14 @@ var _ = Describe("Reconciler install ownership", func() {
 				line{"provider", dn.Provider, reconciler.ReasonWaitsForAgent},
 				line{"sandbox", an.Sandbox, reconciler.ReasonWaitsForAgent},
 			))
-			Expect(gauge("sandbox")).To(Equal(2.0), "the gauge counts what waits for an agent")
-			Expect(gauge("provider")).To(Equal(1.0))
-			Expect(gauge("profile")).To(BeZero())
+			waiting := func(kind string) float64 { return testutil.ToFloat64(m.UnmarkedWaiting.WithLabelValues(kind)) }
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(gauge(kind)).To(BeZero(), "the drill gauge leaves out what waits for an agent: %s", kind)
+			}
+			Expect(waiting("sandbox")).To(Equal(2.0), "the second gauge counts what waits for an agent")
+			Expect(waiting("provider")).To(Equal(1.0))
+			Expect(waiting("profile")).To(BeZero())
+			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
 
 			By("activating the draft agent and unarchiving the archived one clears it")
 			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
@@ -507,6 +513,9 @@ var _ = Describe("Reconciler install ownership", func() {
 				Expect(live.ReconcileAll(ctx)).To(Succeed())
 			}
 			Expect(list(ctx)).To(BeEmpty())
+			for _, kind := range []string{"sandbox", "provider", "profile"} {
+				Expect(waiting(kind)).To(BeZero(), kind)
+			}
 		})
 
 		It("reaches 0 on an install with no orphans", func(ctx SpecContext) {

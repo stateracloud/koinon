@@ -431,36 +431,44 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	}
 }
 
-// unmarkedCounter is implemented by a backend that counts, from the gateway, the objects in this
-// install's workspaces that carry no install mark (the OpenShell backend with an owner).
-type unmarkedCounter interface {
-	CountUnmarked(ctx context.Context) (map[string]int, error)
-}
-
-// observeUnmarked sets koinon_openshell_unmarked_objects from one list of the gateway's sandboxes,
-// providers and profiles, whatever this pass did or failed to do (issue 461). A list that fails keeps
-// the previous values and sets koinon_openshell_unmarked_objects_stale to 1; a complete one sets it
-// to 0. Without an install mark ownership is off, no object can be claimed and nothing is safe: the
-// kinds read 0 and stale reads 1, so the drill condition ("0 and stale 0") is not met.
+// observeUnmarked sets koinon_openshell_unmarked_objects and
+// koinon_openshell_unmarked_objects_waiting_for_agent from one classified unmarked list (the one
+// koinon-reconciler unmarked list prints: the gateway's sandboxes, providers and profiles, whatever
+// this pass did or failed to do, issue 461, with each object's reason from the database, issue 511).
+// waits-for-agent objects go to the second gauge, every other reason to the first, so the drill gate
+// ("0 and stale 0") means no object without a known owner is left. A list that fails, on the gateway
+// or in the database, keeps the previous values and sets koinon_openshell_unmarked_objects_stale to
+// 1; a complete one sets it to 0. Without an install mark ownership is off, no object can be claimed
+// and nothing is safe: the kinds read 0 and stale reads 1, so the drill condition is not met.
 func (r *Reconciler) observeUnmarked(ctx context.Context) {
-	c, ok := r.backend.(unmarkedCounter)
+	_, ok := r.backend.(unmarkedLister)
 	if !ok || !r.owns() {
 		for _, k := range unmarkedKinds {
 			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
+			r.m.UnmarkedWaiting.WithLabelValues(k).Set(0)
 		}
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
-	counts, err := c.CountUnmarked(ctx)
+	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Flavors)
 	if err != nil {
 		if ctx.Err() == nil {
-			r.log.Warn("counting unmarked OpenShell objects failed; the gauge keeps its last values", "err", err)
+			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
 		}
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
+	unowned, waiting := map[string]int{}, map[string]int{}
+	for _, o := range objs {
+		if o.Reason == ReasonWaitsForAgent {
+			waiting[o.Kind]++
+		} else {
+			unowned[o.Kind]++
+		}
+	}
 	for _, k := range unmarkedKinds {
-		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(counts[k]))
+		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(unowned[k]))
+		r.m.UnmarkedWaiting.WithLabelValues(k).Set(float64(waiting[k]))
 	}
 	r.m.UnmarkedStale.Set(0)
 }

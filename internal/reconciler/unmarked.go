@@ -4,8 +4,9 @@ package reconciler
 
 // The unmarked list (issue 511; the install mark is ADR 0106).
 //
-// koinon_openshell_unmarked_objects says how many objects in this install's workspaces carry no
-// install mark; ListUnmarked says which, and why each is still unmarked, so an operator can tell
+// koinon_openshell_unmarked_objects and koinon_openshell_unmarked_objects_waiting_for_agent say how
+// many objects in this install's workspaces carry no install mark (the second the waits-for-agent
+// ones, the first the rest; both count this list); ListUnmarked says which, and why each is still unmarked, so an operator can tell
 // the ones the reconciler will claim from the ones nothing will. It only reads: it never marks,
 // changes or deletes anything, and an object that carries another install's mark is not listed at
 // all (the backend leaves it out).

@@ -78,13 +78,18 @@ name. Velero's restore marks restored objects the same way.
   replaces the old install applies the mark backup before its first start; a drill copy does not.
 - Legacy objects stay open to a second install until the live install has recreated them, which takes
   several passes (held runs, the cap, attached providers). A restored copy may run on the same gateway only
-  when every sandbox, provider and provider profile of the live install carries the mark: the gauge
-  `koinon_openshell_unmarked_objects` is 0 for every kind and `koinon_openshell_unmarked_objects_stale` is 0.
-  That is reached only when the install has no orphans (`org-not-in-db`, `not-reconciler-made`) and no
-  `waits-for-agent` object (amendment for issue 511): a retained (archived) sandbox and the stopped sandbox of
-  a draft agent are counted and are claimed only when the agent changes status, so the operator unarchives the
-  archived agent on the live install first, activates or archives the draft agent, or deletes the sandbox when
-  its home volume is not needed.
+  when every sandbox, provider and provider profile of the live install without a known owner carries the
+  mark: the gauge `koinon_openshell_unmarked_objects` is 0 for every kind and
+  `koinon_openshell_unmarked_objects_stale` is 0. 0 means no object without a known owner is left; that is
+  reached only when the install has no orphans (`org-not-in-db`, `not-reconciler-made`). `waits-for-agent`
+  objects (amendment for issue 511: a retained (archived) sandbox and the stopped sandbox of a draft agent,
+  with the providers it attaches) are listed and counted apart, in
+  `koinon_openshell_unmarked_objects_waiting_for_agent{kind}`, and do not block: a restored copy of the same
+  database sees the same agent in the same status and does not claim the object either. They are claimed only
+  when the agent changes status. The exception is an agent whose status in the backup differs from the live
+  one (activated or unarchived since): the drill does not activate or unarchive agents on the copy, and an
+  operator who wants the second gauge at 0 too unarchives the archived agent on the live install, activates or
+  archives the draft agent, or deletes the sandbox when its home volume is not needed.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
@@ -122,8 +127,10 @@ objects were. Decision 5's claim ran only for active agents, so three groups wer
   claims these, by design: they are not this install's to change. They are reported instead.
 
 `koinon-reconciler unmarked list [--json]` lists the unmarked objects, one per line: workspace, kind, name
-and reason. It reads the same gateway lists as the gauge (the gauge is the length of the list, by kind)
-and only reads. An object that carries another install's mark is never listed. The reasons are fixed:
+and reason. The gauges count this list, by kind: `koinon_openshell_unmarked_objects` every line except
+`waits-for-agent`, `koinon_openshell_unmarked_objects_waiting_for_agent` the `waits-for-agent` lines (a fixed
+second series, not a reason label; both read the same list in the same pass and share the stale gauge). It
+only reads. An object that carries another install's mark is never listed. The reasons are fixed:
 
 | Reason | Meaning |
 |--------|---------|
@@ -134,14 +141,15 @@ and only reads. An object that carries another install's mark is never listed. T
 | `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing of this install claims it. On a gateway shared with another install, the line can belong to that install, which has not claimed its objects yet (its workspace carries no mark yet): do not delete it, check with that install first. |
 | `not-reconciler-made` | Not made by the reconciler, or this database has no record of it. Nothing claims it. |
 
-An operator reads the gauge as before. A kind above 0 with only `pending-claim`, `draft-agent` and
+An operator reads the first gauge as before. A kind above 0 with only `pending-claim`, `draft-agent` and
 `archived-agent` lines is still being claimed (it clears within a few passes), unless a `draft-agent` line stays
 after a pass (the key Secret case above). Three kinds of line do not clear by themselves and need the
 operator: `waits-for-agent` (activate or archive the draft agent; unarchive the archived agent, or delete its
 retained sandbox by hand once its home is no longer wanted), `org-not-in-db` (delete the object on the
 gateway by hand if it is a leftover of an earlier install or an e2e run; first check it is not another
-install's on a shared gateway) and `not-reconciler-made` (delete or leave). The gauge therefore reaches 0
-only on an install with no orphans and no `waits-for-agent` object. The command runs in the reconciler pod
+install's on a shared gateway) and `not-reconciler-made` (delete or leave). `waits-for-agent` lines are in
+the second gauge only, so the first reaches 0 on an install with no orphans, whatever its draft and archived
+agents hold. The command runs in the reconciler pod
 (`kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list`) and needs the settings the
 Deployment already gives it: the database URL, the OpenShell address and TLS directory, and the install
 mark. Removing the orphans (`--delete-orphans`) and a gauge labeled by reason (ADR 0023 would fix the label

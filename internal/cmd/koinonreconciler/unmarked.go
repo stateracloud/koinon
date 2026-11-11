@@ -38,8 +38,9 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 	cmd := &cobra.Command{
 		Use:   "unmarked",
 		Short: "Inspect the OpenShell objects that carry no install mark",
-		Long: "The gauge koinon_openshell_unmarked_objects counts the OpenShell objects in this install's workspaces " +
-			"that carry no install mark (ADR 0106). These commands say which ones.",
+		Long: "The gauges koinon_openshell_unmarked_objects and koinon_openshell_unmarked_objects_waiting_for_agent count " +
+			"the OpenShell objects in this install's workspaces that carry no install mark (ADR 0106): the second the " +
+			"waits-for-agent ones, the first all the others. These commands say which ones.",
 	}
 	var c unmarkedConfig
 	ls := &cobra.Command{
