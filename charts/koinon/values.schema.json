@@ -568,6 +568,14 @@
         "enabled": {"type": "boolean"}
       }
     },
+    "sandboxLimitRange": {
+      "description": "LimitRange for OpenShell sandbox namespaces (#76). On by default; sizes supervisor and init containers.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
     "restoreHold": {"type": "boolean"},
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "installMark": {

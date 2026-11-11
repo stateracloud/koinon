@@ -60,12 +60,20 @@ that cannot be reclaimed.
 - Negative: the spec hash changes, so after the upgrade each existing sandbox is recreated once; its
   home is restored from the checkpoint, as for any recreate. Changing a default, a bound or
   `memoryRequestEqualsLimit` later recreates the sandboxes it changes.
-- Negative: the supervisor pod stays BestEffort. OpenShell 0.1.5 cannot size it (upstream
-  NVIDIA/OpenShell #3930 and #3415), so its use is unaccounted for until upstream does.
 - Negative: with `memoryRequestEqualsLimit`, the default reserves 2Gi of node memory per sandbox.
 - Follow-ups, each its own issue: a per-agent override within the platform bounds (API, data model
-  and UI), a LimitRange for the supervisor's namespace, and per-org capacity admission.
+  and UI), and per-org capacity admission.
+
+### Amendment (2026-11-11)
+
+- A reconciler-owned LimitRange in each OpenShell workspace namespace (#76) supplies default
+  requests (50m/64Mi) and limits (250m/256Mi) for type Container (which also covers init
+  containers), so the supervisor and init containers are no longer BestEffort. OpenShell still
+  cannot size them itself (upstream NVIDIA/OpenShell #3930 and #3415). Chart: `sandboxLimitRange`;
+  RBAC is fenced by a ValidatingAdmissionPolicy to this gateway's workspace namespaces and the
+  fixed shape.
 
 ## Links
 
 - Old issue 314
+- #76

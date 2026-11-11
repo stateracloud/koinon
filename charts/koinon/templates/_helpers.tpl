@@ -748,6 +748,15 @@ creates one of this name in each workspace namespace.
 {{- printf "%s-%s-sandbox-default-deny" .Release.Namespace (include "koinon.fullname" .) -}}
 {{- end }}
 
+{{/*
+The sandbox LimitRange (#76, ADR 0083 follow-up), named
+<namespace>-<fullname>-sandbox-limitrange like the sandbox policies. The reconciler
+creates one of this name in each workspace namespace.
+*/}}
+{{- define "koinon.sandboxLimitRange" -}}
+{{- printf "%s-%s-sandbox-limitrange" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
 {{- if eq (include "koinon.kms" .) "openbao" }}
 {{- $o := .Values.secrets.kek.kms.openbao }}
@@ -808,6 +817,14 @@ creates one of this name in each workspace namespace.
 {{- end }}
 {{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
 {{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create NetworkPolicies cluster-wide while the policy only warns or audits. Set sandboxNetworkPolicy.enabled=false to run without the writer" }}
+{{- end }}
+{{- end }}
+{{- if .Values.sandboxLimitRange.enabled }}
+{{- if not .Values.sandboxPolicy.enabled }}
+{{- fail "sandboxLimitRange.enabled needs sandboxPolicy.enabled: the LimitRange writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxLimitRange.enabled=false" }}
+{{- end }}
+{{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
+{{- fail "sandboxLimitRange.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create LimitRanges cluster-wide while the policy only warns or audits. Set sandboxLimitRange.enabled=false to run without the writer" }}
 {{- end }}
 {{- end }}
 {{- if .Values.checkpoints.enabled }}

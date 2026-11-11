@@ -170,6 +170,9 @@ type Config struct {
 	// NetworkPolicy applies the chart's default-deny NetworkPolicy in each workspace namespace
 	// (spike 8.15, ADR 0045). Nil turns it off (sandboxNetworkPolicy.enabled=false).
 	NetworkPolicy *SandboxNetworkPolicy
+	// LimitRange applies the chart's LimitRange in each workspace namespace (#76, ADR 0083 follow-up).
+	// Nil turns it off (sandboxLimitRange.enabled=false).
+	LimitRange *SandboxLimitRange
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -307,6 +310,14 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		}
 		if cfg.NetworkPolicy.Log == nil {
 			cfg.NetworkPolicy.Log = cfg.Logger
+		}
+	}
+	if cfg.LimitRange != nil {
+		if err := cfg.LimitRange.validate(); err != nil {
+			return nil, err
+		}
+		if cfg.LimitRange.Log == nil {
+			cfg.LimitRange.Log = cfg.Logger
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
@@ -972,6 +983,10 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	if r.cfg.NetworkPolicy != nil && ws.Active {
 		// Defense in depth: a missing NetworkPolicy is counted and logged there, never fatal here.
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
+	}
+	if r.cfg.LimitRange != nil && ws.Active {
+		// Defense in depth: a missing LimitRange is counted and logged there, never fatal here.
+		_ = r.cfg.LimitRange.Ensure(ctx, name)
 	}
 	return name, nil
 }
