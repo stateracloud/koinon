@@ -9,6 +9,8 @@ import { LeakGuardSettings } from '@/components/leak-guard-settings'
 import { ServerClass } from '@/components/server-class'
 import { ToolSink } from '@/components/tool-sink'
 import { ServerForm } from '@/components/server-form'
+import { OutwardSwitch } from '@/components/outward-switch'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -193,6 +195,7 @@ function ServerCard({
           This server is declared by the Secret {s.managedBySecret}. Change or delete that Secret to change it here. You can still set its tools&apos; tiers.
         </p>
       )}
+      <OutwardSwitch kind={OutwardTargetKind.MCP_SERVER} targetId={s.id} subject={`server ${s.name}`} disabled={s.adminDisabled} />
       {!s.removed && <ServerClass key={`${s.kind}/${s.dataClass.join()}`} server={s} actions={actions} />}
       {editing ? (
         <ServerForm server={s} actions={actions} onDone={done} onSaved={onSaved} />

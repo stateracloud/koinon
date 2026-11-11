@@ -91,6 +91,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
@@ -733,12 +734,12 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)

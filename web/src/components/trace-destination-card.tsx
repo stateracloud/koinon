@@ -3,6 +3,8 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useState, type ReactNode } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
+import { OutwardSwitch } from '@/components/outward-switch'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -59,6 +61,7 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
         <Badge variant="outline">{backendLabel(d.backend)}</Badge>
         <Badge variant={d.enabled ? 'secondary' : 'outline'}>{d.enabled ? 'Enabled' : 'Disabled'}</Badge>
         {full && <FullContentBadge />}
+        {d.adminDisabled && <Badge variant="destructive">Switched off</Badge>}
         {d.credentialLostAt && <Badge variant="destructive">Credentials lost</Badge>}
       </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
@@ -92,6 +95,7 @@ export function TraceDestinationCard({ destination: d, title, full, test, edit, 
           <AlertDescription>The last test failed{t.message ? `: ${t.message}` : '.'}</AlertDescription>
         </Alert>
       )}
+      <OutwardSwitch kind={d.id ? OutwardTargetKind.TRACE_DESTINATION : OutwardTargetKind.PLATFORM_TRACE_DESTINATION} targetId={d.id} subject={subject} disabled={d.adminDisabled} />
       {editing ?? (
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" aria-label={`Test ${subject}`} disabled={testing} onClick={() => void runTest()}>

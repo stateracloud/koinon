@@ -303,6 +303,19 @@ var _ = Describe("the code-host scope refresh (ADR 0091, #115)", func() {
 			Expect(got).To(Equal(sinkclass.ExternalHigh))
 		})
 
+		It("does not read an admin-disabled connection, and reads it once enabled (ADR 0110)", func(ctx SpecContext) {
+			conn := githubConn(ctx, fake)
+			_, err := pool.Exec(ctx, `UPDATE connections SET admin_disabled_at = now(), admin_disabled_by = 'user u-1' WHERE org_id = $1 AND id = $2`, org, conn.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(syncer(hosts).RunOnce(ctx)).To(Succeed())
+			Expect(logBuf.String()).NotTo(ContainSubstring(conn.ID.String()), "no refresh warning for a switched-off connection")
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.ExternalHigh), "never read")
+			_, err = pool.Exec(ctx, `UPDATE connections SET admin_disabled_at = NULL, admin_disabled_by = NULL WHERE org_id = $1 AND id = $2`, org, conn.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(syncer(hosts).RunOnce(ctx)).To(Succeed())
+			Expect(classify(ctx, conn, "acme", "secret")).To(Equal(sinkclass.Internal))
+		})
+
 		It("skips a connection that is not a code host", func(ctx SpecContext) {
 			row := addConn(ctx, "slack", []byte(`{}`), map[string][]byte{"token": []byte("koinon_test_not-a-real-token")})
 			Expect(syncer(hosts).Sync(ctx, row, scopesync.Actor)).To(Succeed())

@@ -50,7 +50,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		Id: m.ID, Name: m.Name, Url: m.URL, Transport: m.Transport, HasCredential: m.HasCredential,
 		CredentialHeader: m.CredentialHeader, CredentialPrefix: m.CredentialPrefix, Source: m.Source,
 		ManagedBySecret: m.ManagedBySecret, DisabledReason: m.DisabledReason, Removed: m.Removed,
-		CredentialLostAt: optTime(m.CredentialLostAt), Health: healthToProto[m.Health], HealthReason: m.HealthReason,
+		CredentialLostAt: optTime(m.CredentialLostAt), AdminDisabled: adminDisabledProto(m.AdminDisabled), Health: healthToProto[m.Health], HealthReason: m.HealthReason,
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),

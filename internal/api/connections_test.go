@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
@@ -167,6 +168,22 @@ var _ = Describe("ConnectionService", func() {
 			Expect(s).NotTo(ContainSubstring("ghs_"), "installation tokens are not leaked either")
 		}
 		Expect(logs.String()).To(ContainSubstring("connection created"))
+	})
+
+	It("tests a switched-off connection without recording a failing status (ADR 0110)", func(ctx SpecContext) {
+		conn, err := create(ctx, owner, gh.PEM, false)
+		Expect(err).NotTo(HaveOccurred())
+		id := conn.GetConnection().GetId()
+		_, err = owner.outward.SetOutwardTargetDisabled(ctx, &outwardv1alpha1.SetOutwardTargetDisabledRequest{OrgId: org, Kind: outwardv1alpha1.OutwardTargetKind_OUTWARD_TARGET_KIND_CONNECTION, TargetId: id, Disabled: true})
+		Expect(err).NotTo(HaveOccurred())
+		var before string
+		Expect(e.pool.QueryRow(ctx, `SELECT status::text FROM connections WHERE id = $1`, id).Scan(&before)).To(Succeed())
+		tested, err := owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mustJSON(tested)).To(ContainSubstring("disabled by an admin"))
+		var after string
+		Expect(e.pool.QueryRow(ctx, `SELECT status::text FROM connections WHERE id = $1`, id).Scan(&after)).To(Succeed())
+		Expect(after).To(Equal(before))
 	})
 
 	It("rejects a bad key without quoting it, and writes nothing", func(ctx SpecContext) {
