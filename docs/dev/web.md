@@ -46,7 +46,11 @@ the Vite dev server (`web` resource). The release image build must run `pnpm bui
 
 ## Tests
 
-- `pnpm test`: Vitest and Testing Library, against an in-memory Connect router transport.
-- `pnpm test:e2e`: one Playwright test (`pnpm exec playwright install chromium` once; CI runs it in the Playwright image, no install). It fakes the
+- `pnpm test`: Vitest and Testing Library, against an in-memory Connect router transport. Files
+  share one module registry (`isolate: false`) for speed. `pnpm test:isolated` runs each file in a
+  fresh environment and the nightly `web-isolated` workflow runs it, so a spec must not rely on
+  state another file leaves behind.
+- `pnpm test:e2e`: one Playwright test (`pnpm exec playwright install chromium` once; CI runs it in
+  the Playwright image, no install). It fakes the
   API inside the browser, including a dropped `WatchRun` stream; the real API path with the fake
   model is plan item E1.

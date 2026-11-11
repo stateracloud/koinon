@@ -1842,6 +1842,19 @@ type HomeRepositoryEpoch struct {
 	PrefixTakenAt    pgtype.Timestamptz
 }
 
+type HomeRepositoryProbe struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+	RequestedAt     pgtype.Timestamptz
+	ExpiresAt       pgtype.Timestamptz
+	ProbeAfter      pgtype.Timestamptz
+	AnsweredAt      pgtype.Timestamptz
+	Outcome         pgtype.Text
+	Message         pgtype.Text
+}
+
 type InstallAuditAnchorHead struct {
 	AnchorEventID pgtype.UUID
 	OrgID         pgtype.UUID
