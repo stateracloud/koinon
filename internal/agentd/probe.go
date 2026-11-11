@@ -19,12 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // The outcomes a probe is answered with (home_repository_probes.outcome).
@@ -41,6 +43,9 @@ const (
 	probeLease = 2 * probeBudget
 	// probeKeep is how long a probe row outlives its expiry before agentd deletes it.
 	probeKeep = time.Hour
+	// probeWorkers bounds the listings in flight at once. Each probe is an independent listing, so a
+	// rotation of hundreds of agents is answered in a few listing latencies, not one per agent.
+	probeWorkers = 16
 )
 
 // probeTick answers the due probes of every org and deletes the old rows.
@@ -52,21 +57,37 @@ func (p *Pool) probeTick(ctx context.Context) {
 		}
 		return
 	}
+	sem := make(chan struct{}, probeWorkers)
+	var wg sync.WaitGroup
 	for _, org := range orgs {
 		for ctx.Err() == nil {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+			}
+			if ctx.Err() != nil {
+				break
+			}
 			pr, err := p.q.ClaimHomeRepositoryProbe(ctx, store.ClaimHomeRepositoryProbeParams{OrgID: org, LeaseSeconds: int32(probeLease.Seconds())})
 			if err != nil {
+				<-sem
 				if !errors.Is(err, pgx.ErrNoRows) && ctx.Err() == nil {
 					p.log.Warn("repository probes: claiming a probe failed", "err", err)
 				}
 				break
 			}
-			p.answerProbe(ctx, pr)
+			wg.Add(1)
+			go safego.Do(p.log, "repository-probe-answer", func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				p.answerProbe(ctx, pr)
+			})
 		}
 		if _, err := p.q.DeleteOldHomeRepositoryProbes(ctx, store.DeleteOldHomeRepositoryProbesParams{OrgID: org, GraceSeconds: int32(probeKeep.Seconds())}); err != nil && ctx.Err() == nil {
 			p.log.Warn("repository probes: deleting old probes failed", "err", err)
 		}
 	}
+	wg.Wait()
 }
 
 // answerProbe checks the probe's prefix and records the answer.

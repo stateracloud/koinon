@@ -506,8 +506,9 @@ and never the bucket's credentials; agentd holds the credentials and no KEK (ADR
 may hold both, so the check goes through the database:
 
 - The command writes a probe request (`home_repository_probes`, keyed `(org_id, id)`: agent and
-  candidate epoch) and waits, by default two minutes (`Tool.ProbeTimeout`). agentd claims pending
-  probes with a lease (the checkpoint loop and the restore-hold loop, `probeTick`), lists the agent's
+  candidate epoch) and waits, by default two minutes plus 250 ms per agent (`Tool.ProbeTimeout`,
+  `--probe-timeout`). agentd claims pending probes with a lease and answers up to 16 at once, as
+  each is an independent listing, so the wait does not grow with the number of agents (the checkpoint loop and the restore-hold loop, `probeTick`), lists the agent's
   epoch folders with the listing a resync uses (`HomeStore.HeldEpochs`: any object under `r<N>/` is a
   taken prefix, whatever its password) and answers in the row: `free`, `taken` or `error`, with a
   message that carries no endpoint text and no secret.

@@ -26,6 +26,14 @@ const (
 // check the storage before they refuse the rotation.
 const DefaultProbeTimeout = 2 * time.Minute
 
+// probePerTarget is added to the default wait for every agent asked about, up to MaxProbeTimeout:
+// a rotation of a large install needs more than a single check's time. An explicit ProbeTimeout is
+// used as given.
+const (
+	probePerTarget  = 250 * time.Millisecond
+	MaxProbeTimeout = 30 * time.Minute
+)
+
 // probePoll is how often the answer is looked for in the database.
 const probePoll = time.Second
 
@@ -48,7 +56,7 @@ func (t *Tool) probeEpochs(ctx context.Context, targets []homeTarget) (map[probe
 	}
 	timeout := t.ProbeTimeout
 	if timeout <= 0 {
-		timeout = DefaultProbeTimeout
+		timeout = min(DefaultProbeTimeout+time.Duration(len(targets))*probePerTarget, MaxProbeTimeout)
 	}
 	poll := t.ProbePoll
 	if poll <= 0 {

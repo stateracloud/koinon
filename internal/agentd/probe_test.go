@@ -36,6 +36,21 @@ func (f failingEpochs) HeldEpochs(context.Context, string, string) ([]int32, err
 	return nil, f.err
 }
 
+// slowEpochs is a bucket whose listing takes a fixed time, as a remote one does.
+type slowEpochs struct {
+	agentd.HomeStore
+	delay time.Duration
+}
+
+func (s slowEpochs) HeldEpochs(ctx context.Context, org, agent string) ([]int32, error) {
+	select {
+	case <-time.After(s.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.HomeStore.HeldEpochs(ctx, org, agent)
+}
+
 // Storage probes of keys new-repositories and keys forget (#285, ADR 0032): koinon-agentd, which
 // holds the bucket's credentials, checks the prefix of the epoch a rotation would start and answers
 // in home_repository_probes; the keys command, which holds the KEKs, waits for the answer.
@@ -138,6 +153,29 @@ var _ = Describe("storage probes", func() {
 		}
 		Eventually(count).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(1))
 		Eventually(answered(ctx, recent)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
+	})
+
+	It("answers many probes concurrently: a rotation of a large install finishes within the wait", func(ctx SpecContext) {
+		// 48 agents at 250ms a listing would take 12s one by one; the workers answer them in a fraction of that.
+		const agents = 48
+		var probes []store.HomeRepositoryProbe
+		for i := 0; i < agents; i++ {
+			var a pgtype.UUID
+			Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'bulk', 'opencode') RETURNING id`, e.org).Scan(&a)).To(Succeed())
+			_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
+				e.org, a, checkpoint.Prefix(e.org.String(), a.String()))
+			Expect(err).NotTo(HaveOccurred())
+			p, err := q.RequestHomeRepositoryProbe(ctx, store.RequestHomeRepositoryProbeParams{OrgID: e.org, AgentID: a, RepositoryEpoch: 1, TimeoutSeconds: 120})
+			Expect(err).NotTo(HaveOccurred())
+			probes = append(probes, p)
+		}
+		stop := e.pool("agentd-a", cfg(slowEpochs{HomeStore: store0, delay: 250 * time.Millisecond}))
+		defer stop()
+		start := time.Now()
+		for _, p := range probes {
+			Eventually(answered(ctx, p)).WithTimeout(racescale.D(20 * time.Second)).Should(BeTrue())
+		}
+		Expect(time.Since(start)).To(BeNumerically("<", racescale.D(6*time.Second)))
 	})
 
 	It("answers in restore-hold mode too, where the restore runbook runs keys forget", func(ctx SpecContext) {
