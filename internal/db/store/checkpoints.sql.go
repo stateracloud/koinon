@@ -11,6 +11,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const answerHomeRepositoryProbe = `-- name: AnswerHomeRepositoryProbe :execrows
+UPDATE home_repository_probes
+SET answered_at = now(), outcome = $1, message = left($2::text, 1000)
+WHERE org_id = $3 AND id = $4 AND answered_at IS NULL
+`
+
+type AnswerHomeRepositoryProbeParams struct {
+	Outcome pgtype.Text
+	Message string
+	OrgID   pgtype.UUID
+	ID      pgtype.UUID
+}
+
+// Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
+func (q *Queries) AnswerHomeRepositoryProbe(ctx context.Context, arg AnswerHomeRepositoryProbeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, answerHomeRepositoryProbe,
+		arg.Outcome,
+		arg.Message,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimHomeCheckpoint = `-- name: ClaimHomeCheckpoint :one
 UPDATE home_checkpoints AS h
 SET status = 'running', started_at = now(), attempts = h.attempts + 1
@@ -104,6 +131,44 @@ func (q *Queries) ClaimHomeCheckpointResync(ctx context.Context, arg ClaimHomeCh
 		&i.Missing,
 		&i.Skipped,
 		&i.Taken,
+	)
+	return i, err
+}
+
+const claimHomeRepositoryProbe = `-- name: ClaimHomeRepositoryProbe :one
+UPDATE home_repository_probes AS p
+SET probe_after = now() + make_interval(secs => $1::int)
+WHERE p.org_id = $2 AND p.id = (
+    SELECT s.id FROM home_repository_probes s
+    WHERE s.org_id = $2 AND s.answered_at IS NULL AND s.probe_after <= now() AND s.expires_at > now()
+    ORDER BY s.requested_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING org_id, id, agent_id, repository_epoch, requested_at, expires_at, probe_after, answered_at, outcome, message
+`
+
+type ClaimHomeRepositoryProbeParams struct {
+	LeaseSeconds int32
+	OrgID        pgtype.UUID
+}
+
+// The next unanswered probe of the org, held for @lease_seconds: an agentd that dies leaves it to
+// another after the lease. An expired probe is not claimed: the command has refused already. No
+// row: nothing to do.
+func (q *Queries) ClaimHomeRepositoryProbe(ctx context.Context, arg ClaimHomeRepositoryProbeParams) (HomeRepositoryProbe, error) {
+	row := q.db.QueryRow(ctx, claimHomeRepositoryProbe, arg.LeaseSeconds, arg.OrgID)
+	var i HomeRepositoryProbe
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.RequestedAt,
+		&i.ExpiresAt,
+		&i.ProbeAfter,
+		&i.AnsweredAt,
+		&i.Outcome,
+		&i.Message,
 	)
 	return i, err
 }
@@ -390,6 +455,38 @@ func (q *Queries) CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUI
 	var i CountHomeRepositorySeedsRow
 	err := row.Scan(&i.Pending, &i.Failed)
 	return i, err
+}
+
+const deleteHomeRepositoryProbe = `-- name: DeleteHomeRepositoryProbe :exec
+DELETE FROM home_repository_probes WHERE org_id = $1 AND id = $2
+`
+
+type DeleteHomeRepositoryProbeParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) DeleteHomeRepositoryProbe(ctx context.Context, arg DeleteHomeRepositoryProbeParams) error {
+	_, err := q.db.Exec(ctx, deleteHomeRepositoryProbe, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteOldHomeRepositoryProbes = `-- name: DeleteOldHomeRepositoryProbes :execrows
+DELETE FROM home_repository_probes WHERE org_id = $1 AND expires_at < now() - make_interval(secs => $2::int)
+`
+
+type DeleteOldHomeRepositoryProbesParams struct {
+	OrgID        pgtype.UUID
+	GraceSeconds int32
+}
+
+// The rows nobody reads any more: expired ones (the command gave up or died), whether answered or not.
+func (q *Queries) DeleteOldHomeRepositoryProbes(ctx context.Context, arg DeleteOldHomeRepositoryProbesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldHomeRepositoryProbes, arg.OrgID, arg.GraceSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const expireRetiredHomeRepository = `-- name: ExpireRetiredHomeRepository :execrows
@@ -807,6 +904,33 @@ func (q *Queries) GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeReposit
 	return i, err
 }
 
+const getHomeRepositoryProbe = `-- name: GetHomeRepositoryProbe :one
+SELECT org_id, id, agent_id, repository_epoch, requested_at, expires_at, probe_after, answered_at, outcome, message FROM home_repository_probes WHERE org_id = $1 AND id = $2
+`
+
+type GetHomeRepositoryProbeParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) GetHomeRepositoryProbe(ctx context.Context, arg GetHomeRepositoryProbeParams) (HomeRepositoryProbe, error) {
+	row := q.db.QueryRow(ctx, getHomeRepositoryProbe, arg.OrgID, arg.ID)
+	var i HomeRepositoryProbe
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.RequestedAt,
+		&i.ExpiresAt,
+		&i.ProbeAfter,
+		&i.AnsweredAt,
+		&i.Outcome,
+		&i.Message,
+	)
+	return i, err
+}
+
 const getOpenHomeCheckpoint = `-- name: GetOpenHomeCheckpoint :one
 SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at, repository_epoch, snapshot_missing_at FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND status IN ('requested', 'running')
@@ -1212,6 +1336,28 @@ func (q *Queries) LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeR
 		&i.PrefixTakenAt,
 	)
 	return i, err
+}
+
+const latestHomeRepositoryNextEpoch = `-- name: LatestHomeRepositoryNextEpoch :one
+SELECT GREATEST(COALESCE((SELECT max(e.repository_epoch) FROM home_repository_epochs e
+                          WHERE e.org_id = r.org_id AND e.agent_id = r.agent_id), 0) + 1,
+                COALESCE(r.next_epoch_at_least, 1))::int AS next_epoch
+FROM home_repositories r
+WHERE r.org_id = $1 AND r.agent_id = $2
+`
+
+type LatestHomeRepositoryNextEpochParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The epoch a keys command would start next for the agent: the newest recorded epoch + 1, or the
+// floor koinon-agentd recorded (#262) when that is higher. No row: the agent has no repository.
+func (q *Queries) LatestHomeRepositoryNextEpoch(ctx context.Context, arg LatestHomeRepositoryNextEpochParams) (int32, error) {
+	row := q.db.QueryRow(ctx, latestHomeRepositoryNextEpoch, arg.OrgID, arg.AgentID)
+	var next_epoch int32
+	err := row.Scan(&next_epoch)
+	return next_epoch, err
 }
 
 const listCompleteHomeCheckpoints = `-- name: ListCompleteHomeCheckpoints :many
@@ -1875,6 +2021,44 @@ func (q *Queries) RequestHomeCheckpointResync(ctx context.Context, arg RequestHo
 		&i.Missing,
 		&i.Skipped,
 		&i.Taken,
+	)
+	return i, err
+}
+
+const requestHomeRepositoryProbe = `-- name: RequestHomeRepositoryProbe :one
+INSERT INTO home_repository_probes (org_id, agent_id, repository_epoch, expires_at)
+VALUES ($1, $2, $3, now() + make_interval(secs => $4::int))
+RETURNING org_id, id, agent_id, repository_epoch, requested_at, expires_at, probe_after, answered_at, outcome, message
+`
+
+type RequestHomeRepositoryProbeParams struct {
+	OrgID           pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+	TimeoutSeconds  int32
+}
+
+// The keys command's request that koinon-agentd checks the storage prefix of an epoch. The command
+// gives up at @timeout_seconds; agentd never claims the row after that.
+func (q *Queries) RequestHomeRepositoryProbe(ctx context.Context, arg RequestHomeRepositoryProbeParams) (HomeRepositoryProbe, error) {
+	row := q.db.QueryRow(ctx, requestHomeRepositoryProbe,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RepositoryEpoch,
+		arg.TimeoutSeconds,
+	)
+	var i HomeRepositoryProbe
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.RepositoryEpoch,
+		&i.RequestedAt,
+		&i.ExpiresAt,
+		&i.ProbeAfter,
+		&i.AnsweredAt,
+		&i.Outcome,
+		&i.Message,
 	)
 	return i, err
 }

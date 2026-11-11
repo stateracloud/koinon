@@ -1,6 +1,6 @@
 # 0085. Upgrade, compatibility and recovery policy
 
-- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md))
+- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285)
 - Date: 2026-11-01
 - Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)
 - Relates to: [0027](0027-repo-and-versioning.md) (forward-only migrations, upgrade test), [0030](0030-run-state-machine.md) (leases, epoch, takeover), [0032](0032-agent-home-checkpoints.md) (home checkpoints), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (KEK and envelopes), [0060](0060-migrations-as-a-job.md) (migration Job), [0066](0066-triggers-and-scheduling.md) (DBOS), [0076](0076-database-modes.md) (database modes, backups), [0077](0077-pinned-openshell-and-installer.md) (OpenShell pins), [0045](0045-openshell-hardening-defaults.md) (pinned supervisor image)
@@ -494,6 +494,39 @@ decision 1 on v0.1.0 no longer includes the schema decisions; it still covers ba
 runbook and the restore drill (decisions 13 to 16), and the drain and rollout decisions 2 to 4.
 The marker `hack/migrate-patch-line` stays `none` until v0.3.0 ships, and a `release/*` base is not
 a patch line by its name.
+
+## Amendment (2026-11-11): keys commands ask agentd to probe the storage before they pick an epoch (#285)
+
+Maintainer decision of 2026-11-07, built for v0.2. `keys forget` and `keys new-repositories` start the
+agent's next repository epoch at `max(current + 1, home_repositories.next_epoch_at_least)`. The floor
+(#262, `next_epoch_at_least`) is recorded only after agentd has met a taken prefix, so a rotation
+before any resync or backup could still land on a prefix that holds a repository the database has no
+password for, and the next backup then fails with `ErrPrefixTaken`. The keys command holds the KEKs
+and never the bucket's credentials; agentd holds the credentials and no KEK (ADR 0032). No process
+may hold both, so the check goes through the database:
+
+- The command writes a probe request (`home_repository_probes`, keyed `(org_id, id)`: agent and
+  candidate epoch) and waits, by default two minutes (`Tool.ProbeTimeout`). agentd claims pending
+  probes with a lease (the checkpoint loop and the restore-hold loop, `probeTick`), lists the agent's
+  epoch folders with the listing a resync uses (`HomeStore.HeldEpochs`: any object under `r<N>/` is a
+  taken prefix, whatever its password) and answers in the row: `free`, `taken` or `error`, with a
+  message that carries no endpoint text and no secret.
+- **Fail closed.** `taken`, `error` and no answer in time each refuse the rotation before anything is
+  written: no epoch, no seed request, no `lost` mark, no audit event. There is no override flag; the
+  operator fixes agentd or the bucket and runs the command again, or lets agentd record the floor
+  (a resync or a backup into the prefix) and runs it again.
+- The epoch probed must be the epoch the transaction starts. The command reads the candidate
+  (`LatestHomeRepositoryNextEpoch`) before it probes and compares it with the epoch
+  `Passwords.NewEpochIn` picked under the row lock; a difference (another rotation, or agentd
+  raising the floor meanwhile) rolls the transaction back and asks for a re-run.
+- The floor of #262 stays as the second guard: the candidate already includes it, and agentd still
+  records it when a backup meets a taken prefix.
+- `keys new-repositories` probes every agent before it starts any epoch, so one refused agent refuses
+  the command. `keys forget` collects the agents that need an epoch inside its org transaction and
+  probes them together on other connections of the pool (hence `forgetMinConns` is 3), so a refusal
+  rolls back the lost marks of that org too.
+- The probe table is ephemeral: the command deletes the rows it read, agentd deletes rows an hour
+  after they expire, and agentd never claims an expired probe.
 
 ## Implementation sub-issues
 

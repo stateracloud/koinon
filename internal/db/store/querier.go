@@ -34,6 +34,8 @@ type Querier interface {
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
 	// item starts waiting on them). Returns the rows that were new.
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
+	// Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
+	AnswerHomeRepositoryProbe(ctx context.Context, arg AnswerHomeRepositoryProbeParams) (int64, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
 	// stores the item (a message or a thought) the agent was in the middle of, so a stopped run keeps
 	// what was said (old issue 344). Nothing else is recorded this way. No row: another epoch, the run is not
@@ -104,6 +106,10 @@ type Querier interface {
 	// itself, and a resync between its snapshot and that record would add the copy twice. No row:
 	// nothing to do.
 	ClaimHomeCheckpointResync(ctx context.Context, arg ClaimHomeCheckpointResyncParams) (HomeCheckpointResync, error)
+	// The next unanswered probe of the org, held for @lease_seconds: an agentd that dies leaves it to
+	// another after the lease. An expired probe is not claimed: the command has refused already. No
+	// row: nothing to do.
+	ClaimHomeRepositoryProbe(ctx context.Context, arg ClaimHomeRepositoryProbeParams) (HomeRepositoryProbe, error)
 	// The next seed due in the org, held for @lease_seconds: a writer that dies leaves it to another
 	// after the lease. A superseded epoch (retired: a later one started) is not seeded; the later
 	// one is. No row: nothing to do.
@@ -284,9 +290,12 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) (int64, error)
+	DeleteHomeRepositoryProbe(ctx context.Context, arg DeleteHomeRepositoryProbeParams) error
 	DeleteLeakGuardSession(ctx context.Context, arg DeleteLeakGuardSessionParams) error
 	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
+	// The rows nobody reads any more: expired ones (the command gave up or died), whether answered or not.
+	DeleteOldHomeRepositoryProbes(ctx context.Context, arg DeleteOldHomeRepositoryProbesParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
 	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFetchTrustedHostParams) (int64, error)
@@ -446,6 +455,7 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	GetHomeRepositoryProbe(ctx context.Context, arg GetHomeRepositoryProbeParams) (HomeRepositoryProbe, error)
 	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -661,6 +671,9 @@ type Querier interface {
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
 	// The agent's current repository when it has epochs; no row: epoch 0 (home_repositories) is current.
 	LatestHomeRepositoryEpoch(ctx context.Context, arg LatestHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// The epoch a keys command would start next for the agent: the newest recorded epoch + 1, or the
+	// floor koinon-agentd recorded (#262) when that is higher. No row: the agent has no repository.
+	LatestHomeRepositoryNextEpoch(ctx context.Context, arg LatestHomeRepositoryNextEpochParams) (int32, error)
 	// The newest written version, valid or not yet; 0 when none was written.
 	LatestPlatformPriceVersion(ctx context.Context) (int64, error)
 	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
@@ -1187,6 +1200,9 @@ type Querier interface {
 	// A new request replaces the agent's last one, done or not: a try of the old one still running
 	// records nothing (its request_id is gone).
 	RequestHomeCheckpointResync(ctx context.Context, arg RequestHomeCheckpointResyncParams) (HomeCheckpointResync, error)
+	// The keys command's request that koinon-agentd checks the storage prefix of an epoch. The command
+	// gives up at @timeout_seconds; agentd never claims the row after that.
+	RequestHomeRepositoryProbe(ctx context.Context, arg RequestHomeRepositoryProbeParams) (HomeRepositoryProbe, error)
 	// The new epoch is to hold the agent's newest home (keys new-repositories, #86): koinon-agentd
 	// copies it there from @seed_from_epoch or older.
 	RequestHomeRepositorySeed(ctx context.Context, arg RequestHomeRepositorySeedParams) (int64, error)

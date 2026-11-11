@@ -168,7 +168,8 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }}
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		freeStorage()
 	})
 
 	It("refuses a KEK still in the key set and an invalid ID, and has nothing to forget for an unused KEK", func(ctx SpecContext) {
@@ -445,6 +446,65 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 
+	Describe("the storage probe of a new repository epoch (#285)", func() {
+		// withLostRepository seals an org's values and an agent's home repository under the KEK that is
+		// then lost, so that forget has an epoch to start.
+		withLostRepository := func(ctx SpecContext) (orgRows, pgtype.UUID) {
+			GinkgoHelper()
+			o := sealOrg(ctx)
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM agents WHERE org_id = $1`, o.org).Scan(&agent)).To(Succeed())
+			_, err := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}.Current(ctx, o.org, agent)
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+			tool.Yes = true
+			return o, agent
+		}
+		unchanged := func(ctx SpecContext, o orgRows, agent pgtype.UUID) {
+			GinkgoHelper()
+			lost, work := orgState(ctx, o)
+			Expect(lost).To(BeFalse(), "nothing of the org is marked lost")
+			Expect(work).NotTo(Equal("expired"))
+			var epochs, probes int
+			Expect(pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM home_repository_epochs WHERE agent_id = $1), (SELECT count(*) FROM home_repository_probes)`, agent).Scan(&epochs, &probes)).To(Succeed())
+			Expect(epochs).To(BeZero(), "no repository epoch was started")
+			Expect(probes).To(BeZero(), "the probe is deleted")
+		}
+
+		It("starts the epoch when the prefix is free", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			var epoch int32
+			Expect(pool.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE agent_id = $1`, agent).Scan(&epoch)).To(Succeed())
+			Expect(epoch).To(Equal(int32(1)))
+			lost, _ := orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+		})
+
+		It("refuses a prefix that holds a repository, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) { return "taken", "" })
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("nothing was changed"), ContainSubstring("already holds a repository the database does not record"))))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses when the check errors, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) { return "error", "could not list" })
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("could not check the storage prefix")))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses when koinon-agentd does not answer in time, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(nil)
+			tool.ProbeTimeout = time.Second
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("did not check the storage within 1s")))
+			unchanged(ctx, o, agent)
+		})
+	})
+
 	Describe("with a database that limits the run", func() {
 		// poolWith opens a pool on the test database with the connection limit and the server's
 		// idle-in-transaction timeout (0 for none) given.
@@ -470,7 +530,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			defer func() { _ = lock.Rollback(ctx) }()
 
 			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
-				ContainSubstring("at least 2 connections"), ContainSubstring("pool_max_conns=1"))))
+				ContainSubstring("at least 3 connections"), ContainSubstring("pool_max_conns=1"))))
 			lost, work := orgState(ctx, o)
 			Expect(lost).To(BeFalse())
 			Expect(work).NotTo(Equal("expired"))
@@ -728,7 +788,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(set.Active).To(Equal(nextKEK))
 
 			By("keys status and keys forget now run")
-			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true}
+			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 			Expect(usage(ctx)).To(BeEmpty())

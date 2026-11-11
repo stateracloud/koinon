@@ -512,3 +512,49 @@ RETURNING *;
 UPDATE home_checkpoints
 SET status = 'failed', snapshot_id = NULL, error = @error, snapshot_missing_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'complete' AND snapshot_id = @snapshot_id::text;
+
+-- name: LatestHomeRepositoryNextEpoch :one
+-- The epoch a keys command would start next for the agent: the newest recorded epoch + 1, or the
+-- floor koinon-agentd recorded (#262) when that is higher. No row: the agent has no repository.
+SELECT GREATEST(COALESCE((SELECT max(e.repository_epoch) FROM home_repository_epochs e
+                          WHERE e.org_id = r.org_id AND e.agent_id = r.agent_id), 0) + 1,
+                COALESCE(r.next_epoch_at_least, 1))::int AS next_epoch
+FROM home_repositories r
+WHERE r.org_id = @org_id AND r.agent_id = @agent_id;
+
+-- name: RequestHomeRepositoryProbe :one
+-- The keys command's request that koinon-agentd checks the storage prefix of an epoch. The command
+-- gives up at @timeout_seconds; agentd never claims the row after that.
+INSERT INTO home_repository_probes (org_id, agent_id, repository_epoch, expires_at)
+VALUES (@org_id, @agent_id, @repository_epoch, now() + make_interval(secs => @timeout_seconds::int))
+RETURNING *;
+
+-- name: GetHomeRepositoryProbe :one
+SELECT * FROM home_repository_probes WHERE org_id = @org_id AND id = @id;
+
+-- name: DeleteHomeRepositoryProbe :exec
+DELETE FROM home_repository_probes WHERE org_id = @org_id AND id = @id;
+
+-- name: ClaimHomeRepositoryProbe :one
+-- The next unanswered probe of the org, held for @lease_seconds: an agentd that dies leaves it to
+-- another after the lease. An expired probe is not claimed: the command has refused already. No
+-- row: nothing to do.
+UPDATE home_repository_probes AS p
+SET probe_after = now() + make_interval(secs => @lease_seconds::int)
+WHERE p.org_id = @org_id AND p.id = (
+    SELECT s.id FROM home_repository_probes s
+    WHERE s.org_id = @org_id AND s.answered_at IS NULL AND s.probe_after <= now() AND s.expires_at > now()
+    ORDER BY s.requested_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1)
+RETURNING *;
+
+-- name: AnswerHomeRepositoryProbe :execrows
+-- Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
+UPDATE home_repository_probes
+SET answered_at = now(), outcome = @outcome, message = left(@message::text, 1000)
+WHERE org_id = @org_id AND id = @id AND answered_at IS NULL;
+
+-- name: DeleteOldHomeRepositoryProbes :execrows
+-- The rows nobody reads any more: expired ones (the command gave up or died), whether answered or not.
+DELETE FROM home_repository_probes WHERE org_id = @org_id AND expires_at < now() - make_interval(secs => @grace_seconds::int);
