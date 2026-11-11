@@ -398,7 +398,7 @@ seq_set "$(rdh "$e2e_pr")"
 printf 'e2e result\n' >"$FAKE_DIR/rules"
 wfruns "$(wfrun 42963673597 e2e-kind.yml e2e-kind 2026-11-11T10:00:00Z)" \
   "$(wfrun 42963683121 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed success workflow_dispatch)"
-run 7 --checks --interval 0
+run 7 --checks --interval 1 --timeout 3s
 expect "#521: a newer workflow_dispatch run does not hide the pull_request run's required row" 0 "checks 1/1 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
 
