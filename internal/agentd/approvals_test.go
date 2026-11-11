@@ -241,6 +241,35 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
 	})
 
+	It("ends a run queued behind the parked run without a turn once the resumed run read its message (#21)", func(ctx SpecContext) {
+		g := newGitHubEnv(ctx)
+		ids := g.script()
+		t := g.task(ctx, markAsk+": fix the typo")
+		r := g.enqueue(ctx, t)
+		g.pool("agentd-a")
+		var id string
+		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+
+		By("a message arrives while the run is parked, and queues a run behind it")
+		g.message(ctx, t, "Also mention the README.")
+		queued := g.enqueue(ctx, t)
+
+		_, err := g.svc.Deny(ctx, g.org, mustUUID(id), g.user, "touch only the docs")
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, queued)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+
+		By("the resumed run took the message, and the queued run did not spend a model turn")
+		prompts, _, _, _ := g.harness.snapshot()
+		Expect(prompts).To(HaveLen(2))
+		Expect(prompts[1]).To(ContainSubstring("Also mention the README."))
+		Expect(kinds(events(ctx, queued))).NotTo(ContainElement("run.prompt"))
+		Expect(getRun(ctx, queued).OutcomeReason.String).To(ContainSubstring("already read"))
+		By("the task still ends, which the queued run was holding back")
+		Eventually(g.taskStatus(ctx, t)).WithTimeout(10 * time.Second).Should(Equal(store.TaskStateCompleted))
+	})
+
 	It("does not wait when the request was decided before the turn ended", func(ctx SpecContext) {
 		g := newGitHubEnv(ctx)
 		g.harness.mu.Lock()

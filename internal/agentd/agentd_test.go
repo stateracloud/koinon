@@ -261,6 +261,7 @@ var _ = Describe("Pool", func() {
 		_, err := db.Exec(ctx, `UPDATE tasks SET harness_session_generation = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())
 
+		e.message(ctx, t, "second") // a run is queued by a message; one with none to read ends without a turn (#21)
 		r2 := e.enqueue(ctx, t)
 		e.pool("agentd-b")
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
