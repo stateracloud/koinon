@@ -10,6 +10,13 @@ reset it on every render that cannot read the live object (helm template, Argo C
 agent traffic would be refused until the next reconcile. The pod below waits (ContainerCreating)
 until the ConfigMap exists.
 
+Held install (restoreHold=true, ADR 0107, issue #530): the reconciler converges nothing, so it writes no
+config and the pod above could never start. The chart then renders a second, fixed ConfigMap
+(koinon.gatewayHeldConfigName) with a deny-all config and the Deployment mounts that one. The gateway
+turns ready (helm --wait and GitOps health checks finish) and refuses every request. Releasing the hold
+is the rollout that mounts the reconciler's ConfigMap again; the chart stops rendering the held one.
+The two never share a name, so the reconciler's ConfigMap (and its ownership) is never touched.
+
 MCP sessions: agentgateway v1.7 always encrypts MCP session IDs. SESSION_KEY comes from a Secret the
 ensure-secrets hook Job generates (a template cannot: a random value changes on every render), as an
 env var so it stays out of the config ConfigMap. A fixed key keeps sessions valid across restarts.
@@ -17,6 +24,41 @@ env var so it stays out of the config ConfigMap. A fixed key keeps sessions vali
 {{- if eq .Values.gateway.mode "standalone" }}
 {{- $name := include "koinon.componentName" (list . "gateway") }}
 {{- $gw := .Values.gateway.standalone }}
+{{- if include "koinon.restoreHold" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "koinon.gatewayHeldConfigName" . }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+data:
+  config.yaml: |
+    # Rendered by the chart while restoreHold is true (ADR 0107, issue #530). Deny-all: the gateway is
+    # ready, and refuses every request (no key is valid, and the authorization rule never admits).
+    config:
+      adminAddr: localhost:15000
+      statsAddr: '[::]:15020'
+      readinessAddr: '[::]:15021'
+      logging:
+        format: json
+    gateways:
+      default:
+        port: {{ $gw.port }}
+    llm:
+      policies:
+        apiKey:
+          mode: strict
+          location:
+            header:
+              name: authorization
+              prefix: 'Bearer '
+          keys: []
+        authorization:
+          rules:
+            - "false"
+      models: []
+{{- end }}
 ---
 apiVersion: v1
 kind: Secret
@@ -128,7 +170,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "koinon.gatewayConfigName" . }}
+            name: {{ ternary (include "koinon.gatewayHeldConfigName" .) (include "koinon.gatewayConfigName" .) (include "koinon.restoreHold" . | eq "true") }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ $name }}-data

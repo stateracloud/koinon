@@ -30,12 +30,13 @@ grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -Fq -- 'enabled: fal
 grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -q -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
-if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+# sandboxLimitRange (on by default) also requires Deny; turn it off for the NetworkPolicy-only checks.
+if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy without a Deny validation action must not render"
 fi
-render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false "${off[@]}" >/dev/null 2>&1 ||
+render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false "${off[@]}" >/dev/null 2>&1 ||
 	fail "validation actions without Deny and the NetworkPolicy writer off must render"
-if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled"
 fi
 
