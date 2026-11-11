@@ -63,7 +63,7 @@ its claims; the default lane is `main`.
 1. `hack/claim.sh next` (or `next --label start-here`): Ready, `agent-ok`, current-milestone,
    unblocked issues that nobody holds, by Priority then age. Only humans move issues to Ready; never
    start an issue that is not listed unless your human names it. Then the overlap check (below).
-2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane, eight per human; a
+2. `hack/claim.sh take <N>` (exit 2: pick another issue). One claim per lane; the per-human cap is off while one human works on the repository (ADR 0104 amendment); a
    PR that closes several issues takes them together, `take N M` (all or nothing). It assigns your
    human.
 3. Push `<type>/<N>-<slug>` and open a draft PR with `Closes #N` (the board's built-in workflow moves

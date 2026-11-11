@@ -153,6 +153,18 @@ About 15 minutes, 2026-11-09:
 - Negative: the limits are best effort.
 - Follow-ups: release the old held claims or merge their pull requests; stop running `beat` loops.
 
+## Amendment (2026-11-11)
+
+Owner decision (procoduck, 2026-11-11): "Remove claims limit for now. It does not make sense having it
+while no one else contributes." The decision above stays as written; this amendment changes one
+limit.
+
+- The cap of eight held claims per human is off by default. `KOINON_CLAIM_HUMAN_CAP=N` turns it on
+  (empty or 0 means no cap), so it can come back when a second human joins.
+- One claim per lane is unchanged.
+- Exit condition: set the cap again (a default in `hack/claim.sh`) when a second human works on the
+  repository.
+
 ## Links
 
 - GitHub changelog, 2025-11-06, improved onboarding flow for GitHub Projects (the "Pull request linked
