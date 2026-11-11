@@ -249,9 +249,14 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 	if [[ $name == */* && ($first == *.* || $first == *:* || $first == localhost) ]]; then
 		host=$first; repo=${name#*/}
 	else
-		host=registry-1.docker.io; repo=$name; [[ $repo == */* ]] || repo="library/$repo"
+		host=registry-1.docker.io; repo=$name
 	fi
 	host=$(image_registry_host "$host")
+	# Official Hub images live under library/: bare `alpine` and `docker.io/alpine` both become
+	# registry-1.docker.io/library/alpine. User/org paths already contain a slash.
+	if [[ $host == registry-1.docker.io && $repo != */* ]]; then
+		repo="library/$repo"
+	fi
 	# Reserved names (RFC 2606, RFC 6761) are test fixtures, never something a build pulls.
 	case "${host%%:*}" in
 	example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | \

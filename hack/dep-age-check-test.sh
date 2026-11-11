@@ -94,9 +94,14 @@ ann "no created annotation" \
 	""
 
 # A found image reference that cannot be dated must FAIL (report unknown), never exit without a line.
-# Stub the network helpers and exercise check_image offline (#537).
-run_check_image() { # run_check_image <manifest-json> -> stdout of check_image + counters
+# Stub the network helpers and exercise check_image offline (#537). Digests are assembled so this
+# file never contains a literal name@sha256:<64 hex> that the live dep-age scan would try to date.
+fake_digest=sha256:$(printf 'a%.0s' {1..64})
+fake_chart_ref="ghcr.io/example/helm-chart@$fake_digest"
+
+run_check_image() { # run_check_image <manifest-json> [ref] -> stdout of check_image + counters
 	local manifest=$1
+	local ref=${2:-$fake_chart_ref}
 	local frag=$tmp/check_image_frag.sh
 	cat >"$frag" <<EOF
 #!/usr/bin/env bash
@@ -114,18 +119,18 @@ report() {
 	return 0
 }
 age_days() { echo 9.9; }
-image_manifest() { printf '%s' $(printf '%q' "$manifest"); }
+image_manifest() { printf 'host=%s repo=%s\\n' "\$1" "\$2" >&2; printf '%s' $(printf '%q' "$manifest"); }
 image_blob() { printf '%s' '{"name":"chart","version":"0.0.0"}'; }
 image_registry_published() { return 1; }
 EOF
 	sed -n \
 		'/^image_registry_host() {/,/^}/p; /^oci_annotation_created() {/,/^}/p; /^consider_created() {/,/^}/p; /^check_image() {/,/^}/p' \
 		"$repo/hack/dep-age-check.sh" >>"$frag"
-	cat >>"$frag" <<'EOF'
-check_image "ghcr.io/example/helm-chart@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-echo "checked=$checked"
-echo "fails=$fails"
-EOF
+	{
+		printf 'check_image %q\n' "$ref"
+		echo 'echo "checked=$checked"'
+		echo 'echo "fails=$fails"'
+	} >>"$frag"
 	bash "$frag" 2>&1
 }
 
@@ -144,6 +149,23 @@ else
 	echo "FAIL OCI chart annotation: $out"
 	fail=1
 fi
+
+# #537: docker.io/<official> and bare <official> both resolve to library/<name> on the Hub API host.
+hub_manifest='{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","annotations":{"org.opencontainers.image.created":"2026-01-01T00:00:00Z"},"config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:dead","size":1},"layers":[]}'
+hub_path() { # hub_path <name> <ref> <want host=… repo=…>
+	local out
+	out=$(run_check_image "$hub_manifest" "$2") || true
+	if grep -qF "$3" <<<"$out" && grep -q '^OK ' <<<"$out"; then
+		echo "ok   $1"
+	else
+		echo "FAIL $1: want '$3' in: $out"
+		fail=1
+	fi
+}
+hub_path "bare alpine → library/alpine" "alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
+hub_path "docker.io/alpine → library/alpine" "docker.io/alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
+hub_path "docker.io/library/alpine unchanged path" "docker.io/library/alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
+hub_path "docker.io/myorg/app keeps org path" "docker.io/myorg/app@$fake_digest" "host=registry-1.docker.io repo=myorg/app"
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"
