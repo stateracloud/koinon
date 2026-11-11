@@ -160,7 +160,7 @@ another agent's reply; it resumes exactly where it stopped.
 _Avoid_: Suspend, pause, block, sleep, hold
 
 **Failure class**:
-The kind of failure a failed run carries, such as transient, throttled, context overflow, budget, policy, fatal or sandbox unavailable. It decides retries and what people are told.
+The kind of failure a failed run carries, such as transient, throttled, context overflow, budget, policy, fatal, sandbox unavailable or loop. It decides retries and what people are told.
 _Avoid_: Error type, error code, failure reason
 
 ### Isolation and sandboxes
