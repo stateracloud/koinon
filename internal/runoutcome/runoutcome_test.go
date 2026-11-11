@@ -324,6 +324,17 @@ var _ = Describe("Fail", func() {
 		Expect(w.taskState(ctx)).NotTo(Equal(store.TaskStateFailed))
 	})
 
+	It("fails a looping run with class loop and leaves its task open for a person to answer", func(ctx SpecContext) {
+		w := newWorld(ctx, true)
+		turn := w.openTurn(ctx)
+		Expect(w.own.Fail(ctx, turn, "the agent kept looping after it was asked to change its approach", store.RunFailureClassLoop)).To(Succeed())
+		run := w.current(ctx)
+		Expect(run.State).To(Equal(store.RunStateFailed))
+		Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassLoop))
+		Expect(w.taskKinds(ctx)).To(Equal([]string{"run.failed"}))
+		Expect(w.taskState(ctx)).NotTo(Equal(store.TaskStateFailed))
+	})
+
 	It("writes nothing for a stale epoch, the turn row included", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		turn := w.openTurn(ctx)
