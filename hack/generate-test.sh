@@ -94,6 +94,28 @@ else
 fi
 grep -q 'restoring generated outputs' "$tmp/out" || bad "restore message missing"
 
+# The docs reference step (#127) runs, and a failure in it restores docs/reference/proto.
+mkdir -p "$repo/docs/reference/proto"
+echo 'tracked-docs' >"$repo/docs/reference/proto/proto-api.md"
+git -C "$repo" add -A
+git -C "$repo" commit -q -m docs
+cat >"$tmp/bin/buf" <<'S'
+#!/usr/bin/env bash
+echo "buf $*" >>"${BUF_LOG:-/dev/null}"
+if [[ ${3:-} == buf.gen.docs.yaml ]]; then
+	echo 'half-written' >docs/reference/proto/proto-api.md
+	exit 1
+fi
+exit 0
+S
+chmod +x "$tmp/bin/buf"
+: >"$tmp/buf.log"
+rc=0
+BUF_LOG=$tmp/buf.log PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/docs.out" 2>&1 || rc=$?
+if [[ $rc -ne 0 ]]; then ok "generate exits non-zero when the docs reference step fails"; else bad "generate hid a docs step failure"; fi
+if grep -q -- '--template buf.gen.docs.yaml' "$tmp/buf.log"; then ok "generate runs the docs reference template"; else bad "docs reference template not run"; fi
+if grep -qx tracked-docs "$repo/docs/reference/proto/proto-api.md"; then ok "docs/reference/proto restored"; else bad "docs/reference/proto not restored"; fi
+
 # Success path: every buf step and go tool succeed; tree may change and is kept.
 cat >"$tmp/bin/buf" <<'S'
 #!/usr/bin/env bash

@@ -502,7 +502,7 @@ and then succeeded stayed `working`, while one that never parked stayed `submitt
 the task in the transaction that finishes the run (`Owner.endTask` in `internal/runoutcome`, ADR 0089; it was `runner.endTask` in agentd): a run that **succeeded**
 completes its task and a run that failed with class **fatal** fails it, whether or not the run
 parked. The other failure classes (`transient`, `throttled`, `context_overflow`, `budget`, `policy`,
-`sandbox_unavailable`) leave the task open, since a person can still retry them with a message. A
+`sandbox_unavailable`, and `loop` from the ADR 0030 amendment 2026-11-11) leave the task open, since a person can still retry them with a message. A
 task that is canceled or already ended, or that has another run queued (a follow-up message arrived
 meanwhile), is left alone. The change is a `status.changed` task event with `reason` `run_succeeded`
 or `run_failed`.

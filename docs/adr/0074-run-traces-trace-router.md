@@ -512,7 +512,7 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
    router can therefore name a turn's root (a span link, a parent) from the row alone.
 2. **A turn is one `session/prompt`.** A retry, a refusal note or a wrap-up prompt in the same
    execution each start a turn of their own; the turn row's `end_reason` says how it ended (`end_turn`,
-   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `refused`, `interrupted`, `fenced`, `shutdown`).
+   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `loop`, `refused`, `interrupted`, `fenced`, `shutdown`).
    The `koinon.wait` event is added only when the previous turn ended in a park. A run that fails
    before its first prompt has no turn and so no trace.
 3. **Content is marked.** A span that carries content has `koinon.content.attributes`, a string array

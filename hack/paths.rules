@@ -114,7 +114,7 @@ job web ^(web/|api/proto/)
 # spec and its config, the sqlc inputs, the buf and sqlc configs, protoc-gen-es (web/package.json,
 # its lockfile) and the outputs.
 # hack/generate.sh is the body of `make generate` (#349): a wrapper-only edit must still run the job.
-job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$)
+job generate ^(api/proto/|third_party/openshell/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
 job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
@@ -188,6 +188,7 @@ script-check - hack/git-identity-check-test.sh
 script-check - hack/git-identity-check.sh range @BASE@ HEAD
 script-check - hack/koinon-fetch-test.sh
 script-check - hack/fetch-pinned-test.sh
+script-check - hack/e2e-parts-test.sh
 script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh
@@ -205,6 +206,7 @@ script-check - hack/agentgateway-pin.sh --check
 script-check - hack/golangci-lint-test.sh
 script-check - hack/preflight-stop-test.sh
 script-check - hack/e2e-decide-test.sh
+script-check - hack/drill-issue-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
@@ -217,6 +219,8 @@ script-check - hack/ci-merge-group-test.sh
 script-check - hack/secrets-skip-test.sh
 script-check - hack/route-guard-test.sh
 script-check - hack/ci-cache-test.sh
+script-check - hack/ci-rules-check-test.sh
+script-check - hack/ci-rules-check.sh
 script-check - hack/e2e-commands-check.sh
 script-check - hack/chart-check-test.sh
 script-check - hack/paths-test.sh
