@@ -250,6 +250,10 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 
 // audit adds the event of a change. The platform kind belongs to no org: its event is an install event.
 func (s *Service) audit(b audit.Batch, org pgtype.UUID, actor audit.Actor, kind Kind, id pgtype.UUID, before, after State) {
+	auditChange(b, org, actor, kind, id, before, after)
+}
+
+func auditChange(b audit.Batch, org pgtype.UUID, actor audit.Actor, kind Kind, id pgtype.UUID, before, after State) {
 	action := ActionEnable
 	if after.Disabled {
 		action = ActionDisable
@@ -283,19 +287,14 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 	actor := audit.Secret(secretName)
 	changed := 0
 	_, err := audit.InPgTx(ctx, s.db, func(tx pgx.Tx, b audit.Batch) error {
-		var q string
 		if disabled {
-			q = fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = now(), admin_disabled_by = $3, admin_disabled_note = $4
-				WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_at IS NULL RETURNING id, %[2]s::text`, t.name, t.nameExpr())
-		} else {
-			q = fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL
-				WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 RETURNING id, %[2]s::text`, t.name, t.nameExpr())
+			n, err := DisableDeclared(ctx, tx, b, org, kind, secretName)
+			changed = n
+			return err
 		}
-		args := []any{org, secretName, actor.String()}
-		if disabled {
-			args = append(args, declaredNote)
-		}
-		rows, err := tx.Query(ctx, q, args...)
+		q := fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL
+			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 RETURNING id, %[2]s::text`, t.name, t.nameExpr())
+		rows, err := tx.Query(ctx, q, org, secretName, actor.String())
 		if err != nil {
 			return err
 		}
@@ -317,18 +316,56 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 			return err
 		}
 		for _, h := range hits {
-			before, after := State{Name: h.name}, State{Name: h.name}
-			if disabled {
-				after = State{Disabled: true, Name: h.name, Note: declaredNote, By: actor.String()}
-			} else {
-				before = State{Disabled: true, Name: h.name, By: actor.String()}
-			}
-			s.audit(b, org, actor, kind, h.id, before, after)
+			s.audit(b, org, actor, kind, h.id, State{Disabled: true, Name: h.name, By: actor.String()}, State{Name: h.name})
 		}
 		changed = len(hits)
 		return nil
 	})
 	return changed, err
+}
+
+// DisableDeclared marks every item that secretName manages in org as disabled by that Secret, in the
+// caller's transaction: the importer calls it in the transaction of the upsert, so a new item declared
+// disabled is never visible enabled. An item an admin disabled earlier is claimed too (its actor becomes
+// "secret <name>", so the API cannot enable it while the Secret says disabled; the first disable time
+// stays). Each change is audited. It returns the number of items changed.
+func DisableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.UUID, kind Kind, secretName string) (int, error) {
+	t, ok := tables[kind]
+	if !ok || kind == TraceDestination || kind == PlatformTraceDestination {
+		return 0, &InvalidError{Msg: "this kind has no declarative form"}
+	}
+	actor := audit.Secret(secretName)
+	q := fmt.Sprintf(`WITH old AS (
+			SELECT id, admin_disabled_at, admin_disabled_by FROM %[1]s
+			WHERE org_id = $1 AND managed_by_secret = $2 AND (admin_disabled_at IS NULL OR admin_disabled_by IS DISTINCT FROM $3) FOR UPDATE)
+		UPDATE %[1]s AS t SET admin_disabled_at = COALESCE(t.admin_disabled_at, now()), admin_disabled_by = $3, admin_disabled_note = $4
+		FROM old WHERE t.org_id = $1 AND t.id = old.id RETURNING t.id, %[2]s::text, old.admin_disabled_at IS NOT NULL`, t.name, t.nameExpr())
+	rows, err := tx.Query(ctx, q, org, secretName, actor.String(), declaredNote)
+	if err != nil {
+		return 0, err
+	}
+	type hit struct {
+		id     pgtype.UUID
+		name   string
+		before bool
+	}
+	var hits []hit
+	for rows.Next() {
+		var h hit
+		if err := rows.Scan(&h.id, &h.name, &h.before); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		hits = append(hits, h)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, h := range hits {
+		auditChange(b, org, actor, kind, h.id, State{Disabled: h.before, Name: h.name}, State{Disabled: true, Name: h.name, Note: declaredNote, By: actor.String()})
+	}
+	return len(hits), nil
 }
 
 // Target is one outward target in a listing.

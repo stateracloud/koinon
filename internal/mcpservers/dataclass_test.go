@@ -157,6 +157,15 @@ var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() 
 		Expect(events(ctx, "mcp_server.data_class.set")).To(BeEmpty())
 	})
 
+	It("creates a server declared disabled already disabled, in the same transaction", func(ctx SpecContext) {
+		decl := mcpservers.Declared{SecretName: "s1", Version: "uid/1", Name: "wiki", URL: "https://decl.example.com/mcp", Disabled: true}
+		_, err := svc.ApplyDeclared(ctx, org, decl)
+		Expect(err).NotTo(HaveOccurred())
+		var by string
+		Expect(pool.QueryRow(ctx, `SELECT admin_disabled_by FROM mcp_servers WHERE org_id = $1 AND name = 'wiki'`, org).Scan(&by)).To(Succeed())
+		Expect(by).To(Equal("secret s1"))
+	})
+
 	It("is settable on a declared server and survives the Secret being applied again with the same URL", func(ctx SpecContext) {
 		decl := mcpservers.Declared{SecretName: "s1", Version: "uid/1", Name: "wiki", URL: "https://decl.example.com/mcp"}
 		_, err := svc.ApplyDeclared(ctx, org, decl)

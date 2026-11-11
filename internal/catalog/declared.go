@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/outward"
 )
 
 // DeclaredModel is a model of a declared provider.
@@ -40,6 +42,8 @@ type DeclaredProvider struct {
 	CostAPIKey string
 	CostScope  string
 	Models     []DeclaredModel
+	// Disabled is the Secret's disabled key, applied in the transaction of the upsert (ADR 0110 decision 5).
+	Disabled bool
 	// Warnings are things the Secret declares that Koinon ignores (the removed per-model rates).
 	Warnings []string
 }
@@ -75,7 +79,8 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		seen[m.Name] = true
 	}
 	actor := audit.Secret(d.SecretName)
-	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+	_, err = audit.InPgTx(ctx, s.pool, func(tx pgx.Tx, b audit.Batch) error {
+		q := store.New(tx)
 		all, err := q.ListProviders(ctx, org)
 		if err != nil {
 			return err
@@ -156,6 +161,11 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 		slices.Sort(names)
 		after["models"] = names
 		changed = true
+		if d.Disabled {
+			if _, err := outward.DisableDeclared(ctx, tx, b, org, outward.ModelProvider, d.SecretName); err != nil {
+				return err
+			}
+		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "provider.declare", TargetKind: "provider", TargetID: id.String(),
 			Before: before, After: after,

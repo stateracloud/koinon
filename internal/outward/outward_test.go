@@ -3,6 +3,9 @@
 package outward_test
 
 import (
+	"context"
+	"time"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -146,6 +149,35 @@ var _ = Describe("the outward switch", func() {
 		})
 	})
 
+	It("wakes the reconciler when an admin disables or enables an MCP server", func(ctx SpecContext) {
+		id := mcp(ctx, "docs", "")
+		conn, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Release()
+		_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+		Expect(err).NotTo(HaveOccurred())
+		// Other specs share the database: drain until a notification names this org.
+		woken := func() bool {
+			wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			for {
+				n, err := conn.Conn().WaitForNotification(wctx)
+				if err != nil {
+					return false
+				}
+				if n.Payload == org.String() {
+					return true
+				}
+			}
+		}
+		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(BeTrue())
+		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, false, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(BeTrue())
+	})
+
 	Describe("a declaring Secret", func() {
 		It("disables what it manages, wins over the API, and releases only its own disable", func(ctx SpecContext) {
 			id := mcp(ctx, "wiki", "wiki-secret")
@@ -166,6 +198,23 @@ var _ = Describe("the outward switch", func() {
 			st, err := svc.Get(ctx, outward.MCPServer, org, id)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(st.Disabled).To(BeFalse())
+		})
+
+		It("claims an item an admin disabled, so the API cannot enable it while the Secret says disabled", func(ctx SpecContext) {
+			id := mcp(ctx, "wiki", "wiki-secret")
+			_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			n, err := svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			st, err := svc.Get(ctx, outward.MCPServer, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Declared()).To(BeTrue())
+			_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, false, "")
+			Expect(err).To(MatchError(outward.ErrDeclared))
+			n, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(0))
 		})
 
 		It("leaves an admin's disable when the Secret does not say disabled", func(ctx SpecContext) {

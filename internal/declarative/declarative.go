@@ -332,6 +332,27 @@ func (i *Importer) syncDisabled(ctx context.Context, org pgtype.UUID, typ string
 	return nil
 }
 
+// declaredDisabled reads the Secret's disabled key; false when the install does not run the switch.
+func (i *Importer) declaredDisabled(sec *corev1.Secret) (bool, error) {
+	if i.Outward == nil {
+		return false, nil
+	}
+	disabled, err := ParseDisabled(sec)
+	if err != nil {
+		return false, &invalidError{err}
+	}
+	return disabled, nil
+}
+
+// disableDeclared applies disabled: true in the transaction of the item's upsert.
+func (i *Importer) disableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.UUID, kind outward.Kind, secret string, disabled bool) error {
+	if !disabled {
+		return nil
+	}
+	_, err := outward.DisableDeclared(ctx, tx, b, org, kind, secret)
+	return err
+}
+
 type invalidError struct{ err error }
 
 func (e *invalidError) Error() string { return e.err.Error() }
@@ -352,6 +373,9 @@ func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *core
 	d, err := ParseProvider(sec, version)
 	if err != nil {
 		return &invalidError{err}
+	}
+	if d.Disabled, err = i.declaredDisabled(sec); err != nil {
+		return err
 	}
 	changed, err := i.Catalog.ApplyDeclaredProvider(ctx, org, d)
 	if err != nil {
@@ -376,6 +400,9 @@ func (i *Importer) applyMCPServer(ctx context.Context, org pgtype.UUID, sec *cor
 	}
 	if i.MCP == nil {
 		return &invalidError{errors.New("remote MCP servers are not configured on this install")}
+	}
+	if d.Disabled, err = i.declaredDisabled(sec); err != nil {
+		return err
 	}
 	changed, err := i.MCP.ApplyDeclared(ctx, org, d)
 	if errors.Is(err, restorehold.ErrHeld) {
@@ -430,7 +457,12 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		return err
 	}
 	actor := audit.Secret(sec.Name)
-	_, err = audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
+	disabled, err := i.declaredDisabled(sec)
+	if err != nil {
+		return err
+	}
+	_, err = audit.InPgTx(ctx, i.Pool, func(tx pgx.Tx, b audit.Batch) error {
+		tq := store.New(tx)
 		after := map[string]any{
 			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
 			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "ciDirs": d.Site.CIDirs, "keyFingerprint": d.Fingerprint, "source": "secret",
@@ -458,7 +490,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 				return err
 			}
 			b.Org(audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
-			return nil
+			return i.disableDeclared(ctx, tx, b, org, outward.CodeHostConnection, sec.Name, disabled)
 		}
 		if cur.Connector != d.Connector {
 			return &invalidError{fmt.Errorf("%s cannot change from %s to %s; delete the Secret and declare a new one", KeyConnector, cur.Connector, d.Connector)}
@@ -492,7 +524,10 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
 		})
 		// A new baseUrl can leave MCP servers linked to a host that is no longer the connection's (#117).
-		return mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated)
+		if err := mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated); err != nil {
+			return err
+		}
+		return i.disableDeclared(ctx, tx, b, org, outward.CodeHostConnection, sec.Name, disabled)
 	})
 	if err != nil {
 		return err
