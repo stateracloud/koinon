@@ -14,6 +14,10 @@
 # Test hooks (env): KOINON_UNAME, KOINON_PMSET, KOINON_DOCKER, KOINON_CAFFEINATE name the commands
 # to use instead of uname, pmset, docker and caffeinate.
 
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax. Sourced by guarded scripts, so the
+# exit only ends a shell that is already too old.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 host_os() { "${KOINON_UNAME:-uname}" -s; }
 host_is_mac() { [[ $(host_os) == Darwin ]]; }
 
@@ -130,9 +134,15 @@ host_acquire_slot() {
 			# that process is alive.
 			err=$(kill -0 "$owner" 2>&1) && continue
 			[[ $err == *'No such process'* ]] || continue
-			# Atomic takeover: of several waiters only one mv wins; the others retry the mkdir.
+			# Atomic takeover: of several waiters only one mv wins; the others retry the mkdir. The pid
+			# was read before the mv, so another waiter may have taken the slot over in between: read
+			# the pid again inside the moved dir and delete it only if it is still the dead owner's.
 			if mv "$d" "$d.stale.$$" 2>/dev/null; then
-				rm -rf "$d.stale.$$"
+				if [[ $(cat "$d.stale.$$/pid" 2>/dev/null || true) == "$owner" ]]; then
+					rm -rf "$d.stale.$$"
+				elif [[ ! -e $d ]]; then
+					mv "$d.stale.$$" "$d" 2>/dev/null || true # a live slot: put it back
+				fi
 				continue 2
 			fi
 		done

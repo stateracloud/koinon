@@ -131,6 +131,45 @@ host_slot_dir=$KOINON_GO_SLOTS_DIR/slot.1 host_release_slot
 unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
 echo "ok: a live owner we cannot signal keeps its slot, release only frees our own"
 
+# Takeover race: waiter A saw the dead owner's pid, then waiter B took the slot over (new live pid)
+# before A's mv. A must put B's slot back, not delete it. The kill override plays B's takeover once,
+# right after A's check.
+export KOINON_GO_SLOTS=1 KOINON_GO_SLOTS_DIR=$tmp/slots-race KOINON_GO_SLOT_POLL=0.2
+mkdir -p "$KOINON_GO_SLOTS_DIR/slot.1"
+exec 9< <(exec sleep 30)
+live=$!
+exec 9<&-
+bg+=("$live")
+echo 999999 >"$KOINON_GO_SLOTS_DIR/slot.1/pid"
+(
+	host_slot_dir=
+	# host_acquire_slot has a local named tmp, so the override keeps its paths in other variables.
+	race_flag=$tmp/race-done
+	race_pid=$live
+	# shellcheck disable=SC2329 # called by host_acquire_slot
+	kill() {
+		if [[ $1 == -0 && ! -e $race_flag ]]; then
+			: >"$race_flag"
+			echo "$race_pid" >"$KOINON_GO_SLOTS_DIR/slot.1/pid"
+			echo "kill: ($2) - No such process" >&2
+			return 1
+		fi
+		builtin kill "$@"
+	}
+	host_acquire_slot 2>/dev/null
+	echo got >"$tmp/got-race"
+) &
+waiter=$!
+bg+=("$waiter")
+sleep 1
+[[ -e $tmp/race-done ]] || fail "race test did not reach the takeover"
+[[ ! -e $tmp/got-race ]] || fail "a waiter took a slot that another waiter had taken over"
+[[ $(<"$KOINON_GO_SLOTS_DIR/slot.1/pid") == "$live" ]] || fail "the taken-over slot was deleted or changed: $(/bin/ls "$KOINON_GO_SLOTS_DIR")"
+[[ -z $(/bin/ls -d "$KOINON_GO_SLOTS_DIR"/*.stale.* 2>/dev/null || true) ]] || fail "a stale dir was left behind"
+kill "$waiter" "$live" 2>/dev/null || true
+unset KOINON_GO_SLOTS KOINON_GO_SLOTS_DIR KOINON_GO_SLOT_POLL
+echo "ok: a slot taken over by another waiter during a stale takeover is restored, not deleted"
+
 # Wiring in go-test.sh.
 for pat in 'host_keep_awake' 'host_docker_preflight' 'host_acquire_slot' 'host_slept_between' 'reason="host slept"' '-timeout "\$go_timeout"' '--timeout="\$ginkgo_timeout"' '--procs=4'; do
 	grep -q -- "$pat" hack/go-test.sh || fail "go-test.sh does not use $pat"
