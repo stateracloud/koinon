@@ -164,7 +164,9 @@ case $model_format in
     model_overlay="\"compatibility\":{\"supportsThinkingBlockBinding\":false,\"supportsEffortUpdates\":false}"
     ;;
 esac
-# Compaction (ADR 0070 amendment 2026-11-11). OpenCode 2.2.0 compacts when the prompt reaches
+# Compaction (ADR 0070 amendment 2026-11-11). Read from the 2.2.0 source (the image ships 2.2.6;
+# test/flavors "koinon-opencode compaction point" runs the real harness to check that 2.2.6 accepts
+# both keys and compacts at the point): OpenCode compacts when the prompt reaches
 # window - compaction.buffer, where the window is the model's limit.input or limit.context, and it
 # never compacts automatically while the window is unknown, as it is for every koinon/<model>
 # (packages/core/src/session/compaction.ts calculateCeiling, :1133-1141, and the Infinity case at

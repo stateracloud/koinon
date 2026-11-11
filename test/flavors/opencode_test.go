@@ -5,6 +5,7 @@ package flavors_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -490,4 +491,49 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 		Expect(env).To(ContainSubstring("KOINON_MODEL_KEY=" + fakeKey + "\n"))
 		Expect(env).To(ContainSubstring("NO_PROXY=127.0.0.1,localhost"))
 	})
+})
+
+// The compaction point reaches OpenCode (ADR 0070 amendment 2026-11-11, issue 97). The entry script
+// renders it as a model window of point + 16000 (limit.input, with no context or output) and
+// compaction.buffer 16000; these specs run the real harness (OpenCode 2.2.6, the version the image
+// ships) to show that it accepts both keys in either model format and that the point takes effect.
+var _ = Describe("koinon-opencode compaction point", func() {
+	// summaryRequests are the requests whose last user message asks for a summary of the
+	// conversation, which is what OpenCode sends to compact it.
+	summaryRequests := func(gw *gateway) []string {
+		var out []string
+		for _, b := range gw.modelBodies() {
+			if strings.Contains(strings.ToLower(lastUserText([]byte(b))), "summar") {
+				out = append(out, b)
+			}
+		}
+		return out
+	}
+	// filler is about 1000 tokens of text OpenCode's estimate (about 4 bytes a token) counts.
+	filler := strings.Repeat("koinon compaction filler words. ", 130)
+
+	for _, format := range []modelformat.Format{modelformat.OpenAI, modelformat.Anthropic} {
+		It("starts and answers with a 170000 point on the "+string(format)+" entry", func(ctx SpecContext) {
+			gw := newGateway(contractScript(opencode))
+			sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+			h, session := harnessIn(ctx, sb, gw, format, "", "--compaction-tokens", "170000")
+			_, err := h.conn.Prompt(ctx, session, helloPrompt)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gw.modelBodies()).NotTo(BeEmpty())
+		}, SpecTimeout(3*time.Minute))
+	}
+
+	It("compacts a conversation that passes the point, and the session keeps working", func(ctx SpecContext) {
+		gw := newGateway(contractScript(opencode))
+		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+		h, session := harnessIn(ctx, sb, gw, modelformat.OpenAI, "", "--compaction-tokens", "1000")
+		for i := 0; i < 8 && len(summaryRequests(gw)) == 0; i++ {
+			_, err := h.conn.Prompt(ctx, session, fmt.Sprintf("turn %d: %s", i, filler))
+			Expect(err).NotTo(HaveOccurred())
+			GinkgoWriter.Printf("after turn %d: %d requests, %d summary requests\n", i, len(gw.modelBodies()), len(summaryRequests(gw)))
+		}
+		Expect(summaryRequests(gw)).NotTo(BeEmpty(), "OpenCode compacted once the prompt passed the point")
+		_, err := h.conn.Prompt(ctx, session, helloPrompt)
+		Expect(err).NotTo(HaveOccurred(), "the session works after the compaction")
+	}, SpecTimeout(8*time.Minute))
 })

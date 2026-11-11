@@ -522,7 +522,7 @@ agentd, from the price catalog, as follows.
    already decides the cache mode (`modelFacts`). The value is a launch switch, `--compaction-tokens`
    (`flavor.Descriptor.CompactionArg`), never an environment variable of the sandbox, and it is not a
    secret. Metric labels do not carry it (ADR 0023).
-3. **How OpenCode takes it (v2.2.0).** OpenCode compacts when its estimate of the prompt reaches
+3. **How OpenCode takes it (read from the v2.2.0 source; the image ships v2.2.6).** OpenCode compacts when its estimate of the prompt reaches
    `window - compaction.buffer`, with `window = limit.input || limit.context`
    (`packages/core/src/session/compaction.ts`, `calculateCeiling`). With an unknown window (limit 0,
    which is the case for every `koinon/<model>`) the ceiling is infinite, so OpenCode did **not**
@@ -530,6 +530,9 @@ agentd, from the price catalog, as follows.
    therefore renders, in `OPENCODE_CONFIG_CONTENT`, a window of `point + 16000` as the model's
    `limit.input` and `compaction.buffer: 16000` (OpenCode's own `RESERVE_MIN`). The ceiling is then
    exactly the point, and the room OpenCode keeps for the last reply and the summary is unchanged.
+   The flavor spec "koinon-opencode compaction point" (`test/flavors/opencode_test.go`) starts the
+   real v2.2.6 harness with `--compaction-tokens` in both model formats and with a point of 1000 and
+   checks that a summary request reaches the gateway and the session keeps working.
 4. **Caching (ADR 0068).** Nothing changes: prompt caching stays on with no off switch. Compaction
    rewrites the prompt once and the next turn writes the cache again; a lower point means more
    rewrites for a tiered model and fewer billed tokens at the dear tier.
