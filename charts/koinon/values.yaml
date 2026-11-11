@@ -553,7 +553,18 @@ openshell:
   # gateway; otherwise the exec channel that controls every sandbox crosses the cluster in clear
   # text. The components log a warning. Not allowed together with clientTLSSecret.
   insecure: false
-  # Default sandbox runtime class (ADR 0045).
+  # Default sandbox runtime class (ADR 0045). A Kata class must carry overhead.podFixed memory and
+  # cpu; the preflight warns when either is missing. Kubernetes adds podFixed to the scheduler's and
+  # ResourceQuota's view of each pod and to the pod cgroup's limits (sum of container limits plus
+  # podFixed). Without it the scheduler undercounts every vm sandbox, a sandbox near its memory limit
+  # can get the VMM OOM-killed, and the guest's and VMM's cpu comes out of the workload's limit.
+  # Sizing (ADR 0039, 2026-11-11 amendment): Kata gives the guest default_memory plus the container
+  # limits, but the host charges guest RAM only as the guest touches it, so podFixed covers what one
+  # sandbox uses beyond its limits (guest kernel and kata-agent, shim, VMM, virtiofsd), not
+  # default_memory. kata-deploy ships memory 130Mi, cpu 250m for Cloud Hypervisor (Talos's kata
+  # handler) and 320Mi, 250m for QEMU. Measure as Kata's sizing guide says (host side: the pod
+  # cgroup's memory.current minus the nominal VM size, under load) and raise it if needed. With enable_mem_prealloc or hugepages the whole guest is charged at boot, so
+  # podFixed must also cover default_memory.
   runtimeClassName: kata
   # The OpenShell gateway's gateway_id (its chart's gatewayId; the default there is openshell). In
   # managed mode OpenShell names each workspace's namespace openshell-<gatewayId>-<workspace> and

@@ -34,7 +34,7 @@ Owner: "repo" means a pull request changes it. "Owner" means only the human owne
 | Merge only with every required context green | `hack/pr-merge.sh` (reads `hack/ci-required.txt` on the head); `hack/pr-wait.sh` exits 1 to 8 | exit 1 (not green), 2 (timeout), 3 (closed), 4 (conflict), 6 (stale head), 7 (open review threads), 8 (left the queue) | Fix the cause; for 7 reply to and resolve the threads (`hack/pr-threads.sh`, `docs/dev/ci.md` "Merging"); for 4 merge `origin/main` | repo |
 | Merge by merge commit, through a queue | GitHub ruleset on `main`: merge queue on | PR waits in the queue | `hack/pr-merge.sh <PR>` (adds `--auto`) | owner |
 | 14 required checks and resolved review threads | GitHub ruleset on `main` | PR `BLOCKED` | as the row above; `hack/ci-fail.sh <PR>` reads why a check failed | owner |
-| One team approval for PRs that touch `.github/**` | GitHub ruleset on `main` (required reviewers on `.github/**` only; the `review` verdict of ADR 0103 is advisory since 2026-11-11) | PR `BLOCKED`, "required review" | A human approval, or the owner merges with `--admin` (only a PR with a `.github/` path) | owner |
+| One team approval for PRs that touch `.github/**` | GitHub ruleset on `main` (required reviewers on `.github/**` only) | PR `BLOCKED`, "required review" | A human approval, or the owner merges with `--admin` (only a PR with a `.github/` path) | owner |
 | An admin merge is the exception | Claude Code permission classifier (outside the repository); `hack/pr-merge.sh --admin` | tool call denied | Today: the human owner runs `hack/pr-merge.sh <PR> --admin`. See section 2 | owner |
 | A new `ci.yml` job is listed in `hack/ci-required.txt` | `hack/ci-required.txt` and its check `hack/ci-required-test.sh` (`docs/dev/ci.md` "required status checks") | the check fails | Add the job to the list, or mark it advisory, in the same PR | repo |
 | Worktrees are removed only by `hack/wt.sh` | `hack/wt.sh rm` refuses a live claim, a process in the tree, uncommitted changes, unpushed commits | `wt: refusing to remove <name>: <reason>` | Commit, push or release first; `--force` for your own worktree only | repo |
@@ -57,7 +57,7 @@ Guards in the table: 29.
    (see the ruleset row; before 2026-11-11 it covered the 15 sensitive path patterns, which 74% of merged PRs touched: 293 of 395 PR
    merges in the 30 days to 2026-11-09, from the diff of each first-parent merge). The permission
    classifier denies `--admin` from an agent (4 of 4 on 2026-11-08, from the audit record).
-   `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Since 2026-11-11 only a PR with a `.github/` path needs `--admin` (ADR 0103 amendment); the owner runs the command; the agent hands over
+   `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Since 2026-11-11 only a PR with a `.github/` path needs `--admin` (ADR 0103 superseded); the owner runs the command; the agent hands over
    `hack/pr-merge.sh <PR> --admin --approved-at <time>` and the evidence.
 2. **The hook set is split.** `sleep-chain.sh`, the second spawn hook and the digest live in
    `~/.config/koinon/hooks`, not in the repository, so a cloud lane or a second contributor has
