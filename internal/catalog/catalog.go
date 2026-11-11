@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -129,6 +130,8 @@ type Provider struct {
 	// CredentialLostAt is set when the API key was lost with the KEK that encrypted it (keys forget,
 	// ADR 0085 decision 13): the provider is not served until the key is entered again.
 	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	// AdminDisabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5).
+	AdminDisabled *outward.Disabled `json:"adminDisabled,omitempty"`
 	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
 	// anthropic only). An identifier, not a credential.
 	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
@@ -214,7 +217,7 @@ func toProvider(p store.Provider) Provider {
 		ID: p.ID.String(), Name: p.Name, Type: p.Type, URL: p.Url, HasKey: len(p.ApiKey) > 0,
 		AnthropicWorkspaceID: p.AnthropicWorkspaceID.String, Formats: offered,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
-		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), AdminDisabled: outward.FromRow(p.AdminDisabledAt, p.AdminDisabledBy, p.AdminDisabledNote), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
 		HasCostKey: len(p.CostApiKey) > 0, CostScope: p.CostScope.String, CostKeyLostAt: optTime(p.CostApiKeyLostAt),
 	}
 }

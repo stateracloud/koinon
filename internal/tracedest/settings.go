@@ -59,7 +59,7 @@ func (s *Service) settings(ctx context.Context, q *store.Queries, org pgtype.UUI
 	}
 	out := Settings{ContentLevel: LevelNone, SampleRate: 1, PlatformCopyLevel: LevelNone, Ceiling: string(plat.ContentCeiling)}
 	if d, err := q.GetPlatformTraceDestination(ctx); err == nil {
-		out.HasPlatformDestination = d.Enabled && !d.CredentialLostAt.Valid
+		out.HasPlatformDestination = d.Enabled && !d.AdminDisabledAt.Valid && !d.CredentialLostAt.Valid
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, err
 	}
@@ -211,7 +211,7 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 	}
 	var out []Route
 	for _, r := range rows {
-		if !r.Enabled {
+		if !r.Enabled || r.AdminDisabledAt.Valid {
 			continue
 		}
 		if r.CredentialLostAt.Valid {
@@ -242,7 +242,7 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 		})
 	}
 	p, err := q.GetPlatformTraceDestination(ctx)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !p.Enabled {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!p.Enabled || p.AdminDisabledAt.Valid) {
 		return out, nil
 	}
 	if err != nil {
@@ -284,7 +284,7 @@ func (s *Service) ConfigVersion(ctx context.Context, org pgtype.UUID) (string, e
 	err := s.pool.QueryRow(ctx, `SELECT concat_ws('|',
 		(SELECT content_ceiling::text || '@' || updated_at::text FROM platform_trace_settings),
 		coalesce((SELECT content_level::text || '/' || platform_copy_level::text || '@' || updated_at::text FROM org_trace_settings WHERE org_id = $1), ''),
-		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
-		coalesce((SELECT config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
+		coalesce((SELECT string_agg(id::text || ':' || config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || ':' || (admin_disabled_at IS NOT NULL)::text, ',' ORDER BY id) FROM trace_destinations WHERE org_id = $1), ''),
+		coalesce((SELECT config_version::text || ':' || enabled::text || ':' || (credential_lost_at IS NOT NULL)::text || ':' || (admin_disabled_at IS NOT NULL)::text || '@' || updated_at::text FROM platform_trace_destination), ''))`, org).Scan(&v)
 	return v, err
 }

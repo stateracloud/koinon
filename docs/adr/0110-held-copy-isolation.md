@@ -249,7 +249,10 @@ the guard off); runtime only (no way to choose read-only before the first start)
   `platform_trace_destination`) gets the same columns. Koinon has no outward notification target yet:
   `notifications` is the in-app inbox (`00013_prices_and_budgets.sql`), which reaches nothing outside. A future outward sink (Slack, a
   webhook) uses this switch from its first migration. The columns are: `admin_disabled_at`,
-  `admin_disabled_by`, `admin_disabled_note`. They are separate from system states such as `disabled_reason` or
+  `admin_disabled_by`, `admin_disabled_note`, and for the kinds with declarative Secrets `admin_disabled_under_by` and
+  `admin_disabled_under_note`: when a Secret's `disabled: true` claims an item an admin disabled (or an admin disables an item
+  the Secret already holds disabled), the admin's actor and note are kept there, and the disable comes back to the
+  admin, still disabled and audited, when the Secret drops the field. They are separate from system states such as `disabled_reason` or
   `removed_at`, so re-declaring or un-shadowing an item never clears an admin's disable.
 - One Go package (`internal/outward`) owns the switch: a `Target` kind enum, one `SetDisabled(kind, id, disabled,
   note)` service, one audit action pair `outward.disable` and `outward.enable` with `targetKind`, and one check

@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
@@ -92,6 +93,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
 		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
 		CredentialLostAt: tsProto(c.CredentialLostAt),
+		AdminDisabled:    adminDisabledProto(outward.FromRow(c.AdminDisabledAt, c.AdminDisabledBy, c.AdminDisabledNote)),
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -641,6 +643,14 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection, actor
 	}
 	var results []connections.CheckResult
 	conn, err := connections.Load(ctx, s.keys, row)
+	if errors.Is(err, outward.ErrDisabled) {
+		// Not a failure of the connection: say so without recording a failing status that enabling would not clear.
+		step := "generate-key"
+		if p.ID() != providers.GitHub {
+			step = "create-tokens"
+		}
+		return row, checksProto([]connections.CheckResult{{Check: "secret", Step: step, Message: "this connection is disabled by an admin (outward switch); enable it to test it"}}), nil
+	}
 	if err == nil {
 		err = p.Validate(conn)
 	}

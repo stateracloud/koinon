@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/tracing/export"
 )
 
@@ -172,6 +173,9 @@ func (s *Service) TestPlatform(ctx context.Context, actor audit.Actor) (Destinat
 		return Destination{}, export.Outcome{}, ErrNotFound
 	}
 	if err != nil {
+		return Destination{}, export.Outcome{}, err
+	}
+	if err := outward.Check(cur.AdminDisabledAt); err != nil {
 		return Destination{}, export.Outcome{}, err
 	}
 	if cur.CredentialLostAt.Valid {

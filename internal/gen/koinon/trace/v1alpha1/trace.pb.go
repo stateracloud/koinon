@@ -9,6 +9,7 @@
 package tracev1alpha1
 
 import (
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -294,8 +295,11 @@ type Destination struct {
 	// forget`, ADR 0085 decision 13): the destination receives nothing until a tested update enters every secret
 	// in secret_fields again. Unset otherwise.
 	CredentialLostAt *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=credential_lost_at,json=credentialLostAt,proto3" json:"credential_lost_at,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
+	// not called, probed or offered to runs. Unset otherwise.
+	AdminDisabled *v1alpha1.AdminDisabled `protobuf:"bytes,15,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Destination) Reset() {
@@ -422,6 +426,13 @@ func (x *Destination) GetConfigVersion() int64 {
 func (x *Destination) GetCredentialLostAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CredentialLostAt
+	}
+	return nil
+}
+
+func (x *Destination) GetAdminDisabled() *v1alpha1.AdminDisabled {
+	if x != nil {
+		return x.AdminDisabled
 	}
 	return nil
 }
@@ -1769,7 +1780,7 @@ var File_koinon_trace_v1alpha1_trace_proto protoreflect.FileDescriptor
 
 const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/trace/v1alpha1/trace.proto\x12\x15koinon.trace.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"o\n" +
+	"!koinon/trace/v1alpha1/trace.proto\x12\x15koinon.trace.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"o\n" +
 	"\n" +
 	"TestResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
@@ -1780,7 +1791,7 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\rlast_error_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastErrorAt\x12\x1d\n" +
 	"\n" +
 	"last_error\x18\x03 \x01(\tR\tlastError\x12#\n" +
-	"\rspans_dropped\x18\x04 \x01(\x03R\fspansDropped\"\xe2\x06\n" +
+	"\rspans_dropped\x18\x04 \x01(\x03R\fspansDropped\"\xb1\a\n" +
 	"\vDestination\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x128\n" +
@@ -1798,7 +1809,8 @@ const file_koinon_trace_v1alpha1_trace_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12%\n" +
 	"\x0econfig_version\x18\r \x01(\x03R\rconfigVersion\x12H\n" +
-	"\x12credential_lost_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x1a9\n" +
+	"\x12credential_lost_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12M\n" +
+	"\x0eadmin_disabled\x18\x0f \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aE\n" +
@@ -1973,6 +1985,7 @@ var file_koinon_trace_v1alpha1_trace_proto_goTypes = []any{
 	nil,                                       // 34: koinon.trace.v1alpha1.DestinationInput.SecretsEntry
 	nil,                                       // 35: koinon.trace.v1alpha1.DestinationInput.ResourceAttributesEntry
 	(*timestamppb.Timestamp)(nil),             // 36: google.protobuf.Timestamp
+	(*v1alpha1.AdminDisabled)(nil),            // 37: koinon.outward.v1alpha1.AdminDisabled
 }
 var file_koinon_trace_v1alpha1_trace_proto_depIdxs = []int32{
 	36, // 0: koinon.trace.v1alpha1.TestResult.tested_at:type_name -> google.protobuf.Timestamp
@@ -1986,62 +1999,63 @@ var file_koinon_trace_v1alpha1_trace_proto_depIdxs = []int32{
 	36, // 8: koinon.trace.v1alpha1.Destination.created_at:type_name -> google.protobuf.Timestamp
 	36, // 9: koinon.trace.v1alpha1.Destination.updated_at:type_name -> google.protobuf.Timestamp
 	36, // 10: koinon.trace.v1alpha1.Destination.credential_lost_at:type_name -> google.protobuf.Timestamp
-	0,  // 11: koinon.trace.v1alpha1.DestinationInput.backend:type_name -> koinon.trace.v1alpha1.Backend
-	33, // 12: koinon.trace.v1alpha1.DestinationInput.params:type_name -> koinon.trace.v1alpha1.DestinationInput.ParamsEntry
-	34, // 13: koinon.trace.v1alpha1.DestinationInput.secrets:type_name -> koinon.trace.v1alpha1.DestinationInput.SecretsEntry
-	35, // 14: koinon.trace.v1alpha1.DestinationInput.resource_attributes:type_name -> koinon.trace.v1alpha1.DestinationInput.ResourceAttributesEntry
-	4,  // 15: koinon.trace.v1alpha1.ListDestinationsResponse.destinations:type_name -> koinon.trace.v1alpha1.Destination
-	5,  // 16: koinon.trace.v1alpha1.CreateDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
-	4,  // 17: koinon.trace.v1alpha1.CreateDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	5,  // 18: koinon.trace.v1alpha1.UpdateDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
-	4,  // 19: koinon.trace.v1alpha1.UpdateDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	4,  // 20: koinon.trace.v1alpha1.TestDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	2,  // 21: koinon.trace.v1alpha1.TestDestinationResponse.result:type_name -> koinon.trace.v1alpha1.TestResult
-	1,  // 22: koinon.trace.v1alpha1.Settings.content_level:type_name -> koinon.trace.v1alpha1.ContentLevel
-	1,  // 23: koinon.trace.v1alpha1.Settings.platform_copy_level:type_name -> koinon.trace.v1alpha1.ContentLevel
-	1,  // 24: koinon.trace.v1alpha1.Settings.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
-	36, // 25: koinon.trace.v1alpha1.Settings.updated_at:type_name -> google.protobuf.Timestamp
-	16, // 26: koinon.trace.v1alpha1.GetSettingsResponse.settings:type_name -> koinon.trace.v1alpha1.Settings
-	1,  // 27: koinon.trace.v1alpha1.UpdateSettingsRequest.content_level:type_name -> koinon.trace.v1alpha1.ContentLevel
-	1,  // 28: koinon.trace.v1alpha1.UpdateSettingsRequest.platform_copy_level:type_name -> koinon.trace.v1alpha1.ContentLevel
-	16, // 29: koinon.trace.v1alpha1.UpdateSettingsResponse.settings:type_name -> koinon.trace.v1alpha1.Settings
-	4,  // 30: koinon.trace.v1alpha1.GetPlatformResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	1,  // 31: koinon.trace.v1alpha1.GetPlatformResponse.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
-	5,  // 32: koinon.trace.v1alpha1.SetPlatformDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
-	4,  // 33: koinon.trace.v1alpha1.SetPlatformDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	4,  // 34: koinon.trace.v1alpha1.TestPlatformDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
-	2,  // 35: koinon.trace.v1alpha1.TestPlatformDestinationResponse.result:type_name -> koinon.trace.v1alpha1.TestResult
-	1,  // 36: koinon.trace.v1alpha1.SetPlatformCeilingRequest.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
-	1,  // 37: koinon.trace.v1alpha1.SetPlatformCeilingResponse.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
-	6,  // 38: koinon.trace.v1alpha1.TraceDestinationService.ListDestinations:input_type -> koinon.trace.v1alpha1.ListDestinationsRequest
-	8,  // 39: koinon.trace.v1alpha1.TraceDestinationService.CreateDestination:input_type -> koinon.trace.v1alpha1.CreateDestinationRequest
-	10, // 40: koinon.trace.v1alpha1.TraceDestinationService.UpdateDestination:input_type -> koinon.trace.v1alpha1.UpdateDestinationRequest
-	12, // 41: koinon.trace.v1alpha1.TraceDestinationService.DeleteDestination:input_type -> koinon.trace.v1alpha1.DeleteDestinationRequest
-	14, // 42: koinon.trace.v1alpha1.TraceDestinationService.TestDestination:input_type -> koinon.trace.v1alpha1.TestDestinationRequest
-	17, // 43: koinon.trace.v1alpha1.TraceDestinationService.GetSettings:input_type -> koinon.trace.v1alpha1.GetSettingsRequest
-	19, // 44: koinon.trace.v1alpha1.TraceDestinationService.UpdateSettings:input_type -> koinon.trace.v1alpha1.UpdateSettingsRequest
-	21, // 45: koinon.trace.v1alpha1.TraceDestinationService.GetPlatform:input_type -> koinon.trace.v1alpha1.GetPlatformRequest
-	23, // 46: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformDestination:input_type -> koinon.trace.v1alpha1.SetPlatformDestinationRequest
-	25, // 47: koinon.trace.v1alpha1.TraceDestinationService.DeletePlatformDestination:input_type -> koinon.trace.v1alpha1.DeletePlatformDestinationRequest
-	27, // 48: koinon.trace.v1alpha1.TraceDestinationService.TestPlatformDestination:input_type -> koinon.trace.v1alpha1.TestPlatformDestinationRequest
-	29, // 49: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformCeiling:input_type -> koinon.trace.v1alpha1.SetPlatformCeilingRequest
-	7,  // 50: koinon.trace.v1alpha1.TraceDestinationService.ListDestinations:output_type -> koinon.trace.v1alpha1.ListDestinationsResponse
-	9,  // 51: koinon.trace.v1alpha1.TraceDestinationService.CreateDestination:output_type -> koinon.trace.v1alpha1.CreateDestinationResponse
-	11, // 52: koinon.trace.v1alpha1.TraceDestinationService.UpdateDestination:output_type -> koinon.trace.v1alpha1.UpdateDestinationResponse
-	13, // 53: koinon.trace.v1alpha1.TraceDestinationService.DeleteDestination:output_type -> koinon.trace.v1alpha1.DeleteDestinationResponse
-	15, // 54: koinon.trace.v1alpha1.TraceDestinationService.TestDestination:output_type -> koinon.trace.v1alpha1.TestDestinationResponse
-	18, // 55: koinon.trace.v1alpha1.TraceDestinationService.GetSettings:output_type -> koinon.trace.v1alpha1.GetSettingsResponse
-	20, // 56: koinon.trace.v1alpha1.TraceDestinationService.UpdateSettings:output_type -> koinon.trace.v1alpha1.UpdateSettingsResponse
-	22, // 57: koinon.trace.v1alpha1.TraceDestinationService.GetPlatform:output_type -> koinon.trace.v1alpha1.GetPlatformResponse
-	24, // 58: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformDestination:output_type -> koinon.trace.v1alpha1.SetPlatformDestinationResponse
-	26, // 59: koinon.trace.v1alpha1.TraceDestinationService.DeletePlatformDestination:output_type -> koinon.trace.v1alpha1.DeletePlatformDestinationResponse
-	28, // 60: koinon.trace.v1alpha1.TraceDestinationService.TestPlatformDestination:output_type -> koinon.trace.v1alpha1.TestPlatformDestinationResponse
-	30, // 61: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformCeiling:output_type -> koinon.trace.v1alpha1.SetPlatformCeilingResponse
-	50, // [50:62] is the sub-list for method output_type
-	38, // [38:50] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	37, // 11: koinon.trace.v1alpha1.Destination.admin_disabled:type_name -> koinon.outward.v1alpha1.AdminDisabled
+	0,  // 12: koinon.trace.v1alpha1.DestinationInput.backend:type_name -> koinon.trace.v1alpha1.Backend
+	33, // 13: koinon.trace.v1alpha1.DestinationInput.params:type_name -> koinon.trace.v1alpha1.DestinationInput.ParamsEntry
+	34, // 14: koinon.trace.v1alpha1.DestinationInput.secrets:type_name -> koinon.trace.v1alpha1.DestinationInput.SecretsEntry
+	35, // 15: koinon.trace.v1alpha1.DestinationInput.resource_attributes:type_name -> koinon.trace.v1alpha1.DestinationInput.ResourceAttributesEntry
+	4,  // 16: koinon.trace.v1alpha1.ListDestinationsResponse.destinations:type_name -> koinon.trace.v1alpha1.Destination
+	5,  // 17: koinon.trace.v1alpha1.CreateDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
+	4,  // 18: koinon.trace.v1alpha1.CreateDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	5,  // 19: koinon.trace.v1alpha1.UpdateDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
+	4,  // 20: koinon.trace.v1alpha1.UpdateDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	4,  // 21: koinon.trace.v1alpha1.TestDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	2,  // 22: koinon.trace.v1alpha1.TestDestinationResponse.result:type_name -> koinon.trace.v1alpha1.TestResult
+	1,  // 23: koinon.trace.v1alpha1.Settings.content_level:type_name -> koinon.trace.v1alpha1.ContentLevel
+	1,  // 24: koinon.trace.v1alpha1.Settings.platform_copy_level:type_name -> koinon.trace.v1alpha1.ContentLevel
+	1,  // 25: koinon.trace.v1alpha1.Settings.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
+	36, // 26: koinon.trace.v1alpha1.Settings.updated_at:type_name -> google.protobuf.Timestamp
+	16, // 27: koinon.trace.v1alpha1.GetSettingsResponse.settings:type_name -> koinon.trace.v1alpha1.Settings
+	1,  // 28: koinon.trace.v1alpha1.UpdateSettingsRequest.content_level:type_name -> koinon.trace.v1alpha1.ContentLevel
+	1,  // 29: koinon.trace.v1alpha1.UpdateSettingsRequest.platform_copy_level:type_name -> koinon.trace.v1alpha1.ContentLevel
+	16, // 30: koinon.trace.v1alpha1.UpdateSettingsResponse.settings:type_name -> koinon.trace.v1alpha1.Settings
+	4,  // 31: koinon.trace.v1alpha1.GetPlatformResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	1,  // 32: koinon.trace.v1alpha1.GetPlatformResponse.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
+	5,  // 33: koinon.trace.v1alpha1.SetPlatformDestinationRequest.destination:type_name -> koinon.trace.v1alpha1.DestinationInput
+	4,  // 34: koinon.trace.v1alpha1.SetPlatformDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	4,  // 35: koinon.trace.v1alpha1.TestPlatformDestinationResponse.destination:type_name -> koinon.trace.v1alpha1.Destination
+	2,  // 36: koinon.trace.v1alpha1.TestPlatformDestinationResponse.result:type_name -> koinon.trace.v1alpha1.TestResult
+	1,  // 37: koinon.trace.v1alpha1.SetPlatformCeilingRequest.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
+	1,  // 38: koinon.trace.v1alpha1.SetPlatformCeilingResponse.ceiling:type_name -> koinon.trace.v1alpha1.ContentLevel
+	6,  // 39: koinon.trace.v1alpha1.TraceDestinationService.ListDestinations:input_type -> koinon.trace.v1alpha1.ListDestinationsRequest
+	8,  // 40: koinon.trace.v1alpha1.TraceDestinationService.CreateDestination:input_type -> koinon.trace.v1alpha1.CreateDestinationRequest
+	10, // 41: koinon.trace.v1alpha1.TraceDestinationService.UpdateDestination:input_type -> koinon.trace.v1alpha1.UpdateDestinationRequest
+	12, // 42: koinon.trace.v1alpha1.TraceDestinationService.DeleteDestination:input_type -> koinon.trace.v1alpha1.DeleteDestinationRequest
+	14, // 43: koinon.trace.v1alpha1.TraceDestinationService.TestDestination:input_type -> koinon.trace.v1alpha1.TestDestinationRequest
+	17, // 44: koinon.trace.v1alpha1.TraceDestinationService.GetSettings:input_type -> koinon.trace.v1alpha1.GetSettingsRequest
+	19, // 45: koinon.trace.v1alpha1.TraceDestinationService.UpdateSettings:input_type -> koinon.trace.v1alpha1.UpdateSettingsRequest
+	21, // 46: koinon.trace.v1alpha1.TraceDestinationService.GetPlatform:input_type -> koinon.trace.v1alpha1.GetPlatformRequest
+	23, // 47: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformDestination:input_type -> koinon.trace.v1alpha1.SetPlatformDestinationRequest
+	25, // 48: koinon.trace.v1alpha1.TraceDestinationService.DeletePlatformDestination:input_type -> koinon.trace.v1alpha1.DeletePlatformDestinationRequest
+	27, // 49: koinon.trace.v1alpha1.TraceDestinationService.TestPlatformDestination:input_type -> koinon.trace.v1alpha1.TestPlatformDestinationRequest
+	29, // 50: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformCeiling:input_type -> koinon.trace.v1alpha1.SetPlatformCeilingRequest
+	7,  // 51: koinon.trace.v1alpha1.TraceDestinationService.ListDestinations:output_type -> koinon.trace.v1alpha1.ListDestinationsResponse
+	9,  // 52: koinon.trace.v1alpha1.TraceDestinationService.CreateDestination:output_type -> koinon.trace.v1alpha1.CreateDestinationResponse
+	11, // 53: koinon.trace.v1alpha1.TraceDestinationService.UpdateDestination:output_type -> koinon.trace.v1alpha1.UpdateDestinationResponse
+	13, // 54: koinon.trace.v1alpha1.TraceDestinationService.DeleteDestination:output_type -> koinon.trace.v1alpha1.DeleteDestinationResponse
+	15, // 55: koinon.trace.v1alpha1.TraceDestinationService.TestDestination:output_type -> koinon.trace.v1alpha1.TestDestinationResponse
+	18, // 56: koinon.trace.v1alpha1.TraceDestinationService.GetSettings:output_type -> koinon.trace.v1alpha1.GetSettingsResponse
+	20, // 57: koinon.trace.v1alpha1.TraceDestinationService.UpdateSettings:output_type -> koinon.trace.v1alpha1.UpdateSettingsResponse
+	22, // 58: koinon.trace.v1alpha1.TraceDestinationService.GetPlatform:output_type -> koinon.trace.v1alpha1.GetPlatformResponse
+	24, // 59: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformDestination:output_type -> koinon.trace.v1alpha1.SetPlatformDestinationResponse
+	26, // 60: koinon.trace.v1alpha1.TraceDestinationService.DeletePlatformDestination:output_type -> koinon.trace.v1alpha1.DeletePlatformDestinationResponse
+	28, // 61: koinon.trace.v1alpha1.TraceDestinationService.TestPlatformDestination:output_type -> koinon.trace.v1alpha1.TestPlatformDestinationResponse
+	30, // 62: koinon.trace.v1alpha1.TraceDestinationService.SetPlatformCeiling:output_type -> koinon.trace.v1alpha1.SetPlatformCeilingResponse
+	51, // [51:63] is the sub-list for method output_type
+	39, // [39:51] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_koinon_trace_v1alpha1_trace_proto_init() }

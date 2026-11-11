@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -388,17 +389,17 @@ func (e *env) poolRunning(conns *pgxpool.Pool, name string, run func(*agentd.Poo
 		Prices:         prices.NewResolver(pricing.Embedded()),
 		OwnerID:        name,
 		Workers:        2,
-		Lease:          2 * time.Second,
-		Heartbeat:      200 * time.Millisecond,
+		Lease:          racescale.D(2 * time.Second),
+		Heartbeat:      racescale.D(200 * time.Millisecond), // scaled with Lease: the ratio must hold
 		Poll:           50 * time.Millisecond,
 		GatewayURL:     gatewayURL,
 		Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})).With("pool", name),
-		CancelGrace:    2 * time.Second,
-		SandboxTimeout: 10 * time.Second,
-		ReadyTimeout:   2 * time.Second,
+		CancelGrace:    racescale.D(2 * time.Second),
+		SandboxTimeout: racescale.D(10 * time.Second),
+		ReadyTimeout:   racescale.D(2 * time.Second),
 		ReadySettle:    10 * time.Millisecond,
 		// Specs that fail a run with an authentication error have no access-log record to wait for.
-		GatewayRecordWait: 300 * time.Millisecond,
+		GatewayRecordWait: racescale.D(300 * time.Millisecond),
 		// A short drain, so a spec that ends with a turn in progress does not wait out the default
 		// 5 minutes; the drain specs set their own.
 		DrainDeadline: 200 * time.Millisecond,
@@ -424,7 +425,7 @@ func (e *env) poolRunning(conns *pgxpool.Pool, name string, run func(*agentd.Poo
 		if !stopped {
 			stopped = true
 			cancel()
-			Eventually(done).WithTimeout(10 * time.Second).Should(BeClosed())
+			Eventually(done).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
 		}
 	}
 	DeferCleanup(stop)
@@ -492,7 +493,7 @@ func (c *fakeClock) awaitWait() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		return c.reads
-	}).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 3))
+	}).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 3))
 }
 
 func (c *fakeClock) Advance(d time.Duration) {
