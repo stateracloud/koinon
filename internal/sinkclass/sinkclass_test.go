@@ -39,6 +39,16 @@ var _ = Describe("Declaration", func() {
 		Expect(n.IsDefault()).To(BeTrue())
 	})
 
+	It("takes each result leg from the tool where it declares one, else from the server", func() {
+		t, f := true, false
+		u, p := sinkclass.Default().ResultLegs(true, false)
+		Expect([]bool{u, p}).To(Equal([]bool{true, false}), "no declaration: the server's legs")
+		u, p = sinkclass.Declaration{ResultUntrustedInput: &f}.ResultLegs(true, false)
+		Expect([]bool{u, p}).To(Equal([]bool{false, false}), "one leg declared, the other the server's")
+		u, p = sinkclass.Declaration{ResultPrivateData: &t}.ResultLegs(true, false)
+		Expect([]bool{u, p}).To(Equal([]bool{true, true}))
+	})
+
 	It("is not the default once anything is declared", func() {
 		t := true
 		for _, d := range []sinkclass.Declaration{

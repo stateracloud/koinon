@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # A valid template that holds all three legs through tools nobody classified (ADR 0084): a read
 # grant on a repository, and two tools of an unclassified server, which carries both data legs and
-# defaults to external-high (ADR 0091 decision 4). No web phrasing names a web tool. The templates
-# test must report it; it is not shipped.
+# defaults to external-high (ADR 0091 decision 4). Neither tool is in
+# testdata/legs/tool-declarations.json. The templates test must report it; it is not shipped.
 apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:

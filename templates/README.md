@@ -9,7 +9,10 @@ Agent templates: building blocks for the agent builder; the result is always a d
 - `researcher` and `web-researcher` are split so that no template holds all three legs of ADR 0084
   (untrusted input, private data, an auto-tier `external-high` tool; fetch and search are
   `external-low`, ADR 0091). `legs_test.go` fails if a template combines them, with no exceptions;
-  `testdata/legs/` has the negative fixture.
+  `testdata/legs/` has the negative fixtures. The test classifies the tools a template names in
+  `spec.tools` (and, for templates without it, the backticked names in its instructions) with the
+  declarations in `testdata/legs/tool-declarations.json`: adding a tool to a template means adding it
+  to `spec.tools` and, if it is not an unclassified default tool, to that file.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
@@ -23,6 +26,10 @@ Agent templates: building blocks for the agent builder; the result is always a d
 OpenCode agent install plugins: its sandbox may read the npm registry (GET and HEAD, no credentials)
 from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
 needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` explicitly.
+
+`spec.tools` (optional) lists the tool names the instructions expect the agent to call, also the ones
+they only describe in prose ("the search and fetch tools"), for example `[ask_user, web_url_read]`.
+It names tools, not MCP servers: an admin allows servers on the agent. The legs check reads it.
 
 `spec.ephemeral: true` makes agents created from the template ephemeral: each task runs in a fresh
 sandbox with no persistent home, deleted when the task ends (ADR 0065 decision 13c). Off when

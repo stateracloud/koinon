@@ -114,7 +114,11 @@ type Spec struct {
 	Ephemeral    bool    `json:"ephemeral,omitempty"`
 	Model        Model   `json:"model"`
 	Instructions string  `json:"instructions"`
-	Grants       []Grant `json:"grants"`
+	// Tools names the tools the instructions expect the agent to call, by tool name (the names the
+	// MCP guard classifies, ADR 0091). Optional; the templates legs test reads it, so a tool the
+	// instructions only describe in prose is still classified.
+	Tools  []string `json:"tools,omitempty"`
+	Grants []Grant  `json:"grants"`
 	Limits       Limits  `json:"limits"`
 	// Triggers start work on the agent: a schedule or a direct message in v0.1 (ADR 0066).
 	Triggers []Trigger `json:"triggers,omitempty"`
