@@ -266,6 +266,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	DecideOpenRouterLimitProposal(ctx context.Context, arg DecideOpenRouterLimitProposalParams) error
 	// Accepts or dismisses an open proposal. No row: it was already decided.
 	DecidePriceProposal(ctx context.Context, arg DecidePriceProposalParams) (PriceProposal, error)
 	// Stores whether the run is traced, once: a run decided earlier keeps its decision (a resume after a
@@ -345,6 +346,7 @@ type Querier interface {
 	// call_binding is given the scope's binding must equal it (a code-host scope covers only the
 	// connection and base URL it was granted on).
 	FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error)
+	FindLiveOpenRouterLimitProposal(ctx context.Context, arg FindLiveOpenRouterLimitProposalParams) (OpenrouterLimitProposal, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Questions an agent asks a person with ask_user (plan item TK3; ADR 0065). Every query on an
@@ -494,6 +496,13 @@ type Querier interface {
 	GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error)
 	GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
+	// The per-install OpenRouter model catalog (ADR 0070 amendment of 2026-11-11, #543). Install-wide
+	// tables: no org column, nothing here reads an org's rows.
+	GetOpenRouterCatalog(ctx context.Context) (OpenrouterCatalog, error)
+	GetOpenRouterLimitProposalForUpdate(ctx context.Context, id pgtype.UUID) (OpenrouterLimitProposal, error)
+	GetOpenRouterLimitValue(ctx context.Context, arg GetOpenRouterLimitValueParams) (OpenrouterLimitValue, error)
+	GetOpenRouterModel(ctx context.Context, model string) (OpenrouterModel, error)
+	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Org and agent budgets and in-app notifications (plan item BG1). Every query on an org-owned
 	// table takes @org_id and filters on it (TestQueriesAreOrgScoped).
@@ -597,6 +606,7 @@ type Querier interface {
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
+	InsertOpenRouterLimitProposal(ctx context.Context, arg InsertOpenRouterLimitProposalParams) (OpenrouterLimitProposal, error)
 	// InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
 	// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
 	// lost the run) is ended as interrupted in the same statement, before the new one starts.
@@ -841,6 +851,9 @@ type Querier interface {
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
 	// hides it meanwhile).
 	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]ListOpenQuestionsForUserRow, error)
+	ListOpenRouterLimitProposals(ctx context.Context, arg ListOpenRouterLimitProposalsParams) ([]OpenrouterLimitProposal, error)
+	ListOpenRouterLimitValues(ctx context.Context) ([]OpenrouterLimitValue, error)
+	ListOpenRouterModels(ctx context.Context) ([]OpenrouterModel, error)
 	// Runs that can still be canceled, when the agent's daily limit is reached.
 	ListOpenRunsOfAgent(ctx context.Context, arg ListOpenRunsOfAgentParams) ([]Run, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
@@ -1175,6 +1188,7 @@ type Querier interface {
 	ReenableUIModels(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI providers no declared provider shadows any more.
 	ReenableUIProviders(ctx context.Context, orgID pgtype.UUID) error
+	RefreshOpenRouterLimitProposal(ctx context.Context, arg RefreshOpenRouterLimitProposalParams) error
 	// A failed attempt that will be tried again after @delay_seconds.
 	ReleaseHomeCheckpoint(ctx context.Context, arg ReleaseHomeCheckpointParams) (HomeCheckpoint, error)
 	// A failed try, tried again after @delay_seconds.
@@ -1290,6 +1304,7 @@ type Querier interface {
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
+	SetOpenRouterModelEndpoints(ctx context.Context, arg SetOpenRouterModelEndpointsParams) (int64, error)
 	// Sets or clears ('') the org's default model. The old value comes back for the audit event.
 	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
 	// The org's first model becomes its default; a default that is set stays.
@@ -1379,6 +1394,9 @@ type Querier interface {
 	// A fetch that returned other values for a model, or the same as the effective price, replaces the
 	// source's open proposals for it.
 	SupersedeOpenPriceProposals(ctx context.Context, arg SupersedeOpenPriceProposalsParams) (int64, error)
+	// Closes the open proposals of a model and field whose value is not the one now proposed (the fetch
+	// moved on), or all of them when keep is 0 (the fetched value is the accepted one).
+	SupersedeOpenRouterLimitProposals(ctx context.Context, arg SupersedeOpenRouterLimitProposalsParams) (int64, error)
 	// koinon-reconciler, after an applied gateway state: the org's models that state serves, with
 	// the provider and key file each is served with. Rows of models it does not serve are removed; a
 	// row whose key file is unchanged is left alone, so served_since stays.
@@ -1434,6 +1452,11 @@ type Querier interface {
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
+	UpsertOpenRouterCatalog(ctx context.Context, arg UpsertOpenRouterCatalogParams) error
+	UpsertOpenRouterLimitValue(ctx context.Context, arg UpsertOpenRouterLimitValueParams) error
+	// Display fields apply at once. The fetched limits are stored but are not effective (see
+	// openrouter_limit_values). The endpoints columns are left as they are.
+	UpsertOpenRouterModel(ctx context.Context, arg UpsertOpenRouterModelParams) error
 	UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error)
 	UpsertOrgTraceSettings(ctx context.Context, arg UpsertOrgTraceSettingsParams) (OrgTraceSetting, error)
 	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)

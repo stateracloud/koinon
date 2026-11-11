@@ -2058,6 +2058,48 @@ type OidcLoginFlow struct {
 	ExpiresAt    pgtype.Timestamptz
 }
 
+type OpenrouterCatalog struct {
+	Singleton  bool
+	Source     string
+	FetchedAt  pgtype.Timestamptz
+	ModelCount int32
+	Sha256     string
+}
+
+type OpenrouterLimitProposal struct {
+	ID            pgtype.UUID
+	Model         string
+	Field         string
+	CurrentValue  pgtype.Int4
+	ProposedValue int32
+	Source        string
+	State         string
+	CreatedAt     pgtype.Timestamptz
+	DecidedAt     pgtype.Timestamptz
+	DecidedBy     string
+}
+
+type OpenrouterLimitValue struct {
+	Model      string
+	Field      string
+	Value      int32
+	AcceptedAt pgtype.Timestamptz
+	AcceptedBy string
+	ProposalID pgtype.UUID
+}
+
+type OpenrouterModel struct {
+	Model              string
+	Display            []byte
+	ContextLength      int32
+	MaxOutput          int32
+	Source             string
+	FetchedAt          pgtype.Timestamptz
+	Endpoints          []byte
+	EndpointsSource    string
+	EndpointsFetchedAt pgtype.Timestamptz
+}
+
 type Org struct {
 	ID                  pgtype.UUID
 	Slug                string
