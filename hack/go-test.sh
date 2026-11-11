@@ -94,9 +94,10 @@ on_exit() {
 }
 trap 'on_exit $?' EXIT # after --list: a listing is not a run
 
-# shellcheck source=hack/go-test-host.sh
+# shellcheck source=/dev/null
 source "$(dirname "$0")/go-test-host.sh"
 host_caffeinate_pid=
+# shellcheck disable=SC2034 # read by host_release_slot in go-test-host.sh
 host_slot_dir=
 # shellcheck disable=SC2317,SC2329 # invoked from the exit trap
 host_cleanup() {

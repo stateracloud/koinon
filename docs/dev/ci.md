@@ -41,12 +41,13 @@ too. The rule leans to "not cacheable"; a wrongly excluded package loses a hit, 
 could show a stale pass. `hack/go-test-test.sh` pins it.
 
 Where the results come from: the `warm-caches` job on main runs
-`KOINON_GO_TEST_CACHE=1 hack/go-test.sh $(hack/go-test-cacheable.sh)` after the build, in the same step that
-fills `go-ci`, and saves the results in that entry. It uses the same script, so the flags (part of Go's
-key) match the pull request run. Like the build cache the entry is saved once per Go version and `go.sum`
-hash: a package that changed on main since then misses in every pull request until `go.sum` changes
-(follow-up: refresh the entry on every main push). To check it works, open the `go-test` log of a pull
-request run and look for `(cached)` on lines such as `internal/money (cached)`.
+`KOINON_GO_TEST_CACHE=1 hack/go-test.sh "$pkgs"` (`pkgs` is the output of `hack/go-test-cacheable.sh`) in its
+own step, after the `go-ci` save, with `continue-on-error`: a failing test loses hits and never costs the
+build cache, and an empty list fails the step instead of running `./...`. It saves `~/.cache/go-build` as
+`go-testres-<os>-<arch>-<go version>-<commit sha>` on every push to main; the `go-test` job of a pull
+request restores the newest entry by the `go-testres-` prefix. The script and flags are the same (they are
+part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
+look for `(cached)` on lines such as `internal/money (cached)`.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
@@ -496,7 +497,8 @@ work that fills it, then saves:
 
 | Cache | Key | Filled by |
 | --- | --- | --- |
-| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, the cacheable packages' test results (#43), one lint run |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |

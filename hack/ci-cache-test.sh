@@ -85,9 +85,15 @@ check "e2e-go is saved only on an exact miss" grep -q "steps.e2ego.outputs.cache
 # Test results (issue 43): only pull requests reuse them, and main's warm-caches job fills them.
 gotest=$(job_body "$wf" go-test)
 check "go-test sets KOINON_GO_TEST_CACHE for pull_request runs only" has "$gotest" "KOINON_GO_TEST_CACHE: \\$\\{\\{ github.event_name == 'pull_request' && '1' \\|\\| '' \\}\\}"
-check "warm-caches runs the cacheable packages through go-test.sh with the cache switch" has "$warm" 'KOINON_GO_TEST_CACHE=1 hack/go-test.sh \$\(hack/go-test-cacheable.sh\)'
+check "warm-caches runs the cacheable packages through go-test.sh with the cache switch" has "$warm" 'KOINON_GO_TEST_CACHE: .1.'
+check "warm-caches takes the cacheable list from go-test-cacheable.sh" has "$warm" 'pkgs=\$\(hack/go-test-cacheable.sh\)'
+check "warm-caches guards an empty cacheable list" has "$warm" '\[ -n "\$pkgs" \]'
+check "warm-caches' test run cannot fail the job (continue-on-error)" has "$warm" 'continue-on-error: true'
+check "warm-caches saves test results per commit" has "$warm" 'key: go-testres-.*github\.sha'
+check "go-test restores test results by prefix on pull requests" has "$gotest" 'go-testres-.*-$'
+check "go-ci save does not depend on the test run (comes first, no testres condition)" test "$(awk '/actions\/cache\/save@/{s++} /id: testres/{t=NR} /key: go-ci-/{if(s&&!k){k=NR}} END{print (k&&t&&k<t)?1:0}' <<<"$warm")" = 1
 check "warm-caches does not run the cacheable packages with -count=1" hasnt "$warm" 'go-test.sh.*-count=1'
-check "no workflow sets KOINON_GO_TEST_CACHE to 1 outside a pull_request condition" test "$(grep -h 'KOINON_GO_TEST_CACHE' "$wf" | grep -vc "pull_request\|warm-caches\|KOINON_GO_TEST_CACHE=1 hack/go-test.sh\|^ *#")" = 0
+check "no workflow sets KOINON_GO_TEST_CACHE to 1 outside a pull_request condition" test "$(grep -h 'KOINON_GO_TEST_CACHE' "$wf" | grep -vc "pull_request\|warm-caches\|KOINON_GO_TEST_CACHE: '1'\|^ *#")" = 0
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

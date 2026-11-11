@@ -222,6 +222,15 @@ jobs:
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      # Test results of the cacheable packages (issue 43), saved by warm-caches on every push to main
+      # under a per-commit key; the newest entry for this Go version is restored by prefix.
+      - if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-none
+          restore-keys: |
+            go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
       # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
       # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
@@ -863,9 +872,6 @@ jobs:
           go mod download
           go build ./...
           go test -count=1 -run '^$' ./...
-          # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
-          # (same script, same flags: they are part of Go's test cache key), without -count=1.
-          KOINON_GO_TEST_CACHE=1 hack/go-test.sh $(hack/go-test-cacheable.sh)
       - if: steps.gocache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -873,6 +879,24 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
+      # (same script, same flags: they are part of Go's test cache key), without -count=1. Their own
+      # cache entry, saved on every push to main under a per-commit key; pull requests restore it by the
+      # `go-testres-` prefix. Separate from go-ci so a failing test never costs the build cache. Go
+      # caches only passing packages, so a failure only loses hits.
+      - id: testres
+        continue-on-error: true
+        env:
+          KOINON_GO_TEST_CACHE: '1'
+        run: |
+          pkgs=$(hack/go-test-cacheable.sh)
+          [ -n "$pkgs" ] || { echo "no cacheable packages listed" >&2; exit 1; }
+          # shellcheck disable=SC2086 # pkgs is a word list
+          hack/go-test.sh $pkgs
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
       # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action
       # skips the save on an exact hit and downloads modules itself when go-ci was only looked up.
