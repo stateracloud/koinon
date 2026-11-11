@@ -326,10 +326,23 @@ func describeMode(name, valuesFile string) {
 			conn, err := pgx.Connect(ctx, dbURL)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(conn.Close)
-			var bound bool
-			Expect(conn.QueryRow(ctx, `SELECT mark IS NOT NULL FROM install_binding WHERE singleton`).Scan(&bound)).To(Succeed(),
+			// A held start (--restore-hold, ADR 0107) writes an unbound row: state copy, held_since set
+			// (ADR 0110 decision 0). An unheld first start claims the row with its own mark.
+			held := slices.Contains(c.Args, "--restore-hold")
+			for _, e := range c.Env {
+				if e.Name == "KOINON_RESTORE_HOLD" && e.Value == "true" {
+					held = true
+				}
+			}
+			var bound, heldSince bool
+			Expect(conn.QueryRow(ctx, `SELECT mark IS NOT NULL, held_since IS NOT NULL FROM install_binding WHERE singleton`).Scan(&bound, &heldSince)).To(Succeed(),
 				"koinon-api wrote the install_binding row on its first start")
-			Expect(bound).To(BeTrue(), "an unheld first start binds the row to its own mark")
+			if held {
+				Expect(bound).To(BeFalse(), "a held first start writes an unbound row (state copy)")
+				Expect(heldSince).To(BeTrue(), "a held first start sets held_since")
+			} else {
+				Expect(bound).To(BeTrue(), "an unheld first start binds the row to its own mark")
+			}
 		}, SpecTimeout(time.Minute))
 
 		// The install audit chain (ADR 0100): the group role existed before the migration, the login
