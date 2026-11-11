@@ -16,10 +16,18 @@ import (
 // WrapperContract declares the specs every secretstore.Wrapper that really wraps (a KMS adapter)
 // passes: call it inside a Describe of the adapter's suite, with a function that returns a wrapper
 // over a reachable test key (an OpenBao dev container, an AWS KMS stand-in that does the dry run,
-// which LocalStack does not). newHanging returns the
+// or LocalStack with SkipReachability, which does not). newHanging returns the
 // adapter pointed at a backend that accepts connections and never answers (a listener that never
 // replies); nil skips that spec. The test KEK is obviously fake.
-func WrapperContract(newWrapper, newHanging func() secretstore.Wrapper) {
+//
+// An adapter whose backend cannot pass every spec (LocalStack ignores DryRun, so its probe is never
+// healthy) runs the rest with SkipReachability and keeps a backend that can pass it as the
+// reachability target in another run of the contract.
+func WrapperContract(newWrapper, newHanging func() secretstore.Wrapper, opts ...WrapperContractOption) {
+	var o wrapperContractOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	kek := bytes.Repeat([]byte("k"), secretstore.KeySize)
 	aad := []byte("koinon-test-aad")
 	expect := gomega.Expect
@@ -73,6 +81,23 @@ func WrapperContract(newWrapper, newHanging func() secretstore.Wrapper) {
 	})
 
 	ginkgo.It("is reachable", func(ctx ginkgo.SpecContext) {
+		if o.skipReachability != "" {
+			ginkgo.Skip("reachability skipped: " + o.skipReachability)
+		}
 		expect(newWrapper().Probe(ctx)).To(gomega.Succeed())
 	})
+}
+
+type wrapperContractOptions struct{ skipReachability string }
+
+// WrapperContractOption changes what WrapperContract declares.
+type WrapperContractOption func(*wrapperContractOptions)
+
+// SkipReachability skips only the "is reachable" spec, for a backend whose probe cannot succeed.
+// The reason is required and shows in the spec's skip message; every other spec still runs.
+func SkipReachability(reason string) WrapperContractOption {
+	if reason == "" {
+		panic("secretstoretest.SkipReachability: a reason is required")
+	}
+	return func(o *wrapperContractOptions) { o.skipReachability = reason }
 }

@@ -31,7 +31,7 @@ func TestAWSKMS(t *testing.T) {
 // without a LocalStack account (later ones need an auth token). It does not check signatures or
 // IAM policies, so rights and signing are covered against a fake (hardening_test.go) and AWS's
 // SigV4 test vectors (sigv4_test.go).
-const image = "docker.io/localstack/localstack:4.14.0"
+const image = "docker.io/localstack/localstack:4.14.0@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a"
 
 const region = "us-east-1"
 
