@@ -186,9 +186,11 @@ if not sandbox_policy:
     # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
     # the OpenShell sandbox namespaces the cluster already has.
     sets.append('sandboxPolicy.enabled=false')
-    # The sandbox observer's RoleBinding policy (ADR 0078) needs the sandbox policy: the chart refuses to
-    # render one without the other.
+    # The observer, NetworkPolicy writer and LimitRange writer all need the sandbox policy: the chart
+    # refuses to render any of them without it (ADR 0078, spike 8.15, #76).
     sets.append('sandboxObserver.enabled=false')
+    sets.append('sandboxNetworkPolicy.enabled=false')
+    sets.append('sandboxLimitRange.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
         sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
