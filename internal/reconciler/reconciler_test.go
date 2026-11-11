@@ -735,6 +735,79 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
+		Describe("the sandbox LimitRange (#76)", func() {
+			var (
+				metrics *reconciler.Metrics
+				ns      string
+				lrNow   atomic.Pointer[time.Time]
+			)
+			const lrName = "koinon-koinon-sandbox-limitrange"
+			BeforeEach(func() {
+				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				metrics = reconciler.NewMetrics(nil)
+				cfg.Metrics = metrics
+				cfg.LimitRange = &reconciler.SandboxLimitRange{
+					Kube: kube, GatewayID: "openshell", Name: lrName,
+					Now: func() time.Time { return *lrNow.Load() },
+				}
+				t0 := time.Now()
+				lrNow.Store(&t0)
+				r = newReconciler()
+			})
+
+			It("applies the LimitRange once per workspace namespace", func(ctx SpecContext) {
+				pass(ctx, r)
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1))
+				lr := list.Items[0]
+				Expect(lr.Name).To(Equal(lrName))
+				Expect(lr.Labels).To(HaveKeyWithValue(reconciler.LimitRangeLabel, "true"))
+				Expect(lr.Spec.Limits).To(HaveLen(1))
+				Expect(lr.Spec.Limits[0].Type).To(Equal(corev1.LimitTypeContainer))
+			})
+
+			It("counts a refused Create and retries it after the backoff", func(ctx SpecContext) {
+				var refuse atomic.Bool
+				refuse.Store(true)
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if refuse.Load() {
+						return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "limitranges"}, "lr", errors.New("policy"))
+					}
+					return false, nil, nil
+				})
+				pass(ctx, r)
+				Expect(testutil.ToFloat64(metrics.LimitRangeErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				By("the next pass does not ask again inside the backoff")
+				before := len(kube.Actions())
+				pass(ctx, r)
+				creates := 0
+				for _, a := range kube.Actions()[before:] {
+					if a.Matches("create", "limitranges") {
+						creates++
+					}
+				}
+				Expect(creates).To(BeZero())
+				refuse.Store(false)
+				later := lrNow.Load().Add(11 * time.Second)
+				lrNow.Store(&later)
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1))
+			})
+
+			It("is off when no LimitRange writer is configured", func(ctx SpecContext) {
+				cfg.LimitRange = nil
+				r = newReconciler()
+				pass(ctx, r)
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(BeEmpty())
+			})
+		})
+
 		Describe("a sandbox in Error or Completed", func() {
 			var names execution.AgentNames
 			fail := func(phase openshellv1.SandboxPhase) {

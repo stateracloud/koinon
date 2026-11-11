@@ -72,6 +72,15 @@ that cannot be reclaimed.
   cannot size them itself (upstream NVIDIA/OpenShell #3930 and #3415). Chart: `sandboxLimitRange`;
   RBAC is fenced by a ValidatingAdmissionPolicy to this gateway's workspace namespaces and the
   fixed shape.
+- A LimitRange sizes pods only at admission: only pods admitted after the LimitRange exists get
+  the defaults. A sandbox created while Ensure failed stays BestEffort until it is recreated; the
+  failure is logged and counted (`koinon_reconciler_sandbox_limit_range_errors_total`) and is not
+  fatal to the pass.
+- Kata's pod overhead (`podFixed` on the RuntimeClass) is outside these Container defaults. A
+  Pod-type LimitRange max would have to include that overhead; this amendment does not add one.
+- Turning `sandboxLimitRange.enabled` off stops the chart from rendering the ClusterRole, binding
+  and VAP, and the reconciler applies nothing new. Existing LimitRanges stay until removed:
+  `kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`.
 
 ## Links
 

@@ -316,6 +316,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		if err := cfg.LimitRange.validate(); err != nil {
 			return nil, err
 		}
+		cfg.LimitRange.Errors = cfg.Metrics.LimitRangeErrors
 		if cfg.LimitRange.Log == nil {
 			cfg.LimitRange.Log = cfg.Logger
 		}
@@ -986,6 +987,8 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	}
 	if r.cfg.LimitRange != nil && ws.Active {
 		// Defense in depth: a missing LimitRange is counted and logged there, never fatal here.
+		// A LimitRange sizes pods only at admission: a sandbox created while Ensure failed stays
+		// BestEffort until it is recreated (ADR 0083 amendment).
 		_ = r.cfg.LimitRange.Ensure(ctx, name)
 	}
 	return name, nil

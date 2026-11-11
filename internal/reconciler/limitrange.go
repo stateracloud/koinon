@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -46,6 +47,8 @@ type SandboxLimitRange struct {
 	// Name is the LimitRange name in every workspace namespace (chart: koinon.sandboxLimitRange).
 	Name string
 	Log  *slog.Logger
+	// Errors counts failed Ensures by reason (forbidden, not_found or other); nil keeps them uncounted.
+	Errors *prometheus.CounterVec
 
 	Now func() time.Time
 
@@ -187,8 +190,23 @@ func (p *SandboxLimitRange) fail(ns string, d *denial, err error) error {
 	}
 	p.denied[ns] = &denial{failures: failures, until: p.now().Add(observerBackoff(failures)), err: err}
 	p.mu.Unlock()
+	p.count(err)
 	p.log().Warn("sandbox LimitRange could not be applied", "namespace", ns, "err", err)
 	return err
+}
+
+func (p *SandboxLimitRange) count(err error) {
+	if p.Errors == nil {
+		return
+	}
+	reason := observerOther
+	switch {
+	case apierrors.IsForbidden(err):
+		reason = observerForbidden
+	case apierrors.IsNotFound(err):
+		reason = observerNotFound
+	}
+	p.Errors.WithLabelValues(reason).Inc()
 }
 
 func (p *SandboxLimitRange) log() *slog.Logger {

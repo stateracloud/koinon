@@ -753,7 +753,9 @@ sandboxNetworkPolicy:
 # <namespace>-<release>-sandbox-limitrange in each workspace namespace of openshell.gatewayId
 # (defaultRequest 50m/64Mi, default 250m/256Mi for type Container, covering init containers too). The chart renders
 # a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-limitrange.yaml). Off, the
-# chart renders none of it and the reconciler applies nothing. Needs sandboxPolicy.enabled.
+# chart renders none of it and the reconciler applies nothing new; existing LimitRanges stay until
+# removed (`kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`). Needs
+# sandboxPolicy.enabled.
 sandboxLimitRange:
   enabled: true
 

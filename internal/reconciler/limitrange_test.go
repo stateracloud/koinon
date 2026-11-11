@@ -3,12 +3,21 @@
 package reconciler_test
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
@@ -83,5 +92,60 @@ var _ = Describe("SandboxLimitRange", func() {
 		Expect(lr.Namespace).To(Equal(ns))
 		Expect(lr.Spec.Limits).To(HaveLen(1))
 		Expect(lr.Spec.Limits[0].Type).To(Equal(corev1.LimitTypeContainer))
+	})
+})
+
+var _ = Describe("SandboxLimitRange.Ensure backoff", func() {
+	var (
+		creates atomic.Int32
+		refuse  atomic.Bool
+		now     time.Time
+		p       *reconciler.SandboxLimitRange
+	)
+	BeforeEach(func() {
+		creates.Store(0)
+		refuse.Store(true)
+		now = time.Unix(1_000_000, 0)
+		kube := fake.NewClientset()
+		kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+			creates.Add(1)
+			if refuse.Load() {
+				return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "limitranges"}, "lr", errors.New("policy"))
+			}
+			return false, nil, nil
+		})
+		p = &reconciler.SandboxLimitRange{
+			Kube: kube, GatewayID: "openshell", Name: "koinon-koinon-sandbox-limitrange",
+			Now: func() time.Time { return now },
+		}
+	})
+
+	It("does not ask the API server again until the backoff has passed", func() {
+		Expect(p.Ensure(context.Background(), "kw-1")).To(HaveOccurred())
+		Expect(creates.Load()).To(BeEquivalentTo(1))
+
+		By("within the first backoff (10s) the cached refusal is returned")
+		for range 5 {
+			now = now.Add(time.Second)
+			err := p.Ensure(context.Background(), "kw-1")
+			Expect(apierrors.IsForbidden(err)).To(BeTrue())
+		}
+		Expect(creates.Load()).To(BeEquivalentTo(1))
+
+		By("after it, one more attempt")
+		now = now.Add(5 * time.Second)
+		Expect(p.Ensure(context.Background(), "kw-1")).To(HaveOccurred())
+		Expect(creates.Load()).To(BeEquivalentTo(2))
+	})
+
+	It("keeps a separate backoff per namespace, and forgets it once the LimitRange is made", func() {
+		Expect(p.Ensure(context.Background(), "kw-1")).To(HaveOccurred())
+		refuse.Store(false)
+		Expect(p.Ensure(context.Background(), "kw-2")).To(Succeed(), "another namespace is not held back")
+		now = now.Add(11 * time.Second)
+		Expect(p.Ensure(context.Background(), "kw-1")).To(Succeed())
+		creates.Store(0)
+		Expect(p.Ensure(context.Background(), "kw-1")).To(Succeed())
+		Expect(creates.Load()).To(BeZero(), "applied namespaces are not asked again")
 	})
 })
