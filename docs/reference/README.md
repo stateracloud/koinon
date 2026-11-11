@@ -34,7 +34,9 @@ declaration, with the comment markers removed.
             { "name", "number",
               "type",                 // scalar name ("string", "int64"), a full message or enum name,
                                       // or "map<key, value>"
-              "label",                // "singular" | "optional" (explicit presence) | "repeated" | "map"
+              "label",                // "singular" (implicit or explicit presence: message fields and oneof
+                                      // members have explicit presence) | "optional" (only the proto3
+                                      // `optional` keyword) | "repeated" | "map"
               "oneof",                // name of the real oneof, "" if none
               "deprecated", "description" } ] } ],
       "enums": [                      // sorted by fullName; nested enums are listed on their own

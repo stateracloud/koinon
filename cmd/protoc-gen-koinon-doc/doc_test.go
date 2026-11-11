@@ -3,9 +3,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/compiler/protogen"
@@ -21,6 +23,60 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 func loc(comment string, path ...int32) *descriptorpb.SourceCodeInfo_Location {
 	return &descriptorpb.SourceCodeInfo_Location{Path: path, Span: []int32{0, 0, 1}, LeadingComments: proto.String(comment)}
+}
+
+// path builds a SourceCodeInfo path from names, so that reordering the fixture cannot misplace a
+// comment. One name is an enum, message or service; two names are a child of it: an enum value, a
+// field, a nested message or a method.
+func path(f *descriptorpb.FileDescriptorProto, names ...string) []int32 {
+	for i, e := range f.EnumType {
+		if e.GetName() != names[0] {
+			continue
+		}
+		p := []int32{5, int32(i)}
+		for j, v := range e.Value {
+			if len(names) == 2 && v.GetName() == names[1] {
+				return append(p, 2, int32(j))
+			}
+		}
+		if len(names) == 1 {
+			return p
+		}
+	}
+	for i, m := range f.MessageType {
+		if m.GetName() != names[0] {
+			continue
+		}
+		p := []int32{4, int32(i)}
+		if len(names) == 1 {
+			return p
+		}
+		for j, fl := range m.Field {
+			if fl.GetName() == names[1] {
+				return append(p, 2, int32(j))
+			}
+		}
+		for j, n := range m.NestedType {
+			if n.GetName() == names[1] {
+				return append(p, 3, int32(j))
+			}
+		}
+	}
+	for i, sv := range f.Service {
+		if sv.GetName() != names[0] {
+			continue
+		}
+		p := []int32{6, int32(i)}
+		if len(names) == 1 {
+			return p
+		}
+		for j, m := range sv.Method {
+			if m.GetName() == names[1] {
+				return append(p, 2, int32(j))
+			}
+		}
+	}
+	panic("fixture: no element " + strings.Join(names, "."))
 }
 
 func fd(name string, num int32, t descriptorpb.FieldDescriptorProto_Type) *descriptorpb.FieldDescriptorProto {
@@ -99,20 +155,21 @@ func fixture() *pluginpb.CodeGeneratorRequest {
 				},
 			},
 		}},
-		SourceCodeInfo: &descriptorpb.SourceCodeInfo{Location: []*descriptorpb.SourceCodeInfo_Location{
-			loc(" Mode picks the speed.\n It has a | pipe.\n", 5, 0),
-			loc(" The fast mode.\n", 5, 0, 2, 1),
-			loc(" Request to greet.\n", 4, 1),
-			{
-				Path: []int32{4, 1}, Span: []int32{0, 0, 1},
-				LeadingDetachedComments: []string{" DETACHED must not appear.\n"},
-			},
-			loc(" Who to greet.\n", 4, 1, 2, 2),
-			loc(" Nested type.\n", 4, 1, 3, 0),
-			loc(" Greets people.\n", 6, 0),
-			loc(" Says hello.\n", 6, 0, 2, 1),
-		}},
 	}
+	demo.SourceCodeInfo = &descriptorpb.SourceCodeInfo{Location: []*descriptorpb.SourceCodeInfo_Location{
+		loc(" Mode picks the speed.\n It has a | pipe.\n", path(demo, "Mode")...),
+		loc(" The fast mode.\n", path(demo, "Mode", "MODE_FAST")...),
+		loc(" Request to greet.\n", path(demo, "HelloRequest")...),
+		{
+			Path: path(demo, "HelloRequest"), Span: []int32{0, 0, 1},
+			LeadingDetachedComments: []string{" DETACHED must not appear.\n"},
+		},
+		loc(" Who to greet, as org#<id> or `org#<id>`.\n", path(demo, "HelloRequest", "name")...),
+		loc(" Nested type.\n", path(demo, "HelloRequest", "Inner")...),
+		loc(" Greets people.\n", path(demo, "Greeter")...),
+		loc(" Says hello.\n", path(demo, "Greeter", "Hello")...),
+	}}
+
 	alpha := &descriptorpb.FileDescriptorProto{
 		Name: proto.String("alpha/v1/alpha.proto"), Package: proto.String("alpha.v1"), Syntax: proto.String("proto3"),
 		Options: &descriptorpb.FileOptions{GoPackage: proto.String("example.com/alpha/v1;alphav1")},
@@ -173,6 +230,42 @@ func TestGolden(t *testing.T) {
 	js, md := run(t)
 	golden(t, "proto-api.golden.json", js)
 	golden(t, "proto-api.golden.md", md)
+	// The comments must land on the intended elements, not only match the golden.
+	for _, want := range []string{
+		"Request to greet.", "Nested type.", "Who to greet, as org#&lt;id&gt; or `org#<id>`.",
+	} {
+		if !strings.Contains(string(md), want) {
+			t.Errorf("markdown lacks %q", want)
+		}
+	}
+	var doc struct {
+		Packages []struct {
+			Messages []struct {
+				Name, Description string
+				Fields            []struct{ Name, Description string }
+			}
+		}
+	}
+	if err := json.Unmarshal(js, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, p := range doc.Packages {
+		for _, m := range p.Messages {
+			got[m.Name] = m.Description
+			for _, f := range m.Fields {
+				got[m.Name+"."+f.Name] = f.Description
+			}
+		}
+	}
+	for k, v := range map[string]string{
+		"HelloRequest": "Request to greet.", "HelloReply": "", "HelloRequest.Inner": "Nested type.",
+		"HelloRequest.name": "Who to greet, as org#<id> or `org#<id>`.",
+	} {
+		if got[k] != v {
+			t.Errorf("description of %s = %q, want %q", k, got[k], v)
+		}
+	}
 }
 
 func TestDeterministic(t *testing.T) {

@@ -251,6 +251,12 @@ func renderJSON(d document) ([]byte, error) {
 
 // cell makes text safe inside a Markdown table cell.
 func cell(s string) string {
+	// Escape HTML in prose; backtick code spans stay as written.
+	parts := strings.Split(s, "`")
+	for i := 0; i < len(parts); i += 2 {
+		parts[i] = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(parts[i])
+	}
+	s = strings.Join(parts, "`")
 	s = strings.ReplaceAll(s, "|", `\|`)
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
