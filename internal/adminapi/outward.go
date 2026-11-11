@@ -5,8 +5,6 @@ package adminapi
 import (
 	"context"
 
-	openapi_types "github.com/oapi-codegen/runtime/types"
-
 	"github.com/stateracloud/koinon/internal/outward"
 )
 
@@ -43,7 +41,7 @@ func (s *Server) SetOutwardTargetDisabled(ctx context.Context, req SetOutwardTar
 		return SetOutwardTargetDisableddefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	out := SetOutwardTargetDisabled200JSONResponse{
-		Kind: req.Kind, TargetId: openapi_types.UUID(req.TargetId), Name: got.Name, Disabled: got.Disabled,
+		Kind: req.Kind, TargetId: req.TargetId, Name: got.Name, Disabled: got.Disabled,
 	}
 	if got.Disabled {
 		at := got.At

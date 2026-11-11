@@ -8,6 +8,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
@@ -15,7 +16,6 @@ import (
 	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/restorehold"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var outwardKindFromProto = map[outwardv1alpha1.OutwardTargetKind]outward.Kind{
