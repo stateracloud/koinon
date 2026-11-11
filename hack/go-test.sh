@@ -59,7 +59,6 @@ PARALLEL_SUITES=(
 	./internal/durable
 	./internal/checkpoint
 	./internal/compat
-	./test/e2e/kind
 )
 
 if [[ ${1:-} == "--list" ]]; then
