@@ -39,11 +39,15 @@ func (r *Refresher) storeCatalog(ctx context.Context, a pricefetch.Adapter, snap
 		r.log.Warn("openrouter catalog: listing the models in use", "err", err)
 		return
 	}
+	listed := make([]string, len(snap.Meta))
+	for i, m := range snap.Meta {
+		listed[i] = m.Model
+	}
+	apply := r.catalog.Apply
 	if trigger == TriggerSchedule {
-		listed := make([]string, len(snap.Meta))
-		for i, m := range snap.Meta {
-			listed[i] = m.Model
-		}
+		// Due is a cheap read without the lock, so most ticks open no transaction; ApplyIfDue checks
+		// it again under the lock, since another replica may store in between.
+		apply = r.catalog.ApplyIfDue
 		due, err := r.catalog.Due(ctx, snap.FetchedAt, inUse, listed)
 		if err != nil {
 			r.log.Warn("openrouter catalog: reading the last store", "err", err)
@@ -53,18 +57,24 @@ func (r *Refresher) storeCatalog(ctx context.Context, a pricefetch.Adapter, snap
 			return
 		}
 	}
-	res, err := r.catalog.Apply(ctx, snap, inUse)
+	res, err := apply(ctx, snap, inUse)
 	if err != nil {
 		r.log.Warn("openrouter catalog: storing the fetch", "err", err)
 		return
+	}
+	if res.Skipped {
+		return // another replica stored this week's catalog and asked the endpoints route
 	}
 	r.log.Info("openrouter catalog stored", "source", orcatalog.SourceTag(snap.FetchedAt), "models", res.Models, "limitProposals", res.Proposals)
 	ef, ok := a.(pricefetch.EndpointsFetcher)
 	if !ok {
 		return
 	}
+	// Only the models in use that the list carries: a name OpenRouter does not list (it comes from an
+	// org's provider settings) would fail every week.
+	ask := orcatalog.InUseListed(inUse, listed)
 	failed := 0
-	for i, m := range inUse {
+	for i, m := range ask {
 		if i == orcatalog.MaxEndpointModels || ctx.Err() != nil {
 			break
 		}
@@ -77,7 +87,7 @@ func (r *Refresher) storeCatalog(ctx context.Context, a pricefetch.Adapter, snap
 		}
 	}
 	if failed > 0 {
-		r.log.Warn("openrouter catalog: endpoints could not be fetched for some models", "failed", failed, "of", min(len(inUse), orcatalog.MaxEndpointModels))
+		r.log.Warn("openrouter catalog: endpoints could not be fetched for some models", "failed", failed, "of", min(len(ask), orcatalog.MaxEndpointModels))
 	}
 }
 

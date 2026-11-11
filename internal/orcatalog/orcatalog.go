@@ -90,7 +90,11 @@ const dueSlack = 12 * time.Hour
 // use that OpenRouter does not list (delisted, retired, misspelled) is never stored as in use and
 // must not make every tick due. A restart inside the week with the same models in use is not due.
 func (s *Store) Due(ctx context.Context, now time.Time, inUse, listed []string) (bool, error) {
-	c, err := store.New(s.pool).GetOpenRouterCatalog(ctx)
+	return due(ctx, store.New(s.pool), now, inUse, listed)
+}
+
+func due(ctx context.Context, q *store.Queries, now time.Time, inUse, listed []string) (bool, error) {
+	c, err := q.GetOpenRouterCatalog(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	} else if err != nil {
@@ -99,7 +103,7 @@ func (s *Store) Due(ctx context.Context, now time.Time, inUse, listed []string) 
 	if now.Sub(c.FetchedAt.Time) >= Interval-dueSlack {
 		return true, nil
 	}
-	for _, m := range inUseListed(inUse, listed) {
+	for _, m := range InUseListed(inUse, listed) {
 		if !slices.Contains(c.InUseModels, m) {
 			return true, nil
 		}
@@ -107,8 +111,10 @@ func (s *Store) Due(ctx context.Context, now time.Time, inUse, listed []string) 
 	return false, nil
 }
 
-// inUseListed is the sorted set of the models in use that listed holds.
-func inUseListed(inUse, listed []string) []string {
+// InUseListed is the sorted set of the models in use that listed holds: the models a store records
+// as in use, and the ones the endpoints route is asked about (a name the list does not carry would
+// fail every time).
+func InUseListed(inUse, listed []string) []string {
 	out := []string{}
 	for _, m := range inUse {
 		if slices.Contains(listed, m) && !slices.Contains(out, m) {
@@ -123,12 +129,29 @@ func inUseListed(inUse, listed []string) []string {
 type Result struct {
 	Models    int
 	Proposals int
+	// Skipped is set by ApplyIfDue when the catalog was no longer due once it held the lock: another
+	// replica stored it first. Nothing was stored, and the caller sends no endpoints request.
+	Skipped bool
 }
+
+// beforeCommit runs at the end of a store's transaction, before it commits; tests hold a store
+// open with it.
+var beforeCommit func()
 
 // Apply stores a snapshot's model metadata in one transaction: the catalog row, every model's
 // display fields and fetched limits, and, for the models in use, a proposal for each fetched limit
 // that is not the accepted one. A snapshot with no metadata stores nothing.
 func (s *Store) Apply(ctx context.Context, snap pricefetch.Snapshot, inUse []string) (Result, error) {
+	return s.apply(ctx, snap, inUse, false)
+}
+
+// ApplyIfDue is Apply for a scheduled fetch: under the store's lock it checks Due again (with the
+// fetch time as now), and stores nothing, with Skipped set, when another replica stored first.
+func (s *Store) ApplyIfDue(ctx context.Context, snap pricefetch.Snapshot, inUse []string) (Result, error) {
+	return s.apply(ctx, snap, inUse, true)
+}
+
+func (s *Store) apply(ctx context.Context, snap pricefetch.Snapshot, inUse []string, ifDue bool) (Result, error) {
 	var res Result
 	if len(snap.Meta) == 0 {
 		return res, nil
@@ -146,14 +169,25 @@ func (s *Store) Apply(ctx context.Context, snap pricefetch.Snapshot, inUse []str
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		// Two replicas can both find the catalog due. The lock makes the second wait until the first
-		// commits; each later statement (read committed) then sees the first one's proposals, so the
-		// second refreshes them instead of inserting a duplicate that the live index would refuse.
+		// commits, before it decides anything: ApplyIfDue then checks Due against the first one's
+		// store and skips, and Apply's later statements (read committed) see the first one's
+		// proposals and refresh them instead of inserting a duplicate.
 		if err := q.LockOpenRouterCatalog(ctx); err != nil {
 			return err
 		}
+		if ifDue {
+			d, err := due(ctx, q, snap.FetchedAt, inUse, listed)
+			if err != nil {
+				return err
+			}
+			if !d {
+				res.Skipped = true
+				return nil
+			}
+		}
 		if err := q.UpsertOpenRouterCatalog(ctx, store.UpsertOpenRouterCatalogParams{
 			Source: source, FetchedAt: at, ModelCount: int32(snap.Count), Sha256: snap.SHA256, // #nosec G115 -- bounded by the body cap
-			InUseModels: inUseListed(inUse, listed),
+			InUseModels: InUseListed(inUse, listed),
 		}); err != nil {
 			return err
 		}
@@ -181,6 +215,9 @@ func (s *Store) Apply(ctx context.Context, snap pricefetch.Snapshot, inUse []str
 					res.Proposals++
 				}
 			}
+		}
+		if beforeCommit != nil {
+			beforeCommit()
 		}
 		return nil
 	})

@@ -512,10 +512,11 @@ The amendment above leaves these points open; this is what the code does.
    to eight days), when none exists, or when a listed model is enabled that was not in use at the
    last store (`openrouter_catalog.in_use_models`; a model OpenRouter does not list never makes a
    tick due). A restart inside the week with the same models in use stores nothing and sends no
-   endpoints request. `koinon-api prices fetch` is an operator's own request and always stores.
+   endpoints request. A scheduled store checks Due again under its lock, so of two replicas that
+   both found it due only one stores and asks the endpoints route. `koinon-api prices fetch` is an operator's own request and always stores.
 2. **Endpoints route.** After storing the list, the install asks
    `GET /api/v1/models/{author}/{slug}/endpoints` once for each distinct model that an enabled
-   `openrouter` provider has enabled, at most 100 per refresh, sequentially, with the same pinned
+   `openrouter` provider has enabled and the list carries, at most 100 per refresh, sequentially, with the same pinned
    host, no redirects and 16 MiB cap as the list. The upstream list is display data and is stored
    without any price (ADR 0098 decision 2.7). A failed request is logged as a count and does not fail
    the price fetch.
@@ -530,9 +531,10 @@ The amendment above leaves these points open; this is what the code does.
    not the accepted one becomes a proposal (`koinon-api model-metadata proposals list|accept|dismiss`;
    accept and dismiss are install audit events `model_metadata.limit.accepted` and `.dismissed`).
    Until one is accepted, `orcatalog.Store.Effective` reports no limit and the models.dev
-   `openrouter` value applies. Nothing serves `Effective` yet: an accepted value becomes the limit
-   that compaction uses once the model-metadata reader of #265 and #305 reads it, and until then
-   accepting only records the decision. A dismissed value is remembered per model, field and value; a
+   `openrouter` value applies. Nothing reads the stored catalog yet, neither the display fields nor
+   `Effective`: the model-metadata reader of #265 and #305 is the follow-up that serves them. Until
+   it does, an accepted value is only a recorded decision, and the display fields are stored, not
+   shown. A dismissed value is remembered per model, field and value; a
    proposal the fetch has moved past is superseded. Proposals are made for models in use only, so a
    first fetch does not raise hundreds. Display fields (name, description, modalities, tokenizer,
    supported parameters, endpoints) are effective as soon as they are stored.

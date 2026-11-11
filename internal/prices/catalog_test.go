@@ -128,6 +128,7 @@ var _ = Describe("the OpenRouter catalog fetch (ADR 0070 amendment of 2026-11-11
 		addProvider(ctx, pool, "openrouter", model, "fake/not-listed")
 		run(ctx, prices.RefreshAuto)
 		first := hits.Load()
+		Expect(first).To(BeEquivalentTo(2), "the list and the endpoints of the listed model only")
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog`)).To(Equal(1))
 
 		now = now.Add(25 * time.Hour)

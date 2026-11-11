@@ -4,6 +4,7 @@ package orcatalog_test
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -118,19 +119,92 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 		Expect(due).To(BeFalse())
 	})
 
-	It("lets two replicas store the same fetch at once without failing", func(ctx SpecContext) {
-		s := orcatalog.New(freshDB(ctx))
-		m := uniq()
-		errs := make(chan error, 2)
-		for range 2 {
-			go func() {
-				_, err := s.Apply(ctx, snapshot(t0, meta(m, 200000, 64000)), []string{m})
-				errs <- err
-			}()
+	Describe("two replicas", func() {
+		// holdFirst makes the first store that reaches its commit wait until release is closed, and
+		// closes held when it is there. Later stores pass straight through.
+		holdFirst := func() (held, release chan struct{}) {
+			held, release = make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			DeferCleanup(orcatalog.SetBeforeCommit(func() {
+				once.Do(func() {
+					close(held)
+					<-release
+				})
+			}))
+			return held, release
 		}
-		Expect(<-errs).To(Succeed())
-		Expect(<-errs).To(Succeed())
-		Expect(forModel(ctx, s, m)).To(HaveLen(2), "one proposal per field")
+
+		It("store one after the other: the second waits for the lock and refreshes the first one's proposals", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			m := uniq()
+			held, release := holdFirst()
+			snap := snapshot(t0, meta(m, 200000, 64000))
+			a := make(chan error, 1)
+			go func() { _, err := s.Apply(ctx, snap, []string{m}); a <- err }()
+			<-held // A has inserted its proposals and has not committed
+
+			b := make(chan error, 1)
+			go func() { _, err := s.Apply(ctx, snap, []string{m}); b <- err }()
+			// B waits for A: on the lock, and without it on the catalog row A upserted first. Either
+			// way B's later statements see A's proposals, so B refreshes them; this guards against an
+			// order of statements that would insert a duplicate. The lock itself is what the next
+			// spec needs.
+			Consistently(b, "300ms").ShouldNot(Receive(), "B waits for A")
+			close(release)
+			Expect(<-a).To(Succeed())
+			Eventually(b).Should(Receive(BeNil()))
+			Expect(forModel(ctx, s, m)).To(HaveLen(2), "one proposal per field")
+		})
+
+		It("skip a scheduled store that another replica made while it waited for the lock", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			m := uniq()
+			held, release := holdFirst()
+			snap := snapshot(t0, meta(m, 200000, 64000))
+			// Both found the catalog due before either took the lock.
+			due, err := s.Due(ctx, t0, []string{m}, []string{m})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(due).To(BeTrue())
+			a := make(chan orcatalog.Result, 1)
+			go func() {
+				defer GinkgoRecover()
+				res, err := s.ApplyIfDue(ctx, snap, []string{m})
+				Expect(err).NotTo(HaveOccurred())
+				a <- res
+			}()
+			<-held
+			b := make(chan orcatalog.Result, 1)
+			go func() {
+				defer GinkgoRecover()
+				res, err := s.ApplyIfDue(ctx, snap, []string{m})
+				Expect(err).NotTo(HaveOccurred())
+				b <- res
+			}()
+			// B has checked Due by now, or is waiting for the lock. Without the lock it checks while
+			// A's store is uncommitted, finds the catalog due, and stores again.
+			Consistently(b, "300ms").ShouldNot(Receive(), "B waits for A")
+			close(release)
+			first, second := <-a, <-b
+			Expect(first.Skipped).To(BeFalse())
+			Expect(first.Proposals).To(Equal(2))
+			Expect(second.Skipped).To(BeTrue(), "the catalog was no longer due under the lock")
+			Expect(second.Models).To(BeZero())
+		})
+
+		It("a store an operator asked for is never skipped", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			m := uniq()
+			snap := snapshot(t0, meta(m, 200000, 64000))
+			_, err := s.Apply(ctx, snap, []string{m})
+			Expect(err).NotTo(HaveOccurred())
+			res, err := s.ApplyIfDue(ctx, snap, []string{m})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Skipped).To(BeTrue())
+			res, err = s.Apply(ctx, snap, []string{m})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Skipped).To(BeFalse())
+			Expect(res.Models).To(Equal(1))
+		})
 	})
 
 	Describe("limit proposals", func() {

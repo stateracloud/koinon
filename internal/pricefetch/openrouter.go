@@ -150,10 +150,12 @@ func (o *OpenRouter) Fetch(ctx context.Context, now time.Time) (Snapshot, error)
 }
 
 // FetchEndpoints implements EndpointsFetcher: GET /api/v1/models/{author}/{slug}/endpoints for one
-// model of the list. The model id comes from the list this adapter fetched; each path segment is
-// escaped, and the request is held to the same pinned host as the list.
+// model. The name comes from an org's provider settings (the caller asks only about names the list
+// carries), so it is checked here: the model name rule, no empty, "." or ".." segment (url.PathEscape
+// leaves dots alone, and a dot segment would walk the path). Each segment is escaped, and the request
+// is held to the same pinned host as the list.
 func (o *OpenRouter) FetchEndpoints(ctx context.Context, model string, now time.Time) (ModelEndpoints, error) {
-	if !modelNameRE.MatchString(model) {
+	if !validModelName(model) {
 		return ModelEndpoints{}, fmt.Errorf("pricefetch: openrouter: %q is not a model name", model)
 	}
 	segs := strings.Split(model, "/")
@@ -211,7 +213,7 @@ func ParseOpenRouter(body []byte, now time.Time) (Snapshot, error) {
 	snap := Snapshot{Source: SourceOpenRouter, URL: OpenRouterURL, Licence: LicenceOpenRouter, FetchedAt: now.UTC(), SHA256: DigestBody(body), Count: len(l.Data)}
 	seen := map[string]bool{}
 	for _, m := range l.Data {
-		if !modelNameRE.MatchString(m.ID) {
+		if !validModelName(m.ID) {
 			continue // a name Koinon cannot use as a model name
 		}
 		if seen[m.ID] {
@@ -228,6 +230,20 @@ func ParseOpenRouter(body []byte, now time.Time) (Snapshot, error) {
 
 // modelNameRE is the model name rule of the catalog (models.name), without glob characters.
 var modelNameRE = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+
+// validModelName is modelNameRE with no empty, "." or ".." path segment, so a name is safe as URL
+// path segments.
+func validModelName(name string) bool {
+	if !modelNameRE.MatchString(name) {
+		return false
+	}
+	for _, s := range strings.Split(name, "/") {
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	return true
+}
 
 // decimalRE is a non-negative decimal as OpenRouter writes per-token prices, with an optional exponent.
 var decimalRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]{1,3})?$`)

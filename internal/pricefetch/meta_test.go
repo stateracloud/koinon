@@ -122,7 +122,7 @@ func TestOpenRouterFetchEndpoints(t *testing.T) {
 	}
 	// A name that is not a model name never becomes a path.
 	before := len(paths)
-	for _, bad := range []string{"", "../etc/passwd x", "a b", strings.Repeat("a", 300)} {
+	for _, bad := range []string{"", "../etc/passwd x", "a b", strings.Repeat("a", 300), "..", "fake/..", "../x", "fake/./model", "fake//model", "fake/model/"} {
 		if _, err := o.FetchEndpoints(context.Background(), bad, time.Now()); err == nil {
 			t.Errorf("%q must be refused", bad)
 		}
