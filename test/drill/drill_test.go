@@ -25,6 +25,7 @@ import (
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/test/drill"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 )
@@ -60,6 +61,8 @@ var (
 	sourceMCPServer string
 	snapshotUnix    int64 // when the backup began: a fire due after it is not in the dump
 	releasedUnix    int64
+	// heldStatus is GET /restore/status on the held copy, compared with what the release does.
+	heldStatus restorestatus.Report
 )
 
 const retentionMin = 30 // run-content-retention days: the marker is retentionMin+n
@@ -208,6 +211,29 @@ func openAPI(ctx context.Context, s *side) {
 	must(err, "port-forward the API of "+s.in.Release)
 	s.stopFwd = stop
 	s.client = e2eclient.New("http://" + addr)
+}
+
+// signInAdmin signs in on s with the seeded password and makes an admin token of s itself. A held copy
+// refuses the source's API token (another install mark, ADR 0110 decision 3), so the drill never reuses
+// it there; a password login works on a copy and makes a session and token with the copy's mark.
+func signInAdmin(ctx context.Context, s *side, tokenName string) {
+	GinkgoHelper()
+	openAPI(ctx, s)
+	Eventually(func() error {
+		c := e2eclient.New(s.client.Base)
+		change, err := c.Login(ctx, "admin", drill.SeededPassword)
+		if err == nil && change {
+			return fmt.Errorf("the restored admin must not need a password change")
+		}
+		if err == nil {
+			s.client = c
+		}
+		return err
+	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+	s.org = orgOf(ctx, s.client)
+	tok, err := s.client.Tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{OrgId: s.org, Name: tokenName, Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN})
+	must(err, "create a token on "+s.in.Release)
+	s.token = tok.GetSecret()
 }
 
 func orgOf(ctx context.Context, c *e2eclient.Client) string {
@@ -593,8 +619,11 @@ stringData:
 			_, err := kube.KubectlStdin(ctx, secret, "apply", "-f", "-")
 			must(err, "declare a provider")
 			time.Sleep(60 * time.Second)
-			dst.token = src.token // the restored admin token reads the held install
-			openAPI(ctx, &dst)
+			// The source's token is refused on the copy (ADR 0110 decision 3); the database is the
+			// first check, the API the second.
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared'")).To(BeZero(),
+				"the importer created the declared provider while the install was held (ADR 0110 decision 1)")
+			signInAdmin(ctx, &dst, "drill-held")
 			code, body := admin(ctx, &dst, http.MethodGet, "/providers")
 			Expect(code).To(Equal(http.StatusOK), string(body))
 			Expect(string(body)).NotTo(ContainSubstring("drill-declared"), "the importer created the declared provider while the install was held (ADR 0110 decision 1)")
@@ -606,8 +635,9 @@ stringData:
 		It("can disable its MCP servers, and cannot enable one", Label("hold", "mcp-disable"), func(ctx SpecContext) {
 			needs("restore")
 			Expect(sourceMCPServer).NotTo(BeEmpty(), "the source declared no MCP server")
-			dst.token = src.token // the restored admin token reads the held install
-			openAPI(ctx, &dst)
+			if dst.token == "" {
+				signInAdmin(ctx, &dst, "drill-held")
+			}
 			path := "/outward-targets/mcp-server/" + sourceMCPServer + "/disabled"
 			code, body := admin(ctx, &dst, http.MethodPut, path, `{"disabled":true,"note":"restore drill"}`)
 			Expect(code).To(Equal(http.StatusOK), string(body))
@@ -617,6 +647,38 @@ stringData:
 			code, body = admin(ctx, &dst, http.MethodPut, path, `{"disabled":false}`)
 			Expect(code).To(Equal(http.StatusConflict), "enable while held must be refused: "+string(body))
 			Expect(string(body)).To(ContainSubstring(restorehold.ErrHeld.Error()))
+		}, NodeTimeout(5*time.Minute))
+
+		It("shows in restore status what the release will do", Label("hold", "restore-status"), func(ctx SpecContext) {
+			needs("restore")
+			if dst.token == "" {
+				signInAdmin(ctx, &dst, "drill-held")
+			}
+			code, body := admin(ctx, &dst, http.MethodGet, "/restore/status")
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			AddReportEntry("restore status, held", string(body))
+			var r restorestatus.Report
+			must(json.Unmarshal(body, &r), "decode the restore status")
+			Expect(r.Binding.State).To(Equal("copy"))
+			Expect(r.Release.Pending).To(BeTrue(), "a held copy has a release pending")
+			Expect(r.Binding.HeldSince).NotTo(BeNil())
+			Expect(r.DumpTokens.DumpTime).NotTo(BeNil(), "the dump time is known from held_since")
+			kinds := map[string]bool{}
+			disabledMCP := false
+			for _, t := range r.Targets {
+				kinds[t.Kind] = true
+				disabledMCP = disabledMCP || (t.Kind == "mcp-server" && t.Disabled)
+			}
+			Expect(kinds).To(HaveKey("mcp-server"), "the seeded MCP server is listed")
+			Expect(kinds).To(HaveKey("model-provider"), "the seeded provider is listed")
+			Expect(disabledMCP).To(BeTrue(), "the MCP server disabled while held shows as disabled")
+			Expect(r.Release.DueTriggers).NotTo(BeEmpty(), "the every-minute schedule has a catch-up fire due")
+			wf := 0
+			for _, w := range r.Release.DBOS {
+				wf += w.Enqueued
+			}
+			Expect(wf).To(BeNumerically(">=", len(enqueued)), "the workflows ENQUEUED at the backup are listed")
+			heldStatus = r
 		}, NodeTimeout(5*time.Minute))
 	})
 
@@ -638,23 +700,33 @@ stringData:
 	Describe("released", func() {
 		It("signs in with the seeded password", Label("signin"), func(ctx SpecContext) {
 			needs("release")
-			openAPI(ctx, &dst)
-			Eventually(func() error {
-				c := e2eclient.New(dst.client.Base)
-				change, err := c.Login(ctx, "admin", drill.SeededPassword)
-				if err == nil && change {
-					return fmt.Errorf("the restored admin must not need a password change")
-				}
-				if err == nil {
-					dst.client = c
-				}
-				return err
-			}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-			dst.org = orgOf(ctx, dst.client)
-			tok, err := dst.client.Tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{OrgId: dst.org, Name: "drill-dst", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN})
-			must(err, "create a token on the target")
-			dst.token = tok.GetSecret()
+			signInAdmin(ctx, &dst, "drill-dst")
 		})
+
+		// The guide releases with kubectl set env, so the restore-release-check Job does not run (as with
+		// helm --no-hooks) and restore.acceptImporterDeletions is not set: the release step in koinon-api
+		// still revokes every session and records restore.release once, and the removals the restore
+		// brought in stay waiting (ADR 0110 decision 1).
+		It("releases once: sessions revoked, removals waiting without the accept", Label("hold", "release-gate"), func(ctx SpecContext) {
+			needs("release")
+			Expect(heldStatus.Binding.State).NotTo(BeEmpty(), "the held restore status was not read")
+			Eventually(func() int {
+				return sqlInt(ctx, &dst, "SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'")
+			}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal(1))
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM install_audit_events WHERE action = 'restore.sessions_revoked'")).To(Equal(1))
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM sessions WHERE created_at < (SELECT released_at FROM install_binding)")).To(BeZero(),
+				"a session made before the release survived it")
+			code, body := admin(ctx, &dst, http.MethodGet, "/restore/status")
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			AddReportEntry("restore status, released", string(body))
+			var r restorestatus.Report
+			must(json.Unmarshal(body, &r), "decode the restore status")
+			Expect(r.Release.Pending).To(BeFalse())
+			Expect(r.Release.PlanHash).NotTo(BeEmpty(), "restore.release records the plan hash")
+			Expect(r.Importer.Accepted).To(BeEmpty(), "nothing was accepted")
+			Expect(r.Importer.Waiting).To(ConsistOf(heldStatus.Importer.Planned), "the removals restore status planned while held wait for the accept")
+			Expect(metric(ctx, &dst, "api", "koinon_restore_release_pending")).To(BeEquivalentTo(map[bool]int{true: 1, false: 0}[len(r.Importer.Waiting) > 0]))
+		}, NodeTimeout(5*time.Minute))
 
 		It("sends the seeded provider key to the fake model", Label("provider-key"), func(ctx SpecContext) {
 			needs("release")
