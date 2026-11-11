@@ -648,8 +648,10 @@ chain would.
   `VerifyExport` checks each line against its event (a missing, forged or orphaned line, a wrong
   root or count) with no database. `audit verify --file <org export> --anchors <install export>`
   then checks an org export's hashes at the anchored `chain_seq` values. The install export
-  verifies on its own first. An org export with no `--anchors` is internally consistent only, and
-  says so.
+  verifies on its own first. It keeps only the heads of the org export's own org (memory stays
+  bounded), and the anchor set records that org: `VerifyExport` refuses an org export of another
+  org against it, which would otherwise pass with no anchor checked. An org export with no
+  `--anchors` is internally consistent only, and says so.
 
 *Prior art (sources read 2026-11-08).*
 

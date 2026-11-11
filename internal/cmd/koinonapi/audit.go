@@ -227,7 +227,7 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if len(inst.StreamAnchors) == 0 {
 			_, _ = fmt.Fprintf(out, "note    --anchors %s holds no anchors: nothing to check the file against\n", anchors)
 		}
-		opt.Anchors = &audit.ExportAnchorSet{InstallID: inst.Header.InstallID, Anchors: inst.StreamAnchors}
+		opt.Anchors = inst.AnchorSet()
 	}
 	if after != "" {
 		if after == "-" {

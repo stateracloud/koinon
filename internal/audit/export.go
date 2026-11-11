@@ -90,9 +90,14 @@ type ExportAnchorLine struct {
 }
 
 // ExportAnchorSet is the anchors of a verified install export, to check an org export against.
+// Build it with [ExportResult.AnchorSet], so OrgID is the filter the anchors were collected with.
 type ExportAnchorSet struct {
 	InstallID string
-	Anchors   []ExportAnchor
+	// OrgID is the org whose heads alone the anchors keep (ExportVerifyOptions.AnchorOrgID), empty
+	// when they keep every org's. VerifyExport refuses an org export of another org: its heads were
+	// dropped, so checking it would pass with no anchor checked.
+	OrgID   string
+	Anchors []ExportAnchor
 }
 
 // ExportEvent is one event line. Every field the hash covers is here exactly as hashed.
@@ -343,10 +348,18 @@ type ExportResult struct {
 	// StreamAnchors are the verified anchor_heads lines of an install export when CollectAnchors
 	// was set. Used to pin an org export (--anchors). Empty otherwise so memory stays bounded.
 	StreamAnchors []ExportAnchor
+	// AnchorOrgID is the ExportVerifyOptions.AnchorOrgID StreamAnchors were collected with.
+	AnchorOrgID string
 }
 
 // OK reports whether the file holds.
 func (r ExportResult) OK() bool { return r.Break == nil }
+
+// AnchorSet is the anchors r collected (CollectAnchors), to check an org export against with
+// ExportVerifyOptions.Anchors. It carries the org the heads were kept for.
+func (r ExportResult) AnchorSet() *ExportAnchorSet {
+	return &ExportAnchorSet{InstallID: r.Header.InstallID, OrgID: r.AnchorOrgID, Anchors: r.StreamAnchors}
+}
 
 // ErrExportFormat is returned for a file that is not an export the verifier can read.
 var ErrExportFormat = errors.New("audit export: not a koinon.audit.export.v2 file")
@@ -382,12 +395,18 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 		if opt.Anchors != nil {
 			return res, errors.New("audit export: --anchors is for an org export; this one is the install chain")
 		}
+		if opt.CollectAnchors {
+			res.AnchorOrgID = opt.AnchorOrgID
+		}
 	case ChainOrg:
 		if h.OrgID == "" {
 			return res, fmt.Errorf("%w: an org export has no org_id", ErrExportFormat)
 		}
 		if a := opt.Anchors; a != nil && a.InstallID != h.InstallID {
 			return res, errors.New("audit export: the anchors are of another install")
+		}
+		if a := opt.Anchors; a != nil && a.OrgID != "" && a.OrgID != h.OrgID {
+			return res, fmt.Errorf("audit export: the anchors keep the heads of org %s only; this export is of org %s", a.OrgID, h.OrgID)
 		}
 		if opt.CollectAnchors {
 			return res, errors.New("audit export: CollectAnchors is for an install export")
@@ -534,7 +553,7 @@ func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent,
 		return fmt.Sprintf("the line after the anchor event %s is not an anchor_heads line", ev.ID)
 	}
 	if k, dup := duplicateKey(raw); dup {
-		return fmt.Sprintf("the anchor_heads line has the key %q twice", k)
+		return fmt.Sprintf("the anchor_heads line after the anchor event %s has the key %q twice", ev.ID, k)
 	}
 	want, err := parseAnchorSummary(ev.SummaryText)
 	if err != nil {
