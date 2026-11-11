@@ -77,7 +77,7 @@ var _ = Describe("the agent's sandbox resource override", func() {
 		},
 		Entry("memory above the maximum", &agentv1alpha1.SandboxResources{MemoryLimit: "16Gi"}, "memory.limit 16Gi is above the maximum: the platform allows 512Mi to 8Gi"),
 		Entry("memory below the minimum", &agentv1alpha1.SandboxResources{MemoryLimit: "128Mi"}, "memory.limit 128Mi is below the minimum: the platform allows 512Mi to 8Gi"),
-		Entry("cpu above the maximum", &agentv1alpha1.SandboxResources{CpuLimit: "64"}, "cpu.limit 64 is above the maximum: the platform allows at most 4"),
+		Entry("cpu above the maximum", &agentv1alpha1.SandboxResources{CpuLimit: "64"}, "cpu.limit 64 is above the maximum: the platform allows 100m to 4"),
 		Entry("a malformed quantity", &agentv1alpha1.SandboxResources{CpuLimit: "lots"}, `cpu.limit "lots"`),
 		Entry("a request above the limit", &agentv1alpha1.SandboxResources{CpuRequest: "2", CpuLimit: "1"}, "cpu.request 2 is greater than cpu.limit 1"),
 	)

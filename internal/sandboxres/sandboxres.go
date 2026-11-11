@@ -44,7 +44,7 @@ func DefaultPolicy() Policy {
 		},
 		Bounds: Bounds{
 			CPURequest:    Range{Min: "100m", Max: "2"},
-			CPULimit:      Range{Max: "4"},
+			CPULimit:      Range{Min: "100m", Max: "4"},
 			MemoryRequest: Range{Min: "512Mi", Max: "8Gi"},
 			MemoryLimit:   Range{Min: "512Mi", Max: "8Gi"},
 		},
@@ -77,6 +77,29 @@ func (p Policy) Validate() error {
 		}
 		if lo != nil && hi != nil && lo.Cmp(*hi) > 0 {
 			return fmt.Errorf("bounds.%s: min %s is greater than max %s", r.name, r.rng.Min, r.rng.Max)
+		}
+	}
+	// A limit is clamped into its range and the request is then lowered to it, so the limit range
+	// must not reach below the request minimum (nor, with the memory rule, above the request maximum).
+	for _, c := range []struct {
+		name     string
+		req, lim Range
+		equal    bool
+	}{
+		{"cpu", p.Bounds.CPURequest, p.Bounds.CPULimit, false},
+		{"memory", p.Bounds.MemoryRequest, p.Bounds.MemoryLimit, p.MemoryRequestEqualsLimit},
+	} {
+		if c.req.Min != "" {
+			reqMin, _ := parse(c.req.Min)
+			if limMin, _ := parse(c.lim.Min); limMin == nil || limMin.Cmp(*reqMin) < 0 {
+				return fmt.Errorf("bounds.%s: the limit range (%s) must not start below the request minimum %s", c.name, c.lim, c.req.Min)
+			}
+		}
+		if c.equal && c.req.Max != "" {
+			reqMax, _ := parse(c.req.Max)
+			if limMax, _ := parse(c.lim.Max); limMax == nil || limMax.Cmp(*reqMax) > 0 {
+				return fmt.Errorf("bounds.%s: with memoryRequestEqualsLimit the limit range (%s) must end at or below the request maximum %s", c.name, c.lim, c.req.Max)
+			}
 		}
 	}
 	return nil
@@ -227,11 +250,47 @@ func (r Range) String() string {
 // limit. The reconciler clamps again on every pass, because the bounds can change after the write.
 // A *BoundsError is a refusal; any other error is a malformed quantity. The policy must be valid.
 func (p Policy) CheckOverride(tpl, override templates.Resources) error {
+	if err := override.Validate(); err != nil {
+		return &BoundsError{Msg: err.Error()}
+	}
+	for _, f := range []struct {
+		field, v string
+		r        Range
+	}{
+		{"cpu.request", override.CPU.Request, p.Bounds.CPURequest},
+		{"cpu.limit", override.CPU.Limit, p.Bounds.CPULimit},
+		{"memory.request", override.Memory.Request, p.Bounds.MemoryRequest},
+		{"memory.limit", override.Memory.Limit, p.Bounds.MemoryLimit},
+	} {
+		if _, reason := clamp(f.v, f.r); reason != "" {
+			return &BoundsError{Msg: fmt.Sprintf("%s %s is %s: the platform allows %s", f.field, f.v, reason, f.r)}
+		}
+	}
+
+	// An explicit limit below the request minimum would lower the request below it (Effective
+	// lowers a request to its limit).
+	eff := Overlay(tpl, override)
+	for _, f := range []struct {
+		field string
+		set   templates.Quantities
+		reqR  Range
+	}{{"cpu", override.CPU, p.Bounds.CPURequest}, {"memory", override.Memory, p.Bounds.MemoryRequest}} {
+		if f.set.Limit == "" || f.reqR.Min == "" {
+			continue
+		}
+		l, _ := parse(f.set.Limit)
+		lo, _ := parse(f.reqR.Min)
+		if l != nil && lo != nil && l.Cmp(*lo) < 0 {
+			return &BoundsError{Msg: fmt.Sprintf("%s.limit %s is below the minimum request: the platform allows a request of %s and a limit of %s",
+				f.field, f.set.Limit, f.reqR, p.limitRange(f.field))}
+		}
+	}
+
 	// Only a request the user set explicitly can be refused for being above its limit. A request
 	// that comes from the template or the platform default is lowered to the effective limit by
 	// Effective (and, with MemoryRequestEqualsLimit, set to it), so the API and the reconciler
-	// agree. The limit is the override's, else the template's, else the default.
-	eff := Overlay(tpl, override)
+	// agree. The limit is the override's, else the template's, else the default, clamped to its
+	// range as Effective does.
 	for _, f := range []struct {
 		field string
 		set   templates.Quantities
@@ -248,28 +307,12 @@ func (p Policy) CheckOverride(tpl, override templates.Resources) error {
 		if lim == "" {
 			continue
 		}
+		lim, _ = clamp(lim, p.limitRange(f.field))
 		req, _ := parse(f.set.Request)
 		l, _ := parse(lim)
 		if req != nil && l != nil && req.Cmp(*l) > 0 {
 			return &BoundsError{Msg: fmt.Sprintf("%s.request %s is greater than %s.limit %s: a request cannot exceed its limit (the platform allows a limit of %s)",
 				f.field, f.set.Request, f.field, lim, p.limitRange(f.field))}
-		}
-	}
-
-	if err := override.Validate(); err != nil {
-		return &BoundsError{Msg: err.Error()}
-	}
-	for _, f := range []struct {
-		field, v string
-		r        Range
-	}{
-		{"cpu.request", override.CPU.Request, p.Bounds.CPURequest},
-		{"cpu.limit", override.CPU.Limit, p.Bounds.CPULimit},
-		{"memory.request", override.Memory.Request, p.Bounds.MemoryRequest},
-		{"memory.limit", override.Memory.Limit, p.Bounds.MemoryLimit},
-	} {
-		if _, reason := clamp(f.v, f.r); reason != "" {
-			return &BoundsError{Msg: fmt.Sprintf("%s %s is %s: the platform allows %s", f.field, f.v, reason, f.r)}
 		}
 	}
 	return nil

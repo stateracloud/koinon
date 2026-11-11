@@ -86,6 +86,10 @@ var _ = Describe("Policy.Validate", func() {
 		Entry("a bad bound", func(p *sandboxres.Policy) { p.Bounds.CPULimit.Max = "lots" }, `bounds.cpuLimit.max "lots"`),
 		Entry("min above max", func(p *sandboxres.Policy) { p.Bounds.MemoryLimit = sandboxres.Range{Min: "9Gi", Max: "8Gi"} }, "bounds.memoryLimit: min 9Gi is greater than max 8Gi"),
 		Entry("a bad default", func(p *sandboxres.Policy) { p.Default.Memory.Limit = "2 gigs" }, "default: memory.limit"),
+		Entry("a cpu limit range starting below the request minimum", func(p *sandboxres.Policy) { p.Bounds.CPULimit.Min = "50m" }, "bounds.cpu: the limit range (50m to 4) must not start below the request minimum 100m"),
+		Entry("a cpu limit range with no minimum", func(p *sandboxres.Policy) { p.Bounds.CPULimit.Min = "" }, "bounds.cpu: the limit range"),
+		Entry("a memory limit range starting below the request minimum", func(p *sandboxres.Policy) { p.Bounds.MemoryLimit.Min = "256Mi" }, "bounds.memory: the limit range (256Mi to 8Gi)"),
+		Entry("a memory limit range above the request maximum with the memory rule", func(p *sandboxres.Policy) { p.Bounds.MemoryLimit.Max = "16Gi" }, "bounds.memory: with memoryRequestEqualsLimit"),
 		Entry("a default request above its limit", func(p *sandboxres.Policy) { p.Default.CPU.Request = "4" }, "default: cpu.request 4 is greater than cpu.limit 2"),
 	)
 })
@@ -123,8 +127,8 @@ var _ = Describe("Policy.CheckOverride", func() {
 			"memory.limit 16Gi is above the maximum: the platform allows 512Mi to 8Gi"),
 		Entry("the memory limit below the minimum", res("", "", "", ""), res("", "", "", "128Mi"),
 			"memory.limit 128Mi is below the minimum: the platform allows 512Mi to 8Gi"),
-		Entry("the cpu limit above the maximum (no minimum)", res("", "", "", ""), res("", "8", "", ""),
-			"cpu.limit 8 is above the maximum: the platform allows at most 4"),
+		Entry("the cpu limit above the maximum ", res("", "", "", ""), res("", "8", "", ""),
+			"cpu.limit 8 is above the maximum: the platform allows 100m to 4"),
 		Entry("the cpu request below the minimum", res("", "", "", ""), res("50m", "", "", ""),
 			"cpu.request 50m is below the minimum: the platform allows 100m to 2"),
 		Entry("a malformed quantity", res("", "", "", ""), res("", "lots", "", ""), `cpu.limit "lots"`),
@@ -133,6 +137,31 @@ var _ = Describe("Policy.CheckOverride", func() {
 		Entry("a request above the default limit", res("", "", "", ""), res("", "", "3Gi", ""), "memory.request 3Gi is greater than memory.limit 2Gi"),
 	)
 
+	DescribeTable("refuses what Effective would shrink below a bound",
+		func(tpl, override templates.Resources, want string) {
+			Expect(p.CheckOverride(tpl, override)).To(MatchError(ContainSubstring(want)))
+		},
+		Entry("a cpu limit below the bounds", res("", "", "", ""), res("", "50m", "", ""), "cpu.limit 50m is below the minimum: the platform allows 100m to 4"),
+		Entry("a zero limit with a request reports the zero", res("", "", "", ""), res("100m", "0", "", ""), "must be greater than zero"),
+	)
+
+	It("refuses a limit below the request minimum even if the limit range allows it", func() {
+		pol := p
+		pol.Bounds.CPULimit.Min = "" // an invalid policy; CheckOverride still protects the request bound
+		err := pol.CheckOverride(res("", "", "", ""), res("", "50m", "", ""))
+		Expect(err).To(MatchError(ContainSubstring("cpu.limit 50m is below the minimum request: the platform allows a request of 100m to 2")))
+	})
+
+	It("compares an explicit request with the limit after clamping", func() {
+		pol := withoutEqual(p)
+		pol.Bounds.CPURequest = sandboxres.Range{Min: "100m"}
+		pol.Bounds.CPULimit = sandboxres.Range{Min: "100m", Max: "1"}
+		pol.Default.CPU.Limit = "1"
+		// The template limit 3 is clamped to 1, so a request of 2 would exceed the effective limit.
+		err := pol.CheckOverride(res("", "3", "", ""), res("2", "", "", ""))
+		Expect(err).To(MatchError(ContainSubstring("cpu.request 2 is greater than cpu.limit 1")))
+	})
+
 	// An unset request is filled from the template or the default and lowered to the limit, as
 	// Effective does; only a request the user set can be refused.
 	DescribeTable("agrees with Effective on requests the user did not set",
@@ -140,7 +169,6 @@ var _ = Describe("Policy.CheckOverride", func() {
 			err := pol.CheckOverride(tpl, override)
 			if want != "" {
 				Expect(err).To(MatchError(ContainSubstring(want)))
-				Expect(err).To(MatchError(SatisfyAny(ContainSubstring("512Mi to 8Gi"), ContainSubstring("at most 4"))))
 				return
 			}
 			Expect(err).NotTo(HaveOccurred())
@@ -175,11 +203,11 @@ var _ = Describe("FromConfig", func() {
 		p, err := sandboxres.FromConfig(func(key string, out any) error {
 			Expect(key).To(Equal("sandboxResources"))
 			fc := out.(*sandboxres.FileConfig)
-			fc.Bounds.Memory.Limit.Max = "16Gi"
+			fc.Bounds.Memory.Limit.Max = "6Gi"
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(p.Bounds.MemoryLimit.Max).To(Equal("16Gi"))
+		Expect(p.Bounds.MemoryLimit.Max).To(Equal("6Gi"))
 		Expect(p.Bounds.MemoryLimit.Min).To(Equal("512Mi"))
 	})
 })
