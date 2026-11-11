@@ -57,7 +57,7 @@ Guards in the table: 29.
    (see the ruleset row; before 2026-11-11 it covered the 15 sensitive path patterns, which 74% of merged PRs touched: 293 of 395 PR
    merges in the 30 days to 2026-11-09, from the diff of each first-parent merge). The permission
    classifier denies `--admin` from an agent (4 of 4 on 2026-11-08, from the audit record).
-   `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Since 2026-11-11 only a PR with a `.github/` path needs `--admin` (ADR 0103 superseded); the owner runs the command; the agent hands over
+   `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Since 2026-11-11 only a PR with a `.github/` path needs `--admin` (ADR 0103 deprecated); the owner runs the command; the agent hands over
    `hack/pr-merge.sh <PR> --admin --approved-at <time>` and the evidence.
 2. **The hook set is split.** `sleep-chain.sh`, the second spawn hook and the digest live in
    `~/.config/koinon/hooks`, not in the repository, so a cloud lane or a second contributor has

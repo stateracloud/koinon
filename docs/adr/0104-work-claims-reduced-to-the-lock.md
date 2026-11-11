@@ -1,6 +1,6 @@
 # 0104. Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane
 
-- Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock")
+- Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default)
 - Date: 2026-11-09
 - Amends: [0082](0082-work-claims-and-ready-queue.md) decisions 1, 2, 3, 5, 6, 7 and 10 (and its lanes);
   [0094](0094-work-claims-on-the-public-repository.md) decisions 1, 2, 3, 5, 6 and 7

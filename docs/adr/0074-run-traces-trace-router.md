@@ -105,7 +105,7 @@ procoduck decided the open points on 2026-10-28.
    - **The gateway sends model-call spans only to Koinon.** agentgateway exports through
      `frontendPolicies.tracing` to a receiver on koinon-api's internal OTLP listener (`/v1/traces`
      next to `/v1/logs`). Like the log receiver, it is reachable only from the gateway pods. The gateway
-     never exports to a third party.
+     never exports to a third party. _(Not built: nothing exports model-call spans from the gateway today; see item 6 of the amendment of 2026-11-11 below. The gateway still never exports to a third party.)_
    - **The router** runs in koinon-api. For every span it:
      - attributes the span to an org and a run (decision 4);
      - re-parents it under the turn (decision 2);
