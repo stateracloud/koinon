@@ -88,7 +88,7 @@ var _ = Describe("the outward switch", func() {
 		Expect(events(ctx, outward.ActionDisable)).To(HaveLen(1))
 
 		// The same state again changes and audits nothing.
-		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "again")
+		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "source credentials")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(events(ctx, outward.ActionDisable)).To(HaveLen(1))
 
@@ -178,6 +178,52 @@ var _ = Describe("the outward switch", func() {
 		Expect(woken()).To(BeTrue())
 	})
 
+	It("wakes the reconciler when an admin disables or enables a model provider", func(ctx SpecContext) {
+		id := provider(ctx, "openai-wake")
+		conn, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Release()
+		_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+		Expect(err).NotTo(HaveOccurred())
+		woken := func() bool {
+			wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			for {
+				n, err := conn.Conn().WaitForNotification(wctx)
+				if err != nil {
+					return false
+				}
+				if n.Payload == org.String() {
+					return true
+				}
+			}
+		}
+		_, err = svc.SetDisabled(ctx, org, actor, outward.ModelProvider, id, true, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(BeTrue())
+		_, err = svc.SetDisabled(ctx, org, actor, outward.ModelProvider, id, false, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(BeTrue())
+	})
+
+	It("changes the note when the same owner disables again, and audits it", func(ctx SpecContext) {
+		id := mcp(ctx, "docs", "")
+		_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "first")
+		Expect(err).NotTo(HaveOccurred())
+		before := len(events(ctx, outward.ActionDisable))
+		st, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "second")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Note).To(Equal("second"))
+		got, err := svc.Get(ctx, outward.MCPServer, org, id)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Note).To(Equal("second"))
+		Expect(events(ctx, outward.ActionDisable)).To(HaveLen(before + 1))
+		// The same note again changes and audits nothing.
+		_, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "second")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(events(ctx, outward.ActionDisable)).To(HaveLen(before + 1))
+	})
+
 	Describe("a declaring Secret", func() {
 		It("disables what it manages, wins over the API, and releases only its own disable", func(ctx SpecContext) {
 			id := mcp(ctx, "wiki", "wiki-secret")
@@ -215,6 +261,25 @@ var _ = Describe("the outward switch", func() {
 			n, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(Equal(0))
+		})
+
+		It("gives an admin's disable back to the admin when the Secret drops disabled: true", func(ctx SpecContext) {
+			id := mcp(ctx, "wiki", "wiki-secret")
+			_, err := svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, true, "by hand")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", true)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SyncDeclared(ctx, org, outward.MCPServer, "wiki-secret", false)
+			Expect(err).NotTo(HaveOccurred())
+			st, err := svc.Get(ctx, outward.MCPServer, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Disabled).To(BeTrue())
+			Expect(st.By).To(Equal(actor.String()))
+			Expect(st.Note).To(Equal("by hand"))
+			Expect(st.Declared()).To(BeFalse())
+			st, err = svc.SetDisabled(ctx, org, actor, outward.MCPServer, id, false, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.Disabled).To(BeFalse())
 		})
 
 		It("leaves an admin's disable when the Secret does not say disabled", func(ctx SpecContext) {

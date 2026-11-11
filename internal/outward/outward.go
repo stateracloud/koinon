@@ -219,6 +219,16 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 		if err != nil {
 			return err
 		}
+		if cur.Disabled && disabled && cur.By == actor.String() && cur.Note != note {
+			// The same owner disables again with a new note: the note changes, the first disable time stays.
+			if _, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_note = NULLIF($%d, '') WHERE %s`, t.name, len(args)+1, w), append(args, note)...); err != nil {
+				return err
+			}
+			out = cur
+			out.Note = note
+			s.audit(b, org, actor, kind, id, cur, out)
+			return nil
+		}
 		if cur.Disabled == disabled {
 			out = cur
 			return nil
@@ -230,7 +240,7 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 			_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_at = now(), admin_disabled_by = $%d, admin_disabled_note = NULLIF($%d, '') WHERE %s`,
 				t.name, len(args)+1, len(args)+2, w), append(args, actor.String(), note)...)
 		} else {
-			_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL WHERE %s`, t.name, w), args...)
+			_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL, admin_disabled_under_by = NULL, admin_disabled_under_note = NULL WHERE %s`, t.name, w), args...)
 		}
 		if err != nil {
 			return err
@@ -240,7 +250,7 @@ func (s *Service) SetDisabled(ctx context.Context, org pgtype.UUID, actor audit.
 			out.By, out.Note = actor.String(), note
 		}
 		s.audit(b, org, actor, kind, id, cur, out)
-		return nil
+		return notifyProvider(ctx, tx, kind, org)
 	})
 	if err != nil {
 		return State{}, err
@@ -290,6 +300,12 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 		if disabled {
 			n, err := DisableDeclared(ctx, tx, b, org, kind, secretName)
 			changed = n
+			return err // DisableDeclared wakes the reconciler
+		}
+		// An admin's disable that the Secret claimed comes back to the admin; the item stays disabled.
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET admin_disabled_by = admin_disabled_under_by, admin_disabled_note = admin_disabled_under_note,
+			admin_disabled_under_by = NULL, admin_disabled_under_note = NULL
+			WHERE org_id = $1 AND managed_by_secret = $2 AND admin_disabled_by = $3 AND admin_disabled_under_by IS NOT NULL`, t.name), org, secretName, actor.String()); err != nil {
 			return err
 		}
 		q := fmt.Sprintf(`UPDATE %[1]s SET admin_disabled_at = NULL, admin_disabled_by = NULL, admin_disabled_note = NULL
@@ -319,7 +335,7 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 			s.audit(b, org, actor, kind, h.id, State{Disabled: true, Name: h.name, By: actor.String()}, State{Name: h.name})
 		}
 		changed = len(hits)
-		return nil
+		return notifyProvider(ctx, tx, kind, org)
 	})
 	return changed, err
 }
@@ -328,7 +344,8 @@ func (s *Service) SyncDeclared(ctx context.Context, org pgtype.UUID, kind Kind, 
 // caller's transaction: the importer calls it in the transaction of the upsert, so a new item declared
 // disabled is never visible enabled. An item an admin disabled earlier is claimed too (its actor becomes
 // "secret <name>", so the API cannot enable it while the Secret says disabled; the first disable time
-// stays). Each change is audited. It returns the number of items changed.
+// stays). The admin's actor and note are kept underneath and come back when the Secret drops the field.
+// Each change is audited. It returns the number of items changed.
 func DisableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.UUID, kind Kind, secretName string) (int, error) {
 	t, ok := tables[kind]
 	if !ok || kind == TraceDestination || kind == PlatformTraceDestination {
@@ -338,9 +355,12 @@ func DisableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.U
 	q := fmt.Sprintf(`WITH old AS (
 			SELECT id, admin_disabled_at, admin_disabled_by FROM %[1]s
 			WHERE org_id = $1 AND managed_by_secret = $2 AND (admin_disabled_at IS NULL OR admin_disabled_by IS DISTINCT FROM $3) FOR UPDATE)
-		UPDATE %[1]s AS t SET admin_disabled_at = COALESCE(t.admin_disabled_at, now()), admin_disabled_by = $3, admin_disabled_note = $4
+		UPDATE %[1]s AS t SET admin_disabled_at = COALESCE(t.admin_disabled_at, now()),
+			admin_disabled_under_by = CASE WHEN t.admin_disabled_at IS NOT NULL AND t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_by END,
+			admin_disabled_under_note = CASE WHEN t.admin_disabled_at IS NOT NULL AND t.admin_disabled_by NOT LIKE $5 THEN t.admin_disabled_note END,
+			admin_disabled_by = $3, admin_disabled_note = $4
 		FROM old WHERE t.org_id = $1 AND t.id = old.id RETURNING t.id, %[2]s::text, old.admin_disabled_at IS NOT NULL`, t.name, t.nameExpr())
-	rows, err := tx.Query(ctx, q, org, secretName, actor.String(), declaredNote)
+	rows, err := tx.Query(ctx, q, org, secretName, actor.String(), declaredNote, DeclaredActorPrefix+"%")
 	if err != nil {
 		return 0, err
 	}
@@ -365,7 +385,23 @@ func DisableDeclared(ctx context.Context, tx pgx.Tx, b audit.Batch, org pgtype.U
 	for _, h := range hits {
 		auditChange(b, org, actor, kind, h.id, State{Disabled: h.before, Name: h.name}, State{Disabled: true, Name: h.name, Note: declaredNote, By: actor.String()})
 	}
+	if len(hits) > 0 {
+		if err := notifyProvider(ctx, tx, kind, org); err != nil {
+			return 0, err
+		}
+	}
 	return len(hits), nil
+}
+
+// notifyProvider wakes the reconciler when a model provider changes: providers have no NOTIFY trigger, and
+// the gateway plan skips a disabled provider, so without it the change waits for the next resync. The
+// notification is sent when tx commits.
+func notifyProvider(ctx context.Context, tx pgx.Tx, kind Kind, org pgtype.UUID) error {
+	if kind != ModelProvider {
+		return nil
+	}
+	_, err := tx.Exec(ctx, "SELECT pg_notify('koinon_reconcile', $1::uuid::text)", org)
+	return err
 }
 
 // Target is one outward target in a listing.
