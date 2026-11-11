@@ -110,10 +110,25 @@ func ensureNamespace(ctx context.Context, ns string) {
 	})
 }
 
+// gatewayChartRef pins the gateway chart to the digest test/e2e/kind/up.sh installs, so the digest has
+// one home (and one dependency-age check) in the repository.
+func gatewayChartRef() string {
+	GinkgoHelper()
+	b, err := os.ReadFile(filepath.Join(repoRoot, "test/e2e/kind/up.sh"))
+	must(err, "read test/e2e/kind/up.sh for the OpenShell chart digest")
+	for _, l := range strings.Split(string(b), "\n") {
+		if d, ok := strings.CutPrefix(l, "OS_DIGEST="); ok && strings.HasPrefix(d, "sha256:") {
+			return top.GatewayChart + "@" + d
+		}
+	}
+	Fail("no OS_DIGEST in test/e2e/kind/up.sh")
+	return ""
+}
+
 func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 	GinkgoHelper()
 	ensureNamespace(ctx, in.GatewayNamespace)
-	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, top.GatewayChart, "--version", top.GatewayVersion,
+	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, gatewayChartRef(), "--version", top.GatewayVersion,
 		// The OpenShell chart has no top-level gatewayId; its gateway_id comes from server.sandboxJwt.gatewayId (default: the release name).
 		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "server.sandboxJwt.gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
 	must(err, "install the OpenShell gateway "+in.GatewayRelease)

@@ -22,7 +22,7 @@ target:
 fakesNamespace: koinon-drill-fakes-{run}
 chartPath: charts/koinon
 valuesFile: test/e2e/kind/koinon-values.yaml
-gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart@sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901
+gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart
 gatewayVersion: 0.1.7
 gatewayValues: test/e2e/kind/openshell-values.yaml
 fakeModelImage: kind.local/koinon-fakemodel:e2e
