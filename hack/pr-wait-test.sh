@@ -301,8 +301,8 @@ rdh() { # <rollup>: a ready PR with a head commit
 cr_ci() { cr_at "$@" | sed 's/^{/{"workflowName":"ci",/'; }
 # wfrun <id> <path> <title> <created_at> [attempt] [status] [conclusion]: one workflow run object as `GET actions/runs?head_sha=` prints it.
 wfrun() {
-  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"pull_request","display_title":"%s","status":"%s","conclusion":"%s","created_at":"%s","run_started_at":"%s","run_attempt":%s}' \
-    "$1" "${2%.yml}" "$2" "$3" "${6:-completed}" "${7-success}" "$4" "$4" "${5:-1}"
+  printf '{"id":%s,"name":"%s","path":".github/workflows/%s","event":"%s","display_title":"%s","status":"%s","conclusion":"%s","created_at":"%s","run_started_at":"%s","run_attempt":%s}' \
+    "$1" "${2%.yml}" "$2" "${8:-pull_request}" "$3" "${6:-completed}" "${7-success}" "$4" "$4" "${5:-1}"
 }
 # wfruns <run object>...: the answer of the runs listing.
 wfruns() { local IFS=,; printf '{"total_count":%s,"workflow_runs":[%s]}' "$#" "$*" >"$FAKE_DIR/wfruns"; }
@@ -390,6 +390,38 @@ ciruns "61:ci (draft)" "62:ci"
 run 7 --checks --interval 0
 expect "a draft-era dco run still counts" 0 "checks 2/2 green"
 rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
+
+# (PR #521) a newer workflow_dispatch run of the same workflow on the head is no part of the PR verdict: it must not
+# supersede the pull_request run and hide its required "e2e result" row (pr-wait waited forever on "checks missing").
+e2e_pr=$(cr "e2e result" COMPLETED SUCCESS 42963673597)
+seq_set "$(rdh "$e2e_pr")"
+printf 'e2e result\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 42963673597 e2e-kind.yml e2e-kind 2026-11-11T10:00:00Z)" \
+  "$(wfrun 42963683121 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed success workflow_dispatch)"
+run 7 --checks --interval 1 --timeout 3s
+expect "#521: a newer workflow_dispatch run does not hide the pull_request run's required row" 0 "checks 1/1 green"
+rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns"
+
+# (PR #545) an explicit --require name is judged on its newest run of any event: a newer FAILED workflow_dispatch run
+# (hack/e2e-remote.sh) is read, not hidden behind the older green pull_request run; a dispatch-only run is found.
+qs_pr=$(cr quickstart COMPLETED SUCCESS 500)
+qs_dx=$(cr quickstart COMPLETED FAILURE 501)
+seq_set "$(rdh "$qs_pr")"
+printf '%s\n%s\n' "$qs_pr" "$qs_dx" >"$FAKE_DIR/rows"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 500 e2e-kind.yml e2e-kind 2026-11-11T10:00:00Z)" \
+  "$(wfrun 501 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed failure workflow_dispatch)"
+run 7 --checks --require quickstart --interval 1 --timeout 3s
+expect "#545: --require reads a newer failed workflow_dispatch run, not the older green pull_request run" 1 "FAILED quickstart (run 501)
+REQUIRED quickstart failed"
+seq_set "$(rdh "")"
+printf '%s\n' "$qs_dx" >"$FAKE_DIR/rows"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 501 e2e-kind.yml e2e-kind 2026-11-11T10:01:00Z 1 completed failure workflow_dispatch)"
+run 7 --checks --require quickstart --interval 1 --timeout 3s
+expect "#545: --require finds a check that only a workflow_dispatch run has" 1 "FAILED quickstart (run 501)
+REQUIRED quickstart failed"
+rm -f "$FAKE_DIR/rules" "$FAKE_DIR/wfruns" "$FAKE_DIR/rows"
 
 # (#133) one verdict per workflow run: the newest run of a workflow decides, not the newest row of a name.
 # The bug these pin: an older green `go` outvoted a newer cancelled run, because a cancelled row never counts as a failure.
