@@ -129,6 +129,10 @@ has "the namespace label policy judges the old object" 'variables.oldLabels\[\\"
 has "the namespace label policy follows openshell.gatewayId" 'variables.oldLabels\[\\"openshell.ai/gateway-id\\"\] == \\"prod\\"' --set openshell.gatewayId=prod --show-only "$nsp"
 has "the namespace label policy follows sandboxPolicy.identities.namespaces" 'request.userInfo.username in \[\\"system:serviceaccount:ns:own\\"\]' --set-json 'sandboxPolicy.identities.namespaces=["system:serviceaccount:ns:own"]' --show-only "$nsp"
 has "a key of sandboxPolicy.namespaceSelector is guarded" '\[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\",\\"team\\"\]' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$nsp"
+# Issue 507: a pre-filter on the OLD object, so namespaces without a guarded label never reach the CEL.
+has "the namespace label policy pre-filters on the old object's guarded labels" 'name: old-object-has-a-guarded-label' --show-only "$nsp"
+has "the pre-filter reads the old labels map with has()" 'has\(oldObject.metadata.labels\) && \[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\"\]\.exists\(k, k in oldObject.metadata.labels\)' --show-only "$nsp"
+has "the pre-filter follows sandboxPolicy.namespaceSelector" 'has\(oldObject.metadata.labels\) && \[\\"openshell.ai/gateway-id\\",\\"openshell.ai/managed-by\\",\\"team\\"\]\.exists' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$nsp"
 nsb=$(render --show-only "$nsp" | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmissionPolicyBinding/ && /sandbox-namespaces/')
 [[ -n $nsb ]] || fail "the namespace label policy has a binding"
 ! grep -Eq -- 'namespaceSelector|objectSelector' <<<"$nsb" || fail "the namespace label policy binds without a selector (it reads the old object itself)"

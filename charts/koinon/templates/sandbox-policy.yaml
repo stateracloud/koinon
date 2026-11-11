@@ -379,6 +379,15 @@ spec:
         apiVersions: [v1]
         operations: [UPDATE]
         resources: [namespaces]
+  # Only an UPDATE of a namespace that carries one of the guarded keys reaches the variables and the
+  # validation: every other namespace update in the cluster (Argo CD's managedNamespaceMetadata
+  # included) passes untouched, so a CEL error in the validation cannot block it. The keys come from
+  # koinon.sandboxGuardedLabels, not a fixed prefix, because namespaceSelector is configurable. The
+  # test reads the OLD object, as the validation does. A namespace with none of the keys is outside
+  # every selector that matches on them.
+  matchConditions:
+    - name: old-object-has-a-guarded-label
+      expression: {{ printf "has(oldObject.metadata.labels) && %s.exists(k, k in oldObject.metadata.labels)" (include "koinon.sandboxGuardedLabels" .) | quote }}
   variables:
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.namespaces | default list)) | quote }}
