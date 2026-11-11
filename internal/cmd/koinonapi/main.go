@@ -91,6 +91,7 @@ import (
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/outward"
@@ -814,6 +815,7 @@ func serve(ctx context.Context, cfg config) error {
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
 		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
 		Metrics:  priceMetrics,
+		Catalog:  orcatalog.New(pool),
 	})
 	if err != nil {
 		return fmt.Errorf("price refresh: %w", err)
