@@ -456,14 +456,23 @@ is not needed any more.
      discovery page's live fields; it does not turn the OpenRouter fetch on.
    - **Source record.** Each stored row keeps the fetch time as its source, `openrouter@<fetched_at>`.
      This replaces the commit in the source tag of decision 5.
-   - **Review.** The stored catalog feeds discovery and the metadata page. A change in it does not
-     change a compaction threshold or a price until a person accepts it, as decision 8 and ADR 0098
-     already require for fetched data.
+   - **Review.** The stored catalog feeds discovery and the metadata page. Two rules apply, by field.
+     Prices from the fetch follow ADR 0098 (decision 2.4 and decision 3): the 24-hour stability
+     rule, bounded auto-apply in `auto` mode, and a proposal for a platform admin above the bounds.
+     This amendment adds no second price rule. Metadata fields that change behaviour, such as the
+     context and output limits that set a compaction threshold, become decision 8 proposals and
+     wait for a person; they change nothing until a platform admin accepts them.
+   - **First fetch.** Its rows are stored and are effective metadata at once, because nothing
+     embedded exists to diff them against. This covers discovery, the metadata page and display
+     fields. The behaviour-changing fields of the first fetch follow the Review rule: until a
+     person accepts them, the effective value stays the models.dev one (item 4). Later fetches
+     produce proposals against the effective values.
 3. **No offline path.** An air-gapped install has no OpenRouter catalog, because OpenRouter needs
    connectivity for every request anyway. The `koinon-api model-metadata fetch --out <file>` import of
    decision 8 stays for models.dev, and does not carry OpenRouter data.
-4. **No fallback copy.** Until the first fetch succeeds, OpenRouter models use models.dev's
-   `openrouter` provider (MIT) for metadata. That provider loses the per-upstream data,
+4. **No fallback copy.** Until the first fetch succeeds, and for behaviour-changing fields until a person
+   accepts the fetched values (Review), OpenRouter models use models.dev's `openrouter` provider
+   (MIT) for metadata. That provider loses the per-upstream data,
    `supported_parameters`, `input_cache_write_1h` and the models models.dev lacks, until the fetch
    runs.
 5. **Costs come from `/generation`.** The ledger takes the cost of an OpenRouter request from
