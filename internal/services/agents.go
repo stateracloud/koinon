@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runoutcome"
@@ -39,7 +40,8 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		OrgId:           idString(a.OrgID),
 		DisplayName:     a.DisplayName,
 		Status:          agentStatusToProto[a.Status],
-		Flavor:          flavorProto(string(a.Flavor)),
+		Flavor:          flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
+		Harness:         a.Harness,
 		TemplateId:      idString(a.TemplateID),
 		LatestVersion:   a.LatestVersion,
 		CreatedAt:       tsProto(a.CreatedAt),
@@ -119,13 +121,22 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	if err != nil {
 		return nil, s.dbError(err, "template")
 	}
-	flavor := store.AgentFlavor(t.Spec.Flavors.Default)
-	if req.GetFlavor() != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED {
-		f, ok := flavorFromProto(req.GetFlavor())
-		if !ok || !slices.Contains(t.Spec.Flavors.Allowed, templates.Flavor(f)) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, "flavor is not allowed by the template")
+	// The harness the agent runs on, by name (ADR 0112). The deprecated harness field is read only
+	// when the request names no harness.
+	chosen := string(t.Spec.Harnesses.Default)
+	requested := strings.TrimSpace(req.GetHarness())
+	if requested == "" && req.GetFlavor() != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED { //nolint:staticcheck // deprecated field, read for older clients
+		f, ok := flavorFromProto(req.GetFlavor()) //nolint:staticcheck // deprecated field, read for older clients
+		if !ok {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "harness is not allowed by the template")
 		}
-		flavor = f
+		requested = f
+	}
+	if requested != "" {
+		if _, ok := harness.Lookup(requested); !ok || !slices.Contains(t.Spec.Harnesses.Allowed, templates.HarnessName(requested)) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "harness is not allowed by the template")
+		}
+		chosen = requested
 	}
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
@@ -151,7 +162,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	var out *agentv1alpha1.Agent
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{
-			OrgID: c.org, DisplayName: name, Flavor: flavor, TemplateID: row.ID, CreatedBy: c.actor(),
+			OrgID: c.org, DisplayName: name, Harness: chosen, TemplateID: row.ID, CreatedBy: c.actor(),
 		})
 		if err != nil {
 			return err
@@ -177,7 +188,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		}
 		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.create", TargetKind: "agent", TargetID: a.ID.String(),
-			After: map[string]any{"displayName": name, "flavor": string(flavor), "templateId": row.ID.String()},
+			After: map[string]any{"displayName": name, "harness": chosen, "templateId": row.ID.String()},
 		})
 		return nil
 	})

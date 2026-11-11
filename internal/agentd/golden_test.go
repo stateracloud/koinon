@@ -15,7 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/triggers"
 )
 
@@ -145,8 +145,8 @@ var _ = Describe("Prompt shapes (golden)", func() {
 			{Kind: "fetch", Title: "webfetch"},
 		}, "/sandbox/work"))
 	})
-	It("the section on large data names only the tools the flavor declares", func() {
-		d, ok := flavor.Lookup(store.AgentFlavorOpencode)
+	It("the section on large data names only the tools the harness declares", func() {
+		d, ok := harness.Lookup(harness.OpenCode)
 		Expect(ok).To(BeTrue())
 		Expect(agentd.InstructionsFile("x", "/sandbox/work")).To(ContainSubstring(agentd.WorkingWithDataSaved(d.Tools...)))
 
@@ -155,7 +155,7 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(some).NotTo(ContainSubstring("duckdb"))
 		Expect(some).NotTo(ContainSubstring("python3"))
 	})
-	It("a bullet that names an optional tool drops that part when the flavor lacks the tool", func() {
+	It("a bullet that names an optional tool drops that part when the harness lacks the tool", func() {
 		withoutFile := agentd.WorkingWithData("python3")
 		Expect(withoutFile).To(ContainSubstring("- Check size before reading: `wc -c FILE`, `ls -l`. Read in ranges"))
 		Expect(withoutFile).NotTo(ContainSubstring("file FILE"))
@@ -175,7 +175,7 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(agentd.WorkingWithData(tools...)).NotTo(ContainSubstring("full output saved to FILE"))
 		Expect(agentd.WorkingWithData(tools...)).To(ContainSubstring("Never try to install"))
 	})
-	It("the section on large data of a flavor with no tools is the neutral form", func() {
+	It("the section on large data of a harness with no tools is the neutral form", func() {
 		got := agentd.WorkingWithData()
 		Expect(got).To(HavePrefix("## Working with large data\n\n- Check size before reading"))
 		Expect(got).To(ContainSubstring("Never try to install anything"))

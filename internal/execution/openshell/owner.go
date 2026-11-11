@@ -171,7 +171,7 @@ func (b *Backend) ListUnmarked(ctx context.Context) ([]execution.UnmarkedObject,
 // ClaimProviderProfile marks a workspace profile that exists without an install mark (issue 511): it
 // imports the profile again as p, which stamps the mark (the owner is part of the profile's spec
 // hash). A missing profile is not created (false, nil), and a profile that carries a mark is left as
-// it is: the active agents of its flavor keep it current through [Backend.EnsureProvider]. A profile
+// it is: the active agents of its harness keep it current through [Backend.EnsureProvider]. A profile
 // marked by another install fails with [execution.ErrForeign]. It reports whether it claimed one.
 func (b *Backend) ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error) {
 	const op = "ClaimProviderProfile"

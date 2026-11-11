@@ -54,7 +54,7 @@ var _ = Describe("the tasks migration", func() {
 		// (A deleted org: the manual-owner rule is checked for live orgs only.)
 		org := scan(`INSERT INTO orgs (slug, display_name, kind, deleted_at) VALUES ('before', 'Before', 'personal', now()) RETURNING id`)
 		user := scan(`INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', 'sub-before', $1) RETURNING id`, org)
-		agent := scan(`INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'helper', 'opencode') RETURNING id`, org)
+		agent := scan(`INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'helper', 'opencode') RETURNING id`, org)
 		agentVersion := scan(`INSERT INTO agent_versions (org_id, agent_id, version, config) VALUES ($1, $2, 1, '{}') RETURNING id`, org, agent)
 		exec(`UPDATE agents SET status = 'active', active_version_id = $2, activated_at = now() WHERE id = $1`, agent, agentVersion)
 

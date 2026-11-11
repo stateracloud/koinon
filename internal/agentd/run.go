@@ -168,8 +168,8 @@ type runner struct {
 	// (internal/agentmodel).
 	model       string
 	modelSource agentmodel.Source
-	// flavor is the agent's harness flavor, set with the launch command.
-	flavor store.AgentFlavor
+	// harness is the agent's harness, set with the launch command.
+	harness string
 
 	// vcfg and home are the run's version config and the sandbox's home generation, for
 	// handling a stuck sandbox (stuck.go).
@@ -492,17 +492,17 @@ func (r *runner) execute(ctx context.Context) error {
 	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
 	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
-	cmd, err := launchCommand(agent.Flavor, endpoints{
+	cmd, err := launchCommand(agent.Harness, endpoints{
 		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
 		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg),
 	})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
-	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
+	cmd = append(cmd, harnessArgs(agent.Harness, vc)...)
 	r.vcfg = vc
-	r.flavor = agent.Flavor
-	r.taint.setMCPPrefix(mcpToolPrefix(agent.Flavor))
+	r.harness = agent.Harness
+	r.taint.setMCPPrefix(mcpToolPrefix(agent.Harness))
 	// A code-host connection whose credential was lost fails the run at once, before the waits for
 	// the model and the sandbox: nothing it would wait for can bring the credential back.
 	if err := r.checkCodeHostCredential(fctx); err != nil {
@@ -603,7 +603,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(agent.Flavor, vc.Instructions, cwd, repos, vc.WebEgress())
+	instructions := instructionsFile(agent.Harness, vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -688,7 +688,7 @@ func (r *runner) execute(ctx context.Context) error {
 			return r.dbErr(ctx, "store the session", err)
 		}
 	}
-	if command := readyCommand(agent.Flavor); command != "" {
+	if command := readyCommand(agent.Harness); command != "" {
 		if err := r.waitCommand(fctx, conn, command, cfg.ReadyTimeout); err != nil {
 			var f *failure
 			if errors.As(err, &f) {
@@ -702,7 +702,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The harness may report a model of its own choosing; agentd selects the agent's model
 	// and never relies on what the session reports.
-	if value := modelOption(agent.Flavor, format, model); value != "" {
+	if value := modelOption(agent.Harness, format, model); value != "" {
 		if err := conn.SetModel(fctx, session, value); err != nil {
 			return harnessErr("select the model "+value, err)
 		}
@@ -736,7 +736,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The agent can write its home, instruction file included; the prompt goes out only with
 	// the run's instructions in place.
-	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
+	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Harness, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
 	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {

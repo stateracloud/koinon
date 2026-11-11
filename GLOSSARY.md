@@ -70,7 +70,7 @@ Koinon's record of how to obtain and run one harness. It is built-in (shipped in
 _Avoid_: Flavor, adapter, plugin, harness image
 
 **Flavor**:
-The earlier word for a harness definition: Koinon's tested packaging of one harness as a sandbox image. It is being retired; templates, API and database still say `flavor` until the rename lands.
+The earlier word for a harness definition: Koinon's tested packaging of one harness as a sandbox image. It is being retired (#610): the template format, the chart values and the image and directory names still say `flavor`, and the API keeps deprecated `flavor` fields beside the `harness` ones.
 _Avoid_: Agent image, harness image, runtime; flavor for anything new
 
 **Ephemeral agent**:

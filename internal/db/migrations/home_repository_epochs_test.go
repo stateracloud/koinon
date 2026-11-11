@@ -34,7 +34,7 @@ var _ = Describe("the home repository epochs migration (ADR 0085 decision 13, #2
 
 		var org, agent string
 		Expect(db.QueryRowContext(ctx, `INSERT INTO orgs (slug, display_name, kind, deleted_at) VALUES ('epochs', 'Epochs', 'personal', now()) RETURNING id`).Scan(&org)).To(Succeed())
-		Expect(db.QueryRowContext(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(db.QueryRowContext(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		prefix := "orgs/" + org + "/homes/" + agent + "/"
 		_, err = db.ExecContext(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{"kek_id":"k"}')`, org, agent, prefix)
 		Expect(err).NotTo(HaveOccurred())

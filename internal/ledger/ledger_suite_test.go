@@ -95,7 +95,7 @@ func newEnv(ctx context.Context, slug, agentID, spendUSD string) *env {
 	})).To(Succeed())
 	var id pgtype.UUID
 	Expect(db.QueryRow(ctx,
-		`INSERT INTO agents (org_id, id, display_name, flavor, created_by)
+		`INSERT INTO agents (org_id, id, display_name, harness, created_by)
 		 VALUES ($1, coalesce(nullif($2, '')::uuid, uuidv7()), $3, 'opencode', $4) RETURNING id`,
 		e.org, agentID, uniq("agent"), e.user).Scan(&id)).To(Succeed())
 	cfg := fmt.Sprintf(`{"instructions":"","limits":{"run":{"maxDuration":"30m","maxModelRequests":200,"maxSpendUSD":"5.00"},"spendUSD":%q}}`, spendUSD)

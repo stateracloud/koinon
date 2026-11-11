@@ -5,7 +5,7 @@
 //   - an active agent gets its org's OpenShell workspace (one per org, ADR 0002), an
 //     agentgateway key issued through the ModelGateway (material in a Kubernetes Secret in
 //     Koinon's namespace, only the hash in gateway config and Postgres), a provider record
-//     holding that key behind a stable placeholder, and a sandbox on its flavor image with an
+//     holding that key behind a stable placeholder, and a sandbox on its harness image with an
 //     enforced policy (ADR 0045) and a persistent home;
 //   - a sandbox stops after IdleTimeout without an active run (parked runs included) and starts
 //     again when a run is queued or a park is resolved (ADR 0049);
@@ -128,12 +128,12 @@ type Config struct {
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
-	// GitBinaries may use the GitHub endpoints of a read grant, besides the flavor's binaries.
+	// GitBinaries may use the GitHub endpoints of a read grant, besides the harness's binaries.
 	// Default DefaultGitBinaries.
 	GitBinaries []string
-	// Flavors maps each flavor to its image and binaries. Agents of a flavor without an image
+	// Harnesses maps each harness to its image and binaries. Agents of a harness without an image
 	// are reported as errors.
-	Flavors map[store.AgentFlavor]Flavor
+	Harnesses map[string]Harness
 	// RuntimeClassName is the sandbox runtime class (ADR 0045: kata). Empty uses the
 	// gateway's default.
 	RuntimeClassName string
@@ -217,11 +217,11 @@ type Reconciler struct {
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
 	draftGitHubDropped map[string]bool
-	// flavorProfileSettled holds the flavor profiles, by workspace and profile ID (flavorProfileKey),
-	// that claimFlavorProfiles found marked or missing (under mu), so an org whose flavors no active
-	// agent keeps current does not cost a gateway call per flavor every pass. reconcileActive clears
+	// harnessProfileSettled holds the harness profiles, by workspace and profile ID (harnessProfileKey),
+	// that claimHarnessProfiles found marked or missing (under mu), so an org whose harnesses no active
+	// agent keeps current does not cost a gateway call per harness every pass. reconcileActive clears
 	// the entry when it imports the profile again; a new workspace is a new key.
-	flavorProfileSettled map[string]bool
+	harnessProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -336,7 +336,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
-		flavorProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
@@ -462,7 +462,7 @@ func (r *Reconciler) observeUnmarked(ctx context.Context) {
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
-	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Flavors)
+	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Harnesses)
 	if err != nil {
 		if ctx.Err() == nil {
 			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
@@ -529,12 +529,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			}
 			items = append(items, w)
 		}
-		if err := r.claimFlavorProfiles(ctx, org, agents); err != nil {
+		if err := r.claimHarnessProfiles(ctx, org, agents); err != nil {
 			if errors.Is(err, errAbortPass) {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return errors.Join(append(errs, err)...)
 			}
-			// A flavor profile is part of what an agent's sandbox converges (reconcileActive and
+			// A harness profile is part of what an agent's sandbox converges (reconcileActive and
 			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
 			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 			errs = append(errs, err)
@@ -1055,9 +1055,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if w.keyErr != nil {
 		return w.keyErr
 	}
-	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || !flavor.rendered() {
-		return fmt.Errorf("flavor %q has no image or binaries configured", w.agent.Flavor)
+	harness, ok := r.cfg.Harnesses[w.agent.Harness]
+	if !ok || !harness.rendered() {
+		return fmt.Errorf("harness %q has no image or binaries configured", w.agent.Harness)
 	}
 	ws, err := r.ensureWorkspace(ctx, w.org, workspaces)
 	if err != nil {
@@ -1069,7 +1069,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	ensureKey := func(claim bool) error {
 		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
 			Name:               names.Provider,
-			Profile:            r.profile(w.agent.Flavor, flavor),
+			Profile:            r.profile(w.agent.Harness, harness),
 			Credentials:        map[string]string{keyEnvVar: w.material},
 			CredentialRevision: w.key.ID,
 			Labels:             ownerLabels(w.org.ID, w.agent.ID),
@@ -1079,10 +1079,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err := ensureKey(false); err != nil {
 		return err
 	}
-	// The ensure imported the flavor profile: once no active agent keeps it current, the org pass
+	// The ensure imported the harness profile: once no active agent keeps it current, the org pass
 	// looks at it again.
 	r.mu.Lock()
-	delete(r.flavorProfileSettled, flavorProfileKey(ws, r.profile(w.agent.Flavor, flavor).ID))
+	delete(r.harnessProfileSettled, harnessProfileKey(ws, r.profile(w.agent.Harness, harness).ID))
 	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
@@ -1097,13 +1097,13 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, false); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, harness, read, false); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
-		network[githubRule] = GitHubRule(read, r.githubBinaries(flavor))
+		network[githubRule] = GitHubRule(read, r.githubBinaries(harness))
 	}
-	if rule, ok := PluginInstallRule(w.cfg, w.agent.Flavor, flavor); ok {
+	if rule, ok := PluginInstallRule(w.cfg, w.agent.Harness, harness); ok {
 		network[npmRule] = rule
 	}
 
@@ -1117,7 +1117,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
@@ -1134,7 +1134,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 			if hasRead {
-				if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, true); err != nil {
+				if err := r.ensureGitHub(ctx, ws, w, names, harness, read, true); err != nil {
 					return err
 				}
 			}
@@ -1401,7 +1401,7 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
 // for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
-// provider and flavor profile for this install (claimDraft), which no other path does for a draft.
+// provider and harness profile for this install (claimDraft), which no other path does for a draft.
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
 	if errors.Is(err, execution.ErrNotFound) {
@@ -1431,8 +1431,8 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 //
 // The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
 // re-activation; without a Secret that still matches it nothing is touched and no key is issued).
-// The ensure imports the flavor profile with the mark; without it the org pass marks the profile
-// (claimFlavorProfiles), which needs no key. The provider record itself is recreated with
+// The ensure imports the harness profile with the mark; without it the org pass marks the profile
+// (claimHarnessProfiles), which needs no key. The provider record itself is recreated with
 // the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
 // OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
 // claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
@@ -1442,8 +1442,8 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 	if !r.owns() || w.key.ID == "" {
 		return nil
 	}
-	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || !flavor.rendered() {
+	harness, ok := r.cfg.Harnesses[w.agent.Harness]
+	if !ok || !harness.rendered() {
 		return nil
 	}
 	_, material, ok, err := r.recordedMaterial(ctx, w)
@@ -1457,7 +1457,7 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 	ws, names := w.sb.Workspace, w.names()
 	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
 		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Flavor, flavor),
+		Profile:            r.profile(w.agent.Harness, harness),
 		Credentials:        map[string]string{keyEnvVar: material},
 		CredentialRevision: w.key.ID,
 		Labels:             ownerLabels(w.org.ID, w.agent.ID),
@@ -1546,28 +1546,28 @@ type profileClaimer interface {
 	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
 }
 
-// claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)
-// that no active agent keeps current (issue 511). A profile belongs to the workspace and the flavor, not
-// to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to delete one a
+// claimHarnessProfiles marks, once per org and pass, the harness profiles (koinon-agentgateway-<harness>)
+// that no active agent keeps current (issue 511). A profile belongs to the workspace and the harness, not
+// to an agent: every agent of the harness in the org shares it, and OpenShell refuses to delete one a
 // provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
-// flavors whose agents are all draft or archived, or that have none. A draft agent does not count as
-// keeping its flavor: claimDraft imports the profile only when the agent's key Secret still matches
+// harnesses whose agents are all draft or archived, or that have none. A draft agent does not count as
+// keeping its harness: claimDraft imports the profile only when the agent's key Secret still matches
 // the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
 // archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
 // it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
 // is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
 // un-archive needs. A profile that does not exist is not created, and an org with no recorded
 // workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
-// missing is not asked for again (flavorProfileSettled) until an active agent imports it.
-func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
+// missing is not asked for again (harnessProfileSettled) until an active agent imports it.
+func (r *Reconciler) claimHarnessProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
 	c, ok := r.backend.(profileClaimer)
 	if !ok || !r.owns() {
 		return nil
 	}
-	kept := map[store.AgentFlavor]bool{}
+	kept := map[string]bool{}
 	for _, a := range agents {
 		if a.Status == store.AgentStatusActive {
-			kept[a.Flavor] = true
+			kept[a.Harness] = true
 		}
 	}
 	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
@@ -1578,36 +1578,36 @@ func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgs
 		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
 	}
 	var errs []error
-	for _, flavor := range slices.Sorted(maps.Keys(r.cfg.Flavors)) {
-		f := r.cfg.Flavors[flavor]
-		if kept[flavor] || !f.rendered() {
+	for _, harness := range slices.Sorted(maps.Keys(r.cfg.Harnesses)) {
+		f := r.cfg.Harnesses[harness]
+		if kept[harness] || !f.rendered() {
 			continue
 		}
-		p := r.profile(flavor, f)
-		k := flavorProfileKey(row.Workspace, p.ID)
+		p := r.profile(harness, f)
+		k := harnessProfileKey(row.Workspace, p.ID)
 		r.mu.Lock()
-		settled := r.flavorProfileSettled[k]
+		settled := r.harnessProfileSettled[k]
 		r.mu.Unlock()
 		if settled {
 			continue
 		}
 		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("reconciler: claim flavor profile %s of org %s: %w", flavor, org.Slug, err))
+			errs = append(errs, fmt.Errorf("reconciler: claim harness profile %s of org %s: %w", harness, org.Slug, err))
 			continue
 		}
 		if claimed {
-			r.log.Info("marked a flavor profile no active agent keeps current", "org", org.Slug, "flavor", string(flavor))
+			r.log.Info("marked a harness profile no active agent keeps current", "org", org.Slug, "harness", harness)
 		}
 		r.mu.Lock()
-		r.flavorProfileSettled[k] = true
+		r.harnessProfileSettled[k] = true
 		r.mu.Unlock()
 	}
 	return errors.Join(errs...)
 }
 
-// flavorProfileKey is the key of a flavor profile in flavorProfileSettled.
-func flavorProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
+// harnessProfileKey is the key of a harness profile in harnessProfileSettled.
+func harnessProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,

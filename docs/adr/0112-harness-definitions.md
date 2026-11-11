@@ -144,6 +144,19 @@ product.
     harness in templates, API and database while there is no upgrade promise (ADR 0099), and moving
     OpenCode's Go descriptor to the definition format.
 
+### Groundwork decisions (2026-11-11, #610)
+
+Decided by procoduck when the rename of decision 22 was scoped:
+
+- **API.** New `harness` fields beside the `flavor` ones, which are deprecated and still filled. The
+  breaking-change check stays as it is; the `Flavor` enum cannot be renamed or removed under it, and
+  a harness an install registers cannot be an enum value.
+- **Reference.** A harness is referenced by its name, a string (`agents.harness`, `Agent.harness`,
+  `Template.allowed_harnesses`). Only `opencode` is accepted until definitions exist; the name then
+  refers to a definition.
+- **Names users see.** The sandbox image becomes `sandbox`, and the chart key `flavors` becomes
+  `harnesses`. This follows in a second change, with the template format and the directory names.
+
 ## Alternatives considered
 
 - **An image per harness, built by Koinon or by the user.** The agent could not alter its harness and

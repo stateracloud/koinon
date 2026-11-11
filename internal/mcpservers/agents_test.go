@@ -10,6 +10,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -27,7 +28,7 @@ var _ = Describe("agent allowlists", func() {
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 		actor = audit.User(user)
 		var err error
-		agent, err = store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		agent, err = store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "a", Harness: harness.OpenCode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 	})
 	add := func(ctx SpecContext, org, user pgtype.UUID, name string) mcpservers.Server {

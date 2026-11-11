@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
@@ -122,7 +123,7 @@ var _ = Describe("remote MCP servers", func() {
 	It("replaces an agent's allowlist", func(ctx SpecContext) {
 		_, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{"name": "tracker", "url": "https://mcp.example.com/mcp"})
 		s := decode[mcpServerJSON](raw)
-		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: e.user})
+		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Harness: harness.OpenCode, CreatedBy: e.user})
 		Expect(err).NotTo(HaveOccurred())
 		path := "/agents/" + agent.ID.String() + "/mcp-servers"
 		code, raw := e.call(ctx, e.token, http.MethodPut, path, map[string]any{"servers": []any{map[string]any{"serverId": s.ID, "tools": []string{"search"}}}})

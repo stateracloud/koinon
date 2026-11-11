@@ -14,8 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/acp"
-	"github.com/stateracloud/koinon/internal/db/store"
-	koinflavor "github.com/stateracloud/koinon/internal/flavor"
+	koinflavor "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
@@ -23,7 +22,7 @@ import (
 // opencode is the OpenCode flavor's contract (flavors/opencode/README.md).
 var opencode = flavor{
 	name:        "opencode",
-	storeFlavor: store.AgentFlavorOpencode,
+	storeFlavor: koinflavor.OpenCode,
 	dockerfile:  "flavors/opencode",
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}

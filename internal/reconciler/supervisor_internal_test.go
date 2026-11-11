@@ -46,10 +46,10 @@ func TestSpecHashLeavesTheSupervisorImageOut(t *testing.T) {
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
 	names := execution.AgentNames{Sandbox: "sb"}
-	s1, h1 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
+	s1, h1 := r.sandboxSpec(zeroUUID, zeroUUID, names, Harness{Image: "img"}, nil, nil, defaultRes)
 	src.image = "supervisor:2"
 	r.refreshSupervisor(t.Context())
-	s2, h2 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
+	s2, h2 := r.sandboxSpec(zeroUUID, zeroUUID, names, Harness{Image: "img"}, nil, nil, defaultRes)
 	if h1 != h2 {
 		t.Error("a new supervisor image changes the spec hash")
 	}
@@ -94,7 +94,7 @@ func TestSupervisorLabelIsAValidLabelValue(t *testing.T) {
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	r := testReconciler(&stubSupervisor{image: long})
 	r.refreshSupervisor(t.Context())
-	spec, _ := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, defaultRes)
+	spec, _ := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Harness{Image: "img"}, nil, nil, defaultRes)
 	v := spec.Labels[LabelSupervisorImage]
 	if errs := validation.IsValidLabelValue(v); len(errs) > 0 || v == "" || len(v) != 16 {
 		t.Errorf("label value %q is not a short valid label value: %v", v, errs)

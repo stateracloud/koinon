@@ -46,14 +46,17 @@ var _ = Describe("template sync", func() {
 		Expect(t.GetContentHash()).To(Equal(strings.Repeat("ab", 32)))
 	})
 
-	It("lists the repo-helper template with its flavors, grants and caps", func(ctx SpecContext) {
+	It("lists the repo-helper template with its harnesses, grants and caps", func(ctx SpecContext) {
 		e := newEnv(ctx, envOptions{})
 		_, owner := e.newTeamOrg(ctx)
 		t := owner.repoHelper(ctx)
 		orig, _ := templates.Get("repo-helper")
 		Expect("sha256:" + t.GetContentHash()).To(Equal(orig.Hash))
-		Expect(t.GetDefaultFlavor()).To(Equal(templatev1alpha1.Flavor_FLAVOR_OPENCODE))
-		Expect(t.GetAllowedFlavors()).To(ConsistOf(templatev1alpha1.Flavor_FLAVOR_OPENCODE))
+		Expect(t.GetDefaultHarness()).To(Equal("opencode"))
+		Expect(t.GetAllowedHarnesses()).To(ConsistOf("opencode"))
+		// The deprecated enum fields stay filled for older clients.
+		Expect(t.GetDefaultFlavor()).To(Equal(templatev1alpha1.Flavor_FLAVOR_OPENCODE))      //nolint:staticcheck // deprecated field
+		Expect(t.GetAllowedFlavors()).To(ConsistOf(templatev1alpha1.Flavor_FLAVOR_OPENCODE)) //nolint:staticcheck // deprecated field
 		Expect(t.GetGrants()).To(ConsistOf(SatisfyAll(
 			HaveField("Connector", "github"),
 			HaveField("Scopes", ConsistOf("repo.read", "pull_request.create", "issue.comment")),
@@ -81,7 +84,8 @@ var _ = Describe("AgentService", func() {
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		a := member.draftAgent(ctx, org)
 		Expect(a.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_DRAFT))
-		Expect(a.GetFlavor()).To(Equal(templatev1alpha1.Flavor_FLAVOR_OPENCODE))
+		Expect(a.GetHarness()).To(Equal("opencode"))
+		Expect(a.GetFlavor()).To(Equal(templatev1alpha1.Flavor_FLAVOR_OPENCODE)) //nolint:staticcheck // deprecated field
 		Expect(a.GetTemplateSlug()).To(Equal("repo-helper"))
 		Expect(a.GetLatestVersion()).To(Equal(int32(1)))
 		Expect(a.GetActiveVersion()).To(BeZero())
@@ -201,9 +205,24 @@ var _ = Describe("AgentService", func() {
 		)
 	})
 
-	It("rejects a flavor the template does not allow", func(ctx SpecContext) {
+	It("rejects a harness the template does not allow", func(ctx SpecContext) {
 		_, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), Flavor: templatev1alpha1.Flavor(99),
+			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), Harness: "no-such-harness",
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+	})
+
+	It("still reads the deprecated flavor field when the request names no harness", func(ctx SpecContext) {
+		a, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), DisplayName: "By flavor",
+			Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE, //nolint:staticcheck // deprecated field
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.GetAgent().GetHarness()).To(Equal("opencode"))
+
+		_, err = owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(),
+			Flavor: templatev1alpha1.Flavor_FLAVOR_HERMES, //nolint:staticcheck // deprecated field and value
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
 	})

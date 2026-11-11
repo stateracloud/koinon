@@ -167,24 +167,24 @@ func (c *config) finish(v *viper.Viper) error {
 	if err := c.sandboxResources.Validate(); err != nil {
 		return fmt.Errorf("config sandboxResources: %w", err)
 	}
-	images, err := flavorImages(v)
+	images, err := harnessImages(v)
 	if err != nil {
 		return err
 	}
-	c.flavorImages = images
+	c.harnessImages = images
 	return nil
 }
 
-// flavorImages reads the config file's flavors section: each flavor's image.
-func flavorImages(v *viper.Viper) (map[string]string, error) {
-	var flavors map[string]struct {
+// harnessImages reads the config file's harnesses section: each harness's image.
+func harnessImages(v *viper.Viper) (map[string]string, error) {
+	var harnesses map[string]struct {
 		Image string `mapstructure:"image"`
 	}
-	if err := v.UnmarshalKey("flavors", &flavors); err != nil {
+	if err := v.UnmarshalKey("flavors", &harnesses); err != nil {
 		return nil, fmt.Errorf("config flavors: %w", err)
 	}
 	images := map[string]string{}
-	for name, f := range flavors {
+	for name, f := range harnesses {
 		images[name] = f.Image
 	}
 	return images, nil

@@ -110,7 +110,7 @@
     // "Authorization: Bearer", the header OpenShell rewrites the placeholder in and the gateway's
     // key policy reads. Never set apiKey as well: the provider refuses both
     // (packages/ai/src/providers/anthropic.ts). The entry script and koinon-agentd choose the entry
-    // from the model's format (--model-format, internal/flavor).
+    // from the model's format (--model-format, internal/harness).
     "koinon-anthropic": {
       "name": "Koinon agentgateway (Anthropic Messages)",
       "package": "aisdk:@ai-sdk/anthropic",

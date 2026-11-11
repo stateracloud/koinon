@@ -6,12 +6,11 @@ import (
 	"fmt"
 
 	"github.com/stateracloud/koinon/internal/acp"
-	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // HarnessArgs exposes the launch command's harness switches, read from a raw version config,
 // to the external test package.
-func HarnessArgs(f store.AgentFlavor, config []byte) []string {
+func HarnessArgs(f string, config []byte) []string {
 	c, _ := versionConfig(config)
 	return harnessArgs(f, c)
 }

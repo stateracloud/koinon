@@ -238,8 +238,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use harness. Unspecified when the harness has no Flavor value."
             },
             {
               "name": "template_id",
@@ -411,6 +411,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "The agent's own model setting (SetAgentModel); empty when it follows the version and the org\ndefault. When set it wins over `model`, which is the latest version's."
+            },
+            {
+              "name": "harness",
+              "number": 25,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The name of the harness the agent runs on (ADR 0112), for example \"opencode\". Fixed when the\nagent is created."
             }
           ]
         },
@@ -499,8 +508,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": "One of the template's allowed flavors; unspecified picks its default."
+              "deprecated": true,
+              "description": "Deprecated: use harness. Read only when harness is empty."
             },
             {
               "name": "grants",
@@ -519,6 +528,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Overrides the template's ephemeral setting; unset keeps it."
+            },
+            {
+              "name": "harness",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "One of the template's allowed harnesses, by name; empty picks its default (ADR 0112)."
             }
           ]
         },
@@ -13168,8 +13186,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "repeated",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use allowed_harnesses. A harness with no Flavor value is left out."
             },
             {
               "name": "default_flavor",
@@ -13177,8 +13195,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use default_harness. Unspecified when the default harness has no Flavor value."
             },
             {
               "name": "model",
@@ -13251,6 +13269,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The starting value of the agent's thinking setting, \"on\" or \"off\"; empty when the template\nnames none, which is the default, on (ADR 0069 amendment 2026-10-29)."
+            },
+            {
+              "name": "allowed_harnesses",
+              "number": 17,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Names of the harnesses the agent may run on (ADR 0112), for example \"opencode\"."
+            },
+            {
+              "name": "default_harness",
+              "number": 18,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The harness an agent gets when the request names none; one of allowed_harnesses."
             }
           ]
         },
@@ -13323,7 +13359,7 @@
           "name": "Flavor",
           "fullName": "koinon.template.v1alpha1.Flavor",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "Flavor is the harness an agent runs on (ADR 0035).",
+          "description": "Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since\nADR 0112 (\"opencode\" is the built-in one); the fields of this type are deprecated and kept so\nthe API stays wire- and source-compatible.",
           "deprecated": false,
           "values": [
             {

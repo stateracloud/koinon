@@ -18,7 +18,9 @@ service TemplateService {
   }
 }
 
-// Flavor is the harness an agent runs on (ADR 0035).
+// Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since
+// ADR 0112 ("opencode" is the built-in one); the fields of this type are deprecated and kept so
+// the API stays wire- and source-compatible.
 enum Flavor {
   FLAVOR_UNSPECIFIED = 0;
   FLAVOR_OPENCODE = 1;
@@ -131,8 +133,10 @@ message Template {
   string version = 4;
   string display_name = 5;
   string description = 6;
-  repeated Flavor allowed_flavors = 7;
-  Flavor default_flavor = 8;
+  // Deprecated: use allowed_harnesses. A harness with no Flavor value is left out.
+  repeated Flavor allowed_flavors = 7 [deprecated = true];
+  // Deprecated: use default_harness. Unspecified when the default harness has no Flavor value.
+  Flavor default_flavor = 8 [deprecated = true];
   // Logical model name; "default" is the install's default model.
   string model = 9;
   string instructions = 10;
@@ -147,6 +151,10 @@ message Template {
   // The starting value of the agent's thinking setting, "on" or "off"; empty when the template
   // names none, which is the default, on (ADR 0069 amendment 2026-10-29).
   string thinking = 16;
+  // Names of the harnesses the agent may run on (ADR 0112), for example "opencode".
+  repeated string allowed_harnesses = 17;
+  // The harness an agent gets when the request names none; one of allowed_harnesses.
+  string default_harness = 18;
 }
 
 // ListTemplatesRequest is empty.

@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -199,7 +199,7 @@ var _ = Describe("parseConfig", func() {
 			"koinon": "http://koinon-api-tools.koinon.svc:8081/mcp-koinon", // ask_user (TK3)
 		}))
 
-		f := c.flavors()[store.AgentFlavorOpencode]
+		f := c.harnesses()[harness.OpenCode]
 		Expect(f.Image).To(Equal("ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
 	})
