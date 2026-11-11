@@ -99,9 +99,9 @@ WRAP
 fi
 # The quickstart's working directory: the repository's chart and the values file.
 ln -sfn "$root/charts" "$OUT/quickstart/charts"
-# The images live under this cluster'"'"'s path on the shared registry (kind/imagerepo.sh), so the static
+# The images live under this cluster's path on the shared registry (kind/imagerepo.sh), so the static
 # localhost:5001 of the files below is rewritten to it.
-IMAGE_REPO=$("$here/kind/imagerepo.sh")
+IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
 sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/koinon-values.yaml" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded

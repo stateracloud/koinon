@@ -201,9 +201,9 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 		"install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
 		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
 	}
-	// The images are under this cluster's path on the shared registry (run.sh sets it in the topology).
-	if top.Registry != "" {
-		args = append(args, "--set", "image.registry="+top.Registry)
+	// The images are under this cluster's path on the shared registry (run.sh sets imageRegistry in the topology copy).
+	if top.ImageRegistry != "" {
+		args = append(args, "--set", "image.registry="+top.ImageRegistry)
 	}
 	// --wait for held and unheld alike (issue #530): a held install's gateway is ready but deny-all (ADR 0107).
 	args = append(args, "--wait")

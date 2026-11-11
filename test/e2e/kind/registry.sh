@@ -70,6 +70,10 @@ ensure() {
   [[ -z $publish ]] || args+=(-p "$publish")
   local e
   for e in "$@"; do args+=(-e "$e"); done
+  # Two up.sh runs on one host can both find no container: the loser's docker run fails on the name,
+  # and it uses the winner's container once that one is running.
+  docker run "${args[@]}" "$REGISTRY_IMAGE" >/dev/null 2>&1 && return 0
+  [[ $(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true) == true ]] && return 0
   docker run "${args[@]}" "$REGISTRY_IMAGE" >/dev/null
 }
 
