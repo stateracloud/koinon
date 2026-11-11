@@ -372,8 +372,9 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		// (connect.CodeUnavailable); the admin API shows that as 500 "internal error", not 503. The workflow
 		// stays ENQUEUED, and that is what the drill needs. The calls go out a second apart (see below) and wait together, so the wait is one
 		// timeout, not N. What the check holds to is the end state: at least one 202, no other status than a
-		// 202, 500 or 503, and N-1 workflows ENQUEUED when the backup starts. The 500 is a product gap (no
-		// issue names it yet); do not let it hide a real failure by accepting any other status.
+		// 202, 500 or 503, and N-1 workflows ENQUEUED when the backup starts.
+		// TODO(#529): the 500 is a product gap. Exit condition: when #529 maps CodeUnavailable to 503,
+		// stop accepting 500 here. Do not let it hide a real failure by accepting any other status.
 		type reply struct {
 			code int
 			body string
