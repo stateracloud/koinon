@@ -551,6 +551,9 @@ during a rotation, the same design as the one above. Only koinon-agentd (the sen
 mount it; the gateway and the sandboxes never do, so a holder of the gateway's token cannot post spans into a run.
 */}}
 {{- define "koinon.otlpTracesTokenName" -}}
+{{- if and .Values.api.otlpToken.existingSecret (eq .Values.api.otlpToken.existingSecret .Values.api.otlpTracesToken.existingSecret) }}
+{{- fail "api.otlpToken.existingSecret and api.otlpTracesToken.existingSecret name the same Secret: /v1/traces needs a token of its own (issue 55)" }}
+{{- end }}
 {{- .Values.api.otlpTracesToken.existingSecret | default (include "koinon.componentName" (list . "otlp-traces-token")) }}
 {{- end }}
 

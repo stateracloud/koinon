@@ -859,6 +859,9 @@ func serve(ctx context.Context, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("--otlp-traces-token-dir: %w", err)
 		}
+		if otlpTokens.SharesToken(otlpTraceTokens) {
+			return errors.New("--otlp-token-dir and --otlp-traces-token-dir hold the same token: /v1/traces needs a token of its own, held only by koinon-agentd (issue 55)")
+		}
 		otlpMetrics := otlpauth.NewMetrics(reg)
 		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
 		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)

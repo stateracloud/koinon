@@ -225,3 +225,31 @@ var _ = Describe("otlpauth scopes", func() {
 		Expect(status("//v1/traces", agentd)).To(Equal(http.StatusUnauthorized))
 	})
 })
+
+var _ = Describe("SharesToken", func() {
+	const (
+		one   = "koinon_test_not-a-real-token-share-0001"
+		two   = "koinon_test_not-a-real-token-share-0002"
+		three = "koinon_test_not-a-real-token-share-0003"
+	)
+	newTokens := func(token, previous string) *otlpauth.Tokens {
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, "token"), []byte(token), 0o600)).To(Succeed())
+		if previous != "" {
+			Expect(os.WriteFile(filepath.Join(dir, "previous"), []byte(previous), 0o600)).To(Succeed())
+		}
+		t, err := otlpauth.NewTokens(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		Expect(err).NotTo(HaveOccurred())
+		return t
+	}
+
+	It("is false for two different tokens", func() {
+		Expect(newTokens(one, "").SharesToken(newTokens(two, ""))).To(BeFalse())
+	})
+	It("is true for the same current token", func() {
+		Expect(newTokens(one, "").SharesToken(newTokens(one, ""))).To(BeTrue())
+	})
+	It("is true when one scope's previous token is the other's current", func() {
+		Expect(newTokens(one, two).SharesToken(newTokens(two, three))).To(BeTrue())
+	})
+})

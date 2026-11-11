@@ -177,6 +177,19 @@ func (t *Tokens) Match(bearer string) bool {
 	return ok == 1
 }
 
+// SharesToken reports whether t and other accept a common token (current or previous). Two scopes
+// that share one token defeat the split (issue 55), so koinon-api refuses to start on it. The
+// digests are compared in constant time and every pair is tested.
+func (t *Tokens) SharesToken(other *Tokens) bool {
+	shared := 0
+	for _, a := range t.accepted() {
+		for _, b := range other.accepted() {
+			shared |= subtle.ConstantTimeCompare(a[:], b[:])
+		}
+	}
+	return shared == 1
+}
+
 // Metrics are the receiver's authentication metrics.
 type Metrics struct {
 	// Rejected counts refused requests by reason, a fixed set; never by sender or path.

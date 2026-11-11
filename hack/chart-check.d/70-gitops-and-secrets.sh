@@ -140,6 +140,10 @@ has "an existing OTLP token Secret reaches the config" 'accessLogOtlpTokenSecret
 lacks "an existing OTLP token Secret is not ensured" 'koinon-otlp-token' --set api.otlpToken.existingSecret=mine-otlp --show-only templates/ensure-secrets.yaml
 has "an existing OTLP traces token Secret is mounted" 'secretName: mine-otlp-traces$' --set api.otlpTracesToken.existingSecret=mine-otlp-traces --show-only templates/deployments.yaml
 lacks "an existing OTLP traces token Secret is not ensured" 'koinon-otlp-traces-token' --set api.otlpTracesToken.existingSecret=mine-otlp-traces --show-only templates/ensure-secrets.yaml
+# One Secret for both scopes would give both one token, the hole issue 55 closes: the render fails.
+if render --set api.otlpToken.existingSecret=same --set api.otlpTracesToken.existingSecret=same >/dev/null 2>&1; then
+	fail "a render with one existing Secret for both OTLP tokens must fail"
+fi
 has "the ensure-secrets Job still makes the logs token when only the traces one is supplied" 'koinon-otlp-token' --set api.otlpTracesToken.existingSecret=mine-otlp-traces --show-only templates/ensure-secrets.yaml
 lacks "the gateway never mounts the traces token (standalone)" 'otlp-traces' --set gateway.mode=standalone --show-only templates/gateway-standalone.yaml
 lacks "the reconciler config never names the traces token" 'otlp-traces' --show-only templates/config.yaml
