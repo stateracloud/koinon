@@ -265,7 +265,7 @@ spec:
       appProtocol: kubernetes.io/h2c
 ---
 # Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054; see networkpolicy.yaml). Its own
-# Service and port keep it apart from the tools, which trust agentgateway's agent header.
+# Service and port keep it apart from the tools, which trust the gateway's agent header.
 apiVersion: v1
 kind: Service
 metadata:

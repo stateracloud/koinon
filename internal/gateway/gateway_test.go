@@ -184,3 +184,23 @@ var _ = Describe("AgentRef", func() {
 		Expect(gateway.AgentRef{Org: "acme", Name: strings.Repeat("a", 64)}.Validate()).NotTo(Succeed())
 	})
 })
+
+// The tool servers trust gateway.AgentHeader, so what they parse from it must be exactly one agent. A
+// client copy that the gateway failed to overwrite shows up as a joined value; it must not resolve (#281).
+var _ = Describe("ParseAgentRef on the agent header", func() {
+	It("accepts what the gateway sets", func() {
+		got, err := gateway.ParseAgentRef(agent.String())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(agent))
+	})
+	DescribeTable("refuses a value that is not one agent",
+		func(v string) {
+			_, err := gateway.ParseAgentRef(v)
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("empty (a request that skipped the gateway)", ""),
+		Entry("two agents joined by a second copy of the header", agent.String()+", other/victim"),
+		Entry("a path segment", "acme/repo-helper/extra"),
+		Entry("a newline", "acme/repo-helper\nx-koinon-org: evil"),
+	)
+})

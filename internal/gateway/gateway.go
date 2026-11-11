@@ -178,8 +178,8 @@ func ParseAgentRef(s string) (AgentRef, error) {
 // gateway overwrites whatever they send.
 const OrgHeader = "x-koinon-org"
 
-// AgentHeader is the request header agentgateway sets on every MCP request
-// it forwards to a target: the authenticated key's agent (AgentRef.String).
+// AgentHeader is the request header the gateway (agentgateway today, Koinon's MCP path
+// when it takes over, ADR 0097 decision 5) sets on every MCP request it forwards to a target: the authenticated key's agent (AgentRef.String).
 // Drivers render it so that a client-supplied value is overwritten; MCP
 // targets trust it only because they are reachable from the gateway alone.
 const AgentHeader = "X-Koinon-Agent"
