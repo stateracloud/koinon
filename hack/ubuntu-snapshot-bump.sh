@@ -198,7 +198,7 @@ append_index() {
 	local snap=$1 suite=$2 comp=$3 arch=$4 rel ext got want f
 	rel="$comp/binary-$arch/Packages"
 	for ext in .xz .gz ""; do
-		want=$(release_hash "$work/InRelease.$snap.$suite" "$rel$ext")
+		want=$(release_hash "$work/Release.$snap.$suite" "$rel$ext")
 		[[ -n $want ]] && break
 	done
 	[[ -n $want ]] || { echo "$suite: InRelease lists no $rel{.xz,.gz,}" >&2; return 1; }
@@ -224,7 +224,14 @@ load_snapshot() {
 	for suite in "${suites[@]}"; do
 		fetch "dists/$suite/InRelease" "$work/InRelease.$snap.$suite" || { echo "ubuntu-snapshot-bump: cannot fetch dists/$suite/InRelease at $snap" >&2; return 1; }
 		if ((!no_gpg)); then
-			gpgv --keyring "$keyring" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
+			# Parse only the signed text gpgv writes out: lines outside the clearsigned block (before
+			# BEGIN PGP SIGNED MESSAGE or after the signature) do not affect gpgv's verdict, so the raw
+			# file could carry an unsigned SHA256 list that release_hash would otherwise read.
+			rm -f "$work/Release.$snap.$suite"
+			gpgv --keyring "$keyring" --output "$work/Release.$snap.$suite" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
+		else
+			# --no-gpg (fixtures only): nothing is verified, the file is read as it is.
+			cp "$work/InRelease.$snap.$suite" "$work/Release.$snap.$suite"
 		fi
 	done
 	for arch in "${ARCHES[@]}"; do
@@ -495,6 +502,8 @@ usn_for() {
 	while IFS=$'\t' read -r id pub bin ver cves sev; do
 		[[ $bin == "$1" ]] || continue
 		if dpkg_gt "$ver" "$2" && ! dpkg_gt "$ver" "$3"; then
+			# usn_for runs in a command substitution, so the high/critical flag is a file, not a variable.
+			[[ ${sev,,} =~ high|critical ]] && : >"$work/usn.high-priority"
 			printf '%s (%s, fixes %s%s%s)\n' "$id" "${pub%%T*}" "$ver" "${sev:+, priority $sev}" "${cves:+, $cves}"
 		fi
 	done < <(sort -u "$usn_rows")
@@ -547,7 +556,7 @@ if [[ -n $report ]]; then
 		echo
 		echo "USN source: canonical/ubuntu-security-notices at \`${usn_commit:-unknown}\`; lookup: $usn_state."
 		echo "InRelease signatures: $( ((no_gpg)) && echo 'NOT verified (--no-gpg)' || echo 'verified with gpgv against the Ubuntu archive keyring'); Packages indexes: SHA256 checked against InRelease."
-		if [[ $usn_state == ok ]] && grep -qiE 'high|critical' "$usn_rows"; then
+		if [[ $usn_state == ok && -e "$work/usn.high-priority" ]]; then
 			echo
 			echo "**A matched USN carries an Ubuntu priority of high or critical** (check which package): the security fast path of ADR 0079 is a human decision and this PR does not take it."
 		fi

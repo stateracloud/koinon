@@ -175,6 +175,14 @@ run --check --base-url "$tmp/repo-hash" --no-gpg --today $TODAY --dockerfile "$t
 eq "a hash mismatch fails" "$rc" 1
 has "and says which index" "$out" "main/binary-amd64/Packages.xz SHA256"
 
+# --- an index InRelease lists that the snapshot does not serve ---------------------------------------------------
+cp -r "$repo" "$tmp/repo-gone"
+rm "$tmp/repo-gone/$SNAP/dists/noble-updates/universe/binary-arm64/Packages.xz"
+fresh_files "$tmp/x"
+run --check --base-url "$tmp/repo-gone" --no-gpg --today $TODAY --dockerfile "$tmp/x/Dockerfile" --readme "$tmp/x/README.md"
+eq "a listed index that cannot be fetched fails" "$rc" 1
+has "and says which" "$out" "noble-updates: cannot fetch universe/binary-arm64/Packages.xz"
+
 # --- a pin newer than the snapshot is never a downgrade ----------------------------------------------------------
 fresh_files "$tmp/g"
 sed -i.bak 's/git=1:2.43.0-1ubuntu7.4/git=1:2.43.0-1ubuntu7.8/' "$tmp/g/Dockerfile"
@@ -266,6 +274,12 @@ has "unparsable USN records are FAILED" "$(<"$tmp/u/report4.md")" "FAILED: jq"
 run --check "${base[@]}" --dockerfile "$tmp/u/Dockerfile" --readme "$tmp/u/README.md" --report "$tmp/u/report5.md"
 has "no --usn-dir is reported as skipped" "$(<"$tmp/u/report5.md")" "skipped"
 eq "a failed USN lookup does not change the exit code" "$rc" 10
+# The banner counts only USNs in (old pin, new]: a high one at or below the old pin does not raise it.
+mkdir -p "$tmp/lowusn/osv/usn"
+cp "$data/usn/osv/usn/USN-9001-1.json" "$data/usn/osv/usn/USN-9004-1.json" "$tmp/lowusn/osv/usn/"
+sed 's/"score":"low"/"score":"high"/' "$data/usn/osv/usn/USN-9003-1.json" >"$tmp/lowusn/osv/usn/USN-9003-1.json"
+run --check "${base[@]}" --dockerfile "$tmp/u/Dockerfile" --readme "$tmp/u/README.md" --usn-dir "$tmp/lowusn" --report "$tmp/u/report6.md"
+lacks "a high USN outside the range does not raise the banner" "$(<"$tmp/u/report6.md")" "security fast path"
 
 # --- signatures: gpgv on a real signed InRelease ----------------------------------------------------------------------
 if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
@@ -286,6 +300,19 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a signed InRelease verifies" "$rc" 10
 		lacks "and no-gpg is not announced" "$out" "NOT verified"
+		# Text outside the clearsigned block does not change gpgv's verdict, so an unsigned SHA256
+		# list put before BEGIN PGP SIGNED MESSAGE must not be read: the signed hash is the one checked.
+		cp -r "$tmp/repo-signed" "$tmp/repo-prepend"
+		ir=$tmp/repo-prepend/$SNAP/dists/noble-security/InRelease
+		pk=$tmp/repo-prepend/$SNAP/dists/noble-security/main/binary-amd64/Packages.xz
+		printf '\nPackage: git\nVersion: 1:2.43.0-1ubuntu7.9\nArchitecture: amd64\n' | xz -c >"$pk"
+		h=$(sha256sum "$pk")
+		{ echo "SHA256:"; printf ' %s %s %s\n' "${h%% *}" "$(wc -c <"$pk")" main/binary-amd64/Packages.xz; cat "$ir"; } >"$tmp/ir.new"
+		mv "$tmp/ir.new" "$ir"
+		if gpgv --keyring "$tmp/test-keyring.gpg" "$ir" >/dev/null 2>&1; then ok "gpgv accepts text before the signed block (the case this guards)"; else bad "gpgv rejected the prepended InRelease; the case no longer tests the parser"; fi
+		run --check --base-url "$tmp/repo-prepend" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		eq "an unsigned SHA256 list before the signed block is ignored" "$rc" 1
+		has "and the signed hash is the one checked" "$out" "main/binary-amd64/Packages.xz SHA256"
 		sed -i.bak 's/^Suite: noble-security/Suite: noble-securitx/' "$tmp/repo-signed/$SNAP/dists/noble-security/InRelease"
 		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a tampered InRelease fails" "$rc" 1
