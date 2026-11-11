@@ -158,6 +158,8 @@ func installKoinon(ctx context.Context, s *side, hold bool) {
 	if hold {
 		// A held reconciler converges nothing (ADR 0107), so it never makes the gateway's ConfigMap and the gateway
 		// Deployment cannot become ready until the hold is released: `helm --wait` would wait for it for ever.
+		// TODO(#530): exit condition: when a held install reaches ready (or #530 decides it must not), put
+		// `--wait` back for the held install, or keep this and point to the decision.
 		// What a held install must reach is its three binaries, ready. The hooks (preflight, migrate) ran above.
 		for _, c := range []string{"api", "reconciler", "agentd"} {
 			out, err := kube.Kubectl(ctx, "-n", in.Namespace, "rollout", "status", "deploy/"+s.name(c), "--timeout=10m")
