@@ -38,7 +38,8 @@ import (
 //	                            koinon-sandbox-default-deny)
 //	KOINON_OPENSHELL_IMAGE      probe image with /bin/sh and nc (required)
 //	KOINON_ESCAPE_RUNTIME_CLASS runtime class the pods policy admits (default runc)
-//	KOINON_ESCAPE_API           host:port the probe must not reach (default 10.96.0.1:443)
+//	KOINON_ESCAPE_API           host:port list; the probe must not reach the first entry
+//	                            (default: the default/kubernetes Service ClusterIP, port 443)
 var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), SpecPriority(-5), func() {
 	It("blocks a plain workload pod that opens sockets outside the supervisor", func(ctx SpecContext) {
 		// Chart e2e only: kind.sh exports KOINON_ESCAPE_NAMESPACE with the chart install, and the
@@ -55,13 +56,24 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		image := os.Getenv("KOINON_OPENSHELL_IMAGE")
 		runtimeClass := envOr("KOINON_ESCAPE_RUNTIME_CLASS", "runc")
 		policyName := envOr("KOINON_ESCAPE_NETPOL", defaultNetPolName())
-		apiHost, apiPort := "10.96.0.1", 443
-		if t := targets(envOr("KOINON_ESCAPE_API", "10.96.0.1:443")); len(t) > 0 {
-			apiHost, apiPort = t[0].host, t[0].port
-		}
 
 		cfg := kubeConfig()
 		cs := kubernetes.NewForConfigOrDie(cfg)
+
+		// The API server's Service IP differs per cluster (service subnet), and an address nothing
+		// answers on would read as "blocked" without testing the policy. Take the first
+		// KOINON_ESCAPE_API entry when set, else read the kubernetes Service from this cluster.
+		var apiHost string
+		apiPort := 443
+		if v := os.Getenv("KOINON_ESCAPE_API"); v != "" {
+			t := targets(v)
+			apiHost, apiPort = t[0].host, t[0].port
+		} else {
+			svc, err := cs.CoreV1().Services("default").Get(ctx, "kubernetes", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), "read the kubernetes Service ClusterIP")
+			apiHost = svc.Spec.ClusterIP
+		}
+		Expect(apiHost).NotTo(BeEmpty(), "API server Service IP")
 
 		By("ensuring Koinon's default-deny NetworkPolicy is in the sandbox namespace (as the reconciler)")
 		writer := &reconciler.SandboxNetworkPolicy{Kube: cs, Name: policyName}
@@ -92,7 +104,9 @@ var _ = Describe("Sandbox NetworkPolicy bypass", Label("escape", "openshell"), S
 		_ = cs.CoreV1().Pods(ns).Delete(ctx, podName, metav1.DeleteOptions{})
 		automount := false
 		// Retry inside the pod: kube-network-policies can lag a few seconds after the NetworkPolicy lands.
-		script := fmt.Sprintf(`for i in $(seq 1 60); do
+		// A probe image without nc would fail every check and read as "blocked": report it instead.
+		script := fmt.Sprintf(`command -v nc >/dev/null 2>&1 || { printf no-nc >/dev/termination-log; exit 2; }
+for i in $(seq 1 60); do
   if nc -z -w 1 %s %d; then
     sleep 1
   else
