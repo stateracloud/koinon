@@ -127,7 +127,7 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 | [0041](adr/0041-koinon-spend-ledger-and-budget-stops.md) | Koinon owns the authoritative spend ledger; agentgateway enforces pushed per-key limits |
 | [0042](adr/0042-ask-tier-park-and-execute.md) | Ask tier (amended by ADR 0065: safe defaults, scoped approvals): ask-tier scopes are MCP tools only; the run parks and Koinon executes the exact approved call (OpenShell has no ask tier) |
 | [0043](adr/0043-workload-identity-adapters-and-koinon-issuer.md) | Cloud identity via per-cloud adapters and a Koinon-owned OIDC issuer; replaces "Pod Identity" (EKS-only) |
-| [0044](adr/0044-in-sandbox-credential-exception.md) | Gated exception for credentials inside the sandbox (e.g. Copilot device login), personal orgs by default, v0.2 |
+| [0044](adr/0044-in-sandbox-credential-exception.md) | Gated exception for credentials inside the sandbox; since 2026-11-11 only for a named auth type that cannot be held outside, personal orgs by default, no release assigned |
 | [0045](adr/0045-openshell-hardening-defaults.md) | OpenShell hardening defaults (always `enforce`, no secrets in sandbox env, Kata default) |
 | [0046](adr/0046-adr-conventions.md) | ADR conventions |
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
@@ -31,6 +33,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
@@ -435,6 +438,36 @@ var _ = Describe("the quickstart", Ordered, func() {
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Pulls).To(BeEmpty())
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
+
+		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		kc := func(args ...string) string {
+			GinkgoHelper()
+			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			return strings.TrimSpace(string(out))
+		}
+		orgID, err := uuid.Parse(org)
+		Expect(err).NotTo(HaveOccurred())
+		ws := execution.WorkspaceName(orgID)
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(Equal("openshell-openshell-" + ws))
+		Expect(kc("-n", ns, "get", "limitrange", "koinon-koinon-sandbox-limitrange", "-o", "jsonpath={.metadata.name}")).
+			To(Equal("koinon-koinon-sandbox-limitrange"))
+		var supervisors corev1.PodList
+		Expect(json.Unmarshal([]byte(kc("-n", ns, "get", "pods", "-l", "openshell.ai/boundary-role=supervisor", "-o", "json")), &supervisors)).To(Succeed())
+		Expect(supervisors.Items).NotTo(BeEmpty(), "OpenShell created at least one supervisor pod")
+		for _, p := range supervisors.Items {
+			for _, c := range append(slices.Clone(p.Spec.InitContainers), p.Spec.Containers...) {
+				Expect(c.Resources.Requests).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange requests")
+				Expect(c.Resources.Limits).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange limits")
+				cpuReq, memReq := c.Resources.Requests[corev1.ResourceCPU], c.Resources.Requests[corev1.ResourceMemory]
+				cpuLim, memLim := c.Resources.Limits[corev1.ResourceCPU], c.Resources.Limits[corev1.ResourceMemory]
+				Expect((&cpuReq).Cmp(reconciler.LimitRangeCPURequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memReq).Cmp(reconciler.LimitRangeMemoryRequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&cpuLim).Cmp(reconciler.LimitRangeCPULimit)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memLim).Cmp(reconciler.LimitRangeMemoryLimit)).To(Equal(0), p.Name+"/"+c.Name)
+			}
+		}
 		t.end("4. Task → run streamed → approval pending")
 	})
 

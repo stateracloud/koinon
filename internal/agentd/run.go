@@ -598,7 +598,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(vc.Instructions, cwd, repos, vc.WebEgress())
+	instructions := instructionsFile(agent.Flavor, vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}

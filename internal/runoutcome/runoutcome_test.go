@@ -255,6 +255,19 @@ var _ = Describe("Succeed", func() {
 		Expect(w.turnRow(ctx).EndReason.String).To(Equal("end_turn"))
 		Expect(w.current(ctx).State).To(Equal(store.RunStateSucceeded))
 		Expect(w.taskState(ctx)).To(Equal(store.TaskStateCompleted))
+		// The session restart matches this event literally (RequestSessionRestartForAgent, #81).
+		var last store.TaskEvent
+		for _, ev := range w.taskEvents(ctx) {
+			if ev.Kind == "status.changed" {
+				last = ev
+			}
+		}
+		Expect(last.ActorKind).To(Equal(store.TaskActorKindSystem))
+		var payload struct{ To, Reason string }
+		Expect(json.Unmarshal(last.Payload, &payload)).To(Succeed())
+		Expect(payload.To).To(Equal(string(store.TaskStateCompleted)))
+		Expect(payload.Reason).To(Equal(runoutcome.ReasonRunSucceeded))
+		Expect(payload.Reason).To(Equal("run_succeeded"), "the literal in queries/stuck.sql")
 	})
 })
 

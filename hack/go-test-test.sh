@@ -43,7 +43,7 @@ echo "ok: one testcontainers session per run, exported before pgserver"
 grep -q -- '--junit-report' hack/go-test.sh || { echo "FAIL: go-test.sh writes no Ginkgo JUnit report"; exit 1; }
 grep -q -- 'gotestsum --junitfile' hack/go-test.sh || { echo "FAIL: go-test.sh writes no gotestsum JUnit file"; exit 1; }
 wf=.github/workflows/ci.yml
-for job in go-test go-race; do
+for job in go-test go-race-serial go-race-parallel; do
 	body=$(sed -n "/^  $job:\$/,/^  [a-z-]*:\$/p" "$wf")
 	grep -q 'upload-artifact@' <<<"$body" || { echo "FAIL: $job does not upload its reports"; exit 1; }
 	grep -q 'if: always()' <<<"$body" || { echo "FAIL: $job uploads reports only on success (needs if: always())"; exit 1; }
@@ -59,7 +59,7 @@ echo "ok: serial Ginkgo suites and go-race report per spec"
 
 # Issue 44: the race detector covers the concurrent packages, and the parallel ones run with -p only
 # when hack/go-test.sh lists them as parallel suites.
-race=$(sed -n '/^  go-race:$/,/^  go:$/p' "$wf")
+race=$(sed -n '/^  go-race-serial:$/,/^  go:$/p' "$wf")
 for pkg in reconciler ledger agentd durable; do
 	grep -q "ginkgo -race.* ./internal/$pkg/" <<<"$race" || { echo "FAIL: go-race does not run ./internal/$pkg under -race"; exit 1; }
 done

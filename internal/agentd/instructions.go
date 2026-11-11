@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/codehost"
@@ -35,33 +36,90 @@ const instructionsPreamble = "# Koinon\n\n" +
 	"These are your instructions from Koinon for this run. Koinon writes this file before the " +
 	"run and restores it before every prompt, so changing it has no effect.\n\n"
 
-// TODO: the tool list below is specific to the OpenCode flavor's image. When a second flavor
-// lands it should move to the flavor descriptor (internal/flavor), not stay a package constant.
-// workingWithData is Koinon's guidance on the tools the flavor image ships (flavors/opencode/
-// README.md) and on how to read large inputs. It follows the preamble in every run, whatever the
-// agent version says. OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full
-// output to a file; the section tells the agent to query that file rather than run the command
-// again. The image has no network, no pip and no package manager the agent may use.
-const workingWithData = "## Working with large data\n\n" +
-	"- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.\n" +
-	"- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
-	"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n" +
-	"- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
-	"Select fields; do not `cat` a large file.\n" +
-	"- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
-	"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
-	"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n" +
-	"- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n" +
-	"- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
-	"PDF with the read tool.\n" +
-	"- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n" +
-	"- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
-	"`duckdb`; do not run the command again.\n" +
-	"- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, " +
-	"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
-	"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n" +
-	"- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
-	"Use what is installed, or say what is missing.\n\n"
+// dataBullet is one line of the "Working with large data" section. It is shown only when the
+// flavor's image ships every tool in needs (flavor.Descriptor.Tools); a line with no needs
+// holds for any flavor. A line with savesOutput is also shown only for a harness that saves a
+// cut tool result to a file (flavor.Descriptor.TruncatedOutputSaved).
+//
+// A text that names a tool the line does not require is built by render instead, which asks
+// whether the flavor ships that tool; text is then empty.
+type dataBullet struct {
+	needs       []string
+	savesOutput bool
+	text        string
+	render      func(has func(tool string) bool) string
+}
+
+// dataBullets is Koinon's guidance on how to read large inputs, with the tools the flavor image
+// ships (flavors/opencode/README.md). The section follows the preamble in every run, whatever the
+// agent version says. The image has no network, no pip and no package manager the agent may use.
+//
+// The flavor decides which tools exist and how its harness cuts output, not this file: a flavor
+// that lacks a tool never hears about it, and a line that names several tools needs all of them.
+// OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full output to a file; a
+// harness with that behaviour (TruncatedOutputSaved) tells the agent to query the file rather
+// than run the command again.
+var dataBullets = []dataBullet{
+	{nil, false, "", func(has func(string) bool) string {
+		cmds := "`wc -c FILE`, `ls -l`"
+		if has("file") {
+			cmds += ", `file FILE`"
+		}
+		return "- Check size before reading: " + cmds + ". Read in ranges, not whole files.\n"
+	}},
+	{[]string{"rg", "fd", "ast-grep"}, false, "- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
+		"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n", nil},
+	{[]string{"jq", "yq"}, false, "- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
+		"Select fields; do not `cat` a large file.\n", nil},
+	{[]string{"duckdb"}, false, "- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
+		"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
+		"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n", nil},
+	{[]string{"sqlite3"}, false, "- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n", nil},
+	{[]string{"pdftotext", "pdfinfo"}, false, "- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
+		"PDF with the read tool.\n", nil},
+	{[]string{"git"}, false, "- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n", nil},
+	{[]string{"rg", "jq", "duckdb"}, true, "- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
+		"`duckdb`; do not run the command again.\n", nil},
+	{[]string{"python3"}, false, "", func(has func(string) bool) string {
+		name := "`python3`"
+		if has("python") {
+			name += " (also `python`)"
+		}
+		return "- " + name + " has the standard library only: json, csv, sqlite3, re, gzip, " +
+			"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
+			"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n"
+	}},
+	{nil, false, "- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
+		"Use what is installed, or say what is missing.\n", nil},
+}
+
+// workingWithData renders the section for a flavor. A flavor that declares no tools gets the
+// neutral form: the lines that name no tool (check the size, never install). The section is
+// never dropped, because those two rules hold on any image.
+func workingWithData(f store.AgentFlavor) string {
+	d, _ := flavor.Lookup(f)
+	return workingWithDataFor(d.Tools, d.TruncatedOutputSaved)
+}
+
+func workingWithDataFor(tools []string, truncatedOutputSaved bool) string {
+	var b strings.Builder
+	b.WriteString("## Working with large data\n\n")
+	for _, l := range dataBullets {
+		if l.savesOutput && !truncatedOutputSaved {
+			continue
+		}
+		if slices.ContainsFunc(l.needs, func(t string) bool { return !slices.Contains(tools, t) }) {
+			continue
+		}
+		if l.render != nil {
+			b.WriteString(l.render(func(t string) bool { return slices.Contains(tools, t) }))
+			continue
+		}
+		b.WriteString(l.text)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
 
 // writeScript replaces the file in one rename, so a harness never reads a half-written file;
 // umask 077 keeps it and its directory private to the sandbox user. $1 is the directory, $2
@@ -176,9 +234,9 @@ func repositoriesSection(repos []repository) string {
 
 // instructionsFile is the file's content for a version's instructions. It is never empty,
 // which the flavors' entry scripts require. cwd is the session directory, repos the agent's
-// granted repositories and webEgress whether it may reach arbitrary web hosts.
-func instructionsFile(instructions, cwd string, repos []repository, webEgress bool) []byte {
-	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + webSection(webEgress) + workingWithData
+// granted repositories, f the flavor whose image runs the agent and webEgress whether it may reach arbitrary web hosts.
+func instructionsFile(f store.AgentFlavor, instructions, cwd string, repos []repository, webEgress bool) []byte {
+	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + webSection(webEgress) + workingWithData(f)
 	if instructions = strings.TrimSpace(instructions); instructions == "" {
 		return []byte(head + "The agent version has no instructions of its own.\n")
 	}

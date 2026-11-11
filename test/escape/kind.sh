@@ -70,6 +70,7 @@ if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
   export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
   export KOINON_ESCAPE_NETPOL="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-default-deny"
+  export KOINON_ESCAPE_LIMITRANGE="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-limitrange"
   export KOINON_ESCAPE_POLICY_REQUIRED=1
   # The class the install's policy admits for workload pods: openshell.runtimeClassName of
   # test/e2e/kind/koinon-values.yaml (runc on kind), which sandboxPolicy.runtimeClasses lists.

@@ -126,3 +126,14 @@ func WorkspaceNamespace(gatewayID, workspace string) string {
 	}
 	return "openshell-" + gatewayID + "-" + workspace
 }
+
+// UnmarkedObject is an OpenShell sandbox, provider or provider profile in one of an install's
+// workspaces that carries no install mark (issue 511). Labels are the object's labels (a profile's
+// annotations).
+type UnmarkedObject struct {
+	Workspace string
+	// Kind is "sandbox", "provider" or "profile".
+	Kind   string
+	Name   string
+	Labels map[string]string
+}
