@@ -730,7 +730,8 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   On the push to main that the queue made, `gitleaks` does not scan again (#572): `hack/secrets-skip.sh` finds a
   successful `merge_group` run of `secrets.yml` whose `head_sha` is the pushed commit (the queue
   fast-forwards main to that head). It matches the commit, not the tree: gitleaks scans commits, and an equal tree can hide other commits. The job still runs and reports success. An admin or break-glass merge, a
-  direct push and any API doubt scan as before.
+  direct push and any API doubt scan as before. The workflow runs the script only on a `push` event (an `if:` on the step),
+  so a changed script cannot switch off the scan of a pull request or a queue build.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
   waited fails the entry. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)

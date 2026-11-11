@@ -80,5 +80,19 @@ else
 	echo "FAIL: secrets.yml does not run hack/secrets-skip.sh or does not gate its scan steps on it"
 	fails=1
 fi
+# the decision is possible only on a push, by a condition in the workflow (the script is outside .github/)
+if awk '/^      - id: skip$/{f=1;next} f&&/^      - /{exit} f&&/^        if: github.event_name == .push.$/{ok=1} END{exit !ok}' "$yml"; then
+	echo "ok: the skip step runs only on push"
+else
+	echo "FAIL: the skip step of secrets.yml has no 'if: github.event_name == push' condition"
+	fails=1
+fi
+# every scan step is gated by the same plain condition, so an empty skip output scans
+if [[ $(grep -c "if: steps.skip.outputs.skip != 'true'" "$yml") -eq 4 ]] && ! grep -q "skip == 'true'" "$yml"; then
+	echo "ok: the four scan steps scan unless skip is exactly true"
+else
+	echo "FAIL: secrets.yml scan steps are not all gated by steps.skip.outputs.skip != 'true'"
+	fails=1
+fi
 
 exit "$fails"
