@@ -489,7 +489,7 @@ func (r *runner) execute(ctx context.Context) error {
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
 	cmd, err := launchCommand(agent.Flavor, endpoints{
 		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
-		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg),
+		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg), CompactionTokens: facts.CompactionTokens,
 	})
 	if err != nil {
 		return &failure{reason: err.Error()}
@@ -1330,6 +1330,8 @@ type modelFacts struct {
 	Format modelformat.Format
 	// Cache is the model's prompt-cache mode (ADR 0068, 0069).
 	Cache prices.CacheMode
+	// CompactionTokens is where the harness compacts the conversation (compactionTokens).
+	CompactionTokens int
 }
 
 // modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
@@ -1340,12 +1342,12 @@ func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error
 	m := qt.Model
 	if _, ok := prices.Unpriceable(err); ok {
 		if m.Name == "" {
-			return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+			return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone, CompactionTokens: defaultCompactionTokens}, nil
 		}
 		// The model exists but has no usable price: its format and provider type still apply.
-		return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}, nil
+		return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone, CompactionTokens: defaultCompactionTokens}, nil
 	} else if err != nil {
 		return modelFacts{}, err
 	}
-	return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheModeFor(m.ProviderType, m.Name, m.Format, qt.Resolution.Price)}, nil
+	return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheModeFor(m.ProviderType, m.Name, m.Format, qt.Resolution.Price), CompactionTokens: compactionTokens(qt.Resolution.Price)}, nil
 }

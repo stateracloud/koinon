@@ -427,6 +427,24 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
 	})
 
+	// ADR 0070 amendment 2026-11-11 (issue 97): the compaction point is rendered as a window of
+	// point + 16000 and a buffer of 16000, so OpenCode 2.2.0's ceiling (window - buffer) is the point.
+	It("renders the compaction point of --compaction-tokens as the model's window and the buffer", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--compaction-tokens", "100000")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"compaction":{"buffer":16000},"providers":{"koinon":{"models":{"m-1":{"limit":{"input":116000}}}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--compaction-tokens", "170000", "--model-format", "anthropic")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","compaction":{"buffer":16000},"providers":{"koinon-anthropic":{"models":{"m-1":{` +
+				`"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false},"limit":{"input":186000}}}}}}` + "\n"))
+	})
+
+	It("refuses a compaction point it cannot follow", func(ctx SpecContext) {
+		base := opencode.command("http://gw.test/v1", "m-1", "http://gw.test/mcp")
+		for _, v := range []string{"0", "999", "-1", "1.5", "lots"} {
+			_, stderr, code := sb.try(ctx, append(slices.Clone(base), "--compaction-tokens", v)...)
+			Expect(code).To(Equal(64), "%q: %s", v, stderr)
+		}
+	})
+
 	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
 		// The Messages entry always turns OpenCode's own thinking block off (ADR 0069 amendment
 		// 2026-10-29); Koinon's form goes in the body overlay (old issue 316). The chat-completions entry has
