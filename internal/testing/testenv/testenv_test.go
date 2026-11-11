@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 func TestTestenv(t *testing.T) {
@@ -115,5 +117,29 @@ var _ = Describe("RequireT", func() {
 		r := BinaryNamed("helm", "koinon-no-such-binary")
 		Expect(r.Name).To(Equal("helm"))
 		Expect(r.Err()).To(MatchError(ContainSubstring("koinon-no-such-binary is not on PATH")))
+	})
+})
+
+var _ = Describe("dockerCheck", func() {
+	It("fails within the deadline when the provider lookup hangs", func() {
+		release := make(chan struct{})
+		DeferCleanup(func() { close(release) })
+		hang := func(...testcontainers.GenericProviderOption) (testcontainers.GenericProvider, error) {
+			<-release
+			return nil, errors.New("late")
+		}
+		start := time.Now()
+		err := dockerCheck(100*time.Millisecond, hang)
+		Expect(err).To(MatchError(ContainSubstring("docker is not available: no answer within")))
+		Expect(time.Since(start)).To(BeNumerically("<", 5*time.Second))
+	})
+
+	It("reports a lookup error and a panic as unavailable", func() {
+		fail := func(...testcontainers.GenericProviderOption) (testcontainers.GenericProvider, error) {
+			return nil, errors.New("no socket")
+		}
+		Expect(dockerCheck(time.Second, fail)).To(MatchError(ContainSubstring("no socket")))
+		boom := func(...testcontainers.GenericProviderOption) (testcontainers.GenericProvider, error) { panic("boom") }
+		Expect(dockerCheck(time.Second, boom)).To(MatchError(ContainSubstring("panicked: boom")))
 	})
 })
