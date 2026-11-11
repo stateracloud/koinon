@@ -262,6 +262,10 @@ fails with `known gap: #N` and the label `known-gap`; those stay red in the repo
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
 commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
 `junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
+Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session come back; needs the drill's
+SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
+source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
+waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
