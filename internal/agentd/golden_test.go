@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/triggers"
 )
 
@@ -143,6 +144,24 @@ var _ = Describe("Prompt shapes (golden)", func() {
 			{Kind: "edit", Title: "write", Outside: "/sandbox/.koinon/notes/external/report.md"},
 			{Kind: "fetch", Title: "webfetch"},
 		}, "/sandbox/work"))
+	})
+	It("the section on large data names only the tools the flavor declares", func() {
+		d, ok := flavor.Lookup(store.AgentFlavorOpencode)
+		Expect(ok).To(BeTrue())
+		Expect(agentd.InstructionsFile("x", "/sandbox/work")).To(ContainSubstring(agentd.WorkingWithData(d.Tools...)))
+
+		some := agentd.WorkingWithData("jq", "yq")
+		Expect(some).To(ContainSubstring("`jq`; YAML"))
+		Expect(some).NotTo(ContainSubstring("duckdb"))
+		Expect(some).NotTo(ContainSubstring("python3"))
+	})
+	It("the section on large data of a flavor with no tools is the neutral form", func() {
+		got := agentd.WorkingWithData()
+		Expect(got).To(HavePrefix("## Working with large data\n\n- Check size before reading"))
+		Expect(got).To(ContainSubstring("Never try to install anything"))
+		for _, tool := range []string{"jq", "duckdb", "ast-grep", "sqlite3", "pdftotext", "python3", "`rg`", "git diff"} {
+			Expect(got).NotTo(ContainSubstring(tool))
+		}
 	})
 	It("the instruction file of an agent version without instructions", func() {
 		golden("instructions_file_empty", agentd.InstructionsFile(" \n", "/sandbox/work"))

@@ -93,12 +93,12 @@ func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
 // InstructionsFile exposes the instruction file's content for a version's instructions to the
 // golden tests.
 func InstructionsFile(instructions, cwd string, repos ...Repository) string {
-	return string(instructionsFile(instructions, cwd, repos, false))
+	return string(instructionsFile(store.AgentFlavorOpencode, instructions, cwd, repos, false))
 }
 
 // InstructionsFileWithWeb is InstructionsFile for an agent with web egress.
 func InstructionsFileWithWeb(instructions, cwd string, repos ...Repository) string {
-	return string(instructionsFile(instructions, cwd, repos, true))
+	return string(instructionsFile(store.AgentFlavorOpencode, instructions, cwd, repos, true))
 }
 
 // Repository is a granted repository as the instruction file lists it.
@@ -141,3 +141,7 @@ func FeedCounts(line []byte) (read, handled bool) {
 var WaitProcess = waitProcess
 
 var LineTooLongReason = lineTooLongReason
+
+// WorkingWithData exposes the "Working with large data" section for a flavor's tools, which
+// need not belong to a shipped flavor.
+func WorkingWithData(tools ...string) string { return workingWithDataFor(tools) }
