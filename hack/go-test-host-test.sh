@@ -186,3 +186,14 @@ out=$(KOINON_UNAME=$bin/uname-mac KOINON_PMSET=$bin/pmset-slept KOINON_CAFFEINAT
 [[ $rc == 3 ]] || { echo "$out" | tail -10; fail "a run that slept must exit 3, got $rc"; }
 grep -q 'go-test verdict: notrun reason="host slept"' <<<"$out" || { echo "$out" | tail -10; fail "no host slept verdict"; }
 echo "ok: a run during which the host slept exits 3 with notrun reason=\"host slept\""
+
+# A Sleep before the run's window (for example while it waited for a slot) must not mark the run.
+stub pmset-old 'case "$1 $2" in "-g batt") ;; *) echo "2000-01-01 00:00:00 +0000 Sleep Entering Sleep";; esac'
+rc=0
+out=$(KOINON_UNAME=$bin/uname-mac KOINON_PMSET=$bin/pmset-old KOINON_CAFFEINATE=$bin/caffeinate-quick KOINON_DOCKER=$bin/docker-off \
+	KOINON_GO_SLOTS_DIR=$tmp/slots3 REPORT_DIR=$tmp/reports3 hack/go-test.sh ./internal/project 2>&1) || rc=$?
+! grep -q 'reason="host slept"' <<<"$out" || { echo "$out" | tail -10; fail "a Sleep before the run window marked the run"; }
+slot_line=$(grep -n '^[[:space:]]*host_acquire_slot' hack/go-test.sh | head -1 | cut -d: -f1)
+start_line=$(grep -n '^run_start=' hack/go-test.sh | head -1 | cut -d: -f1)
+((start_line > slot_line)) || fail "run_start is set before the slot is taken"
+echo "ok: a Sleep before the run window does not mark the run, the window starts after the slot"

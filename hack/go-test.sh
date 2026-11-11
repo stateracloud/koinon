@@ -100,7 +100,6 @@ host_cleanup() {
 trap 'rc_=$?; host_cleanup; on_exit $rc_' EXIT
 
 host_keep_awake $$
-run_start=$(date '+%Y-%m-%d %H:%M:%S')
 
 # Four processes per run on a Mac (two runs at once), Ginkgo's default (one per core) elsewhere.
 procs=(-p)
@@ -156,6 +155,9 @@ if ((${#parallel[@]} + ${#ginkgo_rest[@]})); then
 	host_acquire_slot
 	host_docker_preflight || exit 3
 fi
+# The sleep window starts here, with the suites: waiting for a slot can last as long as another heavy
+# run, and a Sleep in that wait did not touch these results. Keep-awake is held since the start.
+run_start=$(date '+%Y-%m-%d %H:%M:%S')
 
 # One testcontainers session for the whole run (#171). By default every test process is its own
 # session lead and shares the run's single Ryuk reaper by name; Ryuk exits 10 s after its last
