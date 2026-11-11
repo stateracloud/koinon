@@ -35,8 +35,12 @@ The cluster-scoped grants outside this file are:
 - the sandbox default-deny NetworkPolicy writer (sandboxNetworkPolicy.enabled, on by default; spike
   8.15, ADR 0045): templates/sandbox-networkpolicy.yaml gives the reconciler create/get/update/patch
   on NetworkPolicies, fenced by a native ValidatingAdmissionPolicy to the fixed default-deny shape
-  in this gateway's workspace namespaces. That is the one write the reconciler makes in sandbox
-  namespaces (besides the observer RoleBinding).
+  in this gateway's workspace namespaces;
+- the sandbox LimitRange writer (sandboxLimitRange.enabled, on by default; #76, ADR 0083 follow-up):
+  templates/sandbox-limitrange.yaml gives the reconciler create/get/update/patch on LimitRanges,
+  fenced by a native ValidatingAdmissionPolicy to the fixed sized shape in this gateway's workspace
+  namespaces. Those are the writes the reconciler makes in sandbox namespaces (besides the observer
+  RoleBinding).
 */ -}}
 {{- $api := include "koinon.componentName" (list . "api") }}
 apiVersion: rbac.authorization.k8s.io/v1

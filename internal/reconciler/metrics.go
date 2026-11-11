@@ -58,6 +58,9 @@ type Metrics struct {
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
+	// LimitRangeErrors counts failures of the sandbox LimitRange writer (#76), by reason: forbidden,
+	// not_found or other.
+	LimitRangeErrors *prometheus.CounterVec
 	// GatewayIDMismatch is 1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId,
 	// which leaves the sandbox admission policies matching none of its namespaces (old issue 475).
 	GatewayIDMismatch prometheus.Gauge
@@ -109,6 +112,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_sandbox_observer_errors_total",
 			Help: "Failed reads or RoleBindings of the sandbox observer (ADR 0078), by reason (forbidden, not_found or other).",
 		}, []string{"reason"}),
+		LimitRangeErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_reconciler_sandbox_limit_range_errors_total",
+			Help: "Failed Applies of the sandbox LimitRange (#76), by reason (forbidden, not_found or other).",
+		}, []string{"reason"}),
 		GatewayIDMismatch: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_openshell_gateway_id_mismatch",
 			Help: "1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId, so the sandbox admission policies match none of its namespaces and fail open, else 0.",
@@ -125,6 +132,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, k := range observerReasons {
 		m.ObserverErrors.WithLabelValues(k)
+		m.LimitRangeErrors.WithLabelValues(k)
 	}
 	for _, k := range unmarkedKinds {
 		m.UnmarkedObjects.WithLabelValues(k)
@@ -136,7 +144,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
-			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.GatewayIDMismatch)
+			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.GatewayIDMismatch)
 	}
 	return m
 }

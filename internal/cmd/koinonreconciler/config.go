@@ -103,6 +103,9 @@ type config struct {
 	sandboxNetworkPolicy     bool
 	sandboxNetworkPolicyName string
 
+	sandboxLimitRange     bool
+	sandboxLimitRangeName string
+
 	gatewayMode        project.GatewayMode
 	gatewayURL         string
 	gatewayConfigMap   string

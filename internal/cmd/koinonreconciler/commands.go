@@ -66,6 +66,8 @@ var configKeys = map[string]string{
 	"sandbox-observer-service-account":     "sandboxObserver.serviceAccount",
 	"sandbox-network-policy":               "sandboxNetworkPolicy.enabled",
 	"sandbox-network-policy-name":          "sandboxNetworkPolicy.name",
+	"sandbox-limit-range":                  "sandboxLimitRange.enabled",
+	"sandbox-limit-range-name":             "sandboxLimitRange.name",
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-config-map":                   "gateway.configMap",
@@ -147,6 +149,9 @@ func (c *config) finish(v *viper.Viper) error {
 	if c.sandboxNetworkPolicy && c.sandboxNetworkPolicyName == "" {
 		return fmt.Errorf("--sandbox-network-policy-name is required with --sandbox-network-policy")
 	}
+	if c.sandboxLimitRange && c.sandboxLimitRangeName == "" {
+		return fmt.Errorf("--sandbox-limit-range-name is required with --sandbox-limit-range")
+	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return fmt.Errorf("--gateway-config-map is required in standalone mode")
 	}
@@ -208,6 +213,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
 	fs.BoolVar(&c.sandboxNetworkPolicy, "sandbox-network-policy", false, "apply a default-deny NetworkPolicy in each OpenShell workspace namespace (spike 8.15, ADR 0045)")
 	fs.StringVar(&c.sandboxNetworkPolicyName, "sandbox-network-policy-name", "", "name of the default-deny NetworkPolicy in each workspace namespace")
+	fs.BoolVar(&c.sandboxLimitRange, "sandbox-limit-range", false, "apply a LimitRange in each OpenShell workspace namespace so the supervisor and init containers are sized (#76)")
+	fs.StringVar(&c.sandboxLimitRangeName, "sandbox-limit-range-name", "", "name of the LimitRange in each workspace namespace")
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
