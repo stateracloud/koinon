@@ -464,7 +464,6 @@ work that fills it, then saves:
 | --- | --- | --- |
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
-| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
 
@@ -493,7 +492,7 @@ Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then
 `apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
 later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
 snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
-another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with all three
+another tool (a tool that runs `apt-get` itself) writes an `apt.conf.d` snippet with all three
 settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.

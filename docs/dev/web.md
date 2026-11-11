@@ -47,6 +47,6 @@ the Vite dev server (`web` resource). The release image build must run `pnpm bui
 ## Tests
 
 - `pnpm test`: Vitest and Testing Library, against an in-memory Connect router transport.
-- `pnpm test:e2e`: one Playwright test (`pnpm exec playwright install chromium` once). It fakes the
+- `pnpm test:e2e`: one Playwright test (`pnpm exec playwright install chromium` once; CI runs it in the Playwright image, no install). It fakes the
   API inside the browser, including a dropped `WatchRun` stream; the real API path with the fake
   model is plan item E1.
