@@ -5,6 +5,9 @@
 The detail behind the short CI bullets in `AGENTS.md`. The rules an agent must not break stay in
 `AGENTS.md`; this page says how the gates work and why.
 
+The rules a CI check must follow, with their reasons and checks, are in [ci-rules.md](ci-rules.md) (ADR 0111). This page
+describes how the jobs work today. `hack/ci-rules-check.sh` (job `scripts`) checks the rules a script can decide.
+
 ## Go test suites
 
 `hack/go-test.sh` is what `make test` runs: the agentd, api, durable, checkpoint and compat suites under

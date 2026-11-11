@@ -826,6 +826,8 @@ jobs:
       - run: hack/ci-cache-test.sh
       - run: hack/ci-playwright-image-test.sh
       - run: hack/chart-check-test.sh
+      - run: hack/ci-rules-check-test.sh
+      - run: hack/ci-rules-check.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
   # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so

@@ -49,6 +49,8 @@ Instructions for coding agents working on Koinon.
 - A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a
   required job must report on every PR, push and merge_group build (no workflow-level `paths:`).
   ([required checks](docs/dev/ci.md#required-status-checks))
+- Adding or changing a CI check: read `docs/dev/ci-rules.md` first (rules R1-R8, limits L1-L6 of ADR 0111). Its first
+  section says when it does not apply. `hack/ci-rules-check.sh` checks the rules a script can decide.
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.

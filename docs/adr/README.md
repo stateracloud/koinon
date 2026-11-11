@@ -129,3 +129,4 @@ are in [0046](0046-adr-conventions.md).
 | [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |
 | [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted |
 | [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, |
+| [0111](0111-ci-requirements.md) | CI requirements | Accepted |
