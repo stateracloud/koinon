@@ -22,13 +22,13 @@ func TestRTOAndRPOAreMeasuredFromTheDisaster(t *testing.T) {
 		TargetInstalled: d.Add(120 * time.Second), Restored: d.Add(150 * time.Second),
 		HeldChecksDone: d.Add(270 * time.Second), Released: d.Add(290 * time.Second),
 		FirstRunDone: d.Add(330 * time.Second), QueueDrained: d.Add(500 * time.Second),
-		AllChecksPassed: d.Add(520 * time.Second), LatestMarker: d.Add(-22 * time.Second),
+		DeadExecutorRecovered: d.Add(440 * time.Second), AllChecksPassed: d.Add(520 * time.Second), LatestMarker: d.Add(-22 * time.Second),
 	}
 	got := m.Compute()
 	if got.RTOSeconds != 520 || got.RPOSeconds != 22 {
 		t.Fatalf("RTO %v RPO %v, want 520 and 22", got.RTOSeconds, got.RPOSeconds)
 	}
-	for name, want := range map[string]float64{"backup": 10, "targetInstall": 120, "restore": 30, "heldChecks": 120, "release": 20, "firstRun": 40, "queueDrained": 210} {
+	for name, want := range map[string]float64{"backup": 10, "targetInstall": 120, "restore": 30, "heldChecks": 120, "release": 20, "firstRun": 40, "queueDrained": 210, "dbosRecovery": 150} {
 		if got.Phases[name] != want {
 			t.Errorf("phase %s = %v, want %v", name, got.Phases[name], want)
 		}
@@ -187,7 +187,7 @@ func checkFakeModelManifest(t *testing.T, id string) {
 
 func TestValuesOverlayHoldsAndNamesTheGateway(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-dst-a1b2c3", Service: "openshell-dst-a1b2c3", ClientTLSSecret: "openshell-dst-a1b2c3-client-tls"}
-	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-dst-a1b2c3", true, "")
+	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-dst-a1b2c3", true, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +209,73 @@ func TestFakeModelScriptParses(t *testing.T) {
 	}
 	if s.Model != drill.ModelName {
 		t.Fatalf("model %q, want %q", s.Model, drill.ModelName)
+	}
+}
+
+func TestValuesOverlayTurnsCheckpointsOnWithAShortArchive(t *testing.T) {
+	gw := drill.Gateway{Namespace: "koinon-drill-os-src-a1b2c3", Service: "openshell-src-a1b2c3", ClientTLSSecret: "openshell-src-a1b2c3-client-tls"}
+	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", &drill.Checkpoints{ArchiveAfter: "1m", IdleTimeout: "2m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"checkpoints:\n    enabled: true", "existingSecret: " + drill.CheckpointSecretName, "bucket: " + drill.CheckpointBucket, "archiveAfter: 1m", "idleTimeout: 2m"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+	off, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(off, "checkpoints") || strings.Contains(off, "archiveAfter") {
+		t.Errorf("a nil Checkpoints must leave them off:\n%s", off)
+	}
+}
+
+func TestObjectStoreAndCheckpointSecretManifestsAreLabelledAndParse(t *testing.T) {
+	for _, m := range []string{
+		drill.ObjectStoreManifest("koinon-drill-fakes-381049", "381049", "chrislusf/seaweedfs:4.50@sha256:abc"),
+		drill.CheckpointSecretManifest("koinon-drill-src-381049", "381049", "koinon-drill-fakes-381049"),
+	} {
+		for i, d := range strings.Split(m, "\n---\n") {
+			var v struct {
+				Metadata struct {
+					Name   string
+					Labels map[string]string
+				}
+			}
+			if err := yaml.Unmarshal([]byte(d), &v); err != nil {
+				t.Fatalf("document %d: %v\n%s", i, err, d)
+			}
+			if v.Metadata.Labels[drill.RunLabel] != "381049" {
+				t.Errorf("document %d (%s) has no run label", i, v.Metadata.Name)
+			}
+		}
+	}
+	// The SeaweedFS entrypoint cannot drop from root with no capabilities: the pod starts as its user.
+	for _, d := range strings.Split(drill.ObjectStoreManifest("n", "1", "img"), "\n---\n") {
+		var v struct {
+			Kind string
+			Spec struct {
+				Template struct {
+					Spec struct {
+						SecurityContext struct {
+							RunAsNonRoot bool  `yaml:"runAsNonRoot"`
+							RunAsUser    int64 `yaml:"runAsUser"`
+							FSGroup      int64 `yaml:"fsGroup"`
+						} `yaml:"securityContext"`
+					}
+				}
+			}
+		}
+		if err := yaml.Unmarshal([]byte(d), &v); err != nil {
+			t.Fatal(err)
+		}
+		if sc := v.Spec.Template.Spec.SecurityContext; v.Kind == "Deployment" && (!sc.RunAsNonRoot || sc.RunAsUser != 1000 || sc.FSGroup != 1000) {
+			t.Errorf("object store pod securityContext %+v: want runAsNonRoot, uid 1000, fsGroup 1000", sc)
+		}
+	}
+	if got := drill.ObjectStoreEndpoint("f"); got != "http://objectstore.f.svc:8333" {
+		t.Errorf("endpoint %q", got)
 	}
 }
