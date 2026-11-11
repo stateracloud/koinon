@@ -19,13 +19,14 @@ import (
 )
 
 // A template does not name MCP servers: an admin allows them on the agent. What a template does
-// fix is its grants (the org's repositories, private data) and the tools its instructions tell the
-// agent to call. This test reads both, classifies the backticked tools the instructions name with
-// sinkclass.Classify, the function the guard calls, over the declarations in
+// fix is its grants (the org's repositories, private data) and its tools, the structured spec.tools
+// list. This test reads both, classifies each tool in spec.tools with sinkclass.Classify and
+// sinkclass.Declaration.ResultLegs, the functions the guard calls, over the declarations in
 // testdata/legs/tool-declarations.json (ADR 0084 decision 8, ADR 0091 decision 4), and fails when
-// one template holds all three legs of the lethal trifecta (ADR 0084 decision 9). The tools of a
-// template are the names in its structured spec.tools list, so a tool the instructions only
-// describe in prose ("the search and fetch tools") is still read.
+// one template holds all three legs of the lethal trifecta (ADR 0084 decision 9). The legs come from
+// spec.tools only, so a tool the instructions describe in prose ("the search and fetch tools") is
+// read too. A drift check fails when the instructions name a tool in backticks that spec.tools does
+// not list.
 
 // toolCall matches a tool the instructions tell the agent to call, written in backticks. It is a
 // drift check only: every name found must be in spec.tools. The legs come from spec.tools alone.

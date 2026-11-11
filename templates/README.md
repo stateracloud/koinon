@@ -9,10 +9,11 @@ Agent templates: building blocks for the agent builder; the result is always a d
 - `researcher` and `web-researcher` are split so that no template holds all three legs of ADR 0084
   (untrusted input, private data, an auto-tier `external-high` tool; fetch and search are
   `external-low`, ADR 0091). `legs_test.go` fails if a template combines them, with no exceptions;
-  `testdata/legs/` has the negative fixtures. The test classifies the tools a template names in
-  `spec.tools` (and, for templates without it, the backticked names in its instructions) with the
-  declarations in `testdata/legs/tool-declarations.json`: adding a tool to a template means adding it
-  to `spec.tools` and, if it is not an unclassified default tool, to that file.
+  `testdata/legs/` has the negative fixtures. The test takes the legs only from the tools in
+  `spec.tools`, classified with the declarations in `testdata/legs/tool-declarations.json`. A drift
+  check fails when the instructions name a tool in backticks that `spec.tools` does not list. To add
+  a tool to a template, add it to `spec.tools` and, if it is not an unclassified default tool, to
+  that file.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
