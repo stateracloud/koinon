@@ -233,8 +233,9 @@ while IFS= read -r cfg; do # oapi-codegen -config <file> <spec>: the config, its
 	out=$(sed -n -E 's/^output:[[:space:]]*//p' "$cfg")
 	[[ -n $out ]] && { gen_inputs+=("$out"); oapi=$((oapi + 1)); }
 done < <(grep -oE -- '-config [^ ]+' <<<"$recipe" | awk '{print $2}')
-# The spec is the recipe's last argument of the oapi-codegen line.
-spec=$(grep 'oapi-codegen' <<<"$recipe" | awk '{print $NF}')
+# The spec is the last argument of the oapi-codegen invocation (not a comment that
+# merely mentions the tool). Strip a trailing line-continuation backslash (#349).
+spec=$(grep -E '^[^#]*[[:space:]]oapi-codegen[[:space:]]' <<<"$recipe" | sed -E 's/[[:space:]]*\\$//' | awk '{print $NF}' | tr -d '"')
 [[ -f $spec ]] && { gen_inputs+=("$spec"); oapi=$((oapi + 1)); }
 need_min "oapi-codegen config, output and spec" 3 $oapi
 need_min "generator inputs in all" 15 ${#gen_inputs[@]}
