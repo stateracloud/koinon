@@ -84,6 +84,37 @@ var _ = Describe("the loop nudge", func() {
 		Expect(a.Outcome.NudgeUndelivered).To(BeTrue(), "the agent was never told it loops")
 	})
 
+	It("nudges when the harness ends the interrupted turn cancelled after the grace", func() {
+		c := turnpolicy.New(cfg())
+		startedAndLooping(c, t0)
+		Expect(c.Step(ev(turnpolicy.EvCancelTimeout), t0).Kind).To(Equal(turnpolicy.ActWait))
+		a := c.Step(done(cancelled), t0.Add(time.Minute))
+		Expect(a.Kind).To(Equal(turnpolicy.ActRecord))
+		Expect(a.Record).To(Equal(turnpolicy.RecordLoopNudge))
+		Expect(a.Pattern).To(Equal("same_action"))
+		a = c.Step(ev(turnpolicy.EvRecorded), t0.Add(time.Minute))
+		Expect(a.Kind).To(Equal(turnpolicy.ActSendPrompt))
+		Expect(a.Lead).To(Equal(turnpolicy.LeadLoop))
+		// The nudge is used: the next loop ends the run, and the agent was told.
+		a = c.Step(loop("same_error"), t0.Add(2*time.Minute))
+		Expect(a.Why).To(Equal(turnpolicy.CancelLoopStop))
+		a = c.Step(done(cancelled), t0.Add(2*time.Minute))
+		Expect(a.Outcome.Kind).To(Equal(turnpolicy.OutLoop))
+		Expect(a.Outcome.NudgeUndelivered).To(BeFalse())
+	})
+
+	It("ends as a loop when a second loop follows an ignored cancel and the turn ends cancelled", func() {
+		c := turnpolicy.New(cfg())
+		startedAndLooping(c, t0)
+		c.Step(ev(turnpolicy.EvCancelTimeout), t0)
+		a := c.Step(loop("monologue"), t0)
+		Expect(a.Why).To(Equal(turnpolicy.CancelLoopStop))
+		a = c.Step(done(cancelled), t0)
+		Expect(a.Kind).To(Equal(turnpolicy.ActEnd))
+		Expect(a.Outcome.Kind).To(Equal(turnpolicy.OutLoop))
+		Expect(a.Outcome.NudgeUndelivered).To(BeTrue())
+	})
+
 	It("tells the agent about a refusal first and keeps the nudge for the next loop", func() {
 		c := turnpolicy.New(cfg())
 		startedAndLooping(c, t0)

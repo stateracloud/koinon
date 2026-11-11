@@ -367,7 +367,10 @@ type Controller struct {
 	loopNudged      bool
 	loopUndelivered bool
 	loopPattern     string
-	nextLoop        bool
+	// loopCancelTimedOut: the cancel that interrupted the first loop was ignored for the grace. A
+	// turn that then ends cancelled is the late cancel: the nudge is deliverable after all.
+	loopCancelTimedOut bool
+	nextLoop           bool
 
 	// next is the record's follow-up.
 	nextSleep bool
@@ -575,7 +578,7 @@ func (c *Controller) proceed(now time.Time, u *Usage) Action {
 
 func (c *Controller) send(now time.Time, notice *Cause) Action {
 	c.phase = phasePrompt
-	c.cancelIgnored = false
+	c.cancelIgnored, c.loopCancelTimedOut = false, false
 	c.timeArmed = c.wants() && c.timeNotice() && c.cfg.CapEnd.Sub(now) > c.cfg.WrapUpNotice
 	c.usageArmed = c.wants() && c.countNotice()
 	a := c.wait(ActSendPrompt)
@@ -631,6 +634,16 @@ func (c *Controller) inPrompt(ev Event, now time.Time) Action {
 		if c.cancelIgnored && r.Kind == ResultCancelled {
 			if r.Refusals {
 				return c.refusedTurn(r)
+			}
+			if c.loopCancelTimedOut {
+				// The harness honoured the loop interrupt late: go on with the loop flow, as if
+				// it had ended the turn within the grace. The nudge is deliverable after all.
+				c.loopCancelTimedOut = false
+				if r.Stop != StopNone {
+					return c.endStop(r.Stop, EndedLoop)
+				}
+				c.loopUndelivered = false
+				return c.loopNudgeRecord()
 			}
 			// The harness honoured Koinon's own cancel late. No second prompt is sent; the run
 			// ends at the cap as it does without a notice, not as a failed turn.
@@ -734,6 +747,7 @@ func (c *Controller) inLoopCancel(ev Event) Action {
 	case EvCancelFailed, EvCancelTimeout:
 		c.phase = phasePrompt
 		c.cancelIgnored, c.loopNudged, c.loopUndelivered = true, true, true
+		c.loopCancelTimedOut = true
 		return c.wait(ActWait)
 	case EvPromptDone:
 		r := ev.Result
@@ -745,14 +759,19 @@ func (c *Controller) inLoopCancel(ev Event) Action {
 			if r.Stop != StopNone {
 				return c.endStop(r.Stop, EndedLoop)
 			}
-			c.loopNudged = true
-			c.phase = phaseRecord
-			c.nextSleep, c.nextLoop = false, true
-			return Action{Kind: ActRecord, Ended: EndedLoop, Record: RecordLoopNudge, Pattern: c.loopPattern}
+			return c.loopNudgeRecord()
 		}
 		return c.turnResult(r)
 	}
 	return Action{Kind: ActWait}
+}
+
+// loopNudgeRecord spends the one nudge: record it, then send it as the next prompt.
+func (c *Controller) loopNudgeRecord() Action {
+	c.loopNudged = true
+	c.phase = phaseRecord
+	c.nextSleep, c.nextLoop = false, true
+	return Action{Kind: ActRecord, Ended: EndedLoop, Record: RecordLoopNudge, Pattern: c.loopPattern}
 }
 
 // turnResult acts on how a turn ended on its own.
