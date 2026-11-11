@@ -106,7 +106,7 @@ cache_switches() {
 }
 check "KOINON_GO_TEST_CACHE is 1 only on pull requests and in warm-caches" cache_switches "$wf"
 # The same check must catch an unconditional switch in go-test, in YAML or in a run line.
-neg=$(mktemp "${TMPDIR:-/tmp}/ci-cache-test.XXXXXX")
+neg=$(mktemp "${TMPDIR:-/tmp}/ci-cache-test.XXXXXX") || exit 1
 awk '{print} /^  go-test:/{j=1} j&&/KOINON_REQUIRE: docker/{sub(/KOINON_REQUIRE.*/, "KOINON_GO_TEST_CACHE: '"'"'1'"'"'"); print; j=0}' "$wf" >"$neg"
 # shellcheck disable=SC2329 # called through check
 rejects() { grep -q -- "$2" <<<"$(job_body "$1" go-test)" && ! cache_switches "$1"; } # FILE PATTERN-in-go-test
@@ -117,7 +117,7 @@ rm -f "$neg"
 
 # ci-stamp-mtime.sh: two fresh clones of one commit get the same file and directory mtimes; a same-size
 # edit changes the file's mtime and its directories', not a sibling directory's.
-st=$(mktemp -d "${TMPDIR:-/tmp}/ci-stamp-test.XXXXXX")
+st=$(mktemp -d "${TMPDIR:-/tmp}/ci-stamp-test.XXXXXX") || exit 1
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 # shellcheck disable=SC2329 # called through check
 same() { [ "$(mtime "$1")" = "$(mtime "$2")" ]; }
