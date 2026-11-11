@@ -181,8 +181,7 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   main releases the claim (`claims.yml`, `release-merged`). Do not hand-write the wait or the merge.
   `--jump` enqueues at the front. `--admin` is for a PR that changes at least one `.github/**` path (owner
   decision, ADR 0105); an e2e-relevant one also needs a green `quickstart` on its head. `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved; it
-  opens a `break-glass` issue. Independent reviews of sensitive-path PR heads continue, and their findings are fixed. The recorded verdict is advisory, not a gate (ADR 0103, amended 2026-11-11): record it with
-  `hack/review-verdict.sh <PR> ready|not-ready <reviewer> <sha>` if you like; no merge needs it. Details: `docs/dev/ci.md#merging`.
+  opens a `break-glass` issue. Details: `docs/dev/ci.md#merging`.
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the
   cause. An interim fix is allowed only with an issue that names the exit condition (when it can be
   removed), linked from the code or doc that carries it.

@@ -10,7 +10,7 @@
 # job), so this judges the jobs, not the run's conclusion, and polls an in-progress run for up to POLL_MAX seconds
 # (default 600). When no such run exists for the pushed tree it opens an issue keyed by the sha, or comments on the
 # open one, labelled `break-glass`, unless the commit is the merge of a pull request that changes a path under
-# `.github/` and whose required checks were green on its head (`review` is advisory since 2026-11-11, ADR 0103 amendment, and is not read): that is the expected `--admin` route
+# `.github/` and whose required checks were green on its head: that is the expected `--admin` route
 # (ADR 0105) and gets no issue. A push with no pull request at all is a real hit. When it cannot tell (an API read
 # failed), it opens the issue anyway and says "could not verify". The comparison is by TREE, as
 # hack/ci-skip-heavy.sh and hack/release-gate.sh do; whether the landed sha equals merge_group.head_sha is ADR
@@ -37,7 +37,7 @@ if [[ -z ${SHA:-} || -z ${REPO:-} ]]; then
 fi
 
 # Required job names of the ci workflow (aggregators and plain jobs), and all required check names of a pull request
-# head (those plus the external ones; the advisory `review` is not among them).
+# head (those plus the external ones).
 ci_jobs=$(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$REQUIRED" 2>/dev/null |
 	awk 'NF && $1 != "advisory" && $1 != "external" { sub(/^aggregator /, ""); print }')
 pr_checks=$(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$REQUIRED" 2>/dev/null |

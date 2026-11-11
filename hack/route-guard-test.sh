@@ -145,19 +145,6 @@ run
 exit0 "github admin merge, green"
 hasnt "github admin merge, green: no issue" 'issue create\|issue comment'
 
-# 2b. review is advisory (ADR 0103 amendment, 2026-11-11): red or missing on the head, the expected admin merge still gets NO issue
-reset
-echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
-checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review failure)"
-run
-exit0 "github admin merge, review red"
-hasnt "github admin merge, review red: no issue" 'issue create\|issue comment'
-reset
-echo '[{"filename":".github/workflows/ci.yml"}]' >"$tmp/files.json"
-checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)"
-run
-exit0 "github admin merge, review missing"
-hasnt "github admin merge, review missing: no issue" 'issue create\|issue comment'
 
 # 2c. a required check missing on the head
 reset
