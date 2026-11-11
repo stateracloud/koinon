@@ -31,7 +31,8 @@ tilt_modules/
 # Compiled test binaries (go test -c, ginkgo build)
 *.test
 
-# Per-spec JUnit reports of hack/go-test.sh (old issue 221)
+# Per-spec JUnit reports of hack/go-test.sh (old issue 221) and make test-chart-smoke
+# (reports/chartsmoke/; #349).
 /reports/
 /junit.xml
 # Ginkgo's --junit-report/--json-report write these into each suite's package dir (hack/go-test.sh

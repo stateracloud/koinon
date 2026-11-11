@@ -790,7 +790,8 @@ type Querier interface {
 	// prefix holds another repository, none of the row's (#262).
 	ListHomeRepositoryEpochsOfAgent(ctx context.Context, arg ListHomeRepositoryEpochsOfAgentParams) ([]ListHomeRepositoryEpochsOfAgentRow, error)
 	// The anchored heads of the anchors whose event has a chain_seq in [from_seq, up_to_seq], in anchor
-	// order then org order: the install export's header (ADR 0100 decision 5).
+	// order then org order: the install export writes them as stream lines next to each audit.anchor
+	// event (ADR 0100 decision 5; format koinon.audit.export.v2).
 	ListInstallAnchorHeadsInRange(ctx context.Context, arg ListInstallAnchorHeadsInRangeParams) ([]ListInstallAnchorHeadsInRangeRow, error)
 	// A page of audit.anchor events in chain order, from after_seq (exclusive) to up_to_seq (inclusive),
 	// with the summary as Postgres prints it.
