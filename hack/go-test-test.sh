@@ -63,6 +63,9 @@ for pkg in agentd durable; do
 	grep -q "ginkgo -race -p .*./internal/$pkg/" <<<"$race" || { echo "FAIL: go-race runs $pkg without -p"; exit 1; }
 	grep -q "^	./internal/$pkg\$" hack/go-test.sh || { echo "FAIL: go-race runs $pkg with -p but go-test.sh does not list it as parallel"; exit 1; }
 done
+grep -c -- 'ginkgo -race.* --keep-going ' <<<"$race" | grep -qx 2 || { echo "FAIL: a go-race ginkgo step lacks --keep-going (a failing first suite skips the second)"; exit 1; }
+grep -q 'uses: ./.github/actions/agentgateway-test-image' <<<"$race" || { echo "FAIL: go-race runs the ledger suite without pulling the agentgateway test image"; exit 1; }
+grep -q 'packages: read' <<<"$race" || { echo "FAIL: go-race cannot read the GHCR agentgateway copy (packages: read)"; exit 1; }
 echo "ok: go-race covers reconciler, ledger, agentd and durable"
 
 # One EXIT trap removes every fixture dir and file this script makes. Each path is registered in
