@@ -81,17 +81,56 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 			listed []string
 			want   bool
 		}{
-			"a restart an hour later":            {t0.Add(time.Hour), []string{m}, []string{m}, false},
-			"just under a week":                  {t0.Add(orcatalog.Interval - time.Minute), []string{m}, []string{m}, false},
-			"a week":                             {t0.Add(orcatalog.Interval), []string{m}, []string{m}, true},
-			"a listed model in use that is new":  {t0.Add(time.Hour), []string{m, "fake/added-later"}, []string{m, "fake/added-later"}, true},
-			"in use but not listed by the fetch": {t0.Add(time.Hour), []string{m, "fake/delisted"}, []string{m}, false},
-			"no models in use, inside week":      {t0.Add(time.Hour), nil, []string{m}, false},
+			"a restart an hour later":              {t0.Add(time.Hour), []string{m}, []string{m}, false},
+			"six and a half days, less a minute":   {t0.Add(orcatalog.Interval - 12*time.Hour - time.Minute), []string{m}, []string{m}, false},
+			"an hour short of a week (daily tick)": {t0.Add(orcatalog.Interval - time.Hour), []string{m}, []string{m}, true},
+			"a week":                               {t0.Add(orcatalog.Interval), []string{m}, []string{m}, true},
+			"a listed model in use that is new":    {t0.Add(time.Hour), []string{m, "fake/added-later"}, []string{m, "fake/added-later"}, true},
+			"in use but not listed by the fetch":   {t0.Add(time.Hour), []string{m, "fake/delisted"}, []string{m}, false},
+			"no models in use, inside week":        {t0.Add(time.Hour), nil, []string{m}, false},
 		} {
 			due, err := s.Due(ctx, c.at, c.inUse, c.listed)
 			Expect(err).NotTo(HaveOccurred(), name)
 			Expect(due).To(Equal(c.want), name)
 		}
+	})
+
+	It("is due when a model it already stored comes into use", func(ctx SpecContext) {
+		s := orcatalog.New(freshDB(ctx))
+		used, later := uniq(), uniq()
+		_, err := s.Apply(ctx, snapshot(t0, meta(used, 1000, 100), meta(later, 2000, 200)), []string{used})
+		Expect(err).NotTo(HaveOccurred())
+		listed := []string{used, later}
+
+		due, err := s.Due(ctx, t0.Add(time.Hour), []string{used}, listed)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(due).To(BeFalse(), "the same models in use")
+
+		due, err = s.Due(ctx, t0.Add(time.Hour), []string{used, later}, listed)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(due).To(BeTrue(), "the second model has a row, but it was not in use at the store")
+
+		res, err := s.Apply(ctx, snapshot(t0.Add(time.Hour), meta(used, 1000, 100), meta(later, 2000, 200)), []string{used, later})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Proposals).To(Equal(2), "the newly used model gets its proposals")
+		due, err = s.Due(ctx, t0.Add(2*time.Hour), []string{later, used}, listed)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(due).To(BeFalse())
+	})
+
+	It("lets two replicas store the same fetch at once without failing", func(ctx SpecContext) {
+		s := orcatalog.New(freshDB(ctx))
+		m := uniq()
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, err := s.Apply(ctx, snapshot(t0, meta(m, 200000, 64000)), []string{m})
+				errs <- err
+			}()
+		}
+		Expect(<-errs).To(Succeed())
+		Expect(<-errs).To(Succeed())
+		Expect(forModel(ctx, s, m)).To(HaveLen(2), "one proposal per field")
 	})
 
 	Describe("limit proposals", func() {

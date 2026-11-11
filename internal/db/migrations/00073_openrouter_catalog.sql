@@ -30,7 +30,10 @@ CREATE TABLE openrouter_catalog (
     source      text        NOT NULL CHECK (source ~ '^openrouter@.+Z$' AND length(source) <= 64),
     fetched_at  timestamptz NOT NULL,
     model_count integer     NOT NULL CHECK (model_count >= 0),
-    sha256      text        NOT NULL DEFAULT '' CHECK (sha256 = '' OR sha256 ~ '^[0-9a-f]{64}$')
+    sha256      text        NOT NULL DEFAULT '' CHECK (sha256 = '' OR sha256 ~ '^[0-9a-f]{64}$'),
+    -- The models in use (and listed) at the last store: a model that comes into use later makes the
+    -- next tick due, without waiting for the week (orcatalog.Store.Due).
+    in_use_models text[]    NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE openrouter_models (

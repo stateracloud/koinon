@@ -24,8 +24,9 @@ func newModelMetadataCommand() *cobra.Command {
 		Short: "Review the OpenRouter catalog this install fetched",
 		Long: "While an enabled openrouter provider exists, koinon-api stores OpenRouter's model list in this " +
 			"install's database (the same fetch as the price refresh, so --prices-refresh=off makes no request). " +
-			"Display fields apply at once. The context and output limits set compaction thresholds, so they wait here " +
-			"for a person; until one is accepted, models.dev's openrouter values apply.",
+			"Display fields are stored at once. The context and output limits set compaction thresholds, so they wait " +
+			"here for a person; until one is accepted, models.dev's openrouter values apply. An accepted limit is " +
+			"recorded now and becomes the served one when the model-metadata reader (#265, #305) reads this catalog.",
 	}
 	root.PersistentFlags().StringVar(&dbURL, "database-url", "", "Postgres connection string")
 	cli.EnvAlias(root, "database-url", "DATABASE_URL")
@@ -93,7 +94,7 @@ func newModelMetadataCommand() *cobra.Command {
 			},
 		}
 	}
-	accept := decide("accept <proposal id>", "Make the proposed limit the effective one from now on",
+	accept := decide("accept <proposal id>", "Accept the proposed limit (served once the model-metadata reader reads it, #265)",
 		func(s *orcatalog.Store, cmd *cobra.Command, id string) error {
 			return s.Accept(cmd.Context(), audit.CLI("model-metadata proposals accept"), id)
 		})

@@ -1033,6 +1033,8 @@ type Querier interface {
 	// reset changed the hash after the old password was checked. Lock order: the credential, then the
 	// sessions (as the reset does).
 	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	// Serializes the stores of several replicas for the rest of the transaction.
+	LockOpenRouterCatalog(ctx context.Context) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0

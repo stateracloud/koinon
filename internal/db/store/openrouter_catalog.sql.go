@@ -57,7 +57,7 @@ func (q *Queries) FindLiveOpenRouterLimitProposal(ctx context.Context, arg FindL
 
 const getOpenRouterCatalog = `-- name: GetOpenRouterCatalog :one
 
-SELECT singleton, source, fetched_at, model_count, sha256 FROM openrouter_catalog WHERE singleton
+SELECT singleton, source, fetched_at, model_count, sha256, in_use_models FROM openrouter_catalog WHERE singleton
 `
 
 // SPDX-License-Identifier: Apache-2.0
@@ -72,6 +72,7 @@ func (q *Queries) GetOpenRouterCatalog(ctx context.Context) (OpenrouterCatalog, 
 		&i.FetchedAt,
 		&i.ModelCount,
 		&i.Sha256,
+		&i.InUseModels,
 	)
 	return i, err
 }
@@ -288,6 +289,16 @@ func (q *Queries) ListOpenRouterModels(ctx context.Context) ([]OpenrouterModel, 
 	return items, nil
 }
 
+const lockOpenRouterCatalog = `-- name: LockOpenRouterCatalog :exec
+SELECT pg_advisory_xact_lock(hashtext('koinon.openrouter_catalog'))
+`
+
+// Serializes the stores of several replicas for the rest of the transaction.
+func (q *Queries) LockOpenRouterCatalog(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockOpenRouterCatalog)
+	return err
+}
+
 const refreshOpenRouterLimitProposal = `-- name: RefreshOpenRouterLimitProposal :exec
 UPDATE openrouter_limit_proposals SET current_value = $1, source = $2 WHERE id = $3 AND state = 'open'
 `
@@ -351,17 +362,19 @@ func (q *Queries) SupersedeOpenRouterLimitProposals(ctx context.Context, arg Sup
 }
 
 const upsertOpenRouterCatalog = `-- name: UpsertOpenRouterCatalog :exec
-INSERT INTO openrouter_catalog (singleton, source, fetched_at, model_count, sha256)
-VALUES (true, $1, $2, $3, $4)
+INSERT INTO openrouter_catalog (singleton, source, fetched_at, model_count, sha256, in_use_models)
+VALUES (true, $1, $2, $3, $4, $5::text[])
 ON CONFLICT (singleton) DO UPDATE
-SET source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at, model_count = EXCLUDED.model_count, sha256 = EXCLUDED.sha256
+SET source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at, model_count = EXCLUDED.model_count, sha256 = EXCLUDED.sha256,
+    in_use_models = EXCLUDED.in_use_models
 `
 
 type UpsertOpenRouterCatalogParams struct {
-	Source     string
-	FetchedAt  pgtype.Timestamptz
-	ModelCount int32
-	Sha256     string
+	Source      string
+	FetchedAt   pgtype.Timestamptz
+	ModelCount  int32
+	Sha256      string
+	InUseModels []string
 }
 
 func (q *Queries) UpsertOpenRouterCatalog(ctx context.Context, arg UpsertOpenRouterCatalogParams) error {
@@ -370,6 +383,7 @@ func (q *Queries) UpsertOpenRouterCatalog(ctx context.Context, arg UpsertOpenRou
 		arg.FetchedAt,
 		arg.ModelCount,
 		arg.Sha256,
+		arg.InUseModels,
 	)
 	return err
 }

@@ -6,10 +6,15 @@
 SELECT * FROM openrouter_catalog WHERE singleton;
 
 -- name: UpsertOpenRouterCatalog :exec
-INSERT INTO openrouter_catalog (singleton, source, fetched_at, model_count, sha256)
-VALUES (true, @source, @fetched_at, @model_count, @sha256)
+INSERT INTO openrouter_catalog (singleton, source, fetched_at, model_count, sha256, in_use_models)
+VALUES (true, @source, @fetched_at, @model_count, @sha256, @in_use_models::text[])
 ON CONFLICT (singleton) DO UPDATE
-SET source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at, model_count = EXCLUDED.model_count, sha256 = EXCLUDED.sha256;
+SET source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at, model_count = EXCLUDED.model_count, sha256 = EXCLUDED.sha256,
+    in_use_models = EXCLUDED.in_use_models;
+
+-- name: LockOpenRouterCatalog :exec
+-- Serializes the stores of several replicas for the rest of the transaction.
+SELECT pg_advisory_xact_lock(hashtext('koinon.openrouter_catalog'));
 
 -- name: UpsertOpenRouterModel :exec
 -- Display fields apply at once. The fetched limits are stored but are not effective (see

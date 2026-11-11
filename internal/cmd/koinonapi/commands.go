@@ -27,7 +27,7 @@ func NewRootCommand() *cobra.Command {
 		Long: "koinon-api serves the Koinon API and web UI (serve, also what runs without a subcommand), " +
 			"applies the database migrations (migrate), checks the install prerequisites (preflight), " +
 			"creates generated Secrets (ensure-secrets), wraps new KEKs with a KMS (key-admin) and offers the operator " +
-			"tools (keys, audit, org-limits).\n\n" +
+			"tools (keys, audit, org-limits, prices, model-metadata).\n\n" +
 			"Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper case with " +
 			"dashes as underscores (--database-url is KOINON_DATABASE_URL). Secrets are read from files, never from flags.",
 	}

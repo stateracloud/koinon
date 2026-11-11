@@ -80,36 +80,43 @@ type Store struct {
 // New returns a Store over pool.
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// dueSlack lets a weekly tick fire although the previous store ran a little later in its tick: the
+// refresher looks once a day, so without it the interval drifts to eight days.
+const dueSlack = 12 * time.Hour
+
 // Due says whether the catalog should be stored from a list fetched now: it has never been stored,
-// the last store is a week old, or a model in use that this fetch lists has no row yet (it was
-// added since). listed is the set of model names of the fetch: a model in use that OpenRouter does
-// not list (delisted, retired, misspelled) never gets a row and must not make every tick due. A
-// restart inside the week with every listed model known is not due.
+// the last store is (about) a week old, or a model in use that this fetch lists was not in use at
+// the last store (it was enabled since). listed is the set of model names of the fetch: a model in
+// use that OpenRouter does not list (delisted, retired, misspelled) is never stored as in use and
+// must not make every tick due. A restart inside the week with the same models in use is not due.
 func (s *Store) Due(ctx context.Context, now time.Time, inUse, listed []string) (bool, error) {
-	q := store.New(s.pool)
-	c, err := q.GetOpenRouterCatalog(ctx)
+	c, err := store.New(s.pool).GetOpenRouterCatalog(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	} else if err != nil {
 		return false, err
 	}
-	if now.Sub(c.FetchedAt.Time) >= Interval {
+	if now.Sub(c.FetchedAt.Time) >= Interval-dueSlack {
 		return true, nil
 	}
-	rows, err := q.ListOpenRouterModels(ctx)
-	if err != nil {
-		return false, err
-	}
-	known := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		known[r.Model] = true
-	}
-	for _, m := range inUse {
-		if !known[m] && slices.Contains(listed, m) {
+	for _, m := range inUseListed(inUse, listed) {
+		if !slices.Contains(c.InUseModels, m) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// inUseListed is the sorted set of the models in use that listed holds.
+func inUseListed(inUse, listed []string) []string {
+	out := []string{}
+	for _, m := range inUse {
+		if slices.Contains(listed, m) && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Result says what one Apply stored.
@@ -132,10 +139,21 @@ func (s *Store) Apply(ctx context.Context, snap pricefetch.Snapshot, inUse []str
 	for _, m := range inUse {
 		use[m] = true
 	}
+	listed := make([]string, 0, len(snap.Meta))
+	for _, m := range snap.Meta {
+		listed = append(listed, m.Model)
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
+		// Two replicas can both find the catalog due. The lock makes the second wait until the first
+		// commits; each later statement (read committed) then sees the first one's proposals, so the
+		// second refreshes them instead of inserting a duplicate that the live index would refuse.
+		if err := q.LockOpenRouterCatalog(ctx); err != nil {
+			return err
+		}
 		if err := q.UpsertOpenRouterCatalog(ctx, store.UpsertOpenRouterCatalogParams{
 			Source: source, FetchedAt: at, ModelCount: int32(snap.Count), Sha256: snap.SHA256, // #nosec G115 -- bounded by the body cap
+			InUseModels: inUseListed(inUse, listed),
 		}); err != nil {
 			return err
 		}

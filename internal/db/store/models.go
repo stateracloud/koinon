@@ -2059,11 +2059,12 @@ type OidcLoginFlow struct {
 }
 
 type OpenrouterCatalog struct {
-	Singleton  bool
-	Source     string
-	FetchedAt  pgtype.Timestamptz
-	ModelCount int32
-	Sha256     string
+	Singleton   bool
+	Source      string
+	FetchedAt   pgtype.Timestamptz
+	ModelCount  int32
+	Sha256      string
+	InUseModels []string
 }
 
 type OpenrouterLimitProposal struct {
