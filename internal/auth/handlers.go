@@ -108,15 +108,26 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.afterPasswordCheck != nil {
+		s.afterPasswordCheck()
+	}
 	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}
 	var token string
 	_, err = audit.InTx(r.Context(), s.pool, func(q *store.Queries, b audit.Batch) error {
+		if err := recheckCredential(r.Context(), q, cred); err != nil {
+			return err
+		}
 		var err error
 		token, _, err = s.createSession(r.Context(), q, b, cred.UserID, store.AuthMethodPassword)
 		return err
 	})
+	if errors.Is(err, errCredentialChanged) {
+		s.log.Info("password login rejected", "reason", "password changed during login")
+		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
+		return
+	}
 	if err != nil {
 		s.log.Error("creating session failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{"internal error"})
@@ -128,6 +139,28 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 var errBusy = errors.New("too many concurrent password checks")
+
+// errCredentialChanged means the password changed (a change or an operator reset) between the
+// password check and the session.
+var errCredentialChanged = errors.New("the password changed during the login")
+
+// recheckCredential share-locks the credential in the session's transaction and refuses the login
+// when its hash is no longer the one checkPassword verified. The lock serializes the session with a
+// password change or reset, which UPDATE the row: either the login sees the new hash here, or the
+// reset waits for the session to commit and then revokes it (RevokeUserSessions).
+func recheckCredential(ctx context.Context, q *store.Queries, verified store.LocalCredential) error {
+	cur, err := q.LockLocalCredentialShare(ctx, verified.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errCredentialChanged
+	}
+	if err != nil {
+		return err
+	}
+	if cur.PasswordHash != verified.PasswordHash {
+		return errCredentialChanged
+	}
+	return nil
+}
 
 // checkPassword verifies a local password. Unknown usernames cost the same
 // as wrong passwords.

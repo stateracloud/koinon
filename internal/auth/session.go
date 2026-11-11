@@ -84,6 +84,10 @@ type Service struct {
 
 	// secureCookies is false only for a plain http:// PublicURL.
 	secureCookies bool
+
+	// afterPasswordCheck is a test hook: it runs after a password check succeeded and before the
+	// transaction that acts on it, so a spec can change the password in that window.
+	afterPasswordCheck func()
 }
 
 // New returns a Service backed by pool.

@@ -13,23 +13,24 @@ import (
 
 const createAPIToken = `-- name: CreateAPIToken :one
 
-INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, created_at, install_mark)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark
+INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, created_at, install_mark, requires_platform_admin)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark, requires_platform_admin
 `
 
 type CreateAPITokenParams struct {
-	OrgID         pgtype.UUID
-	ID            pgtype.UUID
-	Name          string
-	Prefix        string
-	TokenHash     []byte
-	Role          OrgRole
-	CreatedBy     pgtype.UUID
-	ParentTokenID pgtype.UUID
-	ExpiresAt     pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	InstallMark   pgtype.Text
+	OrgID                 pgtype.UUID
+	ID                    pgtype.UUID
+	Name                  string
+	Prefix                string
+	TokenHash             []byte
+	Role                  OrgRole
+	CreatedBy             pgtype.UUID
+	ParentTokenID         pgtype.UUID
+	ExpiresAt             pgtype.Timestamptz
+	CreatedAt             pgtype.Timestamptz
+	InstallMark           pgtype.Text
+	RequiresPlatformAdmin bool
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -52,6 +53,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.ExpiresAt,
 		arg.CreatedAt,
 		arg.InstallMark,
+		arg.RequiresPlatformAdmin,
 	)
 	var i ApiToken
 	err := row.Scan(
@@ -68,12 +70,13 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.InstallMark,
+		&i.RequiresPlatformAdmin,
 	)
 	return i, err
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
-SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark FROM api_tokens
+SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark, requires_platform_admin FROM api_tokens
 WHERE org_id = $1 AND id = $2
 `
 
@@ -99,31 +102,33 @@ func (q *Queries) GetAPIToken(ctx context.Context, arg GetAPITokenParams) (ApiTo
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.InstallMark,
+		&i.RequiresPlatformAdmin,
 	)
 	return i, err
 }
 
 const getAPITokenByPrefix = `-- name: GetAPITokenByPrefix :one
-SELECT t.org_id, t.id, t.name, t.prefix, t.token_hash, t.role, t.created_by, t.parent_token_id, t.expires_at, t.revoked_at, t.last_used_at, t.created_at, t.install_mark, o.slug AS org_slug FROM api_tokens t
+SELECT t.org_id, t.id, t.name, t.prefix, t.token_hash, t.role, t.created_by, t.parent_token_id, t.expires_at, t.revoked_at, t.last_used_at, t.created_at, t.install_mark, t.requires_platform_admin, o.slug AS org_slug FROM api_tokens t
 JOIN orgs o ON o.id = t.org_id AND o.deleted_at IS NULL
 WHERE t.prefix = $1
 `
 
 type GetAPITokenByPrefixRow struct {
-	OrgID         pgtype.UUID
-	ID            pgtype.UUID
-	Name          string
-	Prefix        string
-	TokenHash     []byte
-	Role          OrgRole
-	CreatedBy     pgtype.UUID
-	ParentTokenID pgtype.UUID
-	ExpiresAt     pgtype.Timestamptz
-	RevokedAt     pgtype.Timestamptz
-	LastUsedAt    pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	InstallMark   pgtype.Text
-	OrgSlug       string
+	OrgID                 pgtype.UUID
+	ID                    pgtype.UUID
+	Name                  string
+	Prefix                string
+	TokenHash             []byte
+	Role                  OrgRole
+	CreatedBy             pgtype.UUID
+	ParentTokenID         pgtype.UUID
+	ExpiresAt             pgtype.Timestamptz
+	RevokedAt             pgtype.Timestamptz
+	LastUsedAt            pgtype.Timestamptz
+	CreatedAt             pgtype.Timestamptz
+	InstallMark           pgtype.Text
+	RequiresPlatformAdmin bool
+	OrgSlug               string
 }
 
 // Authentication: the org is not known before the token is. Looked up by the unique prefix
@@ -145,13 +150,14 @@ func (q *Queries) GetAPITokenByPrefix(ctx context.Context, prefix string) (GetAP
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.InstallMark,
+		&i.RequiresPlatformAdmin,
 		&i.OrgSlug,
 	)
 	return i, err
 }
 
 const listAPITokens = `-- name: ListAPITokens :many
-SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark FROM api_tokens
+SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark, requires_platform_admin FROM api_tokens
 WHERE org_id = $1
 ORDER BY created_at DESC, id DESC
 `
@@ -179,6 +185,7 @@ func (q *Queries) ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiTo
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.InstallMark,
+			&i.RequiresPlatformAdmin,
 		); err != nil {
 			return nil, err
 		}
@@ -191,7 +198,7 @@ func (q *Queries) ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiTo
 }
 
 const lockAPITokenShare = `-- name: LockAPITokenShare :one
-SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark FROM api_tokens
+SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at, install_mark, requires_platform_admin FROM api_tokens
 WHERE org_id = $1 AND id = $2
 FOR SHARE
 `
@@ -220,6 +227,7 @@ func (q *Queries) LockAPITokenShare(ctx context.Context, arg LockAPITokenSharePa
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.InstallMark,
+		&i.RequiresPlatformAdmin,
 	)
 	return i, err
 }
@@ -269,7 +277,7 @@ WITH RECURSIVE tree AS (
 UPDATE api_tokens AS t
 SET revoked_at = coalesce(t.revoked_at, now())
 WHERE t.org_id = $1 AND t.id IN (SELECT tree.id FROM tree)
-RETURNING t.org_id, t.id, t.name, t.prefix, t.token_hash, t.role, t.created_by, t.parent_token_id, t.expires_at, t.revoked_at, t.last_used_at, t.created_at, t.install_mark
+RETURNING t.org_id, t.id, t.name, t.prefix, t.token_hash, t.role, t.created_by, t.parent_token_id, t.expires_at, t.revoked_at, t.last_used_at, t.created_at, t.install_mark, t.requires_platform_admin
 `
 
 type RevokeAPITokenTreeParams struct {
@@ -301,6 +309,7 @@ func (q *Queries) RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTree
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.InstallMark,
+			&i.RequiresPlatformAdmin,
 		); err != nil {
 			return nil, err
 		}
