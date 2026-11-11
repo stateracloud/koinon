@@ -128,8 +128,11 @@ EOF
 		"$repo/hack/dep-age-check.sh" >>"$frag"
 	{
 		printf 'check_image %q\n' "$ref"
-		echo 'echo "checked=$checked"'
-		echo 'echo "fails=$fails"'
+		# Literal $checked/$fails for the frag; expand when the frag runs.
+		cat <<'FRAGTAIL'
+echo "checked=$checked"
+echo "fails=$fails"
+FRAGTAIL
 	} >>"$frag"
 	bash "$frag" 2>&1
 }
