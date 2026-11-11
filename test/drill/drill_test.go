@@ -402,12 +402,10 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		must(err, "org-limits set: "+out)
 		// Run now goes through the org's queue, so with the low limits only the first call is accepted at once.
 		// The others wait for the rate limit, and the request gives up after 30 s with "queue is busy"
-		// (connect.CodeUnavailable); the admin API shows that as 500 "internal error", not 503. The workflow
-		// stays ENQUEUED, and that is what the drill needs. The calls go out a second apart (see below) and wait together, so the wait is one
-		// timeout, not N. What the check holds to is the end state: at least one 202, no other status than a
-		// 202, 500 or 503, and N-1 workflows ENQUEUED when the backup starts.
-		// TODO(#529): the 500 is a product gap. Exit condition: when #529 maps CodeUnavailable to 503,
-		// stop accepting 500 here. Do not let it hide a real failure by accepting any other status.
+		// (connect.CodeUnavailable → HTTP 503). The workflow stays ENQUEUED, and that is what the drill
+		// needs. The calls go out a second apart (see below) and wait together, so the wait is one
+		// timeout, not N. What the check holds to is the end state: at least one 202, no other status
+		// than a 202 or 503, and N-1 workflows ENQUEUED when the backup starts.
 		type reply struct {
 			code int
 			body string
@@ -431,7 +429,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			switch r.code {
 			case http.StatusAccepted:
 				accepted++
-			case http.StatusInternalServerError, http.StatusServiceUnavailable:
+			case http.StatusServiceUnavailable:
 			default:
 				Fail(fmt.Sprintf("Run now answered %d: %s", r.code, r.body))
 			}

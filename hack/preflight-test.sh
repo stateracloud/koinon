@@ -37,7 +37,8 @@ esac
 exit 0'
 stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
-stub pnpm 'exit 0'
+# `pnpm --dir web install` makes web/node_modules/.bin/protoc-gen-es unless FAKE_PNPM_INSTALL_FAIL is set.
+stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
@@ -65,6 +66,7 @@ chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
 echo "package foo" >"$seed/internal/foo/a.go"
 echo base >"$seed/README.txt"
+echo 'lockfileVersion: 1' >"$seed/web/pnpm-lock.yaml"
 for d in internal/foo charts/koinon web docs/adr internal/db/queries internal/db/migrations; do : >"$seed/$d/.gitkeep"; done
 (cd "$seed" && git add -A && git commit -q -m seed && git remote add origin "$tmp/origin.git" && git push -q origin main)
 
@@ -298,6 +300,26 @@ rc=$(pf "$tmp/g2" --only generate)
 check "generate leaves a diff: exit 1" eq "$rc" 1
 rm -f generated.txt
 unset FAKE_GEN_CHANGE
+
+# 6b. a fresh worktree has no web/node_modules (#541): one offline install, then the gate runs; if the
+# store cannot serve it the gate is a skip (lane-gates: notrun), never a failure
+reset_state
+w=$(fresh); cd "$w"
+echo "-- q" >internal/db/queries/q.sql; echo "x" >web/app.ts; commit_all
+check "fresh worktree has no node_modules" hasnt 'x' <(ls web/node_modules 2>/dev/null)
+rc=$(pf "$tmp/n1" --only generate)
+check "generate in a fresh worktree: exit 0" eq "$rc" 0
+check "offline frozen install ran" has '^pnpm --dir web install --offline --frozen-lockfile' "$FAKE_LOG"
+check "make generate ran after the install" has '^make generate' "$FAKE_LOG"
+rm -rf web/node_modules; reset_state
+export FAKE_PNPM_INSTALL_FAIL=1
+for g in generate web; do
+	rc=$(pf "$tmp/n2$g" --only "$g")
+	check "$g without deps: exit 0 (skip, not fail)" eq "$rc" 0
+	check "$g without deps: skip line says why" has "^$g skip (web dependencies missing" "$tmp/n2$g"
+done
+check "make generate not run without deps" hasnt '^make generate' "$FAKE_LOG"
+unset FAKE_PNPM_INSTALL_FAIL
 
 # 7. the checker gates run their scripts with the right arguments
 reset_state
