@@ -6,6 +6,10 @@
 # test/e2e/kind/model-provider.yaml, which the Tiltfile applies. Prerequisites: make dev-kind-up.
 image:
   registry: localhost:5001
+  # Always: the Tiltfile pushes every rebuild under the reused `dev` tag too (the preflight Job's probe pods run
+  # it). With the push registry the node is not reloaded as `kind load` did, so IfNotPresent would keep the old
+  # image under that tag (#45).
+  pullPolicy: Always
 
 egress:
   allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080"]

@@ -98,4 +98,14 @@ var _ = Describe("kind-config.yaml registry wiring", func() {
 			Expect(string(b)).NotTo(ContainSubstring("kind.local"), f)
 		}
 	})
+
+	// A pushed image is not reloaded into the node the way `kind load` replaced it, so a reused tag (the e2e's
+	// `e2e`, the Tiltfile's `dev` for the preflight probe pods) needs pullPolicy Always or the node keeps the old one.
+	It("pulls the reused tags on every start, in the e2e values and in the Tilt kind profile", func() {
+		for _, f := range []string{"koinon-values.yaml", "../../../hack/dev/values-kind.yaml"} {
+			b, err := os.ReadFile(f)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).To(MatchRegexp(`(?m)^image:\n(?:  .*\n|\s*#.*\n)*?  pullPolicy: Always$`), f)
+		}
+	})
 })
