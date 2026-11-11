@@ -148,6 +148,27 @@ var _ = Describe("Binding", func() {
 		Expect(n).To(Equal(1))
 	})
 
+	It("retries the follow-up steps of a claim that failed after the row was read", func(ctx SpecContext) {
+		_, err := pool.Exec(ctx, `ALTER TABLE install_binding ADD CONSTRAINT test_no_public_url CHECK (public_url IS NULL) NOT VALID`)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) {
+			_, _ = pool.Exec(ctx, `ALTER TABLE install_binding DROP CONSTRAINT IF EXISTS test_no_public_url`)
+		})
+		b := newBinding("hash-a", false)
+		_, err = b.Claim(ctx, installbinding.Targets{PublicURL: "https://a"})
+		Expect(err).To(HaveOccurred(), "refreshTargets fails once")
+		_, err = pool.Exec(ctx, `ALTER TABLE install_binding DROP CONSTRAINT test_no_public_url`)
+		Expect(err).NotTo(HaveOccurred())
+
+		runCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go b.Run(runCtx)
+		Eventually(func() string {
+			r, _ := row(ctx, b)
+			return r.Targets.PublicURL
+		}).WithTimeout(installbinding.ClaimRetryInterval * 3).WithPolling(250 * time.Millisecond).Should(Equal("https://a"))
+	})
+
 	It("does not refresh targets or stamp legacy rows in state copy", func(ctx SpecContext) {
 		Expect(newBinding("hash-a", false).Claim(ctx, installbinding.Targets{PublicURL: "https://a"})).To(Equal(installbinding.StateSame))
 		b := newBinding("hash-b", false)

@@ -142,6 +142,9 @@ type Binding struct {
 	at      time.Time
 	own     Targets
 	claimed bool
+	// followUp is set while the steps after the row read (refreshTargets, stampLegacy) have not all
+	// succeeded; Run repeats Claim until it clears. Both steps are idempotent.
+	followUp bool
 
 	quarantined *prometheus.CounterVec
 }
@@ -286,6 +289,7 @@ func (b *Binding) Claim(ctx context.Context, own Targets) (State, error) {
 	}
 	b.mu.Lock()
 	b.claimed = true
+	b.followUp = !b.held && st == StateSame
 	b.mu.Unlock()
 	if !b.held && st == StateSame {
 		if err := b.refreshTargets(ctx, own); err != nil {
@@ -294,6 +298,9 @@ func (b *Binding) Claim(ctx context.Context, own Targets) (State, error) {
 		if err := b.stampLegacy(ctx); err != nil {
 			return st, err
 		}
+		b.mu.Lock()
+		b.followUp = false
+		b.mu.Unlock()
 	}
 	if st == StateCopy {
 		b.log.Warn("install binding: this database was bound to another install; its API tokens and sessions are refused until a platform admin runs adopt-restore or rebinds a token",
@@ -401,9 +408,9 @@ func (b *Binding) Run(ctx context.Context) {
 			// The start-time claim failed (the migration Job has not created install_binding yet, or the
 			// database was away). Keep trying; until it succeeds Allows fails closed.
 			b.mu.Lock()
-			claimed, own := b.claimed, b.own
+			claimed, own, followUp := b.claimed, b.own, b.followUp
 			b.mu.Unlock()
-			if claimed {
+			if claimed && !followUp {
 				continue
 			}
 			if _, err := b.Claim(ctx, own); err != nil {
