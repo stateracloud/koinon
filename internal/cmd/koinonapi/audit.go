@@ -184,7 +184,10 @@ func anchorAudit(ctx context.Context, db audit.Beginner, out io.Writer) error {
 func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
 	if anchors != "" {
-		inst, err := checkExportFile(anchors, true)
+		// Verify without CollectAnchors first: that option is install-only inside VerifyExport, so
+		// an org file would fail with an internal option name before we can say --anchors needs
+		// an install export (#406 Bugbot).
+		inst, err := checkExportFile(anchors, false)
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -194,6 +197,14 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		}
 		if inst.Header.Chain != audit.ChainInstall {
 			return fmt.Errorf("--anchors %s is an org export; give an install export", anchors)
+		}
+		inst, err = checkExportFile(anchors, true)
+		if err != nil {
+			return fmt.Errorf("--anchors %s: %w", anchors, err)
+		}
+		if !inst.OK() {
+			audit.WriteExportReport(out, inst)
+			return fmt.Errorf("--anchors %s does not verify: %w", anchors, audit.ErrBroken)
 		}
 		if len(inst.StreamAnchors) == 0 {
 			_, _ = fmt.Fprintf(out, "note    --anchors %s holds no anchors: nothing to check the file against\n", anchors)
