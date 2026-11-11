@@ -170,8 +170,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Restored everywhere, saved only by pushes to main (below): a pull request, or a dispatch on
-      # an arbitrary commit, can never write the cache that main's runs read.
+      # Restored everywhere, saved only by a push to main or the nightly schedule on main (below): a pull request, or a
+      # dispatch on an arbitrary commit, can never write the cache that main's runs read.
       - id: e2ego
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
