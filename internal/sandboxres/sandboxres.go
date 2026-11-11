@@ -227,6 +227,35 @@ func (r Range) String() string {
 // limit. The reconciler clamps again on every pass, because the bounds can change after the write.
 // A *BoundsError is a refusal; any other error is a malformed quantity. The policy must be valid.
 func (p Policy) CheckOverride(tpl, override templates.Resources) error {
+	// Only a request the user set explicitly can be refused for being above its limit. A request
+	// that comes from the template or the platform default is lowered to the effective limit by
+	// Effective (and, with MemoryRequestEqualsLimit, set to it), so the API and the reconciler
+	// agree. The limit is the override's, else the template's, else the default.
+	eff := Overlay(tpl, override)
+	for _, f := range []struct {
+		field string
+		set   templates.Quantities
+		eff   templates.Quantities
+		def   templates.Quantities
+	}{{"cpu", override.CPU, eff.CPU, p.Default.CPU}, {"memory", override.Memory, eff.Memory, p.Default.Memory}} {
+		if f.set.Request == "" {
+			continue
+		}
+		lim := f.eff.Limit
+		if lim == "" {
+			lim = f.def.Limit
+		}
+		if lim == "" {
+			continue
+		}
+		req, _ := parse(f.set.Request)
+		l, _ := parse(lim)
+		if req != nil && l != nil && req.Cmp(*l) > 0 {
+			return &BoundsError{Msg: fmt.Sprintf("%s.request %s is greater than %s.limit %s: a request cannot exceed its limit (the platform allows a limit of %s)",
+				f.field, f.set.Request, f.field, lim, p.limitRange(f.field))}
+		}
+	}
+
 	if err := override.Validate(); err != nil {
 		return &BoundsError{Msg: err.Error()}
 	}
@@ -243,24 +272,12 @@ func (p Policy) CheckOverride(tpl, override templates.Resources) error {
 			return &BoundsError{Msg: fmt.Sprintf("%s %s is %s: the platform allows %s", f.field, f.v, reason, f.r)}
 		}
 	}
-	// The values that would run, before clamping: a request above its limit is a refusal here,
-	// where Effective would silently lower it.
-	eff := Overlay(tpl, override)
-	for _, f := range []struct {
-		field string
-		q     templates.Quantities
-		def   templates.Quantities
-	}{{"cpu", eff.CPU, p.Default.CPU}, {"memory", eff.Memory, p.Default.Memory}} {
-		q := f.q
-		if q.Request == "" {
-			q.Request = f.def.Request
-		}
-		if q.Limit == "" {
-			q.Limit = f.def.Limit
-		}
-		if err := q.Validate(f.field); err != nil {
-			return &BoundsError{Msg: err.Error()}
-		}
-	}
 	return nil
+}
+
+func (p Policy) limitRange(field string) Range {
+	if field == "cpu" {
+		return p.Bounds.CPULimit
+	}
+	return p.Bounds.MemoryLimit
 }

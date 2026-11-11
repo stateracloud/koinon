@@ -1,6 +1,8 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /* koinon-api, koinon-reconciler and koinon-agentd. */ -}}
 {{- $configHash := include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+{{- /* The API reads only the sandboxResources section (the values under sandbox.resources), so its checksum covers just those: a reconciler-only change must not restart koinon-api. */}}
+{{- $apiConfigHash := toYaml .Values.sandbox.resources | sha256sum }}
 {{- range $component := list "api" "reconciler" "agentd" }}
 {{- $v := index $.Values $component }}
 {{- $name := include "koinon.componentName" (list $ $component) }}
@@ -36,8 +38,8 @@ spec:
       {{- if or $readsConfig $v.podAnnotations }}
       annotations:
         {{- if $readsConfig }}
-        {{- /* The reconciler and the API read config.yaml; roll them when the file changes. */}}
-        checksum/config: {{ $configHash }}
+        {{- /* The reconciler reads config.yaml and rolls when the file changes; the API rolls only when its section does. */}}
+        checksum/config: {{ ternary $apiConfigHash $configHash (eq $component "api") }}
         {{- end }}
         {{- with $v.podAnnotations }}
         {{- toYaml . | nindent 8 }}

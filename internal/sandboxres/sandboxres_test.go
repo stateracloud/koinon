@@ -132,7 +132,43 @@ var _ = Describe("Policy.CheckOverride", func() {
 		Entry("a request above the limit the template sets", res("", "1", "", ""), res("2", "", "", ""), "cpu.request 2 is greater than cpu.limit 1"),
 		Entry("a request above the default limit", res("", "", "", ""), res("", "", "3Gi", ""), "memory.request 3Gi is greater than memory.limit 2Gi"),
 	)
+
+	// An unset request is filled from the template or the default and lowered to the limit, as
+	// Effective does; only a request the user set can be refused.
+	DescribeTable("agrees with Effective on requests the user did not set",
+		func(pol sandboxres.Policy, tpl, override templates.Resources, want string, wantMem, wantCPU string) {
+			err := pol.CheckOverride(tpl, override)
+			if want != "" {
+				Expect(err).To(MatchError(ContainSubstring(want)))
+				Expect(err).To(MatchError(SatisfyAny(ContainSubstring("512Mi to 8Gi"), ContainSubstring("at most 4"))))
+				return
+			}
+			Expect(err).NotTo(HaveOccurred())
+			eff, _ := pol.Effective(sandboxres.Overlay(tpl, override))
+			Expect(eff.Memory.Request).To(Equal(wantMem))
+			Expect(eff.CPU.Request).To(Equal(wantCPU))
+		},
+		Entry("memory limit only, below the default request (request equals limit)",
+			p, res("", "", "", ""), res("", "", "", "512Mi"), "", "512Mi", "250m"),
+		Entry("memory limit only, below the default request, equal-to-limit off",
+			withoutEqual(p), res("", "", "", ""), res("", "", "", "512Mi"), "", "512Mi", "250m"),
+		Entry("memory limit only, template request above it",
+			p, res("", "", "4Gi", ""), res("", "", "", "512Mi"), "", "512Mi", "250m"),
+		Entry("cpu limit only, below the default request",
+			p, res("", "", "", ""), res("", "100m", "", ""), "", "2Gi", "100m"),
+		Entry("explicit memory request above the explicit limit",
+			p, res("", "", "", ""), res("", "", "4Gi", "2Gi"), "memory.request 4Gi is greater than memory.limit 2Gi", "", ""),
+		Entry("explicit memory request above the explicit limit, equal-to-limit off",
+			withoutEqual(p), res("", "", "", ""), res("", "", "4Gi", "2Gi"), "memory.request 4Gi is greater than memory.limit 2Gi", "", ""),
+		Entry("explicit cpu request above the explicit limit",
+			p, res("", "", "", ""), res("2", "1", "", ""), "cpu.request 2 is greater than cpu.limit 1", "", ""),
+	)
 })
+
+func withoutEqual(p sandboxres.Policy) sandboxres.Policy {
+	p.MemoryRequestEqualsLimit = false
+	return p
+}
 
 var _ = Describe("FromConfig", func() {
 	It("lays the file over the defaults and validates", func() {
