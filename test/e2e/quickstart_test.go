@@ -1014,15 +1014,16 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
-		// 2 minutes, the value with evidence. The cap counts from the run's first claim
-		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
-		// A 30 s cap failed in CI (#572, PR 595, run 43091299950): after 30 s the new sandbox's pods were
-		// still behind OpenShell's openshell.ai/bootstrap scheduling gate, so no pull had been tried and
-		// the cause was "unknown". Only the OpenShell gateway removes that gate (in its CreateSandbox);
-		// in that run the config change above was recreating the org's other OpenCode sandbox at the
-		// same time. Why the gate stays that long is the slow-start question of #573; this step goes
-		// back to a short cap when that has a cause and a fix, not by a guess.
-		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
+		// The cap counts from the run's first claim (internal/agentd/sandbox.go) and the cause is named
+		// from the last pod reason the observer read. A 30 s cap failed in CI (#572, PR 595, run
+		// 43091299950): after 30 s the new sandbox's pods were still behind OpenShell's
+		// openshell.ai/bootstrap scheduling gate, so no pull had been tried and the cause was
+		// "unknown". Only the OpenShell gateway removes that gate (in its CreateSandbox), and nothing
+		// reconciled while the restarted reconciler had no leader: the new pod waited for the old pod's
+		// advisory lock and retried only after ResyncInterval (30 s). The gate does not stay that long
+		// by itself. #573 fixed the hand-over (the follower now blocks on the lock), so the cap is back
+		// at 30 s.
+		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=30s")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
@@ -1057,7 +1058,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		})
 
 		// Data for the KOINON_SANDBOX_WAIT_CAP above: how long the image_pull failure took on this runner.
-		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 2 minutes)", time.Since(missingImageStart).Seconds()))
+		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 30 seconds)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
 		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))

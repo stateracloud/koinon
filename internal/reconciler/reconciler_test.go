@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -1433,6 +1434,87 @@ var _ = Describe("Reconciler", func() {
 		Eventually(func() openshellv1.SandboxPhase {
 			return osg.Sandbox(ws, names.Sandbox).GetStatus().GetPhase()
 		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+	})
+
+	Describe("the leader lock (#573)", func() {
+		// holdLock takes the reconciler's session lock on its own connection, as a running leader
+		// does, and returns the function that releases it.
+		holdLock := func(ctx context.Context) (release func()) {
+			GinkgoHelper()
+			c, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(0x6b6f696e6f6e7263))
+			Expect(err).NotTo(HaveOccurred())
+			return func() { _ = c.Conn().Close(context.Background()); c.Release() }
+		}
+		// run starts r.Run and returns a stop function that waits for Run to end.
+		run := func(r *reconciler.Reconciler) (stop func() time.Duration) {
+			runCtx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- r.Run(runCtx) }()
+			var stopped bool
+			stop = func() time.Duration {
+				if stopped {
+					return 0
+				}
+				stopped = true
+				t := time.Now()
+				cancel()
+				Eventually(done).Should(Receive(BeNil()))
+				return time.Since(t)
+			}
+			DeferCleanup(func() { stop() })
+			return stop
+		}
+		leading := func() int { return strings.Count(logs.String(), "reconciler is leading") }
+		holders := func(ctx context.Context) int {
+			GinkgoHelper()
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
+				AND ((classid::bigint << 32) | objid::bigint) = $1`, int64(0x6b6f696e6f6e7263)).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		It("takes over within about 2 s of the holder releasing the lock, with a long resync interval", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			release := holdLock(ctx)
+			run(newReconciler())
+			Eventually(logs.String).Should(ContainSubstring("waiting for the leader lock"))
+			Consistently(leading, "500ms", "50ms").Should(BeZero())
+
+			t := time.Now()
+			release()
+			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(1))
+			GinkgoWriter.Printf("leader hand-over took %s\n", time.Since(t))
+			Expect(logs.String()).To(MatchRegexp(`reconciler is leading" waited=\S+`))
+		})
+
+		It("ends a blocked wait promptly when its context is cancelled, and does not take the lock afterwards", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			release := holdLock(ctx)
+			stop := run(newReconciler())
+			Eventually(logs.String).Should(ContainSubstring("waiting for the leader lock"))
+
+			Expect(stop()).To(BeNumerically("<", 2*time.Second))
+			release()
+			// No orphaned backend takes the lock once the holder is gone.
+			Consistently(func() int { return holders(ctx) }, "1s", "100ms").Should(BeZero())
+			Expect(leading()).To(BeZero())
+		})
+
+		It("never has two leaders, and the follower leads after the leader stops", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			stopFirst := run(newReconciler())
+			Eventually(leading).Should(Equal(1))
+			run(newReconciler())
+			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
+			Consistently(func() int { return holders(ctx) }, "1s", "100ms").Should(Equal(1))
+			Expect(leading()).To(Equal(1))
+
+			stopFirst()
+			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(2))
+			Expect(holders(ctx)).To(Equal(1))
+		})
 	})
 })
 

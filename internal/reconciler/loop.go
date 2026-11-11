@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/safego"
@@ -30,7 +31,9 @@ const (
 )
 
 // Run reconciles until ctx ends. Only the replica holding the leader lock reconciles; the
-// others retry every ResyncInterval. A failed pass is logged and retried on the next wake-up.
+// others wait on the lock and take over as soon as the leader releases it (#573). A failed pass
+// is logged and retried on the next wake-up; a failed lead (lost connection) is retried after
+// ResyncInterval.
 func (r *Reconciler) Run(ctx context.Context) error {
 	defer r.plan.Close()
 	safego.Go(ctx, r.log, "mcp-prober", func(ctx context.Context) { r.RunProber(ctx) })
@@ -39,11 +42,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if errors.Is(err, errNotLeader) {
-			r.log.Debug("another replica holds the reconciler lock")
-		} else {
-			r.log.Warn("reconcile loop restarting", "err", err)
-		}
+		r.log.Warn("reconcile loop restarting", "err", err)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -52,10 +51,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	}
 }
 
-var errNotLeader = errors.New("reconciler: not the leader")
-
 // lead takes the leader lock and LISTENs on one dedicated connection, so that losing the
-// connection releases the lock and stops the loop together.
+// connection releases the lock and stops the loop together. A replica that is not the leader
+// blocks in pg_advisory_lock until the holder's session ends, so a rollout hands over at once
+// instead of after a poll interval. The lock is a session lock: it needs the session-level
+// connection that LISTEN needs anyway (a transaction-mode pooler cannot serve this process).
 func (r *Reconciler) lead(ctx context.Context) error {
 	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
@@ -63,17 +63,16 @@ func (r *Reconciler) lead(ctx context.Context) error {
 	}
 	defer closeConn(conn)
 
-	var leader bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", leaderLock).Scan(&leader); err != nil {
+	r.log.Info("reconciler is waiting for the leader lock")
+	start := time.Now()
+	if err := lockBlocking(ctx, conn.Conn(), leaderLock); err != nil {
 		return fmt.Errorf("take leader lock: %w", err)
-	}
-	if !leader {
-		return errNotLeader
 	}
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	r.log.Info("reconciler is leading", "resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout)
+	r.log.Info("reconciler is leading", "waited", time.Since(start).Round(time.Millisecond),
+		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout)
 
 	for {
 		pctx, cancel := context.WithTimeout(ctx, passTimeout)
@@ -87,6 +86,43 @@ func (r *Reconciler) lead(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// lockBlocking takes the session advisory lock key on c and returns when it is held, or when ctx
+// ends. The query runs on a context that ctx does not cancel: cancelling a query context makes
+// pgx close the socket, and a backend that waits for a lock does not notice a closed socket until
+// it has the lock, so it would take the lock after the caller gave up. Instead a watcher sends the
+// server a cancel request (repeated, because one sent before the backend runs the query is lost)
+// and the query ends with SQLSTATE 57014 on a connection that stays in a clean state.
+func lockBlocking(ctx context.Context, c *pgx.Conn, key int64) error {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+		}
+		for {
+			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = c.PgConn().CancelRequest(cctx)
+			cancel()
+			select {
+			case <-done:
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}()
+	_, err := c.Exec(context.Background(), "SELECT pg_advisory_lock($1)", key)
+	close(done)
+	<-stopped
+	if ctx.Err() != nil {
+		// Cancelled, or granted at the moment of shutdown; the caller closes the connection.
+		return ctx.Err()
+	}
+	return err
 }
 
 // wait returns after a notification (and a short debounce) or after d.
