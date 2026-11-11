@@ -63,8 +63,8 @@ check "e2e-kind.yml: a queue build is never cancelled" bash -c '
 
 # Every required name reports on a queue build. Only a workflow without a `merge_group` trigger makes the entry wait
 # for the 60-minute timeout; a job skipped by its `if:` reports a skipped (green) check that tests nothing, which is
-# also wrong for a required name, so (b) and (c) catch that. For every name in hack/ci-required.txt (not the advisory ones) plus
-# the advisory `review` (ADR 0103, advisory since 2026-11-11): find the job that produces it (its `name:`), then check (a) the workflow listens to
+# also wrong for a required name, so (b) and (c) catch that. For every name in hack/ci-required.txt (not the advisory ones):
+# find the job that produces it (its `name:`), then check (a) the workflow listens to
 # `merge_group`, (b) the job's `if:` is not false on merge_group, (c) every job it `needs:` passes (b) too, unless
 # the job runs under always()/!cancelled(). The `if:` forms are a small table (event_name compares, the draft flag,
 # always(), !cancelled(), outputs and results of other jobs); an unknown form fails the test, so teach it the new form.
@@ -202,7 +202,6 @@ print("ok %s/%s" % (found[0][0], found[0][3]))
 PY
 }
 required_names=$(sed -E 's/#.*//; s/[[:space:]]+$//' "$repo/hack/ci-required.txt" | awk 'NF { if ($1 == "advisory") next; sub(/^(aggregator|external) /, ""); print }')
-required_names=$(printf '%s\nreview\n' "$required_names" | sort -u)
 mg_seen=""
 while IFS= read -r name; do
 	[[ -n $name ]] || continue
@@ -223,7 +222,7 @@ while IFS= read -r name; do
 		;;
 	esac
 done <<<"$required_names"
-for name in review claim dco gitleaks 'e2e result'; do
+for name in claim dco gitleaks 'e2e result'; do
 	if [[ $mg_seen == *"|$name|"* ]]; then
 		echo "ok: '$name' is among the names checked"
 		pass=$((pass + 1))

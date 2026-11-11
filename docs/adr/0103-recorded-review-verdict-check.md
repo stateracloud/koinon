@@ -1,6 +1,6 @@
 # 0103. A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`
 
-- Status: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate
+- Status: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate; superseded 2026-11-11 (#546): the check is removed
 - Date: 2026-11-09
 - Amends: [0082](0082-work-claims-and-ready-queue.md) decision 9 (approval on sensitive paths), once the ruleset step below is done
 - Relates to: [0094](0094-work-claims-on-the-public-repository.md) (the merge queue), [0102](0102-merge-queue-runs-the-kind-e2e.md) (the queue runs the e2e), [0046](0046-adr-conventions.md)
@@ -287,6 +287,21 @@ What goes:
 
 Cost: nothing in the repository now stops a sensitive-path pull request that nobody reviewed. The queue's
 required checks and the owner's habit of running the review are the guard.
+
+## 2026-11-11 (#546): superseded, the check is removed
+
+procoduck decided on 2026-11-11 to remove the sensitive-path review requirement fully. This ADR is
+superseded: nothing in the repository records, checks or gates a review verdict any more. The
+decisions above stay as the record of what was tried; do not follow them.
+
+Removed: `.github/workflows/review.yml` (the `review` job), `hack/review-gate.sh`, `hack/review-gate-test.sh`,
+`hack/review-verdict.sh`, their `ci.yml` step, `paths.rules` entry and CODEOWNERS lines, and the section "The
+`review` check" of `docs/dev/ci.md`. `hack/pr-merge.sh` never reads a verdict; `--admin` is only for a pull
+request with a `.github/` path (ADR 0105 decision 6). `review` is in no required or advisory list, and the
+`main` ruleset does not name it (read on 2026-11-11), so no ruleset change is needed.
+
+What stays from ADR 0082: the CODEOWNERS approval on `.github/**`. Independent reviews of sensitive-path pull
+requests are the owner's habit, not a check.
 
 ## Links
 

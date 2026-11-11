@@ -377,3 +377,8 @@ ruleset. This changes two decisions above. Decision 5 (break glass): `pr-merge.s
 the ADR 0103 review gate on the head. Decision 6 (`--admin` for `.github/**`): `pr-merge.sh --admin` still runs
 `pr-wait.sh --checks` but no longer runs the review gate. The route guard no longer reads `review`: the expected
 `--admin` merge needs only the other required checks green on the head. The rest of both decisions stands.
+
+## Amendment 2026-11-11 (#546): the `review` check is gone
+
+ADR 0103 is superseded: `review.yml`, `hack/review-gate.sh` and `hack/review-verdict.sh` are removed. Read every
+`review` context and review-gate step above as historical; the `main` ruleset never requires it.
