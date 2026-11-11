@@ -18,8 +18,9 @@ yourself" rule; procoduck can overrule any of them.
 3. ADRs are canonical. `docs/design.md` remains the one-page overview and links each decision to
    its ADR; changes land in an ADR first, then the overview is updated.
 4. Statuses: Proposed, Accepted, Superseded by NNNN, Deprecated, Rejected. An ADR changed in part by a
-   later one lists it as "Amended by NNNN"; the later one lists "Amends". A change in part is always
-   written this way, never as "superseded in part".
+   later one lists it as "Amended by NNNN"; the later one lists "Amends". A later ADR that replaces
+   only some decisions may instead list "Supersedes in part" (and the older ADR "superseded in part
+   by NNNN"); the link rules below treat it like "Amends".
    - **Links go both ways.** "Amends", "Supersedes" and "Reduces" in one ADR need "Amended by",
      "Superseded by" and "Reduced by" (or the same words in the Status line) in the ADR it names, and the
      other way round. `hack/adr-lint.sh` fails on a link that has no matching link back, and on a

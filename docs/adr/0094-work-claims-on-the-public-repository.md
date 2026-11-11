@@ -87,6 +87,8 @@ token the bots use, and how pull requests merge.
 
 ### 1. Claims by comment: `/claim` and `/release`
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): no claim by comment; `claim-comment.yml` and the `comment` command are removed. A claim is taken with `hack/claim.sh take`, and the holder is `<login>#<lane>`.)_
+
 A new workflow `.github/workflows/claim-comment.yml` runs on `issue_comment` (`created`) for issues,
 not pull requests (`github.event.issue.pull_request` is empty). It ignores comments by bots. It runs
 the default branch's `hack/claim.sh` with the built-in `GITHUB_TOKEN` (job permissions
@@ -155,6 +157,8 @@ bot does three things:
 
 ### 2. The `claim` check is a conflict check
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): the check fails only when another human holds a claim on a closed issue or an ADR number; a live-claim or lease test does not exist, and the outsider classes are removed.)_
+
 The required check `claim` (`claims.yml`, `pull_request_target`, read-only token, the base branch's
 script) **fails only when someone else holds a live claim** on what the pull request takes:
 
@@ -188,6 +192,8 @@ The success lines name what was checked, for example `claim check: #159 is free`
 is claimed by @procoduck (the author)`, `claim check: no Closes #N; nothing to check`.
 
 ### 3. The sweeper and release-on-close use `GITHUB_TOKEN`; the App is retired
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): there is no sweeper; only the `release` job (`release-merged`) remains, and a close without a merge is released by its human with `release-pr`.)_
 
 The `sweeper` and `release` jobs of `claims.yml` drop `actions/create-github-app-token` and the
 `claims-bot` Environment. They run with `GITHUB_TOKEN`, job permissions `contents: write` (fast-forward
@@ -268,6 +274,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
 
 ### 5. `next` and `take` respect people, outsiders and open pull requests
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): outsider and person claim classes are removed; `next` skips held claims and issues an open pull request closes, and `take` assigns only the human.)_
+
 - **`next` skips** issues with any held claim (as today, which now includes person and outsider
   claims), issues that an open pull request closes (`closingIssuesReferences`, any author), and issues
   assigned to someone other than the caller's human (an assignee is a person's soft claim, Prow
@@ -281,6 +289,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   refusal; `take` links it as `pr`.
 
 ### 6. ADR numbers: the open pull requests count
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): an ADR reservation is permanent (`state: reserved`, no lease); the highest-of-three-sets rule stays.)_
 
 `hack/claim.sh adr` takes the highest of three sets, plus one:
 
@@ -296,6 +306,8 @@ both skipped `adr` remain `adr-lint`'s mechanical conflict after the first merge
 as in ADR 0082 decision 8.
 
 ### 7. `beat --mine` drops a claim its own session released
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): `beat` is removed with the lease, so this rule no longer applies.)_
 
 A claim that its own holder released is not lost. Today `beat --mine` stops with exit 3 ("lost #140
 #143 #145: stop work") when the same session released those claims itself with `claim.sh release`

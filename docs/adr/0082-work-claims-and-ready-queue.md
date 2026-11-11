@@ -32,6 +32,7 @@ claim ref could be deleted by hand.
    `released`). Heartbeat, release and takeover append a commit and fast-forward the ref
    (`PATCH`, `force=false`). **Claim refs are never deleted**: release writes `state: released`, and
    taking a released or expired claim is also a fast-forward, so exactly one taker wins.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): the holder is `<login>#<lane>`, there is no `lease_until`, and no heartbeat or takeover commit; the ref stays the only truth.)_
 2. **Leases.** An agent claim lasts 2 h with a heartbeat every 30 min; at lease + 15 min (grace)
    the sweeper warns, and at lease + 2 h the claim is freed. A human claim (`take <N> --human`)
    lasts 3 days with a daily heartbeat (`beat <N> --human`) and does not count against the session
@@ -42,9 +43,11 @@ claim ref could be deleted by hand.
    previous holder's next `beat` fails with exit code 3 ("lost claim"). A different human taking
    over opens a new pull request, because the `claim` check requires the claim's human to be the PR
    author.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): no lease, no heartbeat, no grace period and no takeover; a held claim stays held until the closing pull request merges or its human releases it.)_
 3. **Mirrors for humans, best effort; the ref is the truth.** Taking assigns the human, sets Project
    Status to In Progress and writes one issue comment carrying `<!-- koinon-claim -->`, edited (never
    appended) on every later change. Release unassigns and sets Status to Ready.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): the assignee is the only mirror; no board Status writes and no issue comment.)_
 4. **Ordering.** Board Status: Backlog, Ready, In Progress, In Review, Done. A Priority field P0 to
    P3. Label `agent-ok`. `claim.sh next` lists only issues that are Ready, `agent-ok`, in the
    current milestone, have no open native "blocked by" (`issues/{n}/dependencies/blocked_by`) and
@@ -56,12 +59,14 @@ claim ref could be deleted by hand.
    else sees the whole queue. `take` warns when another active claim
    shares the issue's `area:` label. The Phase field is retired: milestones are the release gate, and
    `next` uses the milestone only.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): one claim per lane, not per session; the cap of eight per human stays, best effort.)_
 6. **Liveness and the sweeper** (`claims.yml`, every 30 minutes). Liveness is the later of the
    lease and the last push or comment on the linked pull request plus one lease. Past liveness +
    grace the sweeper comments, mentioning the human, and labels `claim:stale`. Two hours after the
    lease ran out it releases the claim, sets Status Ready and
    keeps the draft pull request. When a pull request closes its claims are released. A pull request
    that is ready for review (not draft) is never swept: it is waiting on a person, not abandoned.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): there is no sweeper, no liveness rule and no `claim:stale` label; `release-merged` frees a claim on the merge, and its human frees any other.)_
 7. **PR check `claim`** (required from day one). Every pull request references `Closes #N` and each
    linked issue has a held claim whose `human` is the PR author. Exemptions: Dependabot (by actor
    login, never by title); a title starting `chore`, `ci` or `build(deps)`, but only when the pull
@@ -73,6 +78,7 @@ claim ref could be deleted by hand.
    is the bot): a human opens or adopts them. The check runs from `pull_request_target`, using the
    base branch's workflow and script and never checking out the pull request. After `take`, the
    script re-runs the failed check.
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): the check fails only when another human holds a claim on a closed issue or an ADR number; a pull request without `Closes #N` passes, and no exemption list is needed.)_
 8. **Merge ordering.** Strict required status checks plus a serialising updater (`updater.yml`): on
    a push to main, a finished `ci` or `e2e-kind` run of a pull request, auto-merge being enabled or the
    30-minute schedule (:07 and :37), the oldest auto-merge pull request that is behind main, not a
@@ -106,6 +112,7 @@ claim ref could be deleted by hand.
     `KOINON_BOT_PRIVATE_KEY`, read through `actions/create-github-app-token`, pinned by SHA and
     older than the ADR 0079 cooldown), held as secrets of an Environment limited to main; each job
     asks for the narrowest token permissions. Jobs skip with a notice while the secrets are absent.
+    _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): claims write no Project fields, so the App is not needed for claims; the updater is retired, see decision 8.)_
 11. **People.** `@ovirandunu` stays admin with full trust in the repository. He gets no access to
     procoduck's secret store, model budget or private test infrastructure; he uses his own setup for those. Both humans'
     agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay procoduck's.
