@@ -42,7 +42,8 @@ Each rule has these fields:
 - **Source**: where the pattern comes from, or "Koinon decision" and the ADR.
 - **Scope**: "general pattern" (other projects can use it) or "Koinon only".
 - **In force**: "now", "from v0.3" (planned in #580, no check yet) or "with #579 part 2" (the check arrives
-  with the next part of that issue).
+  with the next part of that issue). A MUST rule marked "from v0.3" has no check until #580 delivers it and does
+  not bind before v0.3.
 - **Not when**: one line, only where it helps.
 
 Run `hack/ci-rules-check.sh` to check the rules that a text scan can decide. It prints one line per rule:
@@ -78,7 +79,7 @@ budget is L1. Scope: general pattern. In force: now.
 or at release, not on each pull request. A red scheduled run MUST open or update one issue.
 Why: they are too slow for L1, and a red nightly nobody reads proves nothing.
 Check: review for the stage; `hack/e2e-bisect-test.sh` (the nightly and main e2e) and `hack/drill-issue-test.sh`
-(the drill, with #572) for the issue. The nightly `govulncheck` run notifies the maintainer through the failed
+(the drill; the script arrives with #572) for the issue. The nightly `govulncheck` run notifies the maintainer through the failed
 run only; it opens no issue yet.
 Source: [Firecracker tests README](https://github.com/firecracker-microvm/firecracker/blob/main/tests/README.md)
 (three lanes: required, optional, periodic). The upgrade test is "from v0.3". Scope: general pattern. In force: now.

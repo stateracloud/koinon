@@ -103,6 +103,8 @@ case_ "Q1: paths-ignore fails too" 1 'rule=Q1 verdict=fail' \
 	'sed -i.bak "s|^    types: \[opened\]|    types: [opened]\n    paths-ignore:\n      - \"docs/**\"|" "$r/.github/workflows/ci.yml"'
 case_ "Q1: a paths filter on a workflow with no required check is fine" 0 'rule=Q1 verdict=pass' \
 	'printf "name: o\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  o:\n    name: optional thing\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/o.yml"'
+case_ "Q1: a required name with parentheses is matched as plain text" 1 'rule=Q1 verdict=fail' \
+	'printf "escape (admission)\n" >>"$r/hack/ci-required.txt"; printf "name: e\non:\n  pull_request:\n    paths:\n      - x\npermissions:\n  contents: read\njobs:\n  e:\n    name: escape (admission)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n" >"$r/.github/workflows/e.yml"'
 case_ "Q1: a job-level if is fine" 0 'rule=Q1 verdict=pass' \
 	'sed -i.bak "s|^    name: go|    name: go\n    if: \${{ github.event_name == '"'"'push'"'"' }}|" "$r/.github/workflows/ci.yml"'
 
@@ -113,6 +115,10 @@ case_ "Q6: an expression without pull_request fails" 1 'rule=Q6 verdict=fail' \
 	'sed -i.bak "s|cancel-in-progress: false|cancel-in-progress: \${{ github.ref != '"'"'refs/heads/main'"'"' }}|" "$r/.github/workflows/ci.yml"'
 case_ "Q6: an expression naming pull_request passes" 0 'rule=Q6 verdict=pass' \
 	'sed -i.bak "s|cancel-in-progress: false|cancel-in-progress: \${{ github.event_name == '"'"'pull_request'"'"' }}|" "$r/.github/workflows/ci.yml"'
+case_ "Q6: a pull_request not-equal expression fails" 1 'rule=Q6 verdict=fail' \
+	'sed -i.bak "s|cancel-in-progress: false|cancel-in-progress: \${{ github.event_name != '"'"'pull_request'"'"' }}|" "$r/.github/workflows/ci.yml"'
+case_ "Q6: pull_request inside a longer expression passes" 0 'rule=Q6 verdict=pass' \
+	'sed -i.bak "s|cancel-in-progress: false|cancel-in-progress: \${{ github.event_name == '"'"'pull_request'"'"' \&\& github.ref != '"'"'refs/heads/main'"'"' }}|" "$r/.github/workflows/ci.yml"'
 case_ "Q6: cancel-in-progress true on a workflow without a required check passes" 0 'rule=Q6 verdict=pass' \
 	'printf "name: o\non: push\npermissions:\n  contents: read\nconcurrency:\n  group: g\n  cancel-in-progress: true\njobs:\n  o:\n    name: optional thing\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n" >"$r/.github/workflows/o.yml"'
 
@@ -142,6 +148,8 @@ case_ "T2: a waiver without an issue fails" 1 'rule=T2 verdict=fail' \
 case_ "T7: a job without timeout-minutes is reported, not failed" 0 'rule=T7 verdict=report' \
 	'sed -i.bak "/timeout-minutes: 5/{x;s/^/x/;/^x\{1\}$/{x;d;};x;}" "$r/.github/workflows/ci.yml"'
 case_ "T7: defers to runner-lint.sh when it has the rule" 0 'rule=T7 verdict=pass' \
+	'printf "grep -q timeout-minutes \"\$f\"\n" >"$r/hack/runner-lint.sh"; sed -i.bak "/timeout-minutes: 5/d" "$r/.github/workflows/ci.yml"'
+case_ "T7: the word only in a comment of runner-lint.sh does not defer" 0 'rule=T7 verdict=report' \
 	'printf "# timeout-minutes rule\n" >"$r/hack/runner-lint.sh"; sed -i.bak "/timeout-minutes: 5/d" "$r/.github/workflows/ci.yml"'
 
 # The real tree must not fail.

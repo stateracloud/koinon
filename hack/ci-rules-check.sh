@@ -123,7 +123,12 @@ fi
 defines_required() {
 	local n
 	for n in "${required[@]}"; do
-		code_lines "$1" | grep -q -x -E "(    name: |  )${n//./\\.}:?[[:space:]]*(#.*)?" && return 0
+		local l
+		while IFS= read -r l; do
+			l=${l%%[[:space:]]#*}
+			l=${l%"${l##*[![:space:]]}"}
+			[[ $l == "    name: $n" || $l == "    name: $n:" || $l == "  $n" || $l == "  $n:" ]] && return 0
+		done < <(code_lines "$1")
 	done
 	return 1
 }
@@ -161,8 +166,8 @@ else
 			val=${val#"${val%%[![:space:]]*}"}
 			if [[ $val == true* ]]; then
 				bad+=("$(basename "$f"): cancel-in-progress: true")
-			elif [[ $val == '${{'* && $val != *pull_request* ]]; then
-				bad+=("$(basename "$f"): cancel-in-progress expression without pull_request")
+			elif [[ $val == '${{'* && $val != *"github.event_name == 'pull_request'"* ]]; then
+				bad+=("$(basename "$f"): cancel-in-progress expression without github.event_name == 'pull_request'")
 			fi
 		done < <(code_lines "$f" | grep -E '^[[:space:]]+cancel-in-progress:')
 	done
@@ -225,7 +230,7 @@ fi
 
 # --- T7 -------------------------------------------------------------------------------------------
 ci=$wfdir/ci.yml
-if [[ -f $root/hack/runner-lint.sh ]] && grep -q 'timeout-minutes' "$root/hack/runner-lint.sh"; then
+if [[ -f $root/hack/runner-lint.sh ]] && code_lines "$root/hack/runner-lint.sh" | grep -q 'timeout-minutes'; then
 	verdict T7 pass "hack/runner-lint.sh checks timeout-minutes on every ci.yml job"
 elif [[ -f $ci ]]; then
 	counts=$(code_lines "$ci" | awk '

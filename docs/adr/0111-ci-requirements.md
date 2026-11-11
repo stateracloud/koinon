@@ -152,7 +152,7 @@ in part 2 too.
 
 ## Confirmation
 
-The rule script `hack/ci-rules-check.sh` confirms W1, W2, Q1, Q6, T1, T2 and T7. It runs in the `scripts` job of
+The rule script `hack/ci-rules-check.sh` confirms W1, W2, W5, Q1, Q6, T1, T2 and T7. It runs in the `scripts` job of
 `ci.yml` and in `hack/preflight.sh` (gate `scripts`). Other rules name their check in the guide:
 `hack/runner-lint.sh`, `hack/ci-required-test.sh`, `hack/ci-merge-group-test.sh`, `hack/migrate-lint.sh`,
 `hack/dep-age-check.sh`, `hack/release-gate.sh`, `make breaking`, `hack/generate.sh`, the chart smoke test
