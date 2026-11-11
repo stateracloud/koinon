@@ -45,9 +45,13 @@ var _ = Describe("a looping agent", func() {
 			}
 		},
 		"monologue": func(say func(sdk.SessionUpdate) error) {
+			// Three messages (three message ids) with no tool call between them.
 			for i := range 3 {
 				Expect(say(sdk.UpdateAgentThoughtText("hm"))).To(Succeed())
-				Expect(say(sdk.UpdateAgentMessageText(fmt.Sprintf("I will look, attempt %d. ", i)))).To(Succeed())
+				u := sdk.UpdateAgentMessageText(fmt.Sprintf("I will look, attempt %d. ", i))
+				mid := fmt.Sprintf("m%d", i)
+				u.AgentMessageChunk.MessageId = &mid
+				Expect(say(u)).To(Succeed())
 			}
 		},
 		"alternating": func(say func(sdk.SessionUpdate) error) {

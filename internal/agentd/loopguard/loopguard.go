@@ -84,6 +84,9 @@ var DefaultThresholds = Thresholds{ActionObservation: 4, ActionError: 3, Monolog
 // maxSteps bounds the history; the widest pattern needs Alternating steps.
 const maxSteps = 64
 
+// maxClosed bounds the ids of calls whose step is already counted.
+const maxClosed = 256
+
 // step is one batch of tool calls that has finished.
 type step struct {
 	action, result string
@@ -109,8 +112,13 @@ type Detector struct {
 	calls map[string]*call // the batch in progress, by tool call id
 	order []string
 	steps []step
-	// msgs counts message bursts since the last tool call; prev is the kind of the last update that
-	// matters and msgID the id of the current message, if the harness sends one.
+	// closed holds the ids of calls whose step is already counted (the newest maxClosed, in
+	// closedOrder). It outlives a reset: a call id names one call for the whole session.
+	closed      map[string]struct{}
+	closedOrder []string
+	// msgs counts messages since the last tool call; prev is the kind of the last update that
+	// matters (a thought does not count) and msgID the id of the current message, if the harness
+	// sends one.
 	msgs  int
 	prev  string
 	msgID string
@@ -118,7 +126,7 @@ type Detector struct {
 
 // New returns a Detector with the given thresholds. A threshold of zero or less turns its pattern off.
 func New(th Thresholds) *Detector {
-	return &Detector{th: th, sig: make(chan Pattern, 1), calls: map[string]*call{}}
+	return &Detector{th: th, sig: make(chan Pattern, 1), calls: map[string]*call{}, closed: map[string]struct{}{}}
 }
 
 // Signal delivers a detected pattern. It holds at most one.
@@ -160,7 +168,8 @@ func (d *Detector) Observe(n acp.SessionNotification) {
 		}
 		d.prev, d.msgID = "message", id
 	case u.AgentThoughtChunk != nil:
-		d.prev = "thought"
+		// Reasoning inside one answer does not split the message: a model that thinks, writes,
+		// thinks and writes again in one response is not talking to itself.
 	case u.ToolCall != nil:
 		t := u.ToolCall
 		d.msgs, d.prev = 0, "tool"
@@ -174,6 +183,11 @@ func (d *Detector) Observe(n acp.SessionNotification) {
 	case u.ToolCallUpdate != nil:
 		t := u.ToolCallUpdate
 		d.prev = "tool"
+		if _, ok := d.closed[string(t.ToolCallId)]; ok {
+			// A late update (more output after the final status) of a call whose step is already
+			// counted: adding it again would open a batch that never finishes.
+			break
+		}
 		c := d.call(string(t.ToolCallId))
 		if t.Kind != nil {
 			c.kind = string(*t.Kind)
@@ -242,9 +256,25 @@ func (d *Detector) finish() Pattern {
 	if len(d.steps) > maxSteps {
 		d.steps = slices.Delete(d.steps, 0, len(d.steps)-maxSteps)
 	}
+	for _, id := range d.order {
+		d.close(id)
+	}
 	clear(d.calls)
 	d.order = d.order[:0]
 	return d.tools()
+}
+
+// close remembers that a call's step is counted, keeping the newest maxClosed ids.
+func (d *Detector) close(id string) {
+	if _, ok := d.closed[id]; ok {
+		return
+	}
+	d.closed[id] = struct{}{}
+	d.closedOrder = append(d.closedOrder, id)
+	if len(d.closedOrder) > maxClosed {
+		delete(d.closed, d.closedOrder[0])
+		d.closedOrder = slices.Delete(d.closedOrder, 0, 1)
+	}
 }
 
 // digest is a short, stable hash of values: results can be large.

@@ -36,6 +36,12 @@ var _ = Describe("the loop guard", func() {
 		start(tid, cmd)
 		finish(tid, st, out)
 	}
+	// msg is a message chunk with a message id.
+	msg := func(mid, text string) sdk.SessionUpdate {
+		u := sdk.UpdateAgentMessageText(text)
+		u.AgentMessageChunk.MessageId = &mid
+		return u
+	}
 	detected := func() loopguard.Pattern {
 		select {
 		case p := <-d.Signal():
@@ -77,13 +83,29 @@ var _ = Describe("the loop guard", func() {
 	})
 
 	It("finds messages with no tool call between them after three", func() {
-		feed(sdk.UpdateAgentMessageText("I will look"))
+		feed(msg("m1", "I will look"))
 		feed(sdk.UpdateAgentThoughtText("hm"))
-		feed(sdk.UpdateAgentMessageText("I will look again"))
+		feed(msg("m2", "I will look again"))
 		Expect(detected()).To(BeEmpty())
 		feed(sdk.UpdateAgentThoughtText("hm"))
-		feed(sdk.UpdateAgentMessageText("Still looking"))
+		feed(msg("m3", "Still looking"))
 		Expect(detected()).To(Equal(loopguard.Monologue))
+	})
+
+	It("does not split one message at its reasoning (one messageId)", func() {
+		for range 3 {
+			feed(sdk.UpdateAgentThoughtText("hm"))
+			feed(msg("m1", "part "))
+		}
+		Expect(detected()).To(BeEmpty())
+	})
+
+	It("does not split one message at its reasoning (no messageId)", func() {
+		for range 3 {
+			feed(sdk.UpdateAgentThoughtText("hm"))
+			feed(sdk.UpdateAgentMessageText("part "))
+		}
+		Expect(detected()).To(BeEmpty())
 	})
 
 	It("counts the chunks of one message once", func() {
@@ -101,6 +123,19 @@ var _ = Describe("the loop guard", func() {
 		feed(sdk.UpdateAgentThoughtText("t"))
 		feed(sdk.UpdateAgentMessageText("three"))
 		Expect(detected()).To(BeEmpty())
+	})
+
+	It("ignores a late update of a call whose step is counted", func() {
+		for range 3 {
+			tid := id()
+			start(tid, "ls")
+			finish(tid, sdk.ToolCallStatusCompleted, "a b")
+			// More output after the final status, with no status of its own.
+			feed(sdk.UpdateToolCall(tid, sdk.WithUpdateRawOutput("late")))
+		}
+		Expect(detected()).To(BeEmpty())
+		call("ls", sdk.ToolCallStatusCompleted, "a b")
+		Expect(detected()).To(Equal(loopguard.SameAction))
 	})
 
 	It("finds two actions taking turns after six steps", func() {
