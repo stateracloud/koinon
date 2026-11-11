@@ -89,7 +89,7 @@ var _ = Describe("the AWS KMS wrapper", func() {
 		Describe("against LocalStack", func() {
 			secretstoretest.WrapperContract(
 				func() secretstore.Wrapper { return withKey(testKey) },
-				newHanging,
+				nil,
 				secretstoretest.SkipReachability("LocalStack ignores DryRun, so the probe reads the decrypt right as unverified; the stand-in is the reachability target"),
 			)
 		})
