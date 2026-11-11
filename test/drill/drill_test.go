@@ -83,13 +83,25 @@ func needs(steps ...string) {
 	}
 }
 
-// step names a step of the drill in the report; check names come from the label.
-func step(name string, body func(ctx SpecContext)) {
+// stepTimeout is the node timeout of a step that does not name its own.
+const stepTimeout = 20 * time.Minute
+
+// seedTimeout covers the seed step's waits with margin: the scheduled run and the marker run (each
+// up to releasedWait, 8m in topology/kind.yaml) and 20m for archived_at, about 36m, plus the API calls.
+const seedTimeout = 45 * time.Minute
+
+// step names a step of the drill in the report; check names come from the label. A step whose
+// waits add up to more than stepTimeout passes its own budget.
+func step(name string, body func(ctx SpecContext), timeout ...time.Duration) {
 	id := strings.TrimSuffix(strings.Fields(name)[0], ":")
+	budget := stepTimeout
+	if len(timeout) > 0 {
+		budget = timeout[0]
+	}
 	It(name, Label("step", id), func(ctx SpecContext) {
 		body(ctx)
 		done[id] = true
-	}, NodeTimeout(20*time.Minute))
+	}, NodeTimeout(budget))
 }
 
 func must(err error, what string) {
@@ -507,7 +519,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 		Expect(accepted).To(BeNumerically(">=", 1), "no Run now call was accepted: %v", replies)
 		AddReportEntry("run-now replies", fmt.Sprintf("%v", replies))
-	})
+	}, seedTimeout)
 
 	step("backup: the guide's backup blocks, then the source is lost", func(ctx SpecContext) {
 		needs("seed")
