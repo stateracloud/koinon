@@ -182,12 +182,13 @@ func (d *Detector) Observe(n acp.SessionNotification) {
 		found = d.finish()
 	case u.ToolCallUpdate != nil:
 		t := u.ToolCallUpdate
-		d.prev = "tool"
 		if _, ok := d.closed[string(t.ToolCallId)]; ok {
 			// A late update (more output after the final status) of a call whose step is already
-			// counted: adding it again would open a batch that never finishes.
+			// counted: adding it again would open a batch that never finishes, and it must not
+			// change the message state (later chunks of one message are still that message).
 			break
 		}
+		d.prev = "tool"
 		c := d.call(string(t.ToolCallId))
 		if t.Kind != nil {
 			c.kind = string(*t.Kind)

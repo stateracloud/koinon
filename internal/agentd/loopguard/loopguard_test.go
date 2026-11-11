@@ -138,6 +138,17 @@ var _ = Describe("the loop guard", func() {
 		Expect(detected()).To(Equal(loopguard.SameAction))
 	})
 
+	It("does not split one message at a late update of a counted call", func() {
+		tid := id()
+		start(tid, "ls")
+		finish(tid, sdk.ToolCallStatusCompleted, "a b")
+		for range 4 {
+			feed(msg("m1", "part "))
+			feed(sdk.UpdateToolCall(tid, sdk.WithUpdateRawOutput("late")))
+		}
+		Expect(detected()).To(BeEmpty())
+	})
+
 	It("finds two actions taking turns after six steps", func() {
 		for i := range 6 {
 			if i%2 == 0 {
