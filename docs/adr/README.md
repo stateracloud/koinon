@@ -44,7 +44,7 @@ are in [0046](0046-adr-conventions.md).
 | [0022](0022-frontend-architecture.md) | React SPA served by the Go API over connect-rpc | Accepted |
 | [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
 | [0024](0024-roadmap.md) | Release roadmap from v0.1 to v1.0 | Accepted |
-| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md) |
+| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind) |
 | [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md) |
 | [0027](0027-repo-and-versioning.md) | Monorepo, one version, supply-chain hygiene | Accepted; amended 2026-10-25 (below) |
 | [0028](0028-name-koinon.md) | Name the project Koinon | Accepted |
@@ -75,7 +75,7 @@ are in [0046](0046-adr-conventions.md).
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by [0059](0059-v01-opencode-only.md) |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
-| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md) |
+| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md) |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted; amended by [0112](0112-harness-definitions.md) |
@@ -122,11 +122,11 @@ are in [0046](0046-adr-conventions.md).
 | [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Accepted (maintainer decision 2026-11-04) |
 | [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md) |
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Deprecated (2026-11-11, #546: the check is removed; see the amendment). Earlier: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate |
-| [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock") |
+| [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default) |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Accepted (procoduck, 2026-11-09; built in PR A #479 and PR B #487; amended 2026-11-11, below) |
 | [0106](0106-install-mark-owns-openshell-objects.md) | An install mark decides which OpenShell objects an install owns | Accepted |
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
-| [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491) |
+| [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127) |
 | [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted |
 | [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, |
 | [0111](0111-ci-requirements.md) | CI requirements | Accepted |

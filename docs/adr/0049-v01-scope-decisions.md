@@ -59,6 +59,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
   Key Vault sync them into Kubernetes with the External Secrets Operator. Secrets entered in the UI
   (setup-guide secure inputs, ADR [0021](0021-connector-setup-guides.md)) are written by Koinon as
   Kubernetes Secrets. This amends ADR 0007, which kept connection secrets in Vault/OpenBao.
+  _(Changed by [0056](0056-model-providers-pricing-and-budgets-per-org.md): provider keys and connection secrets are envelope-encrypted in Postgres; Kubernetes Secrets still hold the KEKs and the gateway's provider keys, see the amendment of 2026-10-23 (plan item PV1) below. There is still no hard dependency on a secret store.)_
 - **Models:** one OpenAI-compatible upstream (base URL, key Secret, model list). Docs cover
   OpenRouter with the routing guard (ADR 0048) and Ollama. CI uses the fake model server.
 - **agentgateway, two modes behind one `ModelGateway` interface:**

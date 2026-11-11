@@ -59,7 +59,7 @@ claim ref could be deleted by hand.
    else sees the whole queue. `take` warns when another active claim
    shares the issue's `area:` label. The Phase field is retired: milestones are the release gate, and
    `next` uses the milestone only.
-   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): one claim per lane, not per session; the cap of eight per human stays, best effort.)_
+   _(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): one claim per lane, not per session. Since 0104's amendment of 2026-11-11 the per-human cap is off by default; `KOINON_CLAIM_HUMAN_CAP=N` turns it on when a second human joins.)_
 6. **Liveness and the sweeper** (`claims.yml`, every 30 minutes). Liveness is the later of the
    lease and the last push or comment on the linked pull request plus one lease. Past liveness +
    grace the sweeper comments, mentioning the human, and labels `claim:stale`. Two hours after the

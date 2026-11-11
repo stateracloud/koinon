@@ -1,6 +1,6 @@
 # 0108. The docs site lives in its own repository; this repository owns the tested commands
 
-- Status: Accepted (maintainer decisions of 2026-11-10, issue #491)
+- Status: Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127)
 - Date: 2026-11-10
 - Supersedes in part: [0037](0037-tooling.md) (the docs-site decision: Starlight in `docs/site/`; Starlight itself stays)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decision 18, backup and restore), [0105](0105-merge-queue-route.md)
@@ -54,6 +54,7 @@ without making this repository wait for it.
    `koinon-docs`.
 9. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
    later work, tracked on #505.
+   _(Changed 2026-11-11, see the amendment below (issue #127): the generated reference is committed here under `docs/reference/proto/` and `koinon-docs` reads it at a release tag; no bot pull request.)_
 
 ## Alternatives considered
 

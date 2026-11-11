@@ -1,6 +1,6 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
 - Amended by: [0097](0097-koinon-owned-gateway.md) (decision 5 in step 3: the gateway's own cost and catalog fall away)
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
@@ -29,7 +29,7 @@ usage type, tiers and match patterns.
    org-scoped role tokens that expire. Every call is audited.
 3. **Provider keys** are envelope-encrypted in Postgres. The key-encryption key (KEK) is generated
    by the chart into a Secret, or taken from an existing Secret. A KMS is optional.
-   _(Changed: `koinon-api` creates the KEK on its first start, because the chart cannot render key material; see the amendment of 2026-10-23 (PV1) below. How this fits the rule that generated secrets come from the ensure-secrets hook Job is still being decided.)_
+   _(Changed: `koinon-api` creates the KEK on its first start, because the chart cannot render key material; see the amendment of 2026-10-23 (PV1) below. This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job, see the amendment of 2026-11-11 below.)_
 4. **Model names are org-scoped**: `<org>/<model>`.
 5. **Prices** follow the Langfuse style: a price per usage type, with tiers and match patterns.
    Prices are effective-dated. Each ledger entry records the price version it used. Koinon ships a
@@ -732,6 +732,17 @@ The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the
 - The cost report's generated example sends `Authorization: Bearer`; the Admin API page says an
   Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
   the Admin API page says; the first real-key run confirms it.
+
+## Amendment (2026-11-11, issue #603): koinon-api creates the KEK
+
+Maintainer decision (procoduck, 2026-11-11).
+
+- `koinon-api` keeps creating the KEK on its first start and never overwrites it (decision 3 and the
+  2026-10-23 amendment, item 2).
+- This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
+  Only a creator that can see the database can refuse to make a new key when encrypted data already
+  exists; the hook Job cannot see the database.
+- Hardening of this path, and the matching text in AGENTS.md, follow in issue #604.
 
 ## Open questions
 
