@@ -239,6 +239,14 @@ func (o *Owner) Succeed(ctx context.Context, turn Turn) error {
 	return o.end(ctx, turn, store.RunStateSucceeded, "", "", nil)
 }
 
+// Supersede ends a run that has nothing left to do as succeeded, without a turn: the task's earlier
+// run already read every message this run was queued for (#21). The reason is the run's outcome
+// reason. Like any success it completes the task, which the queued run was holding open (EndTaskFrom
+// waits for the queue to empty); the run has no reply of its own.
+func (o *Owner) Supersede(ctx context.Context, reason string) error {
+	return o.end(ctx, Turn{}, store.RunStateSucceeded, reason, "", nil)
+}
+
 // Fail ends the run as failed with a reason and a failure class. A fatal class fails the task too
 // (ADR 0065); any other leaves it open for a person to retry with a message.
 func (o *Owner) Fail(ctx context.Context, turn Turn, reason string, class store.RunFailureClass) error {

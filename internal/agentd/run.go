@@ -414,6 +414,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load task", err)
 	}
+	if done, err := r.superseded(fctx, task); done || err != nil {
+		return err
+	}
 	// An unreadable config would leave the run without its instructions (and model): it fails
 	// before anything starts.
 	vc, err := versionConfig(version.Config)
@@ -981,6 +984,64 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
 	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
+}
+
+// supersededReason is the outcome reason of a run that ended without a turn because the task's
+// earlier run had read its messages already.
+const supersededReason = "its messages were already read by the task's earlier run"
+
+// superseded ends a run that has nothing new to say (#21) and reports whether it did. A message sent
+// while a run is parked queues a run behind it; the parked run resumes, reads that message, and the
+// queued run then starts with no unread message, which would cost a model turn that only says
+// "Continue with the task." The run is dropped instead (Owner.Supersede), and only when all hold:
+// it is a fresh run (a resumed or taken-over one has work), the task has been prompted before
+// (a first run with an empty message is a scheduled task), no session restart is pending (its
+// handoff prompt is not made of messages), nothing is unread, and the task's previous run
+// succeeded. After a failed or canceled run, a run with no new message is a person's retry and
+// still runs; ending it as a success would also complete a task whose last run failed.
+func (r *runner) superseded(ctx context.Context, task store.Task) (bool, error) {
+	if r.run.PromptThroughSeq.Valid || (task.HarnessSessionID.Valid && task.SessionRestartPending) {
+		return false, nil
+	}
+	after, err := r.q.GetTaskPromptedThrough(ctx, store.GetTaskPromptedThroughParams{
+		OrgID: r.run.OrgID, TaskID: task.ID, RunID: r.run.ID,
+	})
+	if err != nil {
+		return false, r.dbErr(ctx, "check for unread messages", err)
+	}
+	if after == 0 {
+		return false, nil
+	}
+	msgs, err := r.q.ListTaskMessagesAfter(ctx, store.ListTaskMessagesAfterParams{
+		OrgID: r.run.OrgID, TaskID: task.ID, AfterSeq: after,
+	})
+	if err != nil {
+		return false, r.dbErr(ctx, "check for unread messages", err)
+	}
+	if len(msgs) > 0 {
+		return false, nil
+	}
+	runs, err := r.q.ListRunsForTask(ctx, store.ListRunsForTaskParams{OrgID: r.run.OrgID, TaskID: task.ID})
+	if err != nil {
+		return false, r.dbErr(ctx, "list the task's runs", err)
+	}
+	var prev *store.Run
+	for i := range runs {
+		if runs[i].ID != r.run.ID && !runs[i].CreatedAt.Time.After(r.run.CreatedAt.Time) {
+			prev = &runs[i]
+		}
+	}
+	if prev == nil || prev.State != store.RunStateSucceeded {
+		return false, nil
+	}
+	r.log.Info("the run has no unread message; ending it without a turn", "previous", prev.ID.String())
+	// FinishRun ends a run as succeeded only from running, so the run is marked running first.
+	if r.run.State == store.RunStateStarting {
+		if _, err := r.q.MarkRunRunning(ctx, store.MarkRunRunningParams{OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch}); err != nil {
+			return true, r.dbErr(ctx, "mark the run running", err)
+		}
+	}
+	return true, r.own.Supersede(ctx, supersededReason)
 }
 
 // promptMode says which of the turn's prompt shapes assemblePrompt builds.
