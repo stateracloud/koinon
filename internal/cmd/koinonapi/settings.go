@@ -116,6 +116,7 @@ var recordedSettings = []platformSetting{
 
 	// the chart (the image's version is added by platformSettings)
 	setting("chart-version", kindValue),
+	setting("release", kindValue),
 }
 
 // imageVersionKey is the summary key of the build's version, which is not a flag.
