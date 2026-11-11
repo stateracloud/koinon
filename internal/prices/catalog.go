@@ -24,13 +24,27 @@ func (r *Refresher) storeCatalog(ctx context.Context, a pricefetch.Adapter, snap
 	if r.catalog == nil || snap.Source != pricefetch.SourceOpenRouter || len(snap.Meta) == 0 {
 		return
 	}
+	// The catalog is stored only while an enabled openrouter provider exists (ADR 0070 amendment):
+	// a provider with no enabled model still counts. This holds for the schedule and the CLI alike.
+	exists, err := store.New(r.svc.pool).ProviderTypeInUse(ctx, pricefetch.ProviderTypesOf(pricefetch.SourceOpenRouter)[0])
+	if err != nil {
+		r.log.Warn("openrouter catalog: looking for an openrouter provider", "err", err)
+		return
+	}
+	if !exists {
+		return
+	}
 	inUse, err := r.openRouterModelsInUse(ctx)
 	if err != nil {
 		r.log.Warn("openrouter catalog: listing the models in use", "err", err)
 		return
 	}
 	if trigger == TriggerSchedule {
-		due, err := r.catalog.Due(ctx, snap.FetchedAt, inUse)
+		listed := make([]string, len(snap.Meta))
+		for i, m := range snap.Meta {
+			listed[i] = m.Model
+		}
+		due, err := r.catalog.Due(ctx, snap.FetchedAt, inUse, listed)
 		if err != nil {
 			r.log.Warn("openrouter catalog: reading the last store", "err", err)
 			return

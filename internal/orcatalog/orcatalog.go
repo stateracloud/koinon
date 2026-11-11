@@ -81,9 +81,11 @@ type Store struct {
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // Due says whether the catalog should be stored from a list fetched now: it has never been stored,
-// the last store is a week old, or a model in use has no row yet (it was added since). A restart
-// inside the week with every model known is not due.
-func (s *Store) Due(ctx context.Context, now time.Time, inUse []string) (bool, error) {
+// the last store is a week old, or a model in use that this fetch lists has no row yet (it was
+// added since). listed is the set of model names of the fetch: a model in use that OpenRouter does
+// not list (delisted, retired, misspelled) never gets a row and must not make every tick due. A
+// restart inside the week with every listed model known is not due.
+func (s *Store) Due(ctx context.Context, now time.Time, inUse, listed []string) (bool, error) {
 	q := store.New(s.pool)
 	c, err := q.GetOpenRouterCatalog(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +105,7 @@ func (s *Store) Due(ctx context.Context, now time.Time, inUse []string) (bool, e
 		known[r.Model] = true
 	}
 	for _, m := range inUse {
-		if !known[m] {
+		if !known[m] && slices.Contains(listed, m) {
 			return true, nil
 		}
 	}

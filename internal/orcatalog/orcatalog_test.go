@@ -68,7 +68,7 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 	It("refreshes weekly: not due inside the week, due after it, and due for a new model in use", func(ctx SpecContext) {
 		// A database of its own: the catalog row is a singleton.
 		s := orcatalog.New(freshDB(ctx))
-		due, err := s.Due(ctx, t0, nil)
+		due, err := s.Due(ctx, t0, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(due).To(BeTrue(), "never stored")
 
@@ -76,17 +76,19 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 		_, err = s.Apply(ctx, snapshot(t0, meta(m, 1000, 100)), []string{m})
 		Expect(err).NotTo(HaveOccurred())
 		for name, c := range map[string]struct {
-			at    time.Time
-			inUse []string
-			want  bool
+			at     time.Time
+			inUse  []string
+			listed []string
+			want   bool
 		}{
-			"a restart an hour later":       {t0.Add(time.Hour), []string{m}, false},
-			"just under a week":             {t0.Add(orcatalog.Interval - time.Minute), []string{m}, false},
-			"a week":                        {t0.Add(orcatalog.Interval), []string{m}, true},
-			"a model in use that is new":    {t0.Add(time.Hour), []string{m, "fake/added-later"}, true},
-			"no models in use, inside week": {t0.Add(time.Hour), nil, false},
+			"a restart an hour later":            {t0.Add(time.Hour), []string{m}, []string{m}, false},
+			"just under a week":                  {t0.Add(orcatalog.Interval - time.Minute), []string{m}, []string{m}, false},
+			"a week":                             {t0.Add(orcatalog.Interval), []string{m}, []string{m}, true},
+			"a listed model in use that is new":  {t0.Add(time.Hour), []string{m, "fake/added-later"}, []string{m, "fake/added-later"}, true},
+			"in use but not listed by the fetch": {t0.Add(time.Hour), []string{m, "fake/delisted"}, []string{m}, false},
+			"no models in use, inside week":      {t0.Add(time.Hour), nil, []string{m}, false},
 		} {
-			due, err := s.Due(ctx, c.at, c.inUse)
+			due, err := s.Due(ctx, c.at, c.inUse, c.listed)
 			Expect(err).NotTo(HaveOccurred(), name)
 			Expect(due).To(Equal(c.want), name)
 		}

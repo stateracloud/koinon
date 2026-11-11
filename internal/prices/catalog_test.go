@@ -117,6 +117,25 @@ var _ = Describe("the OpenRouter catalog fetch (ADR 0070 amendment of 2026-11-11
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog`)).To(BeZero())
 	})
 
+	It("does not store the catalog under RefreshOn when no openrouter provider exists", func(ctx SpecContext) {
+		run(ctx, prices.RefreshOn)
+		Expect(hits.Load()).To(BeNumerically(">", 0), "on fetches the prices regardless")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog`)).To(BeZero())
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models`)).To(BeZero())
+	})
+
+	It("does not store again for an in-use model the list does not carry", func(ctx SpecContext) {
+		addProvider(ctx, pool, "openrouter", model, "fake/not-listed")
+		run(ctx, prices.RefreshAuto)
+		first := hits.Load()
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog`)).To(Equal(1))
+
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(hits.Load()).To(Equal(first+1), "the list only: no second store, no endpoints request")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog WHERE source = 'openrouter@2026-11-11T08:00:00Z'`)).To(Equal(1))
+	})
+
 	It("stores the metadata weekly: the daily price tick and a restart inside the week do not", func(ctx SpecContext) {
 		addProvider(ctx, pool, "openrouter", model)
 		run(ctx, prices.RefreshAuto)
