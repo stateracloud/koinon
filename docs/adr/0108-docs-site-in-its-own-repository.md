@@ -83,3 +83,11 @@ without making this repository wait for it.
   `https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/`, `docs/ops/secret-keys.md` is
   `https://koinon.stateracloud.com/docs/operate/secret-keys/` and the prices page is
   `https://koinon.stateracloud.com/docs/operate/default-prices/`.
+
+## Amendment 2026-11-11: the generated reference is committed here (issue #127)
+
+Decision 9 names a bot pull request from the release job. That is not how the proto reference reaches
+`koinon-docs`. This repository commits the generated reference under `docs/reference/proto/`
+(`proto-api.json` and `proto-api.md`, written by `make generate`; CI's no-diff check keeps it current), and
+`koinon-docs` reads it at a release tag (`stateracloud/koinon-docs#6`). No bot pull request is needed. The
+generator is `cmd/protoc-gen-koinon-doc`, owned here; the JSON layout is in `docs/reference/README.md`.

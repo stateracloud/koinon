@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# The proto API reference for the docs site (#127). koinon-docs pulls docs/reference/proto/ at a release tag
+# (stateracloud/koinon-docs#6). `clean` stays off because docs/reference/ also holds hand-written files; the
+# two files the plugin writes (proto-api.json, proto-api.md) are overwritten on every run. The plugin is our
+# own, cmd/protoc-gen-koinon-doc. `strategy: all` runs it once over every package (the default, one run per
+# directory, makes each run overwrite the file of the one before).
+version: v2
+plugins:
+  - local: ["go", "run", "./cmd/protoc-gen-koinon-doc"]
+    out: docs/reference/proto
+    strategy: all
