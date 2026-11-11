@@ -79,7 +79,7 @@ budget is L1. Scope: general pattern. In force: now.
 or at release, not on each pull request. A red scheduled run MUST open or update one issue.
 Why: they are too slow for L1, and a red nightly nobody reads proves nothing.
 Check: review for the stage; `hack/e2e-bisect-test.sh` (the nightly and main e2e) and `hack/drill-issue-test.sh`
-(the drill; the script arrives with #572) for the issue. The nightly `govulncheck` run notifies the maintainer through the failed
+(the drill) for the issue. The nightly `govulncheck` run notifies the maintainer through the failed
 run only; it opens no issue yet.
 Source: [Firecracker tests README](https://github.com/firecracker-microvm/firecracker/blob/main/tests/README.md)
 (three lanes: required, optional, periodic). The upgrade test is "from v0.3". Scope: general pattern. In force: now.
@@ -93,7 +93,6 @@ Check: review. Source: Firecracker README (as S4). Scope: general pattern. In fo
 ### Stage table: a new check, which stage
 
 Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs and never blocks, "-" does not run.
-A cell with "(with #572)" shows the decided state of the parts of the CI speed work that are not yet merged (part 3).
 
 | Kind of check | Example here | Pull request | Merge queue | Push to main | Nightly | Release | Lab | Time limit | Blocks merge |
 |---|---|---|---|---|---|---|---|---|---|
@@ -107,7 +106,7 @@ A cell with "(with #572)" shows the decided state of the parts of the CI speed w
 | Kind e2e quickstart | `quickstart`, gate `e2e result` | label `e2e` only | yes, when relevant | batched | yes | tag needs a green one | optional | about 15 min | yes, in the queue |
 | Flavors image build | `flavors` | - | yes | publish | - | - | - | up to 60 min job limit | yes in the queue |
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
-| CodeQL | `codeql` workflow (with #572) | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
+| CodeQL | `codeql` workflow | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
 | govulncheck | `govulncheck.yml` | with #579 part 2, if `go.mod` or `go.sum` changed | - | - | yes | - | - | minutes | decided in part 2 |
 | Restore drill | `drill` job (ADR 0109) | - | - | - | yes | rc tag | final tag | long | adv |
 | Upgrade from last release | planned, #83, #519 | - | - | - | from v0.3 | from v0.3 | - | long | from v0.3 |
@@ -123,7 +122,7 @@ and the merge queue waits for a required check until its timeout and then remove
 Check: `hack/ci-rules-check.sh` (rule Q1).
 Source: GitHub Docs, [skipping workflow runs](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/skipping-workflow-runs)
 and [managing a merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
-Scope: general pattern. In force: now. Not when: a workflow that is advisory only (CodeQL, with #572).
+Scope: general pattern. In force: now. Not when: a workflow that is advisory only (CodeQL).
 
 **Q2. MUST** list the `merge_group` trigger (`types: [checks_requested]`) in every workflow that produces
 a required check.
