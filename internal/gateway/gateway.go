@@ -54,6 +54,20 @@ type ModelGateway interface {
 	Usage() UsageReader
 }
 
+// MCPGateway is implemented by a driver that serves the MCP path (ADR 0097 decision 2.1). It is the
+// MCP counterpart of [ModelGateway], so the two paths are built and tested apart and a driver may
+// serve one of them only. The standalone and Kubernetes drivers serve both paths from one config
+// and implement neither interface separately yet; Koinon's own gateway (ADR 0097 step 2) is the
+// first driver of this one.
+type MCPGateway interface {
+	// Apply converges the gateway's MCP path to the MCP half of s and returns once the gateway
+	// serves it, or with an error when the gateway rejected it or ctx expired. Apply is idempotent.
+	// It takes the whole State, not an MCPState, because the MCP half reads s.Keys to know which
+	// agent a key belongs to (see State.Keys). It returns the same [Revision] type as
+	// [ModelGateway.Apply]: one revision covers both halves.
+	Apply(ctx context.Context, s State) (Revision, error)
+}
+
 // Rejection is one object the gateway refused, with the org it belongs to ("" for a platform
 // object).
 type Rejection struct {
@@ -433,7 +447,7 @@ type PriceTier struct {
 }
 
 // Unpriced returns "<org>/<model>" for each model without a price; drivers do not serve them.
-func (s State) Unpriced() []string {
+func (s ModelState) Unpriced() []string {
 	var out []string
 	for _, p := range s.Providers {
 		for _, m := range p.Models {
@@ -477,18 +491,37 @@ type ToolGrant struct {
 	All bool
 }
 
-// State is everything a gateway serves. The zero value serves nothing.
+// State is everything a gateway serves. The zero value serves nothing. It is the model half and
+// the MCP half side by side (ADR 0097 decision 2.1), with the one thing both need, the keys.
+// Fields of the halves are promoted, so s.Providers and s.MCP read as before; a composite literal
+// names the half: State{ModelState: ModelState{...}}.
 type State struct {
-	Keys      []Key
+	// Keys are shared by the halves: a key is how a caller of either path is authenticated, and
+	// its agent is what the model half limits and the MCP half grants tools to. Keeping them on
+	// State (not copied into each half) leaves one source of truth for them.
+	Keys []Key
+	ModelState
+	MCPState
+}
+
+// ModelState is the half of a State the model path serves (ADR 0097 decision 2.1): spend limits,
+// providers with their models, and each agent's model allowlist. A driver that serves only the
+// model path is handed this half (with the keys) and ignores the MCP half.
+type ModelState struct {
 	Limits    map[AgentRef]Limit
 	Providers []Provider
-	MCP       []MCPTarget
-	// Tools are per-agent MCP allowlists. An agent without grants sees no tools.
-	Tools map[AgentRef][]ToolGrant
 	// Models narrows a key's models to the listed names, which must be served and priced for the
 	// key's org to count. An agent without an entry may request all of its org's models; a system
 	// agent (IsSystemAgent) without one may request none.
 	Models map[AgentRef][]string
+}
+
+// MCPState is the half of a State the MCP path serves (ADR 0097 decision 2.1): the upstream MCP
+// servers and each agent's tool allowlist.
+type MCPState struct {
+	MCP []MCPTarget
+	// Tools are per-agent MCP allowlists. An agent without grants sees no tools.
+	Tools map[AgentRef][]ToolGrant
 }
 
 // WithoutInvalidLimits returns s without the keys and limits of agents whose Limit fails
@@ -539,7 +572,7 @@ func (s *State) RevokeKey(id string) bool {
 }
 
 // SetLimit sets agent's limit; nil clears it.
-func (s *State) SetLimit(agent AgentRef, l *Limit) {
+func (s *ModelState) SetLimit(agent AgentRef, l *Limit) {
 	if l == nil {
 		delete(s.Limits, agent)
 		return
@@ -551,7 +584,7 @@ func (s *State) SetLimit(agent AgentRef, l *Limit) {
 }
 
 // RestrictModels limits agent's keys to the named models; no names clears the entry.
-func (s *State) RestrictModels(agent AgentRef, names ...string) {
+func (s *ModelState) RestrictModels(agent AgentRef, names ...string) {
 	if s.Models == nil {
 		s.Models = map[AgentRef][]string{}
 	}
@@ -565,7 +598,7 @@ func (s *State) RestrictModels(agent AgentRef, names ...string) {
 // AllowedModels returns the names agent's keys may request out of served, the plain names its org
 // serves: all of them, the State.Models entry's, or none for an internal agent and for a system
 // agent without an entry. The result is sorted.
-func (s State) AllowedModels(agent AgentRef, served []string) []string {
+func (s ModelState) AllowedModels(agent AgentRef, served []string) []string {
 	out := []string{}
 	if IsInternalAgent(agent) {
 		return out
@@ -584,7 +617,7 @@ func (s State) AllowedModels(agent AgentRef, served []string) []string {
 }
 
 // ServedModels returns the plain names of the priced models org serves in s, sorted.
-func (s State) ServedModels(org string) []string {
+func (s ModelState) ServedModels(org string) []string {
 	var out []string
 	for _, p := range s.Providers {
 		if p.Org != org {
@@ -601,13 +634,13 @@ func (s State) ServedModels(org string) []string {
 }
 
 // Restricted reports whether agent's keys carry a model list of their own.
-func (s State) Restricted(agent AgentRef) bool {
+func (s ModelState) Restricted(agent AgentRef) bool {
 	_, ok := s.Models[agent]
 	return ok || IsSystemAgent(agent)
 }
 
 // GrantTools replaces agent's MCP allowlist.
-func (s *State) GrantTools(agent AgentRef, grants ...ToolGrant) {
+func (s *MCPState) GrantTools(agent AgentRef, grants ...ToolGrant) {
 	if s.Tools == nil {
 		s.Tools = map[AgentRef][]ToolGrant{}
 	}
@@ -697,6 +730,17 @@ func (s State) Validate() error {
 		}
 		seenID[k.ID], seenHash[k.Hash] = true, true
 	}
+	errs = append(errs, s.ModelState.validate()...)
+	errs = append(errs, s.MCPState.validate()...)
+	if len(errs) > 0 {
+		return fmt.Errorf("gateway: invalid state: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+// validate checks the model half; State.Validate runs it after the keys.
+func (s ModelState) validate() []error {
+	var errs []error
 	for a, l := range s.Limits {
 		if err := a.Validate(); err != nil {
 			errs = append(errs, err)
@@ -754,6 +798,22 @@ func (s State) Validate() error {
 			seenModel[p.Org+"/"+m.Name] = true
 		}
 	}
+	for a, names := range s.Models {
+		if err := a.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+		for _, n := range names {
+			if !modelName.MatchString(n) {
+				errs = append(errs, fmt.Errorf("models for %s: invalid name %q", a, n))
+			}
+		}
+	}
+	return errs
+}
+
+// validate checks the MCP half; State.Validate runs it after the model half.
+func (s MCPState) validate() []error {
+	var errs []error
 	targets := map[string]bool{}
 	for _, t := range s.MCP {
 		switch {
@@ -779,16 +839,6 @@ func (s State) Validate() error {
 		}
 		targets[t.Name] = true
 	}
-	for a, names := range s.Models {
-		if err := a.Validate(); err != nil {
-			errs = append(errs, err)
-		}
-		for _, n := range names {
-			if !modelName.MatchString(n) {
-				errs = append(errs, fmt.Errorf("models for %s: invalid name %q", a, n))
-			}
-		}
-	}
 	for a, grants := range s.Tools {
 		if err := a.Validate(); err != nil {
 			errs = append(errs, err)
@@ -804,10 +854,7 @@ func (s State) Validate() error {
 			}
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("gateway: invalid state: %w", errors.Join(errs...))
-	}
-	return nil
+	return errs
 }
 
 const (
