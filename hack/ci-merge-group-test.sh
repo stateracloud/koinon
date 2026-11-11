@@ -122,6 +122,10 @@ ATOMS = [
     (r"github\.event_name\s*==\s*'([a-z_]+)'", lambda g: g == "merge_group"),
     (r"github\.event_name\s*!=\s*'([a-z_]+)'", lambda g: g != "merge_group"),
     (r"github\.event\.pull_request\.draft", lambda: False),
+    # a queue ref is gh-readonly-queue/..., never a tag; a queue build has no dispatch inputs
+    (r"startsWith\(github\.ref,\s*'refs/tags/'\)", lambda: False),
+    (r"inputs\.suite\s*==\s*'[a-z]+'", lambda: False),
+    (r"inputs\.suite\s*!=\s*'[a-z]+'", lambda: True),
     (r"always\(\)", lambda: True),
     (r"!cancelled\(\)", lambda: True),
     # conditional on an upstream output or result: a skip still reports, so it counts as running
@@ -233,7 +237,11 @@ for name in claim dco gitleaks 'e2e result'; do
 done
 # `e2e result` reads `decide`; a skipped decide on a queue build would hand the gate an empty output.
 decide_if=$(awk '/^  decide:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/e2e-kind.yml")
-check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || !github.event.pull_request.draft) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'"
+check "e2e-kind.yml: the advisory drill job is continue-on-error and runs only on schedule, rc tags and a drill dispatch" bash -c '
+	awk "/^  drill:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    continue-on-error: true/ { c = 1 } j && /event_name == .schedule./ { s = 1 } j && /refs\/tags\// { t = 1 } j && /inputs.suite == .drill./ { d = 1 } END { exit !(c && s && t && d) }" "$1"' _ "$wfdir/e2e-kind.yml"
+check "e2e-kind.yml: result is skipped on an rc tag push and a drill dispatch" bash -c '
+	awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if: always\(\).*refs\/tags\/.*suite != .drill./ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/e2e-kind.yml"
 check "e2e-kind.yml: result runs under always()" bash -c 'awk "/^  result:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if: always\(\)/ { ok = 1 } END { exit !ok }" "$1"' _ "$wfdir/e2e-kind.yml"
 # The checker itself: a workflow without merge_group, an upstream gated on pull_request, and an unknown form are caught.
 mgtmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-mg-eval.XXXXXX") || exit 1

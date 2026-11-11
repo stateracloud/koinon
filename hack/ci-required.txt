@@ -45,3 +45,8 @@ advisory flavors
 advisory flavor-publish
 advisory warm-caches
 advisory warm-caches-web
+
+# The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514) is advisory, and is not a pull request or
+# merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
+# required (a required name must report on every PR, push and merge_group build). It is `continue-on-error`, so a red
+# drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.

@@ -32,6 +32,7 @@ import (
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/thinking"
+	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
 
@@ -96,8 +97,8 @@ type watcher struct {
 	done  chan error
 }
 
-func watchRun(ctx context.Context, c *client, org, run string, after int64) *watcher {
-	stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: run, AfterSeq: after})
+func watchRun(ctx context.Context, c *e2eclient.Client, org, run string, after int64) *watcher {
+	stream, err := c.Runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: run, AfterSeq: after})
 	Expect(err).NotTo(HaveOccurred())
 	w := &watcher{items: make(chan *runv1alpha1.WatchRunResponse, 4096), done: make(chan error, 1)}
 	go func() {
@@ -119,7 +120,7 @@ func watchRun(ctx context.Context, c *client, org, run string, after int64) *wat
 // until reads the stream until cond holds for the run, logging every event. It returns the
 // last event seq seen. A run update (or a poll of GetRun, when the stream is quiet) is checked
 // against cond.
-func (w *watcher) until(ctx context.Context, c *client, org, run string, timeout time.Duration, lastSeq *int64, kinds *[]string,
+func (w *watcher) until(ctx context.Context, c *e2eclient.Client, org, run string, timeout time.Duration, lastSeq *int64, kinds *[]string,
 	cond func(*runv1alpha1.Run) bool,
 ) *runv1alpha1.Run {
 	GinkgoHelper()
@@ -146,7 +147,7 @@ func (w *watcher) until(ctx context.Context, c *client, org, run string, timeout
 				GinkgoWriter.Printf("   event %d %s\n", ev.GetSeq(), ev.GetKind())
 			}
 		case <-tick.C:
-			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run})
+			got, err := c.Runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run})
 			Expect(err).NotTo(HaveOccurred())
 			if cond(got.GetRun()) {
 				return got.GetRun()
@@ -155,7 +156,7 @@ func (w *watcher) until(ctx context.Context, c *client, org, run string, timeout
 				Fail(fmt.Sprintf("run ended %s: %s", got.GetRun().GetState(), got.GetRun().GetOutcomeReason()))
 			}
 		case <-deadline:
-			got, _ := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run})
+			got, _ := c.Runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run})
 			Fail(fmt.Sprintf("run did not reach the expected state within %s; it is %s (%s)",
 				timeout, got.GetRun().GetState(), got.GetRun().GetOutcomeReason()))
 		}
@@ -172,7 +173,7 @@ func terminal(s runv1alpha1.RunState) bool {
 
 var _ = Describe("the quickstart", Ordered, func() {
 	var (
-		c        *client
+		c        *e2eclient.Client
 		gh       fakeGitHub
 		t        timings
 		org      string
@@ -193,7 +194,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 	)
 
 	BeforeAll(func() {
-		c = newClient(strings.TrimRight(os.Getenv("KOINON_E2E_API_URL"), "/"))
+		c = e2eclient.New(strings.TrimRight(os.Getenv("KOINON_E2E_API_URL"), "/"))
 		gh = fakeGitHub{base: strings.TrimRight(os.Getenv("KOINON_E2E_FAKEGITHUB_URL"), "/")}
 		Expect(gh.base).NotTo(BeEmpty(), "KOINON_E2E_FAKEGITHUB_URL")
 		t.t0 = time.Now()
@@ -210,16 +211,18 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.begin()
 		password := os.Getenv("KOINON_E2E_PASSWORD")
 		Expect(password).NotTo(BeEmpty(), "KOINON_E2E_PASSWORD")
-		Expect(c.login(ctx, "admin", password)).To(BeTrue(), "the one-time password must be changed first")
+		changeRequired, err := c.Login(ctx, "admin", password)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changeRequired).To(BeTrue(), "the one-time password must be changed first")
 
 		buf := make([]byte, 16)
 		_, _ = rand.Read(buf)
-		_, err := c.auth.ChangePassword(ctx, &authv1alpha1.ChangePasswordRequest{
+		_, err = c.Auth.ChangePassword(ctx, &authv1alpha1.ChangePasswordRequest{
 			CurrentPassword: password, NewPassword: "e2e-" + hex.EncodeToString(buf),
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		me, err := c.auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		me, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(me.GetPasswordChangeRequired()).To(BeFalse())
 		Expect(me.GetPlatformAdmin()).To(BeTrue())
@@ -237,7 +240,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.begin()
 		// The quickstart's model-provider.yaml is a labelled Secret that koinon-api imported at start.
 		// A token made with the session reads it back through /admin/v1, read-only.
-		tok, err := c.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
+		tok, err := c.Tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
 			OrgId: org, Name: "e2e", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -246,7 +249,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			if len(body) > 0 {
 				rdr = strings.NewReader(body[0])
 			}
-			req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin/v1"+path, rdr)
+			req, err := http.NewRequestWithContext(ctx, method, c.Base+"/admin/v1"+path, rdr)
 			Expect(err).NotTo(HaveOccurred())
 			req.Header.Set("Authorization", "Bearer "+tok.GetSecret())
 			if rdr != nil {
@@ -293,7 +296,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 	It("2. creates and tests the GitHub connection", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
 		app := gh.app(ctx)
-		res, err := c.connections.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+		res, err := c.Connections.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 			OrgId: org, DisplayName: "GitHub (" + app.Account + ")",
 			AppId: app.AppID, InstallationId: app.InstallationID, PrivateKey: app.PrivateKey, Test: true,
 		})
@@ -308,7 +311,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	It("3. creates a repo-helper agent bound to the repository and activates it", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
-		ts, err := c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
+		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
 		var tmpl string
 		for _, tp := range ts.GetTemplates() {
@@ -318,7 +321,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(tmpl).NotTo(BeEmpty(), "the repo-helper template")
 
-		created, err := c.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: tmpl, DisplayName: "Repo helper",
 			Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
@@ -329,7 +332,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		prBranch, err = scenarios.PullRequest.Branch(agent.GetDisplayName(), agent.GetId())
 		Expect(err).NotTo(HaveOccurred())
 
-		activated, err := c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
+		activated, err := c.Agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
 			OrgId: org, AgentId: agent.GetId(), Version: agent.GetLatestVersion(),
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -357,7 +360,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	It("4. creates a task, streams the run and parks on an approval", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
-		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Add hello.md",
 			Message: "Please add a hello.md to " + repository + " that says hello from koinon.",
 		})
@@ -372,11 +375,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(run.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
 		Expect(kinds).To(ContainElement("acp.tool_call"), "the run streamed the agent's tool call")
 
-		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: task.GetId()})
+		list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
 		// The list is a summary; the approval card reads the call itself.
-		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+		got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		approval = got.GetApproval()
 		Expect(approval.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
@@ -390,7 +393,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// The gateway exports its access log in batches, so the ledger lags the run by a moment.
 		var cost *runv1alpha1.Cost
 		Eventually(func(g Gomega) {
-			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			got, err := c.Runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			cost = got.GetRun().GetCost()
 			// The refused title request (no tokens) can reach the ledger before the streamed ones:
@@ -437,12 +440,12 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	It("5. approves, and Koinon opens exactly one branch, commit and pull request", Label("smoke"), func(ctx SpecContext) {
 		t.begin()
-		_, err := c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
+		_, err := c.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
 			OrgId: org, ApprovalId: approval.GetId(), ArgsSha256: approval.GetArgsSha256(),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
-			got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: approval.GetId()})
+			got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: approval.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			approval = got.GetApproval()
 			g.Expect(approval.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), approval.GetError())
@@ -467,7 +470,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		run = w.until(ctx, c, org, run.GetId(), 5*time.Minute, &lastSeq, &kinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
-		got, err := c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
+		got, err := c.Tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		var replies []string
 		for _, ev := range got.GetEvents() {
@@ -493,7 +496,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		var got *taskv1alpha1.GetTaskResponse
 		Eventually(func(g Gomega) {
 			var err error
-			got, err = c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
+			got, err = c.Tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(got.GetTask().GetAgentSummary()).To(HavePrefix("Notes: the task asks for a hello.md"))
 		}, 30*time.Second, time.Second).Should(Succeed())
@@ -506,7 +509,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		By("the note's model call went through the gateway and was counted with the run")
 		Eventually(func(g Gomega) {
-			r, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			r, err := c.Runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(r.GetRun().GetCost().GetRequests()).To(BeNumerically(">=", 4), "title, two turns and at least one note")
 		}, 60*time.Second, time.Second).Should(Succeed())
@@ -568,7 +571,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 			return out
 		}
-		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Tracker exfil",
 			Message: p.TrackerGuardPrompt + ": read an item from the tracker, then write it back.",
 		})
@@ -580,10 +583,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_PARKED
 		})
 		Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
-		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
+		list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1), "the guard's card is the run's only approval")
-		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+		got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		ap := got.GetApproval()
 		Expect(ap.GetConnector()).To(Equal("mcp"))
@@ -599,10 +602,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(lg.GetPrivateData()).To(BeTrue(), "the card names the private-data leg")
 		Expect(guarded()).To(BeEmpty(), "the guard held the call: nothing reached the server before the approval")
 
-		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
+		_, err = c.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
-			a, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
+			a, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			ap = a.GetApproval()
 			g.Expect(ap.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), ap.GetError())
@@ -621,7 +624,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.begin()
 		Expect(mcpServerID).NotTo(BeEmpty(), "step 6b adds the server")
 		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
-		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Tracker write",
 			Message: "tracker write: please call the tracker's write tool.",
 		})
@@ -634,10 +637,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 		})
 		Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
 
-		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
+		list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
-		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+		got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		ap := got.GetApproval()
 		Expect(ap.GetConnector()).To(Equal("mcp"))
@@ -651,10 +654,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 			Expect(r.Tool == "write_item" && r.Args == scenarios.PullRequest.TrackerAskArgs).To(BeFalse(), "nothing reached the server before the approval")
 		}
 
-		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
+		_, err = c.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
-			a, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
+			a, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
 			ap = a.GetApproval()
 			g.Expect(ap.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), ap.GetError())
@@ -701,7 +704,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(code).To(Equal(http.StatusOK), string(body))
 		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
 
-		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Cache probe", Message: "Run the cache probe and say when it is done.",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -794,7 +797,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
 		runTask := func(title string) {
 			GinkgoHelper()
-			res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 				OrgId: org, AgentId: agent.GetId(), Title: title, Message: "Run the cache probe and say when it is done.",
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -971,7 +974,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
 		By("a task for a new agent: its sandbox is rendered with the broken image")
-		ts, err := c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
+		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
 		var tmpl string
 		for _, tp := range ts.GetTemplates() {
@@ -980,15 +983,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 		}
 		Expect(tmpl).NotTo(BeEmpty())
-		created, err := c.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		bad := created.GetAgent()
-		_, err = c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: org, AgentId: bad.GetId(), Version: bad.GetLatestVersion()})
+		_, err = c.Agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: org, AgentId: bad.GetId(), Version: bad.GetLatestVersion()})
 		Expect(err).NotTo(HaveOccurred())
-		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: bad.GetId(), Title: "Never starts", Message: "Say hello.",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -1005,7 +1008,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// The kubelet alternates between ErrImagePull and ImagePullBackOff while it retries.
 		Expect(failed.GetOutcomeReason()).To(MatchRegexp(`ErrImagePull|ImagePullBackOff`), "the pod's reason is in the detail")
 		Expect(failed.GetOutcomeReason()).NotTo(ContainSubstring("ConfigurationPending"), "not OpenShell's opaque reason")
-		got, err := c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: res.GetTask().GetId()})
+		got, err := c.Tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		var cause string
 		for _, ev := range got.GetEvents() {

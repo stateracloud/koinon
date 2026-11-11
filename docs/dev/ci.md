@@ -219,6 +219,21 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+**The restore drill** (ADR 0109, #514; `test/drill`) is the evidence for ADR 0085 decision 15: a Ginkgo suite
+seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
+with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
+kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
+`koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
+`e2e-kind.yml` (`continue-on-error: true`, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
+reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
+branch): nightly, on rc tags (`v*-rc.*`) and on `gh workflow run e2e-kind.yml -f suite=drill`, which runs only the
+drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
+merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
+fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
+any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
+commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
+`junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
+
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
 queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts
