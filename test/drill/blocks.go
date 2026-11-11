@@ -15,8 +15,8 @@ import (
 var (
 	nsFlagRE   = regexp.MustCompile(`(^|\s)-n koinon(\s|$)`)
 	objectRE   = regexp.MustCompile(`\b(deploy|deployment)/koinon-`)
-	clusterRE  = regexp.MustCompile(`cnpg\.io/cluster=koinon-pg\b`)
-	instanceRE = regexp.MustCompile(`app\.kubernetes\.io/instance=koinon([,'"\s]|$)`)
+	clusterRE  = regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`)
+	instanceRE = regexp.MustCompile(`(^|[\s,'"])app\.kubernetes\.io/instance=koinon([,'"\s]|$)`)
 )
 
 // Substitute rewrites one guide block for the install in namespace ns, release release. Release
@@ -35,8 +35,8 @@ func Substitute(block, ns, release string) (string, error) {
 		out = nsFlagRE.ReplaceAllString(out, "${1}-n "+ns+"${2}")
 	}
 	out = objectRE.ReplaceAllString(out, "${1}/"+release+"-")
-	out = clusterRE.ReplaceAllString(out, "cnpg.io/cluster="+release+"-pg")
-	out = instanceRE.ReplaceAllString(out, "app.kubernetes.io/instance="+release+"${1}")
+	out = clusterRE.ReplaceAllString(out, "${1}cnpg.io/cluster="+release+"-pg")
+	out = instanceRE.ReplaceAllString(out, "${1}app.kubernetes.io/instance="+release+"${2}")
 	if err := Unsubstituted(out); err != nil {
 		return "", err
 	}
@@ -46,8 +46,8 @@ func Substitute(block, ns, release string) (string, error) {
 var leftoverRE = []*regexp.Regexp{
 	regexp.MustCompile(`(^|\s)-n koinon(\s|$)`),
 	regexp.MustCompile(`\b(deploy|deployment)/koinon-(api|reconciler|agentd|gateway|pg|kek)\b`),
-	regexp.MustCompile(`cnpg\.io/cluster=koinon-pg\b`),
-	regexp.MustCompile(`app\.kubernetes\.io/instance=koinon([,'"\s]|$)`),
+	regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`),
+	regexp.MustCompile(`(^|[\s,'"])app\.kubernetes\.io/instance=koinon([,'"\s]|$)`),
 	regexp.MustCompile(`\b(svc|service|secret|statefulset|job|pod)/koinon(-(api|reconciler|agentd|gateway|pg|kek)\b|\s|$)`),
 }
 

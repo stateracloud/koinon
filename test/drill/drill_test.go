@@ -722,11 +722,11 @@ stringData:
 			// task it made, and runs.task_id to the run. dbos.workflow_status is keyed by workflow_uuid, so
 			// counting it by that key proves nothing about doing the work once.
 			runs := func(id string) (total, terminal int, err error) {
-				key, ok := fireKey(id)
+				source, key, ok := fireKey(id)
 				if !ok {
 					return 0, 0, fmt.Errorf("workflow ID %q is not a trigger fire", id)
 				}
-				q := fmt.Sprintf("SELECT count(*) || ' ' || count(*) FILTER (WHERE r.state IN ('succeeded','failed','canceled')) FROM runs r JOIN dedupe_records d ON d.org_id = r.org_id AND d.effect_kind = 'task' AND d.effect_id = r.task_id WHERE d.key = '%s'", strings.ReplaceAll(key, "'", "''"))
+				q := fmt.Sprintf("SELECT count(*) || ' ' || count(*) FILTER (WHERE r.state IN ('succeeded','failed','canceled')) FROM runs r JOIN dedupe_records d ON d.org_id = r.org_id AND d.effect_kind = 'task' AND d.effect_id = r.task_id WHERE d.source = '%s' AND d.key = '%s'", source, strings.ReplaceAll(key, "'", "''"))
 				out, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, q)
 				if err != nil {
 					return 0, 0, err
@@ -798,15 +798,17 @@ stringData:
 	})
 })
 
-// fireKey is the dedupe key of the trigger fire a workflow ID names: "run-now:<org>:<trigger>:<unix>" and
-// "trigger-fire:<org>:<trigger>@<unix>" both fire the key "<trigger>@<unix>" (durable.TriggerFireKey).
-func fireKey(workflowID string) (string, bool) {
+// fireKey is the dedupe source and key of the trigger fire a workflow ID names. "run-now:<org>:<trigger>:<unix>"
+// is stored under durable.SourceManualTrigger and "trigger-fire:<org>:<trigger>@<unix>" under
+// durable.SourceTrigger; both have the key "<trigger>@<unix>" (durable.TriggerFireKey). The source is part of
+// the primary key, so a Run-now and a scheduled fire of one second are two rows and two runs, not one.
+func fireKey(workflowID string) (source, key string, ok bool) {
 	parts := strings.Split(workflowID, ":")
 	switch {
 	case parts[0] == "run-now" && len(parts) == 4:
-		return parts[2] + "@" + parts[3], true
+		return "trigger_manual", parts[2] + "@" + parts[3], true
 	case parts[0] == "trigger-fire" && len(parts) == 3:
-		return parts[2], true
+		return "trigger", parts[2], true
 	}
-	return "", false
+	return "", "", false
 }
