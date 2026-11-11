@@ -93,6 +93,7 @@ check "escape (admission) restores the envtest cache" has "$(job_body "$wf" esca
 # The e2e Go cache: one entry per go.sum, no run id, saved only when the exact key was missing.
 check "e2e-go key has no run id" hasnt "$(grep 'key: e2e-go-' "$e2e")" 'run_id'
 check "e2e-go is saved only on an exact miss" grep -q "steps.e2ego.outputs.cache-hit != 'true'" "$e2e"
+check "e2e-go is also saved from the nightly schedule" grep -q "github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit" "$e2e"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -301,7 +301,7 @@ jobs:
         run: test/e2e/kind/down.sh
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build
