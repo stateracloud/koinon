@@ -336,6 +336,11 @@ describe('a spend limit', () => {
       expect(text('unknown')).toContain('the cause is unknown')
     })
 
+    it('shows the one nudge to a looping agent and the stop after it', () => {
+      expect(noteText(runEvent(1, 'run.loop_nudge', { pattern: 'same_error' }))[0]).toContain('looping (the same action failing)')
+      expect(noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'loop' }))[0]).toContain('kept looping')
+    })
+
     it('shows who answered a question', () => {
       expect(noteText(taskEvent(1, 100, 'question.answered', { answered_by_name: 'Ana', answer: 'Yes' }))).toEqual(['Ana answered: Yes'])
     })

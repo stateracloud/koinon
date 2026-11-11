@@ -52,6 +52,14 @@ function num(v: unknown): string {
 }
 
 /** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
+// The loop patterns agentd names in run.loop_nudge (internal/agentd/loopguard).
+const loopPatterns: Record<string, string> = {
+  same_action: 'the same action with the same result',
+  same_error: 'the same action failing',
+  monologue: 'messages without a tool call',
+  alternating: 'two actions taking turns',
+}
+
 const sandboxCauses: Record<string, string> = {
   image_pull: 'the image could not be pulled',
   admission: "the cluster's admission policy refused the sandbox",
@@ -199,6 +207,9 @@ function taskItem(ev: TaskEvent): TimelineItem {
           runId,
         }
       }
+      if (ev.kind === 'run.failed' && str(p.failureClass) === 'loop') {
+        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} was stopped: the agent kept looping after it was asked to change its approach`, runId }
+      }
       if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
         const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
         return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} failed: the sandbox never became ready (${cause})`, runId }
@@ -304,6 +315,10 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
     }
     case 'run.mcp_server_recovered':
       return { key, at, type: 'note', text: `Run ${shortId(runId)} found its MCP servers serving tools again and started`, runId }
+    case 'run.loop_nudge': {
+      // agentd told the agent it is repeating itself (once per run): {pattern}.
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: the agent seems to be looping (${loopPatterns[str(p.pattern) ?? ''] ?? 'it repeats itself'}); it was asked to change its approach`, runId }
+    }
     case 'run.retry': {
       // agentd retries a turn after a transient model fault: {failureClass, attempt, delaySeconds, reason}.
       const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''

@@ -251,3 +251,67 @@ starting --> succeeded: composite (Supersede: MarkRunRunning then FinishRun, one
 
 `FinishRun` itself still accepts `succeeded` only from `running`. The composite is the only path from
 `starting` to `succeeded`.
+
+## Amendment 2026-11-11 (#119): failure class `loop`
+
+A run that repeats the same failing action used to run on until a cap stopped it, and the run was
+filed as `budget` or as a wall-clock stop. The cause, a loop, was lost and the spend was wasted. The
+maintainer settled the design on 2026-11-03: detect the loop, nudge the agent once, and fail the run
+with a new class if it goes on. This is a bounded exception to the 2026-10-31 decision "no agent
+nannies" (ADR 0084): one nudge, then the run ends. No other intervention is added.
+
+| Class | What happens |
+| --- | --- |
+| `loop` | the agent was nudged once and kept repeating itself: the run fails; no retry |
+
+**Detection** (`internal/agentd/loopguard`) reads the harness's ACP `session/update` stream. A step is
+a batch of tool calls. Calls announced before any of them has finished are parallel calls of one model
+response and count once. The count starts again whenever a prompt goes out (a new user message, which
+includes the nudge), and the replay of a resumed session is not read. The thresholds are constants
+(`loopguard.DefaultThresholds`), taken from OpenHands' defaults. `agentd.Config.LoopThresholds` can
+change them in tests, and a threshold of zero turns its pattern off.
+
+| Pattern (`pattern` label) | Seen when | Steps |
+| --- | --- | --- |
+| `same_action` | the same tool call with the same result | 4 |
+| `same_error` | the same tool call, failing each time (the error text may differ) | 3 |
+| `monologue` | agent messages with no tool call between them | 3 |
+| `alternating` | two different tool calls, each with its result, taking turns (A B A B A B) | 6 |
+
+A harness that announces the second call of a response only after the first has finished is counted as
+two steps: ACP has no response id on tool calls. That can only make a loop show up later, not sooner.
+A message is a new message when its `messageId` changes or when anything but a message chunk came
+before it.
+
+**One nudge, then the end.** The turn policy (`turnpolicy`, ADR 0087) takes a new event, `EvLoop`:
+
+1. First loop: agentd sends `session/cancel` to end the running turn. When the turn has ended it writes
+   the run event `run.loop_nudge` (`{pattern}`, a diagnostic event) and sends the next prompt with the
+   nudge: it names the pattern, asks for a different approach or an end of the turn that says what
+   blocks it, and warns that Koinon stops the run if it repeats. If the turn ends another way first
+   (`end_turn`, a refusal, a fence) that outcome is honoured. If the harness ignores the cancel, no
+   second prompt is sent (it could overlap the first), the nudge is spent, and the next loop ends the run.
+2. Second loop, after the detector has counted a full threshold again: agentd cancels the turn and ends
+   the turns with `OutLoop`. `conclude` fails the run with class `loop` and the reason "the agent kept
+   looping after it was asked to change its approach: ...".
+
+**Where the class goes.** `run_failure_class` gets the value `loop` (migration 00072, expand only,
+ADR 0085) and the API enum `FAILURE_CLASS_LOOP = 8`. `runoutcome` treats it like every class except
+`fatal`: the run is `failed` and the task stays open, so a person can answer and start a new run
+(`Owner.endTask`, ADR 0065). The class is never retried (ADR 0030 table). The web timeline shows both
+events.
+
+**Metric** (ADR 0023): `koinon_agentd_loop_detections_total{action,pattern}`, with `action` in
+`nudge` and `stop` and `pattern` in the four values above. All series exist from the start. No org,
+agent or run ID is a label.
+
+**Prior art.** OpenHands `StuckDetector` (MIT, software-agent-sdk; read only, nothing copied): the four
+patterns, the thresholds 4, 3, 3 and 6, parallel calls counted as one response, and the reset by a user
+message, at
+[`stuck_detector.py`](https://github.com/OpenHands/software-agent-sdk/blob/3b20e38c3d356cccbd0b89c4c917a7ee25fc13ba/openhands-sdk/openhands/sdk/conversation/stuck_detector.py)
+and [`StuckDetectionThresholds`](https://github.com/OpenHands/software-agent-sdk/blob/3b20e38c3d356cccbd0b89c4c917a7ee25fc13ba/openhands-sdk/openhands/sdk/conversation/types.py).
+Koinon differs in four places. It reads the ACP stream, not an event log, so a step is rebuilt from
+tool call updates. It has no context-window-error pattern, because the failure classes already handle
+`context_overflow`. Its action key is the tool call's kind, title and raw input, and its result key is
+the status, raw output and content, both hashed. And the response to a detection is one nudge then a
+failed run, where OpenHands stops its loop and lets the caller decide.

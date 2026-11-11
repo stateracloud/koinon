@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -42,6 +43,9 @@ type turnDriver struct {
 	text    string
 	done    chan promptResult
 	started time.Time
+
+	// pattern is the last loop pattern found.
+	pattern string
 
 	// What the policy does not interpret and the outcome returns: the classified error of the last
 	// result, its failure, and what agentd refused in the last turn.
@@ -185,6 +189,12 @@ func (d *turnDriver) record(a turnpolicy.Action) error {
 		if err := r.own.Record(d.fctx, "run.refusal", map[string]any{"refusals": d.refs, "count": a.Count, "cwd": r.cwd}); err != nil {
 			return r.dbErr(d.ctx, "record the refusal", err)
 		}
+	case turnpolicy.RecordLoopNudge:
+		r.log.Warn("telling the agent it is looping", "pattern", a.Pattern)
+		if err := r.own.Record(d.fctx, kindLoopNudge, map[string]any{"pattern": a.Pattern}); err != nil {
+			return r.dbErr(d.ctx, "record the loop nudge", err)
+		}
+		r.p.cfg.Metrics.LoopDetections.WithLabelValues(loopNudge, a.Pattern).Inc()
 	case turnpolicy.RecordRetry:
 		f := d.failure
 		r.log.Info("retrying the turn", "class", f.class, "attempt", a.Attempt, "delay", a.Delay)
@@ -208,6 +218,8 @@ func (d *turnDriver) send(a turnpolicy.Action) {
 		d.text = refusalNote(d.refs, r.cwd)
 	case turnpolicy.LeadRetry:
 		d.text = fmt.Sprintf(retryNote, a.Class)
+	case turnpolicy.LeadLoop:
+		d.text = loopNote(loopguard.Pattern(a.Pattern))
 	}
 	if a.Notice != nil {
 		d.text = wrapUpNote(*a.Notice, limit) + "\n\n" + d.text
@@ -217,6 +229,8 @@ func (d *turnDriver) send(a turnpolicy.Action) {
 	d.done = done
 	d.started = time.Now()
 	r.takeRefusals()
+	// A prompt is a new user message: the count of stuck steps starts again (ADR 0030 amendment 2026-11-11).
+	r.loop.Reset()
 	meta := r.tr.beginTurn(d.ctx, text)
 	go func() {
 		stop, err := d.conn.PromptMeta(d.ctx, d.session, text, meta)
@@ -240,10 +254,17 @@ func (d *turnDriver) await(a turnpolicy.Action) turnpolicy.Event {
 		defer t.Stop()
 		poll = t.C
 	}
+	var loop <-chan loopguard.Pattern
+	if a.WatchLoop {
+		loop = r.loop.Signal()
+	}
 	for {
 		select {
 		case res := <-d.done:
 			return d.promptDone(res)
+		case p := <-loop:
+			d.pattern = string(p)
+			return turnpolicy.Event{Kind: turnpolicy.EvLoop, Pattern: d.pattern}
 		case <-r.own.Fenced():
 			return turnpolicy.Event{Kind: turnpolicy.EvFenced, FenceCanceled: r.own.FenceKind() == fenceCanceled}
 		case <-deadline:
@@ -267,6 +288,10 @@ func (d *turnDriver) cancel(a turnpolicy.Action) turnpolicy.Event {
 		r.log.Info("wall-clock cap reached; cancelling the turn")
 	case turnpolicy.CancelFence:
 		r.log.Info("run canceled; cancelling the turn")
+	case turnpolicy.CancelLoop:
+		r.log.Warn("the agent is looping; interrupting the turn to tell it", "pattern", d.pattern)
+	case turnpolicy.CancelLoopStop:
+		r.log.Warn("the agent kept looping after the nudge; stopping the run", "pattern", d.pattern)
 	default:
 		r.log.Info("run limit near; interrupting the turn to ask the agent to wrap up", "limit", a.Cause.Kind)
 	}
@@ -369,6 +394,8 @@ func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok boo
 	case turnpolicy.OutRetriesExhausted:
 		f := exhausted(t.failure, t.out.Retries, t.harnessTries, t.maxRetryAfter)
 		return f.reason, f.class, true
+	case turnpolicy.OutLoop:
+		return loopStopReason(loopguard.Pattern(t.out.Pattern)), classLoop, true
 	case turnpolicy.OutRefusalsExceeded:
 		ref := &refused{refusals: t.refs}
 		return fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), t.out.Refused), classPolicy, true
@@ -379,6 +406,9 @@ func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok boo
 // result carries the policy's outcome to execute.
 func (d *turnDriver) result(o turnpolicy.Outcome) *turnResult {
 	r := d.r
+	if o.Kind == turnpolicy.OutLoop {
+		r.p.cfg.Metrics.LoopDetections.WithLabelValues(loopStop, o.Pattern).Inc()
+	}
 	tries := 0
 	if r.harnessRetries() {
 		tries = retryPolicyOf(r.p.cfg).Tries

@@ -1098,6 +1098,7 @@ const (
 	RunFailureClassPolicy             RunFailureClass = "policy"
 	RunFailureClassFatal              RunFailureClass = "fatal"
 	RunFailureClassSandboxUnavailable RunFailureClass = "sandbox_unavailable"
+	RunFailureClassLoop               RunFailureClass = "loop"
 )
 
 func (e *RunFailureClass) Scan(src interface{}) error {

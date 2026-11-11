@@ -21,7 +21,9 @@
 //   - a refusal that lands with a cancel wins over the wrap-up, the cap and the fence;
 //   - a cancel the harness honours late is not a failure: the run waits for the cap;
 //   - only the owner that recorded the notice sends it;
-//   - a notice interrupts a turn once per limit window, and one notice is sent per run.
+//   - a notice interrupts a turn once per limit window, and one notice is sent per run;
+//   - a loop (EvLoop) is nudged once per run, in the turn after the interrupted one, and the second
+//     loop ends the turns with OutLoop (ADR 0030 amendment 2026-11-11).
 package turnpolicy
 
 import (
@@ -105,6 +107,7 @@ const (
 	LeadWrapUp               // the wrap-up note of the Action's Cause
 	LeadRefusal              // the note that tells the agent what was refused
 	LeadRetry                // the note that tells the agent its model request is retried
+	LeadLoop                 // the note that tells the agent it is looping (Pattern)
 )
 
 // ActionKind is what the driver does next.
@@ -117,7 +120,8 @@ const (
 	// ActMarkNotice: run MarkRunWrapUpNotice and answer EvNoticeResult. Unless Suppress is set, a
 	// recorded notice also records the run event and counts the metric.
 	ActMarkNotice
-	// ActSendPrompt: start a prompt (Lead, Notice) and wait for events.
+	// ActSendPrompt: start a prompt (Lead, Notice) and wait for events. The driver resets its loop
+	// detector: a prompt is a new user message.
 	ActSendPrompt
 	// ActWait: wait for events until Deadline.
 	ActWait
@@ -137,9 +141,11 @@ type CancelWhy int
 
 // The reasons to cancel a turn.
 const (
-	CancelCap   CancelWhy = iota + 1 // the wall-clock cap is reached
-	CancelFence                      // the control plane canceled the run
-	CancelWrap                       // a limit is near: tell the agent
+	CancelCap      CancelWhy = iota + 1 // the wall-clock cap is reached
+	CancelFence                         // the control plane canceled the run
+	CancelWrap                          // a limit is near: tell the agent
+	CancelLoop                          // the agent is looping: interrupt the turn, then nudge it
+	CancelLoopStop                      // the agent kept looping after the nudge: end the run
 )
 
 // RecordKind is the event of an ActRecord.
@@ -147,8 +153,9 @@ type RecordKind int
 
 // The events the policy has recorded.
 const (
-	RecordRefusal RecordKind = iota + 1 // run.refusal: Count refused turns so far
-	RecordRetry                         // run.retry: attempt Attempt after Delay, for Class
+	RecordRefusal   RecordKind = iota + 1 // run.refusal: Count refused turns so far
+	RecordRetry                           // run.retry: attempt Attempt after Delay, for Class
+	RecordLoopNudge                       // run.loop_nudge: the agent is told it loops (Pattern)
 )
 
 // Ended says how the turn that just ended did, for the run's trace. The zero value is a step that
@@ -160,6 +167,7 @@ const (
 	EndedNone Ended = iota
 	EndedTurn
 	EndedWrapUp
+	EndedLoop
 	EndedRefused
 	EndedFailed
 	EndedCanceled
@@ -181,6 +189,10 @@ type Action struct {
 	Class     Class
 	Notice    *Cause
 	PollUsage bool
+	// WatchLoop: feed EvLoop when the loop detector reports a pattern (while a prompt is running).
+	WatchLoop bool
+	// Pattern: the loop pattern of an ActRecord (RecordLoopNudge) and of an ActSendPrompt (LeadLoop).
+	Pattern string
 
 	// ActMarkNotice, ActCancel (CancelWrap) and ActSendPrompt (LeadWrapUp): the limit.
 	Cause    Cause
@@ -214,6 +226,7 @@ const (
 	OutFenced                                  // the worker may no longer write
 	OutShutdown                                // the pool is stopping
 	OutPassthrough                             // an error the driver classified that the policy does not interpret
+	OutLoop                                    // the agent kept looping after the nudge (Outcome.Pattern)
 )
 
 // Outcome is the end of the turns.
@@ -224,6 +237,8 @@ type Outcome struct {
 	// Refused is how many consecutive refused turns the agent caused before this one
 	// (OutRefusalsExceeded).
 	Refused int
+	// Pattern is the loop pattern that ended the turns (OutLoop).
+	Pattern string
 }
 
 // ResultKind is how a prompt ended, as the driver reads it.
@@ -288,6 +303,7 @@ const (
 	EvCancelTimeout                         // the harness did not end its turn within the grace
 	EvNoticeResult                          // the notice row was written: Recorded
 	EvRecorded                              // the run event was recorded
+	EvLoop                                  // the loop detector found a pattern: Pattern
 )
 
 // Event is what the driver feeds the Controller.
@@ -300,6 +316,8 @@ type Event struct {
 	// FenceCanceled (EvFenced): the control plane canceled the run; the turn is cancelled before
 	// the worker lets go.
 	FenceCanceled bool
+	// Pattern (EvLoop) names the stuck pattern.
+	Pattern string
 }
 
 type phase int
@@ -339,6 +357,12 @@ type Controller struct {
 	timeArmed, usageArmed bool
 	// cancelIgnored: the wrap-up cancel went out and the harness ignored it for the grace.
 	cancelIgnored bool
+
+	// loopNudged: the one nudge of the run is used (sent, or not deliverable). loopPattern is the
+	// pattern being nudged; nextLoop makes the record's follow-up the nudge prompt.
+	loopNudged  bool
+	loopPattern string
+	nextLoop    bool
 
 	// next is the record's follow-up.
 	nextSleep bool
@@ -414,6 +438,11 @@ func (c *Controller) Step(ev Event, now time.Time) Action {
 		}
 	case phaseRecord:
 		if ev.Kind == EvRecorded {
+			if c.nextLoop {
+				c.nextLoop = false
+				c.lead = LeadLoop
+				return c.begin(now)
+			}
 			if c.nextSleep {
 				c.phase = phaseSleep
 				c.sleepEnd = now.Add(c.delay)
@@ -546,6 +575,9 @@ func (c *Controller) send(now time.Time, notice *Cause) Action {
 	c.usageArmed = c.wants() && c.countNotice()
 	a := c.wait(ActSendPrompt)
 	a.Lead, a.Class, a.Cause, a.Notice = c.lead, c.leadClass, c.leadCause, notice
+	if c.lead == LeadLoop {
+		a.Pattern = c.loopPattern
+	}
 	return a
 }
 
@@ -559,6 +591,7 @@ func (c *Controller) wait(k ActionKind) Action {
 			a.Deadline = c.cfg.CapEnd.Add(-c.cfg.WrapUpNotice)
 		}
 		a.PollUsage = c.usageArmed
+		a.WatchLoop = true
 	case phaseLate:
 		a.Deadline = c.cfg.CapEnd
 	case phaseSleep:
@@ -622,6 +655,13 @@ func (c *Controller) inPrompt(ev Event, now time.Time) Action {
 				return c.cancel(CancelWrap, cause)
 			}
 		}
+	case EvLoop:
+		// One nudge per run, then the run ends: a bounded exception to "no agent nannies".
+		c.loopPattern = ev.Pattern
+		if c.loopNudged {
+			return c.cancel(CancelLoopStop, Cause{})
+		}
+		return c.cancel(CancelLoop, Cause{})
 	}
 	return c.wait(ActWait)
 }
@@ -632,6 +672,12 @@ func (c *Controller) inCancel(ev Event, now time.Time) Action {
 		return c.end(OutCapReached, EndedCanceled)
 	case CancelFence:
 		return c.end(OutFenced, EndedFenced)
+	case CancelLoopStop:
+		a := c.end(OutLoop, EndedLoop)
+		a.Outcome.Pattern = c.loopPattern
+		return a
+	case CancelLoop:
+		return c.inLoopCancel(ev)
 	}
 	switch ev.Kind {
 	case EvShutdown:
@@ -665,6 +711,38 @@ func (c *Controller) inCancel(ev Event, now time.Time) Action {
 		// The turn ended on its own while the cancel was sent (for example end_turn after an
 		// ask_user, where the run must park and must not get another prompt). Honour it; if a next
 		// turn starts inside the window, it gets the notice prepended.
+		return c.turnResult(r)
+	}
+	return Action{Kind: ActWait}
+}
+
+// inLoopCancel waits for the turn that was interrupted to tell the agent it loops. A turn that ends
+// another way is honoured as it is (the agent is told after a refusal; end_turn ends the run). A
+// harness that ignores the cancel cannot be nudged without overlapping prompts: the nudge is spent
+// and the turn goes on, so the next loop ends the run.
+func (c *Controller) inLoopCancel(ev Event) Action {
+	switch ev.Kind {
+	case EvShutdown:
+		return c.end(OutShutdown, EndedShutdown)
+	case EvCancelFailed, EvCancelTimeout:
+		c.phase = phasePrompt
+		c.cancelIgnored, c.loopNudged = true, true
+		return c.wait(ActWait)
+	case EvPromptDone:
+		r := ev.Result
+		switch r.Kind {
+		case ResultCancelled, ResultErrored:
+			if r.Refusals {
+				return c.refusedTurn(r)
+			}
+			if r.Stop != StopNone {
+				return c.endStop(r.Stop, EndedLoop)
+			}
+			c.loopNudged = true
+			c.phase = phaseRecord
+			c.nextSleep, c.nextLoop = false, true
+			return Action{Kind: ActRecord, Ended: EndedLoop, Record: RecordLoopNudge, Pattern: c.loopPattern}
+		}
 		return c.turnResult(r)
 	}
 	return Action{Kind: ActWait}

@@ -72,6 +72,9 @@ enum FailureClass {
   FAILURE_CLASS_FATAL = 6;
   // The sandbox never became ready within the org's cap; never retried.
   FAILURE_CLASS_SANDBOX_UNAVAILABLE = 7;
+  // The agent kept repeating itself after one nudge (the same action, the same error, messages
+  // without a tool call, or two actions taking turns); never retried.
+  FAILURE_CLASS_LOOP = 8;
 }
 
 // Run is one execution of an agent for a ticket.
