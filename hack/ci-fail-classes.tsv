@@ -3,16 +3,20 @@
 # Failure classes of red CI and e2e jobs, read by hack/ci-fail.sh. ORDER MATTERS: the first row whose
 # regex matches a line of the job log wins; no match is class `unknown` (retry `unknown`).
 # Columns, tab separated: category, retry (yes|no), POSIX extended regex (grep -E, case sensitive).
+# Infra rows match runner and tool lines only; generic network words are at the bottom.
 # Put a specific row above a generic one (a race and a timeout also print `--- FAIL`). Infra rows come
 # first: a runner that lost DNS also fails the steps after it. Add a row when a failure shows as
 # `unknown`, and add a log sample under hack/testdata/ci-fail/ (hack/ci-fail-test.sh checks both).
 # Retry `yes` means a plain re-run is a fair first step; `no` means read the failure.
-infra	yes	Temporary failure resolving|Could not resolve host|no such host|TLS handshake timeout|connection reset by peer
+infra	yes	^E: Failed to fetch|^Err:[0-9]+ |Temporary failure resolving|Could not resolve host|TLS handshake timeout
 infra	yes	ErrImagePull|ImagePullBackOff|toomanyrequests|pull access denied|failed to pull image
 infra	yes	no space left on device
 infra	yes	The runner has received a shutdown signal|lost communication with the server
 race	no	WARNING: DATA RACE
-timeout	no	panic: test timed out|exceeded the maximum execution time|context deadline exceeded|timed out waiting for the condition
+timeout	no	panic: test timed out|exceeded the maximum execution time|timed out waiting for the condition
 lint	no	golangci-lint|shellcheck|tmp-safety|\(typecheck\)|ESLint|eslint|[0-9]+ issues?:
 build	no	^[^ ]+\.go:[0-9]+:[0-9]+: |\[build failed\]|Type error:|error TS[0-9]+
 test	no	--- FAIL|\[FAIL\]|Summarizing [0-9]+ Failures?|FAIL! -- |[0-9]+ failed
+# Generic words that tests log on purpose sit below `test`, so a real `--- FAIL` is never called infra.
+infra	yes	no such host|connection reset by peer
+timeout	no	context deadline exceeded

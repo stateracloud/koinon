@@ -108,8 +108,14 @@ while IFS=$'\t' read -r name run job url; do
   echo "run $url"
   args=(run view "$run" --log-failed)
   [ "$job" = "-" ] || args+=(--job "$job")
-  log=$(gh "${args[@]}" 2>&1 | filter) || true
-  read -r cls retry <<<"$(classify <<<"$log")"
+  ghrc=0
+  raw=$(gh "${args[@]}" 2>&1) || ghrc=$?
+  log=$(filter <<<"$raw") || true
+  if [ "$ghrc" -ne 0 ]; then
+    cls=unknown retry=unknown # gh's own error text is not a CI log
+  else
+    read -r cls retry <<<"$(classify <<<"$log")"
+  fi
   echo "class=$cls retry=$retry"
   out=$(useful <<<"$log" | head -n 27) || true
   if [ -z "$out" ]; then

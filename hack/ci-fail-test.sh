@@ -64,7 +64,9 @@ case "$1 $2" in
 "run view")
   case "$*" in
   *--json*) cat "$t/jobs.json" ;;
-  *"--job 21"*) cat "$t/log-${FAKE_GOLOG:-go}.txt" ;;
+  *"--job 21"*)
+    [ -z "${FAKE_GHFAIL:-}" ] || { echo "gh: HTTP 502: Temporary failure resolving api.github.com"; exit 1; }
+    cat "$t/log-${FAKE_GOLOG:-go}.txt" ;;
   *"--job 22"*) cat "$t/log-web.txt" ;;
   *) exit 9 ;;
   esac ;;
@@ -141,7 +143,7 @@ samples=0
 for f in "$repo"/hack/testdata/ci-fail/*.log; do
   samples=$((samples + 1))
   want=$(sed -n '1s/^# expect: //p' "$f")
-  cp "$f" "$tmp/log-go.txt"
+  sed 1d "$f" >"$tmp/log-go.txt"
   run 7 --job go
   got=$(printf '%s\n' "$out" | sed -n 's/^class=\([a-z]*\) retry=\([a-z]*\)$/\1 \2/p')
   check "class of $(basename "$f") is $want" test "$got" = "$want"
@@ -159,6 +161,10 @@ check "swapped table: first row wins" has "class=test retry=no"
 printf '# only a comment\n' >"$tmp/empty.tsv"
 CI_FAIL_CLASSES="$tmp/empty.tsv" run 7 --job go
 check "empty table falls back to unknown" has "class=unknown retry=unknown"
+FAKE_GHFAIL=1 run 7 --job go
+check "failing gh: class unknown" has "class=unknown retry=unknown"
+check "failing gh: its error text is not classified" hasnt "class=infra"
+check "failing gh: still exit 1" test "$rc" = 1
 run 7
 check "a status without a run is class unknown" has "class=unknown retry=unknown"
 
