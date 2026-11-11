@@ -138,6 +138,10 @@ type Result struct {
 // open with it.
 var beforeCommit func()
 
+// afterLimitRead runs in a store after it read a model's accepted limit and before it looks up the
+// proposals; tests hold a store there with it.
+var afterLimitRead func()
+
 // Apply stores a snapshot's model metadata in one transaction: the catalog row, every model's
 // display fields and fetched limits, and, for the models in use, a proposal for each fetched limit
 // that is not the accepted one. A snapshot with no metadata stores nothing.
@@ -236,6 +240,9 @@ func propose(ctx context.Context, q *store.Queries, model, field string, fetched
 		current = pgtype.Int4{Int32: a.Value, Valid: true}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
+	}
+	if afterLimitRead != nil {
+		afterLimitRead()
 	}
 	if current.Valid && int(current.Int32) == fetched {
 		_, err := q.SupersedeOpenRouterLimitProposals(ctx, store.SupersedeOpenRouterLimitProposalsParams{Model: model, Field: field, Keep: 0})
@@ -416,6 +423,13 @@ func (s *Store) decide(ctx context.Context, actor audit.Actor, id, state string)
 		return &InvalidError{Msg: "proposal id " + id + " is not a UUID"}
 	}
 	_, err = audit.InTx(ctx, s.pool, func(q *store.Queries, b audit.Batch) error {
+		// A store reads the accepted limit and then the proposals, as separate statements. Without the
+		// store's lock an accept could commit between the two: the store would then find no live
+		// proposal for the value just accepted and insert it again as open. With the lock, a decision
+		// and a store never interleave.
+		if err := q.LockOpenRouterCatalog(ctx); err != nil {
+			return err
+		}
 		row, err := q.GetOpenRouterLimitProposalForUpdate(ctx, uid)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: proposal %s", ErrNotFound, id)

@@ -322,6 +322,43 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 			Expect(states).To(Equal(map[int]string{100000: "dismissed", 150000: "superseded", 160000: "open"}))
 		})
 
+		It("never lets an accept interleave with a store: the accepted value does not come back as open", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			m := uniq()
+			snap := snapshot(t0, meta(m, 200000, 0))
+			_, err := s.Apply(ctx, snap, []string{m})
+			Expect(err).NotTo(HaveOccurred())
+			p := forModel(ctx, s, m)[0]
+
+			// Hold the next store after it read the accepted limit (none yet), inside its lock.
+			held, release := make(chan struct{}), make(chan struct{})
+			var once, released sync.Once
+			free := func() { released.Do(func() { close(release) }) }
+			DeferCleanup(orcatalog.SetAfterLimitRead(func() {
+				once.Do(func() {
+					close(held)
+					<-release
+				})
+			}))
+			DeferCleanup(free) // a failed assertion must not leave the store holding its transaction
+			a := make(chan error, 1)
+			go func() { _, err := s.Apply(ctx, snapshot(t0.Add(time.Hour), meta(m, 200000, 0)), []string{m}); a <- err }()
+			<-held
+
+			b := make(chan error, 1)
+			go func() { b <- s.Accept(ctx, audit.CLI("test"), p.ID) }()
+			// Without the lock the accept commits here, the store then finds no live proposal for
+			// 200000, and inserts it again as open.
+			Consistently(b, "300ms").ShouldNot(Receive(), "the accept waits for the store")
+			free()
+			Expect(<-a).To(Succeed())
+			Eventually(b).Should(Receive(BeNil()))
+
+			ps := forModel(ctx, s, m)
+			Expect(ps).To(HaveLen(1), "no duplicate proposal")
+			Expect(ps[0].State).To(Equal(orcatalog.StateAccepted))
+		})
+
 		It("refuses an unknown or malformed proposal id", func(ctx SpecContext) {
 			s := orcatalog.New(db)
 			Expect(s.Accept(ctx, audit.CLI("test"), "not-a-uuid")).To(BeAssignableToTypeOf(&orcatalog.InvalidError{}))
