@@ -533,14 +533,6 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}()
 		Eventually(func() bool { _, ok := markers.Load(retentionMin + 1); return ok }).WithTimeout(time.Minute).Should(BeTrue(), "the marker writer works")
 
-		// The snapshot: what is ENQUEUED now is what the dump will hold, and a trigger fire due after this
-		// instant is not in it. Both are read just before the backup-db block, not at the end of the seed.
-		snapshotUnix = time.Now().Unix()
-		rows := sql(ctx, &src, "SELECT workflow_uuid FROM dbos.workflow_status WHERE status = 'ENQUEUED' ORDER BY created_at")
-		enqueued = strings.Fields(rows)
-		Expect(len(enqueued)).To(BeNumerically(">=", top.RunNowCalls-1), "N-1 Run-now calls stay ENQUEUED behind the low limits, got %v", enqueued)
-		AddReportEntry("enqueued at backup", enqueued)
-
 		// A notification the source cannot finish (ADR 0109, phase 2). No Koinon notification posts to an HTTP
 		// endpoint a fake could hold (the only kinds write to the database), so the hold is a row lock: a
 		// session of the drill locks the scheduled agent's sandbox row, a new task starts the "wake.agent"
@@ -568,6 +560,14 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		dead.executor = sql(ctx, &src, fmt.Sprintf("SELECT DISTINCT executor_id FROM dbos.workflow_status WHERE workflow_uuid = '%s'", dead.workflows[0]))
 		Expect(dead.executor).NotTo(BeEmpty(), "the pending workflow has an executor")
 		AddReportEntry("pending at backup (dead executor)", fmt.Sprintf("%s on %s", dead.workflows, dead.executor))
+
+		// The snapshot: what is ENQUEUED now is what the dump will hold, and a trigger fire due after this
+		// instant is not in it. Both are read just before the backup-db block, not at the end of the seed.
+		snapshotUnix = time.Now().Unix()
+		rows := sql(ctx, &src, "SELECT workflow_uuid FROM dbos.workflow_status WHERE status = 'ENQUEUED' ORDER BY created_at")
+		enqueued = strings.Fields(rows)
+		Expect(len(enqueued)).To(BeNumerically(">=", top.RunNowCalls-1), "N-1 Run-now calls stay ENQUEUED behind the low limits, got %v", enqueued)
+		AddReportEntry("enqueued at backup", enqueued)
 
 		marks.DumpStart = time.Now()
 		for _, b := range []string{"backup-keys", "check-keys", "backup-db", "verify-dump"} {
