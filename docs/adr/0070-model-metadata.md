@@ -1,6 +1,6 @@
 # 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
 
-- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 8 and 9 amended 2026-11-11 (never embedded)
+- Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 4, 5, 6, 8, 9 and 10 amended 2026-11-11 (never embedded)
 - Date: 2026-10-28
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
@@ -429,7 +429,7 @@ reproducible.
 ## Amendment (2026-11-11): never embed OpenRouter's catalog; the operator's cluster fetches it
 
 Maintainer decision of 2026-10-31, recorded for issue #68. This amendment replaces the OpenRouter
-parts of decisions 1, 2, 3, 8 and 9. Why: OpenRouter's terms (§12 "Materials", §7 no scraping) give no
+parts of decisions 1, 2, 3, 4, 5, 6, 8, 9 and 10. Why: OpenRouter's terms (§12 "Materials", §7 no scraping) give no
 licence to redistribute its catalog (see Context), and the written answer that decision 9 waited for
 is not needed any more.
 
@@ -446,7 +446,7 @@ is not needed any more.
      `openrouter` exists. It stops when none exists. The weekly interval applies to OpenRouter
      metadata only; decision 8's interval (24h) still applies to models.dev.
    - **One switch, one parser.** The fetch uses the shared OpenRouter adapter and parser of ADR 0098
-     decision 2.1, not a second client. It follows the three-mode setting of ADR 0098 decision 2
+     decision 2.1, not a second client. It follows the three-mode setting of ADR 0098 decision 2.2
      (amendment of 2026-11-07), the one flag `--prices-refresh=auto|off|on` (Helm
      `prices.refresh.enabled`; unset renders `auto`). `auto`, the default, fetches while an enabled
      `openrouter` provider exists, checked on every tick. `off` makes no request to OpenRouter, so a
@@ -482,6 +482,12 @@ is not needed any more.
 7. **Tests (decision 10).** The `modelmeta` tests cover models.dev only. The fetch, the weekly
    refresh and the source record get their own tests with the fake model server when the OpenRouter
    provider code is written.
+
+8. **Decisions 4 and 6 (snapshot and CI sync).** The weekly CI sync no longer reads OpenRouter, and
+   no OpenRouter snapshot exists to sync. OpenRouter price changes reach an install only through ADR
+   0098's per-install fetch. For `openrouter` providers the serving source is the per-install stored
+   catalog (behaviour-changing fields only after acceptance, see Review), else models.dev's
+   `openrouter` provider.
 
 Follow-up code work this implies (not part of #68): `modelmeta/snapshot/openrouter.json` was never
 added to the tree (no `modelmeta/` package exists yet), so nothing is removed today. #265 and #305
