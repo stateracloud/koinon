@@ -11,6 +11,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -129,19 +130,26 @@ var _ = Describe("A fresh session with a handoff", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryReply = "Notes: waiting on the review." })
 		t := e.task(ctx, "first message")
+		// A direct-message thread of the agent, as services.DirectMessage creates it.
+		dm := services.DirectMessageTriggerID(e.agent.ID)
+		_, err := db.Exec(ctx, `UPDATE tasks SET created_by_kind = 'trigger', created_by_user_id = NULL,
+			created_by_trigger_id = $3 WHERE org_id = $1 AND id = $2`, e.org, t.ID, dm)
+		Expect(err).NotTo(HaveOccurred())
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		// A run that succeeded completed its task (old issue 324); the restart marks open tasks, so a
-		// follow-up reopens it first.
+		// The run that succeeded completed its task (old issue 324). A chat thread sits completed
+		// between turns, and the restart still marks it, because its run completed it (#81).
+		Expect(before.State).To(Equal(store.TaskStateCompleted))
+		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID, DmTriggerID: dm})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(marked).To(ConsistOf(t.ID))
+		// The follow-up reopens it, as the message service does.
 		_, err = db.Exec(ctx, `UPDATE tasks SET state = 'submitted', finished_at = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())
-		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(marked).To(HaveLen(1))
 		e.message(ctx, t, "second message")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
