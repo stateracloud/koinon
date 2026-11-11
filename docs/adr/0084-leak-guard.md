@@ -2,6 +2,7 @@
 
 - Status: Accepted (decisions by procoduck, 2026-10-31; delivery before v0.1.0); amended by [0091](0091-leak-guard-by-destination.md) (2026-11-03: the main protection is where a call sends data; the text check is a frozen secondary alarm)
 - Date: 2026-10-31
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 1, in step 2: the guard is called from Koinon's MCP path, not through ExtMcp)
 - Amends: [0042](0042-ask-tier-park-and-execute.md) (a leak becomes an approval), [0057](0057-mcp-servers.md) (servers declare a data class and kind; every org route carries the guard)
 - Relates to: [0051](0051-session-home-generations.md) (home generations), [0040](0040-agentgateway-model-and-mcp-gateway.md), [0023](0023-observability-and-audit.md), [0020](0020-agent-builder-and-templates.md)
 - Issue: old issue 347, part of #51; implemented by old issue 348, old issue 349, old issue 350, old issue 351 and #70
@@ -61,7 +62,7 @@ while the synthetic encoded and split leaks were caught.
    and becomes an ADR 0042 approval request for that exact call, and the approval card shows what
    would leave (the matched text in the arguments). A call that does not match passes with no
    approval and no delay a person would notice. Forcing the ask tier on every outbound call of an
-   agent with all three legs is rejected.
+   agent with all three legs is rejected. _(Changed by [0091](0091-leak-guard-by-destination.md): the main protection is where a call sends data (sink classes and session legs); the text check is a frozen second layer.)_
 8. **MCP servers declare their data class and kind** (old issue 350). A server record says which legs it
    carries (untrusted input, private data, outbound tool) and its kind (for example fetch or
    search), so the guard and the template test read a declaration instead of guessing from names.

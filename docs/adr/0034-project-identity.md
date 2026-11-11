@@ -21,7 +21,7 @@ regardless of a later repository move.
 ## Decision
 
 - **Repository:** `github.com/procoduck/koinon`. It already exists and is private. It stays private
-  until procoduck decides to make it public.
+  until procoduck decides to make it public. _(Changed: the repository is `stateracloud/koinon` and it is public; see the amendment of 2026-10-26 and [0094](0094-work-claims-on-the-public-repository.md).)_
 - **Go module path:** `github.com/procoduck/koinon`, defined once in `go.mod`. Code must not build
   the path from strings elsewhere, so a move is one search-and-replace.
 - **Possible org move:** if the project moves to a `koinon` GitHub org, the move and the module path

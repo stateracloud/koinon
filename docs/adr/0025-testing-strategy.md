@@ -32,7 +32,10 @@ same test also exercises usage parsing and the spend ledger (ADR
 | Security | sandbox escape suite against OpenShell sandboxes on every PR |
 | Quality | capped nightly evals against real models, with a hard budget |
 
+_(Changed 2026-11-11: the escape suite runs on every PR for its admission-policy part (`make test-admission`); its OpenShell cases need a gateway and run on kind (`make test-escape-kind`). Real-model evals are not a CI job: they run local or on your own cluster and budget, see `docs/dev/real-model-tests.md`.)_
+
 - CI never holds paid model keys; only the nightly eval job does, with a capped budget.
+  _(Replaced 2026-11-11: no job holds a paid model key, and CI never calls paid models. There is no nightly eval job.)_
 - The fake model server is registered as an agentgateway backend in e2e, so the model path in CI
   matches production.
 - The escape suite asserts: no direct egress, no cloud metadata, no service account token, no

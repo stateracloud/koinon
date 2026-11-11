@@ -2,6 +2,7 @@
 
 - Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 5 in step 3: the gateway's own cost and catalog fall away)
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
   (connection secrets move into the encrypted store), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (price versions, raw
@@ -28,6 +29,7 @@ usage type, tiers and match patterns.
    org-scoped role tokens that expire. Every call is audited.
 3. **Provider keys** are envelope-encrypted in Postgres. The key-encryption key (KEK) is generated
    by the chart into a Secret, or taken from an existing Secret. A KMS is optional.
+   _(Changed: `koinon-api` creates the KEK on its first start, because the chart cannot render key material; see the amendment of 2026-10-23 (PV1) below. How this fits the rule that generated secrets come from the ensure-secrets hook Job is still being decided.)_
 4. **Model names are org-scoped**: `<org>/<model>`.
 5. **Prices** follow the Langfuse style: a price per usage type, with tiers and match patterns.
    Prices are effective-dated. Each ledger entry records the price version it used. Koinon ships a
@@ -172,7 +174,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    [docs/ops/prices.md](../ops/prices.md): a pull request that cites the page, a changed entry becomes
    a new `valid_from`, and the version is bumped.
 5. **Cost truth.** Koinon recomputes the cost of every request from the raw usage and the dated price;
-   that cost counts for limits and reports. agentgateway's own cost from the access log is kept beside
+   that cost counts for limits and reports. _(Changed: an OpenRouter entry settles at the billed cost, see the amendment of 2026-11-06 (issue #47) below.)_ agentgateway's own cost from the access log is kept beside
    it (`gateway_cost_usd`). When both exist and differ by more than 1% of the gateway's cost, the
    entry is flagged and `GET /admin/v1/prices/flagged` lists the price entries with how often. A model
    without a Koinon price is still served only when the gateway can price it; the gateway's cost then

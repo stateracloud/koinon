@@ -16,7 +16,8 @@
 - Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e);
   [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
   claims, outsider classes, leases or sweeper);
-  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced)
+  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced);
+  [0105](0105-merge-queue-route.md) (decision 4: the way in, admin merges and the e2e evidence; the queue is the only route)
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
@@ -236,6 +237,7 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
 - **The way in is unchanged.** `gh pr merge --auto --merge` and `hack/pr-merge.sh` put the pull
   request in the queue once its own checks pass. Admin merges (`--admin`, the org-admin bypass of the
   `main` ruleset) still merge directly.
+  _(Changed by [0105](0105-merge-queue-route.md): the queue is the only route; `--admin` is only for a pull request that changes a `.github/**` path.)_
 - **`merge_group` on every required workflow.**
 
   | Workflow | Check | On `merge_group` |
@@ -255,6 +257,7 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   not the queue commit.
   - A needs-e2e pull request still needs a green `quickstart` or `e2e-lab` on its own head before it
     can be queued, and the queue re-checks that this evidence is there.
+    _(Changed by [0102](0102-merge-queue-runs-the-kind-e2e.md) and [0105](0105-merge-queue-route.md): the `e2e-lab` status no longer counts toward a merge, and the queue's own `quickstart` is the only e2e proof.)_
   - The queue commit itself gets no kind e2e. Fifteen to 25 minutes per entry would hold the queue,
     and the lab cannot test the read-only, short-lived queue ref.
   - The backstop stays as it is: the batched e2e-kind on pushes to main, the nightly run, and

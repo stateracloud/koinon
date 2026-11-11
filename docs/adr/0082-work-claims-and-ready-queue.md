@@ -1,6 +1,6 @@
 # 0082. Work claims and the ready queue: a claim branch is the lock, the board is the queue
 
-- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`); decision 9 (approval on sensitive paths) amended by [0103](0103-recorded-review-verdict-check.md) once the owner's ruleset step is done; 0103 itself superseded 2026-11-11 (#546: the check is removed)
+- Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`); decision 8 (the updater) retired by [0094](0094-work-claims-on-the-public-repository.md) (amendment of 2026-11-10) and the merge route set by [0105](0105-merge-queue-route.md); decision 9 (approval on sensitive paths) amended by [0103](0103-recorded-review-verdict-check.md), which is itself deprecated (2026-11-11, #546: the check is removed), so only the CODEOWNERS approval on `.github/**` remains ([0105](0105-merge-queue-route.md))
 - Date: 2026-10-30
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
@@ -89,6 +89,7 @@ claim ref could be deleted by hand.
    live in `hack/chart-check.d/NN-<feature>.sh`; `docs/plans/v0.1.md` no longer tracks status (the
    board does).
    Use the native merge queue once the repository is public.
+   _(Changed: the updater and the `needs-update` label are retired, see [0094](0094-work-claims-on-the-public-repository.md), amendment of 2026-11-10; the merge queue is the only route, see [0105](0105-merge-queue-route.md).)_
 9. **Review.** The agent's human is the PR author; GitHub forbids self-approval, so the other human
    reviews. Approval is required on **sensitive paths only**, enforced by the `main` ruleset's
    native `required_reviewers` path rule: one approval from either human other than the author. The
@@ -100,6 +101,7 @@ claim ref could be deleted by hand.
    `hack/claim.sh sensitive-paths` prints the patterns to paste into the ruleset. The general
    required-approval count stays 0, and "Require review from Code Owners" stays off (the `*` line would
    make it apply everywhere).
+   _(Changed: [0103](0103-recorded-review-verdict-check.md) amended this, then was deprecated; no sensitive-path review is required any more. Only the CODEOWNERS approval on `.github/**` remains, see [0105](0105-merge-queue-route.md).)_
 10. **Project writes and the updater use a GitHub App** (`KOINON_BOT_APP_ID`,
     `KOINON_BOT_PRIVATE_KEY`, read through `actions/create-github-app-token`, pinned by SHA and
     older than the ADR 0079 cooldown), held as secrets of an Environment limited to main; each job

@@ -2,10 +2,12 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Amended by: [0078](0078-sandbox-observer.md) (the wait cause set and where its input comes from)
 - Relates to: old issue 146 (rounds 1 and 3, and the
   releases)
 - Amends: [0010](0010-eventing.md) (ingress, subscriptions), [0030](0030-run-state-machine.md)
-  (timers, the sandbox-timeout failure), [0049](0049-v01-scope-decisions.md) (sandbox idle stop)
+  (timers, the sandbox-timeout failure), [0049](0049-v01-scope-decisions.md) (sandbox idle stop),
+  [0018](0018-v1-screens.md) (the trigger and schedule screens)
 - Work model: [0065](0065-work-model-tasks-inbox.md). Trackers: [0064](0064-work-tracker-connectors.md).
 
 ## Context
@@ -62,6 +64,8 @@ than a Postgres row does (`messaging-and-workflows.md` §3.4).
    - **code-host events** from GitHub and Gitea: PR opened or updated, push, comment;
    - **chat events** from Slack and Teams: a channel message matching rules, or an @mention;
    - **direct messages** to an agent in the inbox chat.
+
+   _(Changed: v0.1 builds schedules and direct messages; code-host events and chat events come in v0.2 and are rejected until then. See "Releases" and the TR1 amendment of 2026-10-27 below.)_
 
    Tracker events (Jira, Linear and the rest) come with the tracker connectors
    ([0064](0064-work-tracker-connectors.md)).
@@ -234,7 +238,8 @@ file on 2026-10-26):
 - ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
   the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
-- The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
+- ~~The filter language for rules (CEL was ADR 0010's candidate)~~ Answered by the TR1 amendment of
+  2026-10-27: filters are typed per type, no expression language. Still open: whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
 - Gitea's webhook signature scheme, and the polling interval per provider.

@@ -17,8 +17,21 @@ yourself" rule; procoduck can overrule any of them.
    the next free number.
 3. ADRs are canonical. `docs/design.md` remains the one-page overview and links each decision to
    its ADR; changes land in an ADR first, then the overview is updated.
-4. Statuses: Proposed, Accepted, Superseded by NNNN, Deprecated. An ADR changed in part by a later
-   one lists it as "Amended by NNNN"; the later one lists "Amends".
+4. Statuses: Proposed, Accepted, Superseded by NNNN, Deprecated, Rejected. An ADR changed in part by a
+   later one lists it as "Amended by NNNN"; the later one lists "Amends". A change in part is always
+   written this way, never as "superseded in part".
+   - **Links go both ways.** "Amends", "Supersedes" and "Reduces" in one ADR need "Amended by",
+     "Superseded by" and "Reduced by" (or the same words in the Status line) in the ADR it names, and the
+     other way round. `hack/adr-lint.sh` fails on a link that has no matching link back, and on a
+     Status outside the list above.
+   - **A marker at each changed decision.** An amendment, in the same ADR or in a later one, puts a
+     one-line marker at each decision it changes, in the form `_(Changed by NNNN: what holds now.)_`
+     (or `_(Changed: ... see the amendment below.)_`), pointing to the amendment or to the later ADR.
+     The old text stays; the marker says what holds now. A reader who stops at "Decision" then does not
+     read a rule that no longer holds. Review checks this; the lint cannot.
+   - Context is the record of what was known when the ADR was written. An amendment does not edit it.
+   - A Status of Deprecated is used when no ADR replaces the one in question; write "deprecated", not
+     "superseded", in that ADR and in every ADR that mentions it.
 5. Content added while writing an ADR rather than taken from the design discussion is marked
    _(reconstructed)_ (alternatives) or _(inferred)_ (consequences).
 6. Decisions that depend on unverified upstream behaviour stay Accepted with a "Pending
