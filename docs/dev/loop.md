@@ -70,8 +70,12 @@ and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute wi
 
 - `kind-registry` (`127.0.0.1:5001`): the push target. Koinon's images (ko, the OpenCode flavor, the fakes)
   are pushed to `localhost:5001` and the node pulls them from it, so a layer the registry already has is
-  not sent again. `kind load` copied every image into every node on every run. The chart's `image.registry`
-  is `localhost:5001` in `hack/dev/values-kind.yaml` and `test/e2e/kind/koinon-values.yaml`; every chart
+  not sent again. `kind load` copied every image into every node on every run. The registry is shared by
+  every kind cluster on the Docker host, so the e2e and the drill push to `localhost:5001/<cluster>/...`
+  (`test/e2e/kind/imagerepo.sh`): two runs next to each other (two lanes, or your `koinon-e1` and the
+  e2e-remote runner) never overwrite each other's `:e2e` tags. The static `localhost:5001` in
+  `test/e2e/kind/koinon-values.yaml`, `fakes.yaml` and the drill topology is rewritten to that path when a
+  run uses it; `hack/dev/values-kind.yaml` (Tilt, unique tags) keeps `localhost:5001`. Every chart
   image still goes through `koinon.imageRef`. The ConfigMap `kube-public/local-registry-hosting` (KEP-1755)
   names it for tools that read it.
 - `kind-proxy-ghcr-io` and `kind-proxy-registry-k8s-io`: pull-through caches of the two hosts the install

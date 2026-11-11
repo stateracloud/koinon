@@ -80,5 +80,18 @@ check "a second attach connects no network again" bash -c "test \$(grep -c '^doc
 
 check "the script never uses the legacy mirrors patch" bash -c "! grep -v '^ *#' '$reg' | grep -q 'registry.mirrors'"
 
+# Clusters share the registry, so their images must not share a reference (a second run would
+# overwrite the first run's :e2e tags).
+repo=$PWD/test/e2e/kind/imagerepo.sh
+a=$(CLUSTER=koinon-e1 "$repo")
+b=$(CLUSTER=koinon-e2e-runner "$repo")
+check "two clusters get different image repositories" test "$a" != "$b"
+check "an image repository is <registry>/<cluster>" test "$a" = "localhost:5001/koinon-e1"
+check "KIND_REGISTRY moves the repository" test "$(KIND_REGISTRY=r.test:1 CLUSTER=c1 "$repo")" = "r.test:1/c1"
+for f in test/e2e/kind/images.sh test/e2e/run.sh test/drill/run.sh test/e2e/escape-openshell.sh; do
+  check "$f takes the image repository from imagerepo.sh" grep -q 'imagerepo.sh' "$f"
+done
+check "images.sh pushes nothing outside the cluster's path" bash -c "! grep -v '^ *#' test/e2e/kind/images.sh | grep -q 'KO_DOCKER_REPO=\$REGISTRY\|\$REGISTRY/flavors'"
+
 ((fail == 0)) || exit 1
 echo "kind-registry-test: all passed"

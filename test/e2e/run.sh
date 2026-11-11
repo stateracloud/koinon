@@ -99,7 +99,10 @@ WRAP
 fi
 # The quickstart's working directory: the repository's chart and the values file.
 ln -sfn "$root/charts" "$OUT/quickstart/charts"
-cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
+# The images live under this cluster'"'"'s path on the shared registry (kind/imagerepo.sh), so the static
+# localhost:5001 of the files below is rewritten to it.
+IMAGE_REPO=$("$here/kind/imagerepo.sh")
+sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/koinon-values.yaml" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -170,7 +173,7 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
 fi
 
 step "fakes ($FAKES)"
-"${K[@]}" apply -f "$here/kind/fakes.yaml"
+sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
 "${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
 done_step "Fakes deployed"
