@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
@@ -172,14 +173,26 @@ func ParseAgentRef(s string) (AgentRef, error) {
 	return a, nil
 }
 
+// AgentFromHeader reads the agent the gateway set in AgentHeader. It refuses unless the header
+// is present exactly once and that value parses: Go keeps repeated header lines apart and Get
+// returns the first, which could be a client's copy that a driver appended to instead of
+// overwriting. Tool servers must use this, not Header.Get.
+func AgentFromHeader(h http.Header) (AgentRef, error) {
+	v := h.Values(AgentHeader)
+	if len(v) != 1 {
+		return AgentRef{}, fmt.Errorf("gateway: want exactly one %s header, got %d", AgentHeader, len(v))
+	}
+	return ParseAgentRef(v[0])
+}
+
 // OrgHeader is the request header agentgateway sets on every LLM request from the
 // authenticated key's org. Drivers render model entries that match on it, so an org's
 // plain model name resolves to that org's model only. Clients cannot choose it: the
 // gateway overwrites whatever they send.
 const OrgHeader = "x-koinon-org"
 
-// AgentHeader is the request header agentgateway sets on every MCP request
-// it forwards to a target: the authenticated key's agent (AgentRef.String).
+// AgentHeader is the request header the gateway (agentgateway today, Koinon's MCP path
+// when it takes over, ADR 0097 decision 5) sets on every MCP request it forwards to a target: the authenticated key's agent (AgentRef.String).
 // Drivers render it so that a client-supplied value is overwritten; MCP
 // targets trust it only because they are reachable from the gateway alone.
 const AgentHeader = "X-Koinon-Agent"
