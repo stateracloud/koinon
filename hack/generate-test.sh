@@ -113,7 +113,7 @@ chmod +x "$tmp/bin/buf"
 rc=0
 BUF_LOG=$tmp/buf.log PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/docs.out" 2>&1 || rc=$?
 if [[ $rc -ne 0 ]]; then ok "generate exits non-zero when the docs reference step fails"; else bad "generate hid a docs step failure"; fi
-grep -q -- '--template buf.gen.docs.yaml' "$tmp/buf.log" && ok "generate runs the docs reference template" || bad "docs reference template not run"
+if grep -q -- '--template buf.gen.docs.yaml' "$tmp/buf.log"; then ok "generate runs the docs reference template"; else bad "docs reference template not run"; fi
 if grep -qx tracked-docs "$repo/docs/reference/proto/proto-api.md"; then ok "docs/reference/proto restored"; else bad "docs/reference/proto not restored"; fi
 
 # Success path: every buf step and go tool succeed; tree may change and is kept.
