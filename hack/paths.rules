@@ -74,19 +74,17 @@ job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|ha
 
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
-# no build tags (test/chartsmoke/images_test.go), so what can change the result is the chart, the
-# Go packages those commands and the suite import, the files they embed, and go.mod/go.sum.
-# The list is hand-written and partial (the Jobs also read hack/versions.env and other files the
-# suite names); a push to main runs the job anyway.
-job chartsmoke ^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/.*\.go$|test/chartsmoke/|go\.(mod|sum))
-# web/ without .go: the suite builds without the `webui` tag, so web/src, web/package.json and
-# the rest never reach a binary (web/webui.go and web/webui_stub.go are Go files and stay).
-# api/proto/: the Go code generated from it is committed under internal/gen, where a change
-# matches; a proto edit without regenerating fails the `generate` job. api/admin/v1/openapi.yaml
-# is embedded by api/admin/v1/spec.go and stays a trigger.
-except chartsmoke ^api/proto/.*\.proto$
+# no build tags (test/chartsmoke/images_test.go). Go packages those commands and the suite import
+# (and files they embed) are derived by hack/ci-changes.sh (`go list`, like flavors). This seed
+# covers what the graph cannot name: the chart itself, hack/versions.env (tool pins the job and
+# the suite's helpers read), the suite's own tree, and go.mod/go.sum.
+job chartsmoke ^(charts/|test/chartsmoke/|hack/versions\.env$|go\.(mod|sum))
+# The go-list graph's package directory `web` would also match web/src and package.json; the suite
+# builds without the `webui` tag, so only the Go stubs under web/ can change a binary.
+except chartsmoke ^web/
+keep chartsmoke ^web/.*\.go$
 # Test files of other packages are not compiled into a binary or into the suite's imports; the
-# suite's own _test.go files are under test/chartsmoke/ and stay.
+# suite's own _test.go files are under test/chartsmoke/ (seed) and stay.
 except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 
 # --- escape: the admission specs (the only ones CI runs) read the chart and the testenv helper -----

@@ -23,14 +23,16 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0 total=0
 script=hack/ci-changes.sh
 
-# The flavors suite's package directories, computed once (the script's own `go list`); the table
-# rows reuse them, three rows at the end run the real `go list` path.
+# The flavors and chartsmoke suite package directories, computed once (the script's own `go list`);
+# the table rows reuse them; rows at the end run the real `go list` path.
 flavors_dirs=$(bash $script --flavors-dirs)
 [[ -n $flavors_dirs ]] || { echo "FAIL: $script --flavors-dirs printed nothing"; exit 1; }
+chartsmoke_dirs=$(bash $script --chartsmoke-dirs)
+[[ -n $chartsmoke_dirs ]] || { echo "FAIL: $script --chartsmoke-dirs printed nothing"; exit 1; }
 
 # jobs_for <paths...>: the sorted jobs that turn on, space separated.
 jobs_for() {
-	printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
+	printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
 }
 
 # expect <expected jobs> <path>...: the paths together must turn on exactly these jobs.
@@ -85,17 +87,17 @@ expect "web" web/e2e-real/login.spec.ts
 # The protos: generate and web (the generated client). The chart smoke ignores them: the generated
 # Go code is committed under internal/gen, where a change matches.
 expect "go web generate" api/proto/koinon/agent/v1/agent.proto
-expect "go chartsmoke" internal/zzz-new/x.go
+expect "go" internal/zzz-new/x.go # not in the chartsmoke or flavors build graph
 expect "go" internal/zzz-new/x_test.go # tests of other packages are not in a binary or the suite's imports
 
 # F3, generate: the Makefile's `generate` recipe reads each of these.
-expect "go generate chartsmoke" api/admin/v1/openapi.yaml       # oapi-codegen input
+expect "go generate chartsmoke" api/admin/v1/openapi.yaml       # oapi-codegen input (embedded; chartsmoke graph)
 expect "go generate chartsmoke" api/admin/v1/oapi-codegen.yaml  # oapi-codegen -config
 expect "go generate chartsmoke" internal/adminapi/api.gen.go    # oapi-codegen output (checked for drift)
 expect "go generate" third_party/openshell/proto/openshell.proto # buf.gen.openshell.yaml input
 expect "go generate" buf.gen.openshell.yaml                      # buf generate --template
 expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agentgateway.yaml input
-expect "go generate chartsmoke" internal/db/queries/agents.sql # sqlc.yaml queries
+expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
 expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/flavors)
 expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
@@ -105,8 +107,9 @@ expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "go chartsmoke" api/admin/v1/spec.go
 
 # F4, chart: hack/chart-check.sh sources hack/versions.env and hack/chart-check.d/*.sh.
+# versions.env is also a chartsmoke seed input (old issue 110).
 expect "chart" hack/chart-check.d/10-new-feature.sh
-expect "go chart" hack/versions.env
+expect "go chart chartsmoke" hack/versions.env
 expect "chart" hack/chart-check.sh
 expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart chartsmoke escape" charts/koinon/values.yaml
@@ -118,7 +121,7 @@ expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the 
 expect "go chartsmoke flavors" internal/execution/run.go
 expect "go chartsmoke flavors" internal/modelformat/format.go
 expect "go chartsmoke flavors" internal/prices/prices.go
-expect "go chartsmoke flavors" internal/testing/fakemodel/server.go
+expect "go flavors" internal/testing/fakemodel/server.go # flavors only; not in the chartsmoke graph
 expect "go chartsmoke flavors" internal/thinking/thinking.go
 expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
@@ -129,10 +132,10 @@ expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh
 expect "go flavors" hack/spike/probe/Dockerfile
-# Negative: a package the suite does not import.
-expect "go chartsmoke" internal/zzz-not-imported/x.go
+# Negative: a package neither suite imports.
+expect "go" internal/zzz-not-imported/x.go
 
-# F6: a test file of another package is not in the smoke build; the e2e scripts and command files are Go inputs.
+# F6: a package in the smoke build graph; foreign _test.go and the e2e scripts are Go-only.
 expect "go chartsmoke" internal/preflight/preflight.go
 expect "go" internal/declarative/docs_test.go
 expect "go" test/e2e/run.sh
@@ -151,14 +154,26 @@ expect "$all" hack/paths-lib.sh
 # Several paths together: the union.
 expect "go chart chartsmoke escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
 
-# The real `go list` path (no CI_CHANGES_FLAVORS_DIRS): a dependency of the suite, and one it lacks.
-total=$((total + 2))
+# The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
+# Read the script's output fully before grepping: chartsmoke is not the last job, so `grep -q` in
+# a pipefail pipeline would SIGPIPE the script mid-write and look like a miss.
+total=$((total + 4))
 if ! printf 'internal/execution/run.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
 	echo "FAIL: go list path: internal/execution/run.go does not turn on flavors"
 	fails=$((fails + 1))
 fi
 if printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
 	echo "FAIL: go list path: an unrelated package turns on flavors"
+	fails=$((fails + 1))
+fi
+out=$(printf 'internal/preflight/preflight.go\n' | bash $script --stdin) || true
+if ! grep -qx 'chartsmoke=true' <<<"$out"; then
+	echo "FAIL: go list path: internal/preflight/preflight.go does not turn on chartsmoke"
+	fails=$((fails + 1))
+fi
+out=$(printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin) || true
+if grep -qx 'chartsmoke=true' <<<"$out"; then
+	echo "FAIL: go list path: an unrelated package turns on chartsmoke"
 	fails=$((fails + 1))
 fi
 
@@ -268,8 +283,38 @@ while IFS= read -r d; do
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
 total=$((total + 1))
-if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' bash $script --stdin | grep -qx 'flavors=true'; then
+if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | grep -qx 'flavors=true'; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
+	fails=$((fails + 1))
+fi
+
+# chartsmoke: real `go list` of the suite plus the three cmd binaries images_test builds; seed
+# inputs the graph cannot name (charts/, hack/versions.env) must also turn the job on.
+cs_suite=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/chartsmoke/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u)
+cs_cmds=$(GOOS=linux go list -deps -f '{{.ImportPath}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler | awk '{print $1}' | grep -F "$mod/" | sed -e "s#^$mod/##" | sort -u)
+cs_dirs=$(printf '%s\n%s\n' "$cs_suite" "$cs_cmds" | sort -u)
+for pkg in test/chartsmoke cmd/koinon-api cmd/koinon-agentd cmd/koinon-reconciler internal/preflight web api/admin/v1; do
+	total=$((total + 1))
+	if ! grep -qxF "$pkg" <<<"$cs_dirs"; then
+		echo "FAIL: go list of chartsmoke does not contain $pkg"
+		fails=$((fails + 1))
+	fi
+done
+need_min "packages in the chartsmoke build graph" 50 "$(grep -c . <<<"$cs_dirs" || true)"
+while IFS= read -r d; do
+	[[ -n $d ]] || continue
+	# A .go probe: except chartsmoke ^web/ keeps only web/*.go (web/src and package.json stay off).
+	turns_on chartsmoke "$d/zzz-probe.go"
+done <<<"$cs_dirs"
+# Seed inputs go list cannot name (old issue 110).
+for p in charts/koinon/values.yaml hack/versions.env test/chartsmoke/smoke_test.go; do
+	turns_on chartsmoke "$p"
+done
+# Fail closed: a dirs list without test/chartsmoke turns chartsmoke on.
+total=$((total + 1))
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$'cmd/koinon-api\ninternal/preflight' bash $script --stdin) || true
+if ! grep -qx 'chartsmoke=true' <<<"$out"; then
+	echo "FAIL: a dirs list without test/chartsmoke must fail closed (chartsmoke=true)"
 	fails=$((fails + 1))
 fi
 
@@ -277,7 +322,7 @@ fi
 total=$((total + 1))
 all=$(bash $script | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ')
 [[ -n $all ]] || { echo "FAIL: no-argument run printed no jobs"; exit 1; }
-if [[ $(printf '' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
+if [[ $(printf '' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
 	echo "FAIL: an empty change list must turn every job on"
 	fails=$((fails + 1))
 fi
@@ -293,7 +338,7 @@ total=$((total + 1))
 	echo a >charts/a.yaml && echo b >docs/b.md
 	git add -A && git commit -q -m base
 	git mv charts/a.yaml docs/a.yaml && git commit -q -m rename
-	CI_CHANGES_FLAVORS_DIRS=$flavors_dirs bash hack/ci-changes.sh HEAD~1
+	CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash hack/ci-changes.sh HEAD~1
 ) >"$tmp/rename.out" 2>&1 || true
 if ! grep -qx 'chart=true' "$tmp/rename.out"; then
 	echo "FAIL: renaming charts/a.yaml to docs/ must turn chart on: $(tr '\n' ' ' <"$tmp/rename.out")"
