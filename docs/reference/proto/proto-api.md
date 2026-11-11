@@ -2866,6 +2866,7 @@ and the message to the person follow from it. Unset on a run that did not fail.
 | FAILURE_CLASS_POLICY | 5 | A policy denied the request; never retried. |
 | FAILURE_CLASS_FATAL | 6 | Anything unknown; never retried. |
 | FAILURE_CLASS_SANDBOX_UNAVAILABLE | 7 | The sandbox never became ready within the org's cap; never retried. |
+| FAILURE_CLASS_LOOP | 8 | The agent kept repeating itself after one nudge (the same action, the same error, messages without a tool call, or two actions taking turns); never retried. |
 
 ### Enum ParkReason
 

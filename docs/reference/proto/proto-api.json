@@ -11851,6 +11851,12 @@
               "number": 7,
               "deprecated": false,
               "description": "The sandbox never became ready within the org's cap; never retried."
+            },
+            {
+              "name": "FAILURE_CLASS_LOOP",
+              "number": 8,
+              "deprecated": false,
+              "description": "The agent kept repeating itself after one nudge (the same action, the same error, messages\nwithout a tool call, or two actions taking turns); never retried."
             }
           ]
         },
