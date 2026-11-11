@@ -522,6 +522,31 @@ var _ = Describe("audit export and off-cluster verify", func() {
 		}
 	})
 
+	It("retains far less heap with AnchorOrgID than without it, for many orgs x anchors", func() {
+		const orgs, anchors = 200, 300
+		lines, orgIDs := syntheticAnchorExport(orgs, anchors)
+		stream := strings.Join(lines, "\n") + "\n"
+
+		// retained is the heap still held after a collecting verify, with its result kept alive.
+		retained := func(opt audit.ExportVerifyOptions) int64 {
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			res, err := audit.VerifyExport(strings.NewReader(stream), opt)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Break).To(BeNil())
+			runtime.GC()
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(res)
+			return int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		}
+		all := retained(audit.ExportVerifyOptions{CollectAnchors: true})
+		one := retained(audit.ExportVerifyOptions{CollectAnchors: true, AnchorOrgID: orgIDs[3]})
+		// 60,000 kept heads (an org ID and a hash each) are several MiB; one org's 300 heads are tens of KiB.
+		Expect(all).To(BeNumerically(">", 1<<20), "without a filter every org's head is retained")
+		Expect(one).To(BeNumerically("<", all/10), "with AnchorOrgID the retained heap does not grow with the org count (all=%d one=%d)", all, one)
+	})
+
 	It("refuses an anchor_heads line with a key twice, at the top level or inside a head", func() {
 		lines, _ := syntheticAnchorExport(3, 2)
 		Expect(audit.VerifyExport(strings.NewReader(strings.Join(lines, "\n")+"\n"), audit.ExportVerifyOptions{})).To(
