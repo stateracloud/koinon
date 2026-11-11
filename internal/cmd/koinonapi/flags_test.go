@@ -57,6 +57,7 @@ var _ = Describe("koinon-api's startup", func() {
 	It("refuses to serve the OTLP receiver without its token", func() {
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db})).To(MatchError(ContainSubstring("--otlp-token-dir is required")))
 		Expect(start(map[string]string{"KOINON_DATABASE_URL": db}, "serve")).To(MatchError(ContainSubstring("--otlp-token-dir is required")))
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/otlp"}, "serve")).To(MatchError(ContainSubstring("--otlp-traces-token-dir is required")))
 	})
 
 	It("serves without the receiver when it is turned off, by flag or by an empty variable", func() {
@@ -65,7 +66,7 @@ var _ = Describe("koinon-api's startup", func() {
 	})
 
 	It("serves when a bare flag list is given, as the pods did before serve was a subcommand", func() {
-		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/otlp"}, "--addr", ":8080")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/otlp", "KOINON_OTLP_TRACES_TOKEN_DIR": "/otlp-traces"}, "--addr", ":8080")).To(Succeed())
 	})
 
 	It("checks the rules between flags on serve only", func() {
@@ -85,7 +86,7 @@ var _ = Describe("koinon-api's startup", func() {
 	It("refuses an unknown flag, an unknown command and an environment variable nothing reads", func() {
 		Expect(start(nil, "migrate", "--database-url="+db, "--otlp-addr=")).To(MatchError(ContainSubstring("unknown flag")))
 		Expect(start(nil, "frobnicate")).To(MatchError(ContainSubstring("unknown command")))
-		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/x", "KOINON_NO_SUCH": "1"})).
+		Expect(start(map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OTLP_TOKEN_DIR": "/x", "KOINON_OTLP_TRACES_TOKEN_DIR": "/y","KOINON_NO_SUCH": "1"})).
 			To(MatchError(ContainSubstring("KOINON_NO_SUCH")))
 	})
 

@@ -164,6 +164,8 @@ type config struct {
 
 	otlpAddr     string
 	otlpTokenDir string
+	// otlpTracesTokenDir holds the token only koinon-agentd sends (/v1/traces), apart from the gateway's (issue 55).
+	otlpTracesTokenDir string
 	// The trace router's byte budgets; 0 derives each from the container memory limit (its cgroup's,
 	// or KOINON_MEMORY_LIMIT_BYTES when that is lower; 20% queues, 5% intake, 3% held roots, 8% requests).
 	traceQueueBytes, traceIntakeBytes, traceHeldBytes, traceRequestBytes int
@@ -270,8 +272,11 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"listen address of the internal OTLP/HTTP receiver (the spend ledger's logs from agentgateway); "+
 			"every request needs the bearer token in --otlp-token-dir; empty disables it")
 	fs.StringVar(&c.otlpTokenDir, "otlp-token-dir", "",
-		"directory with the OTLP receiver's bearer token (file token) and, during a rotation, the one it replaced (file previous); "+
+		"directory with the bearer token of the OTLP receiver's /v1/logs, the gateway's (file token) and, during a rotation, the one it replaced (file previous); "+
 			"required with --otlp-addr")
+	fs.StringVar(&c.otlpTracesTokenDir, "otlp-traces-token-dir", "",
+		"directory with the bearer token of the OTLP receiver's /v1/traces, held only by koinon-agentd (same files as --otlp-token-dir); "+
+			"the two tokens never admit each other's path; required with --otlp-addr")
 
 	fs.IntVar(&c.traceQueueBytes, "trace-queue-bytes", 0,
 		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (the cgroup's or KOINON_MEMORY_LIMIT_BYTES, the lower) (128 MiB without one)")
@@ -848,6 +853,12 @@ func serve(ctx context.Context, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("--otlp-token-dir: %w", err)
 		}
+		// /v1/traces has its own token, held only by koinon-agentd (issue 55); every other path,
+		// /v1/logs included, takes the gateway's.
+		otlpTraceTokens, err := otlpauth.NewTokens(cfg.otlpTracesTokenDir, slog.Default())
+		if err != nil {
+			return fmt.Errorf("--otlp-traces-token-dir: %w", err)
+		}
 		otlpMetrics := otlpauth.NewMetrics(reg)
 		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
 		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
@@ -867,7 +878,7 @@ func serve(ctx context.Context, cfg config) error {
 		defer traceRouter.Close()
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics), traceRouter.Mount()); err != nil {
+			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.ScopedMiddleware(otlpTokens, map[string]*otlpauth.Tokens{tracerouter.TracesPath: otlpTraceTokens}, otlpMetrics), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

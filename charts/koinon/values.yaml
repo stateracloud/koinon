@@ -53,11 +53,13 @@ api:
   # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
   # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
   # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.
+  # The listener has two tokens with separate scopes (issue 55): otlpToken admits /v1/logs (the
+  # gateway's), otlpTracesToken admits /v1/traces (only koinon-agentd's). Each path refuses the other's.
   otlpPort: 4318
-  # The receiver's bearer token. By default the ensure-secrets hook Job generates the Secret
-  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api, koinon-agentd
-  # and the gateway mount it; sandboxes never see it. existingSecret names your own Secret with a
-  # "token" key instead.
+  # The /v1/logs bearer token. By default the ensure-secrets hook Job generates the Secret
+  # koinon-otlp-token (key "token": 64 hex characters) and never changes it. koinon-api and the
+  # gateway mount it; koinon-agentd and sandboxes never see it. existingSecret names your own Secret
+  # with a "token" key instead.
   #
   # Rotation: accepting the current and the previous token needs no downtime. Edit the Secret: copy
   # the old "token" value to a key "previous" and put a new random value (`openssl rand -hex 32`) in
@@ -68,6 +70,12 @@ api:
   # the new token, delete "previous". See https://koinon.stateracloud.com/docs/operate/secret-keys/.
   # With a Secret you manage (existingSecret), rotate the same way.
   otlpToken:
+    existingSecret: ""
+  # The /v1/traces bearer token, held only by koinon-agentd (the sender) and koinon-api (the check);
+  # the gateway and sandboxes never see it. The hook Job generates the Secret koinon-otlp-traces-token
+  # (key "token") unless existingSecret names your own. Rotation is the same as for otlpToken
+  # ("previous" plus a new "token"); only koinon-agentd sends it, so there is no gateway to reload.
+  otlpTracesToken:
     existingSecret: ""
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.

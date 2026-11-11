@@ -103,6 +103,7 @@ var _ = Describe("the Helm-set platform settings", func() {
 				"kek-dir":                 filepath.Join(dir, "does-not-exist"),
 				"saved-work-secret":       "koinon-saved-work",
 				"otlp-token-dir":          filepath.Join(dir, "no-such-token-dir"),
+				"otlp-traces-token-dir":   filepath.Join(dir, "no-such-traces-token-dir"),
 			} {
 				Expect(fs.Set(flag, v)).To(Succeed())
 			}

@@ -32,8 +32,9 @@ const dbSecretPassword = "koinon_test_not-a-real-password"
 // wholeSecretKeys are the keys of a Secret that a pod mounts as a whole directory (no items),
 // by volume name: the chart documents them in values.yaml.
 var wholeSecretKeys = map[string][]string{
-	"openshell-tls": {"tls.crt", "tls.key", "ca.crt"},
-	"otlp-token":    {"token"},
+	"openshell-tls":     {"tls.crt", "tls.key", "ca.crt"},
+	"otlp-token":        {"token"},
+	"otlp-traces-token": {"token"},
 }
 
 // databaseKeys are the keys of the operator's database Secret, as values.yaml documents them

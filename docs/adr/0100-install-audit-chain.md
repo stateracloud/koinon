@@ -534,7 +534,7 @@ contents. The list:
   `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `github-api-url`;
 - keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
   `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
-- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
+- telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `otlp-traces-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;
 - the chart (`chart-version`, `release`) and image version.
 
 The price refresh flags are not on it: #316 records them as `price.refresh.settings_changed` (ADR
@@ -548,7 +548,7 @@ on it, and a test lists the flags that are not, so none is forgotten.
 **Amendment (maintainer decision 2026-11-08): summary keys.** Five flags that name a Secret, a file
 or a directory are recorded under a neutral summary key, because the audit scrubber refuses a key that
 looks like a secret value: `bootstrap-password-file` as `bootstrap-admin-pw-file`, `kek-secret` as `kek-object`,
-`saved-work-secret` as `saved-work-object`, `otlp-token-dir` as `otlp-auth-dir`, and
+`saved-work-secret` as `saved-work-object`, `otlp-token-dir` as `otlp-auth-dir`, `otlp-traces-token-dir` as `otlp-traces-auth-dir`, and
 `openbao-token-file` as `openbao-auth-file`. Every other flag is recorded under its own name.
 
 ### 4. Anchors in v0.1; signed checkpoints designed now, built after v0.1

@@ -535,20 +535,32 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// no token and a wrong one are refused, whatever the path. (The gateway's own exports carry the
 		// real token, which is what keeps the spend ledger filling in the steps above.)
 		otlp := portForward(ctx, kubectl, "svc/koinon-api", "4318")
+		otlpStatus := func(path, auth string) int {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+otlp+path, strings.NewReader("x"))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/x-protobuf")
+			if auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			_ = res.Body.Close()
+			return res.StatusCode
+		}
 		for _, auth := range []string{"", "Bearer koinon_test_not-a-real-token-wrong-0000000"} {
 			for _, path := range []string{"/v1/logs", "/v1/traces"} {
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+otlp+path, strings.NewReader("x"))
-				Expect(err).NotTo(HaveOccurred())
-				req.Header.Set("Content-Type", "application/x-protobuf")
-				if auth != "" {
-					req.Header.Set("Authorization", auth)
-				}
-				res, err := http.DefaultClient.Do(req)
-				Expect(err).NotTo(HaveOccurred())
-				_ = res.Body.Close()
-				Expect(res.StatusCode).To(Equal(http.StatusUnauthorized), path+" with Authorization %q", auth)
+				Expect(otlpStatus(path, auth)).To(Equal(http.StatusUnauthorized), path+" with Authorization %q", auth)
 			}
 		}
+		// The two tokens have separate scopes (issue 55): the gateway's token gets 401 on /v1/traces
+		// and agentd's token gets 401 on /v1/logs. (Each is admitted on its own path: the gateway's
+		// exports fill the spend ledger, agentd's spans reach the trace router, in the steps above.)
+		gatewayToken := "Bearer " + secretToken(ctx, kubectl, "koinon-otlp-token")
+		agentdToken := "Bearer " + secretToken(ctx, kubectl, "koinon-otlp-traces-token")
+		Expect(otlpStatus("/v1/traces", gatewayToken)).To(Equal(http.StatusUnauthorized), "the gateway's token on /v1/traces")
+		Expect(otlpStatus("/v1/logs", agentdToken)).To(Equal(http.StatusUnauthorized), "agentd's token on /v1/logs")
+		Expect(otlpStatus("/v1/traces", agentdToken)).NotTo(Equal(http.StatusUnauthorized), "agentd's token on /v1/traces")
+		Expect(otlpStatus("/v1/logs", gatewayToken)).NotTo(Equal(http.StatusUnauthorized), "the gateway's token on /v1/logs")
 		t.end("6a2. Saved-work upload Service")
 	})
 

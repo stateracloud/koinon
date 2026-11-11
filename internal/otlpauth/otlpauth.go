@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package otlpauth authenticates the requests to koinon-api's internal OTLP listener (logs from
-// agentgateway, traces from agentgateway and koinon-agentd) with a shared bearer token.
+// Package otlpauth authenticates the requests to koinon-api's internal OTLP listener with bearer
+// tokens, one set per scope (issue 55): the gateway's token admits /v1/logs (and is the default for
+// every other path), a token only koinon-agentd holds admits /v1/traces. A token of one scope never
+// admits the other, so a holder of the gateway's token cannot post spans into a traced run.
 //
-// The token is a Secret the chart's ensure-secrets Job generates and the pods mount as files. The
+// Each token set is a Secret the chart's ensure-secrets Job generates and the pods mount as files. The
 // Secret has two keys: "token", the one senders use, and an optional "previous", the one it replaced.
 // The listener accepts either, so an operator rotates without dropping a record: put the old value
 // in "previous", the new one in "token", wait until every sender uses the new one (kubelet updates
@@ -200,6 +202,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 // covered, including ones next does not serve. A refusal is a 401 with no body and no detail, and
 // the token is never logged.
 func Middleware(tokens *Tokens, m *Metrics) func(http.Handler) http.Handler {
+	return ScopedMiddleware(tokens, nil, m)
+}
+
+// ScopedMiddleware is Middleware with a token set per path (issue 55). A request whose URL path is
+// a key of scoped is checked against that path's tokens only; every other path, including ones next
+// does not serve, is checked against fallback. A token of one scope therefore gets a 401 on the
+// other: the gateway's token on /v1/traces, and agentd's token on /v1/logs or anywhere else.
+// The path is matched exactly, as the handlers behind it match it, so a variant such as
+// "/v1/traces/" is no bypass: it falls to fallback and is refused unless fallback's token is sent.
+func ScopedMiddleware(fallback *Tokens, scoped map[string]*Tokens, m *Metrics) func(http.Handler) http.Handler {
 	reject := func(w http.ResponseWriter, reason string) {
 		if m != nil {
 			m.Rejected.WithLabelValues(reason).Inc()
@@ -213,6 +225,10 @@ func Middleware(tokens *Tokens, m *Metrics) func(http.Handler) http.Handler {
 			if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
 				reject(w, reasonMissing)
 				return
+			}
+			tokens := fallback
+			if t, ok := scoped[r.URL.Path]; ok {
+				tokens = t
 			}
 			if !tokens.Match(strings.TrimSpace(token)) {
 				reject(w, reasonInvalid)
