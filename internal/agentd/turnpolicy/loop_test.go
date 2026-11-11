@@ -59,6 +59,7 @@ var _ = Describe("the loop nudge", func() {
 		Expect(a.Kind).To(Equal(turnpolicy.ActEnd))
 		Expect(a.Outcome.Kind).To(Equal(turnpolicy.OutLoop))
 		Expect(a.Outcome.Pattern).To(Equal("same_error"))
+		Expect(a.Outcome.NudgeUndelivered).To(BeFalse(), "the nudge went out")
 		Expect(a.Ended).To(Equal(turnpolicy.EndedLoop))
 	})
 
@@ -78,6 +79,9 @@ var _ = Describe("the loop nudge", func() {
 		a = c.Step(loop("monologue"), t0)
 		Expect(a.Kind).To(Equal(turnpolicy.ActCancel))
 		Expect(a.Why).To(Equal(turnpolicy.CancelLoopStop))
+		a = c.Step(done(cancelled), t0)
+		Expect(a.Outcome.Kind).To(Equal(turnpolicy.OutLoop))
+		Expect(a.Outcome.NudgeUndelivered).To(BeTrue(), "the agent was never told it loops")
 	})
 
 	It("tells the agent about a refusal first and keeps the nudge for the next loop", func() {

@@ -395,7 +395,7 @@ func (t *turnResult) fails() (reason string, class store.RunFailureClass, ok boo
 		f := exhausted(t.failure, t.out.Retries, t.harnessTries, t.maxRetryAfter)
 		return f.reason, f.class, true
 	case turnpolicy.OutLoop:
-		return loopStopReason(loopguard.Pattern(t.out.Pattern)), classLoop, true
+		return loopStopReason(loopguard.Pattern(t.out.Pattern), t.out.NudgeUndelivered), classLoop, true
 	case turnpolicy.OutRefusalsExceeded:
 		ref := &refused{refusals: t.refs}
 		return fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), t.out.Refused), classPolicy, true

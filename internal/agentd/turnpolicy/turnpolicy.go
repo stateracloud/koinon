@@ -239,6 +239,9 @@ type Outcome struct {
 	Refused int
 	// Pattern is the loop pattern that ended the turns (OutLoop).
 	Pattern string
+	// NudgeUndelivered: the harness ignored the loop cancel, so the agent was never told it loops
+	// (OutLoop).
+	NudgeUndelivered bool
 }
 
 // ResultKind is how a prompt ended, as the driver reads it.
@@ -358,11 +361,13 @@ type Controller struct {
 	// cancelIgnored: the wrap-up cancel went out and the harness ignored it for the grace.
 	cancelIgnored bool
 
-	// loopNudged: the one nudge of the run is used (sent, or not deliverable). loopPattern is the
-	// pattern being nudged; nextLoop makes the record's follow-up the nudge prompt.
-	loopNudged  bool
-	loopPattern string
-	nextLoop    bool
+	// loopNudged: the one nudge of the run is used (sent, or not deliverable); loopUndelivered: it
+	// was not deliverable. loopPattern is the pattern being nudged; nextLoop makes the record's
+	// follow-up the nudge prompt.
+	loopNudged      bool
+	loopUndelivered bool
+	loopPattern     string
+	nextLoop        bool
 
 	// next is the record's follow-up.
 	nextSleep bool
@@ -674,7 +679,7 @@ func (c *Controller) inCancel(ev Event, now time.Time) Action {
 		return c.end(OutFenced, EndedFenced)
 	case CancelLoopStop:
 		a := c.end(OutLoop, EndedLoop)
-		a.Outcome.Pattern = c.loopPattern
+		a.Outcome.Pattern, a.Outcome.NudgeUndelivered = c.loopPattern, c.loopUndelivered
 		return a
 	case CancelLoop:
 		return c.inLoopCancel(ev)
@@ -719,14 +724,16 @@ func (c *Controller) inCancel(ev Event, now time.Time) Action {
 // inLoopCancel waits for the turn that was interrupted to tell the agent it loops. A turn that ends
 // another way is honoured as it is (the agent is told after a refusal; end_turn ends the run). A
 // harness that ignores the cancel cannot be nudged without overlapping prompts: the nudge is spent
-// and the turn goes on, so the next loop ends the run.
+// undelivered and the turn goes on, so the next loop ends the run with a reason that says the agent
+// was never told. Keeping the nudge for later would not help: a looping turn that ignores cancels
+// does not end cancelled, so the nudge would wait while the loop goes on spending budget.
 func (c *Controller) inLoopCancel(ev Event) Action {
 	switch ev.Kind {
 	case EvShutdown:
 		return c.end(OutShutdown, EndedShutdown)
 	case EvCancelFailed, EvCancelTimeout:
 		c.phase = phasePrompt
-		c.cancelIgnored, c.loopNudged = true, true
+		c.cancelIgnored, c.loopNudged, c.loopUndelivered = true, true, true
 		return c.wait(ActWait)
 	case EvPromptDone:
 		r := ev.Result

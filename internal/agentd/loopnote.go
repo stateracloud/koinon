@@ -24,7 +24,12 @@ func loopNote(p loopguard.Pattern) string {
 		"with a reply that says what is blocking you. If you repeat this, Koinon stops the run."
 }
 
-// loopStopReason is why the run failed with class loop.
-func loopStopReason(p loopguard.Pattern) string {
+// loopStopReason is why the run failed with class loop. undelivered: the harness ignored the loop
+// cancel, so the agent was never asked to change its approach.
+func loopStopReason(p loopguard.Pattern, undelivered bool) string {
+	if undelivered {
+		return "the agent kept looping and could not be asked to change its approach (the harness " +
+			"ignored the cancel): it " + p.Describe()
+	}
 	return "the agent kept looping after it was asked to change its approach: it " + p.Describe()
 }
