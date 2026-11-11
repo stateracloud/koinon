@@ -72,7 +72,7 @@ const createProvider = `-- name: CreateProvider :one
 
 INSERT INTO providers (org_id, id, name, type, url, api_key, anthropic_workspace_id, source, managed_by_secret, declared_version, disabled_reason, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type CreateProviderParams struct {
@@ -134,6 +134,11 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
 		&i.CostReconcileSince,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -286,7 +291,7 @@ FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
 WHERE m.org_id = $1 AND m.name = $2
-  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
+  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
 LIMIT 1
 `
 
@@ -325,7 +330,7 @@ func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM providers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -358,6 +363,11 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
 		&i.CostReconcileSince,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -486,7 +496,7 @@ func (q *Queries) ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID)
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM providers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -521,6 +531,11 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 			&i.CostScope,
 			&i.CostApiKeyLostAt,
 			&i.CostReconcileSince,
+			&i.AdminDisabledAt,
+			&i.AdminDisabledBy,
+			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -537,7 +552,7 @@ SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.
        p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
+WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL AND p.credential_lost_at IS NULL
   AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name
 `
@@ -589,8 +604,8 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 }
 
 const listServedProviders = `-- name: ListServedProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since FROM providers
-WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM providers
+WHERE org_id = $1 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name
 `
 
@@ -625,6 +640,11 @@ func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([
 			&i.CostScope,
 			&i.CostApiKeyLostAt,
 			&i.CostReconcileSince,
+			&i.AdminDisabledAt,
+			&i.AdminDisabledBy,
+			&i.AdminDisabledNote,
+			&i.AdminDisabledUnderBy,
+			&i.AdminDisabledUnderNote,
 		); err != nil {
 			return nil, err
 		}
@@ -826,7 +846,7 @@ UPDATE providers
 SET type = $1, url = $2, api_key = $3, anthropic_workspace_id = $4, declared_version = $5,
     removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL
 WHERE org_id = $6 AND id = $7 AND source = 'secret'
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type UpdateDeclaredProviderParams struct {
@@ -871,6 +891,11 @@ func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclared
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
 		&i.CostReconcileSince,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }
@@ -926,7 +951,7 @@ SET type = $1, url = $2, anthropic_workspace_id = $3,
     api_key = CASE WHEN $4::boolean THEN $5 ELSE api_key END,
     credential_lost_at = CASE WHEN $4::boolean THEN NULL ELSE credential_lost_at END
 WHERE org_id = $6 AND id = $7
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
 `
 
 type UpdateProviderParams struct {
@@ -975,6 +1000,11 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.CostScope,
 		&i.CostApiKeyLostAt,
 		&i.CostReconcileSince,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
 	)
 	return i, err
 }

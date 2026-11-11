@@ -76,6 +76,22 @@ const (
 	KeyCIDirs         = "ciDirs"     // optional: directories that run CI on the host, one per line or comma-separated
 )
 
+// KeyDisabled is the optional key of all three Secret types: "true" switches the declared items off
+// (the outward switch, ADR 0110 decision 5), "false" or absent leaves the switch to the admin. The UI
+// cannot enable an item its Secret disables.
+const KeyDisabled = "disabled"
+
+// ParseDisabled reads the disabled key of a declarative Secret.
+func ParseDisabled(sec *corev1.Secret) (bool, error) {
+	switch strings.TrimSpace(string(sec.Data[KeyDisabled])) {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	return false, fmt.Errorf("%s must be true or false", KeyDisabled)
+}
+
 // maxValue bounds one Secret value; a Kubernetes Secret is at most 1 MiB in all.
 const maxValue = 64 << 10
 
@@ -105,6 +121,9 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 		if get(k) == "" {
 			errs = append(errs, fmt.Errorf("%s is required", k))
 		}
+	}
+	if _, err := ParseDisabled(sec); err != nil {
+		errs = append(errs, err)
 	}
 	if len(errs) == 0 {
 		if err := catalog.ValidateProvider(d.Name, d.Type, d.URL); err != nil {
@@ -177,6 +196,9 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 			errs = append(errs, fmt.Errorf("%s is required", k))
 		}
 	}
+	if _, err := ParseDisabled(sec); err != nil {
+		errs = append(errs, err)
+	}
 	if d.CredentialValue == "" && (d.CredentialHeader != "" || d.CredentialPrefix != "") {
 		errs = append(errs, fmt.Errorf("%s is required when a credential header or scheme is set", KeyCredential))
 	}
@@ -224,6 +246,9 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 	var errs []error
 	if d.DisplayName == "" || len(d.DisplayName) > 200 {
 		errs = append(errs, fmt.Errorf("%s is required and at most 200 characters", KeyName))
+	}
+	if _, err := ParseDisabled(sec); err != nil {
+		errs = append(errs, err)
 	}
 	switch d.Connector {
 	case github.HostID, gitea.HostID:

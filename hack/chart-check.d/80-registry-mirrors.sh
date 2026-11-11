@@ -54,8 +54,13 @@ done
 if render --set global.imageRegistry=https://art.example.com >/dev/null 2>&1; then fail "imageRegistry with a scheme must not render"; fi
 if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/null 2>&1; then fail "a mirror with a scheme must not render"; fi
 # NOTES warn when image.registry is customised next to a global mirror (helm install prints them; template does not).
-notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
-grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
+# Do not hide a helm failure with || true: that turned an unsupported helm into "missing NOTES" (#349).
+notes=""
+if ! notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1); then
+	fail "helm install --dry-run=client for NOTES failed: $(head -1 <<<"$notes")"
+else
+	grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
+fi
 # An explicit image.registry is the upstream that the rewrite starts from.
 has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/api:0.0.0$' \
 	--set image.registry=quay.io/mine --set 'global.registryMirrors.quay\.io=art.example.com/ghcr-remote'

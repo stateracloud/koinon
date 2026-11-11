@@ -105,6 +105,10 @@ func (r *runner) checkCodeHostCredential(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read the %s connection: %w", connector, err)
 	}
+	if conn.AdminDisabledAt.Valid {
+		return &failure{reason: fmt.Sprintf("the %s connection %q is disabled by an admin (outward switch); an admin has to enable it, then run the task again",
+			connector, conn.DisplayName)}
+	}
 	if conn.CredentialLostAt.Valid {
 		return &failure{reason: fmt.Sprintf("the stored credential of the %s connection %q was lost; %s, then run the task again",
 			connector, conn.DisplayName, connections.LostRemedy(conn))}

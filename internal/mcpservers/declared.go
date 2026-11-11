@@ -6,10 +6,12 @@ import (
 	"context"
 	"slices"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/outward"
 )
 
 // Declared is a server declared by a Kubernetes Secret of type mcp-server.
@@ -25,6 +27,9 @@ type Declared struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialValue  string
+	// Disabled is the Secret's disabled key. It is applied in the transaction of the upsert, so a new
+	// server declared disabled is never visible enabled (ADR 0110 decision 5).
+	Disabled bool
 }
 
 // ApplyDeclared creates or updates the server a Secret declares and reports whether anything
@@ -43,7 +48,8 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 		return false, err
 	}
 	actor := audit.Secret(d.SecretName)
-	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+	_, err = audit.InPgTx(ctx, s.pool, func(tx pgx.Tx, b audit.Batch) error {
+		q := store.New(tx)
 		all, err := q.ListMCPServers(ctx, org)
 		if err != nil {
 			return err
@@ -120,6 +126,11 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			return err
 		}
 		changed = true
+		if d.Disabled {
+			if _, err := outward.DisableDeclared(ctx, tx, b, org, outward.MCPServer, d.SecretName); err != nil {
+				return err
+			}
+		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_server.declare", TargetKind: "mcp_server", TargetID: id.String(),
 			Before: before, After: serverSummary(row),

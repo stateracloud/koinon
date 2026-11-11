@@ -258,12 +258,13 @@ and exits 1 when a gate failed, 3 when none failed but a gate could not run on t
 all passed. `notrun` (no Docker, a missing tool, a sandbox denial, a suite that skipped for a missing
 requirement) is never a `fail` and never a pass; exit 3 is not "verified", so rerun where the
 requirement exists. A gate is `notrun` when its log shows the machine denied it and no failure
-marker (`--- FAIL`, `[FAIL]`, a compile error) is in it: Docker (daemon down, socket denied), the
-network (proxy refusal, no such host), or the sandbox (`deny(`, `operation not permitted`). A real
+marker (`--- FAIL`, `[FAIL]`, a compile error, helm `Error:`, chart-check `assertion(s) failed`,
+gitleaks `leaks found:`) is in it: Docker (daemon down, socket denied), the
+network (proxy refusal, no such host, buf remote unavailable), or the sandbox (`deny(`, `operation not permitted`). A real
 test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
-its offline self-test (stubbed gates, run by the `scripts` job).
+its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
 
 ## The race detector
 

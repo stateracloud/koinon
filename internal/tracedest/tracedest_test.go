@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
@@ -649,6 +650,33 @@ var _ = Describe("Service", func() {
 		Expect(routes[0].Unreadable).To(BeFalse())
 		Expect(routes[0].Destination.Secrets).To(HaveKey("secret_key"))
 		Expect(got.Health.LastError).To(BeEmpty(), "the lost state is shown as itself, not as an export error")
+	})
+
+	It("changes the fingerprint when an admin switches a destination off or on, so the router reloads its routes", func(ctx SpecContext) {
+		d, err := svc.Create(ctx, org, actor, user, own, langfuse("switched"))
+		Expect(err).NotTo(HaveOccurred())
+		sw := outward.New(pool)
+		v0, err := svc.ConfigVersion(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = sw.SetDisabled(ctx, org, audit.User(user), outward.TraceDestination, uuidOf(d.ID), true, "")
+		Expect(err).NotTo(HaveOccurred())
+		v1, _ := svc.ConfigVersion(ctx, org)
+		Expect(v1).NotTo(Equal(v0), "a router that cached the route sees the change and drops it")
+		routes, err := svc.Routes(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(routes).To(BeEmpty())
+		_, err = sw.SetDisabled(ctx, org, audit.User(user), outward.TraceDestination, uuidOf(d.ID), false, "")
+		Expect(err).NotTo(HaveOccurred())
+		v2, _ := svc.ConfigVersion(ctx, org)
+		Expect(v2).NotTo(Equal(v1))
+
+		_, err = svc.SetPlatformDestination(ctx, actor, nil, langfuse("platform-sw"))
+		Expect(err).NotTo(HaveOccurred())
+		p0, _ := svc.ConfigVersion(ctx, org)
+		_, err = sw.SetDisabled(ctx, pgtype.UUID{}, audit.User(user), outward.PlatformTraceDestination, pgtype.UUID{}, true, "")
+		Expect(err).NotTo(HaveOccurred())
+		p1, _ := svc.ConfigVersion(ctx, org)
+		Expect(p1).NotTo(Equal(p0))
 	})
 
 	It("sends no org's spans to a platform destination whose credentials were lost", func(ctx SpecContext) {

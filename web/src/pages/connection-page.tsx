@@ -10,6 +10,8 @@ import { ConfirmAction } from '@/components/confirm-action'
 import { ConnectionSecretForm } from '@/components/connection-secret-form'
 import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
+import { OutwardSwitch } from '@/components/outward-switch'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -82,12 +84,14 @@ export function ConnectionPage() {
         <h1 className="text-xl font-semibold">{c.displayName}</h1>
         <Badge variant={c.status === ConnectionStatus.FAILING ? 'destructive' : 'secondary'}>{connectionStatusLabel(c.status)}</Badge>
         {c.credentialLostAt && <Badge variant="destructive">Credential lost</Badge>}
+        {c.adminDisabled && <Badge variant="destructive">Switched off</Badge>}
         {isApprover(org.role) && (
           <Button size="sm" className="ml-auto" disabled={test.isPending} onClick={() => test.mutate({ orgId, connectionId })}>
             {test.isPending ? 'Testing…' : 'Test connection'}
           </Button>
         )}
       </div>
+      {isApprover(org.role) && <OutwardSwitch kind={OutwardTargetKind.CONNECTION} targetId={connectionId} subject={`connection ${c.displayName}`} disabled={c.adminDisabled} />}
       {c.credentialLostAt && !c.removed && (
         <p role="note" className="text-destructive text-sm">
           {declared
