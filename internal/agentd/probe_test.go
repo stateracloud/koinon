@@ -183,6 +183,35 @@ var _ = Describe("storage probes", func() {
 		Expect(answer(ctx, p)().AnsweredAt.Valid).To(BeFalse())
 	})
 
+	It("polls only the orgs with probe work: a due probe or an old row, in a live org", func(ctx SpecContext) {
+		keep := int32(time.Hour.Seconds())
+		listed := func() []pgtype.UUID {
+			orgs, err := q.ListOrgIDsWithProbeWork(ctx, keep)
+			Expect(err).NotTo(HaveOccurred())
+			return orgs
+		}
+		Expect(listed()).NotTo(ContainElement(e.org), "no probe")
+
+		p := request(ctx, 1, 60)
+		Expect(listed()).To(ContainElement(e.org), "a due probe")
+		_, err := db.Exec(ctx, `UPDATE home_repository_probes SET probe_after = now() + interval '1 minute' WHERE org_id = $1 AND id = $2`, e.org, p.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed()).NotTo(ContainElement(e.org), "a claimed probe under its lease")
+		_, err = db.Exec(ctx, `UPDATE home_repository_probes SET probe_after = now(), answered_at = now(), outcome = 'free' WHERE org_id = $1 AND id = $2`, e.org, p.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed()).NotTo(ContainElement(e.org), "an answered probe the command has still to read")
+		_, err = db.Exec(ctx, `UPDATE home_repository_probes SET expires_at = now() - interval '30 minutes' WHERE org_id = $1 AND id = $2`, e.org, p.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed()).NotTo(ContainElement(e.org), "expired, within the grace")
+		_, err = db.Exec(ctx, `UPDATE home_repository_probes SET expires_at = now() - interval '2 hours' WHERE org_id = $1 AND id = $2`, e.org, p.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed()).To(ContainElement(e.org), "a row to delete")
+
+		_, err = db.Exec(ctx, `UPDATE orgs SET deleted_at = now() WHERE id = $1`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed()).NotTo(ContainElement(e.org), "a deleted org")
+	})
+
 	It("deletes answered and expired rows a while after they expire, and keeps the recent ones", func(ctx SpecContext) {
 		old, recent := request(ctx, 1, 60), request(ctx, 2, 60)
 		_, err := db.Exec(ctx, `UPDATE home_repository_probes SET expires_at = now() - interval '2 hours', answered_at = now() - interval '2 hours',

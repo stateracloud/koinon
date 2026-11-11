@@ -878,6 +878,12 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by org. The run
 	// claim loop of koinon-agentd uses ListOrgIDsWithRunWork instead.
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
+	// for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the
+	// orgs with probes, not every org that ever existed (as ListOrgIDsWithRunWork, koinon issue 378).
+	// Both halves use an index (home_repository_probes_due, home_repository_probes_expiry). A superset
+	// is fine: the claim and the delete re-check every condition.
+	ListOrgIDsWithProbeWork(ctx context.Context, graceSeconds int32) ([]pgtype.UUID, error)
 	// The live orgs where a worker could claim or take over a run right now: a run that is claimable
 	// (ready_at set, ClaimNextRun) or whose owner's lease expired (TakeOverExpiredRun). agentd polls
 	// this every few tens of milliseconds, so its cost follows the orgs with work, not every org that

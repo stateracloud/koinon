@@ -50,9 +50,10 @@ const (
 	probeWorkers = 16
 )
 
-// probeTick answers the due probes of every org and deletes the old rows.
+// probeTick answers the due probes of every org and deletes the old rows. It runs every checkpoint
+// poll, so it lists only the orgs that have probe work: almost always none.
 func (p *Pool) probeTick(ctx context.Context) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	orgs, err := p.q.ListOrgIDsWithProbeWork(ctx, int32(probeKeep.Seconds()))
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("repository probes: listing orgs failed", "err", err)

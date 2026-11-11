@@ -537,6 +537,23 @@ SELECT * FROM home_repository_probes WHERE org_id = @org_id AND id = ANY(@ids::u
 -- name: DeleteHomeRepositoryProbe :exec
 DELETE FROM home_repository_probes WHERE org_id = @org_id AND id = @id;
 
+-- name: ListOrgIDsWithProbeWork :many
+-- The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
+-- for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the
+-- orgs with probes, not every org that ever existed (as ListOrgIDsWithRunWork, koinon issue 378).
+-- Both halves use an index (home_repository_probes_due, home_repository_probes_expiry). A superset
+-- is fine: the claim and the delete re-check every condition.
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT p.org_id FROM home_repository_probes p
+    WHERE p.answered_at IS NULL AND p.probe_after <= now() AND p.expires_at > now()
+    UNION
+    SELECT p.org_id FROM home_repository_probes p
+    WHERE p.expires_at < now() - make_interval(secs => @grace_seconds::int)
+  )
+ORDER BY o.id;
+
 -- name: ClaimHomeRepositoryProbe :one
 -- The next unanswered probe of the org, held for @lease_seconds: an agentd that dies leaves it to
 -- another after the lease. An expired probe is not claimed: the command has refused already. No

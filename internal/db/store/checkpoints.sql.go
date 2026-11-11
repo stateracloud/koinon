@@ -1616,6 +1616,44 @@ func (q *Queries) ListHomeRepositoryProbes(ctx context.Context, arg ListHomeRepo
 	return items, nil
 }
 
+const listOrgIDsWithProbeWork = `-- name: ListOrgIDsWithProbeWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT p.org_id FROM home_repository_probes p
+    WHERE p.answered_at IS NULL AND p.probe_after <= now() AND p.expires_at > now()
+    UNION
+    SELECT p.org_id FROM home_repository_probes p
+    WHERE p.expires_at < now() - make_interval(secs => $1::int)
+  )
+ORDER BY o.id
+`
+
+// The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
+// for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the
+// orgs with probes, not every org that ever existed (as ListOrgIDsWithRunWork, koinon issue 378).
+// Both halves use an index (home_repository_probes_due, home_repository_probes_expiry). A superset
+// is fine: the claim and the delete re-check every condition.
+func (q *Queries) ListOrgIDsWithProbeWork(ctx context.Context, graceSeconds int32) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithProbeWork, graceSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockHomeRepository = `-- name: LockHomeRepository :one
 SELECT org_id, agent_id, prefix, password_envelope, created_at, retired_at, delete_after, deleted_at, credential_lost_at, next_epoch_at_least, prefix_taken_at FROM home_repositories
 WHERE org_id = $1 AND agent_id = $2
