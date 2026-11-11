@@ -34,7 +34,12 @@
 # in an `except` rule and say why in the comment above it.
 
 # --- Changes that run everything: CI itself, the Makefile, the Go module, and these rules ---------
-everything - ^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh|Makefile|go\.mod|go\.sum)$
+# `everything ci` is CI plumbing: the workflow and the scripts that decide what it runs. `everything -` is the
+# build inputs. Both turn everything on; hack/pr-merge.sh --admin asks hack/ci-changes.sh to ignore the plumbing
+# rule (CI_CHANGES_IGNORE_PLUMBING=1) when it decides whether `flavors` is owed, because a plumbing change by itself
+# cannot get a branch `flavors` run and `--admin` is the only route of a `.github/**` pull request.
+everything ci ^(\.github/workflows/ci\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh)$
+everything - ^(Makefile|go\.mod|go\.sum)$
 
 # --- go: go-tidy, go-lint, go-test (Postgres), go-race --------------------------------------------
 # Any path can affect them, except what is listed here. Not listed on purpose: charts/, test/,

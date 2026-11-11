@@ -93,7 +93,8 @@ SH
 cat >"$tmp/bin/cich" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null
-echo "flavors=${FLAVORS:-false}"
+# Without the plumbing flag the real script answers true for a ci.yml change (the `everything` rule).
+if [ "${CI_CHANGES_IGNORE_PLUMBING:-}" = 1 ]; then echo "flavors=${FLAVORS:-false}"; else echo "flavors=${FLAVORS_ALL:-true}"; fi
 SH
 chmod +x "$tmp/bin"/*
 export PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CI_CHANGES="$tmp/bin/cich"
@@ -217,11 +218,21 @@ setup false "$green
 $(r flavors 2026-11-01T10:00:00Z skipped)"
 NEEDS_RC=1 FLAVORS=true run 7 --admin
 check "--admin, flavors affected, skipped flavors: refused (10)" 10 nomerge
-grep -q 'use the merge queue' <<<"$out" || { echo "FAIL: flavors refusal says use the merge queue: $out" >&2; fail=1; }
+{ grep -q 'changes flavor inputs and .github paths together' <<<"$out" && grep -q 'split it' <<<"$out"; } || { echo "FAIL: flavors refusal says to split the pull request: $out" >&2; fail=1; }
 setup false "$green
 $(r flavors 2026-11-01T10:00:00Z success)"
 NEEDS_RC=1 FLAVORS=true run 7 --admin
 check "--admin, flavors affected, real flavors success: merges" 0 merge
+# A ci.yml-only change (flavors=true only through the plumbing rule) is not held for flavors.
+setup false "$green
+$(r flavors 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 FLAVORS=false FLAVORS_ALL=true run 7 --admin
+check "--admin, ci.yml-only change, skipped flavors: merges" 0 merge
+# Real flavor inputs together with a .github path: refused unless a real flavors success exists.
+setup false "$green
+$(r flavors 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 FLAVORS=true FLAVORS_ALL=true run 7 --admin
+check "--admin, flavor input plus .github path, skipped flavors: refused (10)" 10 nomerge
 setup false "$green
 $(r flavors 2026-11-01T10:00:00Z skipped)"
 NEEDS_RC=1 FLAVORS=false run 7 --admin

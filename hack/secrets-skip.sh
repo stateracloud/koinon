@@ -35,14 +35,14 @@ decide() {
 		emit false "not a push to main: scanning"
 		return
 	fi
-	if ! head=$(gh api "repos/$REPO/actions/workflows/secrets.yml/runs?event=merge_group&status=success&per_page=30" \
+	if ! head=$(gh api "repos/$REPO/actions/workflows/secrets.yml/runs?event=merge_group&status=success&head_sha=$SHA&per_page=1" \
 		--jq ".workflow_runs[] | select(.conclusion == \"success\" and .head_sha == \"$SHA\") | .head_sha" 2>/dev/null); then
 		emit false "cannot list the merge_group runs of secrets: scanning"
 		return
 	fi
 	head=${head%%$'\n'*}
 	if [[ -z $head ]]; then
-		emit false "no successful merge_group secrets run on commit $SHA (an admin merge, a direct push, or a run older than the last 30): scanning"
+		emit false "no successful merge_group secrets run on commit $SHA (an admin merge or a direct push): scanning"
 		return
 	fi
 	emit true "a successful merge_group secrets run scanned commit $SHA"

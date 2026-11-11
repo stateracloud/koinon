@@ -171,6 +171,27 @@ expect "$all" hack/ci-changes.sh
 expect "$all" hack/ci-skip-heavy.sh
 expect "$all" hack/paths.rules
 expect "$all" hack/paths-lib.sh
+# CI_CHANGES_IGNORE_PLUMBING=1 (hack/pr-merge.sh --admin) drops the CI-plumbing rule but keeps the build inputs.
+expect_ignoring() { # <want flavors value> <paths...>
+	local want=$1 got
+	shift
+	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^flavors=//p')
+	total=$((total + 1))
+	if [[ $got != "$want" ]]; then
+		echo "FAIL: ignoring plumbing, flavors for [$*]: want $want, got $got"
+		fails=$((fails + 1))
+	fi
+}
+for f in .github/workflows/ci.yml hack/ci-changes.sh hack/ci-skip-heavy.sh hack/paths.rules hack/paths-lib.sh; do
+	expect_ignoring false "$f"
+done
+expect_ignoring false .github/workflows/ci.yml .github/CODEOWNERS
+expect_ignoring true Makefile
+expect_ignoring true go.mod
+expect_ignoring true go.sum
+expect_ignoring true .github/workflows/ci.yml flavors/base/Dockerfile
+expect_ignoring true .github/workflows/ci.yml internal/execution/run.go
+expect_ignoring true # an empty change list still fails closed
 # Several paths together: the union.
 expect "go chart chartsmoke escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
 

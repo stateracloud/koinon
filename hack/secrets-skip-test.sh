@@ -29,8 +29,7 @@ while (($#)); do
 	shift
 done
 case $path in
-repos/o/r/git/commits/*) f=$FAKE_DIR/commit.json ;;
-repos/o/r/actions/workflows/secrets.yml/runs*) [[ ${FAKE_FAIL_RUNS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/runs.json ;;
+repos/o/r/actions/workflows/secrets.yml/runs*head_sha=abc123*per_page=1) [[ ${FAKE_FAIL_RUNS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/runs.json ;;
 *) echo "fake gh: unknown $path" >&2; exit 1 ;;
 esac
 jq -r "$jq_expr" "$f"
@@ -38,7 +37,6 @@ EOF
 chmod +x "$tmp/bin/gh"
 export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r
 
-echo '{"tree":{"sha":"tree-main"}}' >"$tmp/commit.json"
 # one queue run on the pushed commit, one on another commit, one that failed on the pushed commit;
 # runs_sametree: a successful queue run with the pushed tree but another head_sha (other commits)
 runs_match='{"workflow_runs":[{"head_sha":"q1","conclusion":"success","head_commit":{"tree_id":"tree-other"}},{"head_sha":"abc123","conclusion":"success","head_commit":{"tree_id":"tree-main"}}]}'

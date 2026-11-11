@@ -109,7 +109,7 @@ only queue latency and runner slots.
      pushed tree; when none does, it opens (or comments on) an issue labelled `break-glass` or, for a
      `.github/**` pull request. A queue merge is recognised by the REQUIRED jobs (`hack/ci-required.txt`) passing on
      a `merge_group` run of that tree, not by the run's conclusion (the queue merges on the required contexts
-     while the advisory `flavors` job may be red or the run still running); an in-progress run is polled for up
+     while an advisory job may be red or the run still running (when this was written `flavors` was advisory; since #572 it is required, see the amendment below)); an in-progress run is polled for up
      to about 10 minutes. The expected `--admin` merge of a `.github/**` pull request whose required checks and
      `review` were green on its head opens no issue; a direct push, or anything else, opens a `break-glass`
      issue. The job stays green: it never turns main red, because a red job
@@ -410,8 +410,16 @@ config change, `gitleaks` is not run again on a push to main that the queue made
 queue run of the same workflow scanned that exact commit), and the OpenSSF Scorecard runs weekly, not on every push.
 
 Gap and its closure: `flavors` reports a green skip on every pull request head, and `--admin` skips the queue, so a
-`.github/**` pull request that also changes flavor inputs could merge with no `flavors` run. `hack/pr-merge.sh --admin`
-now refuses (exit 10) when `hack/ci-changes.sh` says `flavors=true` and the head has no real `flavors` success. `ci.yml`
-has no `workflow_dispatch` trigger that runs `flavors` for a branch, and none is added here, so in practice the answer
-is "use the merge queue". The push to main still builds and tests the flavors after an `--admin` merge of a
-pull request that does not affect them.
+`.github/**` pull request that also changes flavor inputs could merge with no `flavors` run. `ci.yml` has no
+`workflow_dispatch` trigger that runs `flavors` for a branch, and none is added here. `hack/pr-merge.sh --admin`
+therefore asks the base's `hack/ci-changes.sh` with `CI_CHANGES_IGNORE_PLUMBING=1`, which drops the `everything ci`
+rule of `hack/paths.rules` (`ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, `paths.rules`, `paths-lib.sh`) and decides
+on the real flavor inputs only: the `job flavors` rule, the suite's build graph, `Makefile`, `go.mod` and `go.sum`.
+(A first version of the guard used the full answer and so refused every `ci.yml` change, which can only go by
+`--admin`: a deadlock.) On the `--admin` route a CI-plumbing-only change is not held for `flavors`: the push run on
+main runs it after the merge, because `ci-skip-heavy.sh` skips a push only when a successful `merge_group` run tested
+the same tree, and an `--admin` merge has none, so the `changes` job answers every job `true` and the `flavors` job
+(`if: github.event_name != 'pull_request' && needs.changes.outputs.flavors == 'true'`) runs. A break there is fixed
+forward. A pull request that mixes real flavor inputs with `.github` paths is refused with exit 10 and must be split:
+the flavor change goes through the merge queue, the `.github` change through `--admin`. The guard reads the rule from
+the base, as the e2e guard does, so a pull request cannot loosen its own check.
