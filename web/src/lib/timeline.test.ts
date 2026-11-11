@@ -343,9 +343,9 @@ describe('a spend limit', () => {
 
     it('says when the loop stop came without the agent being asked', () => {
       const reason = 'the agent kept looping and could not be asked to change its approach (the harness ignored the cancel): it repeated the same action'
-      const t = noteText(taskEvent(1, 100, 'run.failed', { reason, failureClass: 'loop' }))[0]
-      expect(t).toContain('could not be asked')
-      expect(t).not.toContain('after it was asked')
+      const note = noteText(taskEvent(1, 100, 'run.failed', { reason, failureClass: 'loop' }))[0]
+      expect(note).toContain('could not be asked')
+      expect(note).not.toContain('after it was asked')
     })
 
     it('shows who answered a question', () => {
