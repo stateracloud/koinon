@@ -93,7 +93,9 @@ edited.
 ## Consequences
 
 - A release candidate cannot be cut on a restore nobody tested. The drill is repeatable by one command
-  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`.
+  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`. A topology's optional
+  `imageRegistry` is passed to both installs as `image.registry` (run.sh sets it on kind to the cluster's
+  path on the local registry, #45).
 - The suite shows what is missing before the product fixes land. `known gap: #N` is a red line in the
   report on purpose: it is the list of work, and it ends when the issue closes.
 - Each gateway has its own `gatewayId` (`drill-src-<run>`, `drill-dst-<run>`; the gateway chart value and
