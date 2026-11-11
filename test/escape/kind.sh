@@ -195,7 +195,19 @@ need_gateway=0 need_gitea=0
 
 if (( need_gateway || need_gitea )); then
   echo "== stand-in image (koinon-fakemodel) for koinon-fixtures"
-  img=$(cd "$root" && KO_DOCKER_REPO=kind.local/rt1-fakemodel KIND_CLUSTER_NAME="$CLUSTER" \
+  # A cluster with the local registry (test/e2e/kind/registry.sh, #45; its KEP-1755 ConfigMap) gets the
+  # stand-in pushed to the cluster's path there, not kind-loaded. The kubelet has then pulled the same
+  # digest itself (the e2e's fakemodel, the same reproducible ko build), and with
+  # KubeletEnsureSecretPulledImages (beta, on since Kubernetes 1.35) a pulled image counts as verified
+  # only for the names it was pulled under: a kind-loaded kind.local name for that image is pulled
+  # again, which cannot work (ImagePullBackOff). Without the registry, nothing is pulled and kind.local
+  # stays as before.
+  stand_repo=kind.local/rt1-fakemodel
+  reg_host=$("${K[@]}" -n kube-public get configmap local-registry-hosting \
+    -o jsonpath='{.data.localRegistryHosting\.v1}' 2>/dev/null | sed -n 's/^host: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' || true)
+  [[ -z $reg_host ]] ||
+    stand_repo="$(KIND_REGISTRY="$reg_host" CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/rt1-fakemodel"
+  img=$(cd "$root" && KO_DOCKER_REPO="$stand_repo" KIND_CLUSTER_NAME="$CLUSTER" \
     ko build --bare --platform "linux/$(go env GOARCH)" --tags escape ./cmd/koinon-fakemodel 2>"$tmp/ko.log") ||
     { cat "$tmp/ko.log" >&2; exit 1; }
   "${K[@]}" create namespace koinon-fixtures --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
