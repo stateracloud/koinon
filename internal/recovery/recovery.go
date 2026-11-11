@@ -47,7 +47,7 @@ var (
 	ErrNoLocalUser = errors.New("no local user with that username")
 	// ErrNotPlatformAdmin means the user is not a platform admin. Recovery is a platform admin job.
 	ErrNotPlatformAdmin = errors.New("the user is not a platform admin")
-	// ErrNoOrg means the org slug or ID matches no org.
+	// ErrNoOrg means the org slug or ID matches no live org (none, or a deleted one).
 	ErrNoOrg = errors.New("no org with that slug or ID")
 )
 
@@ -133,9 +133,10 @@ type MintTokenParams struct {
 
 // MintAdminToken makes an owner-role API token for an existing platform admin, through the tokens
 // service, so it is hashed at rest, stamped with the install mark (svc.WithBinding) and audited as
-// token.create with actor, in the caller's transaction. The token is as valid as its creator: it stops working when the user stops
-// being a platform admin. An org owner who is not a platform admin is refused (ErrNotPlatformAdmin):
-// recovery is never an org owner's job.
+// token.create with actor, in the caller's transaction. It is a platform admin token
+// (tokens.Creator.PlatformAdmin): it stops working when the user stops being a platform admin, even
+// if the user also owns the org. An org owner who is not a platform admin is refused
+// (ErrNotPlatformAdmin): recovery is never an org owner's job.
 func MintAdminToken(ctx context.Context, svc *tokens.Service, q *store.Queries, b audit.Batch, actor audit.Actor, p MintTokenParams) (tokens.Created, error) {
 	ttl := p.TTL
 	switch {
@@ -170,14 +171,23 @@ func MintAdminToken(ctx context.Context, svc *tokens.Service, q *store.Queries, 
 	if err != nil {
 		return tokens.Created{}, err
 	}
-	// A platform admin counts as owner of every org.
-	return svc.CreateTx(ctx, q, b, org, actor, tokens.Creator{User: cred.UserID, Role: store.OrgRoleOwner}, p.Name, store.OrgRoleOwner, ttl)
+	// A platform admin counts as owner of every org; the token holds only while the grant does.
+	by := tokens.Creator{User: cred.UserID, Role: store.OrgRoleOwner, PlatformAdmin: true}
+	return svc.CreateTx(ctx, q, b, org, actor, by, p.Name, store.OrgRoleOwner, ttl)
 }
 
-// resolveOrg takes ref as an org ID, else as a slug.
+// resolveOrg takes ref as an org ID, else as a slug. Either way the org must exist and not be deleted
+// (a token in a deleted org could never authenticate), else ErrNoOrg.
 func resolveOrg(ctx context.Context, q *store.Queries, ref string) (pgtype.UUID, error) {
 	var id pgtype.UUID
 	if err := id.Scan(ref); err == nil && id.Valid {
+		_, err := q.GetOrgSlug(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, ErrNoOrg
+		}
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
 		return id, nil
 	}
 	o, err := q.GetOrgBySlug(ctx, ref)

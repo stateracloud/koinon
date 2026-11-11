@@ -556,6 +556,28 @@ func (q *Queries) LockBootstrap(ctx context.Context) error {
 	return err
 }
 
+const lockLocalCredentialShare = `-- name: LockLocalCredentialShare :one
+SELECT user_id, username, password_hash, must_change_password, password_changed_at, created_at, updated_at FROM local_credentials WHERE user_id = $1 FOR SHARE
+`
+
+// A password login holds a share lock on the credential while it creates its session, so a password
+// change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+// login either sees the new hash and is refused, or commits first and the reset revokes its session.
+func (q *Queries) LockLocalCredentialShare(ctx context.Context, userID pgtype.UUID) (LocalCredential, error) {
+	row := q.db.QueryRow(ctx, lockLocalCredentialShare, userID)
+	var i LocalCredential
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.MustChangePassword,
+		&i.PasswordChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const recordUserLogin = `-- name: RecordUserLogin :exec
 UPDATE users
 SET email = $1, display_name = $2, last_login_at = $3

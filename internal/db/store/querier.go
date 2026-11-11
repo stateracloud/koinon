@@ -1012,6 +1012,10 @@ type Querier interface {
 	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
 	// once count both calls.
 	LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunParams) (LeakGuardRun, error)
+	// A password login holds a share lock on the credential while it creates its session, so a password
+	// change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+	// login either sees the new hash and is refused, or commits first and the reset revokes its session.
+	LockLocalCredentialShare(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0

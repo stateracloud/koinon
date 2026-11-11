@@ -129,6 +129,12 @@ SELECT * FROM local_credentials WHERE username = @username;
 -- name: GetLocalCredential :one
 SELECT * FROM local_credentials WHERE user_id = @user_id;
 
+-- name: LockLocalCredentialShare :one
+-- A password login holds a share lock on the credential while it creates its session, so a password
+-- change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+-- login either sees the new hash and is refused, or commits first and the reset revokes its session.
+SELECT * FROM local_credentials WHERE user_id = @user_id FOR SHARE;
+
 -- name: CreateLocalCredential :exec
 INSERT INTO local_credentials (user_id, username, password_hash, must_change_password)
 VALUES (@user_id, @username, @password_hash, true)

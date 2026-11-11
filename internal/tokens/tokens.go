@@ -89,6 +89,9 @@ type Principal struct {
 	// CreatedBy is the root user of the token's chain.
 	CreatedBy pgtype.UUID
 	ExpiresAt time.Time
+	// RequiresPlatformAdmin is set on a platform admin token (a recovery token, ADR 0110 decision 6)
+	// and on every token it creates: it works only while CreatedBy holds a platform admin grant.
+	RequiresPlatformAdmin bool
 }
 
 // Service issues and verifies tokens.
@@ -160,6 +163,10 @@ type Creator struct {
 	Role store.OrgRole
 	// Parent is the creating token, nil for a session.
 	Parent *Principal
+	// PlatformAdmin makes a platform admin token: User must be a platform admin, and the token works
+	// only while User still is one, whatever User's role in the org (ADR 0110 decision 6). A child of
+	// such a token is one too, whatever this field says.
+	PlatformAdmin bool
 }
 
 // Create issues a token for org with role, expiring after ttl (zero means DefaultTTL, or the
@@ -241,10 +248,20 @@ func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch,
 				return &InvalidError{"the creating token has been revoked or has expired"}
 			}
 		}
+		requiresAdmin := by.PlatformAdmin || (by.Parent != nil && by.Parent.RequiresPlatformAdmin)
+		if by.PlatformAdmin {
+			admin, err := q.IsPlatformAdmin(ctx, by.User)
+			if err != nil {
+				return err
+			}
+			if !admin {
+				return &InvalidError{"only a platform admin can create a platform admin token"}
+			}
+		}
 		var err error
 		row, err = q.CreateAPIToken(ctx, store.CreateAPITokenParams{
 			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: by.User,
-			ParentTokenID: parentID, InstallMark: s.binding.Stamp(),
+			ParentTokenID: parentID, InstallMark: s.binding.Stamp(), RequiresPlatformAdmin: requiresAdmin,
 			ExpiresAt: pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
@@ -253,6 +270,9 @@ func (s *Service) CreateTx(ctx context.Context, q *store.Queries, b audit.Batch,
 		after := map[string]any{"name": name, "role": string(role), "tokenPrefix": prefix, "expiresAt": row.ExpiresAt.Time}
 		if parentID.Valid {
 			after["parentTokenId"] = parentID.String()
+		}
+		if requiresAdmin {
+			after["requiresPlatformAdmin"] = true
 		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(), After: after,
@@ -366,7 +386,8 @@ func (e *AuthError) Error() string { return ErrInvalid.Error() }
 func (e *AuthError) Unwrap() error { return ErrInvalid }
 
 // Authenticate verifies a bearer token and records its use. A token also needs its root user to
-// still hold at least the token's role in the org (a demoted or removed creator voids the chain).
+// still hold at least the token's role in the org (a demoted or removed creator voids the chain); a
+// platform admin token needs its root user to still be a platform admin, and org roles do not count.
 // A failure that names a real token is recorded in that token's org audit trail.
 func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, error) {
 	rest, ok := strings.CutPrefix(raw, Prefix)
@@ -398,6 +419,12 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 		} else if !ok {
 			s.binding.Refused("token")
 			reason = installbinding.QuarantineReason
+		} else if row.RequiresPlatformAdmin {
+			if admin, err := q.IsPlatformAdmin(ctx, row.CreatedBy); err != nil {
+				return Principal{}, err
+			} else if !admin {
+				reason = "its creator is no longer a platform admin"
+			}
 		} else if holds, err := s.holdsRole(ctx, q, row.CreatedBy, row.OrgID, row.Role); err != nil {
 			return Principal{}, err
 		} else if !holds {
@@ -412,6 +439,7 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, erro
 	_ = q.TouchAPIToken(ctx, store.TouchAPITokenParams{OrgID: row.OrgID, ID: row.ID})
 	return Principal{
 		TokenID: row.ID, Org: row.OrgID, OrgSlug: row.OrgSlug, Role: row.Role, CreatedBy: row.CreatedBy, ExpiresAt: row.ExpiresAt.Time,
+		RequiresPlatformAdmin: row.RequiresPlatformAdmin,
 	}, nil
 }
 
