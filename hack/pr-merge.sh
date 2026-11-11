@@ -269,6 +269,9 @@ if [ $((admin + glass)) != 0 ]; then
     # CI_CHANGES_IGNORE_PLUMBING=1, which drops the `everything ci` rule and decides on the real flavor inputs only
     # (the `job flavors` rule, the suite's build graph, Makefile, go.mod, go.sum). When those changed, the head needs a
     # real (not skipped) success, and there is none to get: the change must be split (exit 10).
+    # The build graph (`go list`) comes from the local checkout, not from the base or the head: run this script from a
+    # checkout that is in sync with the pull request head. A variable exported in the caller's shell must not change
+    # the answer, so the base copy runs with the rule-file and directory overrides unset.
     ci_sh=${here}/ci-changes.sh
     ci_root=""
     if [ "${PR_MERGE_TEST:-}" = 1 ] && [ -n "${PR_MERGE_CI_CHANGES:-}" ]; then
@@ -284,7 +287,7 @@ if [ $((admin + glass)) != 0 ]; then
       ci_sh=$ci_dir/hack/ci-changes.sh
       ci_root=$(cd "$here/.." && pwd)
     fi
-    fl=$(CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^flavors=//p') || fl=""
+    fl=$(env -u HACK_PATHS_RULES -u CI_CHANGES_FLAVORS_DIRS CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^flavors=//p') || fl=""
     if [ "$fl" != false ]; then
       # true, or the rule could not be applied: needed.
       fv=$(prv_judge "$rows" "$wfruns" false flavors | awk -F'\t' 'NR == 1 { print $2 }')

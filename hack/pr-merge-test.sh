@@ -65,6 +65,7 @@ show)
   [ -z "${SHOW_FAIL:-}" ] || case $2 in *:"$SHOW_FAIL") exit 128 ;; esac
   case $2 in
   *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
+  *:hack/ci-changes.sh) [ -n "${CICH_BODY:-}" ] && cat "$CICH_BODY" || exit 128 ;;
   *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
   *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
   *) exit 128 ;;
@@ -591,5 +592,27 @@ PR_MERGE_NEEDS_E2E="" run 7 --admin
 check "the base rule path: fetch ok, rule read from the base, e2e not needed: merges" 0 merge
 grep -q '^git fetch .*origin main' "$FAKE_DIR/calls" || { echo "FAIL: the base was not fetched" >&2; fail=1; }
 grep -q '^git show refs/remotes/origin/main:hack/needs-e2e.sh' "$FAKE_DIR/calls" || { echo "FAIL: needs-e2e.sh not shown from the base" >&2; fail=1; }
+
+# The flavors guard reads ci-changes.sh from the base too (PR_MERGE_CI_CHANGES="" selects the real copy path).
+setup false "$green"
+PR_MERGE_CI_CHANGES="" SHOW_FAIL=hack/ci-changes.sh PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "a base ci-changes.sh git show cannot read is a tool failure" 2 nomerge
+# A base copy that echoes its environment: the plumbing flag and the root reach it, caller overrides do not.
+# shellcheck disable=SC2016 # the $FAKE_DIR must expand in the fake script, not here
+printf '#!/usr/bin/env bash\ncat >/dev/null\nenv >"$FAKE_DIR/cich-env"\necho flavors=false\n' >"$tmp/cich-env.sh"
+setup false "$green"
+HACK_PATHS_RULES=/nonexistent CI_CHANGES_FLAVORS_DIRS=nonexistent CICH_BODY="$tmp/cich-env.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "the base copy of ci-changes.sh answers flavors=false: merges" 0 merge
+grep -qx 'CI_CHANGES_IGNORE_PLUMBING=1' "$FAKE_DIR/cich-env" || { echo "FAIL: the base copy did not get CI_CHANGES_IGNORE_PLUMBING=1" >&2; fail=1; }
+grep -qx "CI_CHANGES_ROOT=$repo" "$FAKE_DIR/cich-env" || { echo "FAIL: the base copy did not get CI_CHANGES_ROOT=$repo" >&2; fail=1; }
+grep -q '^HACK_PATHS_RULES=\|^CI_CHANGES_FLAVORS_DIRS=' "$FAKE_DIR/cich-env" && { echo "FAIL: a caller override reached the base copy" >&2; fail=1; }
+# A base copy that errors or prints nothing means "flavors needed": the head has no flavors success, so refuse.
+printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 3\n' >"$tmp/cich-err.sh"
+printf '#!/usr/bin/env bash\ncat >/dev/null\n' >"$tmp/cich-empty.sh"
+for b in err empty; do
+  setup false "$green"
+  CICH_BODY="$tmp/cich-$b.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
+  check "a base copy that gives no answer ($b) is treated as flavors needed" 10 nomerge
+done
 
 exit "$fail"

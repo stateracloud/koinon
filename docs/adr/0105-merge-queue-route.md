@@ -423,3 +423,5 @@ the same tree, and an `--admin` merge has none, so the `changes` job answers eve
 forward. A pull request that mixes real flavor inputs with `.github` paths is refused with exit 10 and must be split:
 the flavor change goes through the merge queue, the `.github` change through `--admin`. The guard reads the rule from
 the base, as the e2e guard does, so a pull request cannot loosen its own check.
+Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`;
+the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.
