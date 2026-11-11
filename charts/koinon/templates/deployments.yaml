@@ -125,7 +125,7 @@ spec:
             {{- . | nindent 12 }}
             {{- end }}
             {{- end }}
-            {{- if has $component (list "reconciler" "agentd") }}
+            {{- if has $component (list "api" "reconciler" "agentd") }}
             {{- include "koinon.installMarkEnv" $ | nindent 12 }}
             {{- end }}
             {{- if eq $component "api" }}

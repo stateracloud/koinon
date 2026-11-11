@@ -364,6 +364,12 @@ var isolationCases = map[string]isolationCase{
 			return c.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: f.token})
 		},
 	},
+	// Platform admins only (ADR 0110): no org role, owner included, can re-enable a token.
+	tokenv1alpha1connect.TokenServiceRebindTokenProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tokens.RebindToken(ctx, &tokenv1alpha1.RebindTokenRequest{OrgId: org, TokenId: f.token})
+		},
+	},
 
 	budgetv1alpha1connect.BudgetServiceGetOrgBudgetProcedure: {
 		ownOrgOK: true,

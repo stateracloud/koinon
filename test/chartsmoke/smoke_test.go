@@ -307,6 +307,31 @@ func describeMode(name, valuesFile string) {
 			Expect(cl.Secret(ctx, kekSecretName(r))).NotTo(BeNil(), "the key-encryption Secret exists")
 		}, SpecTimeout(3*time.Minute))
 
+		// The install binding (ADR 0110): koinon-api reads the install mark from the same Secret as the
+		// reconciler and agentd, and its first unheld start claims the one install_binding row with the
+		// hash of that mark. A koinon-api without KOINON_INSTALL_MARK would bind nothing and refuse nothing.
+		It("gives koinon-api the install mark and binds the database to it", func(ctx SpecContext) {
+			c := r.deployment("koinon-api").Spec.Template.Spec.Containers[0]
+			var ref *corev1.EnvVar
+			for i := range c.Env {
+				if c.Env[i].Name == "KOINON_INSTALL_MARK" {
+					ref = &c.Env[i]
+				}
+			}
+			Expect(ref).NotTo(BeNil(), "koinon-api has KOINON_INSTALL_MARK")
+			Expect(ref.ValueFrom).NotTo(BeNil())
+			Expect(ref.ValueFrom.SecretKeyRef).NotTo(BeNil())
+			Expect(ref.ValueFrom.SecretKeyRef.Key).To(Equal("token"))
+
+			conn, err := pgx.Connect(ctx, dbURL)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(conn.Close)
+			var bound bool
+			Expect(conn.QueryRow(ctx, `SELECT mark IS NOT NULL FROM install_binding WHERE singleton`).Scan(&bound)).To(Succeed(),
+				"koinon-api wrote the install_binding row on its first start")
+			Expect(bound).To(BeTrue(), "an unheld first start binds the row to its own mark")
+		}, SpecTimeout(time.Minute))
+
 		// The install audit chain (ADR 0100): the group role existed before the migration, the login
 		// roles came after it, and koinon-api, which connects as koinon_api, can append to the chain.
 		// A first start in mode auto records nothing (the default is not a change), so the event is

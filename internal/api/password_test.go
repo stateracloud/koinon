@@ -5,14 +5,18 @@ package api_test
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/auth"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
+	"github.com/stateracloud/koinon/internal/installbinding"
 )
 
 var _ = Describe("bootstrap password login", func() {
@@ -54,6 +58,46 @@ var _ = Describe("bootstrap password login", func() {
 		Expect(e.pool.QueryRow(ctx, `SELECT token_hash FROM sessions`).Scan(&stored)).To(Succeed())
 		sum := sha256.Sum256([]byte(c.Value))
 		Expect(stored).To(Equal(sum[:]))
+	})
+
+	// ADR 0110 decision 3: a session another install issued is refused on a restored copy and never
+	// comes back; a new login on the copy works.
+	It("refuses a session another install issued, and accepts a new login", func(ctx SpecContext) {
+		e := newEnv(ctx, envOptions{binding: func(p *pgxpool.Pool) *installbinding.Binding {
+			quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+			_, err := installbinding.New(p, "hash-source", false, quiet).Claim(ctx, installbinding.Targets{})
+			Expect(err).NotTo(HaveOccurred())
+			cp := installbinding.New(p, "hash-copy", false, quiet)
+			st, err := cp.Claim(ctx, installbinding.Targets{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st).To(Equal(installbinding.StateCopy))
+			return cp
+		}})
+		b := e.browser()
+		Expect(b.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+		_, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred(), "a session made on the copy carries the copy's mark")
+		var mark string
+		Expect(e.pool.QueryRow(ctx, `SELECT install_mark FROM sessions`).Scan(&mark)).To(Succeed())
+		Expect(mark).To(Equal("hash-copy"))
+
+		By("the session came with the dump of the source")
+		_, err = e.pool.Exec(ctx, `UPDATE sessions SET install_mark = 'hash-source'`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated))
+
+		By("a legacy session without a mark is refused on a copy too")
+		_, err = e.pool.Exec(ctx, `UPDATE sessions SET install_mark = NULL`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated))
+
+		By("a new login works")
+		b2 := e.browser()
+		Expect(b2.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+		_, err = b2.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("drops Secure and the __Host- prefix when the public URL is plain http", func(ctx SpecContext) {

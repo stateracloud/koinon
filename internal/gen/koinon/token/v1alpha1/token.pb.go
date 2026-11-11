@@ -465,6 +465,102 @@ func (x *RevokeTokenResponse) GetToken() *Token {
 	return nil
 }
 
+type RebindTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RebindTokenRequest) Reset() {
+	*x = RebindTokenRequest{}
+	mi := &file_koinon_token_v1alpha1_token_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RebindTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RebindTokenRequest) ProtoMessage() {}
+
+func (x *RebindTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_token_v1alpha1_token_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RebindTokenRequest.ProtoReflect.Descriptor instead.
+func (*RebindTokenRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_token_v1alpha1_token_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RebindTokenRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *RebindTokenRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+type RebindTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         *Token                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RebindTokenResponse) Reset() {
+	*x = RebindTokenResponse{}
+	mi := &file_koinon_token_v1alpha1_token_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RebindTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RebindTokenResponse) ProtoMessage() {}
+
+func (x *RebindTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_token_v1alpha1_token_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RebindTokenResponse.ProtoReflect.Descriptor instead.
+func (*RebindTokenResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_token_v1alpha1_token_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RebindTokenResponse) GetToken() *Token {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
 var File_koinon_token_v1alpha1_token_proto protoreflect.FileDescriptor
 
 const file_koinon_token_v1alpha1_token_proto_rawDesc = "" +
@@ -505,12 +601,18 @@ const file_koinon_token_v1alpha1_token_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\btoken_id\x18\x02 \x01(\tR\atokenId\"I\n" +
 	"\x13RevokeTokenResponse\x122\n" +
-	"\x05token\x18\x01 \x01(\v2\x1c.koinon.token.v1alpha1.TokenR\x05token2\xc2\x02\n" +
+	"\x05token\x18\x01 \x01(\v2\x1c.koinon.token.v1alpha1.TokenR\x05token\"F\n" +
+	"\x12RebindTokenRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\"I\n" +
+	"\x13RebindTokenResponse\x122\n" +
+	"\x05token\x18\x01 \x01(\v2\x1c.koinon.token.v1alpha1.TokenR\x05token2\xa8\x03\n" +
 	"\fTokenService\x12d\n" +
 	"\vCreateToken\x12).koinon.token.v1alpha1.CreateTokenRequest\x1a*.koinon.token.v1alpha1.CreateTokenResponse\x12f\n" +
 	"\n" +
 	"ListTokens\x12(.koinon.token.v1alpha1.ListTokensRequest\x1a).koinon.token.v1alpha1.ListTokensResponse\"\x03\x90\x02\x01\x12d\n" +
-	"\vRevokeToken\x12).koinon.token.v1alpha1.RevokeTokenRequest\x1a*.koinon.token.v1alpha1.RevokeTokenResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1;tokenv1alpha1b\x06proto3"
+	"\vRevokeToken\x12).koinon.token.v1alpha1.RevokeTokenRequest\x1a*.koinon.token.v1alpha1.RevokeTokenResponse\x12d\n" +
+	"\vRebindToken\x12).koinon.token.v1alpha1.RebindTokenRequest\x1a*.koinon.token.v1alpha1.RebindTokenResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1;tokenv1alpha1b\x06proto3"
 
 var (
 	file_koinon_token_v1alpha1_token_proto_rawDescOnce sync.Once
@@ -524,7 +626,7 @@ func file_koinon_token_v1alpha1_token_proto_rawDescGZIP() []byte {
 	return file_koinon_token_v1alpha1_token_proto_rawDescData
 }
 
-var file_koinon_token_v1alpha1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_koinon_token_v1alpha1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_koinon_token_v1alpha1_token_proto_goTypes = []any{
 	(*Token)(nil),                 // 0: koinon.token.v1alpha1.Token
 	(*CreateTokenRequest)(nil),    // 1: koinon.token.v1alpha1.CreateTokenRequest
@@ -533,32 +635,37 @@ var file_koinon_token_v1alpha1_token_proto_goTypes = []any{
 	(*ListTokensResponse)(nil),    // 4: koinon.token.v1alpha1.ListTokensResponse
 	(*RevokeTokenRequest)(nil),    // 5: koinon.token.v1alpha1.RevokeTokenRequest
 	(*RevokeTokenResponse)(nil),   // 6: koinon.token.v1alpha1.RevokeTokenResponse
-	(v1alpha1.OrgRole)(0),         // 7: koinon.auth.v1alpha1.OrgRole
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 9: google.protobuf.Duration
+	(*RebindTokenRequest)(nil),    // 7: koinon.token.v1alpha1.RebindTokenRequest
+	(*RebindTokenResponse)(nil),   // 8: koinon.token.v1alpha1.RebindTokenResponse
+	(v1alpha1.OrgRole)(0),         // 9: koinon.auth.v1alpha1.OrgRole
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 11: google.protobuf.Duration
 }
 var file_koinon_token_v1alpha1_token_proto_depIdxs = []int32{
-	7,  // 0: koinon.token.v1alpha1.Token.role:type_name -> koinon.auth.v1alpha1.OrgRole
-	8,  // 1: koinon.token.v1alpha1.Token.created_at:type_name -> google.protobuf.Timestamp
-	8,  // 2: koinon.token.v1alpha1.Token.expires_at:type_name -> google.protobuf.Timestamp
-	8,  // 3: koinon.token.v1alpha1.Token.revoked_at:type_name -> google.protobuf.Timestamp
-	8,  // 4: koinon.token.v1alpha1.Token.last_used_at:type_name -> google.protobuf.Timestamp
-	7,  // 5: koinon.token.v1alpha1.CreateTokenRequest.role:type_name -> koinon.auth.v1alpha1.OrgRole
-	9,  // 6: koinon.token.v1alpha1.CreateTokenRequest.expires_in:type_name -> google.protobuf.Duration
+	9,  // 0: koinon.token.v1alpha1.Token.role:type_name -> koinon.auth.v1alpha1.OrgRole
+	10, // 1: koinon.token.v1alpha1.Token.created_at:type_name -> google.protobuf.Timestamp
+	10, // 2: koinon.token.v1alpha1.Token.expires_at:type_name -> google.protobuf.Timestamp
+	10, // 3: koinon.token.v1alpha1.Token.revoked_at:type_name -> google.protobuf.Timestamp
+	10, // 4: koinon.token.v1alpha1.Token.last_used_at:type_name -> google.protobuf.Timestamp
+	9,  // 5: koinon.token.v1alpha1.CreateTokenRequest.role:type_name -> koinon.auth.v1alpha1.OrgRole
+	11, // 6: koinon.token.v1alpha1.CreateTokenRequest.expires_in:type_name -> google.protobuf.Duration
 	0,  // 7: koinon.token.v1alpha1.CreateTokenResponse.token:type_name -> koinon.token.v1alpha1.Token
 	0,  // 8: koinon.token.v1alpha1.ListTokensResponse.tokens:type_name -> koinon.token.v1alpha1.Token
 	0,  // 9: koinon.token.v1alpha1.RevokeTokenResponse.token:type_name -> koinon.token.v1alpha1.Token
-	1,  // 10: koinon.token.v1alpha1.TokenService.CreateToken:input_type -> koinon.token.v1alpha1.CreateTokenRequest
-	3,  // 11: koinon.token.v1alpha1.TokenService.ListTokens:input_type -> koinon.token.v1alpha1.ListTokensRequest
-	5,  // 12: koinon.token.v1alpha1.TokenService.RevokeToken:input_type -> koinon.token.v1alpha1.RevokeTokenRequest
-	2,  // 13: koinon.token.v1alpha1.TokenService.CreateToken:output_type -> koinon.token.v1alpha1.CreateTokenResponse
-	4,  // 14: koinon.token.v1alpha1.TokenService.ListTokens:output_type -> koinon.token.v1alpha1.ListTokensResponse
-	6,  // 15: koinon.token.v1alpha1.TokenService.RevokeToken:output_type -> koinon.token.v1alpha1.RevokeTokenResponse
-	13, // [13:16] is the sub-list for method output_type
-	10, // [10:13] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 10: koinon.token.v1alpha1.RebindTokenResponse.token:type_name -> koinon.token.v1alpha1.Token
+	1,  // 11: koinon.token.v1alpha1.TokenService.CreateToken:input_type -> koinon.token.v1alpha1.CreateTokenRequest
+	3,  // 12: koinon.token.v1alpha1.TokenService.ListTokens:input_type -> koinon.token.v1alpha1.ListTokensRequest
+	5,  // 13: koinon.token.v1alpha1.TokenService.RevokeToken:input_type -> koinon.token.v1alpha1.RevokeTokenRequest
+	7,  // 14: koinon.token.v1alpha1.TokenService.RebindToken:input_type -> koinon.token.v1alpha1.RebindTokenRequest
+	2,  // 15: koinon.token.v1alpha1.TokenService.CreateToken:output_type -> koinon.token.v1alpha1.CreateTokenResponse
+	4,  // 16: koinon.token.v1alpha1.TokenService.ListTokens:output_type -> koinon.token.v1alpha1.ListTokensResponse
+	6,  // 17: koinon.token.v1alpha1.TokenService.RevokeToken:output_type -> koinon.token.v1alpha1.RevokeTokenResponse
+	8,  // 18: koinon.token.v1alpha1.TokenService.RebindToken:output_type -> koinon.token.v1alpha1.RebindTokenResponse
+	15, // [15:19] is the sub-list for method output_type
+	11, // [11:15] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_koinon_token_v1alpha1_token_proto_init() }
@@ -572,7 +679,7 @@ func file_koinon_token_v1alpha1_token_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_token_v1alpha1_token_proto_rawDesc), len(file_koinon_token_v1alpha1_token_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1133,6 +1133,9 @@ type Querier interface {
 	// The prefixes of the agent's epochs below @next_epoch hold repositories this database has no
 	// password for (#262): the next repository epoch starts at @next_epoch or later. Monotonic.
 	RaiseHomeRepositoryNextEpoch(ctx context.Context, arg RaiseHomeRepositoryNextEpochParams) (int64, error)
+	// Re-enables a token that a restored copy refuses (ADR 0110 decision 3): stamps it with this
+	// install's mark. A revoked or expired token is not re-enabled.
+	RebindAPIToken(ctx context.Context, arg RebindAPITokenParams) (ApiToken, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
 	// transition into ready and stopped. An empty home_generation (no sandbox
 	// observed) keeps the recorded one.

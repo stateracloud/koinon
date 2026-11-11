@@ -147,8 +147,8 @@ WHERE user_id = @user_id;
 
 -- name: CreateSession :one
 INSERT INTO sessions (token_hash, user_id, auth_method, created_at, last_seen_at,
-                      idle_expires_at, expires_at)
-VALUES (@token_hash, @user_id, @auth_method, @now, @now, @idle_expires_at, @expires_at)
+                      idle_expires_at, expires_at, install_mark)
+VALUES (@token_hash, @user_id, @auth_method, @now, @now, @idle_expires_at, @expires_at, sqlc.narg(install_mark))
 RETURNING *;
 
 -- name: TouchSession :one
