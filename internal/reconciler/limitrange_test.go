@@ -166,3 +166,30 @@ var _ = Describe("SandboxLimitRange.Ensure backoff", func() {
 		Expect(p.Ready(context.Background(), "kw-1")).To(BeFalse())
 	})
 })
+
+var _ = Describe("SandboxLimitRange.Ready", func() {
+	const (
+		gateway = "openshell"
+		ws      = "kw-1"
+		ns      = "openshell-openshell-kw-1"
+		name    = "koinon-koinon-sandbox-limitrange"
+	)
+
+	It("is false when the LimitRange is missing", func(ctx SpecContext) {
+		p := &reconciler.SandboxLimitRange{Kube: fake.NewClientset(), GatewayID: gateway, Name: name}
+		Expect(p.Ready(ctx, ws)).To(BeFalse())
+	})
+
+	It("is true only when the LimitRange has the sized shape", func(ctx SpecContext) {
+		kube := fake.NewClientset()
+		p := &reconciler.SandboxLimitRange{Kube: kube, GatewayID: gateway, Name: name}
+		Expect(p.Ensure(ctx, ws)).To(Succeed())
+		Expect(p.Ready(ctx, ws)).To(BeTrue())
+		lr, err := kube.CoreV1().LimitRanges(ns).Get(ctx, name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		lr.Spec.Limits[0].Default[corev1.ResourceMemory] = resource.MustParse("1Gi")
+		_, err = kube.CoreV1().LimitRanges(ns).Update(ctx, lr, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(p.Ready(ctx, ws)).To(BeFalse(), "a drifted LimitRange is not ready")
+	})
+})

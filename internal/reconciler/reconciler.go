@@ -1115,17 +1115,23 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if r.cfg.LimitRange != nil {
 			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
 			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
-			// admits them sized (#76).
-			if err := r.cfg.LimitRange.Ensure(ctx, ws); err != nil {
-				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", err)
-			}
+			// admits them sized (#76). Delete even when Ensure fails: otherwise the sandbox stays
+			// BestEffort forever on the sandbox-exists branch, and a missing-namespace Ensure
+			// error on this path would never be counted.
+			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
 			if !lrReady {
 				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 					return err
 				}
+				if ensureErr != nil {
+					return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+				}
 				r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
 				sb.Phase = execution.PhaseDeleting
 				return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
+			}
+			if ensureErr != nil {
+				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
 			}
 		}
 		return r.record(ctx, w, sb, hash, "")

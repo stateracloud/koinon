@@ -9,7 +9,10 @@ lr=templates/sandbox-limitrange.yaml
 # On by default: a ClusterRole, binding and ValidatingAdmissionPolicy for the reconciler to apply
 # a LimitRange in each OpenShell workspace namespace.
 has "sandbox LimitRange writer ClusterRole" 'name: koinon-koinon-sandbox-limitrange-writer$' --show-only "$lr"
-has "sandbox LimitRange writer may create LimitRanges" 'resources: \[limitranges\]' --show-only "$lr"
+has "sandbox LimitRange writer ClusterRole LimitRanges" 'resources: \[limitranges\]' --show-only "$lr"
+has "sandbox LimitRange writer ClusterRole verbs" 'verbs: \[create, get, update, patch\]' --show-only "$lr"
+has "sandbox LimitRange writer ClusterRoleBinding" 'kind: ClusterRoleBinding' --show-only "$lr"
+has "sandbox LimitRange writer ClusterRoleBinding subject" 'name: koinon-reconciler$' --show-only "$lr"
 has "sandbox LimitRange writer ValidatingAdmissionPolicy" 'name: koinon-koinon-sandbox-limitrange-binding$' --show-only "$lr"
 has "sandbox LimitRange writer policy fails closed" 'failurePolicy: Fail' --show-only "$lr"
 has "sandbox LimitRange writer covers CREATE and UPDATE" 'operations: \[CREATE, UPDATE\]' --show-only "$lr"

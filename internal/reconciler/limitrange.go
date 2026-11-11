@@ -217,15 +217,20 @@ func limitRangeNamespaceMissing(err error) bool {
 	return strings.Contains(err.Error(), `namespaces "`)
 }
 
-// Ready reports whether the LimitRange is already in the workspace namespace.
+// Ready reports whether the sized LimitRange is already in the workspace namespace.
+// A drifted LimitRange does not count: CreateSandbox must still recreate so supervisors
+// are admitted with the chart's defaults (#76).
 func (p *SandboxLimitRange) Ready(ctx context.Context, workspace string) bool {
 	if p.Kube == nil || p.Name == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, limitRangeCallTimeout)
 	defer cancel()
-	_, err := p.Kube.CoreV1().LimitRanges(p.namespace(workspace)).Get(ctx, p.Name, metav1.GetOptions{})
-	return err == nil
+	cur, err := p.Kube.CoreV1().LimitRanges(p.namespace(workspace)).Get(ctx, p.Name, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+	return limitRangeShape(cur)
 }
 
 func (p *SandboxLimitRange) count(err error) {

@@ -806,6 +806,43 @@ var _ = Describe("Reconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(list.Items).To(BeEmpty())
 			})
+
+			It("deletes the first sandbox when the LimitRange was missing at CreateSandbox", func(ctx SpecContext) {
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				deletes := osg.Calls("DeleteSandbox")
+				var creates atomic.Int32
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if creates.Add(1) == 1 {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return false, nil, nil
+				})
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(deletes+1), "BestEffort admission is discarded once")
+				Expect(sandboxRow(ctx, agent.ID).Phase).To(Equal(string(execution.PhaseDeleting)))
+				Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("recreating sandbox after the LimitRange was applied"))
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1), "Ensure after CreateSandbox wrote the LimitRange")
+			})
+
+			It("deletes the first sandbox even when Ensure after CreateSandbox fails", func(ctx SpecContext) {
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				deletes := osg.Calls("DeleteSandbox")
+				var creates atomic.Int32
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					n := creates.Add(1)
+					if n == 1 {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "limitranges"}, lrName, errors.New("policy"))
+				})
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox LimitRange after create")))
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(deletes+1), "must not leave a BestEffort sandbox when Ensure fails")
+				Expect(testutil.ToFloat64(metrics.LimitRangeErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+			})
 		})
 
 		Describe("a sandbox in Error or Completed", func() {
