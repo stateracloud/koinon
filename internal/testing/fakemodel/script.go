@@ -60,6 +60,13 @@ type Faults struct {
 	// "overloaded" error event, and end the stream cleanly. A non-streaming request gets the
 	// 503 overloaded error instead.
 	OverloadedMidStream bool `yaml:"overloadedMidStream,omitempty"`
+	// StallMidStream makes a streaming response send about half of its events and then hold the
+	// stream open, sending nothing, until the client or the gateway in between closes it. It is how
+	// a test cancels a stream mid-way. A non-streaming request is answered as usual.
+	StallMidStream bool `yaml:"stallMidStream,omitempty"`
+	// SplitWrites writes every SSE event of a stream in small flushed pieces (7 bytes), so that a
+	// reader sees each event cut at many points. It changes the bytes' timing, never their content.
+	SplitWrites bool `yaml:"splitWrites,omitempty"`
 	// Lockstep holds every request to this model after it is received until the test releases
 	// a response with [Server.Release]; [Server.Waiting] counts the held requests. It works only
 	// in-process: cmd/koinon-fakemodel has no release endpoint, so a script loaded by the binary

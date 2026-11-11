@@ -3,7 +3,9 @@
 package fakemodel_test
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"time"
 
@@ -138,6 +140,63 @@ var _ = Describe("Failure modes", func() {
 		})
 	})
 
+	Describe("splitWrites", func() {
+		It("delivers the same events as an unsplit stream, in many reads", func(ctx SpecContext) {
+			_, plain := start(faulty(fakemodel.Faults{}))
+			resp := anthropic(ctx, plain.URL, true)
+			DeferCleanup(resp.Body.Close)
+			want, err := readSSE(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, ts := start(faulty(fakemodel.Faults{SplitWrites: true}))
+			resp = anthropic(ctx, ts.URL, true)
+			DeferCleanup(resp.Body.Close)
+			reads, buf := 0, make([]byte, 4096)
+			var raw []byte
+			for {
+				n, err := resp.Body.Read(buf)
+				if n > 0 {
+					reads++
+					raw = append(raw, buf[:n]...)
+				}
+				if err != nil {
+					break
+				}
+			}
+			got, err := readSSE(bytes.NewReader(raw))
+			Expect(err).NotTo(HaveOccurred())
+			names := func(es []event) (out []string) {
+				for _, e := range es {
+					out = append(out, e.name)
+				}
+				return out
+			}
+			Expect(names(got)).To(Equal(names(want)))
+			Expect(reads).To(BeNumerically(">", 5*len(want)), "each event arrives in pieces")
+		})
+	})
+
+	Describe("stallMidStream", func() {
+		It("sends about half of the events and holds the stream open until the client leaves", func(ctx SpecContext) {
+			_, ts := start(faulty(fakemodel.Faults{StallMidStream: true}))
+			cctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			resp := post(cctx, ts.URL+"/v1/messages", map[string]any{
+				"model": "faulty", "max_tokens": 1, "stream": true, "messages": []any{anUser("hi")},
+			})
+			DeferCleanup(resp.Body.Close)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			done := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.Discard, resp.Body)
+				done <- err
+			}()
+			Consistently(done, 300*time.Millisecond).ShouldNot(Receive(), "the stream stays open")
+			cancel()
+			Eventually(done).Should(Receive(HaveOccurred()))
+		})
+	})
+
 	Describe("lockstep", func() {
 		It("holds each response until the test releases it", func(ctx SpecContext) {
 			srv, ts := start(faulty(fakemodel.Faults{Lockstep: true}))
@@ -210,9 +269,9 @@ var _ = Describe("Failure modes", func() {
 	})
 
 	It("loads the modes from YAML and rejects negative values", func() {
-		s, err := fakemodel.ParseScript([]byte("model: m\nfaults: {rateLimit: 2, retryAfter: 5, contextLength: true, overloadedMidStream: true, lockstep: true}\nturns: [{text: hi}]\n"))
+		s, err := fakemodel.ParseScript([]byte("model: m\nfaults: {rateLimit: 2, retryAfter: 5, contextLength: true, overloadedMidStream: true, stallMidStream: true, splitWrites: true, lockstep: true}\nturns: [{text: hi}]\n"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(s.Faults).To(Equal(fakemodel.Faults{RateLimit: 2, RetryAfter: 5, ContextLength: true, OverloadedMidStream: true, Lockstep: true}))
+		Expect(s.Faults).To(Equal(fakemodel.Faults{RateLimit: 2, RetryAfter: 5, ContextLength: true, OverloadedMidStream: true, StallMidStream: true, SplitWrites: true, Lockstep: true}))
 		_, err = fakemodel.ParseScript([]byte("model: m\nfaults: {rateLimit: -1}\nturns: [{text: hi}]\n"))
 		Expect(err).To(HaveOccurred())
 	})

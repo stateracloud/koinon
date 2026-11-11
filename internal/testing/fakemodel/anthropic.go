@@ -169,7 +169,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 				"type": "error", "error": map[string]any{"type": "overloaded_error", "message": overloadedMessage},
 			})})
 		}
-		writeSSE(w, events, rep.faults.Truncate)
+		writeSSE(r, w, events, rep.faults)
 		return
 	}
 	writeBody(w, rep.anthropicMessage(), rep.faults.Truncate)

@@ -177,7 +177,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 				"message": overloadedMessage, "type": "server_error", "param": nil, "code": "overloaded",
 			}})})
 		}
-		writeSSE(w, events, rep.faults.Truncate)
+		writeSSE(r, w, events, rep.faults)
 		return
 	}
 	writeBody(w, rep.openAICompletion(), rep.faults.Truncate)

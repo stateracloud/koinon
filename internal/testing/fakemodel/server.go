@@ -457,14 +457,16 @@ type sseEvent struct {
 	data string
 }
 
-// writeSSE writes events, flushing after each. With truncate it writes about half of them and
-// aborts the connection, so the client sees the stream end without its terminator.
-func writeSSE(w http.ResponseWriter, events []sseEvent, truncate bool) {
+// writeSSE writes events, flushing after each. With Truncate it writes about half of them and
+// aborts the connection, so the client sees the stream end without its terminator. With
+// StallMidStream it writes about half of them and then holds the stream open until the client
+// goes away. With SplitWrites it writes each event in small flushed pieces.
+func writeSSE(r *http.Request, w http.ResponseWriter, events []sseEvent, f Faults) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	n := len(events)
-	if truncate {
+	if f.Truncate || f.StallMidStream {
 		n = max(1, n/2)
 	}
 	var buf bytes.Buffer
@@ -474,14 +476,46 @@ func writeSSE(w http.ResponseWriter, events []sseEvent, truncate bool) {
 			fmt.Fprintf(&buf, "event: %s\n", e.name)
 		}
 		fmt.Fprintf(&buf, "data: %s\n\n", e.data)
+		if f.SplitWrites {
+			if !writeSplit(r, w, buf.Bytes()) {
+				return
+			}
+			continue
+		}
 		if _, err := w.Write(buf.Bytes()); err != nil {
 			return
 		}
 		flush(w)
 	}
-	if truncate {
+	switch {
+	case f.Truncate:
 		abort(w)
+	case f.StallMidStream:
+		<-r.Context().Done()
 	}
+}
+
+// splitSize is the piece size of Faults.SplitWrites: small enough to cut every event, its field
+// names and its JSON several times.
+const splitSize = 7
+
+// writeSplit writes b in pieces of splitSize bytes, flushing and pausing briefly after each so
+// that they reach the reader as separate reads. It returns false when the client went away.
+func writeSplit(r *http.Request, w http.ResponseWriter, b []byte) bool {
+	for len(b) > 0 {
+		k := min(splitSize, len(b))
+		if _, err := w.Write(b[:k]); err != nil {
+			return false
+		}
+		flush(w)
+		b = b[k:]
+		select {
+		case <-time.After(time.Millisecond):
+		case <-r.Context().Done():
+			return false
+		}
+	}
+	return true
 }
 
 func flush(w http.ResponseWriter) {
