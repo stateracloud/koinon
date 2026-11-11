@@ -739,6 +739,15 @@ sandbox policies. The reconciler's RoleBinding to it in each workspace namespace
 {{- printf "%s-%s-sandbox-observer" .Release.Namespace (include "koinon.fullname" .) -}}
 {{- end }}
 
+{{/*
+The sandbox default-deny NetworkPolicy (spike 8.15, ADR 0045), named
+<namespace>-<fullname>-sandbox-default-deny like the sandbox policies. The reconciler
+creates one of this name in each workspace namespace.
+*/}}
+{{- define "koinon.sandboxDefaultDeny" -}}
+{{- printf "%s-%s-sandbox-default-deny" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
 {{- if eq (include "koinon.kms" .) "openbao" }}
 {{- $o := .Values.secrets.kek.kms.openbao }}

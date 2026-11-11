@@ -100,6 +100,9 @@ type config struct {
 	sandboxObserverClusterRole    string
 	sandboxObserverServiceAccount string
 
+	sandboxNetworkPolicy     bool
+	sandboxNetworkPolicyName string
+
 	gatewayMode        project.GatewayMode
 	gatewayURL         string
 	gatewayConfigMap   string

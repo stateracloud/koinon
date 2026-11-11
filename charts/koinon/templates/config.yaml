@@ -57,6 +57,11 @@ data:
       clusterRole: {{ include "koinon.observerRole" . }}
       serviceAccount: {{ include "koinon.componentName" (list . "reconciler") }}
       {{- end }}
+    sandboxNetworkPolicy:
+      enabled: {{ .Values.sandboxNetworkPolicy.enabled }}
+      {{- if .Values.sandboxNetworkPolicy.enabled }}
+      name: {{ include "koinon.sandboxDefaultDeny" . | quote }}
+      {{- end }}
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}
       parkWarm: {{ .Values.reconciler.parkWarm }}

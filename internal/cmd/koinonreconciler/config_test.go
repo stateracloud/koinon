@@ -44,6 +44,9 @@ sandboxObserver:
   enabled: true
   clusterRole: koinon-koinon-sandbox-observer
   serviceAccount: koinon-reconciler
+sandboxNetworkPolicy:
+  enabled: true
+  name: koinon-koinon-sandbox-default-deny
 reconciler:
   idleTimeout: 10m
   resyncInterval: 30s
@@ -171,6 +174,8 @@ var _ = Describe("parseConfig", func() {
 		Expect(c.sandboxObserver).To(BeTrue())
 		Expect(c.sandboxObserverClusterRole).To(Equal("koinon-koinon-sandbox-observer"))
 		Expect(c.sandboxObserverServiceAccount).To(Equal("koinon-reconciler"))
+		Expect(c.sandboxNetworkPolicy).To(BeTrue())
+		Expect(c.sandboxNetworkPolicyName).To(Equal("koinon-koinon-sandbox-default-deny"))
 		Expect(c.accessLogOTLP).To(Equal("koinon-api.koinon.svc:4318"))
 		Expect(c.gatewayURL).To(Equal("http://koinon-gateway.koinon.svc:8080"))
 		Expect(c.gatewayStatsURL).To(Equal("http://koinon-gateway.koinon.svc:15020"))

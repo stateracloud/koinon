@@ -58,11 +58,14 @@ root="$(cd "$here/../.." && pwd)"
 # Ambient settings must not point the suite's cluster-side cases at another cluster.
 unset KOINON_ESCAPE_NAMESPACE KOINON_ESCAPE_KUBECONFIG
 export KOINON_ESCAPE_KUBE_CONTEXT="$CTX"
+# OpenShell names a managed workspace's namespace openshell-<gateway id>-<workspace> (the gateway ID is
+# the chart's openshell.gatewayId, default openshell; internal/execution.WorkspaceNamespace). Needed
+# for the live admission case, the NetworkPolicy bypass case (spike 8.15) and Service IP lookups.
+export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
+export KOINON_ESCAPE_RUNTIME_CLASS=${KOINON_ESCAPE_RUNTIME_CLASS:-runc}
 if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
-  # OpenShell names a managed workspace's namespace openshell-<gateway id>-<workspace> (the gateway ID is
-  # the chart's openshell.gatewayId, default openshell; internal/execution.WorkspaceNamespace).
-  export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
+  export KOINON_ESCAPE_NETPOL="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-default-deny"
   export KOINON_ESCAPE_POLICY_REQUIRED=1
   # The class the install's policy admits for workload pods: openshell.runtimeClassName of
   # test/e2e/kind/koinon-values.yaml (runc on kind), which sandboxPolicy.runtimeClasses lists.

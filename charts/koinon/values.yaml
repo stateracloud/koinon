@@ -736,6 +736,16 @@ metrics:
 sandboxObserver:
   enabled: true
 
+# Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15, ADR 0045).
+# On by default. Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
+# renders a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-networkpolicy.yaml);
+# the reconciler applies a NetworkPolicy named <namespace>-<fullname>-sandbox-default-deny in each
+# workspace namespace of openshell.gatewayId: empty podSelector, policyTypes [Ingress, Egress], no
+# allow rules. OpenShell's own workload and supervisor policies are additive with it. Off, the
+# chart renders none of it and the reconciler applies nothing.
+sandboxNetworkPolicy:
+  enabled: true
+
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
