@@ -283,7 +283,7 @@ gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list 
       resource: limits.memory
       divisor: "1"
 {{- /* Restore-hold (issue #462): all three Deployments start but act on nothing until the value is false again. */}}
-{{- if .Values.restoreHold }}
+{{- if include "koinon.restoreHold" . }}
 - name: KOINON_RESTORE_HOLD
   value: "true"
 {{- end }}
@@ -596,6 +596,18 @@ helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 
 {{- define "koinon.gatewayConfigName" -}}
 {{- include "koinon.componentName" (list . "gateway-config") }}
+{{- end }}
+
+{{/* "true" when the install is held (restoreHold, ADR 0107), else empty. The one test every held-only render uses. */}}
+{{- define "koinon.restoreHold" -}}
+{{- if eq (toString .Values.restoreHold) "true" }}true{{- end }}
+{{- end }}
+
+{{/* The deny-all gateway config a held install mounts instead of the reconciler's (restoreHold, issue #530). */}}
+{{/* The suffix is appended after the base is cut, so the 63-character limit cannot drop it and the name always differs from koinon.gatewayConfigName. */}}
+{{- define "koinon.gatewayHeldConfigName" -}}
+{{- $suffix := "-gateway-config-held" -}}
+{{- printf "%s%s" (include "koinon.fullname" . | trunc (int (sub 63 (len $suffix))) | trimSuffix "-") $suffix }}
 {{- end }}
 
 {{/* The Secret with the key-encryption keys (KEKs) for provider keys and connection secrets (ADR 0056). */}}

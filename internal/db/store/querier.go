@@ -1018,6 +1018,14 @@ type Querier interface {
 	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
 	// once count both calls.
 	LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunParams) (LeakGuardRun, error)
+	// A password login holds a share lock on the credential while it creates its session, so a password
+	// change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+	// login either sees the new hash and is refused, or commits first and the reset revokes its session.
+	LockLocalCredentialShare(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	// A password change locks the credential row before it writes, so it can refuse when an operator
+	// reset changed the hash after the old password was checked. Lock order: the credential, then the
+	// sessions (as the reset does).
+	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1240,6 +1248,8 @@ type Querier interface {
 	// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
 	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	// Ends every live session of the user (the operator's password reset).
+	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap

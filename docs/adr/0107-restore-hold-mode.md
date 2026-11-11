@@ -61,6 +61,31 @@ not yet trusted.
 6. **Runbook.** The backup and restore guide starts the restored install held, runs the checks (`keys verify`,
    `org-limits`, `checkpoints resync`), then releases. `test/e2e/backup-restore.sh` runs that order.
 
+## Amendment 2026-11-11: a held gateway is ready but deny-all (issue #530)
+
+A held reconciler converges nothing, so it never wrote the gateway's config ConfigMap, and the standalone
+gateway pod stayed `ContainerCreating`. `helm install --wait` timed out and Argo CD / Flux saw a degraded release for
+as long as the hold lasted. Decided by procoduck, 2026-11-11: **ready but deny-all**.
+
+- While `restoreHold` is true and `gateway.mode=standalone`, the chart renders a second ConfigMap,
+  `<release>-gateway-config-held`, with a fixed config, and the gateway Deployment mounts it instead of the
+  reconciler's `<release>-gateway-config`. The config has no model and no valid key, and its authorization rule
+  admits nothing, so every request is refused (401 or 403) while the readiness listener answers.
+- The held ConfigMap has its own name on purpose. The reconciler's ConfigMap stays unrendered by the chart (a
+  render cannot read the live object), and an in-place restore keeps its live config untouched. The release is the
+  rollout this ADR already requires: the Deployment mounts the reconciler's ConfigMap again and the chart stops
+  rendering the held one. Nothing in the chart reads the cluster, so the render stays deterministic.
+- `helm install --wait` and `upgrade --wait` now work for a held install; the drill (#514) uses `--wait` held and
+  unheld. Checks: `hack/chart-check.d/99-restore-hold.sh` (the render),
+  `internal/gateway/standalone/chart_test.go` (agentgateway accepts the config, is ready and refuses a model request)
+  and the drill (the held gateway refuses a request).
+- `gateway.mode=kubernetes` is unchanged: its data plane is the existing controller, not a pod that waits for a
+  ConfigMap.
+- The `set env` runbook of the restore guide does not use the chart value, so it does not touch the gateway.
+- An install held with `restoreHold=true` must be released by upgrading with `restoreHold=false`
+  (`helm upgrade <release> <chart> --reuse-values --set restoreHold=false --wait`), because `set env` leaves the
+  gateway on the deny-all config. The drill does this after the guide's release block.
+
 ## Alternatives considered
 
 - **A database-backed hold row** (a setting an admin flips live). Releasable without a rollout. But a dump taken
