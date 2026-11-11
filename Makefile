@@ -101,14 +101,9 @@ chart-check: ## Lint and render the Helm chart in every mode and validate it wit
 
 .PHONY: generate
 # The OpenShell client, the agentgateway ExtMcp server and the googleapis ErrorInfo types are generated after buf.gen.yaml, whose clean step
-# empties internal/gen and web/src/gen.
+# empties internal/gen and web/src/gen. hack/generate.sh restores those trees when any step fails (#349).
 generate: ## Regenerate protobuf, sqlc and admin API code
-	buf generate
-	buf generate --template buf.gen.openshell.yaml
-	buf generate --template buf.gen.agentgateway.yaml
-	buf generate --template buf.gen.googleapis.yaml
-	$(GO) tool sqlc generate
-	$(GO) tool oapi-codegen -config api/admin/v1/oapi-codegen.yaml api/admin/v1/openapi.yaml
+	GO=$(GO) hack/generate.sh
 
 # Flavor images build with docker buildx and load into the local Docker image store; nothing is
 # pushed. FLAVOR_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).
