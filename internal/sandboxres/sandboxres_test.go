@@ -89,3 +89,61 @@ var _ = Describe("Policy.Validate", func() {
 		Entry("a default request above its limit", func(p *sandboxres.Policy) { p.Default.CPU.Request = "4" }, "default: cpu.request 4 is greater than cpu.limit 2"),
 	)
 })
+
+var _ = Describe("Overlay", func() {
+	It("lets each override value win and keeps the template's for the rest", func() {
+		Expect(sandboxres.Overlay(res("250m", "1", "", "1Gi"), res("", "3", "", ""))).To(Equal(res("250m", "3", "", "1Gi")))
+		Expect(sandboxres.Overlay(res("250m", "1", "", "1Gi"), templates.Resources{})).To(Equal(res("250m", "1", "", "1Gi")))
+	})
+	It("makes the override beat the template, and the template beat the default, through Effective", func() {
+		p := sandboxres.DefaultPolicy()
+		got, _ := p.Effective(sandboxres.Overlay(res("", "1", "", ""), res("", "3", "", "")))
+		Expect(got.CPU).To(Equal(templates.Quantities{Request: "250m", Limit: "3"}))
+		got, _ = p.Effective(sandboxres.Overlay(res("", "1", "", ""), templates.Resources{}))
+		Expect(got.CPU).To(Equal(templates.Quantities{Request: "250m", Limit: "1"}))
+	})
+})
+
+var _ = Describe("Policy.CheckOverride", func() {
+	p := sandboxres.DefaultPolicy()
+	DescribeTable("refuses what the platform would not run, naming the bounds",
+		func(tpl, override templates.Resources, want string) {
+			err := p.CheckOverride(tpl, override)
+			if want == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			var be *sandboxres.BoundsError
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(err).To(BeAssignableToTypeOf(be))
+		},
+		Entry("nothing set clears the override", res("", "", "", ""), res("", "", "", ""), ""),
+		Entry("inside the bounds", res("", "", "", ""), res("500m", "3", "2Gi", "4Gi"), ""),
+		Entry("the memory limit above the maximum", res("", "", "", ""), res("", "", "", "16Gi"),
+			"memory.limit 16Gi is above the maximum: the platform allows 512Mi to 8Gi"),
+		Entry("the memory limit below the minimum", res("", "", "", ""), res("", "", "", "128Mi"),
+			"memory.limit 128Mi is below the minimum: the platform allows 512Mi to 8Gi"),
+		Entry("the cpu limit above the maximum (no minimum)", res("", "", "", ""), res("", "8", "", ""),
+			"cpu.limit 8 is above the maximum: the platform allows at most 4"),
+		Entry("the cpu request below the minimum", res("", "", "", ""), res("50m", "", "", ""),
+			"cpu.request 50m is below the minimum: the platform allows 100m to 2"),
+		Entry("a malformed quantity", res("", "", "", ""), res("", "lots", "", ""), `cpu.limit "lots"`),
+		Entry("a request above the limit in the override", res("", "", "", ""), res("2", "1", "", ""), "cpu.request 2 is greater than cpu.limit 1"),
+		Entry("a request above the limit the template sets", res("", "1", "", ""), res("2", "", "", ""), "cpu.request 2 is greater than cpu.limit 1"),
+		Entry("a request above the default limit", res("", "", "", ""), res("", "", "3Gi", ""), "memory.request 3Gi is greater than memory.limit 2Gi"),
+	)
+})
+
+var _ = Describe("FromConfig", func() {
+	It("lays the file over the defaults and validates", func() {
+		p, err := sandboxres.FromConfig(func(key string, out any) error {
+			Expect(key).To(Equal("sandboxResources"))
+			fc := out.(*sandboxres.FileConfig)
+			fc.Bounds.Memory.Limit.Max = "16Gi"
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(p.Bounds.MemoryLimit.Max).To(Equal("16Gi"))
+		Expect(p.Bounds.MemoryLimit.Min).To(Equal("512Mi"))
+	})
+})

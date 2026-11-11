@@ -19,11 +19,14 @@ if render --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com -
 	>/dev/null 2>&1; then
 	fail "oidc without a redirect or public URL must not render"
 fi
-# config.yaml is the reconciler's alone.
+# config.yaml is read by the reconciler and by the API (its sandboxResources section, ADR 0083: the API
+# refuses a per-agent override outside the bounds), not by koinon-agentd.
 n=$(render --show-only templates/deployments.yaml | grep -c 'KOINON_CONFIG' || true)
-[ "$n" = 1 ] || fail "KOINON_CONFIG set on $n components, want only the reconciler"
+[ "$n" = 2 ] || fail "KOINON_CONFIG set on $n components, want the reconciler and the API"
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /etc/koinon/config$' || true)
-[ "$n" = 1 ] || fail "config.yaml mounted into $n components, want only the reconciler"
+[ "$n" = 2 ] || fail "config.yaml mounted into $n components, want the reconciler and the API"
+n=$(render --show-only templates/deployments.yaml | grep -c 'checksum/config:' || true)
+[ "$n" = 2 ] || fail "checksum/config on $n components, want the reconciler and the API (they roll when the file changes)"
 # agentgateway's admin listener (config dump and UI) binds to localhost: no Service or container
 # port exposes it (the config the reconciler renders keeps it on localhost: internal/gateway/standalone tests).
 for f in "${value_files[@]}"; do

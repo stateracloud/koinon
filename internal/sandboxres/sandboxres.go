@@ -187,3 +187,80 @@ func clamp(v string, r Range) (string, string) {
 	}
 	return v, ""
 }
+
+// Overlay lays an agent's override over its template's values: each of the four values the
+// override sets wins, the others keep the template's. The result goes to Effective, which fills
+// the platform default and clamps to the bounds, so precedence is override, template, default.
+func Overlay(tpl, override templates.Resources) templates.Resources {
+	pick := func(o, t string) string {
+		if o != "" {
+			return o
+		}
+		return t
+	}
+	return templates.Resources{
+		CPU:    templates.Quantities{Request: pick(override.CPU.Request, tpl.CPU.Request), Limit: pick(override.CPU.Limit, tpl.CPU.Limit)},
+		Memory: templates.Quantities{Request: pick(override.Memory.Request, tpl.Memory.Request), Limit: pick(override.Memory.Limit, tpl.Memory.Limit)},
+	}
+}
+
+// BoundsError is an override outside the platform bounds. Its message names the bounds.
+type BoundsError struct{ Msg string }
+
+func (e *BoundsError) Error() string { return e.Msg }
+
+func (r Range) String() string {
+	switch {
+	case r.Min != "" && r.Max != "":
+		return r.Min + " to " + r.Max
+	case r.Min != "":
+		return "at least " + r.Min
+	case r.Max != "":
+		return "at most " + r.Max
+	}
+	return "any value"
+}
+
+// CheckOverride refuses an agent override the platform would not run as written. Every value the
+// override sets must be a positive quantity inside its bounds; the message names the bounds. The
+// override laid over the template and the default must also keep each request at or below its
+// limit. The reconciler clamps again on every pass, because the bounds can change after the write.
+// A *BoundsError is a refusal; any other error is a malformed quantity. The policy must be valid.
+func (p Policy) CheckOverride(tpl, override templates.Resources) error {
+	if err := override.Validate(); err != nil {
+		return &BoundsError{Msg: err.Error()}
+	}
+	for _, f := range []struct {
+		field, v string
+		r        Range
+	}{
+		{"cpu.request", override.CPU.Request, p.Bounds.CPURequest},
+		{"cpu.limit", override.CPU.Limit, p.Bounds.CPULimit},
+		{"memory.request", override.Memory.Request, p.Bounds.MemoryRequest},
+		{"memory.limit", override.Memory.Limit, p.Bounds.MemoryLimit},
+	} {
+		if _, reason := clamp(f.v, f.r); reason != "" {
+			return &BoundsError{Msg: fmt.Sprintf("%s %s is %s: the platform allows %s", f.field, f.v, reason, f.r)}
+		}
+	}
+	// The values that would run, before clamping: a request above its limit is a refusal here,
+	// where Effective would silently lower it.
+	eff := Overlay(tpl, override)
+	for _, f := range []struct {
+		field string
+		q     templates.Quantities
+		def   templates.Quantities
+	}{{"cpu", eff.CPU, p.Default.CPU}, {"memory", eff.Memory, p.Default.Memory}} {
+		q := f.q
+		if q.Request == "" {
+			q.Request = f.def.Request
+		}
+		if q.Limit == "" {
+			q.Limit = f.def.Limit
+		}
+		if err := q.Validate(f.field); err != nil {
+			return &BoundsError{Msg: err.Error()}
+		}
+	}
+	return nil
+}

@@ -4,6 +4,8 @@
 {{- range $component := list "api" "reconciler" "agentd" }}
 {{- $v := index $.Values $component }}
 {{- $name := include "koinon.componentName" (list $ $component) }}
+{{- /* The reconciler reads the whole config.yaml; the API reads its sandboxResources section (ADR 0083). */}}
+{{- $readsConfig := or (eq $component "reconciler") (eq $component "api") }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -31,10 +33,10 @@ spec:
     metadata:
       labels:
         {{- include "koinon.labels" (list $ $component) | nindent 8 }}
-      {{- if or (eq $component "reconciler") $v.podAnnotations }}
+      {{- if or $readsConfig $v.podAnnotations }}
       annotations:
-        {{- if eq $component "reconciler" }}
-        {{- /* Only the reconciler reads config.yaml; roll it when the file changes. */}}
+        {{- if $readsConfig }}
+        {{- /* The reconciler and the API read config.yaml; roll them when the file changes. */}}
         checksum/config: {{ $configHash }}
         {{- end }}
         {{- with $v.podAnnotations }}
@@ -113,7 +115,7 @@ spec:
             # Prometheus /metrics, on its own port (values: metrics).
             - name: KOINON_METRICS_ADDR
               value: {{ printf ":%d" (int $.Values.metrics.port) | quote }}
-            {{- if eq $component "reconciler" }}
+            {{- if $readsConfig }}
             {{- include "koinon.configEnv" $ | nindent 12 }}
             {{- end }}
             {{- include "koinon.commonEnv" $ | nindent 12 }}
@@ -139,7 +141,7 @@ spec:
           resources:
             {{- toYaml $v.resources | nindent 12 }}
           volumeMounts:
-            {{- if eq $component "reconciler" }}
+            {{- if $readsConfig }}
             {{- include "koinon.configVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
@@ -169,7 +171,7 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
-        {{- if eq $component "reconciler" }}
+        {{- if $readsConfig }}
         {{- include "koinon.configVolume" $ | nindent 8 }}
         {{- end }}
         {{- include "koinon.dbVolume" $ | nindent 8 }}
