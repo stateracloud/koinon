@@ -133,6 +133,17 @@ func TestTopologyRefusesAForeignNamespace(t *testing.T) {
 	}
 }
 
+// A sandbox's resource version moves with the gateway's own status updates: only its spec counts.
+func TestDiffObjectsIgnoresSandboxStatusChurn(t *testing.T) {
+	a := []drill.Object{{Kind: "sandbox", ID: "1", Name: "a", Digest: "x"}}
+	if d := drill.DiffObjects(a, []drill.Object{{Kind: "sandbox", ID: "1", Name: "a", Digest: "x"}}); len(d) != 0 {
+		t.Fatalf("same spec: %v", d)
+	}
+	if d := drill.DiffObjects(a, []drill.Object{{Kind: "sandbox", ID: "1", Name: "a", Digest: "y"}}); len(d) != 1 {
+		t.Fatalf("changed spec: %v", d)
+	}
+}
+
 func TestDiffObjects(t *testing.T) {
 	before := []drill.Object{{Kind: "sandbox", ID: "1", Name: "a", ResourceVersion: 3}, {Kind: "provider", ID: "2", Name: "p", ResourceVersion: 1}}
 	if d := drill.DiffObjects(before, before); len(d) != 0 {

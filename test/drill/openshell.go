@@ -4,9 +4,11 @@ package drill
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -15,6 +17,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	datamodelv1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
@@ -88,6 +92,19 @@ type Object struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	ResourceVersion uint64 `json:"resourceVersion"`
+	// Digest stands in for the resource version of a sandbox: the gateway bumps that version with
+	// every status it derives (about three times a minute on an idle sandbox), so it says nothing
+	// about who changed the sandbox. The digest covers what a client sets: the spec, labels and annotations.
+	Digest string `json:"digest,omitempty"`
+}
+
+func sandboxDigest(m *datamodelv1.ObjectMeta, spec proto.Message) string {
+	opts := protojson.MarshalOptions{Multiline: false}
+	sp, _ := opts.Marshal(spec)
+	lb, _ := json.Marshal(m.GetLabels())
+	an, _ := json.Marshal(m.GetAnnotations())
+	h := sha256.Sum256(append(append(sp, lb...), an...))
+	return hex.EncodeToString(h[:])
 }
 
 // SnapshotGateway lists every sandbox and provider of the gateway, over mTLS through a
@@ -154,7 +171,7 @@ func SnapshotGateway(ctx context.Context, k *Kube, g Gateway, serverName string)
 		}
 		for _, s := range res.GetSandboxes() {
 			m := s.GetMetadata()
-			out = append(out, Object{"sandbox", m.GetId(), m.GetName(), m.GetResourceVersion()})
+			out = append(out, Object{Kind: "sandbox", ID: m.GetId(), Name: m.GetName(), Digest: sandboxDigest(m, s.GetSpec())})
 		}
 		if token = res.GetNextPageToken(); token == "" {
 			break
@@ -167,7 +184,7 @@ func SnapshotGateway(ctx context.Context, k *Kube, g Gateway, serverName string)
 		}
 		for _, p := range res.GetProviders() {
 			m := p.GetMetadata()
-			out = append(out, Object{"provider", m.GetId(), m.GetName(), m.GetResourceVersion()})
+			out = append(out, Object{Kind: "provider", ID: m.GetId(), Name: p.GetMetadata().GetName(), ResourceVersion: m.GetResourceVersion()})
 		}
 		if token = res.GetNextPageToken(); token == "" {
 			break
@@ -196,6 +213,8 @@ func DiffObjects(before, after []Object) []string {
 			d = append(d, fmt.Sprintf("%s %q is gone", k, o.Name))
 		case n.ResourceVersion != o.ResourceVersion:
 			d = append(d, fmt.Sprintf("%s %q changed: resource version %d -> %d", k, o.Name, o.ResourceVersion, n.ResourceVersion))
+		case n.Digest != o.Digest:
+			d = append(d, fmt.Sprintf("%s %q changed: spec, labels or annotations differ", k, o.Name))
 		}
 	}
 	for k, o := range a {

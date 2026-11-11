@@ -56,6 +56,15 @@ var _ = JustAfterEach(func() {
 			section("source sql: "+q, out, err)
 		}
 	}
+	if dst.in.Namespace != "" {
+		for _, q := range []string{
+			"SELECT workflow_uuid || ' ' || status || ' ' || created_at FROM dbos.workflow_status WHERE workflow_uuid LIKE 'trigger-fire:%' ORDER BY created_at",
+			"SELECT status || ':' || count(*) FROM dbos.workflow_status GROUP BY status",
+		} {
+			out, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, q)
+			section("target sql: "+q, out, err)
+		}
+	}
 	var ids []string
 	for _, l := range rep.Labels() {
 		if l != "step" {

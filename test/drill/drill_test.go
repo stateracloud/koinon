@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -653,10 +654,10 @@ stringData:
 			needs("release")
 			// A fire is the DBOS workflow "trigger-fire:<org>:<trigger>@<due unix time>". Fires with a due
 			// time after the snapshot and up to the release are catch-up fires; the dump holds the earlier ones.
-			dues := func() (catchUp, normal int, err error) {
+			dues := func() (catchUp []int64, normal int, err error) {
 				rows, err := kube.SQL(ctx, dst.in.Namespace, dst.in.Release, "SELECT workflow_uuid FROM dbos.workflow_status WHERE workflow_uuid LIKE 'trigger-fire:%'")
 				if err != nil {
-					return 0, 0, err
+					return nil, 0, err
 				}
 				for _, id := range strings.Fields(rows) {
 					i := strings.LastIndex(id, "@")
@@ -669,22 +670,34 @@ stringData:
 					}
 					switch {
 					case due > snapshotUnix && due <= releasedUnix:
-						catchUp++
+						catchUp = append(catchUp, due)
 					case due > releasedUnix:
 						normal++
 					}
 				}
 				return catchUp, normal, nil
 			}
+			// The schedule is every minute and the install was held for minutes, so several due times were
+			// missed: the scheduler fires the latest of them once. The first tick after the release can
+			// start before the due time of the current minute has passed its jitter (up to 30 s), so that
+			// minute's normal fire may also have a due time before releasedUnix. At most two fires, in
+			// consecutive minutes: a catch-up that repeated every missed minute spans more.
+			oneCatchUp := func(g Gomega, c []int64) {
+				g.Expect(c).NotTo(BeEmpty(), "a catch-up fire after the release")
+				g.Expect(len(c)).To(BeNumerically("<=", 2), "one catch-up fire, plus at most the fire of the minute of the release: %v", c)
+				slices.Sort(c)
+				g.Expect(c[len(c)-1]-c[0]).To(BeNumerically("<=", 60), "the catch-up fires only the latest missed due time: %v", c)
+			}
 			Eventually(func(g Gomega) {
 				c, n, err := dues()
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(c).To(Equal(1), "exactly one catch-up fire after the release")
+				oneCatchUp(g, c)
 				g.Expect(n).To(BeNumerically(">=", 1), "then a normal fire")
 			}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
 			c, _, err := dues()
 			must(err, "read the fires")
-			Expect(c).To(Equal(1), "the catch-up must not repeat")
+			AddReportEntry("catch-up fires (due unix time)", c)
+			oneCatchUp(Default, c)
 		}, NodeTimeout(10*time.Minute))
 
 		It("completes every run that was ENQUEUED, once", Label("workflow-queue"), func(ctx SpecContext) {
