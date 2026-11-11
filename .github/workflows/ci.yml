@@ -510,11 +510,13 @@ jobs:
   # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
   # The browser download is cached by @playwright/test version; system libraries are installed on
   # every run (cheap), the browser binary only on a cache miss.
+  # ubuntu-24.04: ubuntu-latest is migrating to 26.04 (actions/runner-images#14748); install-deps
+  # was failing on the new image. Pin until warm-caches-web and the cache key also name the image.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
@@ -536,6 +538,9 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
+      # apt through Playwright needs the same retries as Dockerfiles (docs/dev/ci.md, #149 / #141).
+      - name: apt retries for playwright
+        run: printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAPT::Update::Error-Mode "any";\n' | sudo tee /etc/apt/apt.conf.d/80-koinon-retries >/dev/null
       - if: steps.pwcache.outputs.cache-hit != 'true'
         run: pnpm exec playwright install --with-deps chromium
       - if: steps.pwcache.outputs.cache-hit == 'true'
