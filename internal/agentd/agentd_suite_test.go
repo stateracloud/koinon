@@ -41,6 +41,7 @@ func TestAgentd(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
+	requireTestingTag()
 	db = pgtest.Start(ctx)
 	q = store.New(db)
 }, NodeTimeout(3*time.Minute))
