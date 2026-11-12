@@ -64,6 +64,13 @@ case_ allow $'gh api x -f body="$(cat <<\'EOF\'\nwait\nsleep 10\nEOF\n)"'
 case_ deny 'echo \"; sleep 9'
 case_ allow 'for i in 1 2 3; do git push && break; sleep 2; done'
 case_ allow 'echo $((1<<3)); sleep 1'
+case_ allow $'git commit -m "$(cat <<\'EOF\'\nfix: a 5" screen\n\nsleep 30 was removed\nEOF\n)"'
+case_ allow $'git commit -m "$(cat <<\'EOF\'\nfix: x\n\nsleep 30 was removed\nEOF\n)"'
+case_ deny $'cat <<EOF\nit\'s\nEOF\nsleep 9'
+case_ deny $'# don\'t wait\nsleep 9'
+case_ deny $'echo $((x<<y))\nsleep 9'
+case_ allow $'# sleep 30 later\necho ok'
+case_ allow 'echo a#b; sleep 1'
 
 # The reason is one line and names the legal routes.
 out=$("$hook" <<<'{"tool_input":{"command":"sleep 10"}}')

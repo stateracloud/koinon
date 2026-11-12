@@ -35,7 +35,7 @@ max_seconds=5
 
 # One awk pass over the whole command (RS that never matches, so multi-line quotes are seen whole):
 #   1. drop heredoc bodies (the lines after `<<WORD` up to WORD), outside quotes;
-#   2. replace quoted text with Q, honouring backslashes outside single quotes, and turn newlines,
+#   2. drop # comments, replace quoted text with Q, honouring backslashes outside single quotes, and turn newlines,
 #      backticks and ; & | ( ) { } into separators;
 #   3. add up the literal arguments of every `sleep` that starts a simple command. Before it may come
 #      do/then/else/!/time, NAME=value words, command, env, exec, nohup, and `timeout DURATION`.
@@ -56,10 +56,15 @@ function sep() { out = out " ; " }
     }
     text = text line "\n"
     if (match(line, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
-      pre = substr(line, 1, RSTART - 1)
-      # not a here-string (<<<word), and not inside quotes
-      if (substr(pre, length(pre)) != "<" && gsub(sq, sq, pre) % 2 == 0 && gsub(/"/, "\"", pre) % 2 == 0) {
-        h = substr(line, RSTART, RLENGTH)
+      hs = RSTART; hl = RLENGTH; pre = substr(line, 1, hs - 1)
+      # Not a here-string (<<<word), not a shift inside $(( )), and not inside quotes. An odd count
+      # of " is fine when a $( follows the last one: "$(cat <<EOF", the usual commit message.
+      dq = pre; ndq = gsub(/"/, "\"", dq); lastdq = 0
+      for (q = length(pre); q > 0; q--) if (substr(pre, q, 1) == "\"") { lastdq = q; break }
+      inq = (ndq % 2 == 1 && index(substr(pre, lastdq + 1), "$(") == 0)
+      arith = (match(pre, /\$\(\([^)]*$/) > 0)
+      if (substr(pre, length(pre)) != "<" && !arith && gsub(sq, sq, pre) % 2 == 0 && !inq) {
+        h = substr(line, hs, hl)
         strip = (h ~ /^<<-/)
         sub(/^<<-?[ \t]*/, "", h); gsub(/["\047]/, "", h); tag = h
       }
@@ -78,6 +83,10 @@ function sep() { out = out " ; " }
     if (c == "\\") { k++; out = out "x"; continue }
     if (c == sq) { st = 1; out = out "Q"; continue }
     if (c == "\"") { st = 2; out = out "Q"; continue }
+    if (c == "#" && (out == "" || substr(out, length(out)) ~ /[ \t]/)) {
+      while (k < n && substr(text, k + 1, 1) != "\n") k++
+      continue
+    }
     if (c == "\n" || c == "`" || c ~ /[;&|(){}]/) { sep(); continue }
     out = out c
   }
