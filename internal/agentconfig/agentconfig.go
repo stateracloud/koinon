@@ -52,7 +52,7 @@ type Config struct {
 	Triggers []templates.Trigger `json:"triggers,omitempty"`
 	// Harness holds the template's harness settings: harness.pluginInstalls makes agentd
 	// pass --plugin-installs to OpenCode and the reconciler open the npm registry.
-	Harness templates.Harness `json:"harness,omitzero"`
+	Harness templates.HarnessSettings `json:"harness,omitzero"`
 	// Ephemeral marks an ephemeral agent: every task runs in a fresh sandbox without a persistent
 	// home, deleted when the task ends (ADR 0065 decision 13c). Checkpoints and the archive tier
 	// do not apply to it; callers ask IsEphemeral.
@@ -145,7 +145,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
 		Triggers:     t.Spec.Triggers,
-		Harness:      t.Spec.Harness,
+		Harness:      t.Spec.Harness.HarnessSettings,
 		Ephemeral:    t.Spec.Ephemeral,
 		Questions:    t.Spec.Questions,
 		Resources:    t.Spec.Resources,

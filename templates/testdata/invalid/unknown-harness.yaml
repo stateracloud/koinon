@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# want: at '/spec/flavors/allowed/1'
+# want: at '/spec/harness/allowed/1'
 apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
@@ -8,7 +8,7 @@ metadata:
   displayName: Fixture
   description: A near-valid template with one mistake.
 spec:
-  flavors:
+  harness:
     allowed: [opencode, claude-code]
     default: opencode
   model:

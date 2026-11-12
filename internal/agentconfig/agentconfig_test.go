@@ -14,7 +14,7 @@ import (
 
 var _ = Describe("Harness settings", func() {
 	It("copies the template's harness settings and stores them under harness", func() {
-		t := &templates.Template{Spec: templates.Spec{Harness: templates.Harness{PluginInstalls: true}}}
+		t := &templates.Template{Spec: templates.Spec{Harness: templates.Harness{HarnessSettings: templates.HarnessSettings{PluginInstalls: true}}}}
 		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(raw)).To(ContainSubstring(`"harness":{"pluginInstalls":true}`))
@@ -61,7 +61,7 @@ var _ = Describe("WebEgress", func() {
 	It("is false for a version with the usual grants", func() {
 		c := agentconfig.Config{
 			Grants:  []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
-			Harness: templates.Harness{PluginInstalls: true},
+			Harness: templates.HarnessSettings{PluginInstalls: true},
 		}
 		Expect(c.WebEgress()).To(BeFalse())
 		Expect(agentconfig.Config{}.WebEgress()).To(BeFalse())

@@ -11,7 +11,7 @@ metadata:
   displayName: Unlisted tool
   description: Reads a repository and calls tools of another server.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
   model:

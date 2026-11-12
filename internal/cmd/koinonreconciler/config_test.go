@@ -58,7 +58,7 @@ koinonTools:
   url: http://koinon-api-tools.koinon.svc:8081/mcp-koinon
 githubTools:
   url: http://koinon-api-tools.koinon.svc:8081/mcp
-flavors:
+harnesses:
   opencode:
     image: ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0
 bootstrapAdmin:

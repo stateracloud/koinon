@@ -59,7 +59,7 @@ const (
 	HarnessOpenCode HarnessName = "opencode"
 )
 
-// AllHarnesses lists every built-in harness. The schema's $defs.flavor enum holds the same list; a
+// AllHarnesses lists every built-in harness. The schema's $defs.harness enum holds the same list; a
 // test keeps the two in step.
 var AllHarnesses = allHarnesses()
 
@@ -105,8 +105,7 @@ type Metadata struct {
 
 // Spec is what an agent draft starts from.
 type Spec struct {
-	Harnesses Harnesses `json:"flavors"`
-	Harness   Harness   `json:"harness,omitzero"`
+	Harness Harness `json:"harness"`
 	// Ephemeral makes agents created from the template ephemeral: each task gets a fresh sandbox
 	// without a persistent home, deleted when the task ends (ADR 0065 decision 13c). Off by default.
 	Ephemeral    bool   `json:"ephemeral,omitempty"`
@@ -202,19 +201,20 @@ func (q QuestionTimers) Validate() error {
 	return nil
 }
 
-// Harness holds harness settings beyond the harness choice. The zero value turns every
-// setting off.
+// Harness lists the harnesses an agent may run on, the default choice, and the harness settings.
 type Harness struct {
+	Allowed []HarnessName `json:"allowed"`
+	Default HarnessName   `json:"default"`
+	HarnessSettings
+}
+
+// HarnessSettings are the harness settings of a template, which an agent's configuration carries
+// (internal/agentconfig). The zero value turns every setting off.
+type HarnessSettings struct {
 	// PluginInstalls lets an OpenCode agent install plugins: its sandbox may read the npm
 	// registry (GET and HEAD, no credentials) from the OpenCode binary, and OpenCode loads
 	// external plugins. Off by default; OpenCode only.
 	PluginInstalls bool `json:"pluginInstalls,omitempty"`
-}
-
-// Harnesses lists the allowed harnesses and the default choice.
-type Harnesses struct {
-	Allowed []HarnessName `json:"allowed"`
-	Default HarnessName   `json:"default"`
 }
 
 // Model is a logical model name, resolved against the install's model list
@@ -410,10 +410,10 @@ func (t *Template) check() error {
 	if t.APIVersion != APIVersion || t.Kind != Kind {
 		return fmt.Errorf("apiVersion/kind must be %s/%s", APIVersion, Kind)
 	}
-	if !slices.Contains(t.Spec.Harnesses.Allowed, t.Spec.Harnesses.Default) {
-		return fmt.Errorf("default harness %q is not in the allowed harnesses", t.Spec.Harnesses.Default)
+	if !slices.Contains(t.Spec.Harness.Allowed, t.Spec.Harness.Default) {
+		return fmt.Errorf("default harness %q is not in the allowed harnesses", t.Spec.Harness.Default)
 	}
-	if t.Spec.Harness.PluginInstalls && !slices.ContainsFunc(t.Spec.Harnesses.Allowed, func(f HarnessName) bool {
+	if t.Spec.Harness.PluginInstalls && !slices.ContainsFunc(t.Spec.Harness.Allowed, func(f HarnessName) bool {
 		return harness.SupportsPluginInstalls(string(f))
 	}) {
 		var names []string

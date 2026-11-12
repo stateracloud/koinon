@@ -50,7 +50,7 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 
 	// reconcile activates an OpenCode agent with the harness settings, runs a pass and
 	// returns a function that decides requests under its sandbox's latest policy.
-	reconcile := func(ctx context.Context, settings templates.Harness) func(bin, method, target string) bool {
+	reconcile := func(ctx context.Context, settings templates.HarnessSettings) func(bin, method, target string) bool {
 		GinkgoHelper()
 		org, user := newOrg(ctx)
 		raw, err := agentconfig.Config{Instructions: "help", Harness: settings}.Marshal()
@@ -83,13 +83,13 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 	}
 
 	It("renders no npm endpoint when the option is off", func(ctx SpecContext) {
-		allowed := reconcile(ctx, templates.Harness{})
+		allowed := reconcile(ctx, templates.HarnessSettings{})
 		Expect(allowed(opencode, "GET", "/@opencode-ai%2fplugin")).To(BeFalse())
 		Expect(allowed(opencode, "GET", "/left-pad/-/left-pad-1.3.0.tgz")).To(BeFalse())
 	})
 
 	It("lets the OpenCode binary read the npm registry, and nothing else, when the option is on", func(ctx SpecContext) {
-		allowed := reconcile(ctx, templates.Harness{PluginInstalls: true})
+		allowed := reconcile(ctx, templates.HarnessSettings{PluginInstalls: true})
 
 		By("GET and HEAD of metadata and tarballs, from OpenCode")
 		Expect(allowed(opencode, "GET", "/@opencode-ai%2fplugin")).To(BeTrue())
@@ -114,7 +114,7 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 	})
 
 	It("attaches no credential to the registry", func() {
-		rule, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.Harness{PluginInstalls: true}},
+		rule, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.HarnessSettings{PluginInstalls: true}},
 			harness.OpenCode, reconciler.Harness{Image: image, Binaries: []string{opencode}})
 		Expect(ok).To(BeTrue())
 		Expect(rule.Binaries).To(Equal([]string{opencode}))
@@ -125,7 +125,7 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 	})
 
 	It("renders nothing for a harness without the option, which has no plugin installs", func() {
-		_, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.Harness{PluginInstalls: true}},
+		_, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.HarnessSettings{PluginInstalls: true}},
 			string("other"), reconciler.Harness{Image: image, Binaries: []string{"/opt/other/bin/other"}})
 		Expect(ok).To(BeFalse())
 	})
