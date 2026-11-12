@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): runs in the upstream release workflow; it only reads, so it also runs from a fork.
+#
 # The release gate (plan item REL1): refuses a release unless the tag is a SemVer release tag, the
 # tagged commit is on main, and the required CI checks concluded success on that commit. It does
 # not run any tests. The release workflow runs it as its own job (`gate`), so it can later be

@@ -8,6 +8,7 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+unset KOINON_REPO GH_REPO KOINON_BOARD KOINON_BOARD_OWNER KOINON_UPSTREAM # hack/repo-lib.sh defaults
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ship=$repo/hack/ship.sh
@@ -282,6 +283,29 @@ check "gh pr create called with --draft" has 'gh pr create .*--draft' "$FAKE_LOG
 check "PR line printed" has '^PR #123 https://example.invalid/o/r/pull/123$' "$tmp/o10"
 check "board add called" has 'gh project item-add 1 --owner stateracloud --url https://example.invalid/o/r/pull/123' "$FAKE_LOG"
 check "board ok line" has '^board ok$' "$tmp/o10"
+# (#846) The board comes from hack/repo-lib.sh: a fork has none, and the owner and number are overridable.
+reset_state
+echo pf >pf.txt
+rc=$(KOINON_REPO=someone/koinon run "$tmp/o10f" -m "feat: pf" --pr-title "feat: pf" --pr-body "$tmp/body.md")
+check "fork: exit 0" eq "$rc" 0
+check "fork: no board call" hasnt 'gh project item-add' "$FAKE_LOG"
+check "fork: board none line" has '^board none$' "$tmp/o10f"
+reset_state
+echo pb >pb.txt
+rc=$(KOINON_REPO=someone/koinon KOINON_BOARD=7 run "$tmp/o10g" -m "feat: pb" --pr-title "feat: pb" --pr-body "$tmp/body.md")
+check "fork board: exit 0" eq "$rc" 0
+check "fork board: the fork's own board" has 'gh project item-add 7 --owner someone --url ' "$FAKE_LOG"
+# A bad KOINON_BOARD fails before ship commits or pushes anything.
+reset_state
+echo pz >pz.txt
+head_before=$(git rev-parse HEAD) origin_before=$(git --git-dir="$tmp/origin.git" rev-parse -q --verify refs/heads/feat/1-x || true)
+rc=$(KOINON_BOARD=x run "$tmp/o10h" -m "feat: pz" --pr-title "feat: pz" --pr-body "$tmp/body.md")
+check "bad board: exit 1" eq "$rc" 1
+check "bad board: named" has 'cannot work out the project board' "$tmp/o10h"
+check "bad board: no commit" eq "$(git rev-parse HEAD)" "$head_before"
+check "bad board: no push" eq "$(git --git-dir="$tmp/origin.git" rev-parse -q --verify refs/heads/feat/1-x || true)" "$origin_before"
+check "bad board: no PR" hasnt 'gh pr create' "$FAKE_LOG"
+rm -f pz.txt
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/77
 echo q >q.txt

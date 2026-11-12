@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): measures the maintainers' merge latency. It only reads, so it works from a fork.
+#
 # Measure the target of issue 572: the time from the LAST PUSH of a pull request to MERGED, over the last N
 # merged code pull requests, and where that time goes (queue time, time per CI job, runner minutes). Read-only
 # against GitHub (gh api GET calls only), no pager, nothing posted.
@@ -43,6 +45,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 # A file is docs-only when it matches this (POSIX ERE, jq test()).
@@ -50,7 +56,7 @@ DOCS_RE='(\.md$|^docs/|^\.claude/)'
 PAR=6
 
 usage() {
-  sed -n "4,41p" "$0" | sed "s/^# \{0,1\}//" >&2
+  sed -n "4,43p" "$0" | sed "s/^# \{0,1\}//" >&2
   exit "${1:-64}"
 }
 

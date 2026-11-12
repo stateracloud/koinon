@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): pushes release images, so it needs the registry's write rights (the release
+# workflow). The image source label names the repository it runs in (hack/repo-lib.sh).
+#
 # Builds and pushes the OpenCode harness image for a release (plan item REL1, ADR 0059) for
 # linux/amd64 and linux/arm64, tagged <version> and, for a final release, latest. Prints
 # "ref=<registry>/sandbox@sha256:<hex>" for the release workflow's sign job. Needs a buildx
@@ -20,6 +23,8 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 
 mode=all
 platform=
@@ -39,6 +44,7 @@ version=${1#v}
 repo=${2%/}/sandbox
 commit=$3
 cd "$(dirname "$0")/.."
+source_repo=$(koinon_repo)
 
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]] ||
 	{ echo "version '$1' is not X.Y.Z or X.Y.Z-rc.N" >&2; exit 2; }
@@ -94,7 +100,7 @@ trap 'rm -f "$meta"' EXIT
 docker buildx build "${output[@]}" \
 	--build-arg "SOURCE_DATE_EPOCH=$epoch" \
 	--build-context common=harnesses/common "${secret[@]}" \
-	--label org.opencontainers.image.source=https://github.com/stateracloud/koinon \
+	--label org.opencontainers.image.source="https://github.com/$source_repo" \
 	--label org.opencontainers.image.version="$version" \
 	--label org.opencontainers.image.revision="$commit" \
 	--label org.opencontainers.image.licenses=Apache-2.0 \

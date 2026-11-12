@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork.
+#
 # Show why CI failed, in a few lines. For a PR it finds the failing checks; for a run id it takes the
 # run's failed jobs. Per failing GitHub Actions job it prints at most 30 lines: the job name, the
 # link, then the useful lines of `gh run view --log-failed` (ANSI codes and timestamps stripped;
@@ -19,6 +21,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 usage() {
