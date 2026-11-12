@@ -2,7 +2,8 @@
 
 Issues and specs for Koinon live as GitHub issues in `stateracloud/koinon`, on the org board
 (https://github.com/orgs/stateracloud/projects/1). Use the `gh` CLI for all operations. Work is
-taken through **claims**, not assignees: see AGENTS.md "Picking up work" and ADR 0104. The claim
+taken through **claims**, not assignees: see
+[the maintainer workflow](../maintainers/agent-workflow.md#picking-up-work) and ADR 0104. The claim
 assigns your human; the assignee is only a mirror of the claim ref.
 
 ## Conventions
