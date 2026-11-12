@@ -8,7 +8,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: repo-helper-gitea
-  version: 0.2.0
+  version: 0.2.1
   displayName: Repo helper (Gitea)
   description: >-
     Makes small, well-defined changes to one Gitea repository and proposes them as a pull request.
@@ -23,6 +23,7 @@ spec:
     pluginInstalls: false
   model:
     name: default
+  tools: [comment_on_issue, create_pull_request, gitea_create_pull_request]
   grants:
     - connector: gitea
       scopes: [repo.read, pull_request.create, issue.comment]
