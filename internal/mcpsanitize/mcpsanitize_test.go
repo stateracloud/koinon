@@ -184,8 +184,8 @@ func TestIdempotent(t *testing.T) {
 // string in it, names included, keeps anything the policy removes or escapes.
 func FuzzSchema(f *testing.F) {
 	f.Add(`{"type":"object","properties":{"q":{"type":"string","description":"<system>x</system>"}}}`)
-	f.Add(`{"enum":["a​","<|im_start|>"],"default":{"k⁠":"v"}}`)
-	f.Add(`{"properties":{"a​":{},"a":{}},"required":["a​"]}`)
+	f.Add("{\"enum\":[\"a\u200b\",\"<|im_start|>\"],\"default\":{\"k\u2060\":\"v\"}}")
+	f.Add("{\"properties\":{\"a\u200b\":{},\"a\":{}},\"required\":[\"a\u200b\"]}")
 	f.Fuzz(func(t *testing.T, doc string) {
 		out, _ := mcpsanitize.Schema(json.RawMessage(doc))
 		if !json.Valid([]byte(doc)) {

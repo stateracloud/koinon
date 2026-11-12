@@ -531,8 +531,8 @@ func (sc *structScan) container(start int) *scanned {
 		}
 		c := in[pos]
 		obj := f.n.kind == objNode
-		switch {
-		case f.st == stNextOrEnd || f.st == stFirst:
+		switch f.st {
+		case stNextOrEnd, stFirst:
 			if (obj && c == '}') || (!obj && c == ']') {
 				pos++
 				r := &scanned{ok: true, n: f.n, end: pos, depth: f.depth}
@@ -562,7 +562,7 @@ func (sc *structScan) container(start int) *scanned {
 				f.st = stValue
 			}
 			continue
-		case f.st == stKey:
+		case stKey:
 			if c != '"' {
 				return fail()
 			}
@@ -573,7 +573,7 @@ func (sc *structScan) container(start int) *scanned {
 			f.key = decodeString(in[pos:e])
 			f.st = stColon
 			pos = e
-		case f.st == stColon:
+		case stColon:
 			if c != ':' {
 				return fail()
 			}
