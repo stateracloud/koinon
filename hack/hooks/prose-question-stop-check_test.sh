@@ -38,6 +38,17 @@ run() {
 run "prose question at the end" block false "$(user 'Quick wins')" "$(say $'Two are done.\n\nApply all four?')"
 run "bold question at the end" block false "$(user 'go')" "$(say $'Table.\n\n**Which group next?**')"
 run "question before an insight block" block false "$(user 'go')" "$(say $'Apply these?\n\n`★ Insight ─────`\n- a point.\n`─────────`')"
+run "question after an insight block" block false "$(user 'go')" "$(say $'`★ Insight ─────`\n- a point.\n`─────────`\nShould I merge it?')"
+run "insight block closed by a bare rule" block false "$(user 'go')" "$(say $'`★ Insight ─────`\n- a point.\n─────\nShould I merge it?')"
+for loc in C C.UTF-8; do
+  printf '%s\n' "$(user 'go')" "$(say $'`★ Insight ─────`\n- a point.\n`─────`\nShould I merge it?')" >"$tmp/t.jsonl"
+  out=$(jq -nc --arg p "$tmp/t.jsonl" '{transcript_path:$p,stop_hook_active:false}' | LC_ALL=$loc "$hook")
+  if [[ $out == *'"block"'* ]]; then ok "question after an insight block, LC_ALL=$loc"; else bad "question after an insight block, LC_ALL=$loc: $out"; fi
+done
+# Only the end of a long transcript is read; the turn at its end is still judged.
+{ for _ in $(seq 2000); do user 'old'; say 'Old question?'; done; user 'go'; say 'Merge it?'; } >"$tmp/long.jsonl"
+out=$(jq -nc --arg p "$tmp/long.jsonl" '{transcript_path:$p,stop_hook_active:false}' | "$hook")
+if [[ $out == *'"block"'* ]]; then ok "a long transcript: its last turn is judged"; else bad "long transcript: $out"; fi
 run "AskUserQuestion this turn" pass false "$(user 'go')" "$(tool AskUserQuestion)" "$(toolres)" "$(say 'Should I go on?')"
 run "AskUserQuestion in an older turn" block false "$(user 'a')" "$(tool AskUserQuestion)" "$(toolres)" "$(user 'b')" "$(say 'Merge it?')"
 run "statement at the end" pass false "$(user 'go')" "$(say $'Is it done? Yes.\n\nMerged as 60b79419.')"

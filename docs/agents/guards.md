@@ -52,7 +52,7 @@ The hooks in `hack/hooks/` are maintainer hooks: they run only with `KOINON_MAIN
 | Questions to the maintainer go through the question tool | `hack/hooks/grilling-question-check.sh` (PreToolUse on Skill), `question-checklist-check.sh` (PreToolUse on AskUserQuestion, a checklist) and `prose-question-stop-check.sh` (Stop hook) | the stop is blocked once, with a request to ask again through the tool | Ask through `AskUserQuestion` | repo |
 | Code snippets are added to a prompt only where they help | `hack/hooks/codegraph-prompt-check.sh`, UserPromptSubmit (skips short prompts, notifications and the main checkout) | nothing; it adds or skips context | none needed | repo |
 
-Guards in the table: 29.
+Guards in the table: 31.
 
 ## 2. Guards with no legal route today
 

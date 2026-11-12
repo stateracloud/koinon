@@ -23,8 +23,9 @@ tp=$(jq -r '.transcript_path // empty' <<<"$in")
 [[ -n $tp && -r $tp ]] || exit 0
 
 # This turn: every entry after the last genuine user message (a user entry whose content is text,
-# not a tool_result). Skip sidechain (subagent) entries.
-turn=$(jq -c 'select((.isSidechain // false) | not)' "$tp" 2>/dev/null | jq -sc '
+# not a tool_result). Skip sidechain (subagent) entries. Only the last 400 transcript lines are read,
+# so a long session's transcript stays fast; a turn longer than that is judged on its end.
+turn=$(tail -n 400 "$tp" | jq -c 'select((.isSidechain // false) | not)' 2>/dev/null | jq -sc '
   def human: .type == "user" and ((.message.content | type) == "string"
     or ([.message.content[]? | select(.type == "text")] | length > 0)
     and ([.message.content[]? | select(.type == "tool_result")] | length == 0));
@@ -40,7 +41,7 @@ last_lines=$(awk '
   /^```/ { fence = !fence; next }
   fence { next }
   /★ Insight/ { ins = 1; next }
-  ins && /^`?─+`?$/ { ins = 0; next }
+  ins && /^`?(─)+`?$/ { ins = 0; next }
   ins { next }
   NF { print }' <<<"$text" | tail -n 3)
 

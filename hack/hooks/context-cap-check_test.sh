@@ -55,6 +55,20 @@ transcript 365000
 out=$(input s2 | "$hook" hook)
 if [ -n "$out" ]; then ok "next 50k step: again"; else bad "next step was silent"; fi
 
+# The mark is per session: a second session in the same 50k step is still told, and nothing goes to
+# stderr (a bad tr range once made every session share one mark file and print an error).
+transcript 310000
+err=$(input s4 | "$hook" hook 2>&1 >/dev/null)
+out=$(input s5 | "$hook" hook 2>"$tmp/err")
+if [ -n "$out" ] && [ -z "$err" ] && [ ! -s "$tmp/err" ]; then ok "two sessions in one step: both told, no stderr"; else bad "two sessions: out=$out err=$err $(cat "$tmp/err")"; fi
+if [ -f "$tmp/koinon-context-cap-s4" ] && [ -f "$tmp/koinon-context-cap-s5" ] && [ ! -e "$tmp/koinon-context-cap-" ]; then
+  ok "one mark file per session"
+else
+  bad "mark files: $(cd "$tmp" && echo koinon-context-cap-*)"
+fi
+out=$(jq -nc --arg p "$tmp/t.jsonl" '{transcript_path:$p,session_id:"../a b"}' | "$hook" hook)
+if [ -n "$out" ] && [ -f "$tmp/koinon-context-cap-___a_b" ]; then ok "an odd session id is made safe"; else bad "odd session id: $(cd "$tmp" && echo koinon-context-cap-*)"; fi
+
 transcript 205000
 out=$(input s3 | "$hook" status)
 if [ "$out" = "ctx 205k/300k" ]; then ok "status line"; else bad "status line: $out"; fi

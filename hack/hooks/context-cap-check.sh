@@ -23,7 +23,7 @@ cap=${KOINON_CONTEXT_CAP:-300000}
 step=50000
 in=$(cat)
 transcript=$(jq -r '.transcript_path // ""' <<<"$in")
-session=$(jq -r '.session_id // "unknown"' <<<"$in" | tr -c 'A-Za-z0-9_-\n' '_')
+session=$(jq -r '.session_id // "unknown"' <<<"$in" | tr -c 'A-Za-z0-9_\n-' '_')
 tokens=0
 if [ -f "$transcript" ]; then
   tokens=$(tail -n 400 "$transcript" | jq -s '[.[] | select(.type == "assistant" and (.isSidechain | not)) | .message.usage

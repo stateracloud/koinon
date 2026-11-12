@@ -90,6 +90,8 @@ case_ deny 'read -t 30 x'
 case_ deny 'python3 -c "import time; time.sleep(20)"'
 case_ allow 'read -t 2 x'
 case_ allow 'python3 -c "import time; time.sleep(2)"'
+case_ allow 'python3 -c "import time; time.sleep(5e-3)"'
+case_ deny 'python3 -c "import time; time.sleep(7.5)"'
 case_ allow 'tail -f /var/log/x' true
 case_ allow 'tail -n 20 /var/log/x'
 
