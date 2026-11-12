@@ -42,6 +42,19 @@ var _ = Describe("Host egress policy", func() {
 		Expect(hits.Load()).To(BeZero())
 	})
 
+	It("refuses a denied address without a CA bundle too", func() {
+		var hits atomic.Int32
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+		DeferCleanup(srv.Close)
+		denyAll := catalog.URLPolicy{}
+		h := gitea.NewHost(gitea.Options{DialContext: denyAll.DialContext(&net.Dialer{Timeout: time.Second})})
+		acc, err := h.Open(context.Background(), connection(srv.URL, ""), read)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = acc.Repository(context.Background(), repo)
+		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
+		Expect(hits.Load()).To(BeZero())
+	})
+
 	It("refuses a name that resolves to a denied address at dial time", func() {
 		var hits atomic.Int32
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
@@ -53,6 +66,7 @@ var _ = Describe("Host egress policy", func() {
 			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 		}}
 		h := gitea.NewHost(gitea.Options{DialContext: rebound.DialContext(&net.Dialer{Timeout: time.Second})})
+		// The connection carries a CA bundle, so clientFor builds a per-bundle client: it keeps the check.
 		acc, err := h.Open(context.Background(), connection("https://git.rebind.test:"+port, pemOf(srv)), read)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = acc.Repository(context.Background(), repo)

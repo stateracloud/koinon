@@ -183,7 +183,8 @@ type Options struct {
 	// https://<host>/api/v3.
 	BaseURL string
 	// HTTPClient defaults to a client with a 30-second timeout that dials through DialContext and
-	// returns a 3xx response instead of following it.
+	// returns a 3xx response instead of following it. A caller-set client turns the dial check
+	// off for every base URL, derived clients included; no production caller sets it.
 	HTTPClient *http.Client
 	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext): a Connection's
 	// base URL is admin-supplied, so the clients For derives for another base URL connect only to

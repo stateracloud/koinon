@@ -4,10 +4,12 @@ package github_test
 
 import (
 	"context"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -72,6 +74,50 @@ var _ = Describe("Client egress policy", func() {
 		_, err = c.GetApp(context.Background(), app)
 		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
 		Expect(hits.Load()).To(BeZero())
+	})
+
+	It("keeps the dial check on a client derived with a CA bundle", func() {
+		var hits atomic.Int32
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+		DeferCleanup(srv.Close)
+		ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+
+		denyAll := catalog.URLPolicy{}
+		root := github.NewClient(github.Options{BaseURL: "http://platform.invalid", DialContext: denyAll.DialContext(&net.Dialer{Timeout: time.Second})})
+		c, err := root.For(srv.URL, ca)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = c.GetApp(context.Background(), app)
+		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
+		Expect(hits.Load()).To(BeZero())
+	})
+
+	DescribeTable("checks every base URL that is not exactly the platform's",
+		func(nearMatch func(platform string) string) {
+			f := githubtest.New()
+			DeferCleanup(f.Server.Close)
+			denyAll := catalog.URLPolicy{}
+			root := github.NewClient(github.Options{BaseURL: f.Server.URL, DialContext: denyAll.DialContext(&net.Dialer{Timeout: time.Second})})
+			c, err := root.For(nearMatch(f.Server.URL), "")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.GetApp(context.Background(), app)
+			Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
+		},
+		Entry("another case", func(u string) string { return strings.ToUpper(u) }),
+		Entry("another port", func(u string) string {
+			host, _, _ := net.SplitHostPort(strings.TrimPrefix(u, "http://"))
+			return "http://" + net.JoinHostPort(host, "1")
+		}),
+		Entry("a path", func(u string) string { return u + "/api/v3" }),
+	)
+
+	It("treats a trailing slash as the platform URL itself", func() {
+		// For trims the slash, so it is the same base URL, and the same client comes back.
+		f := githubtest.New()
+		DeferCleanup(f.Server.Close)
+		root := github.NewClient(github.Options{BaseURL: f.Server.URL, DialContext: catalog.URLPolicy{}.DialContext(&net.Dialer{Timeout: time.Second})})
+		c, err := root.For(f.Server.URL+"/", "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c).To(BeIdenticalTo(root))
 	})
 
 	It("dials the platform's own base URL unchecked, even on a private address", func() {
