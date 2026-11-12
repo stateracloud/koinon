@@ -369,6 +369,23 @@ long a deleted org's data stays. An ack of a revision covers every earlier one f
 copy never reuses it after a restart. S3 note: LISTEN does not work behind transaction-mode
 PgBouncer, so the stream client also polls the table as a fallback.
 
+Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
+with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener
+that already carries the gateway's bearer token (`internal/otlpauth`, the token the OTLP receiver
+checks): no new port, Secret or flag, and agentd's trace token never admits it. The server refuses to
+start without an authentication wrapper. One loop reads the newest revision every 5 s and on each
+`pg_notify`, so a missed notification (transaction-mode PgBouncer) costs latency and nothing else; every
+stream reads that one cached snapshot, and a new stream reads the table once at connect. A stream sends a
+revision whenever its number differs from the last one sent, so a restored database that holds a lower
+number is followed. `internal/gateway/stateclient` is the copy's side: it applies the model half
+(`ModelPathGateway.ApplyModel`) and the MCP half (`MCPGateway.ApplyMCP`) of each revision, acks each half
+after that half applied, never acks a half that failed, and reconnects with jittered backoff. A lost ack
+(three tries) ends the stream, so the reconnect replays the newest revision and acks it again without
+applying it twice. Acks are recorded and gate nothing; the reconciler still pushes state with Apply. Slice
+4 moves the gate and must first settle the stale-leader fence of issue 635. Prior art: Envoy's xDS (versioned
+full snapshots, ACK per resource type); here one revision number covers both halves, there is no NACK
+(a failed half is simply not acked) and the copy id stands in for the nonce.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_

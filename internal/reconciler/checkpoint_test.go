@@ -152,7 +152,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 	})
 
-	It("starts at most MaxRecreatesPerPass home checkpoints per pass after a supervisor change", func(ctx SpecContext) {
+	It("starts at most MaxRecreatesPerPass home checkpoints at once after a supervisor change", func(ctx SpecContext) {
 		sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
 		cfg.Supervisor = sup
 		cfg.MaxRecreatesPerPass = 1
@@ -189,11 +189,67 @@ var _ = Describe("Reconciler home checkpoints", func() {
 			dirtyHome(ctx, m.org, m.user, m.agent)
 		}
 
+		// The recreate allowance is a token bucket (issue 573): the first recreate above spent its
+		// token, and one comes back after a resync interval.
+		now = now.Add(time.Minute)
 		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
 		pass(ctx)
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = ANY($1) AND reason = 'recreate'`, orgs).Scan(&n)).To(Succeed())
-		Expect(n).To(Equal(1), "the pass's one slot is taken before the gate asks for a checkpoint")
+		Expect(n).To(Equal(1), "the one recreate token is taken before the gate asks for a checkpoint")
+
+		// Intervals pass while that agent is still behind its gate. The bucket refills, but the
+		// holder keeps the one slot: no second agent starts (ADR 0085 decision 9).
+		now = now.Add(2 * reconciler.DefaultResyncInterval)
+		pass(ctx)
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = ANY($1) AND reason = 'recreate'`, orgs).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "a refilled bucket does not let a second agent into the gate while the first waits")
+	})
+
+	It("frees the recreate slot of an agent that no longer needs a recreate", func(ctx SpecContext) {
+		sup := &fakeSupervisor{image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}
+		cfg.Supervisor = sup
+		cfg.MaxRecreatesPerPass = 1
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx) // deletes the unlabelled BeforeEach sandbox
+		pass(ctx) // creates it, with the label
+		o2, u2 := newOrg(ctx)
+		addProvider(ctx, o2, u2, "upstream", "", "fake")
+		a2 := newAgent(ctx, o2, u2)
+		pass(ctx)
+		pass(ctx)
+		dirtyHome(ctx, org, user, agent.ID)
+		dirtyHome(ctx, o2, u2, a2.ID)
+		checkpoints := func(o pgtype.UUID) int {
+			GinkgoHelper()
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = $1 AND reason = 'recreate'`, o).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		By("one agent takes the only slot; the other waits")
+		now = now.Add(reconciler.DefaultResyncInterval) // the unlabelled sandbox's recreate spent the token
+		sup.image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
+		pass(ctx)
+		first, second, secondAgent := org, o2, a2.ID
+		if checkpoints(org) == 0 {
+			first, second, secondAgent = o2, org, agent.ID
+		}
+		Expect(checkpoints(first)).To(Equal(1))
+		Expect(checkpoints(second)).To(Equal(0))
+
+		By("the holder is archived: its slot is free again, with no time passing")
+		firstAgent := agent.ID
+		if first == o2 {
+			firstAgent = a2.ID
+		}
+		_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: first, ID: firstAgent})
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx) // the archived agent's item ends and frees the slot
+		pass(ctx)
+		Expect(checkpoints(second)).To(Equal(1), "the other agent starts once the holder no longer holds the slot (agent %s)", secondAgent)
 	})
 
 	It("a sandbox recreated without a checkpoint gets a new generation", func(ctx SpecContext) {

@@ -47,8 +47,8 @@ type ModelGateway interface {
 	// ModelState.SetLimit).
 	//
 	// Apply converges both halves of s (the model path and the MCP path), as the agentgateway
-	// drivers serve both from one config. A per-half model call, next to [MCPGateway.ApplyMCP],
-	// comes with the stream client slice of ADR 0097 step 2.
+	// drivers serve both from one config. The per-half model call, next to [MCPGateway.ApplyMCP],
+	// is [ModelPathGateway.ApplyModel].
 	//
 	// A driver whose gateway judges objects one by one (Kubernetes mode) may return the
 	// revision together with a *RejectedError: everything but the named objects is live.
@@ -70,6 +70,16 @@ type MCPGateway interface {
 	// key belongs to. It returns the same [Revision] type as [ModelGateway.Apply]; the revision
 	// covers the MCP path only.
 	ApplyMCP(ctx context.Context, c MCPConfig) (Revision, error)
+}
+
+// ModelPathGateway is the model counterpart of [MCPGateway]: a driver that serves the model path and
+// takes it apart from the MCP path. Koinon's own gateway (ADR 0097 step 2) is its first driver, and the
+// State stream client (package gateway/stateclient) applies and acknowledges each half through it.
+type ModelPathGateway interface {
+	// ApplyModel converges the gateway's model path to c and returns once the gateway serves it, or
+	// with an error when the gateway rejected it or ctx expired. ApplyModel is idempotent. The
+	// revision covers the model path only.
+	ApplyModel(ctx context.Context, c ModelConfig) (Revision, error)
 }
 
 // Rejection is one object the gateway refused, with the org it belongs to ("" for a platform
@@ -706,6 +716,12 @@ var (
 	headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$`)
 )
 
+// loaderDollar ends the error for an org-supplied string with '$' that a driver writes into the
+// gateway's config: agentgateway's file loader reads $NAME and ${NAME} as environment variables
+// (#668). The org-facing validators (catalog, mcpservers) refuse it first; this is the backstop
+// every driver passes.
+const loaderDollar = ", which the gateway's config loader reads as an environment variable"
+
 // ToolRules renders one CEL allow rule per agent for agentgateway's MCP authorization. The gateway
 // allows a tool when any rule matches, and filters tools/list the same way, so an agent sees only
 // its granted tools. The last rule admits ReadyPrompt for every key: the gateway filters
@@ -826,6 +842,9 @@ func (s ModelState) validate() []error {
 		if p.BaseURL == "" {
 			errs = append(errs, fmt.Errorf("provider %q: base URL is required", ref))
 		}
+		if strings.Contains(p.BaseURL, "$") {
+			errs = append(errs, fmt.Errorf("provider %q: base URL contains '$'%s", ref, loaderDollar))
+		}
 		if p.APIKeyFile != "" && !keyPath.MatchString(p.APIKeyFile) {
 			errs = append(errs, fmt.Errorf("provider %q: invalid key file path", ref))
 		}
@@ -894,6 +913,11 @@ func (s MCPState) validate() []error {
 		}
 		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))
+		}
+		for _, f := range [...]struct{ name, v string }{{"URL", t.URL}, {"credential header", t.CredentialHeader}, {"credential prefix", t.CredentialPrefix}} {
+			if strings.Contains(f.v, "$") {
+				errs = append(errs, fmt.Errorf("mcp target %q: %s contains '$'%s", t.Name, f.name, loaderDollar))
+			}
 		}
 		targets[t.Name] = true
 	}

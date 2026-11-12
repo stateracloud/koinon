@@ -39,9 +39,9 @@ type servedMCP struct {
 }
 
 // loadMCP reads every org's enabled servers and their tools. A server that cannot be served (its URL
-// breaks the policy, its credential cannot be opened, its target name clashes with another org's) is
-// left out and reported, so one broken entry does not stop the others. A database error aborts the
-// pass.
+// breaks the policy, its credential cannot be opened, its credential header or prefix holds a '$'
+// (#668), its target name clashes with another org's) is left out and reported, so one broken entry
+// does not stop the others. A database error aborts the pass.
 func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconcileRow) (servedMCP, []error, error) {
 	out := servedMCP{files: map[string][]byte{}}
 	var errs []error
@@ -74,6 +74,10 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				cred, err := mcpservers.OpenCredential(r.cfg.Keys, org.ID, row.ID, row.Credential)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its credential cannot be opened: %w", org.Slug, row.Name, err))
+					continue
+				}
+				if err := mcpservers.CheckCredentialLoader(row.CredentialHeader.String, row.CredentialPrefix); err != nil {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
 				sum := sha256.Sum256(row.Credential)

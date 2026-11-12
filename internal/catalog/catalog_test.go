@@ -152,6 +152,13 @@ var _ = Describe("URLPolicy", func() {
 		Expect(p.CheckStrict(ctx, "https://api.openai.com/v1")).To(Succeed())
 		Expect(p.CheckStrict(ctx, "http://ollama.lab.example.com:11434/v1")).To(Succeed(), "an allow-listed name needs no lookup")
 	})
+	It("refuses '$' at render, so a row saved before the validators refused it is left out (#668)", func(ctx SpecContext) {
+		var inv *catalog.InvalidError
+		err := p.CheckStrict(ctx, "https://api.openai.com/${HOME}/v1")
+		Expect(errors.As(err, &inv)).To(BeTrue())
+		Expect(err).To(MatchError(ContainSubstring("must not contain '$'")))
+		Expect(p.CheckStrict(ctx, "http://ollama.lab.example.com:11434/$v1")).NotTo(Succeed(), "an allow-listed host too")
+	})
 })
 
 var _ = Describe("Service", func() {
@@ -1040,3 +1047,25 @@ func mustUUID(s string) pgtype.UUID {
 	Expect(id.Scan(s)).To(Succeed())
 	return id
 }
+
+// agentgateway's config loader expands $NAME and ${NAME} over the whole standalone config file, so a
+// provider URL that carries '$' is refused when it is saved (#668).
+var _ = DescribeTable("ValidateProvider refuses '$' in the URL",
+	func(rawURL string) {
+		err := catalog.ValidateProvider("openrouter", "openrouter", rawURL)
+		var inv *catalog.InvalidError
+		Expect(err).To(BeAssignableToTypeOf(inv))
+		Expect(err).To(MatchError(ContainSubstring("must not contain '$'")))
+		Expect(err).To(MatchError(ContainSubstring("environment variable")))
+	},
+	Entry("a variable in the path", "https://openrouter.ai/api/$HOME/v1"),
+	Entry("a braced variable in the path", "https://openrouter.ai/api/${HOME}"),
+	Entry("an escaped dollar", "https://openrouter.ai/api/$$/v1"),
+	Entry("a trailing dollar", "https://openrouter.ai/api/v1$"),
+	Entry("a dollar in the host", "https://openrouter$.ai/api/v1"),
+)
+
+var _ = It("ValidateProvider accepts a URL without '$', percent-encoded or not", func() {
+	Expect(catalog.ValidateProvider("openrouter", "openrouter", "https://openrouter.ai/api/v1")).To(Succeed())
+	Expect(catalog.ValidateProvider("openrouter", "openrouter", "https://openrouter.ai/api/%24v1")).To(Succeed())
+})

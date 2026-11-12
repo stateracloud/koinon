@@ -75,12 +75,12 @@ var _ = Describe("Backend ownership", func() {
 		Expect(err).To(MatchError(execution.ErrForeign))
 		_, err = restore.EnsurePolicy(ctx, ws, name, harnessPolicy())
 		Expect(err).To(MatchError(execution.ErrForeign))
-		Expect(restore.DeleteSandbox(ctx, ws, name)).To(MatchError(execution.ErrForeign))
+		Expect(deleteErr(restore.DeleteSandbox(ctx, ws, name))).To(MatchError(execution.ErrForeign))
 
 		Expect(gw.Sandbox(ws, name)).NotTo(BeNil(), "the live sandbox is still there")
 		Expect(gw.Calls("DeleteSandbox")).To(BeZero())
 		Expect(gw.Calls("StopSandbox")).To(BeZero())
-		Expect(live.DeleteSandbox(ctx, ws, name)).To(Succeed(), "its owner can")
+		Expect(deleteErr(live.DeleteSandbox(ctx, ws, name))).To(Succeed(), "its owner can")
 	})
 
 	It("does not let the other install exec in or upload into the sandbox", func(ctx SpecContext) {
@@ -104,12 +104,12 @@ var _ = Describe("Backend ownership", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = b.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: name, Image: "img"})
 		Expect(err).To(MatchError(execution.ErrForeign))
-		Expect(b.DeleteSandbox(ctx, ws, name)).To(MatchError(execution.ErrForeign))
+		Expect(deleteErr(b.DeleteSandbox(ctx, ws, name))).To(MatchError(execution.ErrForeign))
 		Expect(gw.Sandbox(ws, name)).NotTo(BeNil())
 	})
 
 	It("deleting a sandbox that is not there is still fine", func(ctx SpecContext) {
-		Expect(restore.DeleteSandbox(ctx, ws, "ka-missing")).To(Succeed())
+		Expect(deleteErr(restore.DeleteSandbox(ctx, ws, "ka-missing"))).To(Succeed())
 	})
 
 	It("does not adopt the other install's workspace or repoint its provider", func(ctx SpecContext) {
@@ -137,7 +137,7 @@ var _ = Describe("Backend ownership", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = live.StopSandbox(ctx, ws, "ka-old")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(live.DeleteSandbox(ctx, ws, "ka-old")).To(Succeed())
+		Expect(deleteErr(live.DeleteSandbox(ctx, ws, "ka-old"))).To(Succeed())
 	})
 
 	It("takes an unlabeled provider as its own while a sandbox attaches it, and claims it after", func(ctx SpecContext) {
@@ -162,7 +162,7 @@ var _ = Describe("Backend ownership", func() {
 		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
 
 		// After the sandbox is gone the claim recreates it with the label.
-		Expect(live.DeleteSandbox(ctx, ws, "ka-old")).To(Succeed())
+		Expect(deleteErr(live.DeleteSandbox(ctx, ws, "ka-old"))).To(Succeed())
 		Expect(live.EnsureProvider(ctx, ws, claim)).To(Succeed())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 
