@@ -41,7 +41,7 @@ const addressFreeFails = 30
 
 func newLoginKeys(r *http.Request, username string) loginKeys {
 	addr := ratelimit.ClientAddr(r)
-	return loginKeys{addr: addr, user: ratelimit.Key(addr, "user:"+auditedUsername(username)), shared: ratelimit.Key(addr, ""), wide: ratelimit.Key(addr, ratelimit.WidePart)}
+	return loginKeys{addr: addr, user: ratelimit.Key(addr, "user:"+auditedUsername(username)), shared: ratelimit.Key(addr, ""), wide: ratelimit.Key(addr, "all-users")}
 }
 
 // auditedUsername is the username as a key and an audit event keep it: valid UTF-8 without NUL (which

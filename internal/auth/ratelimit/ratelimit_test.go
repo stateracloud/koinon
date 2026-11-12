@@ -166,9 +166,10 @@ var _ = Describe("Limiter", func() {
 		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeZero(), "within the cap")
 		blockKey(ratelimit.Key("192.0.2.7", "user:overflow"), t0)
 		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeNumerically(">", 0))
-		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ratelimit.WidePart), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("192.0.2.7", "all-users"), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("192.0.2.7", "abcdefgh"), t0)).To(BeNumerically(">", 0), "a prefix the address never used is refused too")
 		Expect(l.Blocked(ratelimit.Key("192.0.2.8", ""), t0)).To(BeZero())
-		Expect(l.Blocked(ratelimit.Key("192.0.2.8", ratelimit.WidePart), t0)).To(BeZero())
+		Expect(l.Blocked(ratelimit.Key("192.0.2.8", "all-users"), t0)).To(BeZero())
 		Expect(l.Blocked(ratelimit.Key("192.0.2.8", "user:admin"), t0)).To(BeZero())
 	})
 
@@ -181,6 +182,25 @@ var _ = Describe("Limiter", func() {
 		Expect(l.Blocked(ratelimit.Key("2001:db8:2::", ""), t0)).To(BeZero())
 	})
 
+	It("keeps one /48 within its bound however many /64s it spreads over", func() {
+		for n := range 100 {
+			for u := range 20 {
+				blockKey(ratelimit.Key("2001:db8:7:"+strconv.Itoa(n)+"::", "user:"+strconv.Itoa(u)), t0)
+			}
+		}
+		Expect(l.Len()).To(BeNumerically("<=", 10), "8 blocked keys and the overflow slot")
+		Expect(l.Blocked(ratelimit.Key("2001:db8:7:ffff::", "user:new"), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("2001:db8:8::", "user:new"), t0)).To(BeZero())
+	})
+
+	It("limits every key of a family whose parts are not addresses, however many are blocked", func() {
+		for u := range 30 {
+			k := ratelimit.Key("user-"+strconv.Itoa(u), "change-password")
+			blockKey(k, t0)
+			Expect(l.Blocked(k, t0)).To(BeNumerically(">", 0), "user %d", u)
+		}
+	})
+
 	It("refuses nobody else when many addresses fill the blocked set", func() {
 		for a := range 12600 {
 			addr := "10." + strconv.Itoa(a/250%250) + "." + strconv.Itoa(a/62500) + "." + strconv.Itoa(a%250+1)
@@ -189,7 +209,7 @@ var _ = Describe("Limiter", func() {
 			}
 		}
 		fresh := "198.51.100.1"
-		for _, part := range []string{"", ratelimit.WidePart, "user:admin", "abcdefgh"} {
+		for _, part := range []string{"", "all-users", "user:admin", "abcdefgh"} {
 			Expect(l.Blocked(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
 		}
 		blockKey(ratelimit.Key(fresh, "user:admin"), t0)

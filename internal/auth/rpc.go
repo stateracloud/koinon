@@ -122,7 +122,7 @@ func (h rpcHandler) ChangePassword(ctx context.Context, req *authv1alpha1.Change
 	}
 	// Guessing the current password is limited per user, before the hash runs. It writes no login
 	// audit event: the caller is signed in.
-	limitKey := ratelimit.Key("change-password", hex.EncodeToString(p.UserID.Bytes[:]))
+	limitKey := ratelimit.Key(hex.EncodeToString(p.UserID.Bytes[:]), "change-password")
 	if wait := s.limiter.Blocked(limitKey, s.now()); wait > 0 {
 		return nil, connect.NewError(connect.CodeResourceExhausted, "too many failed attempts; retry in "+ratelimit.RetryAfter(wait)+" seconds")
 	}

@@ -12,12 +12,13 @@
 // The state lives in memory, per replica. At most maxTracked keys that are not blocked are kept (the
 // least recently used is dropped first), and at most maxBlocked blocked ones. A blocked key is not
 // dropped to make room for a fresh key, so flooding the limiter with fresh keys does not reset a
-// backoff. One address (an IPv6 one counts per /48 here) may hold at most maxBlockedPerAddr blocked
-// keys; when it would hold more, the address's own shared slot (Key(addr, "")) and wide slot
-// (Key(addr, WidePart)) are blocked for the wait of the key that overflowed, and that key is not
-// tracked. Only that address is refused. When the blocked set is still full, the block that ends
-// soonest is dropped to make room, and nobody else is refused. The address is the connection's peer,
-// an IPv6 one masked to its /64; X-Forwarded-For is not trusted.
+// backoff. One group (an IPv4 address, or an IPv6 /48) may hold at most maxBlockedPerAddr blocked
+// keys, so the /64 neighbours of an IPv6 client share that cap: a neighbour can push your failures
+// onto the group. A key that would be the ninth is not tracked; the group's overflow slot is blocked
+// for that key's wait instead, and Blocked returns it for every key of the group, so both entry
+// points refuse the whole group before any lookup or hash, and only that group. When the blocked set
+// is full, the block that ends soonest is dropped to make room, and nobody else is refused. The
+// address is the connection's peer, an IPv6 one masked to its /64; X-Forwarded-For is not trusted.
 //
 // Lockout risk behind an ingress: every client then shares the ingress's address, because the peer
 // address is the ingress's and the forwarded address is not read. One client can therefore lock all
@@ -59,10 +60,6 @@ const (
 
 	// maxBlockedPerAddr bounds the blocked keys one address (an IPv6 one: its /48) may hold.
 	maxBlockedPerAddr = 8
-
-	// WidePart is the part of an address's wide slot, which the password login checks over all
-	// usernames; the limiter blocks it with the shared slot when an address overflows its cap.
-	WidePart = "all-users"
 )
 
 // Limiter counts failures per key. The zero value is not usable; call New.
@@ -89,7 +86,7 @@ type attempts struct {
 	elem    *list.Element // in lru, or nil
 	hidx    int           // index in the blocked heap, or -1
 	group   string        // the address, or an IPv6 address's /48, for the per-address cap
-	exempt  bool          // an address-level slot: blocked past the cap, not counted in it
+	exempt  bool          // a group overflow slot: not counted in the cap, dropped when its block ends
 }
 
 type blockHeap []*attempts
@@ -132,6 +129,10 @@ func (l *Limiter) Len() int {
 func (l *Limiter) expire(now time.Time) {
 	for len(l.blocked) > 0 && !now.Before(l.blocked[0].blocked) {
 		a := l.dropBlocked(l.blocked[0])
+		if a.exempt {
+			delete(l.keys, a.key)
+			continue
+		}
 		a.elem = l.lru.PushFront(a)
 	}
 	for l.lru.Len() > maxTracked {
@@ -189,25 +190,26 @@ func (l *Limiter) addBlocked(a *attempts) {
 	}
 }
 
-// blockAddress blocks the address's shared and wide slots until at least until.
-func (l *Limiter) blockAddress(key string, until, now time.Time) {
-	addr, _, _ := strings.Cut(key, "|")
-	for _, k := range []string{Key(addr, ""), Key(addr, WidePart)} {
-		a := l.keys[k]
-		if a == nil {
-			a = &attempts{key: k, first: now, group: groupOf(k), exempt: true, hidx: -1}
-			l.keys[k] = a
-		}
-		if a.blocked.Before(until) {
-			a.blocked = until
-		}
-		if a.hidx >= 0 {
-			heap.Fix(&l.blocked, a.hidx)
-			continue
-		}
-		a.exempt = true
-		l.addBlocked(a)
+// groupSlot is the key of a group's overflow slot. No Key is ever of this form.
+func groupSlot(group string) string { return "\x00group|" + group }
+
+// blockGroup blocks the whole group until at least until, through its overflow slot, which Blocked
+// checks for every key of the group.
+func (l *Limiter) blockGroup(group string, until, now time.Time) {
+	k := groupSlot(group)
+	a := l.keys[k]
+	if a == nil {
+		a = &attempts{key: k, first: now, group: group, exempt: true, hidx: -1}
+		l.keys[k] = a
 	}
+	if a.blocked.Before(until) {
+		a.blocked = until
+	}
+	if a.hidx >= 0 {
+		heap.Fix(&l.blocked, a.hidx)
+		return
+	}
+	l.addBlocked(a)
 }
 
 // Key is the slot of a client address and the credential it names (a token prefix, a username);
@@ -247,15 +249,20 @@ func RetryAfter(d time.Duration) string {
 	return strconv.Itoa(int((d + time.Second - 1) / time.Second))
 }
 
-// Blocked returns how long key must wait, or zero.
+// Blocked returns how long key must wait, or zero: the longer of its own block and its group's
+// overflow block.
 func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.expire(now)
+	var wait time.Duration
 	if a, ok := l.keys[key]; ok && now.Before(a.blocked) {
-		return a.blocked.Sub(now)
+		wait = a.blocked.Sub(now)
 	}
-	return 0
+	if g, ok := l.keys[groupSlot(groupOf(key))]; ok && now.Before(g.blocked) {
+		wait = max(wait, g.blocked.Sub(now))
+	}
+	return wait
 }
 
 // Fail records a failure for key; the key is blocked after FreeFails failures.
@@ -293,10 +300,10 @@ func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 	case a.hidx >= 0:
 		heap.Fix(&l.blocked, a.hidx)
 	case !a.exempt && l.perAddr[a.group] >= maxBlockedPerAddr:
-		// The address holds as many blocked keys as it may: block the address itself, not this key.
+		// The group holds as many blocked keys as it may: block the group, not this key.
 		until := a.blocked
 		l.forget(a)
-		l.blockAddress(key, until, now)
+		l.blockGroup(a.group, until, now)
 	default:
 		l.addBlocked(a)
 	}
