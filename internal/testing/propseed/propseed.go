@@ -15,7 +15,7 @@ import (
 	"os"
 	"strconv"
 
-	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/ginkgo/v2"
 )
 
 const (
@@ -49,7 +49,7 @@ func envInt(name string, def int64) int64 {
 // spec goroutine (Gomega's Expect) or was recorded from another goroutine. A failure recorded from
 // another goroutine does not stop the later cases, so assert in the spec goroutine.
 func ForEach(body func(rng *rand.Rand)) {
-	GinkgoHelper()
+	ginkgo.GinkgoHelper()
 	cur := new(int64)
 	reportOnFailure(cur)
 	for i := 0; i < Cases(); i++ {
@@ -60,17 +60,17 @@ func ForEach(body func(rng *rand.Rand)) {
 
 // Run runs body with the generator of one seed.
 func Run(seed int64, body func(rng *rand.Rand)) {
-	GinkgoHelper()
+	ginkgo.GinkgoHelper()
 	reportOnFailure(&seed)
 	body(rand.New(rand.NewSource(seed))) //nolint:gosec // a reproducible test generator, not security
 }
 
 func reportOnFailure(seed *int64) {
-	DeferCleanup(func() {
-		if CurrentSpecReport().Failed() {
+	ginkgo.DeferCleanup(func() {
+		if ginkgo.CurrentSpecReport().Failed() {
 			msg := fmt.Sprintf("property failed with seed %d: rerun with %s=%d %s=1", *seed, SeedVar, *seed, CasesVar)
-			AddReportEntry("property seed", msg)
-			fmt.Fprintln(GinkgoWriter, msg)
+			ginkgo.AddReportEntry("property seed", msg)
+			ginkgo.GinkgoWriter.Println(msg)
 		}
 	})
 }
