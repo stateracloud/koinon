@@ -589,7 +589,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		AddReportEntry("enqueued at backup", enqueued)
 
 		marks.DumpStart = time.Now()
-		for _, b := range []string{"backup-keys", "check-keys", "backup-db", "verify-dump"} {
+		for _, b := range []string{"backup-keys", "check-keys", "note-keys", "backup-db", "verify-dump"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, src.in.Namespace, src.in.Release)
 			must(err, out)
 		}
@@ -639,7 +639,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		must(os.WriteFile(file, []byte(renamed), 0o600), "write the export")
 		// The blocks run in the guide's order: resync follows start and runs while the install is held. The
 		// request persists in home_checkpoint_resyncs; agentd answers it after the release (the archive check).
-		for _, b := range []string{"stop", "restore-db", "restore-keys", "start", "resync"} {
+		for _, b := range []string{"stop", "restore-db", "restore-keys", "start", "resync", "compare-keys"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, dst.in.Namespace, dst.in.Release)
 			must(err, out)
 			if b == "resync" {

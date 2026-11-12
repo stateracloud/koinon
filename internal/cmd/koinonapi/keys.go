@@ -128,6 +128,7 @@ func newKeysCommand() *cobra.Command {
 		confirmed(sub("forget [ID]", "Give up on a lost KEK: mark every value it sealed as lost and start new home repositories (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		newRepos,
 		sub("verify", "Open every sealed value with the key set and report what does not open; read-only (the check after a restore)", cobra.NoArgs, true),
+		sub("compare", "Read the output of keys status of another install from standard input and check that this key set holds its KEKs with the same fingerprints and the same active KEK; only IDs and fingerprints cross (the check before and after a restore into a fresh namespace)", cobra.NoArgs, false),
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore it with import)", cobra.NoArgs, false),
 		withAllowRetired(confirmed(sub("import", "Read a KEK backup (the output of export) from standard input and merge it into the KEK Secret: adds its KEKs, makes its active KEK active, removes none, refuses KEKs that keys retire removed (see --allow-retired); needs --yes; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false))),
 	)
@@ -204,6 +205,8 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return tool.NewRepositories(ctx, o.all, o.agents)
 	case "verify":
 		return tool.Verify(ctx)
+	case "compare":
+		return tool.Compare(ctx)
 	case "export":
 		return tool.Export(ctx)
 	case "import":

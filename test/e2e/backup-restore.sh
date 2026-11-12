@@ -73,6 +73,7 @@ grep -q '^kek=' "$work/state.before" || fail "keys status lists no KEK"
 step "back up the keys and the database"
 blk backup-keys
 blk check-keys
+blk note-keys
 blk backup-db
 blk verify-dump
 [[ -s $work/koinon.dump && -s $work/koinon-kek-backup.yaml ]] || fail "a backup file is empty"
@@ -128,6 +129,7 @@ if grep -q 'DBOS runtime started' <<<"$api_logs"; then
 fi
 claimed=$(sql "SELECT count(*) FROM runs WHERE owner_id IS NOT NULL AND state IN ('starting', 'running') AND lease_expires_at > now()")
 [[ $claimed == 0 ]] || fail "$claimed run(s) hold a live lease while the install is held"
+blk compare-keys
 blk verify-keys
 blk release
 for c in koinon-api koinon-reconciler koinon-agentd; do

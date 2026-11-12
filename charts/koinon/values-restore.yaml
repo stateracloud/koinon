@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Values preset for a held restore into a fresh namespace with its own OpenShell gateway (issue #517,
+# ADR 0107, ADR 0109). Use it with your own values file after it, so yours win:
+#
+#   helm install <release> koinon/koinon -n <namespace> --create-namespace \
+#     -f values-restore.yaml -f my-values.yaml \
+#     --set openshell.address=<gateway host:port> --set openshell.clientTLSSecret=<client TLS Secret>
+#
+# Then follow the backup and restore guide (test/e2e/commands/backup-restore.e1 shows its commands, with
+# NS=<namespace> REL=<release>). The install starts held: nothing acts outward until you release it.
+#
+# What you still give, because only the target knows it:
+#   - openshell.address and openshell.clientTLSSecret (or openshell.insecure=true behind a mesh) of the
+#     NEW gateway. Never the source install's: two installs on one gateway own each other's objects.
+#   - the postgres, gateway, ingress and OIDC values of the source install (copy your values file).
+#   - openshell.gatewayId below, if you name the new gateway differently.
+#   - sandboxPolicy.identities and preflight.openshell when the new gateway's ServiceAccount, ConfigMap or
+#     workload is not named like the default `openshell` ones (the chart's defaults name the shared install).
+
+# All three binaries start held (ADR 0107): they serve health and reads and act on nothing, and the
+# standalone gateway is deny-all. Release it with `helm upgrade ... --set restoreHold=false` (or drop this
+# file) after the keys verify; the guide's `release` block does it in place with the same effect.
+restoreHold: true
+
+openshell:
+  # The new gateway's gateway_id (its chart's gatewayId). It must differ from the source install's,
+  # which stays `openshell` by default: workspace namespaces are named openshell-<gatewayId>-<workspace>
+  # and the admission policies bind to this ID, so a restored install on the source's ID would share
+  # namespaces and policies with it.
+  gatewayId: koinon-restore
