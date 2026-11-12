@@ -8,6 +8,9 @@
 # install the block acts on (default koinon, koinon). A restore into a fresh namespace sets both to the target's.
 # The chart names its objects <release>-api, <release>-pg, <release>-kek and so on when the release name contains
 # "koinon" and there is no fullnameOverride and no secrets.kek.existingSecret (helm install prints the real names).
+# Not here and not checked by any test: restoring with pg_dump piped into pg_restore, keys export piped into keys import,
+# and a CloudNativePG backup restore. They need a live source and a target at once, which backup-restore.sh cannot
+# provide. Tracked in https://github.com/stateracloud/koinon/issues/910.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/backup-restore.e1
 # e1=backup-keys
 NS=${NS:-koinon}
