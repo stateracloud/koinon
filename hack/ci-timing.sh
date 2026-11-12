@@ -271,7 +271,7 @@ def jobdur: select(.started_at != null and .completed_at != null) | ((.completed
        queue_min: (if $q == null then null else ((($r.mergedAt | ts) - ($q | ts)) / 60) end),
        runs: ($runs | length),
        ci_runs: ([$runs[] | select(.name == "ci" and .event == "pull_request")] | length),
-       runner_min: ([$runs[].jobs[]? | jobdur] | add // 0) / 60,
+       runner_min: (([$runs[].jobs[]? | jobdur] | add // 0) / 60),
        jobs: [$runs[] | . as $run | .jobs[]? | select(.conclusion == "success")
               | {wf: $run.name, event: $run.event, name: .name, sec: jobdur}]})
   | map(select(.code))) as $all
@@ -318,22 +318,29 @@ jq -r '
   kv("runner_min_per_pr"; .runner_min_per_pr),
   "ci_runs_per_pr_median=\(.ci_runs_per_pr_median)",
   "runs_per_pr_median=\(.runs_per_pr_median)"' <<<"$result"
-tab=$(printf '\t')
+# Aligns tab-separated rows into columns, like `column -t -s TAB` (which not every image ships).
+align() {
+  awk -F '\t' '{ for (i = 1; i <= NF; i++) { c[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) }
+                  if (NF > nf) nf = NF; n = NR }
+    END { for (r = 1; r <= n; r++) { line = ""
+            for (i = 1; i <= nf; i++) line = line (i < nf ? sprintf("%-" w[i] "s  ", c[r, i]) : c[r, i])
+            sub(/ +$/, "", line); print line } }'
+}
 echo
 echo "job medians, pull request ci runs (top 10)"
 {
   printf 'job\tn\tmedian_min\n'
   jq -r '.job_median_pr_ci[] | [.job, .n, .median_min] | @tsv' <<<"$result"
-} | column -t -s "$tab"
+} | align
 echo
 echo "job medians, merge queue runs (top 10)"
 {
   printf 'job\tn\tmedian_min\n'
   jq -r '.job_median_merge_group[] | [.job, .n, .median_min] | @tsv' <<<"$result"
-} | column -t -s "$tab"
+} | align
 echo
 echo "pull requests"
 {
   printf 'pr\tmerge\tpush->merged\tqueue\trunner_min\truns\tci_runs\tpush_source\n'
   jq -r '.prs[] | [.number, (if .admin then "admin" else "queue" end), .push_to_merged_min, (.queue_min // "-"), .runner_min, .runs, .ci_runs, .push_source] | @tsv' <<<"$result"
-} | column -t -s "$tab"
+} | align
