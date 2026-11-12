@@ -66,9 +66,21 @@ var _ = Describe("Client egress policy", func() {
 		rebound := catalog.URLPolicy{Resolver: func(context.Context, string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 		}}
-		c := github.NewClient(github.Options{BaseURL: "http://ghe.rebind.test:" + port, DialContext: rebound.DialContext(&net.Dialer{Timeout: time.Second})})
+		root := github.NewClient(github.Options{BaseURL: "http://platform.invalid", DialContext: rebound.DialContext(&net.Dialer{Timeout: time.Second})})
+		c, err := root.For("http://ghe.rebind.test:"+port, "")
+		Expect(err).NotTo(HaveOccurred())
 		_, err = c.GetApp(context.Background(), app)
 		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
 		Expect(hits.Load()).To(BeZero())
+	})
+
+	It("dials the platform's own base URL unchecked, even on a private address", func() {
+		// --github-api-url is the operator's setting (a private GHE, the e2e fake), not a Connection's.
+		denyAll := catalog.URLPolicy{}
+		f := githubtest.New()
+		DeferCleanup(f.Server.Close)
+		c := github.NewClient(github.Options{BaseURL: f.Server.URL, DialContext: denyAll.DialContext(&net.Dialer{Timeout: time.Second})})
+		_, err := c.GetApp(context.Background(), app)
+		Expect(err).NotTo(MatchError(ContainSubstring("egress policy denies")))
 	})
 })
