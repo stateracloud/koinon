@@ -57,10 +57,11 @@ except go ^\.claude/
 # few scripts they call are listed in `keep`. The script tests run in the `scripts` job.
 except go ^hack/[^/]+\.sh$
 except go ^hack/hooks/
-# The failure-class table and its log samples are read only by hack/ci-fail.sh and its test, which
-# run in the `scripts` job; no Go job reads them.
+# The failure-class table and its log samples are read only by hack/ci-fail.sh and its test, and the
+# recorded records of hack/ci-timing.sh only by its test; they run in the `scripts` job, no Go job reads them.
 except go ^hack/ci-fail-classes\.tsv$
 except go ^hack/testdata/ci-fail/
+except go ^hack/testdata/ci-timing/
 except go ^hack/chart-check\.d/
 # The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
 # wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
@@ -79,8 +80,8 @@ job tidy ^go\.(mod|sum)$
 job tidy ^\.golangci\.ya?ml$
 
 # --- shell: lint-shell (#572) --------------------------------------------------------------------------
-# shellcheck over `git ls-files '*.sh'` (any directory) and actionlint over .github/ (workflows, the
-# composite actions it reads, its config). The tool versions and checksums are in hack/versions.env,
+# shellcheck over `git ls-files '*.sh'` (any directory), and actionlint and zizmor over .github/ (workflows,
+# the composite actions they read, their config). The tool versions and checksums are in hack/versions.env,
 # read through hack/versions-env.sh.
 job shell \.sh$
 job shell ^\.github/
@@ -164,6 +165,7 @@ gate migrate ^internal/db/migrations/
 gate adr ^(docs/(adr|research|spikes|metadata)/|hack/(adr-|doc-meta-))
 gate shell \.sh$
 gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
+gate zizmor ^\.github/(workflows/[^/]*\.ya?ml|actions/.*\.ya?ml|zizmor\.ya?ml|dependabot\.ya?ml)$
 gate runnerlint ^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$
 gate pinned \.sh$
 gate pinned ^\.github/workflows/[^/]*\.yml$
@@ -179,7 +181,7 @@ gate audit ^hack/audit-batch-lint
 gate versions ^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)
 # --- script checks: what `preflight` runs of the `quick checks`, `lint-shell` and `scripts` jobs -------
 # Checks that take seconds (measured 2026-11-09 on a Mac: at most 15 s each). The gates adr,
-# migrate, mktemp, pinned, bash5, audit, versions, shell and actionlint run their own.
+# migrate, mktemp, pinned, bash5, audit, versions, shell, actionlint and zizmor run their own.
 script-check - hack/migrate-lint-test.sh
 script-check - hack/migrate-renumber-test.sh
 script-check - hack/commit-subject-check-test.sh
@@ -193,6 +195,7 @@ script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh
 script-check - hack/ci-fail-test.sh
+script-check - hack/ci-timing-test.sh
 script-check - hack/ci-go-gate-test.sh
 script-check - hack/ci-web-gate-test.sh
 script-check - hack/ci-required-test.sh

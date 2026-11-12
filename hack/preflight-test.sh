@@ -41,6 +41,7 @@ stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
 stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
+stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
@@ -152,6 +153,7 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects zizmor" has '^zizmor:' "$tmp/l3"
 check "workflow change selects runnerlint" has '^runnerlint:' "$tmp/l3"
 check "go change does not select runnerlint" hasnt '^runnerlint:' "$tmp/l1"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
@@ -344,6 +346,7 @@ check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"
 check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
+check "zizmor ran for the workflow change" has '^zizmor --offline' "$FAKE_LOG"
 check "runner-lint (with the trigger rule) ran" has '^runner-lint.sh' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
@@ -371,6 +374,15 @@ rc=$(pf "$tmp/c4")
 check "a failing actionlint fails preflight" eq "$rc" 1
 check "actionlint FAIL line" has '^actionlint FAIL' "$tmp/c4"
 unset FAKE_ACTIONLINT_RC
+export FAKE_ZIZMOR_RC=1
+rc=$(pf "$tmp/c4z")
+check "a failing zizmor fails preflight" eq "$rc" 1
+check "zizmor FAIL line" has '^zizmor FAIL' "$tmp/c4z"
+check "no version warning when zizmor is the pinned version" hasnt '^zizmor warn' "$tmp/c4z"
+export FAKE_ZIZMOR_VERSION=0.0.1
+pf "$tmp/c4w" >/dev/null
+check "a zizmor other than the pinned one warns" has '^zizmor warn: CI pins ' "$tmp/c4w"
+unset FAKE_ZIZMOR_RC FAKE_ZIZMOR_VERSION
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1

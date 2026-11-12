@@ -400,6 +400,7 @@ tool_repo() {
 	GITLEAKS) echo "gitleaks/gitleaks" ;;
 	SHELLCHECK) echo "koalaman/shellcheck" ;;
 	ACTIONLINT) echo "rhysd/actionlint" ;;
+	ZIZMOR) echo "zizmorcore/zizmor" ;;
 	GORELEASER) echo "goreleaser/goreleaser" ;;
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;
