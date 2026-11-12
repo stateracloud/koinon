@@ -48,7 +48,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			failures = 0
 		}
 		failures++
-		delay := retryDelay(failures, rand.Float64())
+		delay := retryDelay(failures, rand.Float64()) //nolint:gosec // jitter, not a secret
 		r.log.Warn("reconcile loop restarting", "err", err, "retry_in", delay)
 		select {
 		case <-ctx.Done():
