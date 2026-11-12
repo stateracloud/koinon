@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -77,6 +78,17 @@ var (
 )
 
 const retentionMin = 30 // run-content-retention days: the marker is retentionMin+n
+
+// browserProfile says whether the topology asks for the browser sign-in check. The spec tree is built before
+// BeforeSuite, so the file is read here once, with a placeholder run ID (only the profile matters).
+func browserProfile() bool {
+	f := os.Getenv("KOINON_DRILL_TOPOLOGY")
+	if f == "" {
+		return false
+	}
+	t, err := drill.LoadTopology(f, "tree000")
+	return err == nil && t.BrowserSignin
+}
 
 func needs(steps ...string) {
 	GinkgoHelper()
@@ -159,7 +171,7 @@ func installGateway(ctx context.Context, in drill.Install) drill.Gateway {
 	ensureNamespace(ctx, in.GatewayNamespace)
 	_, err := kube.Helm(ctx, "upgrade", "--install", in.GatewayRelease, gatewayChartRef(), "--version", top.GatewayVersion,
 		// The OpenShell chart has no top-level gatewayId; its gateway_id comes from server.sandboxJwt.gatewayId (default: the release name).
-		"--namespace", in.GatewayNamespace, "-f", filepath.Join(repoRoot, top.GatewayValues), "--set", "server.sandboxJwt.gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
+		"--namespace", in.GatewayNamespace, "-f", top.Path(repoRoot, top.GatewayValues), "--set", "server.sandboxJwt.gatewayId="+in.GatewayID, "--wait", "--timeout", "8m")
 	must(err, "install the OpenShell gateway "+in.GatewayRelease)
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") != "1" {
@@ -200,8 +212,8 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
 	args := []string{
-		"install", in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", in.Namespace,
-		"-f", filepath.Join(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
+		"install", in.Release, top.Path(repoRoot, top.ChartPath), "--namespace", in.Namespace,
+		"-f", top.Path(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
 	}
 	// The images are under this cluster's path on the shared registry (run.sh sets imageRegistry in the topology copy).
 	if top.ImageRegistry != "" {
@@ -747,7 +759,7 @@ stringData:
 		}
 		// The target was installed held with the chart value, so the guide's set-env block leaves the gateway on
 		// the deny-all config. Release the chart value too (ADR 0107 decision 3, amendment for #530).
-		_, err = kube.Helm(ctx, "upgrade", dst.in.Release, filepath.Join(repoRoot, top.ChartPath), "--namespace", dst.in.Namespace,
+		_, err = kube.Helm(ctx, "upgrade", dst.in.Release, top.Path(repoRoot, top.ChartPath), "--namespace", dst.in.Namespace,
 			"--reuse-values", "--set", "restoreHold=false", "--wait", "--timeout", "10m")
 		must(err, "helm upgrade "+dst.in.Release+" --set restoreHold=false")
 		cm, err := kube.Kubectl(ctx, "-n", dst.in.Namespace, "get", "deployment", dst.name("gateway"),
@@ -777,6 +789,32 @@ stringData:
 			must(err, "create a token on the target")
 			dst.token = tok.GetSecret()
 		})
+
+		// The lab profile only (topology browserSignin, #518): the spec exists in the tree only then, because a
+		// drill spec never skips (ADR 0109 decision 3) and a notrun check would turn the result red.
+		if browserProfile() {
+			It("signs in through the browser", Label("browser-signin"), func(ctx SpecContext) {
+				needs("release")
+				openAPI(ctx, &dst) // a fresh port-forward: the browser is the only client of this one
+				password := os.Getenv("KOINON_DRILL_WEB_PASSWORD")
+				if password == "" {
+					password = drill.SeededPassword
+				}
+				logFile, err := os.Create(filepath.Join(outDir, "browser-signin.log"))
+				must(err, "create the browser sign-in log")
+				defer logFile.Close()
+				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill")
+				// The password goes in the environment of the child only, never on its command line or into a log.
+				cmd.Env = append(os.Environ(),
+					"KOINON_DRILL_WEB_URL="+dst.client.Base,
+					"KOINON_DRILL_WEB_PASSWORD="+password,
+					"PLAYWRIGHT_OUTPUT_DIR="+filepath.Join(outDir, "browser-signin"),
+					"PLAYWRIGHT_JSON_REPORT="+filepath.Join(outDir, "browser-signin.json"),
+				)
+				cmd.Stdout, cmd.Stderr = logFile, logFile
+				must(cmd.Run(), "the Playwright sign-in spec on the restored copy (see browser-signin.log)")
+			}, NodeTimeout(10*time.Minute))
+		}
 
 		It("sends the seeded provider key to the fake model", Label("provider-key"), func(ctx SpecContext) {
 			needs("release")

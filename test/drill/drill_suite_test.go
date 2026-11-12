@@ -74,6 +74,9 @@ var _ = BeforeSuite(func() {
 	var err error
 	top, err = drill.LoadTopology(os.Getenv("KOINON_DRILL_TOPOLOGY"), runID)
 	Expect(err).NotTo(HaveOccurred())
+	if top.BrowserSignin {
+		testenv.Require(testenv.Binary("pnpm"))
+	}
 	kube, err = drill.NewKube(os.Getenv("KOINON_DRILL_KUBECONFIG"), top.Context, filepath.Join(outDir, "bin"))
 	Expect(err).NotTo(HaveOccurred())
 
@@ -122,7 +125,7 @@ func checkName(labels []string) string {
 
 // chartVersion reads the chart under test's version from its Chart.yaml.
 func chartVersion() string {
-	b, err := os.ReadFile(filepath.Join(repoRoot, top.ChartPath, "Chart.yaml"))
+	b, err := os.ReadFile(filepath.Join(top.Path(repoRoot, top.ChartPath), "Chart.yaml"))
 	if err != nil {
 		return ""
 	}
