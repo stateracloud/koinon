@@ -16,6 +16,7 @@ tool (
 require (
 	charm.land/huh/v2 v2.0.3
 	connectrpc.com/connect/v2 v2.0.2
+	filippo.io/age v1.3.1
 	github.com/charmbracelet/fang v1.0.0
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coreos/go-oidc/v3 v3.21.0
@@ -77,6 +78,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.13.0 // indirect
