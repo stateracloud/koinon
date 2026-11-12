@@ -242,7 +242,7 @@ pr_url=""
 if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
-		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head ($(koinon_upstream) only)"
+		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head ($up only)"
 		[[ $auto == 1 ]] && say "dry-run: would enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)

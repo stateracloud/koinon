@@ -295,6 +295,17 @@ echo pb >pb.txt
 rc=$(KOINON_REPO=someone/koinon KOINON_BOARD=7 run "$tmp/o10g" -m "feat: pb" --pr-title "feat: pb" --pr-body "$tmp/body.md")
 check "fork board: exit 0" eq "$rc" 0
 check "fork board: the fork's own board" has 'gh project item-add 7 --owner someone --url ' "$FAKE_LOG"
+# A bad KOINON_BOARD fails before ship commits or pushes anything.
+reset_state
+echo pz >pz.txt
+head_before=$(git rev-parse HEAD) origin_before=$(git --git-dir="$tmp/origin.git" rev-parse -q --verify refs/heads/feat/1-x || true)
+rc=$(KOINON_BOARD=x run "$tmp/o10h" -m "feat: pz" --pr-title "feat: pz" --pr-body "$tmp/body.md")
+check "bad board: exit 1" eq "$rc" 1
+check "bad board: named" has 'cannot work out the project board' "$tmp/o10h"
+check "bad board: no commit" eq "$(git rev-parse HEAD)" "$head_before"
+check "bad board: no push" eq "$(git --git-dir="$tmp/origin.git" rev-parse -q --verify refs/heads/feat/1-x || true)" "$origin_before"
+check "bad board: no PR" hasnt 'gh pr create' "$FAKE_LOG"
+rm -f pz.txt
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/77
 echo q >q.txt

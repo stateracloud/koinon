@@ -10,7 +10,8 @@
 #   koinon_repo       the repository the scripts act on: KOINON_REPO, else GH_REPO (gh's own variable), else
 #                     the first GitHub remote of the current directory's checkout in the order gh tries them
 #                     (the one `gh repo set-default` chose, then `upstream`, `github`, `origin`, then any other),
-#                     else koinon_upstream. A non-GitHub remote is skipped, where gh would stop. So
+#                     else koinon_upstream. A non-GitHub remote is skipped, as gh does; with none left, gh fails
+#                     and this falls back to koinon_upstream. So
 #                     the scripts and their plain `gh pr` calls agree: a fork cloned with an `upstream`
 #                     remote acts on the upstream, a fork cloned alone acts on the fork.
 #   koinon_board      prints "<owner> <number>" of the project board, or nothing when there is none.
