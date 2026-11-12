@@ -756,8 +756,12 @@ Maintainer decision (procoduck, 2026-11-11).
 - Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
   exists, which is the usual case (a new install made a first KEK on its empty database). The restore
   therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
-  standard input and creates or replaces the Secret, as the koinon-api service account, which the
-  guard admits. It writes nothing unless every KEK in the manifest opens with the install's key
+  standard input and merges it into the Secret, as the koinon-api service account, which the
+  guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
+  active and never removes a key; only `keys retire` removes one, with its database check. A KEK ID that
+  the Secret holds with other key bytes is refused. It needs `--yes` (the manifest uses standard input,
+  so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
+  is configured. It writes nothing unless every KEK in the manifest opens with the install's key
   wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
   of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
   to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,

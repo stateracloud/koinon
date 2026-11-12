@@ -60,7 +60,7 @@ func newKeysCommand() *cobra.Command {
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api keys status",
 	}
 	pf := keys.PersistentFlags()
-	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, activate, status, verify, rewrap, retire, reencrypt, forget and new-repositories; every command for the install ID that KMS-wrapped KEKs are bound to)")
+	pf.StringVar(&o.dbURL, "database-url", "", "Postgres connection string (add, activate, status, verify, rewrap, retire, reencrypt, forget, new-repositories and, when given, import; every command for the install ID that KMS-wrapped KEKs are bound to)")
 	pf.StringVar(&o.kekSecret, "kek-secret", "", "name of the KEK Secret; the key set is read and changed through the Kubernetes API")
 	pf.StringVar(&o.kekDir, "kek-dir", "", "mounted KEK directory, read-only; used when --kek-secret is not set")
 	pf.StringVar(&o.namespace, "namespace", "", "namespace of the KEK Secret")
@@ -120,7 +120,7 @@ func newKeysCommand() *cobra.Command {
 		newRepos,
 		sub("verify", "Open every sealed value with the key set and report what does not open; read-only (the check after a restore)", cobra.NoArgs, true),
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore it with import)", cobra.NoArgs, false),
-		sub("import", "Read a KEK backup (the output of export) from standard input and make it the KEK Secret; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false),
+		confirmed(sub("import", "Read a KEK backup (the output of export) from standard input and merge it into the KEK Secret: adds its KEKs, makes its active KEK active, removes none; needs --yes; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false)),
 	)
 	return keys
 }
@@ -169,7 +169,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
 	// With the database, every command that changes the key set also records it in the install audit chain
 	// (actor cli, "keys <command>").
-	if pool != nil && cmd != "export" && cmd != "import" {
+	if pool != nil && cmd != "export" {
 		tool.Pool = pool
 	}
 	if pool != nil {

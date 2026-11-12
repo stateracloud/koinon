@@ -31,4 +31,8 @@ has "reconciler Secret fence needs the managed-by label" "koinon-reconciler'" --
 has "provider keys Secret (standalone) is labelled for the fence" 'koinon.dev/managed-by: koinon-reconciler' --show-only templates/gateway-standalone.yaml
 has "provider keys Secret (kubernetes) is labelled for the fence" 'koinon.dev/managed-by: koinon-reconciler' --set gateway.mode=kubernetes --show-only templates/gateway-kubernetes.yaml
 
-lacks "secrets.kek.guard.enabled=false renders no guard" 'kek-guard' --set secrets.kek.guard.enabled=false
+lacks "secrets.kek.guard.enabled=false renders no KEK guard" 'name: koinon-koinon-kek-guard' --set secrets.kek.guard.enabled=false
+# The fence has its own switch: it stays rendered with the KEK guard off, and goes with its own.
+has "reconciler Secret fence renders with the KEK guard off" 'name: koinon-koinon-reconciler-secrets$' --set secrets.kek.guard.enabled=false --show-only "$kg"
+lacks "reconciler Secret fence is not rendered with secrets.reconcilerFence.enabled=false" 'reconciler-secrets' --set secrets.reconcilerFence.enabled=false
+has "KEK guard renders with the fence off" 'name: koinon-koinon-kek-guard$' --set secrets.reconcilerFence.enabled=false --show-only "$kg"

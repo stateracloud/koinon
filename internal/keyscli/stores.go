@@ -137,39 +137,21 @@ func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 	return nil
 }
 
-// Import implements Importer: it creates the Secret, or replaces the data of the one there. It is the
-// one writer besides Save and EnsureWith that the KEK guard admits (issue #604).
+// Import implements Importer: it creates the Secret and refuses to touch one that exists (the merge
+// into an existing Secret goes through Load and Save). It is a writer, besides Save and EnsureWith,
+// that the KEK guard admits (issue #604).
 func (k KubeStore) Import(ctx context.Context, data map[string][]byte, annotations map[string]string) error {
-	secrets := k.Client.CoreV1().Secrets(k.Namespace)
-	s, err := secrets.Get(ctx, k.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		_, err = secrets.Create(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: k.Name, Namespace: k.Namespace,
-				Labels:      map[string]string{project.Domain + "/managed-by": "koinon-api"},
-				Annotations: annotations,
-			},
-			Type: corev1.SecretTypeOpaque,
-			Data: data,
-		}, metav1.CreateOptions{FieldManager: "koinon-api-keys"})
-		if err != nil {
-			return fmt.Errorf("create the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
-		}
-		return nil
-	}
+	_, err := k.Client.CoreV1().Secrets(k.Namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: k.Name, Namespace: k.Namespace,
+			Labels:      map[string]string{project.Domain + "/managed-by": "koinon-api"},
+			Annotations: annotations,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: data,
+	}, metav1.CreateOptions{FieldManager: "koinon-api-keys"})
 	if err != nil {
-		return fmt.Errorf("read the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
-	}
-	s.Data, s.StringData = data, nil
-	if s.Annotations == nil {
-		s.Annotations = map[string]string{}
-	}
-	delete(s.Annotations, ActivatedAnnotation)
-	for a, v := range annotations {
-		s.Annotations[a] = v
-	}
-	if _, err := secrets.Update(ctx, s, metav1.UpdateOptions{FieldManager: "koinon-api-keys"}); err != nil {
-		return fmt.Errorf("update the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
+		return fmt.Errorf("create the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
 	}
 	return nil
 }

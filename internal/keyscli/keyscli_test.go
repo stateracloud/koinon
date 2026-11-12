@@ -444,41 +444,96 @@ var _ = Describe("koinon-api keys", func() {
 		openAll(ctx, ring2, ids)
 	})
 
-	It("imports an export over a KEK Secret that already holds other keys, and refuses what it cannot open", func(ctx SpecContext) {
-		ids := seed(ctx, 1)
-		Expect(tool.Export(ctx)).To(Succeed())
-		backup := out.String()
-		orig, _ := ks.Load(ctx)
+	Describe("import", func() {
+		// A restored install: koinon-api made its own first KEK on the empty database, then the backup
+		// of the old install is imported over it.
+		var (
+			backup  string
+			orig    keyscli.KeySet
+			ids     []string
+			target  keyscli.KubeStore
+			mineKey keyscli.KeySet
+		)
+		BeforeEach(func(ctx SpecContext) {
+			ids = seed(ctx, 1)
+			Expect(tool.Export(ctx)).To(Succeed())
+			backup = out.String()
+			var err error
+			orig, err = ks.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			target = keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "restored", Name: "koinon-kek"}
+			_, err = target.Ensure(ctx, now, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mineKey, err = target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mineKey.Keys).NotTo(Equal(orig.Keys))
+		})
+		importer := func(in string, yes bool) *keyscli.Tool {
+			return &keyscli.Tool{Store: target, Out: &bytes.Buffer{}, In: strings.NewReader(in), Yes: yes, Now: func() time.Time { return now }}
+		}
 
-		// A restored install: koinon-api made its own first KEK on the empty database.
-		target := fake.NewClientset()
-		store := keyscli.KubeStore{Client: target, Namespace: "restored", Name: "koinon-kek"}
-		_, err := store.Ensure(ctx, now, nil)
-		Expect(err).NotTo(HaveOccurred())
-		first, err := store.Load(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(first.Keys).NotTo(Equal(orig.Keys))
+		It("merges: the install's own keys stay, the manifest's are added, the manifest's active key becomes active", func(ctx SpecContext) {
+			Expect(importer(backup, true).Import(ctx)).To(Succeed())
+			got, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			for id, key := range orig.Keys {
+				Expect(got.Keys).To(HaveKeyWithValue(id, key))
+			}
+			for id, key := range mineKey.Keys {
+				Expect(got.Keys).To(HaveKeyWithValue(id, key), "an import never removes a key")
+			}
+			Expect(got.Keys).To(HaveLen(len(orig.Keys) + len(mineKey.Keys)))
+			Expect(got.Active).To(Equal(orig.Active))
+			ring, err := secretstore.NewKeyring(got.Keys, got.Active)
+			Expect(err).NotTo(HaveOccurred())
+			openAll(ctx, ring, ids)
 
-		imp := &keyscli.Tool{Store: store, Out: &bytes.Buffer{}, In: strings.NewReader(backup)}
-		Expect(imp.Import(ctx)).To(Succeed())
-		got, err := store.Load(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(got.Keys).To(Equal(orig.Keys))
-		Expect(got.Active).To(Equal(orig.Active))
-		ring, err := secretstore.NewKeyring(got.Keys, got.Active)
-		Expect(err).NotTo(HaveOccurred())
-		openAll(ctx, ring, ids)
+			// A second import of the same manifest changes nothing more.
+			Expect(importer(backup, true).Import(ctx)).To(Succeed())
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(got.Keys))
+			Expect(again.Active).To(Equal(got.Active))
+		})
 
-		// With no Secret yet, import creates it.
-		empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
-		Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup)}).Import(ctx)).To(Succeed())
+		It("creates the Secret when there is none", func(ctx SpecContext) {
+			empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
+			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true}).Import(ctx)).To(Succeed())
+			got, err := empty.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Keys).To(Equal(orig.Keys))
+		})
 
-		// Input that is not a key set changes nothing.
-		bad := &keyscli.Tool{Store: store, Out: &bytes.Buffer{}, In: strings.NewReader("kind: Secret\ndata:\n  active: bm9wZQ==\n")}
-		Expect(bad.Import(ctx)).NotTo(Succeed())
-		again, err := store.Load(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(again.Keys).To(Equal(orig.Keys))
+		It("changes nothing for input it cannot open", func(ctx SpecContext) {
+			bad := importer("kind: Secret\ndata:\n  active: bm9wZQ==\n", true)
+			Expect(bad.Import(ctx)).NotTo(Succeed())
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("refuses a KEK ID that the Secret holds with other key bytes, and changes nothing", func(ctx SpecContext) {
+			var sec corev1.Secret
+			Expect(yaml.Unmarshal([]byte(backup), &sec)).To(Succeed())
+			other := make([]byte, secretstore.KeySize)
+			copy(other, "koinon_test_not-a-real-kek-zzzz")
+			sec.Data[mineKey.Active] = secretstore.EncodeKey(other)
+			raw, err := yaml.Marshal(sec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(importer(string(raw), true).Import(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("refuses without --yes and changes nothing", func(ctx SpecContext) {
+			Expect(importer(backup, false).Import(ctx)).To(MatchError(ContainSubstring("--yes")))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+		})
 	})
 
 	Describe("with KEKs wrapped by an opted-in KMS", func() {

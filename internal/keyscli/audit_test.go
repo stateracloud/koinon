@@ -285,6 +285,29 @@ var _ = Describe("key events in the install audit chain", func() {
 			noKeyMaterial(ctx, es)
 		})
 
+		It("writes one keys.import event when a manifest is merged in, with the state before and after", func(ctx SpecContext) {
+			// A manifest from another install: one KEK of its own, active.
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-impo")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{"kek-20261001-impo": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-impo")},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			mark := auditMark(ctx)
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(Equal([]string{keyscli.ActionImport}))
+			Expect(es[0].ActorKind).To(Equal("cli"))
+			Expect(es[0].ActorID).To(Equal("keys import"))
+			Expect(kekIDs(section(es[0], "before"))).To(Equal([]string{first}))
+			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{first, "kek-20261001-impo"}))
+			Expect(section(es[0], "after")["active"]).To(Equal("kek-20261001-impo"))
+			noKeyMaterial(ctx, es)
+		})
+
 		It("does not write an event for a command that refused", func(ctx SpecContext) {
 			mark := auditMark(ctx)
 			Expect(tool.Add(ctx, first)).To(MatchError(ContainSubstring("already exists")))

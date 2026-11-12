@@ -36,6 +36,7 @@ var _ = Describe("EnsureWith on a first start", func() {
 		var created atomic.Int32
 		var wg sync.WaitGroup
 		errs := make([]error, 2)
+		loaded := make([]keyscli.KeySet, 2)
 		for i := range errs {
 			wg.Add(1)
 			go func() {
@@ -46,6 +47,11 @@ var _ = Describe("EnsureWith on a first start", func() {
 				if did {
 					created.Add(1)
 				}
+				// Each caller loads the key set right after its own EnsureWith: both must see the winner's.
+				if err == nil {
+					loaded[i], err = store.Load(ctx)
+					errs[i] = err
+				}
 			}()
 		}
 		wg.Wait()
@@ -53,13 +59,9 @@ var _ = Describe("EnsureWith on a first start", func() {
 		Expect(errs).To(Equal([]error{nil, nil}))
 		Expect(created.Load()).To(BeEquivalentTo(1), "exactly one caller creates the Secret")
 
-		first, err := store.Load(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		second, err := store.Load(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(first.Keys).To(HaveLen(1))
-		Expect(first.Active).NotTo(BeEmpty())
-		Expect(second.Active).To(Equal(first.Active))
-		Expect(second.Keys).To(Equal(first.Keys))
+		Expect(loaded[0].Keys).To(HaveLen(1))
+		Expect(loaded[0].Active).NotTo(BeEmpty())
+		Expect(loaded[1].Active).To(Equal(loaded[0].Active))
+		Expect(loaded[1].Keys).To(Equal(loaded[0].Keys))
 	})
 })

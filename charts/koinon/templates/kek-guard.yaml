@@ -18,9 +18,10 @@ each bound to this release's namespace only (namespaceSelector on kubernetes.io/
    therefore never change or delete the KEK Secret, the declarative Secrets or the ones koinon-api
    owns, even though its Role would allow the verb.
 
-secrets.kek.guard.enabled=false renders neither.
+secrets.kek.guard.enabled=false renders only the second; secrets.reconcilerFence.enabled=false renders
+only the first. They are separate switches: turning off the KEK guard, to delete the Secret on purpose,
+must not lift the fence on the reconciler.
 */ -}}
-{{- if .Values.secrets.kek.guard.enabled }}
 {{- $prefix := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
 {{- $kek := include "koinon.kekSecretName" . }}
 {{- $ns := .Release.Namespace }}
@@ -30,6 +31,7 @@ secrets.kek.guard.enabled=false renders neither.
 {{- $writers := concat (list $api $admin) (.Values.secrets.kek.guard.extraWriters | default list) }}
 {{- $kekPolicy := printf "%s-kek-guard" $prefix }}
 {{- $recPolicy := printf "%s-reconciler-secrets" $prefix }}
+{{- if .Values.secrets.kek.guard.enabled }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -71,7 +73,11 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns | quote }}
+{{- end }}
+{{- if .Values.secrets.reconcilerFence.enabled }}
+{{- if .Values.secrets.kek.guard.enabled }}
 ---
+{{- end }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:

@@ -357,6 +357,13 @@ providers:
   allowedInternalHosts: []
 
 secrets:
+  # A native ValidatingAdmissionPolicy (issue #604) limits the reconciler to Secrets labelled
+  # koinon.dev/managed-by=koinon-reconciler, so it can never change the KEK Secret or the Secrets
+  # koinon-api owns. Its own switch, apart from kek.guard.enabled: turning the KEK guard off to delete
+  # the Secret on purpose does not lift this fence. Turn it off only where the install may not create
+  # cluster-scoped objects (the policy is cluster-scoped).
+  reconcilerFence:
+    enabled: true
   kek:
     # A Secret you manage, with one file per key-encryption key named by its ID (base64 of 32 random
     # bytes) plus a file "active" holding the active ID. Empty: koinon-api creates the Secret
@@ -368,9 +375,10 @@ secrets:
     # any identity except the koinon-api and key-admin service accounts, so a deleted or replaced
     # Secret cannot become a new key quietly. extraWriters are further user names (for example
     # "system:serviceaccount:argocd:argocd-application-controller") that may update it: needed when
-    # a GitOps tool applies a Secret you named in existingSecret. It also renders the policy that
-    # limits the reconciler to Secrets labelled koinon.dev/managed-by=koinon-reconciler. To delete
-    # the Secret on purpose, set enabled=false, upgrade, delete it, then set it back.
+    # a GitOps tool applies a Secret you named in existingSecret. The policy that
+    # limits the reconciler to Secrets labelled koinon.dev/managed-by=koinon-reconciler is
+    # secrets.reconcilerFence.enabled, a separate switch. To delete the Secret on purpose, set
+    # enabled=false, upgrade, delete it, then set it back.
     guard:
       enabled: true
       extraWriters: []

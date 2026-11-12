@@ -141,7 +141,7 @@ wait_a_bit 5
 if "${K[@]}" -n "$NS" annotate secret koinon-kek e2e-probe=1 --overwrite 2>/dev/null; then
   fail "kubectl changed the KEK Secret: kek-guard is not enforced after the restore"
 fi
-"${K[@]}" -n "$NS" exec -i deploy/koinon-api -- koinon-api keys import <"$work/koinon-kek-backup.yaml" ||
+"${K[@]}" -n "$NS" exec -i deploy/koinon-api -- koinon-api keys import --yes <"$work/koinon-kek-backup.yaml" ||
   fail "koinon-api keys import failed over the existing KEK Secret"
 state | tee "$work/state.after"
 diff -u "$work/state.before" "$work/state.after" || fail "the restored install differs from the one that was backed up"

@@ -394,6 +394,14 @@
       "additionalProperties": false,
       "properties": {
         "migrateLegacyConnections": {"type": "boolean"},
+        "reconcilerFence": {
+          "description": "The admission policy that limits the reconciler's Secret writes to Secrets it owns (issue #604); separate from kek.guard.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
         "kek": {
           "description": "Key-encryption keys for stored provider keys and connection secrets (ADR 0056).",
           "type": "object",
@@ -401,7 +409,7 @@
           "properties": {
             "existingSecret": {"type": "string"},
             "guard": {
-              "description": "Admission policies that guard the KEK Secret and the reconciler's Secret writes (issue #604).",
+              "description": "Admission policy that guards the KEK Secret (issue #604).",
               "type": "object",
               "additionalProperties": false,
               "properties": {
