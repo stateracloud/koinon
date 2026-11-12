@@ -72,8 +72,9 @@ type Options struct {
 	FeedWait time.Duration
 	// OwnTargets are the gateway targets of Koinon's own tool servers (the code-host tools and
 	// gateway.KoinonTarget). The guard lets the agent's calls to them through: their results carry
-	// no org data, and a call to one only records the write, which runs when its stored decision
-	// is a person's ADR 0042 approval of the exact call. A code-host write that no person decides
+	// no org data, gateway.KoinonTarget's tools reach no third party, and a call to a code-host tool
+	// only records the write, which runs when its stored decision is a person's ADR 0042 approval
+	// of the exact call. A code-host write that no person decides
 	// (the Trusted preset allows it, an approval scope covers it) is not exempt: githubtools runs
 	// it only when CheckCodeHost finds it clean (githubtools.Options.LeakCheck), and records it
 	// for a person's approval otherwise (#687). Any other target that is not an org's server is
@@ -141,7 +142,8 @@ var codeHostWrite = sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivat
 // (githubtools.Options.LeakCheck): the Trusted preset allows it, or an approval scope covers it. The
 // call is checked as a code-host write of an org's MCP server: the repository is its address,
 // looked up in the list of the connection the grant is bound to, and the arguments are its payload.
-// It writes nothing. A nil risk is a clean call. Otherwise the risk is for the card of a person's
+// It records no approval and no guard decision (the session's row may be created, as by Assess).
+// A nil risk is a clean call. Otherwise the risk is for the card of a person's
 // approval of the exact call: a call the rules hold (it needs a decision or would be refused) and
 // a call whose facts the guard cannot gather both go to a person, as the same call does under a
 // preset a person decides. An error is a call the guard could not check at all.
