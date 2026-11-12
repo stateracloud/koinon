@@ -392,17 +392,25 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return invalid("url must not have a query or fragment, which could carry a secret; use a credential header")
 	case len(rawURL) > 2048:
 		return invalid("url is longer than 2048 characters")
+	case strings.Contains(rawURL, "$"):
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	if transport != TransportStreamableHTTP && transport != TransportSSE {
 		return invalid("transport must be %q or %q", TransportStreamableHTTP, TransportSSE)
 	}
 	if header != "" {
+		if strings.Contains(header, "$") {
+			return invalid("credential header must not contain '$': the gateway's config loader reads $NAME as an environment variable")
+		}
 		if !headerPattern.MatchString(header) {
 			return invalid("credential header must be an HTTP header name")
 		}
 		if slices.Contains(reservedHeaders, strings.ToLower(header)) {
 			return invalid("credential header %q is used by HTTP or MCP and cannot carry a credential", header)
 		}
+	}
+	if strings.Contains(prefix, "$") {
+		return invalid("credential prefix must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	if !prefixPattern.MatchString(prefix) {
 		return invalid("credential prefix must be at most 32 printable ASCII characters, for example \"Bearer \"")

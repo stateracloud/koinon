@@ -706,6 +706,12 @@ var (
 	headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$`)
 )
 
+// loaderDollar ends the error for an org-supplied string with '$' that a driver writes into the
+// gateway's config: agentgateway's file loader reads $NAME and ${NAME} as environment variables
+// (#668). The org-facing validators (catalog, mcpservers) refuse it first; this is the backstop
+// every driver passes.
+const loaderDollar = ", which the gateway's config loader reads as an environment variable"
+
 // ToolRules renders one CEL allow rule per agent for agentgateway's MCP authorization. The gateway
 // allows a tool when any rule matches, and filters tools/list the same way, so an agent sees only
 // its granted tools. The last rule admits ReadyPrompt for every key: the gateway filters
@@ -826,6 +832,9 @@ func (s ModelState) validate() []error {
 		if p.BaseURL == "" {
 			errs = append(errs, fmt.Errorf("provider %q: base URL is required", ref))
 		}
+		if strings.Contains(p.BaseURL, "$") {
+			errs = append(errs, fmt.Errorf("provider %q: base URL contains '$'%s", ref, loaderDollar))
+		}
 		if p.APIKeyFile != "" && !keyPath.MatchString(p.APIKeyFile) {
 			errs = append(errs, fmt.Errorf("provider %q: invalid key file path", ref))
 		}
@@ -894,6 +903,11 @@ func (s MCPState) validate() []error {
 		}
 		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))
+		}
+		for _, f := range [...]struct{ name, v string }{{"URL", t.URL}, {"credential header", t.CredentialHeader}, {"credential prefix", t.CredentialPrefix}} {
+			if strings.Contains(f.v, "$") {
+				errs = append(errs, fmt.Errorf("mcp target %q: %s contains '$'%s", t.Name, f.name, loaderDollar))
+			}
 		}
 		targets[t.Name] = true
 	}
