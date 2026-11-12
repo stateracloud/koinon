@@ -21,7 +21,7 @@ var _ = Describe("per-org sandbox creation rate", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rate.SandboxCreationsPerMinute).To(Equal(10))
 
-		// A burst of 25 agents' creations at once, from 5 concurrent workers.
+		// A burst of 25 agents' creations at once, from 25 concurrent goroutines.
 		agents := make([]store.Agent, 25)
 		for i := range agents {
 			agents[i], _ = newAgent(ctx, a.org, a.user)

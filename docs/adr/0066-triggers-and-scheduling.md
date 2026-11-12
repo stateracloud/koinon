@@ -644,15 +644,23 @@ issue, 2026-11-11: with the run limits, not on the DBOS queue).
   `(org_id, id)`, composite foreign key to the agent), written by the reconciler before the backend call
   in the same transaction that counts the last minute. A per-org advisory lock serializes concurrent
   reconciler workers, so the limit is exact, not a racing bound. A creation whose backend call fails gives
-  its slot back, so an agent that keeps failing cannot starve the org's healthy agents (the agent's own
+  its slot back when the call certainly did not make the sandbox (a timeout, a cancellation or an
+  unavailable or unknown outcome keeps the slot spent, which errs toward fewer creations), so an agent
+  that keeps failing cannot starve the org's healthy agents (the agent's own
   unhealthy marking and the pass interval bound the retries). The writer prunes rows older than an hour.
   The wake-for-backup start in the home gate of a recreate is not counted; the recreate cap bounds it.
 - **Default 10 per org per minute**, 1 to 10000 in `org_settings.sandbox_creations_per_minute` (NULL is
   the default).
-- **A burst queues; it does not fail.** An agent held back records phase `WaitingForCreationRate` with
-  the time to the next slot; its runs stay queued or starting and the next reconciler pass retries. The
+- **A burst queues; it does not fail.** An agent held back with no sandbox records phase
+  `WaitingForCreationRate` and a stable message; one with a stopped sandbox keeps its observed phase and
+  only the message changes. The time to the next slot is in the log. Its runs stay queued or starting and
+  the next reconciler pass retries. The
   sandbox wait cap (an hour) and `queue_wait` requeue apply as before, so at the default 10 a minute a
   burst at the 20-run cap clears in two minutes, far inside the 5-minute wait. Another org is never
   affected. The counter `koinon_reconciler_sandbox_creations_held_total` has no org label (ADR 0023).
+- **Limits, not fixed here.** Slots go to agents in the order the reconciler visits them, not first in,
+  first out, so under a sustained overload beyond the rate a later agent can wait until the sandbox wait
+  cap fails its run. A held pass repeats the pre-create steps (key and GitHub record ensure), and the run
+  failure cause does not yet name the creation rate. Both are follow-ups.
 - **Not a run claim condition.** `run_claimable` is unchanged: a held run keeps its place, and a sandbox
   that is already up serves it without a slot.

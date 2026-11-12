@@ -44,6 +44,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -1354,7 +1356,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
-			release()
+			if definiteFailure(err) {
+				release()
+			}
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
@@ -1477,7 +1481,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
-				release()
+				if definiteFailure(err) {
+					release()
+				}
 				return err
 			}
 			r.log.Info("started sandbox for a run", w.logAttrs()...)
@@ -1508,14 +1514,28 @@ func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgs
 		}, false, nil
 	}
 	r.m.SandboxCreationsHeld.Inc()
-	// The message is stable between passes (the wait is only in the log), so a held agent's row is not
-	// rewritten every pass.
+	// The message is stable between passes (the wait is only in the log), so a held agent's message
+	// does not churn.
 	msg := fmt.Sprintf("waiting for the org's sandbox creation rate (%d per minute)", tune.SandboxCreationsPerMinute)
 	r.log.Info("sandbox creation held by the org's rate limit", append(w.logAttrs(), "wait", wait.String())...)
 	if sb != nil {
 		return nil, true, r.record(ctx, w, *sb, hash, msg)
 	}
 	return nil, true, r.recordState(ctx, w, store.SandboxStatePending, creationHeldPhase, msg)
+}
+
+// definiteFailure reports whether a backend call certainly did not make the sandbox, so its slot in
+// the org's creation rate can be refunded. A timeout, a cancellation or an unavailable or unknown
+// outcome may have created it; the slot stays spent then, which errs toward fewer creations.
+func definiteFailure(err error) bool {
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled, codes.Unknown, codes.Aborted, codes.Internal, codes.DataLoss:
+		return false
+	}
+	return true
 }
 
 // creationHeldPhase is the phase recorded while a sandbox waits for the org's creation rate.
