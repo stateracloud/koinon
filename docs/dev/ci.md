@@ -240,8 +240,8 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   (a branch that changes the probe before main has published it) builds the image, with apt, on the same pinned `ARG BASE=` that the tag hashes (kind.sh ignores `KOINON_PROBE_BASE` when
   `PROBE_PULL_REPO` is set), so a tag always names one image. The e2e therefore tests the probe on the pinned base, not on the
   flavor image the run built.
-  The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
-  image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
+  The Gitea read grant cases (label `gitea`) are not in it: they point the OpenShell gateway at a throwaway-CA ConfigMap
+  (`supervisor.network.additionalCaConfigMapName`) by a helm upgrade, which the chart install does not take.
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
   Koinon policy: the quicker loop when you change `test/escape` or the sandbox profile (no Koinon
   images or install), and the only place the Gitea cases run.
