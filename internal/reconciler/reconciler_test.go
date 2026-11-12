@@ -341,7 +341,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
 
 			By("a deleted sandbox is recreated")
-			Expect(backend.DeleteSandbox(ctx, ws, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(backend.DeleteSandbox(ctx, ws, names.Sandbox))).To(Succeed())
 			pass(ctx, r)
 			Expect(osg.Sandbox(ws, names.Sandbox)).NotTo(BeNil())
 			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
@@ -376,7 +376,7 @@ var _ = Describe("Reconciler", func() {
 			r = newReconciler()
 			// The sandbox made before the supervisor label is recreated once (the next test); this one
 			// starts from a sandbox that carries it.
-			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 			pass(ctx, r)
 			pass(ctx, r)
 			baseline := osg.Calls("DeleteSandbox")
@@ -405,7 +405,7 @@ var _ = Describe("Reconciler", func() {
 			sup := &fakeSupervisor{err: errors.New("forbidden")}
 			cfg.Supervisor = sup
 			r = newReconciler()
-			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 			pass(ctx, r) // created while the image is unreadable: no label
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
 			baseline := osg.Calls("DeleteSandbox")
@@ -439,7 +439,7 @@ var _ = Describe("Reconciler", func() {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			cfg.Supervisor = &fakeSupervisor{err: errors.New("forbidden")}
 			r = newReconciler()
-			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 			pass(ctx, r)
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox)).NotTo(BeNil())
 		})
@@ -462,7 +462,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, agent.ID).HomeGeneration.String).To(Equal(id))
 
 			By("a recreated sandbox has a new home")
-			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 			pass(ctx, r)
 			recreated := sandboxRow(ctx, agent.ID)
 			Expect(recreated.HomeGeneration.String).To(Equal(osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()))
@@ -812,7 +812,7 @@ var _ = Describe("Reconciler", func() {
 
 			It("deletes the first sandbox when the LimitRange was missing at CreateSandbox", func(ctx SpecContext) {
 				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 				deletes := osg.Calls("DeleteSandbox")
 				var creates atomic.Int32
 				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -832,7 +832,7 @@ var _ = Describe("Reconciler", func() {
 
 			It("deletes the first sandbox even when Ensure after CreateSandbox fails", func(ctx SpecContext) {
 				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-				Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+				Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
 				deletes := osg.Calls("DeleteSandbox")
 				var creates atomic.Int32
 				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -1502,6 +1502,41 @@ var _ = Describe("Reconciler", func() {
 		Eventually(func() openshellv1.SandboxPhase {
 			return osg.Sandbox(ws, names.Sandbox).GetStatus().GetPhase()
 		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+	})
+
+	// Issue 573: one agent's slow backend call must not hold back another agent. A pass hands the
+	// sandbox work to a per-agent queue and does not wait for it.
+	It("creates a new agent's sandbox while another agent's sandbox delete is still open", func(ctx SpecContext) {
+		wsName := execution.WorkspaceName(org.Bytes)
+		agentA := newAgent(ctx, org, user)
+		cfg.ResyncInterval = time.Hour // only NOTIFY wakes the loop
+		pass(ctx, newReconciler())
+		namesA := execution.AgentObjectNames(org.Bytes, agentA.ID.Bytes)
+		Expect(osg.Sandbox(wsName, namesA.Sandbox)).NotTo(BeNil())
+
+		By("a new image makes the loop delete agent A's sandbox to recreate it; the delete stays open")
+		release := osg.BlockDeletes()
+		DeferCleanup(release)
+		cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: image + "-2", Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
+		r := newReconciler()
+		runCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(runCtx) }()
+		DeferCleanup(func() { release(); cancel(); Eventually(done).Should(Receive(BeNil())) })
+		Eventually(func() int { return osg.Calls("DeleteSandbox") }).WithTimeout(10 * time.Second).Should(Equal(1))
+
+		By("agent B is created during that delete: its sandbox exists before the delete returns")
+		agentB := newAgent(ctx, org, user)
+		namesB := execution.AgentObjectNames(org.Bytes, agentB.ID.Bytes)
+		Eventually(func() *openshellv1.Sandbox { return osg.Sandbox(wsName, namesB.Sandbox) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		Expect(osg.Sandbox(wsName, namesA.Sandbox)).NotTo(BeNil(), "agent A's delete has not returned")
+		Expect(logs.String()).To(ContainSubstring("requesting the deletion of a sandbox"), "the delete is logged before the call")
+
+		By("the delete returns and agent A is recreated with the new image")
+		release()
+		Eventually(func() string {
+			return osg.Sandbox(wsName, namesA.Sandbox).GetSpec().GetTemplate().GetImage()
+		}).WithTimeout(10 * time.Second).Should(Equal(image + "-2"))
 	})
 
 	Describe("the leader lock (#573)", func() {

@@ -17,6 +17,9 @@ The reconciler gets what it renders:
   namespace; Secrets have no list or watch, so it can only reach names it already knows (they are
   recorded in Postgres);
 - the same Secret verbs write the provider keys Secret (koinon-gateway-providers, plan item PV1);
+- those Secret verbs cannot be named (per-agent Secrets), so the policy reconciler-secrets in
+  templates/kek-guard.yaml limits them to Secrets labelled koinon.dev/managed-by=koinon-reconciler:
+  the reconciler cannot write the KEK Secret (issue #604);
 - in kubernetes mode (plan item G2), in this namespace only: create, patch, get, list and delete on the
   Gateway API and agentgateway objects it renders (Gateway, HTTPRoute, AgentgatewayModel, -Policy,
   -Backend, -Parameters) and on ConfigMaps (the per-org key lists and the model catalog; create and list

@@ -83,7 +83,7 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 					return true, r.record(ctx, w, sb, w.sb.SpecHash, note)
 				}
 			}
-			if err := r.backend.DeleteSandbox(ctx, ws, cur); err != nil {
+			if err := r.deleteSandbox(ctx, w, ws, cur, "the task ended"); err != nil {
 				return false, err
 			}
 			r.log.Info("deleted the sandbox of an ended task", w.logAttrs()...)

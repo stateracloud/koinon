@@ -430,7 +430,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			agent := newAgent(ctx, org, user)
 			Expect(mk("mark-live", 0).ReconcileAll(ctx)).To(Succeed())
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-			Expect(bk("mark-live").DeleteSandbox(ctx, ws, names.Sandbox)).To(Succeed())
+			Expect(deleteErr(bk("mark-live").DeleteSandbox(ctx, ws, names.Sandbox))).To(Succeed())
 			Expect(bk("mark-live").DeleteProvider(ctx, ws, names.Provider)).To(Succeed())
 			Expect(bk("mark-live").DeleteProviderProfile(ctx, ws, profileID)).To(Succeed())
 			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
@@ -509,7 +509,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: draft.ID, VersionID: version.ID, ActivatedBy: user})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(bk("mark-live").DeleteSandbox(ctx, ws, an.Sandbox)).To(Succeed(), "or the operator deletes the retained sandbox by hand")
+			Expect(deleteErr(bk("mark-live").DeleteSandbox(ctx, ws, an.Sandbox))).To(Succeed(), "or the operator deletes the retained sandbox by hand")
 			for range 3 {
 				Expect(live.ReconcileAll(ctx)).To(Succeed())
 			}

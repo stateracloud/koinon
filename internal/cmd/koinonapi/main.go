@@ -456,6 +456,7 @@ func serve(ctx context.Context, cfg config) error {
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
 		PublicURL:          cfg.publicURL,
+		DeviceCookieSecret: []byte(cfg.installMark),
 	}
 	if cfg.oidcIssuer != "" {
 		secret, err := auth.ReadSecretFile(cfg.oidcClientSecretFile)
@@ -644,7 +645,10 @@ func serve(ctx context.Context, cfg config) error {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
-		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
+		kekStore := keyscli.KubeStore{
+			Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers,
+			UsedID: func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
+		}
 		keyAudits.keySet = kekStore
 		if cfg.kekCreate {
 			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
@@ -795,6 +799,7 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	auth.RegisterMetrics(reg)
 	// koinon-api checks its own login against the install audit writer role, at startup and every
 	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
 	// identity). A missing grant is logged with the GRANT to run and shows as

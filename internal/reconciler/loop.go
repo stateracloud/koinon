@@ -23,7 +23,8 @@ const (
 	// pass.
 	debounce = 200 * time.Millisecond
 	// passTimeout bounds one pass; Apply may wait for agentgateway's hot reload, which
-	// follows the kubelet's ConfigMap sync (about a minute by default).
+	// follows the kubelet's ConfigMap sync (about a minute by default). It does not bound the
+	// sandbox work of the pass, which has its own timeout per agent (Config.WorkTimeout).
 	passTimeout = 5 * time.Minute
 	// unmarkedTimeout bounds the gateway count of unmarked objects, which runs after a pass and not
 	// inside its timeout.
@@ -132,9 +133,15 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	// The reader must be gone before the connection is closed.
 	defer func() { cancel(nil); <-readerDone }()
 
+	// The sandbox work of every pass goes to one queue that lives as long as the lead: a pass ends
+	// when its own steps end, not when the slowest sandbox call of any agent returns (issue 573). It
+	// stops with lctx, which also ends when the connection (and with it the lock) is lost.
+	queue := r.newWorkQueue(lctx)
+	defer queue.Stop()
+
 	for {
 		pctx, pcancel := context.WithTimeout(lctx, passTimeout)
-		err := r.reconcilePass(pctx)
+		_, err := r.reconcilePass(pctx, queue)
 		pcancel()
 		r.observeUnmarkedDue(lctx)
 		if err != nil && lctx.Err() == nil {

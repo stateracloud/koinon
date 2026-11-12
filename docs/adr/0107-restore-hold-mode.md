@@ -65,6 +65,13 @@ not yet trusted.
    started held and when it was released (ADR 0100).
 6. **Runbook.** The backup and restore guide starts the restored install held, runs the checks (`keys verify`,
    `org-limits`, `checkpoints resync`), then releases. `test/e2e/backup-restore.sh` runs that order.
+   The KEK Secret is guarded (ADR 0056 amendment, issue #604), so its restore is `koinon-api keys import --yes` through
+   `kubectl exec` when the Secret exists, not `kubectl apply`. The import merges: it adds the backup's KEKs to the
+   install's key set, makes the backup's active KEK active and never drops a key. It refuses a KEK that the audit
+   chain records as retired (`keys retire`) unless `--allow-retired` is given, and then adds it inactive: a retired KEK
+   never becomes active. The rule trusts the explicit `keys.retire` event: a retire whose audit event was lost
+   (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event either
+   (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` it warns that retired IDs cannot be checked.
 
 ## Amendment 2026-11-11: a held gateway is ready but deny-all (issue #530)
 

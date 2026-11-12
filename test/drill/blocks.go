@@ -14,7 +14,7 @@ import (
 // parameterised restore guide, after which the blocks take variables and Substitute goes away.
 var (
 	nsFlagRE   = regexp.MustCompile(`(^|\s)-n koinon(\s|$)`)
-	objectRE   = regexp.MustCompile(`\b(deploy|deployment)/koinon-`)
+	objectRE   = regexp.MustCompile(`\b(deploy|deployment|secret)/koinon-`)
 	clusterRE  = regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`)
 	instanceRE = regexp.MustCompile(`(^|[\s,'"])app\.kubernetes\.io/instance=koinon([,'"\s]|$)`)
 )
@@ -48,6 +48,7 @@ var leftoverRE = []*regexp.Regexp{
 	regexp.MustCompile(`\b(deploy|deployment)/koinon-(api|reconciler|agentd|gateway|pg|kek)\b`),
 	regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`),
 	regexp.MustCompile(`(^|[\s,'"])app\.kubernetes\.io/instance=koinon([,'"\s]|$)`),
+	regexp.MustCompile(`\bsecrets? koinon-(api|reconciler|agentd|gateway|pg|kek)\b`),
 	regexp.MustCompile(`\b(svc|service|secret|statefulset|job|pod)/koinon(-(api|reconciler|agentd|gateway|pg|kek)\b|\s|$)`),
 }
 

@@ -157,8 +157,10 @@ you start, after `take`:
 - Dependencies are at least 3 days old before they enter the tree, security fixes excepted with
   checks (ADR 0079; `hack/dep-age-check.sh origin/main`).
 - Chart renders are deterministic: no Helm `lookup` and no random values in templates. Generated
-  secrets come from the ensure-secrets hook Job; objects the reconciler owns are created by the
-  reconciler. Every image reference goes through `koinon.imageRef` and every pod spec gets
+  secrets come from the ensure-secrets hook Job, with one exception: koinon-api creates the KEK Secret
+  on its first start (ADR 0056, amendment 2026-11-11), because only it can see the database and
+  refuse a new key when encrypted values exist; a native ValidatingAdmissionPolicy guards that
+  Secret. Objects the reconciler owns are created by the reconciler. Every image reference goes through `koinon.imageRef` and every pod spec gets
   `koinon.imagePullSecrets` (ADR 0061). Values files without an OpenShell client TLS Secret must
   set `openshell.insecure: true`.
 - Metric labels never carry org, agent, user, ticket or run IDs; use fixed label sets (ADR 0023).
