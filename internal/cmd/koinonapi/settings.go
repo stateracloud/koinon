@@ -73,6 +73,7 @@ var recordedSettings = []platformSetting{
 	setting("session-max-lifetime", kindValue),
 	setting("public-url", kindURL),
 	setting("trusted-origins", kindValue),
+	setting("trusted-proxies", kindValue),
 
 	// network and gateway
 	setting("egress-allowed-hosts", kindValue),
