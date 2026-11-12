@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/thinking"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // endpoints are the per-agent values a harness's launch command takes. None is a secret:
@@ -37,6 +38,9 @@ type endpoints struct {
 	// Retry is Koinon's model-retry policy, handed to a harness whose harness retries model
 	// requests itself (harness.Descriptor.RetriesModelRequests); other harnesses ignore it.
 	Retry retryPolicy
+	// CompactionTokens is the context size at which the harness compacts (compactionTokens). 0
+	// leaves the switch out and the harness on its own behaviour.
+	CompactionTokens int
 }
 
 // retryPolicy is Koinon's policy for retrying a failed model request (Config.ModelRetries,
@@ -60,6 +64,24 @@ func (p retryPolicy) args() []string {
 		"--model-retry-backoff-ms", strconv.FormatInt(p.Backoff.Milliseconds(), 10),
 		"--model-max-retry-after-ms", strconv.FormatInt(p.MaxRetryAfter.Milliseconds(), 10),
 	}
+}
+
+// defaultCompactionTokens is the compaction point of a model whose catalog entry has no context
+// size: OpenCode's own default (ADR 0070 amendment 2026-11-11, issue 97).
+const defaultCompactionTokens = 170_000
+
+// compactionTokens is the context size at which the harness compacts a run on the priced model:
+// the first context tier's boundary when the catalog has one, so the conversation never grows into
+// a dearer tier (Haiku 5.5 bills over 100k at five times the rate), but never above the default.
+// A model without tiers, and a model with no price at all, gets the default. Tiers ascend, so the
+// first one is the lowest boundary.
+func compactionTokens(p pricing.Price) int {
+	if len(p.Tiers) > 0 {
+		if over := p.Tiers[0].ContextOver; over > 0 && over < defaultCompactionTokens {
+			return int(over)
+		}
+	}
+	return defaultCompactionTokens
 }
 
 // harnessRetries reports whether the harness retries model requests itself, so that
@@ -106,6 +128,9 @@ func launchCommand(f string, e endpoints) ([]string, error) {
 			return nil, fmt.Errorf("harness %q cannot send %q prompt-cache markers; add its switch to the harness table", f, e.CacheMarker)
 		}
 		cmd = append(cmd, arg)
+	}
+	if e.CompactionTokens > 0 && d.CompactionArg != "" {
+		cmd = append(cmd, d.CompactionArg, strconv.Itoa(e.CompactionTokens))
 	}
 	if e.SessionID != "" && d.SessionArg != "" {
 		cmd = append(cmd, d.SessionArg, e.SessionID)

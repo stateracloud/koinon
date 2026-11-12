@@ -89,6 +89,10 @@ type Descriptor struct {
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
 	// the harness cannot.
 	SessionArg string
+	// CompactionArg is the launch switch that takes the context size, in tokens, at which the
+	// harness compacts the conversation (agentd's compactionTokens, ADR 0070 amendment 2026-11-11).
+	// "" when the harness takes none.
+	CompactionArg string
 	// RetriesModelRequests is set when the harness retries a failed model request itself.
 	// Exactly one layer retries (ADR 0056 amendment 2026-10-31, point 3), so koinon-agentd then
 	// skips its own turn retry for the harness, and gives the harness Koinon's retry policy instead:
@@ -141,6 +145,7 @@ var table = []Descriptor{
 		CacheArgs:     map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
 		NoWebToolsArg: "--no-web-tools",
 		SessionArg:    "--session-id",
+		CompactionArg: "--compaction-tokens",
 		// OpenCode 2.2.0 retries a failed model request up to 10 times on its own schedule
 		// (packages/core/src/model-retry.ts). No config key sets it; Koinon's retry plugin, loaded
 		// from the read-only config, overrides each decision through the session.retry hook

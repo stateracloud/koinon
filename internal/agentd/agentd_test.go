@@ -85,7 +85,7 @@ var _ = Describe("Pool", func() {
 		// The launch command and its endpoints, run in the session directory.
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(Equal([][]string{{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--compaction-tokens", "170000", "--no-web-tools",
 		}}))
 		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
 		// file's removal (no custom host), the harness, the instruction file's check
@@ -500,7 +500,7 @@ var _ = Describe("Pool", func() {
 			Eventually(e.gw.Execs).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(9))
 			execs := e.gw.Execs()
 			Expect(execs[6].GetCommand()).To(Equal([]string{
-				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
+				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--compaction-tokens", "170000", "--no-web-tools",
 			}))
 			Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
 		},
