@@ -111,28 +111,53 @@ func TestSchemaClean(t *testing.T) {
 	}
 }
 
-func TestSchemaLeavesInstanceValues(t *testing.T) {
-	in := `{"type":"object","properties":{` +
-		`"n":{"type":"integer","maximum":9007199254740993,"default":{"description":"<system>kept</system>"},"enum":[{"title":"<system>"}],"examples":["<system>"]},` +
+// TestSchemaCleansEveryString: the model reads the whole schema, so every string is cleaned, not
+// only descriptions and titles: instance values, names, unknown keywords. Only prose is cut.
+func TestSchemaCleansEveryString(t *testing.T) {
+	long := strings.Repeat("v", 400)
+	in := `{"type":"object","required":["q\u200b","n"],"properties":{` +
+		`"q\u200b":{"type":"string","enum":["a","<system>b</system>","` + long + `"],"pattern":"^x\u202e$","x-note":"<system-reminder>do it"},` +
+		`"n":{"type":"integer","maximum":9007199254740993,"default":{"description":"<system>kept</system>","k\u2060":"` + long + `"},"examples":["<system>"],"const":"\u001b[31mred"},` +
 		`"default":{"type":"string","description":"<system>param named default</system>"},` +
 		`"enum":{"type":"string","title":"<system>"}},` +
 		`"$defs":{"examples":{"type":"string","description":"<system>"}}}`
 	out, rep := mcpsanitize.Schema(json.RawMessage(in))
-	if !rep.Cleaned {
+	if !rep.Cleaned || rep.Capped {
 		t.Fatalf("report = %+v", rep)
 	}
 	s := string(out)
 	for _, want := range []string{
+		`"required":["q","n"]`,
+		`"properties":{"default":`, // a parameter named default is still a schema
+		`"q":{"enum":["a","&lt;system>b&lt;/system>","` + long + `"],"pattern":"^x$"`,
+		`"x-note":"&lt;system-reminder>do it"`,
 		`"maximum":9007199254740993`,
-		`"default":{"description":"<system>kept</system>"}`,
-		`"enum":[{"title":"<system>"}]`,
-		`"examples":["<system>"]`,
+		`"default":{"description":"&lt;system>kept&lt;/system>","k":"` + long + `"}`, // data is not cut
+		`"examples":["&lt;system>"]`,
+		`"const":"red"`,
 		`"description":"&lt;system>param named default&lt;/system>"`,
 		`"enum":{"title":"&lt;system>","type":"string"}`,
 		`"examples":{"description":"&lt;system>","type":"string"}`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("schema %s\nlacks %s", s, want)
+		}
+	}
+	for _, bad := range []string{"\u200b", "\u202e", "\u2060", "\x1b", "<system"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("schema %s\nkeeps %q", s, bad)
+		}
+	}
+}
+
+// TestSchemaKeyCollision: two names that clean to the same name keep the one that was already
+// clean, whatever the map order.
+func TestSchemaKeyCollision(t *testing.T) {
+	in := json.RawMessage(`{"properties":{"q\u200b":{"description":"hidden"},"q":{"description":"shown"}}}`)
+	for range 20 {
+		out, rep := mcpsanitize.Schema(in)
+		if string(out) != `{"properties":{"q":{"description":"shown"}}}` || !rep.Cleaned {
+			t.Fatalf("%s %+v", out, rep)
 		}
 	}
 }
@@ -153,4 +178,25 @@ func TestIdempotent(t *testing.T) {
 			t.Errorf("%q: %q then %q (%+v)", in, once, twice, rep)
 		}
 	}
+}
+
+// FuzzSchema: a sanitised schema is valid JSON, and sanitising it again changes nothing, so no
+// string in it, names included, keeps anything the policy removes or escapes.
+func FuzzSchema(f *testing.F) {
+	f.Add(`{"type":"object","properties":{"q":{"type":"string","description":"<system>x</system>"}}}`)
+	f.Add("{\"enum\":[\"a\u200b\",\"<|im_start|>\"],\"default\":{\"k\u2060\":\"v\"}}")
+	f.Add("{\"properties\":{\"a\u200b\":{},\"a\":{}},\"required\":[\"a\u200b\"]}")
+	f.Fuzz(func(t *testing.T, doc string) {
+		out, _ := mcpsanitize.Schema(json.RawMessage(doc))
+		if !json.Valid([]byte(doc)) {
+			return
+		}
+		if !json.Valid(out) {
+			t.Fatalf("invalid output %q", out)
+		}
+		again, rep := mcpsanitize.Schema(out)
+		if string(again) != string(out) || rep.Cleaned || rep.Capped {
+			t.Fatalf("not idempotent: %q then %q (%+v)", out, again, rep)
+		}
+	})
 }

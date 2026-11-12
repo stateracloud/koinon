@@ -30,6 +30,9 @@ type Metrics struct {
 	// Evictions counts sessions whose taint store dropped fingerprints (a miss may then be text it
 	// once held; the decision is not changed).
 	Evictions prometheus.Counter
+	// EvictedFingerprints counts the fingerprints those evictions dropped (#684). No label: the
+	// session is in no metric label (ADR 0023).
+	EvictedFingerprints prometheus.Counter
 	// Legs counts responses that set a leg, by leg.
 	Legs *prometheus.CounterVec
 	// Unseen counts replies the guard passed without reading (#254): a tools/call that never ended in
@@ -51,6 +54,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Evictions: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_api_mcp_guard_taint_evictions_total", Help: "Times a session's taint store dropped its oldest fingerprints to stay within its bound.",
 		}),
+		EvictedFingerprints: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_api_mcp_guard_taint_evicted_fingerprints_total", Help: "Fingerprints a session's taint store dropped, oldest first, to stay within its bound.",
+		}),
 		Legs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_api_mcp_guard_legs_total", Help: "Tool results and feed reports that set a session leg, by leg.",
 		}, []string{"leg"}),
@@ -69,7 +75,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Legs.WithLabelValues("untrusted_input")
 	m.Legs.WithLabelValues("private_data")
 	if reg != nil {
-		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.Legs, m.Unseen)
+		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen)
 	}
 	return m
 }
@@ -93,9 +99,11 @@ func (m *Metrics) decided(v Verdict, class string, took time.Duration) {
 	m.Duration.Observe(took.Seconds())
 }
 
-func (m *Metrics) evicted() {
-	if m != nil {
+// evicted counts one eviction of n fingerprints; n == 0 is no eviction.
+func (m *Metrics) evicted(n int64) {
+	if m != nil && n > 0 {
 		m.Evictions.Inc()
+		m.EvictedFingerprints.Add(float64(n))
 	}
 }
 
@@ -119,5 +127,5 @@ func (m *Metrics) legs(l Legs) {
 
 // Collectors are the metrics to register.
 func (m *Metrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.Legs, m.Unseen}
+	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen}
 }

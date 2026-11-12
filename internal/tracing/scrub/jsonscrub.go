@@ -26,9 +26,10 @@ const TooDeepPlaceholder = `"[koinon: content too deeply nested]"`
 var errTooDeep = fmt.Errorf("%w: nested too deeply", ErrInvalidJSON)
 
 const (
-	// maxStructuralBytes and maxStructuralFailures bound the search for JSON inside text.
-	maxStructuralBytes    = 1 << 20
-	maxStructuralFailures = 64
+	// maxStructuralBytes bounds the search for JSON inside text. Within it the search is linear in
+	// the text (see structScan), so it has no failure limit: a limit would turn the search off for
+	// the rest of the text after that many stray brackets.
+	maxStructuralBytes = 1 << 20
 	// maxEmbeddedDepth is how many times a JSON document inside a JSON string is unpacked.
 	maxEmbeddedDepth = 3
 	// maxEmbeddedBytes is the largest string that is tried as an embedded JSON document; a longer
@@ -61,65 +62,36 @@ type node struct {
 	dirty bool
 	// extra is how many trailing children were dropped before truncation (see bound).
 	extra int
-	// s and e are the byte range of a string or number token in the parsed text, set only by
-	// parseAt.
+	// s and e are the byte range of a string or number token in the text, set only by the
+	// structural scan of text (findForcedLeaves).
 	s, e int
 }
 
 func parseJSON(raw []byte) (*node, error) {
-	n, _, err := parseAt(string(raw), 0, false)
-	return n, err
-}
-
-// parseAt parses one JSON value from the start of src. With track, string and number nodes
-// record their byte ranges in src, offset by base. It returns the number of bytes consumed;
-// anything after the value is left alone when track is set and is an error otherwise.
-func parseAt(src string, base int, track bool) (*node, int, error) {
-	dec := json.NewDecoder(strings.NewReader(src))
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.UseNumber()
-	p := &parser{dec: dec, src: src, base: base, track: track}
+	p := &parser{dec: dec}
 	n, err := p.value(0)
 	if errors.Is(err, errTooDeep) {
-		return nil, 0, errTooDeep
+		return nil, errTooDeep
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: %w", ErrInvalidJSON, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidJSON, err)
 	}
-	used := int(dec.InputOffset())
-	if !track {
-		if _, err := dec.Token(); err != io.EOF {
-			return nil, 0, fmt.Errorf("%w: trailing data", ErrInvalidJSON)
-		}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%w: trailing data", ErrInvalidJSON)
 	}
-	return n, used, nil
+	return n, nil
 }
 
 type parser struct {
-	dec   *json.Decoder
-	src   string
-	base  int
-	track bool
-}
-
-// leaf records where the token just read sits: between off0 (end of the previous token, which
-// may be followed by blanks, a comma or a colon) and the decoder's current offset.
-func (p *parser) leaf(n *node, off0 int64) *node {
-	if p.track {
-		end := int(p.dec.InputOffset())
-		start := int(off0)
-		for start < end && strings.IndexByte(" \t\r\n,:", p.src[start]) >= 0 {
-			start++
-		}
-		n.s, n.e = p.base+start, p.base+end
-	}
-	return n
+	dec *json.Decoder
 }
 
 func (p *parser) value(depth int) (*node, error) {
 	if depth > maxJSONDepth {
 		return nil, errTooDeep
 	}
-	off0 := p.dec.InputOffset()
 	tok, err := p.dec.Token()
 	if err != nil {
 		return nil, err
@@ -162,9 +134,9 @@ func (p *parser) value(depth int) (*node, error) {
 		}
 		return n, nil
 	case string:
-		return p.leaf(&node{kind: strNode, str: t}, off0), nil
+		return &node{kind: strNode, str: t}, nil
 	case json.Number:
-		return p.leaf(&node{kind: numNode, lit: t.String()}, off0), nil
+		return &node{kind: numNode, lit: t.String()}, nil
 	case bool:
 		if t {
 			return &node{kind: boolNode, lit: "true"}, nil
@@ -459,22 +431,22 @@ func headerPair(n *node) Kind {
 // findForcedLeaves finds JSON objects and arrays written in text (a log line, NDJSON, a tool
 // result) and appends a span over every scalar that sits below a header or credential key, in
 // whatever order the members are written. A regular expression cannot see "value" before "name"
-// or a "in" member between them; the parsed structure can.
+// or a "in" member between them; the parsed structure can. Every '{' and '[' is tried as the start
+// of a document, as far into the text as it goes.
 func findForcedLeaves(in string, spans []span) []span {
 	if len(in) > maxStructuralBytes {
 		return spans
 	}
-	failures := 0
-	for i := 0; i < len(in) && failures < maxStructuralFailures; i++ {
+	sc := structScan{in: in}
+	for i := 0; i < len(in); i++ {
 		if in[i] != '{' && in[i] != '[' {
 			continue
 		}
-		n, used, err := parseAt(in[i:], i, true)
-		if err != nil {
-			failures++
+		r := sc.container(i)
+		if !r.ok || r.depth > maxJSONDepth {
 			continue
 		}
-		collectForced(n, "", func(leaf *node, k Kind) {
+		collectForced(r.n, "", func(leaf *node, k Kind) {
 			a, b := leaf.s, leaf.e
 			if leaf.kind == strNode && b-a >= 2 { // the string's content, inside its quotes
 				a, b = a+1, b-1
@@ -483,9 +455,293 @@ func findForcedLeaves(in string, spans []span) []span {
 				spans = append(spans, span{a, b, k})
 			}
 		})
-		i += used - 1
+		i = r.end - 1
 	}
 	return spans
+}
+
+// scanned is the outcome of parsing the container that starts at one offset of the text.
+type scanned struct {
+	ok bool
+	n  *node
+	// end is the offset just past the container.
+	end int
+	// depth is how deep the deepest value inside it sits (0 for an empty container or a scalar),
+	// as parseJSON counts it: a container deeper than maxJSONDepth is not a document.
+	depth int
+}
+
+// structScan parses the JSON containers that start anywhere in a text. The text of a container
+// is the same whichever start reaches it, so each container is parsed once: its outcome is kept by
+// offset and a later start, or an enclosing container, reuses it. A failure fails every container
+// open at that point (each needed the failed one to be valid), so they are all kept as failed.
+// That makes the work linear in the text: stray brackets, long unterminated arrays and deep
+// nesting each cost their length once, not once per bracket before them.
+type structScan struct {
+	in string
+	// memo holds the outcome by start offset, allocated at the first container.
+	memo []*scanned
+}
+
+// frame is a container being parsed.
+type frame struct {
+	start int
+	n     *node
+	depth int
+	// key is the member name read before the colon (objects).
+	key string
+	// st is what the container expects next.
+	st scanState
+}
+
+type scanState uint8
+
+const (
+	stFirst     scanState = iota // a value or the close (array); a key or the close (object)
+	stValue                      // a value (array after a comma; object after the colon)
+	stKey                        // a key (object after a comma)
+	stColon                      // the colon after a key
+	stNextOrEnd                  // a comma or the close
+)
+
+var failed = &scanned{}
+
+// container returns the outcome of the container at offset start (in[start] is '{' or '[').
+func (sc *structScan) container(start int) *scanned {
+	if sc.memo == nil {
+		sc.memo = make([]*scanned, len(sc.in))
+	}
+	if r := sc.memo[start]; r != nil {
+		return r
+	}
+	in := sc.in
+	stack := []*frame{{start: start, n: newContainer(in[start])}}
+	pos := start + 1
+	fail := func() *scanned {
+		for _, f := range stack {
+			sc.memo[f.start] = failed
+		}
+		return failed
+	}
+	for {
+		f := stack[len(stack)-1]
+		pos = skipSpace(in, pos)
+		if pos >= len(in) {
+			return fail()
+		}
+		c := in[pos]
+		obj := f.n.kind == objNode
+		switch f.st {
+		case stNextOrEnd, stFirst:
+			if (obj && c == '}') || (!obj && c == ']') {
+				pos++
+				r := &scanned{ok: true, n: f.n, end: pos, depth: f.depth}
+				sc.memo[f.start] = r
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 {
+					return r
+				}
+				sc.attach(stack[len(stack)-1], r)
+				continue
+			}
+			if f.st == stNextOrEnd {
+				if c != ',' {
+					return fail()
+				}
+				pos++
+				if obj {
+					f.st = stKey
+				} else {
+					f.st = stValue
+				}
+				continue
+			}
+			if obj {
+				f.st = stKey
+			} else {
+				f.st = stValue
+			}
+			continue
+		case stKey:
+			if c != '"' {
+				return fail()
+			}
+			e, ok := stringEnd(in, pos)
+			if !ok {
+				return fail()
+			}
+			f.key = decodeString(in[pos:e])
+			f.st = stColon
+			pos = e
+		case stColon:
+			if c != ':' {
+				return fail()
+			}
+			pos++
+			f.st = stValue
+		default: // stValue
+			if c == '{' || c == '[' {
+				if r := sc.memo[pos]; r != nil {
+					if !r.ok {
+						return fail()
+					}
+					sc.attach(f, r)
+					pos = r.end
+					continue
+				}
+				stack = append(stack, &frame{start: pos, n: newContainer(c)})
+				pos++
+				continue
+			}
+			n, e, ok := scalar(in, pos)
+			if !ok {
+				return fail()
+			}
+			sc.attach(f, &scanned{ok: true, n: n})
+			pos = e
+		}
+	}
+}
+
+func newContainer(c byte) *node {
+	if c == '{' {
+		return &node{kind: objNode}
+	}
+	return &node{kind: arrNode}
+}
+
+// attach adds the parsed value r to the container f.
+func (sc *structScan) attach(f *frame, r *scanned) {
+	if f.n.kind == objNode {
+		f.n.keys = append(f.n.keys, f.key)
+	}
+	f.n.kids = append(f.n.kids, r.n)
+	f.depth = max(f.depth, r.depth+1)
+	f.st = stNextOrEnd
+}
+
+func skipSpace(in string, pos int) int {
+	for pos < len(in) && (in[pos] == ' ' || in[pos] == '\t' || in[pos] == '\n' || in[pos] == '\r') {
+		pos++
+	}
+	return pos
+}
+
+// stringEnd returns the offset just past the JSON string that starts at in[pos] ('"'), and false
+// when it is not a valid string (unterminated, a control character, a bad escape).
+func stringEnd(in string, pos int) (int, bool) {
+	for i := pos + 1; i < len(in); i++ {
+		switch c := in[i]; {
+		case c == '"':
+			return i + 1, true
+		case c < 0x20:
+			return 0, false
+		case c == '\\':
+			i++
+			if i >= len(in) {
+				return 0, false
+			}
+			switch in[i] {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+			case 'u':
+				if i+4 >= len(in) || !isHex(in[i+1]) || !isHex(in[i+2]) || !isHex(in[i+3]) || !isHex(in[i+4]) {
+					return 0, false
+				}
+				i += 4
+			default:
+				return 0, false
+			}
+		}
+	}
+	return 0, false
+}
+
+// decodeString decodes a valid JSON string token as encoding/json does (invalid UTF-8 and lone
+// surrogates become U+FFFD).
+func decodeString(tok string) string {
+	plain := true
+	for i := 1; i < len(tok)-1; i++ {
+		if tok[i] == '\\' || tok[i] >= utf8.RuneSelf {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return tok[1 : len(tok)-1]
+	}
+	var s string
+	if err := json.Unmarshal([]byte(tok), &s); err != nil {
+		return tok[1 : len(tok)-1] // not reached: the token was checked
+	}
+	return s
+}
+
+// scalar parses the string, number, true, false or null at in[pos] and returns it with the
+// offset just past it. Strings and numbers record their byte range, as findForcedLeaves needs.
+func scalar(in string, pos int) (*node, int, bool) {
+	switch c := in[pos]; {
+	case c == '"':
+		e, ok := stringEnd(in, pos)
+		if !ok {
+			return nil, 0, false
+		}
+		return &node{kind: strNode, str: decodeString(in[pos:e]), s: pos, e: e}, e, true
+	case c == '-' || (c >= '0' && c <= '9'):
+		e, ok := numberEnd(in, pos)
+		if !ok {
+			return nil, 0, false
+		}
+		return &node{kind: numNode, lit: in[pos:e], s: pos, e: e}, e, true
+	}
+	for _, lit := range [...]string{"true", "false", "null"} {
+		if strings.HasPrefix(in[pos:], lit) {
+			if lit == "null" {
+				return &node{kind: nullNode, lit: lit}, pos + len(lit), true
+			}
+			return &node{kind: boolNode, lit: lit}, pos + len(lit), true
+		}
+	}
+	return nil, 0, false
+}
+
+// numberEnd returns the offset just past the JSON number at in[pos], and false when the text
+// there is not one.
+func numberEnd(in string, pos int) (int, bool) {
+	i := pos
+	digits := func() int {
+		s := i
+		for i < len(in) && in[i] >= '0' && in[i] <= '9' {
+			i++
+		}
+		return i - s
+	}
+	if in[i] == '-' {
+		i++
+	}
+	if i >= len(in) {
+		return 0, false
+	}
+	if in[i] == '0' {
+		i++
+	} else if digits() == 0 {
+		return 0, false
+	}
+	if i < len(in) && in[i] == '.' {
+		i++
+		if digits() == 0 {
+			return 0, false
+		}
+	}
+	if i < len(in) && (in[i] == 'e' || in[i] == 'E') {
+		i++
+		if i < len(in) && (in[i] == '+' || in[i] == '-') {
+			i++
+		}
+		if digits() == 0 {
+			return 0, false
+		}
+	}
+	return i, true
 }
 
 func collectForced(n *node, force Kind, emit func(*node, Kind)) {
