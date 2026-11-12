@@ -1,5 +1,5 @@
 --- Brief digest (docs/agents/subagent-brief.md; the file wins) ---
-1. Find first: codegraph_explore (or `codegraph explore "<names>"`) before grep/cat. Read only the part you need (offset+limit). Keep reads small: no `cat a b c`, no loop over files; two or three small `sed -n` ranges in one call are fine, 210 lines at most in total; a saved large output (tool-results/): grep it or Read with offset+limit, never whole.
+1. Find first: codegraph_explore (or `codegraph explore "<names>"`) before grep/cat. Read only the part you need (offset+limit). Keep reads small: no `cat a b c`, no loop that prints files; two or three small `sed -n` line ranges in one call are fine, 210 lines at most in total, and a pattern range (`/^func X/,/^}/p`) goes alone; a saved large output (tool-results/): grep it or Read with offset+limit, never whole.
 2. Read or codegraph a file before you Edit it. New files: the Write tool, never heredocs or echo/sed into files.
 3. The shell tool is named Bash. Use /bin/ls, not ls. Scripts need bash 5 (ADR 0090): run them with `bash`, not /bin/bash (3.2).
 4. Waiting: no standalone sleep, no sleep loops, no Monitor that only sleeps. PRs: hack/pr-wait.sh; else run_in_background.

@@ -24,12 +24,14 @@ tp=$(jq -r '.transcript_path // empty' <<<"$in")
 
 # This turn: every entry after the last genuine user message (a user entry whose content is text,
 # not a tool_result). Skip sidechain (subagent) entries. Only the last 400 transcript lines are read,
-# so a long session's transcript stays fast; a turn longer than that is judged on its end.
+# so a long session's transcript stays fast. A turn that starts before that window is not judged:
+# its AskUserQuestion call may lie outside it (fail open).
 turn=$(tail -n 400 "$tp" | jq -c 'select((.isSidechain // false) | not)' 2>/dev/null | jq -sc '
   def human: .type == "user" and ((.message.content | type) == "string"
     or ([.message.content[]? | select(.type == "text")] | length > 0)
     and ([.message.content[]? | select(.type == "tool_result")] | length == 0));
-  (map(human) | rindex(true)) as $i | if $i == null then . else .[$i + 1:] end') || exit 0
+  (map(human) | rindex(true)) as $i | if $i == null then null else .[$i + 1:] end') || exit 0
+[[ -n $turn && $turn != null ]] || exit 0
 
 asked=$(jq '[.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "AskUserQuestion")] | length' <<<"$turn")
 [[ ${asked:-0} -gt 0 ]] && exit 0

@@ -49,6 +49,10 @@ done
 { for _ in $(seq 2000); do user 'old'; say 'Old question?'; done; user 'go'; say 'Merge it?'; } >"$tmp/long.jsonl"
 out=$(jq -nc --arg p "$tmp/long.jsonl" '{transcript_path:$p,stop_hook_active:false}' | "$hook")
 if [[ $out == *'"block"'* ]]; then ok "a long transcript: its last turn is judged"; else bad "long transcript: $out"; fi
+# A turn that starts before the 400-line window is not judged: its AskUserQuestion may lie outside it.
+{ user 'go'; tool AskUserQuestion; toolres; for _ in $(seq 250); do tool Bash; toolres; done; say 'Merge it?'; } >"$tmp/longturn.jsonl"
+out=$(jq -nc --arg p "$tmp/longturn.jsonl" '{transcript_path:$p,stop_hook_active:false}' | "$hook")
+if [[ -z $out ]]; then ok "a turn longer than the window: not judged"; else bad "long turn: $out"; fi
 run "AskUserQuestion this turn" pass false "$(user 'go')" "$(tool AskUserQuestion)" "$(toolres)" "$(say 'Should I go on?')"
 run "AskUserQuestion in an older turn" block false "$(user 'a')" "$(tool AskUserQuestion)" "$(toolres)" "$(user 'b')" "$(say 'Merge it?')"
 run "statement at the end" pass false "$(user 'go')" "$(say $'Is it done? Yes.\n\nMerged as 60b79419.')"

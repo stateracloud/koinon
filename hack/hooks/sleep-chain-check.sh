@@ -124,7 +124,7 @@ other_pats=(
   "${start}tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow[^[:space:]]*)[[:space:]]+([^|;&]*[[:space:]])?/dev/null"
   "${start}timeout[[:space:]]+(-[^[:space:]]+[[:space:]]+)*${n}[smhd]?[[:space:]]+tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow)"
   "${start}read[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*t[[:space:]]*$n"
-  "python[0-9.]*[[:space:]].*time\\.sleep\\([[:space:]]*$n(\\.[0-9]*)?[[:space:]]*\\)"
+  "python[0-9.]*[[:space:]].*time\\.sleep\\([[:space:]]*$n(\\.[0-9]*)?([^0-9.eE-]|[eE]\\+?[0-9])"
 )
 other=0
 for p in "${other_pats[@]}"; do
