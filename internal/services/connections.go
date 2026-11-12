@@ -224,7 +224,17 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	}
 	var row store.Connection
 	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
-		var err error
+		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
+		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
+			return err
+		}
+		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return connect.NewError(connect.CodeInvalidArgument, "base_url: "+why)
+		}
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
 			SecretEnvelope: envelope, SecretFingerprint: key.Fingerprint(), Source: store.ConfigSourceUi, CreatedBy: c.actor(),
@@ -343,7 +353,17 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFingerprint
 	var row store.Connection
 	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
-		var err error
+		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
+		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
+			return err
+		}
+		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return connect.NewError(connect.CodeInvalidArgument, "base_url: "+why)
+		}
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
 			SecretEnvelope: envelope, SecretFingerprint: fingerprint, Source: store.ConfigSourceUi, CreatedBy: c.actor(),
@@ -676,6 +696,17 @@ func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host s
 		present := slices.Contains(row.McpHosts, host)
 		if present == add {
 			return nil
+		}
+		if add {
+			// The connection's own web or API host is served already; as an extra host it would outlive a
+			// base URL change and keep servers of the old code host linked.
+			if t, ok := connectors.Get(row.Connector); ok {
+				if site, err := codehost.SiteOf(row.Config); err == nil {
+					if loc, err := site.Location(t); err == nil && slices.Contains(t.MCPHosts(loc, nil), host) {
+						return connect.NewError(connect.CodeInvalidArgument, "host: "+host+" is already a host of this connection (its own web or API host)")
+					}
+				}
+			}
 		}
 		hosts := slices.Clone(row.McpHosts)
 		action := "connection.mcp_host.remove"

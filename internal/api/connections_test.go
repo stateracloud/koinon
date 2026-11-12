@@ -588,6 +588,14 @@ var _ = Describe("ConnectionService", func() {
 			Expect(audited(ctx, "connection.mcp_host.add")).To(BeZero())
 		})
 
+		It("refuses an extra host that is the connection's own web or API host", func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `UPDATE connections SET config = '{"baseUrl":"https://ghe.corp.example"}' WHERE org_id = $1 AND id = $2`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "ghe.corp.example")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+		})
+
 		It("refuses to change the hosts of a removed connection, and writes nothing", func(ctx SpecContext) {
 			_, err := add(owner, "gitea-mcp")
 			Expect(err).NotTo(HaveOccurred())
@@ -827,6 +835,27 @@ var _ = Describe("ConnectionService for Gitea", func() {
 		}
 		return c.conns.CreateGiteaConnection(ctx, req)
 	}
+
+	It("refuses a connection whose host is an extra MCP host of another connection, removed ones included (#240)", func(ctx SpecContext) {
+		u, err := url.Parse(gt.URL())
+		Expect(err).NotTo(HaveOccurred())
+		var orgID pgtype.UUID
+		Expect(orgID.Scan(org)).To(Succeed())
+		other, err := store.New(e.pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: orgID, ID: pgtype.UUID{Bytes: guuid.New(), Valid: true}, Connector: "gitea", DisplayName: "forge",
+			Config: []byte(`{"baseUrl":"https://forge.corp.example"}`), Source: store.ConfigSourceUi,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY[$3::text], removed_at = now() WHERE org_id = $1 AND id = $2`, org, other.ID, u.Hostname())
+		Expect(err).NotTo(HaveOccurred())
+		_, err = create(ctx, owner, nil)
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org)).To(Equal(1))
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = '{}' WHERE org_id = $1 AND id = $2`, org, other.ID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = create(ctx, owner, nil)
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 	It("creates a connection, tests it and shows what the bot can see", func(ctx SpecContext) {
 		res, err := create(ctx, owner, nil)

@@ -116,3 +116,33 @@ func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batc
 	}
 	return mismatched, nil
 }
+
+// OwnHostClash says why a connection of type t at loc cannot own the hosts it would serve (#240): one
+// of them is an extra MCP host of another connection of the org, removed ones included, or is in its
+// own extra list (redundant: after a base URL change that extra host would keep servers of the old
+// code host linked). Two connections that share a web host stay allowed; only a clash with an extra
+// list is refused. The caller holds the org's MCP host lock (LockOrgMCPHosts), so an add of an extra
+// host and a create or base URL change cannot both pass. Empty means free.
+func OwnHostClash(ctx context.Context, q *store.Queries, org, self pgtype.UUID, t *connectors.Type, loc connectors.Location, ownExtra []string) (string, error) {
+	own := t.MCPHosts(loc, nil)
+	for _, h := range own {
+		if slices.Contains(ownExtra, h) {
+			return fmt.Sprintf("%s is already an extra MCP host of this connection; remove it from the connection's MCP hosts first", h), nil
+		}
+	}
+	rows, err := q.ListConnections(ctx, org)
+	if err != nil {
+		return "", err
+	}
+	for _, other := range rows {
+		if other.ID == self {
+			continue
+		}
+		for _, h := range own {
+			if slices.Contains(other.McpHosts, h) {
+				return fmt.Sprintf("%s is already an extra MCP host of the connection %q; one host name is one operator and serves one code host", h, other.DisplayName), nil
+			}
+		}
+	}
+	return "", nil
+}

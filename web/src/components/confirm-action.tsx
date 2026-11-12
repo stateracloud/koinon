@@ -69,7 +69,7 @@ export function ConfirmAction({ label, subject, consequence, confirmLabel, onOpe
   return (
     <div role="group" aria-label={`Confirm: ${label} ${subject}`} className="flex flex-wrap items-center gap-2 text-sm">
       <span role="status">{consequence}</span>
-      <Button ref={confirmButton} variant="destructive" size="sm" disabled={pending || confirmDisabled} onClick={() => void confirm()}>
+      <Button ref={confirmButton} variant="destructive" size="sm" disabled={pending || confirmDisabled} onClick={confirm}>
         {confirmLabel}
       </Button>
       <Button variant="outline" size="sm" disabled={pending} onClick={() => {

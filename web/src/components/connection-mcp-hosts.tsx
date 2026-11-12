@@ -20,14 +20,14 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
   const id = useId()
   const queryClient = useQueryClient()
   const [host, setHost] = useState('')
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<string | null>(null)
   const onSuccess = () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
   const add = useMutation(ConnectionService.method.addConnectionMCPHost, { onSuccess })
   const remove = useMutation(ConnectionService.method.removeConnectionMCPHost, { onSuccess })
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    setError(undefined)
+    setError(null)
     try {
       await add.mutateAsync({ orgId, connectionId, host: host.trim() })
       setHost('')
@@ -89,7 +89,7 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
  * restore a link.
  */
 function RemoveHost({ host, preview, onError }: { host: string; preview: (dryRun: boolean) => Promise<{ unlinkedServers: UnlinkedMCPServer[] }>; onError: (message: string) => void }) {
-  const [servers, setServers] = useState<UnlinkedMCPServer[]>()
+  const [servers, setServers] = useState<UnlinkedMCPServer[] | null>(null)
   const [failed, setFailed] = useState(false)
   let consequence = `Checking which MCP servers removing ${host} unlinks…`
   if (failed) consequence = `Could not check which MCP servers removing ${host} unlinks. Servers linked through it lose the link and their code-host tool class.`
@@ -103,9 +103,9 @@ function RemoveHost({ host, preview, onError }: { host: string; preview: (dryRun
       subject={`MCP host ${host}`}
       consequence={consequence}
       confirmLabel="Remove host"
-      confirmDisabled={servers === undefined && !failed}
+      confirmDisabled={servers === null && !failed}
       onOpen={() => {
-        setServers(undefined)
+        setServers(null)
         setFailed(false)
         preview(true).then(
           (res) => setServers(res.unlinkedServers),
