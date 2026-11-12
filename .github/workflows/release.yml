@@ -44,9 +44,9 @@ jobs:
       pull-requests: read # the merged pull request's head commit, for the pull-request-only dco check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           fetch-depth: 0
+          persist-credentials: false # hack/release-gate.sh fetches main anonymously (public repository)
       - name: tagged commit is on main and its required checks succeeded
         env:
           TAG: ${{ github.ref_name }}
@@ -66,26 +66,24 @@ jobs:
       chart_ref: ${{ steps.chart.outputs.ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 0 # GoReleaser's changelog reads the tags
+          persist-credentials: false # GoReleaser talks to the API with GITHUB_TOKEN; nothing is pushed with git
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # zizmor: ignore[cache-poisoning] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           go-version-file: go.mod
+          cache: false # a release never restores a cache that a pull request or branch build could have written
       # The before hooks of .goreleaser.yaml build the web UI that koinon-api embeds.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-      # zizmor: ignore[cache-poisoning] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          package-manager-cache: false # no cache, as with setup-go above; turns automatic caching off explicitly
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
@@ -177,9 +175,9 @@ jobs:
       id-token: write # keyless signing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

@@ -85,6 +85,10 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    the gate fails closed.
    The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
+   No checkout in the workflow keeps git credentials (`persist-credentials: false`), and no job
+   restores an Actions cache (#579). The gate's `git fetch origin main` is anonymous, so it relies on
+   the repository being public. If the repository becomes private, the fetch fails and the gate
+   refuses to release (it fails closed): give that step a token then.
 
    Patch releases (vX.Y.Z, Z > 0) are tagged on `main` like every other release. There is no schema
    or upgrade promise before v0.3 (ADR 0099), so the marker `hack/migrate-patch-line` stays `none`
