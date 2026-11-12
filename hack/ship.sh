@@ -77,6 +77,9 @@ say() { echo "$*"; }
 cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
+# The board and the upstream come from the checkout (hack/repo-lib.sh); a bad value fails here, before the push.
+board=$(koinon_board) || fail "cannot work out the project board (hack/repo-lib.sh)"
+up=$(koinon_upstream) || fail "cannot read the upstream repository (hack/repo-lib.sh)"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
 # work without an issue. A stray name, such as the one a broken test helper once checked out in
 # a real worktree (old issue 485), is refused before anything is pushed.
@@ -255,7 +258,6 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		fi
 		[[ -n $pr_url ]] || fail "no open pull request for $branch (pass --pr-title and --pr-body)"
 		say "PR #${pr_url##*/} $pr_url"
-		board=$(koinon_board) || fail "cannot work out the project board (hack/repo-lib.sh)"
 		if [[ -z $board ]]; then
 			say "board none"
 		elif gh project item-add "${board#* }" --owner "${board%% *}" --url "$pr_url" >/dev/null 2>&1; then
@@ -269,7 +271,6 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "ready"
 		fi
 		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
-		up=$(koinon_upstream)
 		if [[ $ready == 1 && ${pr_url,,} == */"${up,,}"/pull/* ]]; then
 			# A head this run pushed is new: ask without the date check (GitHub moves the PR head after the push, and a
 			# request on the old head says nothing about this one). Otherwise a request dated after the head commit counts.

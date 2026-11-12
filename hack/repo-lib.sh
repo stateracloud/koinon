@@ -8,8 +8,9 @@
 #                     line of this checkout's go.mod (the module path of internal/project, AGENTS.md).
 #                     KOINON_UPSTREAM overrides it.
 #   koinon_repo       the repository the scripts act on: KOINON_REPO, else GH_REPO (gh's own variable), else
-#                     the remote gh itself would pick in the current directory's checkout (the one
-#                     `gh repo set-default` chose, else `upstream`, `github`, `origin`), else koinon_upstream. So
+#                     the first GitHub remote of the current directory's checkout in the order gh tries them
+#                     (the one `gh repo set-default` chose, then `upstream`, `github`, `origin`, then any other),
+#                     else koinon_upstream. A non-GitHub remote is skipped, where gh would stop. So
 #                     the scripts and their plain `gh pr` calls agree: a fork cloned with an `upstream`
 #                     remote acts on the upstream, a fork cloned alone acts on the fork.
 #   koinon_board      prints "<owner> <number>" of the project board, or nothing when there is none.
@@ -58,7 +59,9 @@ koinon_repo() {
 		if [[ $resolved == */* ]]; then
 			r=$resolved
 		else
-			for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream github origin; do
+			# The order gh tries: the set-default remote, upstream, github, origin, then every other remote.
+			# shellcheck disable=SC2046 # one remote name per word; git refuses names with spaces
+			for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream github origin $(git remote 2>/dev/null); do
 				[[ -n $remote ]] || continue
 				r=$(koinon_github_slug "$(git remote get-url "$remote" 2>/dev/null || true)")
 				[[ -z $r ]] || break

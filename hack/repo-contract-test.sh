@@ -76,7 +76,11 @@ done
 	# The caller's git config (url.*.insteadOf in a proxied sandbox) must not rewrite the test remotes.
 	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 	git -C "$g" init -q
-	git -C "$g" remote add origin https://github.com/someone/koinon.git
+	git -C "$g" remote add origin http://proxy.invalid/git/acme/koinon
+	git -C "$g" remote add fork https://github.com/forker/koinon.git
+	chk "any other GitHub remote after a non-GitHub origin" "$(cd "$g" && koinon_repo)" forker/koinon
+	git -C "$g" remote remove fork
+	git -C "$g" remote set-url origin https://github.com/someone/koinon.git
 	chk "origin remote" "$(cd "$g" && koinon_repo)" someone/koinon
 	git -C "$g" remote add upstream git@github.com:acme/koinon.git
 	chk "upstream remote before origin" "$(cd "$g" && koinon_repo)" acme/koinon
