@@ -796,7 +796,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 	// Trusted preset, an approval scope) is checked like a code-host write of an org's server (#687).
 	Describe("the check of an own code-host call no person decides", func() {
 		// The guard's method is the hook githubtools takes.
-		var _ = githubtools.Options{LeakCheck: (*mcpguard.Guard)(nil).CheckCodeHost}
+		_ = githubtools.Options{LeakCheck: (*mcpguard.Guard)(nil).CheckCodeHost}
 
 		codeHostCall := func(repo, body string) githubtools.LeakCall {
 			return githubtools.LeakCall{
