@@ -61,6 +61,6 @@ KOINON_ESCAPE_CHART_NAMESPACE="$ns" \
 KOINON_ESCAPE_DELETE_WORKSPACE=1 \
 KOINON_ESCAPE_GITEA_STANDIN=0 \
 KOINON_ESCAPE_LABEL="openshell && !gitea && !leakguard" \
-KOINON_PROBE_BASE="${KOINON_PROBE_BASE:-$(CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/flavors/opencode:e2e}" \
+KOINON_PROBE_BASE="${KOINON_PROBE_BASE:-$(CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/sandbox:e2e}" \
 KOINON_REQUIRE=openshell,cluster,escape-gateway \
   "$root/test/escape/kind.sh"

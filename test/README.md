@@ -1,6 +1,6 @@
 # test
 
-End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR 0025).
+End-to-end tests (kind), harness contract tests and the sandbox escape suite (ADR 0025).
 
 - `e2e/`: the quickstart on kind (plan item E1). `make test-e2e-kind` (or `test/e2e/run.sh`)
   creates the kind cluster `koinon-e1` with the prerequisites (`e2e/kind/up.sh`: kube-network-policies,
@@ -10,9 +10,9 @@ End-to-end tests (kind), flavor contract tests and the sandbox escape suite (ADR
   the API, printing the wall clock of each step. It deletes the cluster unless `KEEP=1`. Without
   `KOINON_E2E_API_URL` the Go suite skips. CI: `.github/workflows/e2e-kind.yml` (manual).
 
-- `flavors/`: flavor contract suite. Runs each flavor image in Docker as OpenShell would and drives
-  it over ACP against the fake model server. It needs the flavor images, so `make test` (and CI's
-  unit job) leave it out; `make test-flavors` builds the images and then runs it. Needs Docker.
+- `harnesses/`: harness contract suite. Runs each harness image in Docker as OpenShell would and drives
+  it over ACP against the fake model server. It needs the harness images, so `make test` (and CI's
+  unit job) leave it out; `make test-harnesses` builds the images and then runs it. Needs Docker.
 - `escape/`: sandbox escape suite (ADR 0025, plan item E2), in two parts:
   - `make test-admission` (label `admission`): the chart's ValidatingAdmissionPolicies, rendered
     with `helm template` and applied to a real API server from envtest. Pod creation by anyone but

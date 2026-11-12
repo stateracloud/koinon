@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline test of flavors/common/koinon-fetch and of how the Dockerfiles use it (#145): GitHub
+# Offline test of harnesses/common/koinon-fetch and of how the Dockerfiles use it (#145): GitHub
 # release assets are downloaded through the REST API with the optional github_token BuildKit
 # secret (the github.com web URL ignores a token), anonymously from github.com without it, never
 # with the token in argv, and always checked against the pinned sha256. A fake curl on PATH records
@@ -12,7 +12,7 @@
 
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-fetch=$root/flavors/common/koinon-fetch
+fetch=$root/harnesses/common/koinon-fetch
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-fetch-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -104,7 +104,7 @@ fi
 joined() { sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$1"; }
 has_add() { joined "$1" | grep -E '^ADD .*github\.com/[^ ]+/releases/download/' >/dev/null; }
 bad=0
-for f in "$root"/flavors/*/Dockerfile "$root"/hack/e2e-toolchain/*Dockerfile; do
+for f in "$root"/harnesses/*/Dockerfile "$root"/hack/e2e-toolchain/*Dockerfile; do
   if has_add "$f"; then
     echo "  $f: ADD of a GitHub release asset; use koinon-fetch with the github_token secret"
     bad=1

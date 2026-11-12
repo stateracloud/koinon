@@ -2,7 +2,7 @@
 
 // Package harness describes the harnesses Koinon ships (ADR 0112; OpenCode is the only one, ADR
 // 0059). Everything that differs per harness lives in one Descriptor here, so adding a built-in
-// harness means adding one entry to the table (plus its image under flavors/, the schema enum and
+// harness means adding one entry to the table (plus its image under harnesses/, the schema enum and
 // the deprecated proto enum, which tests keep in step). ADR 0112 replaces this table with harness
 // definitions (#611).
 package harness
@@ -27,7 +27,7 @@ type Descriptor struct {
 	// Proto is the harness's value in the template API.
 	Proto templatev1alpha1.Flavor
 	// EntryScript is the harness's entry script, which starts the harness as an ACP agent on its
-	// stdin and stdout (the flavor contract, ADR 0035, 0048; flavors/<flavor>/README.md). All
+	// stdin and stdout (the harness contract, ADR 0035, 0048; harnesses/<harness>/README.md). All
 	// take the same arguments.
 	EntryScript string
 	// ReadyCommand is the ACP command the harness announces once Koinon's MCP tools are
@@ -37,7 +37,7 @@ type Descriptor struct {
 	// server) into the command <server>:<prompt>, and its server is "koinon". agentgateway prefixes every
 	// prompt and tool with its target (prefixMode always, ADR 0057 amendment), and the prompt comes from the
 	// "github" tools target, so the prompt is github_koinon-ready
-	// (flavors/opencode/README.md, ADR 0052).
+	// (harnesses/opencode/README.md, ADR 0052).
 	//
 	// A harness whose harness announces no MCP prompt leaves this empty; it needs no wait only if
 	// its first prompt already carries the Koinon tools (the contract suite checks the first chat
@@ -49,8 +49,8 @@ type Descriptor struct {
 	// FormatArg. OpenCode names models <provider>/<model>. Empty when the harness takes its model
 	// from the launch command alone. A format with no row cannot run on the harness; a new format
 	// is one row here, one in the harness's entry script (the case on --model-format in
-	// flavors/<flavor>/koinon-<flavor>, with its provider in the configuration) and one in the
-	// gateway's table. test/flavors checks that the script and this table agree.
+	// harnesses/<harness>/koinon-<harness>, with its provider in the configuration) and one in the
+	// gateway's table. test/harnesses checks that the script and this table agree.
 	ModelEntries map[modelformat.Format]string
 	// FormatArg is the launch switch that takes the model's format, so the entry script uses the
 	// matching entry. "" when the harness has one entry only.
@@ -65,7 +65,7 @@ type Descriptor struct {
 	// harness needs none.
 	InstructionLink string
 	// DefaultBinaries are the network-calling executables of the harness
-	// (flavors/<flavor>/README.md). OpenShell matches the real path of the executable that
+	// (harnesses/<harness>/README.md). OpenShell matches the real path of the executable that
 	// opens a connection, or of one of its ancestors, never a symbolic link or a script: a
 	// script runs as its interpreter, so a harness written as scripts lists its interpreter's
 	// real path, which may name the architecture. OpenCode is a single binary.
@@ -97,7 +97,7 @@ type Descriptor struct {
 	// Exactly one layer retries (ADR 0056 amendment 2026-10-31, point 3), so koinon-agentd then
 	// skips its own turn retry for the harness, and gives the harness Koinon's retry policy instead:
 	// the entry script takes --model-tries, --model-retry-backoff-ms and --model-max-retry-after-ms
-	// (flavors/common/koinon-entry-lib.sh) and makes the harness follow them, not its own defaults.
+	// (harnesses/common/koinon-entry-lib.sh) and makes the harness follow them, not its own defaults.
 	// A harness whose harness retries but cannot be given the policy has no place here.
 	RetriesModelRequests bool
 	// MCPToolPrefix is what the harness puts before the name of a tool it got from Koinon's MCP
@@ -109,7 +109,7 @@ type Descriptor struct {
 	// Tools are the command-line tools the harness's image ships for the agent to use, by the
 	// name of the command (rg, fd, jq, yq, ast-grep, duckdb, sqlite3, pdftotext, pdfinfo, python3, python, file, git).
 	// agentd's "Working with large data" section names a tool only when the harness lists it, so
-	// a flavor must list exactly what its image has (flavors/<flavor>/README.md). Empty when the
+	// a harness must list exactly what its image has (harnesses/<harness>/README.md). Empty when the
 	// image ships none the agent should rely on.
 	Tools []string
 	// TruncatedOutputSaved is true when the harness cuts a long tool result and saves the full
@@ -126,7 +126,7 @@ var table = []Descriptor{
 		EntryScript:  "/usr/local/bin/koinon-opencode",
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
 		// koinon speaks chat completions (@ai-sdk/openai-compatible), koinon-anthropic the Messages
-		// API (@ai-sdk/anthropic); both are in flavors/opencode/etc/koinon/opencode/opencode.jsonc.
+		// API (@ai-sdk/anthropic); both are in harnesses/opencode/etc/koinon/opencode/opencode.jsonc.
 		ModelEntries: map[modelformat.Format]string{
 			modelformat.OpenAI:    "koinon",
 			modelformat.Anthropic: "koinon-anthropic",
@@ -136,7 +136,7 @@ var table = []Descriptor{
 		// model-ID heuristic never decides whether the request carries a thinking block.
 		ThinkingArg: "--thinking",
 		// None: OpenCode 2.2.0 reads the instruction file through the "instructions" key of its
-		// read-only config (flavors/opencode/README.md, ADR 0052 amendment 2026-10-28).
+		// read-only config (harnesses/opencode/README.md, ADR 0052 amendment 2026-10-28).
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
 		PluginInstalls:    true,
 		PluginInstallsArg: "--plugin-installs",
@@ -149,10 +149,10 @@ var table = []Descriptor{
 		// OpenCode 2.2.0 retries a failed model request up to 10 times on its own schedule
 		// (packages/core/src/model-retry.ts). No config key sets it; Koinon's retry plugin, loaded
 		// from the read-only config, overrides each decision through the session.retry hook
-		// (flavors/opencode/README.md, "Model retries").
+		// (harnesses/opencode/README.md, "Model retries").
 		RetriesModelRequests: true,
 		MCPToolPrefix:        "koinon_",
-		// The tools of the OpenCode image (flavors/opencode/README.md).
+		// The tools of the OpenCode image (harnesses/opencode/README.md).
 		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"},
 		// OpenCode saves the full output of a cut tool result to a file.
 		TruncatedOutputSaved: true,

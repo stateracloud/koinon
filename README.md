@@ -28,7 +28,7 @@ expect rough edges and changes between candidates. The design lives in
 | `cmd/` | `koinon-api` and `koinon-reconciler` binaries |
 | `internal/` | Go packages, database migrations and generated code |
 | `web/` | React + Vite single-page app |
-| `flavors/` | Harness images and contracts (OpenCode) |
+| `harnesses/` | Harness images and contracts (OpenCode) |
 | `connectors/` | Connector types, starting with GitHub |
 | `templates/` | Agent templates |
 | `charts/koinon/` | Helm chart |

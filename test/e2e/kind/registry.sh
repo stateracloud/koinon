@@ -5,7 +5,7 @@
 # which copies every image into every node on every run, and cache the third-party images the
 # install pulls from the internet:
 #
-#   - kind-registry: the push target. Koinon's own images (ko, the OpenCode flavor, the fakes) are
+#   - kind-registry: the push target. Koinon's own images (ko, the OpenCode harness, the fakes) are
 #     pushed to localhost:5001 and the node pulls them from it, so a layer the registry has is not
 #     sent again. 127.0.0.1:5001 on the host; http://kind-registry:5000 on the kind network.
 #   - kind-proxy-<host>: one pull-through cache (distribution `proxy`) per upstream host the install

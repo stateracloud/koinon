@@ -6,7 +6,7 @@
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
 # nvcr.io or apt at run time, old issue 357) and loaded into the node. PROBE_PULL_REPO=<repo> pulls
-# <repo>:<hack/probe-tag.sh tag> (the image ci.yml's flavor-publish pushes on main) when
+# <repo>:<hack/probe-tag.sh tag> (the image ci.yml's harness-publish pushes on main) when
 # KOINON_OPENSHELL_IMAGE is unset, so the e2e needs no apt mirror (#482); a miss falls back to the build; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
@@ -179,11 +179,11 @@ else
   echo "== probe image $IMAGE (built from hack/spike/probe)"
   # KOINON_PROBE_BASE=<image> builds on an image already on this machine. With PROBE_PULL_REPO set the image
   # carries a content tag that names the pinned base (hack/probe-tag.sh), so the fallback ignores
-  # KOINON_PROBE_BASE: one tag, one image. An explicit KOINON_OPENSHELL_IMAGE keeps the override. Unset, the base is the digest pin of the OpenCode flavor
+  # KOINON_PROBE_BASE: one tag, one image. An explicit KOINON_OPENSHELL_IMAGE keeps the override. Unset, the base is the digest pin of the OpenCode harness
   # Dockerfile, the one definition of that base.
   (( ! tagged_probe )) || KOINON_PROBE_BASE=
-  probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/flavors/opencode/Dockerfile" | head -n 1)}
-  [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in flavors/opencode/Dockerfile" >&2; exit 1; }
+  probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/harnesses/opencode/Dockerfile" | head -n 1)}
+  [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in harnesses/opencode/Dockerfile" >&2; exit 1; }
   probe_args=(--build-arg "BASE=$probe_base")
   docker build -q "${probe_args[@]}" -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi

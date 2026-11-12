@@ -294,7 +294,7 @@ func newEnvWith(ctx context.Context, harness string, configFor func(*env) string
 	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.org.Bytes, e.agent.ID.Bytes)
 	_, err = e.backend.EnsureWorkspace(ctx, e.workspace, nil)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/stateracloud/koinon/flavors/opencode:test"})
+	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
 	Expect(err).NotTo(HaveOccurred())
 	// What koinon-reconciler records for the sandbox, which is all agentd reads about it.
 	_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: e.org, Workspace: e.workspace})
@@ -337,7 +337,7 @@ func (e *env) recordSandboxWith(ctx context.Context, state store.SandboxState, r
 // spec change, and records the new one ready.
 func (e *env) recreateSandbox(ctx context.Context) {
 	Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
-	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/sandbox:dev"})
 	Expect(err).NotTo(HaveOccurred())
 	e.recordSandbox(ctx, store.SandboxStateReady, "")
 }

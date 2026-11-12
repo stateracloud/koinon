@@ -15,7 +15,7 @@ import (
 // credential, OrgHeader).
 //
 // content-length stays so the access log's request size (agentgateway.LogFieldRequestBytes) still reads it.
-// Sticky routing needs no header: the session ID travels as a body field (flavors/opencode).
+// Sticky routing needs no header: the session ID travels as a body field (harnesses/opencode).
 var ForwardedHeaders = []string{"accept", "content-length", "content-type", "user-agent"}
 
 // MCPForwardedHeaders are the client request headers an MCP route passes to a target. The session
