@@ -16,7 +16,11 @@ once that pull request is merged.
 Each step that only one person can do today has a stand-in or a written procedure in
 [`docs/dev/releasing.md`](docs/dev/releasing.md#stand-ins-for-owner-only-steps). Security reports go
 through GitHub private vulnerability reporting ([SECURITY.md](SECURITY.md)); conduct reports follow
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Both reach every maintainer, not one login.
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Both reach every maintainer, not one login, on one condition: private vulnerability reports go only
+to repository admins and security managers, so every maintainer must hold the repository admin or
+security-manager role. ovirandunu holds the admin role (checked 2026-11-12). Check this before you add
+a maintainer row; a maintainer without the role does not see these reports. A report about an admin
+goes to the other admin; with two admins today, a report about either reaches the other.
 
 ## Roles
 

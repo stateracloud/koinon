@@ -237,16 +237,17 @@ Every command must succeed. A `denied` or `unauthorized` error means that packag
 One person (the project lead, procoduck) holds each of these today. A second maintainer
 (ovirandunu, `MAINTAINERS.md`) can do the ones that need only repository write access; the others need an
 org owner, and the stand-in is a written procedure. Until a second org owner exists, the org-owner
-steps wait for the project lead. Adding one is the fix and is tracked in #712.
+steps wait for the project lead. Adding one is the fix and is tracked in #853. The stale "private until v0.3" records are tracked in #854.
 
 | Step | Needs | Stand-in or procedure |
 | --- | --- | --- |
-| Cut an rc | tag push on `main` | Any maintainer: "Cut a release candidate". Final `vX.Y.Z` tags stay with the project lead |
+| Cut an rc | repository admin (ruleset `release tags: admins create`) | ovirandunu holds the repository admin role (checked 2026-11-12), so the stand-in works today: "Cut a release candidate". A maintainer without the admin role cannot push the tag and waits for an admin. Final `vX.Y.Z` tags stay with the project lead |
 | Publish the draft release | repository write | Any maintainer, after reading the notes |
 | Package visibility | org owner | Org owner only: "Make the packages public" |
 | `RELEASE_SIGNING` variable | repository admin | Repository admin only; steps above |
 | Docs deploy | write access to `stateracloud/koinon-docs` | Any maintainer: the docs repository's README says how its CI deploys; the page checks run against the release tag you name |
-| Mirror dispatch | repository write | Any maintainer: "Mirror a release to a registry" (`hack/mirror-release.sh`); run it from your own machine |
+| Mirror dispatch (release) | none beyond registry login | Any maintainer: "Mirror a release to a registry" (`hack/mirror-release.sh`); run it from your own machine |
+| Mirror dispatch (agentgateway test image) | repository write to dispatch; org owner or package admin for the package | Dispatch with `gh workflow run mirror-agentgateway-test-image.yml` (any maintainer). After the first run, someone must set **Manage Actions access** on `ghcr.io/stateracloud/agentgateway`: org owner only, waits for the project lead (#853). This package is a CI test image and stays private; it is not in "Make the packages public". The workflow comment still says "private until v0.3" (#854) |
 | Red `main` | repository write | Fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh` opens the issue); a maintainer other than the author may revert. Do not cut a tag from a red commit (`hack/release-gate.sh`) |
 | Conduct and security reports | none | Security: GitHub private vulnerability reporting (`SECURITY.md`). Conduct: `CODE_OF_CONDUCT.md`, a private report to the maintainers, not to one login |
 
