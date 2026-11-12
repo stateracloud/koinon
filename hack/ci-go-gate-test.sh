@@ -22,7 +22,8 @@ fi
 grep -qF '    if: ${{ !cancelled() && !(github.event_name == '"'push'"' && needs.changes.outputs.skip == '"'true'"') }}' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must run if: !cancelled() (runs when a part fails, not on a superseded run)"; exit 1; }
 # A draft is not tested: the gate must fail on it (old issue 593), or a vacuous green would be the newest run.
 # shellcheck disable=SC2016 # literal text of the workflow
-sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | grep -qF 'SKIP == true && $EVENT == pull_request' || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
+# (process substitution, not a pipe: grep -q exits at the first match, and under pipefail sed's SIGPIPE would fail the pipeline)
+grep -qF 'SKIP == true && $EVENT == pull_request' <(sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go gate must fail on a draft (skip=true on a pull_request)"; exit 1; }
 # go-test satisfied by an external run (old issue 610): the job is skipped when `changes` found a green go-test-lab on
 # the head, and only then may the gate count that skip. Run the gate's own script with each outcome.
 # shellcheck disable=SC2016 # literal text of the workflow
@@ -73,7 +74,7 @@ GATE_ENV=()
 grep -qF "if: needs.changes.outputs.vuln == 'true'" <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run on the vuln output only"; exit 1; }
 grep -qF 'run: hack/govulncheck.sh' <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run hack/govulncheck.sh (the pinned version, no retry)"; exit 1; }
 grep -qF 'run: hack/govulncheck.sh' "$(dirname "$wf")/govulncheck.yml" || { echo "FAIL: the nightly govulncheck.yml must run the same script"; exit 1; }
-! sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf" | grep -qiE 'retry|attempt|continue-on-error' || { echo "FAIL: go-vuln must not retry or continue on error (rule T1)"; exit 1; }
+! grep -qiE 'retry|attempt|continue-on-error' <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must not retry or continue on error (rule T1)"; exit 1; }
 grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-tidy:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-tidy must run on the tidy output"; exit 1; }
 grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-lint:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-lint must run on the tidy output"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"
