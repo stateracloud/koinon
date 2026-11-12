@@ -141,7 +141,7 @@ except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
 
 # --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
-job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
+job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|hack/flavor-repro-check\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
 # --- local gates of the CI jobs (hack/lane-gates.sh) -------------------------------------------------
 # A job without a lane line has no local gate and is reported as not run.
@@ -150,6 +150,7 @@ lane web - preflight
 lane generate - preflight
 lane chart - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
+# The CI-only step hack/flavor-repro-check.sh (two uncached builds, one digest) is not in this lane.
 lane flavors docker,go test-flavors
 lane escape helm,go test-admission
 lane tidy - preflight
