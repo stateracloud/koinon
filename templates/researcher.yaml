@@ -14,10 +14,9 @@ metadata:
     five Gitea repositories. It never writes to a repository and reads nothing from the web; for
     web research use Web researcher.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:

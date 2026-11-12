@@ -100,8 +100,8 @@ data:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-koinon
     githubTools:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp
-    flavors:
-      {{- range $flavor, $f := .Values.flavors }}
-      {{ $flavor }}:
+    harnesses:
+      {{- range $harness, $f := .Values.harnesses }}
+      {{ $harness }}:
         image: {{ include "koinon.image" (list $ $f.image) }}
       {{- end }}

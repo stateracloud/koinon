@@ -159,6 +159,22 @@ Decided by procoduck when the rename of decision 22 was scoped:
 - **Names users see.** The sandbox image becomes `sandbox`, and the chart key `flavors` becomes
   `harnesses`. This follows in a second change, with the template format and the directory names.
 
+Decided by procoduck on 2026-11-12, when that second change was scoped:
+
+- **Template format.** `spec.flavors` is merged into the existing `spec.harness` block, which then
+  holds `allowed`, `default` and the harness settings (`pluginInstalls`). Two keys named `harnesses`
+  and `harness` side by side were rejected as easy to confuse. Stored template versions are rewritten
+  by a migration.
+- **Chart.** `flavors` becomes `harnesses` and `flavorPrepull` becomes `harnessPrepull`; the
+  reconciler's config key follows.
+- **Image.** The image is published as `<registry>/sandbox`, not `<registry>/sandbox/opencode`: one
+  image, into which other harnesses are delivered (decision 12).
+- **Everything is renamed, in four changes,** because the CI workflows name the directory, the make
+  targets and the required check, and a change to `.github/**` merges by another route than a change
+  to the harness inputs (ADR 0105): (1) the template format, the chart keys and the config key; (2)
+  the new directory, script and make names, with the old ones kept as aliases; (3) the workflows and
+  the required check switched to the new names, with the image name; (4) the aliases removed.
+
 ## Alternatives considered
 
 - **An image per harness, built by Koinon or by the user.** The agent could not alter its harness and

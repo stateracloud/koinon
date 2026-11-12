@@ -25,7 +25,7 @@ var _ = Describe("harnesses", func() {
 			Defs struct {
 				HarnessName struct {
 					Enum []string `json:"enum"`
-				} `json:"flavor"`
+				} `json:"harness"`
 			} `json:"$defs"`
 		}
 		Expect(json.Unmarshal(readFile("schema/template.schema.json"), &schema)).To(Succeed())
