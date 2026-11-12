@@ -252,8 +252,11 @@ func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Tim
 			}
 			total.Add(total, cents.Quo(cents, big.NewRat(100, 1)))
 		}
-		if !rep.HasMore || rep.NextPage == "" {
+		if !rep.HasMore {
 			return money.FromRat(total)
+		}
+		if rep.NextPage == "" {
+			return 0, fmt.Errorf("providerusage: anthropic analytics cost: more rows but no next page")
 		}
 		page = rep.NextPage
 	}

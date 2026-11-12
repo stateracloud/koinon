@@ -706,9 +706,9 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    `providers.cost_api_key` (its own AAD binding, rewrapped and forgotten with the other envelope
    columns; `cost_api_key_lost_at` marks a forgotten one), and a `cost_scope`: the Anthropic
    workspace (`wrkspc_…`; amendment 2026-11-12 adds one API key, `apikey_…`) that holds the provider's inference key, or for OpenAI the
-   project (`proj_…`) that holds it or the key's own ID (`key_…`). Anthropic's cost report is by
-   workspace, not by key, so there the workspace must hold this key alone for the figures to
-   compare; OpenAI's costs API filters and groups by API key (`api_key_ids`, `group_by=api_key_id`),
+   project (`proj_…`) that holds it or the key's own ID (`key_…`). Anthropic's cost report was by
+   workspace, not by key (amendment 2026-11-12 adds a key scope), so with a workspace scope the
+   workspace must hold this key alone for the figures to compare; OpenAI's costs API filters and groups by API key (`api_key_ids`, `group_by=api_key_id`),
    so a `key_…` scope compares exactly one key. koinon-reconciler, once a day per provider, reads the
    scope's cost for each of the last three complete UTC days (the reports are revised for a while)
    from the provider's pinned cost endpoint, never a URL from the provider record and with no
@@ -886,10 +886,10 @@ platform.claude.com on 2026-11-12 and recorded as a fixture
 (`internal/providerusage/testdata/anthropic-analytics-cost.json`); no paid call was made.
 
 - **Auth and headers.** The Admin key stays in `x-api-key` (Bearer is for OAuth tokens only). Every
-  request also sends `anthropic-version: 2026-10-21` and `anthropic-beta: analytics-usage-cost-2026-08-24`.
-- **Query.** `time_bucket_width=1d`, `starting_at`/`ending_at` of the one UTC day, `limit=1000`, filtered
+  request also sends `anthropic-version: 2026-10-21` (the API version the analytics pages document; the gateway keeps its own `2023-06-01` for inference) and `anthropic-beta: analytics-usage-cost-2026-08-24`.
+- **Query.** `time_bucket_width=1d`, `starting_at`/`ending_at` of the one UTC day, `limit=1000` (the documented maximum, 1 to 1,000), filtered
   by the scope (`workspace_ids[]` or `api_key_ids[]`) and grouped by the same dimension. Rows carry
-  `starting_at`, `group` and `cost`; pages follow `has_more`/`next_page`.
+  `starting_at`, `group` and `cost`; pages follow `has_more`/`next_page`; `has_more` without a `next_page` is an `error`.
 - **Amounts.** `cost.amount` (after discounts, before credits; not `list_amount`) is a decimal string of
   fractional cents with six places; the cents-to-USD conversion is unchanged and a currency other than
   USD is an error.
@@ -898,7 +898,9 @@ platform.claude.com on 2026-11-12 and recorded as a fixture
   `key_…` does. The workspace no longer has to hold the provider's key alone when a key scope is used.
 - **The `default` scope is gone.** The default workspace now has its own `wrkspc_` ID, and the endpoint
   has no null workspace for it. A provider whose stored scope is `default` fails the scope check and
-  records `error` until its scope is set to the workspace's ID (no upgrade promise before v0.3).
+  is rejected by the scope check wherever it is validated: a declarative Secret or a UI/API edit of that
+  provider fails until the scope is set to the workspace's ID (no upgrade promise before v0.3), and
+  the reconciler records `error` meanwhile. Release notes say so.
 - **A missing day is still never $0.** The endpoint has no row for a combination with no cost and no
   empty buckets, so "no bucket" cannot signal "not yet there". A day is complete only when
   `data_refreshed_at` (identical on all pages) is at or after the day's end; a null or earlier value is

@@ -67,6 +67,30 @@ func TestAnthropicCostSumsTheWorkspacesDayInCents(t *testing.T) {
 	}
 }
 
+func TestAnthropicCostPagesMustAllBeComplete(t *testing.T) {
+	for name, second := range map[string]string{
+		"later page refreshed earlier": `{"data":[],"has_more":false,"data_refreshed_at":"2026-11-05T20:00:00Z"}`,
+		"later page without refresh":   `{"data":[],"has_more":false,"data_refreshed_at":null}`,
+	} {
+		client, _ := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("page") == "" {
+				_, _ = w.Write([]byte(`{"data":[],"has_more":true,"next_page":"page_2","data_refreshed_at":"2026-11-06T00:00:00Z"}`))
+				return
+			}
+			_, _ = w.Write([]byte(second))
+		})
+		if got, err := (providerusage.AnthropicCost{Client: client}).DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "wrkspc_a"}, costDay); err == nil {
+			t.Errorf("%s: %s, want an error", name, got)
+		}
+	}
+	client, _ := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[],"has_more":true,"next_page":null,"data_refreshed_at":"2026-11-06T00:00:00Z"}`))
+	})
+	if got, err := (providerusage.AnthropicCost{Client: client}).DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "wrkspc_a"}, costDay); err == nil {
+		t.Errorf("has_more without next_page: %s, want an error", got)
+	}
+}
+
 func TestAnthropicCostReadsOneAPIKeysDay(t *testing.T) {
 	client, seen := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[
