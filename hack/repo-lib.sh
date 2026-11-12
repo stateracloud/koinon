@@ -9,7 +9,7 @@
 #                     KOINON_UPSTREAM overrides it.
 #   koinon_repo       the repository the scripts act on: KOINON_REPO, else GH_REPO (gh's own variable), else
 #                     the remote gh itself would pick in the current directory's checkout (the one
-#                     `gh repo set-default` chose, else `upstream`, else `origin`), else koinon_upstream. So
+#                     `gh repo set-default` chose, else `upstream`, `github`, `origin`), else koinon_upstream. So
 #                     the scripts and their plain `gh pr` calls agree: a fork cloned with an `upstream`
 #                     remote acts on the upstream, a fork cloned alone acts on the fork.
 #   koinon_board      prints "<owner> <number>" of the project board, or nothing when there is none.
@@ -49,7 +49,7 @@ koinon_repo() {
 	local r=${KOINON_REPO:-${GH_REPO:-}}
 	local remote
 	if [[ -z $r ]]; then
-		for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream origin; do
+		for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream github origin; do
 			[[ -n $remote ]] || continue
 			r=$(koinon_github_slug "$(git remote get-url "$remote" 2>/dev/null || true)")
 			[[ -z $r ]] || break

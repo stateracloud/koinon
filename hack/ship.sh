@@ -5,7 +5,8 @@
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge. One line per step.
 #
 # Maintainer script (hack/README.md): the board and the CodeRabbit request need the upstream project's
-# rights. From a fork the commit, checks, push and pull request work; the board step is skipped (no board).
+# rights. From a fork the commit, checks, push and pull request work; when the scripts act on the fork
+# (a clone without an `upstream` remote, or KOINON_REPO=<fork>) the board step is skipped (no board).
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
 #                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
@@ -58,7 +59,7 @@ while [[ $# -gt 0 ]]; do
 	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,31p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,32p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done

@@ -16,7 +16,7 @@ names what needs the upstream project's rights and what still works from a fork.
 | Script | Needs maintainer rights for |
 | --- | --- |
 | `claim.sh` | claim refs and assignees on the repository it acts on; `next` needs a board |
-| `ship.sh` | the board and the CodeRabbit request (skipped on a fork) |
+| `ship.sh` | the board and the CodeRabbit request (skipped when the scripts act on a fork) |
 | `pr-merge.sh` | the merge queue, `--admin`, `--break-glass` |
 | `pr-wait.sh` | nothing: it only reads |
 | `pr-threads.sh` | nothing: it only reads |
@@ -40,10 +40,11 @@ is for Go:
 | Variable | Default |
 | --- | --- |
 | `KOINON_UPSTREAM` | the `module github.com/<owner>/<name>` line of `go.mod` |
-| `KOINON_REPO` | `GH_REPO`, else the remote gh would pick (`gh repo set-default`, else `upstream`, else `origin`), else the upstream |
+| `KOINON_REPO` | `GH_REPO`, else the remote gh would pick (`gh repo set-default`, else `upstream`, `github`, `origin`), else the upstream |
 | `KOINON_BOARD` | `1` on the upstream repository, `none` on a fork |
 | `KOINON_BOARD_OWNER` | the owner of `KOINON_REPO` |
 | `KOINON_WT_ROOT` | `/tmp/kw` (`hack/wt.sh`; the repository's Claude sandbox settings allow it) |
 
 A fork cloned alone acts on the fork with no settings: claims and pull requests go to the fork, and
-the board step is skipped. With an `upstream` remote the scripts act on the upstream, as `gh` does.
+the board step is skipped. With an `upstream` remote the scripts act on the upstream, as `gh` does; set `KOINON_REPO=<you>/koinon`
+to act on the fork instead.

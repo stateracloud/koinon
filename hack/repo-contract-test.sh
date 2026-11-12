@@ -72,6 +72,9 @@ done
 	chk "board owner override" "$(KOINON_REPO=$up KOINON_BOARD_OWNER=acme koinon_board)" "acme 1"
 	chk "board none" "$(KOINON_REPO=$up KOINON_BOARD=none koinon_board)" ""
 	g=$(mktemp -d "${TMPDIR:-/tmp}/rc-remote.XXXXXX")
+	trap 'rm -rf "$g"' EXIT
+	# The caller's git config (url.*.insteadOf in a proxied sandbox) must not rewrite the test remotes.
+	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 	git -C "$g" init -q
 	git -C "$g" remote add origin https://github.com/someone/koinon.git
 	chk "origin remote" "$(cd "$g" && koinon_repo)" someone/koinon
@@ -79,7 +82,6 @@ done
 	chk "upstream remote before origin" "$(cd "$g" && koinon_repo)" acme/koinon
 	git -C "$g" config remote.origin.gh-resolved base
 	chk "gh repo set-default wins" "$(cd "$g" && koinon_repo)" someone/koinon
-	rm -rf "$g"
 	if (KOINON_BOARD=x koinon_board 2>/dev/null); then bad "repo-lib: a bad KOINON_BOARD is refused"; else ok "repo-lib: a bad KOINON_BOARD is refused"; fi
 	exit "$fail"
 ) || fail=1
