@@ -271,6 +271,11 @@ type Querier interface {
 	// active.
 	// origin is interactive unless the caller says scheduled (LT1: interactive work is claimed first).
 	CreateRun(ctx context.Context, arg CreateRunParams) (Run, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run artifacts (#22). Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateRunArtifact(ctx context.Context, arg CreateRunArtifactParams) (CreateRunArtifactRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// A request Koinon makes itself (saved work to push). No row: it exists.
 	CreateSystemApprovalRequest(ctx context.Context, arg CreateSystemApprovalRequestParams) (ApprovalRequest, error)
@@ -573,6 +578,7 @@ type Querier interface {
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
+	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
@@ -1033,6 +1039,8 @@ type Querier interface {
 	ListQuestionsToRemind(ctx context.Context, arg ListQuestionsToRemindParams) ([]Question, error)
 	// The agent's latest replies on the task, newest first.
 	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error)
+	// The artifacts of a run, without their bodies.
+	ListRunArtifacts(ctx context.Context, arg ListRunArtifactsParams) ([]ListRunArtifactsRow, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)

@@ -27,7 +27,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providertype"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
@@ -132,6 +134,10 @@ type runner struct {
 	// res is how the turns ended, when execute got as far as the turn and the policy ended it with
 	// anything but end_turn. The run's ending is then res, not an error.
 	res *turnResult
+	// window is the model's context window from the catalog (0 unknown), and overflow the inputs of
+	// the prompt over the cap (overflow.go).
+	window   int64
+	overflow *inputOverflow
 	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
 	turnState atomic.Int32
 
@@ -482,6 +488,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	r.log.Info("the run's model", "model", model, "source", string(source), "format", string(facts.Format))
 	ptype, format := facts.ProviderType, facts.Format
+	r.window = facts.ContextWindow
 	marker, unknown := cacheMarker(facts.Cache)
 	if unknown {
 		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
@@ -727,6 +734,13 @@ func (r *runner) execute(ctx context.Context) error {
 	text, through, err := r.prompt(fctx, task, loaded, reset, restart)
 	if err != nil {
 		return r.dbErr(ctx, "build the prompt", err)
+	}
+	if r.overflow != nil {
+		// An input is over the cap: keep it, ask a person and park; the prompt is not sent.
+		if err := r.parkOnOverflow(fctx, task, vc, through, closeHarness); err != nil {
+			return r.execErr(ctx, "park the run on an input over the context cap", err)
+		}
+		return nil
 	}
 	if _, err := r.q.SetRunPromptThrough(fctx, store.SetRunPromptThroughParams{
 		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, PromptThroughSeq: through,
@@ -999,6 +1013,7 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	}
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
+	r.guardInputs(texts)
 	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
 }
 
@@ -1343,12 +1358,40 @@ type modelFacts struct {
 	Cache prices.CacheMode
 	// CompactionTokens is where the harness compacts the conversation (compactionTokens).
 	CompactionTokens int
+	// ContextWindow is the model's context window in tokens from the catalog, or 0 when the catalog
+	// has none (contextguard then assumes its default).
+	ContextWindow int64
 }
 
 // modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
 // as before, with chat completions and no cache: the gateway refuses it anyway. Only a database
 // error is returned.
 func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error) {
+	f, err := r.priceFacts(ctx, name)
+	if err != nil {
+		return modelFacts{}, err
+	}
+	f.ContextWindow, err = r.contextWindow(ctx, f.ProviderType, name)
+	return f, err
+}
+
+// contextWindow is the model's accepted context length in the catalog (ADR 0070): today only the
+// accepted OpenRouter limits (internal/orcatalog) are stored; any other model has none, and 0 is
+// returned. Only a database error is returned.
+func (r *runner) contextWindow(ctx context.Context, providerType, name string) (int64, error) {
+	if providerType != providertype.OpenRouter {
+		return 0, nil
+	}
+	v, err := r.q.GetOpenRouterLimitValue(ctx, store.GetOpenRouterLimitValueParams{Model: name, Field: orcatalog.FieldContextLength})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	return int64(v.Value), nil
+}
+
+func (r *runner) priceFacts(ctx context.Context, name string) (modelFacts, error) {
 	qt, err := r.p.cfg.Prices.Find(ctx, r.q, r.run.OrgID, name, time.Now())
 	m := qt.Model
 	if _, ok := prices.Unpriceable(err); ok {
