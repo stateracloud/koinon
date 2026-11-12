@@ -41,8 +41,9 @@ has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.clu
 # forge the header. The header's overwrite is tested in internal/gateway (drivers) and the refusal of a
 # call without it in internal/githubtools.
 tools_from() { # prints the 'from' selectors of the ingress rule on the tools port
-  render "$@" --show-only templates/networkpolicy.yaml |
-    awk '/^  ingress:/{i=1} i&&/^    - ports:/{blk=""; grab=1} grab{blk=blk $0 "\n"} /^    # /{if(grab&&blk ~ /- port: tools/){printf "%s", blk; exit} grab=0}'
+  local np
+  np=$(render "$@" --show-only templates/networkpolicy.yaml)
+  awk '/^  ingress:/{i=1} i&&/^    - ports:/{blk=""; grab=1} grab{blk=blk $0 "\n"} /^    # /{if(grab&&blk ~ /- port: tools/){printf "%s", blk; exit} grab=0}' <<<"$np"
 }
 tf=$(tools_from)
 printf '%s\n' "$tf" | hit  'component: gateway' || fail "the tools port does not admit the gateway (standalone)"

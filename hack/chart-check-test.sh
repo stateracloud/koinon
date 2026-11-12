@@ -131,7 +131,7 @@ early_exit='\|[[:space:]]*(grep[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet|--silen
 hits=$(grep -nE "$early_exit" hack/chart-check.sh hack/chart-check.d/*.sh | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)
 if [[ -n $hits ]]; then
 	echo "FAIL: early-exit reader on a pipe in chart-check (use hit or sed -n 1p, #608):"
-	sed 's/^/    /' <<<"$hits"
+	printf '    %s\n' "${hits//$'\n'/$'\n'    }"
 	fail=1
 else
 	echo "ok: no early-exit reader on a pipe in chart-check"
