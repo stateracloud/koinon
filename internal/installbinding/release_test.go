@@ -109,6 +109,27 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 		Expect(count(ctx, `SELECT count(*) FROM restore_accepted_removals`)).To(BeZero())
 	})
 
+	It("keeps the list when no plan is available (no Kubernetes access), and refuses a removal of an unknown org", func(ctx SpecContext) {
+		seedCopy(ctx)
+		api := newBinding("hash-copy", false)
+		_, err := api.Settle(ctx, []installbinding.Removal{prov}, false)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := api.SettleWith(ctx, nil, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Accepted).To(BeZero(), "without a plan nothing is accepted")
+		Expect(res.Allowed(prov)).To(BeFalse(), "an importer with a plan still finds the item on the list")
+		Expect(count(ctx, `SELECT count(*) FROM restore_accepted_removals`)).To(Equal(1))
+
+		By("a release whose plan names an org that is gone fails and releases nothing")
+		_, err = pool.Exec(ctx, `DELETE FROM install_binding`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = newBinding("hash-copy", true).Claim(ctx, installbinding.Targets{})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = api.Settle(ctx, []installbinding.Removal{{Kind: "connection", Org: "no-such-org", Secret: "x"}}, false)
+		Expect(err).To(HaveOccurred())
+		Expect(count(ctx, `SELECT count(*) FROM install_binding WHERE held_since IS NOT NULL`)).To(Equal(1))
+	})
+
 	It("accepts the removals at the release when the value is set", func(ctx SpecContext) {
 		seedCopy(ctx)
 		res, err := newBinding("hash-copy", false).Settle(ctx, []installbinding.Removal{prov}, true)

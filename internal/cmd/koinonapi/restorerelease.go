@@ -47,14 +47,15 @@ func (r *releaseAtStart) once(ctx context.Context) error {
 	// The plan is computed inside Settle's transaction, under the row lock, so it cannot go stale
 	// between the plan and the release.
 	var plan []installbinding.Removal
-	st, err := r.binding.SettleWith(ctx, func(c context.Context) ([]installbinding.Removal, error) {
-		if r.plan == nil {
-			return nil, nil
+	var planFn func(context.Context) ([]installbinding.Removal, error)
+	if r.plan != nil {
+		planFn = func(c context.Context) ([]installbinding.Removal, error) {
+			p, err := r.plan(c)
+			plan = p
+			return p, err
 		}
-		p, err := r.plan(c)
-		plan = p
-		return p, err
-	}, r.accept)
+	}
+	st, err := r.binding.SettleWith(ctx, planFn, r.accept)
 	if err != nil {
 		return err
 	}
@@ -112,7 +113,9 @@ func (r *releaseAtStart) Retry(ctx context.Context) {
 			return
 		case <-after(d):
 		}
-		err := r.once(ctx)
+		c, cancel := context.WithTimeout(ctx, time.Minute)
+		err := r.once(c)
+		cancel()
 		if err == nil {
 			return
 		}

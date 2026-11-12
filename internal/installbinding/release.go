@@ -125,8 +125,8 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 // install_binding is taken. A plan computed before the lock could be stale when it is applied: another
 // replica may have released, or an item may have appeared, between the plan and the settle, and a held
 // copy would then act outward on an item the list does not cover. Under the lock no release can run
-// between the plan and the settle. plan is called once, with the transaction's context; a nil plan is
-// an empty one.
+// between the plan and the settle. plan is called once, with the outer context; a nil planFn means no plan is
+// available: a pending release is recorded with an empty list and a later pass changes nothing.
 func (b *Binding) SettleWith(ctx context.Context, planFn func(context.Context) ([]Removal, error), accept bool) (SettleResult, error) {
 	var res SettleResult
 	if !b.Enabled() {
@@ -142,8 +142,11 @@ func (b *Binding) SettleWith(ctx context.Context, planFn func(context.Context) (
 		if !found {
 			return nil
 		}
+		// A nil planFn means no plan is available (no Kubernetes access): the list is then neither
+		// pruned nor accepted, or every row would look gone and the next importer would remove it.
+		noPlan := planFn == nil
 		var plan []Removal
-		if planFn != nil {
+		if !noPlan {
 			if plan, err = planFn(ctx); err != nil {
 				return err
 			}
@@ -164,11 +167,16 @@ func (b *Binding) SettleWith(ctx context.Context, planFn func(context.Context) (
 				return err
 			}
 			for _, r := range sortedRemovals(plan) {
-				if _, err := tx.Exec(ctx,
+				ins, err := tx.Exec(ctx,
 					`INSERT INTO restore_accepted_removals (org_id, kind, secret_name, release_id, state)
 					 SELECT id, $1, $3, $4, $5 FROM orgs WHERE slug = $2`,
-					r.Kind, r.Org, r.Secret, releaseID, state); err != nil {
+					r.Kind, r.Org, r.Secret, releaseID, state)
+				if err != nil {
 					return err
+				}
+				if ins.RowsAffected() != 1 {
+					// An org that is gone would leave the item off the list, and the importer would then remove it.
+					return fmt.Errorf("record the removal of %s %s: org %q not found", r.Kind, r.Secret, r.Org)
 				}
 			}
 			if _, err := tx.Exec(ctx,
@@ -184,7 +192,7 @@ func (b *Binding) SettleWith(ctx context.Context, planFn func(context.Context) (
 				Before: map[string]any{"state": string(StateOf(b.mark, row, found)), "heldSince": row.HeldSince},
 				After:  map[string]any{"releaseId": releaseID.String(), "planHash": PlanHash(plan), "removals": sortedRemovals(plan), "removalState": state, "acceptImporterDeletions": accept},
 			})
-		} else {
+		} else if !noPlan {
 			// Forget items whose Secret is back or whose removal is done.
 			rows, err := tx.Query(ctx, `SELECT r.kind, o.slug, r.secret_name FROM restore_accepted_removals r JOIN orgs o ON o.id = r.org_id`)
 			if err != nil {

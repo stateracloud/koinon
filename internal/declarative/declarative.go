@@ -357,7 +357,6 @@ func (i *Importer) removeGated(ctx context.Context, q *store.Queries, seen map[p
 	// another replica cannot fall between the plan and the settle.
 	var plan []installbinding.Removal
 	st, err := i.Release.SettleWith(ctx, func(c context.Context) ([]installbinding.Removal, error) {
-		plan = nil
 		err := i.removeAbsent(c, q, seen, func(r installbinding.Removal) bool {
 			plan = append(plan, r)
 			return false
