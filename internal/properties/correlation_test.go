@@ -42,7 +42,7 @@ func genEvents(rng *rand.Rand) ([]event, int) {
 	return evs, len(distinct)
 }
 
-// outcome is what a world looks like after all deliveries: tasks per correlation key, by title.
+// tasksByKey is what a world looks like after all deliveries: tasks per correlation key, by title.
 func tasksByKey(ctx context.Context, org pgtype.UUID) map[string]int {
 	GinkgoHelper()
 	rows, err := pool.Query(ctx, `SELECT title FROM tasks WHERE org_id = $1`, org)

@@ -24,17 +24,16 @@ import (
 // taskWorld drives one task the way the API (messages), the scheduler (Enqueue) and agentd
 // (claim, prompt, takeover, finish) do, against the real queries.
 type taskWorld struct {
-	ctx         context.Context
-	org, user   pgtype.UUID
-	task        store.Task
-	cur         *store.Run // the run an agentd owns now, if any
-	mu          sync.Mutex
-	sent        int            // messages appended
-	delivered   map[string]int // message text -> times it was put in a prompt
-	totalDeliv  int
-	claims      int
-	runs        map[string]bool // run IDs that ever existed
-	promptSizes []int
+	ctx        context.Context
+	org, user  pgtype.UUID
+	task       store.Task
+	cur        *store.Run // the run an agentd owns now, if any
+	mu         sync.Mutex
+	sent       int            // messages appended
+	delivered  map[string]int // message text -> times it was put in a prompt
+	totalDeliv int
+	claims     int
+	runs       map[string]bool // run IDs that ever existed
 }
 
 func newTaskWorld(ctx context.Context) *taskWorld {
@@ -157,7 +156,6 @@ func (w *taskWorld) prompt() {
 		w.totalDeliv++
 		through = m.Seq
 	}
-	w.promptSizes = append(w.promptSizes, len(msgs))
 	updated, err := q.SetRunPromptThrough(w.ctx, store.SetRunPromptThroughParams{OrgID: w.org, ID: run.ID, Epoch: run.Epoch, PromptThroughSeq: through})
 	Expect(err).NotTo(HaveOccurred())
 	w.cur = &updated

@@ -277,6 +277,10 @@ var _ = Describe("park and resume (issue 26)", func() {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: pr.id})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(got.State).To(Equal(store.RunStateSucceeded))
+				// Every question of every park was answered exactly once: none left waiting.
+				open, err := q.CountOpenQuestionsForRun(ctx, store.CountOpenQuestionsForRunParams{OrgID: org, RunID: pr.id})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(open).To(BeZero())
 			}
 		})
 	})

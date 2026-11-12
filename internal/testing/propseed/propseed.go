@@ -44,35 +44,33 @@ func envInt(name string, def int64) int64 {
 	return def
 }
 
-// ForEach runs body once per case with that case's generator and stops at the first failing
-// case. If body fails (a Gomega failure, a panic, or a failure recorded by a goroutine's
-// GinkgoRecover), ForEach reports the seed of the case.
+// ForEach runs body once per case with that case's generator. The seed of the case that was
+// running when the spec failed is printed after the spec ends, whether the failure panicked the
+// spec goroutine (Gomega's Expect) or was recorded from another goroutine. A failure recorded from
+// another goroutine does not stop the later cases, so assert in the spec goroutine.
 func ForEach(body func(rng *rand.Rand)) {
 	GinkgoHelper()
+	cur := new(int64)
+	reportOnFailure(cur)
 	for i := 0; i < Cases(); i++ {
-		Run(Seed()+int64(i), body)
-		if CurrentSpecReport().Failed() {
-			return
-		}
+		*cur = Seed() + int64(i)
+		body(rand.New(rand.NewSource(*cur))) //nolint:gosec // a reproducible test generator, not security
 	}
 }
 
-// Run runs body with the generator of one seed, printing the seed if body fails.
+// Run runs body with the generator of one seed.
 func Run(seed int64, body func(rng *rand.Rand)) {
 	GinkgoHelper()
-	report := func() {
-		msg := fmt.Sprintf("property failed with seed %d: rerun with %s=%d %s=1", seed, SeedVar, seed, CasesVar)
-		AddReportEntry("property seed", msg)
-		fmt.Fprintln(GinkgoWriter, msg)
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			report()
-			panic(r)
-		}
-	}()
+	reportOnFailure(&seed)
 	body(rand.New(rand.NewSource(seed))) //nolint:gosec // a reproducible test generator, not security
-	if CurrentSpecReport().Failed() {
-		report()
-	}
+}
+
+func reportOnFailure(seed *int64) {
+	DeferCleanup(func() {
+		if CurrentSpecReport().Failed() {
+			msg := fmt.Sprintf("property failed with seed %d: rerun with %s=%d %s=1", *seed, SeedVar, *seed, CasesVar)
+			AddReportEntry("property seed", msg)
+			fmt.Fprintln(GinkgoWriter, msg)
+		}
+	})
 }
