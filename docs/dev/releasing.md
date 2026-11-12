@@ -249,7 +249,7 @@ steps wait for the project lead. Adding one is the fix and is tracked in #853. T
 | Mirror dispatch (release) | none beyond registry login | Any maintainer: "Mirror a release to a registry" (`hack/mirror-release.sh`); run it from your own machine |
 | Mirror dispatch (agentgateway test image) | repository write to dispatch; org owner or package admin for the package | Dispatch with `gh workflow run mirror-agentgateway-test-image.yml` (any maintainer). After the first run, someone must set **Manage Actions access** on `ghcr.io/stateracloud/agentgateway`: org owner only, waits for the project lead (#853). This package is a CI test image and stays private; it is not in "Make the packages public". The workflow comment still says "private until v0.3" (#854) |
 | Red `main` | repository write | Fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh` opens the issue); a maintainer other than the author may revert. Do not cut a tag from a red commit (`hack/release-gate.sh`) |
-| Conduct and security reports | none | Security: GitHub private vulnerability reporting (`SECURITY.md`). Conduct: `CODE_OF_CONDUCT.md`, a private report to the maintainers, not to one login |
+| Conduct and security reports | none | Security: GitHub private vulnerability reporting (`SECURITY.md`). Conduct: `CODE_OF_CONDUCT.md`, a private report to the maintainers, not to one login. A report about a maintainer must not use the advisory (every admin sees it): send a private GitHub message to another maintainer |
 
 ## What protects release tags
 

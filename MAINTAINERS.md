@@ -19,8 +19,10 @@ through GitHub private vulnerability reporting ([SECURITY.md](SECURITY.md)); con
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Both reach every maintainer, not one login, on one condition: private vulnerability reports go only
 to repository admins and security managers, so every maintainer must hold the repository admin or
 security-manager role. ovirandunu holds the admin role (checked 2026-11-12). Check this before you add
-a maintainer row; a maintainer without the role does not see these reports. A report about an admin
-goes to the other admin; with two admins today, a report about either reaches the other.
+a maintainer row; a maintainer without the role does not see these reports. A report about a maintainer must
+not use the advisory route: every admin and security manager sees an advisory, including the maintainer it
+is about. The reporter sends a private message on GitHub to another maintainer (by handle) instead; only
+that direct-message route keeps the maintainer concerned out of the handling.
 
 ## Roles
 
