@@ -132,6 +132,27 @@ off (ADR 0068), with no release.
    away. `koinon-api` logs a count-only warning at start and on every tick while models of a priced
    provider type have no price, and exports `koinon_price_unpriced_models{provider_type}`
    (ADR 0023: no org or model label).
+
+   **Amendment, 2026-11-12 (slice 2, issue #337).** The adapters price these provider types:
+
+   | Source | Provider types | Auto-applies for | Proposes only for |
+   | --- | --- | --- | --- |
+   | `openrouter` | `openrouter` | `openrouter` | |
+   | `litellm` | `anthropic`, `deepseek`, `openai` | `anthropic`, `deepseek`, `openai` | every other type |
+   | `genai-prices` | `anthropic`, `deepseek`, `openai` | `anthropic`, `deepseek`, `openai` | every other type |
+   | `models-dev` | `anthropic`, `deepseek`, `openai` | none | every type |
+
+   In `auto` a source is fetched while a provider of one of its types is in use, so an install with
+   an Anthropic, DeepSeek or OpenAI provider fetches LiteLLM, genai-prices and models.dev, and one
+   with an OpenRouter provider fetches OpenRouter. `on` fetches all four. LiteLLM and genai-prices
+   auto-apply only for the types they track first-hand (maintainer decision on issue #337,
+   2026-11-07); for any other type they propose and an admin accepts. This replaces the "two
+   independent sources must agree" path of decision 3 and decision 7: agreement no longer makes an
+   aggregator's price apply by itself. It is a veto instead. When two sources that may auto-apply
+   return different values for one model, both proposals go to review. The sources that agree are
+   listed in the proposal. If two sources return the same values, the change is applied once and the
+   other proposal is superseded. Other providers' models that LiteLLM lists (Bedrock, Vertex, Azure,
+   and so on) are not read.
 3. **Fetch rules.**
    - Pinned hosts per adapter (`openrouter.ai`, `models.dev`, `api.github.com`,
      `raw.githubusercontent.com`), HTTPS only, no redirects, a body cap (16 MiB) and a strict
@@ -312,19 +333,21 @@ records the page URL and "manual" as its source.
   replaces the decision of 2026-10-31 on issue #68 (Koinon never ships OpenRouter's data). Other
   OpenRouter data (model metadata, descriptions, rankings) is still not shipped.
 - **models.dev, LiteLLM, genai-prices.** MIT. Their licence and copyright line go in the provenance.
-  They are aggregators: on their own they never auto-apply a change for a direct provider; two must
-  agree. Only LiteLLM's repository file is read, never its PyPI package.
+  They are aggregators. LiteLLM and genai-prices auto-apply only for the provider types they track
+  first-hand (decision 2.2, amendment of 2026-11-12); everything else is a proposal. Only LiteLLM's
+  repository file is read, never its PyPI package.
 - **models.dev makes proposals only** (maintainer decision 2026-11-06). It never counts towards
   auto-apply, as a primary source or as one of two. It has no versioned feed: `api.json` is rebuilt
   from about 1,000 TOML files that change more than 100 times a day, mostly bot syncs copied from other
   catalogues, and wrong prices have been merged and reverted several times (for example commits
   `cd7c70b4` and `6a0da0a9` in `github.com/anomalyco/models.dev`, formerly `sst/models.dev`).
-  Auto-apply relies on the provider's own source, or on two independent sources such as OpenRouter
-  and LiteLLM.
+  Auto-apply relies on the provider's own source, or on an aggregator for the provider types it tracks
+  first-hand, held back by a commit at least 24 hours old.
 - **genai-prices lags** the providers (no Claude 5.5 family on 2026-11-06). A model it lacks is not
   a disagreement; it just does not count as an agreeing source.
-- **Anthropic** has no machine-readable list. Its models auto-apply only on agreement of two
-  aggregators, and a person checks its page for everything else.
+- **Anthropic** has no machine-readable list. Its models auto-apply from LiteLLM or genai-prices
+  (a disagreement between them sends both to review), and a person checks its page for everything
+  else.
 - `docs/ops/prices.md` keeps its rule for the default list (primary sources only). It gains a
   section for the platform list: the bounds, the classes and how to read the provenance.
 

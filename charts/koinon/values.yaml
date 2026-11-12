@@ -490,13 +490,14 @@ secrets:
   migrateLegacyConnections: false
 
 # Price refresh (ADR 0098, maintainer decision 2026-11-07). Three modes:
-#   enabled unset (the default): auto. koinon-api fetches OpenRouter's public model list (one
-#     unauthenticated GET per interval) only while some org has an openrouter provider, checked at
+#   enabled unset (the default): auto. koinon-api fetches a source's public price data (unauthenticated
+#     GETs per interval) only while some org has a provider that source prices (openrouter for
+#     OpenRouter; anthropic, deepseek or openai for LiteLLM, genai-prices and models.dev), checked at
 #     every tick (at most an hour apart). With no such provider it makes no request.
 #   enabled: false: off. koinon-api makes no request to any price source; prices change only with an
 #     upgrade or when an admin accepts a proposal ("koinon-api prices fetch", then "prices proposals accept").
-#   enabled: true: on. koinon-api fetches every source it has an adapter for (OpenRouter only, so far),
-#     whatever providers exist.
+#   enabled: true: on. koinon-api fetches every source it has an adapter for (OpenRouter, LiteLLM,
+#     genai-prices and models.dev), whatever providers exist.
 # IN AUTO AND ON, SMALL PRICE CHANGES APPLY BY THEMSELVES: a change of at most maxChangePercent
 # (default 25) against the last reviewed price, and only after two fetches 24 hours apart returned it,
 # is written to the platform price list with no person involved, at most maxAutoPerDay (default 10) a

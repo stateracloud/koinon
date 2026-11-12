@@ -99,7 +99,16 @@ func checkEndpoint(raw, host, port string) error {
 // get does one unauthenticated GET of rawURL (held to https and the pinned host and port) and returns
 // the body, capped at MaxBodyBytes, and the headers. Redirects are never followed.
 func (o *OpenRouter) get(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
-	if err := checkEndpoint(rawURL, o.host, o.port); err != nil {
+	return httpGet(ctx, o.client, rawURL, pin{host: o.host, port: o.port}, "openrouter", "application/json")
+}
+
+// pin is the one host (and port; empty is 443) an adapter's request may go to.
+type pin struct{ host, port string }
+
+// httpGet does one unauthenticated public GET (ADR 0098 decision 2.3): HTTPS only, on the pinned
+// host and port, no redirect followed, a body of at most MaxBodyBytes. name is the source in errors.
+func httpGet(ctx context.Context, c *http.Client, rawURL string, p pin, name, accept string) ([]byte, http.Header, error) {
+	if err := checkEndpoint(rawURL, p.host, p.port); err != nil {
 		return nil, nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -107,29 +116,29 @@ func (o *OpenRouter) get(ctx context.Context, rawURL string) ([]byte, http.Heade
 		return nil, nil, err
 	}
 	// Unauthenticated: no Authorization header, no secret (ADR 0098 decision 2.3).
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	client := http.Client{Timeout: 30 * time.Second}
-	if o.client != nil {
-		client = *o.client
+	if c != nil {
+		client = *c
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("pricefetch: openrouter: %w", err)
+		return nil, nil, fmt.Errorf("pricefetch: %s: %w", name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return nil, nil, fmt.Errorf("pricefetch: openrouter redirected (%d); not followed", resp.StatusCode)
+		return nil, nil, fmt.Errorf("pricefetch: %s redirected (%d); not followed", name, resp.StatusCode)
 	case resp.StatusCode != http.StatusOK:
-		return nil, nil, fmt.Errorf("pricefetch: openrouter answered %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("pricefetch: %s answered %d", name, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes+1))
 	if err != nil {
-		return nil, nil, fmt.Errorf("pricefetch: openrouter: read: %w", err)
+		return nil, nil, fmt.Errorf("pricefetch: %s: read: %w", name, err)
 	}
 	if len(body) > MaxBodyBytes {
-		return nil, nil, errors.New("pricefetch: openrouter: the body is larger than 16 MiB")
+		return nil, nil, fmt.Errorf("pricefetch: %s: the body is larger than 16 MiB", name)
 	}
 	return body, resp.Header, nil
 }

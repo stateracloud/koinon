@@ -96,7 +96,7 @@ func toProposal(r store.PriceProposal) (Proposal, error) {
 
 // RefreshConfig configures a Refresher.
 type RefreshConfig struct {
-	// Adapters are the sources it fetches. OpenRouter only, so far.
+	// Adapters are the sources it fetches (pricefetch.NewAdapters).
 	Adapters []pricefetch.Adapter
 	// Bounds tighten the auto-apply bounds; the zero value means the defaults.
 	Bounds  pricefetch.Bounds
@@ -403,9 +403,13 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 		}
 		stable = obs.Fetches >= 2 && obs.LastSeen.Time.Sub(obs.FirstSeen.Time) >= pricefetch.StabilityWindow
 	}
+	agreeing, disagreeing, err := compareSources(ctx, q, snap.Source, o.ProviderType, o.Model, hash, now)
+	if err != nil {
+		return false, err
+	}
 	prov := Provenance{
-		Source: snap.Source, URL: snap.URL, FetchedAt: snap.FetchedAt, SHA256: snap.SHA256, CommitSHA: snap.CommitSHA, ETag: snap.ETag,
-		Licence: snap.Licence, AgreeingSources: []string{snap.Source}, VouchedBy: vouchedBy, Ignored: o.Ignored,
+		Source: snap.Source, URL: snap.URL, FetchedAt: snap.FetchedAt, SHA256: snap.SHA256, CommitSHA: snap.CommitSHA, CommittedAt: snap.CommittedAt, ETag: snap.ETag,
+		Licence: snap.Licence, AgreeingSources: agreeing, VouchedBy: vouchedBy, Ignored: o.Ignored,
 	}
 	provJSON, err := json.Marshal(prov)
 	if err != nil {
@@ -419,7 +423,7 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 	}
 	params := store.UpsertPriceProposalParams{
 		Source: snap.Source, Origin: origin, ProviderType: o.ProviderType, Model: o.Model, CurrentEntry: curJSON, Provenance: provJSON,
-		AgreeingSources: []string{snap.Source}, ValuesHash: hash, Changes: []byte("[]"),
+		AgreeingSources: agreeing, ValuesHash: hash, Changes: []byte("[]"),
 	}
 	if cur != nil {
 		params.CurrentRef = cur.Ref
@@ -437,7 +441,8 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 		}
 		verdict := pricefetch.Classify(pricefetch.Facts{
 			Origin: origin, Source: snap.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: entry,
-			Agreeing: []string{snap.Source}, Stable: stable,
+			Agreeing: agreeing, Disagreeing: disagreeing, Stable: stable,
+			Pinned: snap.CommitSHA != "", CommitAge: snap.FetchedAt.Sub(snap.CommittedAt),
 		}, bounds)
 		if noMaxOutput {
 			// Never auto: a person supplies the output limit when accepting.
@@ -505,6 +510,11 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 			return err
 		}
 		var cands []Proposal
+		// Two sources that agree each have a proposal for one model. The first applies; the others
+		// are made stale by it and are superseded below, so one change is neither applied twice nor
+		// counted twice against the daily cap.
+		taken := map[string]bool{}
+		var dups []store.PriceProposal
 		for _, row := range rows {
 			if len(sources) > 0 && !slices.Contains(sources, row.Source) {
 				continue
@@ -527,9 +537,14 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 			if err != nil {
 				return err
 			}
+			agreeing, disagreeing, err := compareSources(ctx, q, row.Source, p.ProviderType, row.Model, row.ValuesHash, now)
+			if err != nil {
+				return err
+			}
 			verdict := pricefetch.Classify(pricefetch.Facts{
 				Origin: p.Origin, Source: p.Source, Current: curEntry, Baseline: baselineOf(cur), Proposed: *p.Proposed,
-				Agreeing: p.Agreeing, Stable: stable,
+				Agreeing: agreeing, Disagreeing: disagreeing, Stable: stable,
+				Pinned: p.Provenance.CommitSHA != "", CommitAge: p.Provenance.FetchedAt.Sub(p.Provenance.CommittedAt),
 			}, b)
 			if verdict.Class != pricefetch.ClassAuto {
 				if err := q.SetPriceProposalClass(ctx, store.SetPriceProposalClassParams{
@@ -539,6 +554,12 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 				}
 				continue
 			}
+			key := p.ProviderType + "\x00" + p.Model
+			if taken[key] {
+				dups = append(dups, row)
+				continue
+			}
+			taken[key] = true
 			cands = append(cands, p)
 		}
 		if len(cands) == 0 {
@@ -583,6 +604,11 @@ func (r *Refresher) autoApply(ctx context.Context, b pricefetch.Bounds, sources 
 			}
 			r.metrics.autoApplied(p.Source)
 		}
+		for _, d := range dups {
+			if _, err := q.SupersedeOpenPriceProposals(ctx, store.SupersedeOpenPriceProposalsParams{Source: d.Source, Model: d.Model, Origin: d.Origin, KeepHash: ""}); err != nil {
+				return err
+			}
+		}
 		applied = len(cands)
 		return nil
 	})
@@ -602,6 +628,40 @@ func storedStable(ctx context.Context, q *store.Queries, source, model, valuesHa
 		return false, err
 	}
 	return obs.ValuesHash == valuesHash && obs.Fetches >= 2 && obs.LastSeen.Time.Sub(obs.FirstSeen.Time) >= pricefetch.StabilityWindow, nil
+}
+
+// ObservationMaxAge is how long a source's latest values for a model count when the sources are
+// compared: a source that is no longer fetched must not hold a model's proposals back for good.
+const ObservationMaxAge = 7 * 24 * time.Hour
+
+// compareSources reads what the other sources that price providerType last returned for a model
+// (the stability rule's observations) and splits them by whether they returned the values with hash.
+// The first agreeing source is always source itself. A disagreeing source counts only if it could
+// auto-apply for the provider type (pricefetch.Agrees): models.dev's differing opinion is shown by
+// its own proposal and holds nothing back.
+func compareSources(ctx context.Context, q *store.Queries, source, providerType, model, hash string, now time.Time) (agreeing, disagreeing []string, err error) {
+	agreeing = []string{source}
+	for _, other := range pricefetch.Sources {
+		if other == source || !slices.Contains(pricefetch.ProviderTypesOf(other), providerType) {
+			continue
+		}
+		obs, err := q.GetPriceSourceObservation(ctx, store.GetPriceSourceObservationParams{Source: other, Model: model})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		} else if err != nil {
+			return nil, nil, err
+		}
+		if now.Sub(obs.LastSeen.Time) > ObservationMaxAge {
+			continue
+		}
+		switch {
+		case obs.ValuesHash == hash:
+			agreeing = append(agreeing, other)
+		case pricefetch.Agrees(providerType, other, nil):
+			disagreeing = append(disagreeing, other)
+		}
+	}
+	return agreeing, disagreeing, nil
 }
 
 func (m *Metrics) autoApplied(source string) {
@@ -860,15 +920,15 @@ func (r *Refresher) Import(ctx context.Context, actor audit.Actor, f pricefetch.
 		var uploaded []map[string]any
 		for _, snap := range f.Snapshots {
 			for _, o := range snap.Offers {
-				if o.ProviderType != "openrouter" {
-					return &InvalidError{Msg: fmt.Sprintf("the file prices %q models for provider type %q: only openrouter is supported", o.Model, o.ProviderType)}
+				if !slices.Contains(pricefetch.ProviderTypesOf(snap.Source), o.ProviderType) {
+					return &InvalidError{Msg: fmt.Sprintf("the file prices %q models for provider type %q: %s prices %v", o.Model, o.ProviderType, snap.Source, pricefetch.ProviderTypesOf(snap.Source))}
 				}
 			}
 			floor := 1
 			if a, ok := r.adapters[snap.Source]; ok {
 				floor = minModelsOf(a)
-			} else if snap.Source == pricefetch.SourceOpenRouter {
-				floor = pricefetch.OpenRouterMinModels
+			} else if a := pricefetch.NewAdapter(snap.Source, nil); a != nil {
+				floor = minModelsOf(a)
 			}
 			if err := pricefetch.CheckFloor(snap, floor, 0); err != nil {
 				return &InvalidError{Msg: err.Error()}

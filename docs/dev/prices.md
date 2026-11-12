@@ -52,3 +52,30 @@ method is in the ADR and in [the research](../research/claude-token-estimation.m
 counted with tiktoken through `github.com/pkoukk/tiktoken-go` (MIT) and
 `github.com/pkoukk/tiktoken-go-loader` (MIT), which compile OpenAI's BPE files (also MIT) into the
 binary; nothing is downloaded at run time. Update both modules together and re-run `go test ./internal/estimate`.
+
+## Platform price sources
+
+`koinon-api prices fetch` and the refresh loop read four public sources (ADR 0098 decision 2). All are
+unauthenticated GETs to a pinned host over HTTPS, with no redirects, a 16 MiB body cap and a strict
+decoder. A body under a model-count floor, or with fewer than half the models of the last good fetch,
+is refused and counted as a failed fetch.
+
+| Source | Host | Pinning | Licence | Provider types | Auto-applies for |
+| --- | --- | --- | --- | --- | --- |
+| `openrouter` | `openrouter.ai` | two fetches 24h apart | public data (ADR 0098 decision 7) | `openrouter` | `openrouter` |
+| `litellm` | `api.github.com`, `raw.githubusercontent.com` | newest commit at least 24h old | MIT | `anthropic`, `deepseek`, `openai` | the same |
+| `genai-prices` | `api.github.com`, `raw.githubusercontent.com` | newest commit at least 24h old | MIT | `anthropic`, `deepseek`, `openai` | the same |
+| `models-dev` | `models.dev` | none | MIT | `anthropic`, `deepseek`, `openai` | none: proposals only |
+
+- A GitHub source is read at a commit. The adapter asks for the newest commit of the file that is at
+  least 24 hours old, checks the committer date itself (a server may ignore `until`), and reads the
+  file at that SHA. The SHA and commit date are in the fetch row and in each proposal's provenance. A
+  commit that is reverted within a day never reaches a proposal.
+- LiteLLM floats are parsed from their decimal text, never as float64.
+- The licence of each source is recorded in the fetch row (`pricefetch.LicenceLiteLLM` and the like).
+- `--prices-refresh=auto` runs an adapter only while a provider of one of its types is in use; `on`
+  runs all of them.
+- Two sources that may auto-apply and return different values for a model send both proposals to
+  review. models.dev never counts toward auto-apply or agreement.
+- The test fixtures use fake model ids. Nothing in CI calls a real source.
+- The operator page (`docs/ops/prices.md` in the ADR) lives on the docs site now (ADR 0108).
