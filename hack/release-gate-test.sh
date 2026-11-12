@@ -356,6 +356,15 @@ for c in dco "e2e result"; do
 	jq --arg c "$c" '.check_runs |= map(if .name == $c and (.details_url | test("/runs/(910|930)/")) then .conclusion = "failure" else . end)' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
 	check "fast-forward queue commit: a red queue $c with a green PR head and a newer push skipped is refused" "$(gate_rc)" 1
 done
+# contributor gate (#848) in the queue run: success passes; skipped (a commit queued while the switch was off,
+# docs/maintainers/contributor-gate.md) is refused, not excused by the PR head.
+for c in success skipped; do
+	ff_case success
+	set_ruleset go dco "e2e result" "contributor gate"
+	run_on "$qh" "contributor gate" "$c" "2026-01-01T00:00:00Z" 900
+	run_on "$pr_head" "contributor gate" success
+	check "queue run with contributor gate $c" "$(gate_rc)" "$([[ $c == success ]] && echo 0 || echo 1)"
+done
 ff_case success
 set_ruleset go dco claim "e2e result"
 run_on "$qh" claim failure "2026-01-01T00:00:00Z" 920

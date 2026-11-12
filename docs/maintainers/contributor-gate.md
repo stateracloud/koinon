@@ -67,12 +67,14 @@ Do these in one sitting; each needs a maintainer.
      step 3). `hack/ci-required-test.sh` and `hack/ci-merge-group-test.sh` check the workflow, and
      `hack/contributor-gate-test.sh` already runs both on exactly this configuration in a scratch copy. Add
      `contributor-gate` to the list of workflows that produce a required context in `docs/dev/ci.md`
-     ("Required status checks"). `hack/release-gate.sh` already reads `contributor gate` from the merged
-     pull request (it has no push run), so release tags keep working;
+     ("Required status checks"). `hack/release-gate.sh` already treats `contributor gate` as a pull request
+     check (it has no push run): it reads the merge queue build of the tagged tree, or the merged pull
+     request's head after an admin merge;
    - after it merges, add `contributor gate` to the required status checks of the `main` ruleset and check
      with `hack/ci-required-test.sh --ruleset`. Bind it to the GitHub Actions app (rule Q5 of
      `docs/dev/ci-rules.md`). A ruleset change needs the owner's yes (`docs/dev/ci-rules.md`,
-     "Stop and ask").
+     "Stop and ask"). From then on a release tag needs a commit queued after the switch: an older commit's
+     queue build has a skipped `contributor gate`, which `hack/release-gate.sh` refuses.
 5. Add a line to the "Pull requests" section of `CONTRIBUTING.md`: a first pull request needs a maintainer's
    vouch, and how to ask for one.
 
@@ -85,8 +87,10 @@ not a vouch; the gate then runs and fails until the label or the line is there.
 
 ## Turn it off
 
-In one pull request: set the switch back to `false`, and remove the two `contributor gate` lines from
-`hack/ci-required.txt` (`hack/ci-merge-group-test.sh` fails on a required job that a queue build skips). Remove
-it from the ruleset's required checks right after that merges; until then `hack/ci-required-test.sh --ruleset`
-reports the extra ruleset context, as expected. The ruleset counts a skipped check as passing, so
-nothing waits in between, but `hack/pr-wait.sh --require "contributor gate"` would report it as skipped.
+1. Remove `contributor gate` from the required status checks of the `main` ruleset first (the owner's yes).
+   Until step 2 merges, `hack/ci-required-test.sh --ruleset` reports the list entry missing from the ruleset,
+   as expected. Doing it in this order keeps release tags working: a commit queued with the switch off has a
+   skipped `contributor gate`, which `hack/release-gate.sh` refuses while the check is required.
+2. In one pull request: set the switch back to `false`, and remove the two `contributor gate` lines from
+   `hack/ci-required.txt` (`hack/ci-merge-group-test.sh` fails on a required job that a queue build skips).
+   It merges with `hack/pr-merge.sh <PR> --admin` (a `.github/**` change, ADR 0105).
