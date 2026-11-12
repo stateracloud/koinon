@@ -279,6 +279,7 @@ func (s *Server) AnswerQuestion(ctx context.Context, req *questionv1alpha1.Answe
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "an answer is a choice, the draft or text")
 	}
+	ctx = requestCtx(ctx) // the answer's audit event carries the request ID
 	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries, b audit.Batch) (store.Question, error) {
 		return questions.Respond(ctx, q, b, c.org, id, c.actor(), ans)
 	})
@@ -302,6 +303,7 @@ func (s *Server) DismissQuestion(ctx context.Context, req *questionv1alpha1.Dism
 	if err != nil {
 		return nil, err
 	}
+	ctx = requestCtx(ctx) // the dismissal's audit event carries the request ID
 	row, err := s.resolveQuestion(ctx, c, id, func(q *store.Queries, b audit.Batch) (store.Question, error) {
 		return questions.Dismiss(ctx, q, b, c.org, id, c.actor())
 	})
