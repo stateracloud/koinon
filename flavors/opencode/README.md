@@ -292,7 +292,7 @@ launches the entry script with the policy from its own config (`ModelRetries`, `
 | `--model-tries N` | 3 | tries per model request, the first included (at most 11, OpenCode's own limit) |
 | `--model-retry-backoff-ms MS` | 1000 | the first wait; it doubles per retry, up to a minute, with ±20% jitter |
 | `--model-max-retry-after-ms MS` | 60000 | the longest `Retry-After` waited out; a longer one ends the retries and the turn fails as throttled |
-| `--compaction-tokens N` | none | the prompt size at which OpenCode compacts the conversation (at least 1000); koinon-agentd always passes it (the model's first price tier, at most 170000; ADR 0070 amendment 2026-11-11). Rendered as `limit.input` N+16000 of the model and `compaction.buffer` 16000, because OpenCode (2.2.0 source; the flavor spec "koinon-opencode compaction point" checks the shipped 2.2.6) never compacts a model whose window is unknown |
+| `--compaction-tokens N` | none | the prompt size at which OpenCode compacts the conversation (at least 1000); koinon-agentd always passes it (the model's first price tier, at most 170000; ADR 0070 amendment 2026-11-11). Rendered as `limit.input` N+30000 of the model and `compaction.buffer` 30000, because OpenCode (2.2.6 source; the flavor spec "koinon-opencode compaction point" checks the shipped harness) never compacts a model whose window is unknown; the 30000 leaves the summary request 14000 tokens above the point (the window less OpenCode's `RESERVE_MIN` of 16000), as OpenCode's own defaults do for a 200000-token window |
 
 OpenCode 2.2.0 has no config key for its retries. Its own schedule
 (`packages/core/src/model-retry.ts`) is 10 retries, exponential from 2 s with a 10 s cap per gap,

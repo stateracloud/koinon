@@ -164,16 +164,19 @@ case $model_format in
     model_overlay="\"compatibility\":{\"supportsThinkingBlockBinding\":false,\"supportsEffortUpdates\":false}"
     ;;
 esac
-# Compaction (ADR 0070 amendment 2026-11-11). Read from the 2.2.0 source (the image ships 2.2.6;
-# test/flavors "koinon-opencode compaction point" runs the real harness to check that 2.2.6 accepts
-# both keys and compacts at the point): OpenCode compacts when the prompt reaches
-# window - compaction.buffer, where the window is the model's limit.input or limit.context, and it
-# never compacts automatically while the window is unknown, as it is for every koinon/<model>
-# (packages/core/src/session/compaction.ts calculateCeiling, :1133-1141, and the Infinity case at
-# :282-286). Koinon passes the compaction point and renders a window that is that point plus the
-# reserve, with the buffer set to the reserve, so the ceiling is exactly the point. 16000 is
-# OpenCode's own RESERVE_MIN (the room kept for the last reply and the summary, :128).
-compaction_reserve=16000
+# Compaction (ADR 0070 amendment 2026-11-11). Read from the 2.2.6 source (test/flavors
+# "koinon-opencode compaction point" runs the real harness to check that it accepts both keys and
+# compacts at the point): OpenCode compacts when the prompt reaches window - compaction.buffer,
+# where the window is the model's limit.input or limit.context, and it never compacts automatically
+# while the window is unknown, as it is for every koinon/<model>
+# (packages/core/src/session/compaction.ts calculateCeiling and inputWindow). Koinon passes the
+# compaction point and renders a window that is that point plus the reserve, with the buffer set to
+# the reserve, so the ceiling is exactly the point. The summary request may be as large as the
+# window less RESERVE_MIN (16000, summaryRoom); a smaller reserve leaves it no room above the
+# point, and OpenCode then cannot send the conversation unchanged (or, with little history, at all)
+# to be summarized. 30000 keeps 14000 tokens of that room, OpenCode's own figures for a
+# 200000-token window (ceiling 170000, summary room 184000), which a 170000 point renders exactly.
+compaction_reserve=30000
 if [ -n "$compaction_tokens" ]; then
   model_overlay="$model_overlay${model_overlay:+,}\"limit\":{\"input\":$((compaction_tokens + compaction_reserve))}"
   config_content="$config_content${config_content:+,}\"compaction\":{\"buffer\":$compaction_reserve}"

@@ -429,13 +429,13 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 	})
 
 	// ADR 0070 amendment 2026-11-11 (issue 97): the compaction point is rendered as a window of
-	// point + 16000 and a buffer of 16000, so OpenCode 2.2.0's ceiling (window - buffer) is the point.
+	// point + 30000 and a buffer of 30000, so OpenCode 2.2.6's ceiling (window - buffer) is the point.
 	It("renders the compaction point of --compaction-tokens as the model's window and the buffer", func(ctx SpecContext) {
 		Expect(entryEnv(ctx, "--compaction-tokens", "100000")).To(ContainSubstring(
-			`OPENCODE_CONFIG_CONTENT={"compaction":{"buffer":16000},"providers":{"koinon":{"models":{"m-1":{"limit":{"input":116000}}}}}}` + "\n"))
+			`OPENCODE_CONFIG_CONTENT={"compaction":{"buffer":30000},"providers":{"koinon":{"models":{"m-1":{"limit":{"input":130000}}}}}}` + "\n"))
 		Expect(entryEnv(ctx, "--compaction-tokens", "170000", "--model-format", "anthropic")).To(ContainSubstring(
-			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","compaction":{"buffer":16000},"providers":{"koinon-anthropic":{"models":{"m-1":{` +
-				`"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false},"limit":{"input":186000}}}}}}` + "\n"))
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","compaction":{"buffer":30000},"providers":{"koinon-anthropic":{"models":{"m-1":{` +
+				`"compatibility":{"supportsThinkingBlockBinding":false,"supportsEffortUpdates":false},"limit":{"input":200000}}}}}}` + "\n"))
 	})
 
 	It("refuses a compaction point it cannot follow", func(ctx SpecContext) {
@@ -494,23 +494,36 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 })
 
 // The compaction point reaches OpenCode (ADR 0070 amendment 2026-11-11, issue 97). The entry script
-// renders it as a model window of point + 16000 (limit.input, with no context or output) and
-// compaction.buffer 16000; these specs run the real harness (OpenCode 2.2.6, the version the image
+// renders it as a model window of point + 30000 (limit.input, with no context or output) and
+// compaction.buffer 30000; these specs run the real harness (OpenCode 2.2.6, the version the image
 // ships) to show that it accepts both keys in either model format and that the point takes effect.
 var _ = Describe("koinon-opencode compaction point", func() {
-	// summaryRequests are the requests whose last user message asks for a summary of the
-	// conversation, which is what OpenCode sends to compact it.
+	// summaryMarker is in every summary prompt OpenCode 2.2.6 sends to compact a conversation, the
+	// first and the update (packages/core/src/session/compaction.ts buildPrompt).
+	const summaryMarker = "Return only the structured summary"
+	// summaryRequests are the requests whose last user message is that prompt.
 	summaryRequests := func(gw *gateway) []string {
 		var out []string
 		for _, b := range gw.modelBodies() {
-			if strings.Contains(strings.ToLower(lastUserText([]byte(b))), "summar") {
+			if strings.Contains(lastUserText([]byte(b)), summaryMarker) {
 				out = append(out, b)
 			}
 		}
 		return out
 	}
-	// filler is about 1000 tokens of text OpenCode's estimate (about 4 bytes a token) counts.
-	filler := strings.Repeat("koinon compaction filler words. ", 130)
+	// compactingScript is the contract script with a reply to the summary prompt first. OpenCode
+	// takes a summary only when a line of it is one of the template's headings; a reply without one
+	// gets one reminder, and then the compaction, and with it the turn, fails.
+	compactingScript := func() fakemodel.Script {
+		s := contractScript(opencode)
+		s.Turns = append([]fakemodel.Turn{{
+			When: fakemodel.When{UserContains: summaryMarker},
+			Text: "## Objective\n- Fill the conversation until it compacts.\n\n## Next Move\n1. (none)",
+		}}, s.Turns...)
+		return s
+	}
+	// filler is about 4000 tokens of text OpenCode's estimate (about 4 bytes a token) counts.
+	filler := strings.Repeat("koinon compaction filler words. ", 500)
 
 	for _, format := range []modelformat.Format{modelformat.OpenAI, modelformat.Anthropic} {
 		It("starts and answers with a 170000 point on the "+string(format)+" entry", func(ctx SpecContext) {
@@ -523,11 +536,15 @@ var _ = Describe("koinon-opencode compaction point", func() {
 		}, SpecTimeout(3*time.Minute))
 	}
 
+	// The point is above the first request (OpenCode's system prompt and tools are part of every
+	// request, so a point below them would compact a conversation with nothing to cut yet) and is
+	// passed within at most 10 filler turns. The fake model reports no usage, so OpenCode goes by its
+	// own estimate.
 	It("compacts a conversation that passes the point, and the session keeps working", func(ctx SpecContext) {
-		gw := newGateway(contractScript(opencode))
+		gw := newGateway(compactingScript())
 		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
-		h, session := harnessIn(ctx, sb, gw, modelformat.OpenAI, "", "--compaction-tokens", "1000")
-		for i := 0; i < 8 && len(summaryRequests(gw)) == 0; i++ {
+		h, session := harnessIn(ctx, sb, gw, modelformat.OpenAI, "", "--compaction-tokens", "40000")
+		for i := 0; i < 20 && len(summaryRequests(gw)) == 0; i++ {
 			_, err := h.conn.Prompt(ctx, session, fmt.Sprintf("turn %d: %s", i, filler))
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoWriter.Printf("after turn %d: %d requests, %d summary requests\n", i, len(gw.modelBodies()), len(summaryRequests(gw)))

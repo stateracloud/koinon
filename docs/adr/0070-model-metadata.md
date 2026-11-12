@@ -570,12 +570,17 @@ agentd, from the price catalog, as follows.
    (`packages/core/src/session/compaction.ts`, `calculateCeiling`). With an unknown window (limit 0,
    which is the case for every `koinon/<model>`) the ceiling is infinite, so OpenCode did **not**
    compact automatically before this change, whatever the Context section assumed. The entry script
-   therefore renders, in `OPENCODE_CONFIG_CONTENT`, a window of `point + 16000` as the model's
-   `limit.input` and `compaction.buffer: 16000` (OpenCode's own `RESERVE_MIN`). The ceiling is then
-   exactly the point, and the room OpenCode keeps for the last reply and the summary is unchanged.
-   The flavor spec "koinon-opencode compaction point" (`test/flavors/opencode_test.go`) starts the
-   real v2.2.6 harness with `--compaction-tokens` in both model formats and with a point of 1000 and
-   checks that a summary request reaches the gateway and the session keeps working.
+   therefore renders, in `OPENCODE_CONFIG_CONTENT`, a window of `point + 30000` as the model's
+   `limit.input` and `compaction.buffer: 30000`. The ceiling is then exactly the point. The summary
+   request may be as large as the window less `RESERVE_MIN` (16000; `summaryRoom` in v2.2.6), so
+   30000 leaves it 14000 tokens above the point to send the conversation unchanged, which reuses the
+   prompt cache; these are OpenCode's own figures for a 200000-token window (ceiling 170000, room
+   184000), and a point of 170000 renders them exactly. A reserve of 16000, the first form of this
+   amendment, left no room: the conversation never went out unchanged, and a short one with a large
+   system prompt could not be summarized at all. The flavor spec "koinon-opencode compaction point"
+   (`test/flavors/opencode_test.go`) starts the real v2.2.6 harness with `--compaction-tokens` in
+   both model formats, and with a point of 40000 and a fake model that answers the summary
+   template checks that the conversation compacts and the session keeps working.
 4. **Caching (ADR 0068).** Nothing changes: prompt caching stays on with no off switch. Compaction
    rewrites the prompt once and the next turn writes the cache again; a lower point means more
    rewrites for a tiered model and fewer billed tokens at the dear tier.
