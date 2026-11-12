@@ -886,8 +886,8 @@ creates one of this name in each workspace namespace.
 {{- fail "checkpoints.s3.pathStyle=false is not supported: the S3 client addresses buckets path-style except on AWS" }}
 {{- end }}
 {{- end }}
-{{- if and .Values.flavorPrepull.enabled (not .Values.flavorPrepull.nodeSelector) }}
-{{- fail "flavorPrepull.nodeSelector is required when flavorPrepull.enabled is true: select the Kata nodes, or the images are pulled onto every node" }}
+{{- if and .Values.harnessPrepull.enabled (not .Values.harnessPrepull.nodeSelector) }}
+{{- fail "harnessPrepull.nodeSelector is required when harnessPrepull.enabled is true: select the Kata nodes, or the images are pulled onto every node" }}
 {{- end }}
 {{- if not (has .Values.postgres.mode (list "cnpg" "external")) }}
 {{- fail "postgres.mode must be cnpg or external" }}

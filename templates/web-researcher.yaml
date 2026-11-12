@@ -14,10 +14,9 @@ metadata:
     report. It has no access to your repositories or other private data, and it needs a search or
     fetch MCP server allowed for the agent. For research over your own repositories use Researcher.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:

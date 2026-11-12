@@ -35,7 +35,7 @@ bootstrapAdmin:
   existingSecret: koinon-bootstrap-admin-gitops
 imagePullSecrets:
   - name: ghcr-pull
-flavorPrepull:
+harnessPrepull:
   enabled: true
   nodeSelector:
     katacontainers.io/kata-runtime: "true"

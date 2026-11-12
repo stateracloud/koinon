@@ -13,10 +13,9 @@ metadata:
     through the MCP servers you allow for the agent (billing, cost or metrics servers); allow them
     on the agent's page after you create it.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:

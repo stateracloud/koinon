@@ -130,7 +130,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	}
 	// The harness the agent runs on, by name (ADR 0112). The deprecated harness field is read only
 	// when the request names no harness.
-	chosen := string(t.Spec.Harnesses.Default)
+	chosen := string(t.Spec.Harness.Default)
 	requested := strings.TrimSpace(req.GetHarness())
 	if requested == "" && req.GetFlavor() != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED { //nolint:staticcheck // deprecated field, read for older clients
 		f, ok := flavorFromProto(req.GetFlavor()) //nolint:staticcheck // deprecated field, read for older clients
@@ -140,7 +140,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		requested = f
 	}
 	if requested != "" {
-		if _, ok := harness.Lookup(requested); !ok || !slices.Contains(t.Spec.Harnesses.Allowed, templates.HarnessName(requested)) {
+		if _, ok := harness.Lookup(requested); !ok || !slices.Contains(t.Spec.Harness.Allowed, templates.HarnessName(requested)) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, "harness is not allowed by the template")
 		}
 		chosen = requested
