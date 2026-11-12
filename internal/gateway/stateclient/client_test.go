@@ -219,6 +219,26 @@ var _ = Describe("the gateway State client", func() {
 		Expect(testutil.ToFloat64(m.Applied.WithLabelValues("mcp", "ok"))).To(Equal(1.0))
 	})
 
+	It("retries a half whose apply failed, without a new publish", func() {
+		start(20 * time.Millisecond)
+		st.publish(5, "wiki")
+		model.setErr(errors.New("gateway admin endpoint unreachable"))
+		calls := 0
+		model.onApply = func() { // runs under the applier lock, before the error check: the second call succeeds
+			if calls++; calls == 2 {
+				model.err = nil
+			}
+		}
+		m := stateclient.NewMetrics(nil)
+		run(m)
+
+		Eventually(acked(5, gwv1.Half_HALF_MODEL), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Eventually(acked(5, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Expect(testutil.ToFloat64(m.Applied.WithLabelValues("model", "failed"))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.Applied.WithLabelValues("model", "ok"))).To(Equal(1.0))
+		Expect(mcp.names()).To(Equal([]string{"wiki"}), "the half that applied is not applied again")
+	})
+
 	It("reconnects after a drop and gets the newest revision, not the ones it missed", func() {
 		start(20 * time.Millisecond)
 		st.publish(1, "one")

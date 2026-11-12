@@ -211,7 +211,8 @@ func (c *Client) session(ctx context.Context) (int, error) {
 }
 
 // handle applies both halves of u and acks each one that applied. The halves are independent: one
-// failing to apply does not hold back the other. It returns an error only for a lost ack.
+// failing to apply does not hold back the other. It returns an error for a lost ack or a failed apply, which ends the session so that Run
+// reconnects and the replayed newest revision retries the half.
 func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 	state := staterev.FromProto(u)
 	var ackErr error
@@ -249,7 +250,9 @@ func (c *Client) half(ctx context.Context, rev int64, h gwv1.Half, apply func(co
 			c.cfg.Metrics.Applied.WithLabelValues(name, resultFailed).Inc()
 			c.log.Error("applying a State revision failed; not acked", "half", name, "revision", rev, "err", err)
 			delete(c.applied, h)
-			return nil
+			// End the session: Run reconnects with backoff and the server replays the newest
+			// revision, which applies this half again (the other half is skipped as applied).
+			return fmt.Errorf("apply %s revision %d: %w", name, rev, err)
 		}
 		c.cfg.Metrics.Applied.WithLabelValues(name, resultOK).Inc()
 		c.applied[h] = rev
