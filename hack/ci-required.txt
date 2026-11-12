@@ -30,6 +30,7 @@ generated code
 chart
 chart smoke
 escape (admission)
+opencode plugin
 lint-shell
 scripts
 # Runs in the merge queue and on pushes to main only; on a pull request its job-level `if:` skips it, which

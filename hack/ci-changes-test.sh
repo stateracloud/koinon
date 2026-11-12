@@ -164,7 +164,7 @@ expect "go" test/e2e/run.sh
 expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke escape flavors generate go web"
+all="chart chartsmoke escape flavors generate go opencodeplugin web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum
