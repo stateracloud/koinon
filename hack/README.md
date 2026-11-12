@@ -22,7 +22,7 @@ names what needs the upstream project's rights and what still works from a fork.
 | `pr-threads.sh` | nothing: it only reads |
 | `ci-fail.sh` | nothing: it only reads |
 | `ci-timing.sh` | nothing: it only reads |
-| `wt.sh` | nothing: local worktrees only |
+| `wt.sh` | nothing: local worktrees, and it only reads pull requests |
 | `e2e-status.sh` | posting a commit status |
 | `go-test-lab.sh` | posting a commit status, a lab host |
 | `e2e-remote.sh` | the lab target (`--local` needs none) |

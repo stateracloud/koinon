@@ -45,7 +45,7 @@
 # human holds, or none).
 #
 # Environment (all optional):
-#   KOINON_CLAIM_REPO           owner/name (default: KOINON_REPO, else the remote gh picks, hack/repo-lib.sh)
+#   KOINON_CLAIM_REPO           owner/name (default: KOINON_REPO, GH_REPO, else the remote gh picks; hack/repo-lib.sh)
 #   KOINON_CLAIM_PROJECT        project number for `next`, or none (default: KOINON_BOARD, which is 1 on
 #                               the upstream repository and none on a fork, hack/repo-lib.sh)
 #   KOINON_CLAIM_PROJECT_OWNER  project owner (default: KOINON_BOARD_OWNER, else the repository owner)
