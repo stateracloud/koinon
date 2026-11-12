@@ -240,6 +240,28 @@ var _ = Describe("The handoff", func() {
 		Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
 	})
 
+	It("stays within budget with no message at all and oversized fixed parts", func() {
+		for _, x := range []agentd.Handoff{
+			{Title: strings.Repeat("t", 40000)},
+			{Title: "T", Outcomes: strings.Repeat("o", 40000)},
+			{Title: "T", Summary: strings.Repeat("s", 40000), Replies: []string{"r"}, Outcomes: strings.Repeat("o", 40000)},
+			{Title: strings.Repeat("日本語", 9000)},
+		} {
+			var out string
+			Expect(func() { out = x.Build() }).NotTo(Panic())
+			Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
+			Expect(out).To(HaveSuffix("[truncated]"))
+			Expect(strings.ToValidUTF8(out, "")).To(Equal(out))
+		}
+	})
+
+	It("cuts the one message left with a mark when the fixed parts nearly fill the budget", func() {
+		out := agentd.Handoff{Title: strings.Repeat("t", agentd.HandoffMaxBytes-1000), Messages: []string{strings.Repeat("m", 5000)}}.Build()
+		Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
+		Expect(out).To(ContainSubstring("mmm"))
+		Expect(out).To(HaveSuffix("[truncated]"))
+	})
+
 	It("truncates summaries on a character boundary", func() {
 		out := agentd.TruncateSummary(strings.Repeat("日本語", 5000))
 		Expect(len(out)).To(BeNumerically("<=", agentd.SummaryMaxBytes))

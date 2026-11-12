@@ -69,6 +69,12 @@ func RenderOutcomes(qs []store.Question, reqs []store.ApprovalRequest) string {
 	return text
 }
 
+// OutsideMaxBytes caps one value Koinon did not write in the resume prompt.
+const OutsideMaxBytes = outsideMaxBytes
+
+// QuoteOutside is the quoting rule for those values.
+var QuoteOutside = quoteOutside
+
 func BuildHandoff(title, notice, summary string, replies, messages []string, outcomes string) string {
 	return handoff{Title: title, Notice: notice, Summary: summary, Replies: replies, Messages: messages, Outcomes: outcomes}.build()
 }

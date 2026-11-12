@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/estimate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -146,8 +147,8 @@ var _ = Describe("Settling responses cut short", func() {
 		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-a")})
 		Expect(err).NotTo(HaveOccurred())
 		charges, held, _ := spent(ctx)
-		Expect(charges).To(Equal("0.0002"), "the logged usage: 1000 in at 0.20 per million, no output")
-		Expect(held).To(Equal("0.40"), "the bound (1000 in + 200k max_tokens out at 2, $0.4002) minus the charge")
+		Expect(charges).To(Equal("0.008392"), "1000 in logged and 4096 out estimated (old issue 670), at 0.20 and 2 per million")
+		Expect(held).To(Equal("0.391808"), "the bound (1000 in + 200k max_tokens out at 2, $0.4002) minus the charge")
 		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.5998"))))
 
 		By("pending: the attempt is deferred and nothing changes")
@@ -161,21 +162,21 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(attempts).To(Equal(1))
 
 		By("the provider reports: the entry takes its usage and bill, the reserve is released")
-		// Koinon's price for these tokens: 1000 in at 0.20 + 250 out at 2, per million.
-		src.answer("gen-a", providerusage.Usage{InputTokens: 1000, OutputTokens: 250, Cost: money.MustParse("0.0007")})
+		// Koinon's price for these tokens: 1000 in at 0.20 + 5000 out at 2, per million.
+		src.answer("gen-a", providerusage.Usage{InputTokens: 1000, OutputTokens: 5000, Cost: money.MustParse("0.0102")})
 		clock = clock.Add(time.Hour / 2)
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		charges, held, rows := spent(ctx)
-		Expect([]any{charges, held, rows}).To(Equal([]any{"0.0007", "0.00", 1}), "replaced in place: no second entry, nothing held")
+		Expect([]any{charges, held, rows}).To(Equal([]any{"0.0102", "0.00", 1}), "replaced in place: no second entry, nothing held")
 		Expect(e.lastEntry(ctx).CostFlagged).To(BeTrue(), "still flagged usage_missing from ingest")
 		Expect(string(e.lastEntry(ctx).Estimate)).NotTo(ContainSubstring("provider_diff"), "Koinon's price agrees with the bill")
 		s := e.lastEntry(ctx)
-		Expect(s.OutputTokens).To(Equal(int64(250)))
+		Expect(s.OutputTokens).To(Equal(int64(5000)))
 		Expect(s.Estimated).To(BeFalse())
 		Expect(string(s.Estimate)).To(ContainSubstring(`"settled"`))
 		Expect(e.provisional(ctx)).To(BeZero())
-		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(1250)), "the provider's extra tokens reach the run")
+		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(6000)), "the provider's extra tokens reach the run")
 
 		rs := revisions(ctx)
 		Expect(rs).To(HaveLen(1))
@@ -184,8 +185,8 @@ var _ = Describe("Settling responses cut short", func() {
 		var before, after map[string]any
 		Expect(json.Unmarshal(rs[0].Before, &before)).To(Succeed())
 		Expect(json.Unmarshal(rs[0].After, &after)).To(Succeed())
-		Expect(before).To(HaveKeyWithValue("output_tokens", BeNumerically("==", 0)))
-		Expect(after).To(HaveKeyWithValue("output_tokens", BeNumerically("==", 250)))
+		Expect(before).To(HaveKeyWithValue("output_tokens", BeNumerically("==", 4096)))
+		Expect(after).To(HaveKeyWithValue("output_tokens", BeNumerically("==", 5000)))
 		Expect(after).To(HaveKeyWithValue("provisional", false))
 
 		By("nothing left to settle, and a replayed export changes nothing")
@@ -203,13 +204,13 @@ var _ = Describe("Settling responses cut short", func() {
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		charges, held, _ := spent(ctx)
-		Expect([]any{charges, held}).To(Equal([]any{"0.0002", "0.00"}), "the logged usage, never max_tokens")
+		Expect([]any{charges, held}).To(Equal([]any{"0.008392", "0.00"}), "the logged usage and the bounded output estimate, never max_tokens")
 		Expect(e.provisional(ctx)).To(BeZero())
 		rs := revisions(ctx)
 		Expect(rs).To(HaveLen(1))
 		Expect(rs[0].Reason).To(Equal("expired"))
 		Expect(rs[0].Source).To(Equal("gateway"), "the logged usage stands")
-		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.9998"))))
+		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.991608"))))
 	})
 
 	It("does not ask a provider whose key was lost, and settles once the key is entered again", func(ctx SpecContext) {
@@ -250,12 +251,12 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(src.callsFor("gen-lost2")).To(BeZero())
 		charges, held, _ := spent(ctx)
-		Expect([]any{charges, held}).To(Equal([]any{"0.0002", "0.00"}))
+		Expect([]any{charges, held}).To(Equal([]any{"0.008392", "0.00"}))
 		Expect(revisions(ctx)).To(ConsistOf(HaveField("Reason", "expired")))
 	})
 
 	It("holds the reserve back from the gateway key only; budgets, alerts and stops count the charges", func(ctx SpecContext) {
-		// Limit $1.00: each cut response is charged $0.0002 and holds back $0.40 more ($0.4002).
+		// Limit $1.00: each cut response is charged $0.008392 and holds back $0.391808 more ($0.4002).
 		for i := range 5 {
 			_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-c" + string(rune('0'+i)))})
 			Expect(err).NotTo(HaveOccurred())
@@ -263,10 +264,10 @@ var _ = Describe("Settling responses cut short", func() {
 		l, err := ledger.AgentLimit(ctx, q, e.agent, clock)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.Amount).To(BeZero(), "the key gets nothing while five bounds are pending")
-		Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.001 charged: nothing is stopped")
+		Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.04196 charged: nothing is stopped")
 		v, _, err := budget.New(db).GetAgent(ctx, e.org, e.agent.ID, money.MustParse("1.00"), clock)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(v.SpentToday).To(Equal(money.MustParse("0.001")), "pages show the charges")
+		Expect(v.SpentToday).To(Equal(money.MustParse("0.04196")), "pages show the charges")
 		n, err := ledger.StopSpent(ctx, db, e.agent, clock)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(BeZero(), "a key blocked by reserves alone stops no run")
@@ -310,7 +311,7 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, err = in.Ingest(ctx, []ledger.Entry{cut("gen-r1")})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.0002 charged at ingest")
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.008392 charged at ingest")
 
 			// 1000 in at 0.20 and 300k out at 2, per million: $0.6002 against the $0.50 limit.
 			src.answer("gen-r1", providerusage.Usage{InputTokens: 1000, OutputTokens: 300_000, Cost: money.MustParse("0.6002")})
@@ -369,11 +370,11 @@ var _ = Describe("Settling responses cut short", func() {
 	It("adds the provider's extra tokens to the run once, even when the settlement is replayed", func(ctx SpecContext) {
 		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-d")})
 		Expect(err).NotTo(HaveOccurred())
-		src.answer("gen-d", providerusage.Usage{InputTokens: 1000, OutputTokens: 500, Cost: money.MustParse("0.0005"), Cancelled: true})
+		src.answer("gen-d", providerusage.Usage{InputTokens: 1000, OutputTokens: 5000, Cost: money.MustParse("0.0102"), Cancelled: true})
 		clock = clock.Add(time.Minute)
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(1500)))
+		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(6000)))
 		Expect(string(e.lastEntry(ctx).Estimate)).To(ContainSubstring(`"cancelled": true`))
 
 		By("a stale settlement row for the final entry (a second settler, a replay) changes nothing")
@@ -385,7 +386,7 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = settler.SettleDue(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(1500)), "not 2000")
+		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(6000)), "not 6904")
 		Expect(revisions(ctx)).To(HaveLen(1))
 		var left int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_settlements WHERE org_id = $1`, e.org).Scan(&left)).To(Succeed())
@@ -779,7 +780,7 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(e.provisional(ctx)).To(Equal(1), "settled by generation ID")
 			s := e.lastEntry(ctx)
 			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_partial": true`))
-			Expect(s.OutputTokens).To(Equal(int64(1)), "charged as logged")
+			Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "not message_start's output 1: the bounded estimate (old issue 670)")
 
 			By("an OpenAI-format record with an error and no output is cut too")
 			y := cut("gen-err2")
@@ -839,7 +840,7 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(ledger.FormatUSD(cost)).To(Equal("0.003"))
 		})
 
-		It("from a provider that cannot report: charged as logged, the reserve held until the deadline", func(ctx SpecContext) {
+		It("from a provider that cannot report: charged the logged input and the output estimate, the reserve held until the deadline", func(ctx SpecContext) {
 			d := newEnv(ctx, uniq("org"), "", "1.00")
 			d.model(ctx, "anthropic", flash) // a provider type without a usage source
 			_, err := prices.New(db, nil, priceList).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
@@ -861,8 +862,8 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(d.provisional(ctx)).To(Equal(1))
 			var charge, reserve string
 			Expect(db.QueryRow(ctx, `SELECT cost_usd::text, reserve_usd::text FROM spend_entries WHERE org_id = $1`, d.org).Scan(&charge, &reserve)).To(Succeed())
-			Expect(ledger.FormatUSD(charge)).To(Equal("0.000021"), "as logged: 1000 in + 1 out")
-			Expect(ledger.FormatUSD(reserve)).To(Equal("0.199999"), "the 200k bound held back from the key")
+			Expect(ledger.FormatUSD(charge)).To(Equal("0.004116"), "1000 in as logged + 4096 out estimated, not the logged 1 (old issue 670)")
+			Expect(ledger.FormatUSD(reserve)).To(Equal("0.195904"), "the 200k bound held back from the key, minus the charge")
 
 			clock = clock.Add(time.Minute)
 			_, err = settler.SettleDue(ctx)
@@ -873,7 +874,7 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.provisional(ctx)).To(BeZero())
 			Expect(db.QueryRow(ctx, `SELECT cost_usd::text, reserve_usd::text FROM spend_entries WHERE org_id = $1`, d.org).Scan(&charge, &reserve)).To(Succeed())
-			Expect([]string{ledger.FormatUSD(charge), ledger.FormatUSD(reserve)}).To(Equal([]string{"0.000021", "0.00"}))
+			Expect([]string{ledger.FormatUSD(charge), ledger.FormatUSD(reserve)}).To(Equal([]string{"0.004116", "0.00"}))
 		})
 	})
 })

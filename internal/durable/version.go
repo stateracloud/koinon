@@ -24,8 +24,11 @@ import (
 //
 // Rule for every workflow, old and new: it must be idempotent from step 0, because a carried-over
 // workflow runs all its steps again. Give each effect a dedupe key (Once, a fixed workflow ID, an
-// idempotent insert); see the table in ADR 0085.
-const WorkflowVersion = "1"
+// idempotent insert); see the table in ADR 0085. A new workflow is a bump too: a process of the
+// previous version would dequeue it without having it registered.
+//
+// History: 2 added koinon.code-host-poll-event (issue #25).
+const WorkflowVersion = "2"
 
 // DefaultCarryOverInterval is how often a launched Runtime looks for pending workflows of another
 // version. The first look is at Launch; later ones catch workflows that an older process, still

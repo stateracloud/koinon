@@ -14,7 +14,9 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/estimate"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
@@ -279,8 +281,8 @@ var _ = Describe("Cost truth", func() {
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
 		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
-		Expect(s.OutputTokens).To(BeZero(), "nothing was streamed: no output is charged, never max_tokens")
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
+		Expect(s.OutputTokens).To(Equal(int64(250)), "cut without usage: a quarter of max_tokens 1000 (old issue 670), never max_tokens")
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.2005"))
 		var est map[string]any
 		Expect(json.Unmarshal(s.Estimate, &est)).To(Succeed())
 		Expect(est).To(HaveKey("estimate"))
@@ -291,7 +293,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(rep).To(HaveLen(1))
 		Expect(rep[0].EstimatedRequests).To(Equal(int64(1)))
 		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("0.00"))
-		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.20"))
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.2005"))
 	})
 
 	It("raises, never lowers, the estimate with the learned p90", func(ctx SpecContext) {
@@ -400,11 +402,12 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(s.CostFlagged).To(BeTrue(), "a 2xx without usage is flagged")
 		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_capped": true`))
-		// Nothing was streamed and the provider cannot settle it: only the input estimate is charged,
-		// never the max_tokens bound.
+		// The provider cannot settle it: each is charged its input estimate and the bounded output
+		// estimate (4096 tokens at most, old issue 670), never the max_tokens bound: 5 x (44 input at
+		// 10 + 4096 output at 50 per million).
 		var sum string
 		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd + reserve_usd)::text FROM spend_entries WHERE org_id = $1`, abuser.org).Scan(&sum)).To(Succeed())
-		Expect(sum).To(HavePrefix("0.0"))
+		Expect(ledger.FormatUSD(sum)).To(Equal("1.0262"))
 
 		// The budgets of both orgs still compute.
 		_, err = ledger.AgentLimit(ctx, q, abuser.agent, time.Now())
@@ -571,7 +574,7 @@ var _ = Describe("An unusable stored price", func() {
 		})
 	})
 
-	It("charges an aborted response the usage the gateway logged and holds max_tokens back from the key while the provider's figure is pending", func(ctx SpecContext) {
+	It("charges an aborted response the usage the gateway logged plus its estimated output and holds max_tokens back from the key while the provider's figure is pending", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		x := func(max int64, responseID string) ledger.Entry {
@@ -585,9 +588,9 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
-		Expect(s.OutputTokens).To(BeZero(), "no output was logged: none is charged, never max_tokens")
-		// 1000 reported input at 0.20 per million.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0002"))
+		Expect(s.OutputTokens).To(Equal(int64(500)), "no output was logged: a quarter of max_tokens is estimated (old issue 670), never max_tokens")
+		// 1000 reported input at 0.20 and 500 estimated output at 2 per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0012"))
 		Expect(e.provisional(ctx)).To(BeZero())
 
 		By("a provider that can: provisional, with the bound held back from the key, not in budgets or reports")
@@ -597,18 +600,18 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(e.provisional(ctx)).To(Equal(1))
 		var reserve string
 		Expect(db.QueryRow(ctx, `SELECT reserve_usd::text FROM spend_entries WHERE org_id = $1 AND provisional`, e.org).Scan(&reserve)).To(Succeed())
-		// The bound: 1000 input + 2000 output is 0.0042; the charge 0.0002 is not held twice.
-		Expect(ledger.FormatUSD(reserve)).To(Equal("0.004"))
+		// The bound: 1000 input + 2000 output is 0.0042; the charge 0.0012 is not held twice.
+		Expect(ledger.FormatUSD(reserve)).To(Equal("0.003"))
 		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(Equal(money.MustParse("99.9956")), "the key's limit holds the reserve back")
+		Expect(l.Amount).To(Equal(money.MustParse("99.9946")), "the key's limit holds the reserve back")
 		v, _, err := budget.New(db).GetAgent(ctx, e.org, e.agent.ID, money.MustParse("100.00"), time.Now())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(v.SpentToday).To(Equal(money.MustParse("0.0004")), "the budget counts the charges only")
+		Expect(v.SpentToday).To(Equal(money.MustParse("0.0024")), "the budget counts the charges only")
 		rep, err := q.SpendReport(ctx, store.SpendReportParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.0004"), "reports count the charges only")
-		Expect(ledger.FormatUSD(rep[0].ReservedUsd)).To(Equal("0.004"))
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.0024"), "reports count the charges only")
+		Expect(ledger.FormatUSD(rep[0].ReservedUsd)).To(Equal("0.003"))
 		Expect(rep[0].ProvisionalRequests).To(Equal(int64(1)))
 
 		By("without max_tokens the entry's max_output is the bound, flagged")
@@ -616,7 +619,126 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		s = e.lastEntry(ctx)
 		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_fallback": true`))
-		Expect(s.OutputTokens).To(BeZero())
+		Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "a quarter of the 1M max_output, at most 4096")
+	})
+
+	// Old issue 670, ADR 0056 amendment 2026-10-31 point 2: a response cut short is charged its input
+	// plus the output streamed, estimated when the provider reported none; never zero output, never
+	// max_tokens.
+	Describe("a stream that ended without usage", func() {
+		basis := func(s spendRow) map[string]any {
+			var meta map[string]any
+			Expect(json.Unmarshal(s.Estimate, &meta)).To(Succeed())
+			Expect(meta).To(HaveKey("estimate"))
+			return meta["estimate"].(map[string]any)
+		}
+
+		It("charges an aborted chat-completions stream with max_tokens 32000 a bounded output estimate, not zero", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200, MaxTokens: 32000,
+				Format: modelformat.OpenAI, Stream: true, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.Estimated).To(BeTrue())
+			Expect(s.CostFlagged).To(BeTrue())
+			Expect(s.InputTokens).To(Equal(int64(1000)))
+			Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "a quarter of 32000, at most 4096: never zero, never max_tokens")
+			// 1000 input at 0.20 and 4096 output at 2 per million.
+			Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.008392"))
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputBounded))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+		})
+
+		It("charges no output to a stream the client left before the response headers (no status: nothing streamed)", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, MaxTokens: 32000,
+				Format: modelformat.Anthropic, Stream: true, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.InputTokens).To(Equal(int64(1000)), "the provider may have read the prompt")
+			Expect(s.OutputTokens).To(BeZero(), "a stream sends its headers before its first token")
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputNothingStreamed))
+		})
+
+		It("charges the bounded estimate to a request not known to stream that the client left before the headers", func(ctx SpecContext) {
+			// A non-streamed response sends its headers only once the provider generated it, so a
+			// client that gave up first does not show that nothing was generated (and billed).
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, MaxTokens: 32000,
+				RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.InputTokens).To(Equal(int64(1000)))
+			Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "not a way to leave the output uncharged")
+			Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.008392"))
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputBounded))
+		})
+
+		It("does not raise logged usage that is not message_start's placeholder", func(ctx SpecContext) {
+			// A proxy error on a non-streamed response whose usage is the provider's own: charged as logged.
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, MaxTokens: 32000, Status: 200,
+				Format: modelformat.Anthropic, Error: "Upstream", InputKnown: true, InputTokens: 1000,
+				OutputKnown: true, OutputTokens: 300, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(Equal(int64(300)))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"output_estimated": false`))
+		})
+
+		It("estimates the output of a cut stream from its measured response size", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			x := ledger.Entry{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200, MaxTokens: 32000,
+				RequestBytes: 3000, ResponseBytes: 3000, Time: time.Now(),
+			}
+			_, err := ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(Equal(int64(1000)), "3000 bytes at 3.0 bytes per token")
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputFromBytes))
+
+			By("a measured empty response: nothing was streamed, no output (amendment 2026-10-31, point 1)")
+			x.RequestID, x.ResponseBytes = uniq("req"), 0
+			_, err = ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			s = e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(BeZero())
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputNothingStreamed))
+		})
+
+		It("charges a cut Messages stream that logged output 1 the bounded estimate, not the placeholder", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200, MaxTokens: 32000,
+				Format: modelformat.Anthropic, Stream: true, Error: "Upstream",
+				InputKnown: true, InputTokens: 1000, OutputKnown: true, OutputTokens: 1,
+				RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "not message_start's output 1")
+			Expect(s.Estimated).To(BeTrue())
+			Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.008392"))
+			est := basis(s)
+			Expect(est).To(HaveKeyWithValue("output_basis", estimate.OutputBounded))
+			Expect(est).To(HaveKeyWithValue("output_logged_tokens", BeNumerically("==", 1)))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_partial": true`))
+		})
 	})
 })
 
