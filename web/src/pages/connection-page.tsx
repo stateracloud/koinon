@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
+import { ConnectionMcpHosts } from '@/components/connection-mcp-hosts'
 import { ConnectionSecretForm } from '@/components/connection-secret-form'
 import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
@@ -260,6 +261,7 @@ export function ConnectionPage() {
           </AlertDescription>
         </Alert>
       )}
+      {(gh || gt) && <ConnectionMcpHosts orgId={orgId} connectionId={connectionId} hosts={c.mcpHosts} canEdit={isApprover(org.role)} />}
       {(gh || gt) && isApprover(org.role) && (
         <InstallationRepos orgId={orgId} connectionId={connectionId} noun={gt ? 'the bot can see' : 'the installation can access'} />
       )}

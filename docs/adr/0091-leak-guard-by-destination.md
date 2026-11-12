@@ -106,7 +106,12 @@ A derived class is decided per call from the address arguments only:
   connector's `mcpHosts` (`api.githubcopilot.com` for github.com). A GitHub Enterprise Server or
   Gitea connection accepts only its own host. Hosts are compared by name without the port. A change
   of a connection's `baseUrl` unlinks the servers it no longer serves, audited as
-  `mcp_server.data_class.reset`.
+  `mcp_server.data_class.reset`. An org admin can add extra MCP hosts to one connection (#240), for
+  a self-hosted MCP server on its own host name: exact DNS host names, lower-case, no port, wildcard
+  or IP address, at most 20, kept in `connections.mcp_hosts`. They apply to that connection only and
+  on any host. Each add and remove is audited (`connection.mcp_host.add`, `connection.mcp_host.remove`,
+  with the actor), and a removal unlinks the servers the connection no longer serves, like a
+  `baseUrl` change (reason `connection_mcp_host_removed`).
 - **Repository visibility** (settled 2026-11-06 by procoduck, #115). The connector reads each
   code-host connection's repositories and their visibility when the connection is created, given a
   new secret or tested, and every 20 minutes after that (one koinon-api replica per round). A reading

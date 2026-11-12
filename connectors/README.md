@@ -24,7 +24,8 @@ v0.1 ships `github/` (ADR 0036, 0049) and `gitea/` (ADR 0062, 0063).
   API hosts (GitHub: `api.githubcopilot.com`). An MCP server may be linked to a code-host connection
   (ADR 0091) only when its URL names the connection's web or API host or, for a connection on the
   default host, one of these; a connection on its own host (GitHub Enterprise Server, Gitea) accepts
-  only that host. Not allowed with `selfHosted`.
+  only that host. Not allowed with `selfHosted`. An org admin can add further hosts to one connection
+  (#240; `connections.mcp_hosts`, not part of the connector).
 - `spec.hosts`: every host the connector talks to; scope network rules may only name these.
 - `spec.targets`: what grants are narrowed to (GitHub: `owner/name` repositories).
 - `spec.scopes`: each with a risk tier (ADR 0008), the provider permissions a credential for it is

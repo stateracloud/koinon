@@ -1331,6 +1331,9 @@ type Querier interface {
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
+	// The admin's extra MCP hosts of a connection (#240). The caller holds the row (GetConnectionForUpdate)
+	// and has validated and de-duplicated the hosts.
+	SetConnectionMCPHosts(ctx context.Context, arg SetConnectionMCPHostsParams) (Connection, error)
 	// Names what a claimed key produced, in the same transaction as the claim.
 	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
 	// Changes the format of a model that is still not overridden, so a save that raced the startup

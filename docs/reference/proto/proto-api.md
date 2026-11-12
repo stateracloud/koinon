@@ -1404,6 +1404,7 @@ secret store (ADR 0021, 0056); no response ever contains them.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
+| AddConnectionMCPHost | `koinon.connection.v1alpha1.AddConnectionMCPHostRequest` | `koinon.connection.v1alpha1.AddConnectionMCPHostResponse` | - | AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server whose https URL names that exact host may then be linked to this connection as its code host (ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP address (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is already there changes nothing. Audited (connection.mcp_host.add). Admins and owners. |
 | CreateGitHubConnection | `koinon.connection.v1alpha1.CreateGitHubConnectionRequest` | `koinon.connection.v1alpha1.CreateGitHubConnectionResponse` | - | CreateGitHubConnection creates a GitHub App connection. The private key is stored encrypted and never returned. Admins and owners. |
 | CreateGiteaConnection | `koinon.connection.v1alpha1.CreateGiteaConnectionRequest` | `koinon.connection.v1alpha1.CreateGiteaConnectionResponse` | - | CreateGiteaConnection creates a Gitea connection: a bot account on a Gitea server with a read token and a write token (ADR 0063). Both tokens are stored encrypted and never returned. Admins and owners. |
 | DeleteConnection | `koinon.connection.v1alpha1.DeleteConnectionRequest` | `koinon.connection.v1alpha1.DeleteConnectionResponse` | - | DeleteConnection deletes a connection and its stored secret fields for good. A connection entered here can be deleted; a declared one only after its Secret was deleted (removed). While agents are bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners. |
@@ -1411,8 +1412,25 @@ secret store (ADR 0021, 0056); no response ever contains them.
 | ListConnections | `koinon.connection.v1alpha1.ListConnectionsRequest` | `koinon.connection.v1alpha1.ListConnectionsResponse` | - | ListConnections returns the org's connections, oldest first. Viewers and above. |
 | ListConnectorTypes | `koinon.connection.v1alpha1.ListConnectorTypesRequest` | `koinon.connection.v1alpha1.ListConnectorTypesResponse` | - | ListConnectorTypes returns the connector types this install ships, with their scopes and setup guides. Any signed-in user. |
 | ListInstallationRepos | `koinon.connection.v1alpha1.ListInstallationReposRequest` | `koinon.connection.v1alpha1.ListInstallationReposResponse` | - | ListInstallationRepos lists the repositories a GitHub connection's App installation can access, for choosing what to bind an agent to. Koinon asks GitHub with a metadata-read installation token; nothing is written. Admins and owners. |
+| RemoveConnectionMCPHost | `koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest` | `koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse` | - | RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server linked to the connection that it no longer serves loses the link (and its code-host tool class), each audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). Admins and owners. |
 | SetConnectionSecret | `koinon.connection.v1alpha1.SetConnectionSecretRequest` | `koinon.connection.v1alpha1.SetConnectionSecretResponse` | - | SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector is required; the other settings stay. It clears the lost mark and the last test result. A declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION). Audited without the secret. Admins and owners. |
 | TestConnection | `koinon.connection.v1alpha1.TestConnectionRequest` | `koinon.connection.v1alpha1.TestConnectionResponse` | - | TestConnection runs the setup guide's checks against the provider and records the result. Nothing is written to the provider. Admins and owners. |
+
+### Message AddConnectionMCPHostRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| connection_id | 2 | `string` | singular |  |  |
+| host | 3 | `string` | singular |  |  |
+
+### Message AddConnectionMCPHostResponse
+
+AddConnectionMCPHostResponse holds the connection with its new list.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 
 ### Message BoundAgent
 
@@ -1462,6 +1480,7 @@ Connection is a configured connector instance.
 | gitea | 14 | `koinon.connection.v1alpha1.GiteaConnection` | singular | settings |  |
 | credential_lost_at | 15 | `google.protobuf.Timestamp` | singular |  | credential_lost_at is set when the secret was lost with the key that encrypted it (`koinon-api keys forget`, ADR 0085 decision 13): the connection is not usable (bound agents report it and runs that need it fail) until the secret is entered again. Unset otherwise. |
 | admin_disabled | 16 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
+| mcp_hosts | 17 | `string` | repeated |  | mcp_hosts are the extra host names an admin added for MCP servers that act on this connection (#240), sorted. They come on top of the connection's own hosts and the connector's declared ones. |
 
 ### Message ConnectorType
 
@@ -1658,6 +1677,22 @@ ListInstallationReposResponse is one page, in GitHub's order.
 | repos | 1 | `koinon.connection.v1alpha1.InstallationRepo` | repeated |  |  |
 | next_page_token | 2 | `string` | singular |  | Empty on the last page. A filtered page can hold fewer repositories than an unfiltered one, or none, and still have a next page. |
 | total_count | 3 | `int64` | singular |  | How many repositories the installation can access, before the query. |
+
+### Message RemoveConnectionMCPHostRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| connection_id | 2 | `string` | singular |  |  |
+| host | 3 | `string` | singular |  |  |
+
+### Message RemoveConnectionMCPHostResponse
+
+RemoveConnectionMCPHostResponse holds the connection with its new list.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 
 ### Message Scope
 

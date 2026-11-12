@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -465,6 +466,114 @@ var _ = Describe("ConnectionService", func() {
 		Expect(tx.Commit(ctx)).To(Succeed())
 		Eventually(deleted).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
 		Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND code_host_connection_id IS NULL`, org)).To(Equal(1))
+	})
+
+	Describe("the extra MCP hosts of a connection (#240)", func() {
+		var id string
+		add := func(c *client, host string) (*connectionv1alpha1.Connection, error) {
+			res, err := c.conns.AddConnectionMCPHost(context.Background(), &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: host})
+			return res.GetConnection(), err
+		}
+		remove := func(c *client, host string) (*connectionv1alpha1.Connection, error) {
+			res, err := c.conns.RemoveConnectionMCPHost(context.Background(), &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: host})
+			return res.GetConnection(), err
+		}
+		// audited counts the events of action written by a user (the actor is recorded).
+		audited := func(ctx SpecContext, action string) int {
+			return count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2 AND actor_kind = 'user' AND actor_id <> ''`, org, action)
+		}
+		BeforeEach(func(ctx SpecContext) {
+			id = e.githubConnection(ctx, org)
+		})
+
+		It("adds and removes hosts for an admin, lists them sorted, and audits each change with its actor", func(ctx SpecContext) {
+			conn, err := add(owner, " Zeta-MCP.Corp.Example. ")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"zeta-mcp.corp.example"}))
+			conn, err = add(owner, "alpha-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"alpha-mcp", "zeta-mcp.corp.example"}))
+			got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.GetConnection().GetMcpHosts()).To(Equal([]string{"alpha-mcp", "zeta-mcp.corp.example"}))
+			Expect(audited(ctx, "connection.mcp_host.add")).To(Equal(2))
+
+			conn, err = remove(owner, "alpha-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"zeta-mcp.corp.example"}))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.mcp_host.add' AND summary->'after'->>'host' = 'zeta-mcp.corp.example'`, org)).To(Equal(1))
+		})
+
+		It("changes and audits nothing when a host is already there or already absent", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "GITEA-MCP")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = remove(owner, "other-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(audited(ctx, "connection.mcp_host.add")).To(Equal(1))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(BeZero())
+		})
+
+		It("needs an admin, and hides other orgs' connections", func(ctx SpecContext) {
+			for _, role := range []store.OrgRole{store.OrgRoleMember, store.OrgRoleViewer} {
+				member := e.userIn(ctx, org, role)
+				_, err := add(member, "gitea-mcp")
+				Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			}
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = remove(e.userIn(ctx, org, store.OrgRoleMember), "gitea-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			_, err = add(owner, "second-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(Equal(2))
+
+			otherOrg, otherOwner := e.newTeamOrg(ctx)
+			_, err = otherOwner.conns.AddConnectionMCPHost(ctx, &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: otherOrg, ConnectionId: id, Host: "x-mcp"})
+			Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		})
+
+		DescribeTable("refuses a host that is not a plain host name, and writes nothing",
+			func(ctx SpecContext, host string) {
+				_, err := add(owner, host)
+				Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+				Expect(audited(ctx, "connection.mcp_host.add")).To(BeZero())
+				Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+			},
+			Entry("empty", ""),
+			Entry("with a port", "mcp.example.com:8443"),
+			Entry("a URL", "https://mcp.example.com/mcp"),
+			Entry("a wildcard", "*.example.com"),
+			Entry("an IP address", "10.0.0.5"),
+		)
+
+		It("allows at most 20 hosts", func(ctx SpecContext) {
+			for i := range 20 {
+				_, err := add(owner, fmt.Sprintf("mcp-%02d.example.com", i))
+				Expect(err).NotTo(HaveOccurred())
+			}
+			_, err := add(owner, "one-too-many.example.com")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			_, err = add(owner, "mcp-00.example.com")
+			Expect(err).NotTo(HaveOccurred(), "a present host is still a no-op at the limit")
+		})
+
+		It("unlinks, audited, the servers that lose their host on removal, and keeps the others (the link check uses the list)", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp.corp.example")
+			Expect(err).NotTo(HaveOccurred())
+			// One server on the extra host, one on a host the connector declares for github.com.
+			_, err = e.pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES
+				($1, 'extra', 'https://gitea-mcp.corp.example/mcp', $2), ($1, 'declared', 'https://api.githubcopilot.com/mcp/', $2)`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = remove(owner, "gitea-mcp.corp.example")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'extra' AND code_host_connection_id IS NULL`, org)).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'declared' AND code_host_connection_id IS NOT NULL`, org)).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_server.data_class.reset' AND summary->'after'->>'reason' = 'connection_mcp_host_removed'`, org)).To(Equal(1))
+		})
 	})
 
 	It("deletes a declared connection only after its Secret was deleted", func(ctx SpecContext) {

@@ -524,7 +524,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
 		})
 		// A new baseUrl can leave MCP servers linked to a host that is no longer the connection's (#117).
-		if err := mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated); err != nil {
+		if err := mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated, "connection_host_changed"); err != nil {
 			return err
 		}
 		return i.disableDeclared(ctx, tx, b, org, outward.CodeHostConnection, sec.Name, disabled)

@@ -5812,6 +5812,15 @@
           "deprecated": false,
           "methods": [
             {
+              "name": "AddConnectionMCPHost",
+              "description": "AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server\nwhose https URL names that exact host may then be linked to this connection as its code host\n(ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP\naddress (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is\nalready there changes nothing. Audited (connection.mcp_host.add). Admins and owners.",
+              "requestType": "koinon.connection.v1alpha1.AddConnectionMCPHostRequest",
+              "responseType": "koinon.connection.v1alpha1.AddConnectionMCPHostResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "CreateGitHubConnection",
               "description": "CreateGitHubConnection creates a GitHub App connection. The private key\nis stored encrypted and never returned. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.CreateGitHubConnectionRequest",
@@ -5875,6 +5884,15 @@
               "deprecated": false
             },
             {
+              "name": "RemoveConnectionMCPHost",
+              "description": "RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server\nlinked to the connection that it no longer serves loses the link (and its code-host tool class),\neach audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited\n(connection.mcp_host.remove). Admins and owners.",
+              "requestType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest",
+              "responseType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetConnectionSecret",
               "description": "SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private\nkey, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is\nentered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector\nis required; the other settings stay. It clears the lost mark and the last test result. A\ndeclared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).\nAudited without the secret. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.SetConnectionSecretRequest",
@@ -5896,6 +5914,60 @@
         }
       ],
       "messages": [
+        {
+          "name": "AddConnectionMCPHostRequest",
+          "fullName": "koinon.connection.v1alpha1.AddConnectionMCPHostRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "connection_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AddConnectionMCPHostResponse",
+          "fullName": "koinon.connection.v1alpha1.AddConnectionMCPHostResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "AddConnectionMCPHostResponse holds the connection with its new list.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "connection",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.Connection",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "BoundAgent",
           "fullName": "koinon.connection.v1alpha1.BoundAgent",
@@ -6127,6 +6199,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is\nnot called, probed or offered to runs. Unset otherwise."
+            },
+            {
+              "name": "mcp_hosts",
+              "number": 17,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "mcp_hosts are the extra host names an admin added for MCP servers that act on this connection\n(#240), sorted. They come on top of the connection's own hosts and the connector's declared ones."
             }
           ]
         },
@@ -6854,6 +6935,60 @@
               "oneof": "",
               "deprecated": false,
               "description": "How many repositories the installation can access, before the query."
+            }
+          ]
+        },
+        {
+          "name": "RemoveConnectionMCPHostRequest",
+          "fullName": "koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "connection_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RemoveConnectionMCPHostResponse",
+          "fullName": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "RemoveConnectionMCPHostResponse holds the connection with its new list.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "connection",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.Connection",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },

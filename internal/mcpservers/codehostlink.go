@@ -71,14 +71,15 @@ func servesMCP(conn store.Connection, serverURL string) error {
 	if err != nil {
 		return fmt.Errorf("the connection %q has no readable host: %w", conn.DisplayName, err)
 	}
-	return t.ServesMCP(loc, serverURL)
+	return t.ServesMCP(loc, conn.McpHosts, serverURL)
 }
 
 // UnlinkMismatchedServers clears the code-host link of every server of org linked to conn that conn,
-// as it is now, does not serve: called in the transaction that changed the connection's config (a
-// declared connection's baseUrl), after the change. Each unlink is audited as
-// mcp_server.data_class.reset with reason connection_host_changed; the servers' kind and legs stay.
-func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection) error {
+// as it is now, does not serve: called in the transaction that changed the connection's hosts (a
+// declared connection's baseUrl, or an admin's extra MCP host removed, #240), after the change. Each
+// unlink is audited as mcp_server.data_class.reset with the given reason (connection_host_changed,
+// connection_mcp_host_removed); the servers' kind and legs stay.
+func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection, reason string) error {
 	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
 	if err != nil {
 		return err
@@ -100,7 +101,7 @@ func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batc
 			Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs, "codeHostConnectionId": before.CodeHostConnection},
 			After: map[string]any{
 				"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "codeHostConnectionId": after.CodeHostConnection,
-				"reason": "connection_host_changed",
+				"reason": reason,
 			},
 		})
 	}
