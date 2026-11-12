@@ -3,7 +3,9 @@
 package migrations_test
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"io/fs"
 	"strconv"
 	"strings"
@@ -34,8 +36,10 @@ var _ = Describe("the template harness block migration (ADR 0112)", func() {
 
 		add := func(slug, spec string) {
 			GinkgoHelper()
+			sum := sha256.Sum256([]byte(slug))
 			_, err := old.ExecContext(ctx,
-				`INSERT INTO templates (slug, content_hash, display_name, description, spec) VALUES ($1, encode(sha256($1::bytea), 'hex'), $1, '', $2::jsonb)`, slug, spec)
+				`INSERT INTO templates (slug, content_hash, display_name, description, spec) VALUES ($1, $2, $1, '', $3::jsonb)`,
+				slug, hex.EncodeToString(sum[:]), spec)
 			Expect(err).NotTo(HaveOccurred())
 		}
 		add("with-settings", `{"kind":"Template","spec":{"flavors":{"allowed":["opencode"],"default":"opencode"},"harness":{"pluginInstalls":true},"model":{"name":"default"}}}`)
