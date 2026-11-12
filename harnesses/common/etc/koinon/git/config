@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Koinon's git configuration for every harness image, read-only and included from /etc/gitconfig
+# so that every git in the sandbox reads it, whether or not a harness's entry script started it.
+# GitHub credentials come from koinon-git-credential, which prints the GitHub provider's
+# OpenShell placeholder; nothing secret is stored (connectors/README.md). This file is for
+# github.com. A connection on another host gets the same sections for its host from
+# /sandbox/.koinon/git/config, which koinon-agentd renders before every run and /etc/gitconfig
+# includes after this file.
+[credential "https://github.com"]
+	# The empty value drops any helper configured before this one.
+	helper =
+	helper = /usr/local/bin/koinon-git-credential
+	useHttpPath = false

@@ -72,6 +72,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
@@ -463,6 +464,36 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 	}
 	_, err = audit.InPgTx(ctx, i.Pool, func(tx pgx.Tx, b audit.Batch) error {
 		tq := store.New(tx)
+		// The org's MCP host lock first (before the connection and its servers), so an admin adding an
+		// extra MCP host cannot race this apply (#240). The Secret's own hosts must not be an extra host
+		// of another connection, nor of this one (a base URL change would leave it redundant and keep
+		// servers of the old code host linked): the apply is refused, nothing is dropped silently.
+		if err := tq.LockOrgMCPHosts(ctx, org); err != nil {
+			return err
+		}
+		self := pgtype.UUID{}
+		var ownExtra []string
+		if cur != nil {
+			// Read under the lock: the extra list changes only under it and the connection's row lock.
+			fresh, err := tq.GetConnectionForUpdate(ctx, store.GetConnectionForUpdateParams{OrgID: org, ID: cur.ID})
+			if err != nil {
+				return err
+			}
+			self, ownExtra = fresh.ID, fresh.McpHosts
+		}
+		if t, ok := connectors.Get(d.Connector); ok {
+			loc, err := d.Site.Location(t)
+			if err != nil {
+				return &invalidError{fmt.Errorf("%s: %w", KeyBaseURL, err)}
+			}
+			why, err := mcpservers.OwnHostClash(ctx, tq, org, self, t, loc, ownExtra)
+			if err != nil {
+				return err
+			}
+			if why != "" {
+				return &invalidError{fmt.Errorf("%s: %s", KeyBaseURL, why)}
+			}
+		}
 		after := map[string]any{
 			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
 			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "ciDirs": d.Site.CIDirs, "keyFingerprint": d.Fingerprint, "source": "secret",
@@ -524,7 +555,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
 		})
 		// A new baseUrl can leave MCP servers linked to a host that is no longer the connection's (#117).
-		if err := mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated); err != nil {
+		if _, err := mcpservers.UnlinkMismatchedServers(ctx, tq, b, actor, updated, "connection_host_changed"); err != nil {
 			return err
 		}
 		return i.disableDeclared(ctx, tx, b, org, outward.CodeHostConnection, sec.Name, disabled)

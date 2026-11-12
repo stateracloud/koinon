@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1/gatewayv1alpha1connect"
 	leakguardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
@@ -292,6 +293,16 @@ var isolationCases = map[string]isolationCase{
 	connectionv1alpha1connect.ConnectionServiceDeleteConnectionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceAddConnectionMCPHostProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.AddConnectionMCPHost(ctx, &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: org, ConnectionId: f.connection, Host: "gitea-mcp.example.test"})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceRemoveConnectionMCPHostProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: f.connection, Host: "gitea-mcp.example.test"})
 		},
 	},
 	connectionv1alpha1connect.ConnectionServiceSetConnectionSecretProcedure: {
@@ -817,6 +828,12 @@ var isolationExempt = map[string]string{
 		"takes no IDs",
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
 		"every org; takes no IDs",
+	gatewayv1alpha1connect.GatewayStateServiceStreamStateProcedure: "the install-wide gateway State stream (ADR 0097); " +
+		"served by internal/gateway/stateserver on the internal listener, not on this API: only a holder of the gateway's " +
+		"bearer token reaches it (TestStateServer refuses everyone else), and its request names the copy, not an org",
+	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure: "records a gateway copy's confirmation of an " +
+		"install-wide revision (ADR 0097); served by internal/gateway/stateserver behind the gateway's bearer token, " +
+		"not on this API; the request names the copy, not an org",
 }
 
 var _ = Describe("org isolation", func() {

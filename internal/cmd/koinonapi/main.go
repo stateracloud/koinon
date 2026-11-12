@@ -77,6 +77,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
+	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/installbinding"
@@ -680,9 +681,6 @@ func serve(ctx context.Context, cfg config) error {
 			slog.Info("moved connection secrets into the store", "count", n)
 		}
 	}
-	// One GitHub client, so connection checks and approved calls share its token cache.
-	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
-	hosts := providers.New(gh)
 	var opener connections.Opener
 	var keys services.Keys
 	if keyring != nil {
@@ -694,6 +692,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
 		return err
 	}
+	// One GitHub client, so connection checks and approved calls share its token cache. It and the
+	// Gitea provider dial Connection base URLs through the egress policy.
+	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+	hosts := providers.New(gh)
 	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
 	guardMetrics := mcpguard.NewMetrics(nil)
@@ -887,9 +889,22 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		traceRouter.Start(bgCtx)
 		defer traceRouter.Close()
+		// The gateway State stream (ADR 0097, issue 279 slice 3) shares this listener and the gateway's
+		// token: only a holder of it can open the stream or ack a revision, and agentd's trace token
+		// never admits it. The server also sits behind the same check on its own (it refuses to start
+		// without one). Acks are recorded and gate nothing yet.
+		gwAuth := otlpauth.ScopedMiddleware(otlpTokens, map[string]*otlpauth.Tokens{tracerouter.TracesPath: otlpTraceTokens}, otlpMetrics)
+		stateSrv, err := stateserver.New(stateserver.Config{
+			Store: stateserver.NewPGStore(pool), Auth: gwAuth, Notify: stateserver.PoolNotify(pool),
+			Metrics: stateserver.NewMetrics(reg), Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		safego.Go(bgCtx, slog.Default(), "gateway-state-stream", stateSrv.Run)
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.ScopedMiddleware(otlpTokens, map[string]*otlpauth.Tokens{tracerouter.TracesPath: otlpTraceTokens}, otlpMetrics), traceRouter.Mount()); err != nil {
+			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

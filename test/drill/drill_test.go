@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	. "github.com/onsi/ginkgo/v2"
@@ -712,12 +713,11 @@ stringData:
 			_, err := kube.KubectlStdin(ctx, secret, "apply", "-f", "-")
 			must(err, "declare a provider")
 			time.Sleep(60 * time.Second)
-			dst.token = src.token // the restored admin token reads the held install
-			openAPI(ctx, &dst)
-			code, body := admin(ctx, &dst, http.MethodGet, "/providers")
-			Expect(code).To(Equal(http.StatusOK), string(body))
+			// The source's API token is refused on the copy (ADR 0110 decision 3), so read the table, not the API.
+			// Count only served rows (removed_at IS NULL and disabled_reason IS NULL): that is what GET /providers meant.
+			declared := sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared' AND removed_at IS NULL AND disabled_reason IS NULL")
 			knownGap("#516", "the importer only reports while the install is held", func() string {
-				if strings.Contains(string(body), "drill-declared") {
+				if declared > 0 {
 					return "the importer created the declared provider while the install was held"
 				}
 				return ""
@@ -946,16 +946,13 @@ stringData:
 			Expect(drill.DiffObjects(baseline, after)).To(BeEmpty(), "the target changed objects of the source's gateway")
 		})
 
-		It("refuses a session token of the source", Label("known-gap", "quarantine"), func(ctx SpecContext) {
+		It("refuses a session token of the source", Label("quarantine"), func(ctx SpecContext) {
 			needs("release")
-			knownGap("#516", "a session of the source install is refused on the restored one", func() string {
-				c := e2eclient.New(dst.client.Base)
-				c.SetSession(sourceSession)
-				if _, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{}); err == nil {
-					return "the source's session cookie is accepted by the target"
-				}
-				return ""
-			})
+			c := e2eclient.New(dst.client.Base)
+			c.SetSession(sourceSession)
+			_, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+			Expect(err).To(HaveOccurred(), "the source's session cookie is accepted by the target (ADR 0110 decision 3)")
+			Expect(connect.CodeOf(err)).To(Equal(connect.CodeUnauthenticated), "the target must refuse the source's session cookie as unauthenticated (ADR 0110 decision 3), got: %v", err)
 		})
 	})
 

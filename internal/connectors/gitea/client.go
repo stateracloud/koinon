@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -129,15 +130,31 @@ func escapeRepo(r codehost.Repo) string {
 	return "/repos/" + url.PathEscape(r.Owner) + "/" + url.PathEscape(r.Name)
 }
 
+// newHTTPClient returns the default client: it connects only through dial (when set), ignores the
+// environment's proxy (a proxy would take the traffic around the dial check) and returns a 3xx
+// response instead of following it, so a Connection's admin-supplied URL cannot send Koinon on to
+// another host. It mirrors the trace exporter's client (internal/tracing/export).
+func newHTTPClient(dial func(ctx context.Context, network, addr string) (net.Conn, error), timeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if dial != nil {
+		tr.DialContext = dial
+		tr.Proxy = nil
+	}
+	return &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: noRedirect}
+}
+
+// noRedirect makes the client return the 3xx response itself.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 // transports caches one HTTP client per CA bundle, so connections share their connection pools.
 type transports struct {
 	base *http.Client
 	m    sync.Map // sha256 of the bundle -> *http.Client
 }
 
-func newTransports(base *http.Client) *transports {
+func newTransports(base *http.Client, dial func(ctx context.Context, network, addr string) (net.Conn, error)) *transports {
 	if base == nil {
-		base = &http.Client{Timeout: 30 * time.Second}
+		base = newHTTPClient(dial, 30*time.Second)
 	}
 	return &transports{base: base}
 }
@@ -157,6 +174,7 @@ func (t *transports) clientFor(caBundle string) (*http.Client, error) {
 		return nil, fmt.Errorf("gitea: %w", err)
 	}
 	hc := *t.base
+	hc.CheckRedirect = noRedirect
 	var tr *http.Transport
 	switch x := hc.Transport.(type) {
 	case nil:

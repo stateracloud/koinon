@@ -10,7 +10,7 @@ Instructions for coding agents working on Koinon.
   `GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the tag gives kopia an instant test key
   derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it).
   A new suite joins the parallel list in that script once it shares
-  no database, fixed port or fixed path between processes. `test/flavors`: `make test-flavors`.
+  no database, fixed port or fixed path between processes. `test/harnesses`: `make test-harnesses`.
   Details: `docs/dev/ci.md#go-test-suites`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
 - Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at

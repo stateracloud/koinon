@@ -221,7 +221,7 @@ var _ = Describe("Backend", func() {
 
 		spec := func() execution.SandboxSpec {
 			return execution.SandboxSpec{
-				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon/flavors/opencode:dev",
+				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon/sandbox:dev",
 				Command: []string{"sleep", "infinity"}, Policy: harnessPolicy(),
 				Labels: map[string]string{agentLabel: "a1"}, CPURequest: "250m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi",
 			}
@@ -234,7 +234,7 @@ var _ = Describe("Backend", func() {
 			stored := gw.Sandbox(ws, "agent-1").GetSpec()
 			Expect(stored.GetEnvironment()).To(BeEmpty())
 			Expect(stored.GetTemplate().GetEnvironment()).To(BeEmpty())
-			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon/flavors/opencode:dev"))
+			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon/sandbox:dev"))
 			Expect(stored.GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
 				"requests": map[string]any{"cpu": "250m", "memory": "1Gi"},
 				"limits":   map[string]any{"cpu": "1", "memory": "2Gi"},

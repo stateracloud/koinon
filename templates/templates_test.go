@@ -99,8 +99,8 @@ var _ = Describe("Embedded templates", func() {
 		})
 
 		It("offers OpenCode, the only v0.1 harness, as default", func() {
-			Expect(t.Spec.Harnesses.Allowed).To(ConsistOf(templates.HarnessOpenCode))
-			Expect(t.Spec.Harnesses.Default).To(Equal(templates.HarnessOpenCode))
+			Expect(t.Spec.Harness.Allowed).To(ConsistOf(templates.HarnessOpenCode))
+			Expect(t.Spec.Harness.Default).To(Equal(templates.HarnessOpenCode))
 		})
 
 		It("suggests the GitHub v0.1 scopes on the Standard preset for one repository", func() {
@@ -133,7 +133,7 @@ var _ = Describe("Embedded templates", func() {
 
 		It("turns plugin installs off explicitly", func() {
 			Expect(t.Spec.Harness.PluginInstalls).To(BeFalse())
-			Expect(string(readFile("repo-helper.yaml"))).To(ContainSubstring("harness:\n    pluginInstalls: false\n"))
+			Expect(string(readFile("repo-helper.yaml"))).To(MatchRegexp(`(?s)  harness:\n.*?\n    pluginInstalls: false\n  model:`))
 		})
 	})
 
@@ -243,10 +243,10 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Limits.SpendUSD.Cents()).To(Equal(int64(1000)))
 	})
 
-	It("leaves plugin installs off when harness is omitted", func() {
+	It("leaves plugin installs off when the harness block sets none", func() {
 		t, err := templates.Parse(valid)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(t.Spec.Harness).To(Equal(templates.Harness{}))
+		Expect(t.Spec.Harness.HarnessSettings).To(Equal(templates.HarnessSettings{}))
 	})
 
 	It("is persistent unless the template says ephemeral", func() {
@@ -295,7 +295,7 @@ var _ = Describe("Parse", func() {
 
 	It("accepts plugin installs on an OpenCode template", func() {
 		t, err := templates.Parse([]byte(strings.Replace(string(valid),
-			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))
+			"  model:\n", "    pluginInstalls: true\n  model:\n", 1)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.Spec.Harness.PluginInstalls).To(BeTrue())
 	})

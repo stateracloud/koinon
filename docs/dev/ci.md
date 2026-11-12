@@ -240,8 +240,8 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   (a branch that changes the probe before main has published it) builds the image, with apt, on the same pinned `ARG BASE=` that the tag hashes (kind.sh ignores `KOINON_PROBE_BASE` when
   `PROBE_PULL_REPO` is set), so a tag always names one image. The e2e therefore tests the probe on the pinned base, not on the
   flavor image the run built.
-  The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
-  image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
+  The Gitea read grant cases (label `gitea`) are not in it: they point the OpenShell gateway at a throwaway-CA ConfigMap
+  (`supervisor.network.additionalCaConfigMapName`) by a helm upgrade, which the chart install does not take.
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
   Koinon policy: the quicker loop when you change `test/escape` or the sandbox profile (no Koinon
   images or install), and the only place the Gitea cases run.
@@ -406,18 +406,19 @@ laptop; more on a runner. A longer window would have hidden that. Test binaries 
 tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`, the `go-race-parallel` job and the `warm-caches` test compile): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
 makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
 went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
-`make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
-without the tag still passes, only slower (set `GOFLAGS=-tags=testing` yourself for a quick loop).
+`make build-go` refuses it in `GO_TAGS`, and no release build uses it. `internal/agentd` refuses to
+run without the tag (its BeforeSuite fails, #638: its deadline specs assume fast key derivation); other
+suites still pass without it, only slower. Set `GOFLAGS=-tags=testing` yourself for a quick loop.
 Binaries that tests build themselves (the chart smoke images) do not get the tag: they drop it from `GOFLAGS`.
 
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-vuln, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
-`go.mod`, `go.sum`, the lint config). `changes` and
+`go.mod`, `go.sum`, the lint config) and `go-vuln` (path rule `vuln`: `go.mod`, `go.sum`; see below). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run when the path rules say a change can affect them, and
@@ -438,11 +439,30 @@ that file and nowhere else.
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
   (Markdown, `docs/`, `web/`, `.github/`, top-level `hack/*.sh`, `hack/hooks/`,
   `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
-  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
+  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `harness-tag.sh`) and every
   `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
   the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
   own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
   (`.sh` files, `.github/`, the tool pins); a docs-only or web-only pull request runs neither (#572).
+- **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`),
+  the check itself (`hack/govulncheck.sh`, `govulncheck.yml`, `hack/versions.env`) or an `everything` path
+  (`ci.yml`, the Makefile, the setup-go-cache action, `hack/paths.rules`, `hack/paths-lib.sh`) runs
+  `hack/govulncheck.sh`, and so does a push to main, except one whose heavy jobs are switched off because a queue run already tested the same tree (`hack/ci-skip-heavy.sh`; then `go-vuln` is skipped with the rest); any other pull request skips the job. The nested modules
+  under `hack/spike/` are not scanned. The rule does not see new reachability from a code change (a `.go` change
+  that starts to call a vulnerable symbol of a module already required, or of the standard library) nor a new advisory:
+  the nightly run catches those, up to one day later. It is a part of the
+  required `go` check: the `go` gate accepts the skip only when the `vuln` output is false, and fails on a
+  finding. The script installs the version pinned in `hack/versions.env` (`GOVULNCHECK_VERSION`) with `go install`
+  and runs `govulncheck ./...`: exit 0 is a pass, a reachable known vulnerability fails the job (exit 1), and
+  a tool or database (`vuln.go.dev`) that cannot be fetched fails it too (exit 2, "COULD NOT DECIDE"), never
+  a silent pass. There is no automatic retry (T1): re-run the job by hand. On Actions the cause is an
+  `::error title=govulncheck::` annotation, and `hack/ci-fail.sh` sorts "COULD NOT DECIDE" as `infra` (re-run is
+  fair) and a finding as `vuln` (read it). The script scans with the Go toolchain of the `go` line of `go.mod`,
+  and says so when that toolchain is not available (a local run keeps the default one). The nightly `govulncheck.yml` runs
+  the same script on `main`, because a new advisory needs no code change. The preflight gate `vuln` runs it
+  locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
+  the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`
+  (the gate), `hack/ci-changes-test.sh` and `hack/paths-test.sh` (the path rule).
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
@@ -450,7 +470,7 @@ that file and nowhere else.
   like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
   `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
-- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy` and `scripts` use the CI job's rule. The
+- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy`, `vuln` and `scripts` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
@@ -542,7 +562,7 @@ work that fills it, then saves:
 | Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
-| pnpm store (`flavors/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
+| pnpm store (`harnesses/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
 | golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
 
 Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
@@ -557,7 +577,7 @@ reports on pushes only. A new key goes into the warm job and the restoring jobs 
 
 Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
 which fails a pinned checksum. Every Dockerfile download of a release asset goes through
-`flavors/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
+`harnesses/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
 `GITHUB_TOKEN` as the BuildKit secret `github_token`. The github.com web download URL ignores a
 token, so the script resolves the asset id from the release (`api.github.com/.../releases/tags/<tag>`)
 and downloads `.../releases/assets/<id>` with `Accept: application/octet-stream`; the build log
@@ -600,7 +620,7 @@ no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks sou
 module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
 `go mod download` also checks against sum.golang.org (unless GOSUMDB is off; the pin holds either way); `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
-The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
+The flavor layer cache (`flavors-<hash of harnesses/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
 `flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
 skipped by #595 still writes the entry). A pull request never writes it.

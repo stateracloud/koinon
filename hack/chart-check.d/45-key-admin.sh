@@ -59,7 +59,7 @@ l1=$(job_name "${long[@]}") l2=$(job_name "${long[@]}" --set secrets.kek.kms.key
 
 # The Job accepts no connections, as the migrate Job.
 np=$(render --show-only templates/networkpolicy.yaml "${kms[@]}")
-grep -A20 '^  name: koinon-key-admin$' <<<"$np" | grep -q 'policyTypes: \[Ingress\]' || fail "key-admin NetworkPolicy denies ingress"
+grep -A20 '^  name: koinon-key-admin$' <<<"$np" | hit 'policyTypes: \[Ingress\]' || fail "key-admin NetworkPolicy denies ingress"
 lacks "no key-admin NetworkPolicy with the local KEK" 'name: koinon-key-admin$' --show-only templates/networkpolicy.yaml
 
 # The services decrypt only: each signs in as its own role, and koinon-api no longer creates the

@@ -18,15 +18,15 @@ Agent templates: building blocks for the agent builder; the result is always a d
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
 - `templates.go`: embeds the templates into the binary, validates them (schema plus the rules a
-  schema cannot express, such as the default flavor being allowed) and computes a content hash over
+  schema cannot express, such as the default harness being allowed) and computes a content hash over
   the canonical JSON form, so comments and formatting do not change it.
 - `testdata/`: a minimal valid template and invalid fixtures; each invalid file names the error it
   must produce on a `# want:` line.
 
 `spec.harness` holds harness settings, all off when omitted. `harness.pluginInstalls: true` lets an
 OpenCode agent install plugins: its sandbox may read the npm registry (GET and HEAD, no credentials)
-from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
-needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` explicitly.
+from the OpenCode binary, and OpenCode loads external plugins (`harnesses/opencode/README.md`). It
+needs `opencode` among the allowed harnesses. `repo-helper` sets it to `false` explicitly.
 
 `spec.tools` (optional) lists the tool names the instructions expect the agent to call, also the ones
 they only describe in prose ("the search and fetch tools"), for example `[ask_user, web_url_read]`.

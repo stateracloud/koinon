@@ -1,0 +1,66 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Pre-pulls the harness images on the Kata nodes (plan item LT1, practice B6, ADR 0066 decision 11).
+Each harness image runs once as an init container that exits at once, so the kubelet pulls it; a
+pause container then keeps the pod. Images and pull secrets go through koinon.image and
+koinon.imagePullSecrets like every other pod of the chart (ADR 0061), so a mirror needs no extra
+setting. The pod runs in the release namespace under the default runtime class: it neither is a
+sandbox nor weakens the sandbox admission policy (ADR 0045), which governs the sandbox namespaces.
+Koinon does not place sandbox pods, so there is no node preference for them to set here.
+*/ -}}
+{{- if .Values.harnessPrepull.enabled }}
+{{- include "koinon.validate" . }}
+{{- $name := include "koinon.componentName" (list . "harness-prepull") }}
+{{- $p := .Values.harnessPrepull }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "harness-prepull") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "harness-prepull") | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "harness-prepull") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      {{- with $p.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      nodeSelector:
+        {{- toYaml $p.nodeSelector | nindent 8 }}
+      {{- with $p.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- range $harness, $f := .Values.harnesses }}
+        - name: pull-{{ $harness }}
+          image: {{ include "koinon.image" (list $ $f.image) | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "exit 0"]
+          securityContext:
+            {{- include "koinon.containerSecurityContext" $ | nindent 12 }}
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: pause
+          image: {{ include "koinon.imageRef" (list . $p.pauseImage) | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+{{- end }}

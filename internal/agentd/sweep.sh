@@ -7,7 +7,7 @@
 # nothing the agent started in one run (a harness's daemon, a background job) lives into the
 # next (sweep.go).
 #
-# POSIX sh, /proc, and grep and sleep from the flavor image (every image has them): grep runs
+# POSIX sh, /proc, and grep and sleep from the harness image (every image has them): grep runs
 # once before the scan, sleep only between rounds, and no command substitution or pipeline
 # runs while it scans, so it never finds its own helpers. Prints the main process it kept
 # ("main: PID") and what it ended ("ended: PID..." or "ended: none") on stdout; exits 1 when

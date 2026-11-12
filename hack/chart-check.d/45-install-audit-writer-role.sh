@@ -14,8 +14,8 @@ has "the group role is created in postInitApplicationSQL" '^        - CREATE ROL
 # The group role is created after koinon_app and before the managed roles can join it: both are
 # bootstrap statements, in this order.
 sql=$(render "${cluster[@]}")
-app_line=$(grep -nE '^        - CREATE ROLE koinon_app NOLOGIN$' <<<"$sql" | head -1 | cut -d: -f1)
-writer_line=$(grep -nE '^        - CREATE ROLE koinon_install_audit_writer NOLOGIN$' <<<"$sql" | head -1 | cut -d: -f1)
+app_line=$(grep -nE '^        - CREATE ROLE koinon_app NOLOGIN$' <<<"$sql" | sed -n 1p | cut -d: -f1)
+writer_line=$(grep -nE '^        - CREATE ROLE koinon_install_audit_writer NOLOGIN$' <<<"$sql" | sed -n 1p | cut -d: -f1)
 if [[ -z $app_line || -z $writer_line || $writer_line -le $app_line ]]; then
 	fail "koinon_install_audit_writer is created in postInitApplicationSQL after koinon_app"
 fi
@@ -28,15 +28,15 @@ n=$(grep -cE '^        inRoles: \[koinon_app\]$' <<<"$sql" || true)
 [[ $n == 2 ]] || fail "koinon_reconciler and koinon_agentd are members of koinon_app only (found $n)"
 
 # The member is the api role: the managed role list runs api, reconciler, agentd in that order.
-api_role=$(grep -nE '^      - name: koinon_api$' <<<"$sql" | head -1 | cut -d: -f1)
-member_line=$(grep -nE 'inRoles: \[koinon_app, koinon_install_audit_writer\]' <<<"$sql" | head -1 | cut -d: -f1)
+api_role=$(grep -nE '^      - name: koinon_api$' <<<"$sql" | sed -n 1p | cut -d: -f1)
+member_line=$(grep -nE 'inRoles: \[koinon_app, koinon_install_audit_writer\]' <<<"$sql" | sed -n 1p | cut -d: -f1)
 [[ -n $api_role && -n $member_line && $((member_line - api_role)) -le 5 ]] ||
 	fail "the writer role membership belongs to the koinon_api managed role"
 
 # Clusters initialised before ADR 0100 never ran the new postInitApplicationSQL, and the migrate role
 # (the initdb owner) has no CREATEROLE: the group role is also a managed role, without login.
 has "the group role is a managed role without login" '^      - name: koinon_install_audit_writer$' "${cluster[@]}"
-role_line=$(grep -nE '^      - name: koinon_install_audit_writer$' <<<"$sql" | head -1 | cut -d: -f1)
+role_line=$(grep -nE '^      - name: koinon_install_audit_writer$' <<<"$sql" | sed -n 1p | cut -d: -f1)
 block=$(sed -n "$((role_line + 1)),$((role_line + 3))p" <<<"$sql")
 if ! grep -qE '^        ensure: present$' <<<"$block" || ! grep -qE '^        login: false$' <<<"$block"; then
 	fail "the managed group role is ensure: present, login: false"

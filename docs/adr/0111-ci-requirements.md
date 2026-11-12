@@ -168,6 +168,13 @@ queue, status checks, skipping workflow runs, hosted runners, caching, rulesets)
 Bazel hermeticity page, buf's breaking-change rules, and Dependabot and pnpm option references. A claim
 that rested on a search snippet or a summary only is not cited in the guide.
 
+## Amendments
+
+- 2026-11-12: `govulncheck` on pull requests that change `go.mod` or `go.sum` is in (#579 part 2). It is the job
+  `go-vuln`, a part of the required `go` check (no new ruleset context), gated by the path rule `vuln`. The
+  nightly run and the job both call `hack/govulncheck.sh`; a failed database fetch fails the run and is not
+  retried (T1). Details: `docs/dev/ci.md`.
+
 ## Links
 
 - [`docs/dev/ci-rules.md`](../dev/ci-rules.md): the rules, their checks and sources.

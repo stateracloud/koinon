@@ -8,8 +8,8 @@
 #
 # GO_VERSION must equal go.mod's `go` line (hack/e2e-remote.sh refuses to build otherwise) and
 # GO_DIGEST is that tag's multi-arch index digest: bump both together.
-ARG GO_VERSION=1.27.3
-ARG GO_DIGEST=sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9
+ARG GO_VERSION=1.27.4
+ARG GO_DIGEST=sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
 
 FROM docker:29-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS dockercli
 FROM docker/buildx-bin:0.30.1@sha256:cc16bd35c1bbdde2c9d4ee08cf33be55b17e6ed2188816292dbde51064105e25 AS buildx
@@ -37,7 +37,7 @@ ENV GOTOOLCHAIN=local
 # The apt packages are not version-pinned (hadolint DL3008) on purpose: this is a local dev and lab
 # toolchain, not a shipped image, and the base is pinned by digest. Debian bookworm's archive drops
 # superseded versions, so an exact pin would break the build as soon as a security update lands,
-# while the flavor images pin against an Ubuntu snapshot (flavors/opencode/Dockerfile) because they
+# while the harness images pin against an Ubuntu snapshot (harnesses/opencode/Dockerfile) because they
 # ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
 # above by version and sha256.
 # hadolint ignore=DL3008
@@ -51,7 +51,7 @@ COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 # The optional BuildKit secret github_token (--secret id=github_token,env=GITHUB_TOKEN) authenticates
 # the github.com release downloads (#145); without it they are anonymous. The github.com web URL
 # ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
-# id, Accept: application/octet-stream), as in flavors/common/koinon-fetch (this build context cannot
+# id, Accept: application/octet-stream), as in harnesses/common/koinon-fetch (this build context cannot
 # copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
 RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \

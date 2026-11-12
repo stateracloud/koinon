@@ -72,11 +72,11 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		// The limits a run would get, the platform defaults filling what the template leaves out.
 		RunLimits:      runLimitsProto(agentconfig.FromTemplate(t, row.ContentHash).RunLimits()),
 		SpendLimitUsd:  t.Spec.Limits.SpendUSD.String(),
-		DefaultFlavor:  flavorProto(string(t.Spec.Harnesses.Default)), //nolint:staticcheck // deprecated field, still set for older clients
-		DefaultHarness: string(t.Spec.Harnesses.Default),
+		DefaultFlavor:  flavorProto(string(t.Spec.Harness.Default)), //nolint:staticcheck // deprecated field, still set for older clients
+		DefaultHarness: string(t.Spec.Harness.Default),
 		Ephemeral:      t.Spec.Ephemeral,
 	}
-	for _, f := range t.Spec.Harnesses.Allowed {
+	for _, f := range t.Spec.Harness.Allowed {
 		out.AllowedHarnesses = append(out.AllowedHarnesses, string(f))
 		if p := flavorProto(string(f)); p != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED {
 			out.AllowedFlavors = append(out.AllowedFlavors, p) //nolint:staticcheck // deprecated field, still set for older clients

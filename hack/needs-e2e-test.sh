@@ -34,7 +34,7 @@ forced 0 .github/workflows/e2e-kind.yml
 forced 0 hack/docs-e1.sh
 forced 0 test/e2e/commands/quickstart.e1
 forced 0 test/e2e/commands/backup-restore.e1
-forced 0 flavors/opencode/prompt.md
+forced 0 harnesses/opencode/prompt.md
 forced 0 hack/versions.env
 forced 0 hack/versions-env.sh
 forced 0 hack/e2e-toolchain/web.Dockerfile
@@ -60,7 +60,7 @@ expect 0 internal/gateway/policy.go
 expect 0 internal/ledger/ledger.go
 expect 0 internal/githubtools/branch.go
 expect 0 internal/tracing/export/export.go
-expect 0 flavors/opencode/Dockerfile
+expect 0 harnesses/opencode/Dockerfile
 expect 0 test/e2e/run.sh
 expect 0 test/e2e/quickstart_test.go
 expect 0 test/e2e/kind/up.sh
@@ -83,7 +83,7 @@ expect 1 web/e2e/login.spec.ts
 expect 1 internal/agentd/run_test.go              # tests outside test/e2e
 expect 1 internal/services/agents/service_test.go
 expect 1 test/fakemodel/server_test.go
-expect 0 flavors/opencode/prompts/system.md   # flavors' Markdown can be prompts
+expect 0 harnesses/opencode/prompts/system.md   # flavors' Markdown can be prompts
 expect 0 Makefile
 expect 0 go.work
 expect 1 hack/chart-check.sh
