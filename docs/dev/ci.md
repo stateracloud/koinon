@@ -429,13 +429,21 @@ that file and nowhere else.
   the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
   own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
   (`.sh` files, `.github/`, the tool pins); a docs-only or web-only pull request runs neither (#572).
-- **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`)
-  runs `hack/govulncheck.sh`; any other pull request skips the job and pays nothing. It is a part of the
+- **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`),
+  the check itself (`hack/govulncheck.sh`, `govulncheck.yml`, `hack/versions.env`) or an `everything` path
+  (`ci.yml`, the Makefile, the setup-go-cache action, `hack/paths.rules`, `hack/paths-lib.sh`) runs
+  `hack/govulncheck.sh`, and so does a push to main; any other pull request skips the job. The nested modules
+  under `hack/spike/` are not scanned. The rule does not see new reachability from a code change (a `.go` change
+  that starts to call a vulnerable symbol of a module already required, or of the standard library) nor a new advisory:
+  the nightly run catches those, up to one day later. It is a part of the
   required `go` check: the `go` gate accepts the skip only when the `vuln` output is false, and fails on a
   finding. The script installs the version pinned in `hack/versions.env` (`GOVULNCHECK_VERSION`) with `go install`
   and runs `govulncheck ./...`: exit 0 is a pass, a reachable known vulnerability fails the job (exit 1), and
   a tool or database (`vuln.go.dev`) that cannot be fetched fails it too (exit 2, "COULD NOT DECIDE"), never
-  a silent pass. There is no automatic retry (T1): re-run the job by hand. The nightly `govulncheck.yml` runs
+  a silent pass. There is no automatic retry (T1): re-run the job by hand. On Actions the cause is an
+  `::error title=govulncheck::` annotation, and `hack/ci-fail.sh` sorts "COULD NOT DECIDE" as `infra` (re-run is
+  fair) and a finding as `vuln` (read it). The script scans with the Go toolchain of the `go` line of `go.mod`,
+  and says so when that toolchain is not available (a local run keeps the default one). The nightly `govulncheck.yml` runs
   the same script on `main`, because a new advisory needs no code change. The preflight gate `vuln` runs it
   locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
   the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`

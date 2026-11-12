@@ -31,11 +31,30 @@ fi
 patterns=("$@")
 [[ ${#patterns[@]} -gt 0 ]] || patterns=(./...)
 
+# Scan the standard library of the Go version in go.mod, as CI does (setup-go reads the same line), also in a
+# local run with another Go on the PATH. If that toolchain cannot be had (a download the sandbox or network
+# refuses), keep the default toolchain and say so: the standard library part of the result may then differ.
+if [[ -z ${GOTOOLCHAIN:-} && -f go.mod ]]; then
+	modgo=$(awk '$1 == "go" { print $2; exit }' go.mod)
+	if [[ -n $modgo ]]; then
+		if GOTOOLCHAIN="go$modgo" go version >/dev/null 2>&1; then
+			export GOTOOLCHAIN="go$modgo"
+		else
+			echo "govulncheck: NOTICE: the Go toolchain go$modgo of go.mod is not available here; using the default toolchain, so the standard library part of the result can differ from CI" >&2
+		fi
+	fi
+fi
+
+# On GitHub Actions the cause goes on the run page as an annotation (hack/ci-fail.sh classifies the text).
+annotate() { [[ -z ${GITHUB_ACTIONS:-} ]] || echo "::error title=govulncheck::$1"; }
+
 bindir=$(mktemp -d "${TMPDIR:-/tmp}/govulncheck.XXXXXX")
 trap 'rm -rf "$bindir"' EXIT
 
 if ! GOBIN=$bindir go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"; then
-	echo "govulncheck: FAILED to install govulncheck ${GOVULNCHECK_VERSION} (module proxy or checksum database unreachable?). This is not a pass; no retry (rule T1). Re-run by hand." >&2
+	msg="COULD NOT DECIDE: FAILED to install govulncheck ${GOVULNCHECK_VERSION} (module proxy or checksum database unreachable?). This is not a pass; no retry (rule T1). Re-run by hand."
+	annotate "$msg"
+	echo "govulncheck: $msg" >&2
 	exit 2
 fi
 
@@ -44,11 +63,14 @@ rc=0
 case $rc in
 0) echo "govulncheck ${GOVULNCHECK_VERSION}: no reachable known vulnerability" ;;
 3)
+	annotate "reachable vulnerability: a known vulnerability is reachable from this module (govulncheck ${GOVULNCHECK_VERSION}; report in the log above)"
 	echo "govulncheck ${GOVULNCHECK_VERSION}: FAIL, a known vulnerability is reachable from this module (report above)" >&2
 	exit 1
 	;;
 *)
-	echo "govulncheck ${GOVULNCHECK_VERSION}: COULD NOT DECIDE (exit $rc): the vulnerability database could not be fetched or read, or the packages did not load. This is not a pass; no retry (rule T1). Re-run by hand." >&2
+	msg="COULD NOT DECIDE (exit $rc): the vulnerability database could not be fetched or read, or the packages did not load. This is not a pass; no retry (rule T1). Re-run by hand."
+	annotate "$msg"
+	echo "govulncheck ${GOVULNCHECK_VERSION}: $msg" >&2
 	exit 2
 	;;
 esac

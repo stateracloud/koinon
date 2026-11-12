@@ -223,7 +223,6 @@ expect_gates "shell scripts" hack/ship.sh
 expect_gates "shell scripts" hack/ci-changes-test.sh
 expect_gates "shell scripts" .github/workflows/e2e-kind.yml
 expect_gates "shell scripts" .github/actions/fetch-pinned/action.yml
-expect_gates "shell scripts" hack/versions.env
 expect_gates "shell scripts" internal/agentd/savework.sh
 expect_gates "tidy scripts" hack/pgserver/main.go
 expect_gates "tidy vuln shell scripts" go.mod
@@ -234,8 +233,12 @@ expect_gates "tidy vuln shell scripts" hack/paths.rules
 # vuln (go-vuln, govulncheck, #579 part 2): only the module files (and CI plumbing, through `everything`).
 expect_gates "tidy scripts" internal/zzz-new/x.go # a Go file alone does not run govulncheck
 expect_gates "" docs/dev/ci-rules.md # a docs-only change does not
-expect_gates "shell scripts" hack/govulncheck.sh
-expect_gates "shell scripts" .github/workflows/govulncheck.yml
+expect_gates "vuln shell scripts" hack/govulncheck.sh # the check itself
+expect_gates "vuln shell scripts" .github/workflows/govulncheck.yml
+expect_gates "vuln shell scripts" hack/versions.env # accepted cost: every tool bump runs govulncheck
+expect_gates "scripts" hack/spike/acpdrive/go.mod # nested spike modules are not scanned
+expect_gates "scripts" hack/spike/acpdrive/go.sum
+expect_gates "shell scripts" hack/govulncheck-test.sh
 expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
 
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.

@@ -95,6 +95,15 @@ example "the rules themselves" "chart chartsmoke escape flavors generate go scri
 example "go.mod runs govulncheck" "chart chartsmoke escape flavors generate go scripts shell tidy vuln web" 0 go.mod
 example "a Go file alone does not run govulncheck" "chartsmoke go scripts tidy" 0 internal/reconciler/reconcile.go
 example "documentation" "" 1 docs/design.md
+
+# The `vuln` rule itself (`everything` turns every job on for go.mod and go.sum, so the changes-level tests
+# cannot see a narrowed rule): go.mod and go.sum each trigger it, a nested spike module does not.
+for f in go.mod go.sum hack/govulncheck.sh .github/workflows/govulncheck.yml hack/versions.env; do
+	if paths_job_triggers vuln "$f"; then ok; else bad "the vuln rule must match $f"; fi
+done
+for f in hack/spike/acpdrive/go.mod hack/spike/acpdrive/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
+	if paths_job_triggers vuln "$f"; then bad "the vuln rule must not match $f"; else ok; fi
+done
 example "the CI documentation, read by ci-cache-test" "scripts" 1 docs/dev/ci.md
 
 if [[ $fails -ne 0 ]]; then

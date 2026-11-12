@@ -18,13 +18,17 @@ mkdir -p "$tmp/bin"
 cat >"$tmp/bin/go" <<'EOF'
 #!/usr/bin/env bash
 echo "go $*" >>"$FAKE_LOG"
+if [[ $1 == version ]]; then echo "go version $GOTOOLCHAIN [toolchain probe]" >>"$FAKE_LOG"; exit "${FAKE_TOOLCHAIN_RC:-0}"; fi
 [[ $1 == install ]] || exit 64
 [[ ${FAKE_INSTALL_RC:-0} -eq 0 ]] || { echo "go: fake proxy unreachable" >&2; exit "$FAKE_INSTALL_RC"; }
-printf '#!/usr/bin/env bash\necho "govulncheck $*" >>"$FAKE_LOG"\nexit "${FAKE_VULN_RC:-0}"\n' >"$GOBIN/govulncheck"
+printf '#!/usr/bin/env bash\necho "govulncheck $* [GOTOOLCHAIN=${GOTOOLCHAIN:-}]" >>"$FAKE_LOG"\nexit "${FAKE_VULN_RC:-0}"\n' >"$GOBIN/govulncheck"
 chmod +x "$GOBIN/govulncheck"
 EOF
 chmod +x "$tmp/bin/go"
 export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp/log"
+mkdir -p "$tmp/mod"
+printf 'module example.invalid/m\n\ngo 1.27.3\n' >"$tmp/mod/go.mod"
+cd "$tmp/mod"
 pinned=$(sed -n 's/^GOVULNCHECK_VERSION=//p' "$root/hack/versions.env")
 [[ -n $pinned ]] || fail "no GOVULNCHECK_VERSION in hack/versions.env"
 
@@ -52,14 +56,28 @@ run "the environment overrides the pin" 0 "" FAKE_VULN_RC=0 GOVULNCHECK_VERSION=
 grep -qF "govulncheck@$other" "$FAKE_LOG" || fail "GOVULNCHECK_VERSION from the environment ignored"
 
 run "the default pattern is ./..." 0 "" FAKE_VULN_RC=0
-grep -qx 'govulncheck ./...' "$FAKE_LOG" || fail "default pattern not ./..."
+grep -qx 'govulncheck ./... \[GOTOOLCHAIN=go1.27.3\]' "$FAKE_LOG" || fail "default pattern not ./..."
 : >"$FAKE_LOG"
 FAKE_VULN_RC=0 "$root/hack/govulncheck.sh" ./cmd/... >/dev/null 2>&1
-grep -qx 'govulncheck ./cmd/...' "$FAKE_LOG" || fail "a given pattern was not passed on"
+grep -q '^govulncheck ./cmd/\.\.\. ' "$FAKE_LOG" || fail "a given pattern was not passed on"
 echo "ok: a pattern is passed on"
 
 # A finding must never be retried: the tool ran once.
 run "a finding runs the tool once" 1 "" FAKE_VULN_RC=3
 [[ $(grep -c '^govulncheck ' "$FAKE_LOG") -eq 1 ]] || fail "the tool ran more than once"
 
+# The toolchain of go.mod is used when it is available, else the default one with a notice.
+run "the go.mod toolchain is used" 0 "" FAKE_VULN_RC=0
+grep -qF '[GOTOOLCHAIN=go1.27.3]' "$FAKE_LOG" || fail "GOTOOLCHAIN not set from go.mod"
+run "an unavailable toolchain keeps the default and says so" 0 "using the default toolchain" FAKE_VULN_RC=0 FAKE_TOOLCHAIN_RC=1
+grep -qF '[GOTOOLCHAIN=]' "$FAKE_LOG" || fail "GOTOOLCHAIN was set although the toolchain is unavailable"
+run "a GOTOOLCHAIN from the caller is kept" 0 "" FAKE_VULN_RC=0 GOTOOLCHAIN=local
+grep -qF '[GOTOOLCHAIN=local]' "$FAKE_LOG" || fail "the caller's GOTOOLCHAIN was overridden"
+
+# Annotations on GitHub Actions only (the cause on the run page, classified by hack/ci-fail.sh).
+run "a finding is annotated in Actions" 1 "::error title=govulncheck::reachable vulnerability" FAKE_VULN_RC=3 GITHUB_ACTIONS=true
+run "could not decide is annotated in Actions" 2 "::error title=govulncheck::COULD NOT DECIDE" FAKE_VULN_RC=1 GITHUB_ACTIONS=true
+run "a failed install is annotated in Actions" 2 "::error title=govulncheck::COULD NOT DECIDE" FAKE_INSTALL_RC=1 GITHUB_ACTIONS=true
+run "no annotation outside Actions" 1 "" FAKE_VULN_RC=3
+! grep -q '^::error' "$tmp/out" "$tmp/err" || fail "an annotation outside Actions"
 echo "govulncheck-test ok"
