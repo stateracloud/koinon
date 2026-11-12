@@ -13,6 +13,7 @@ hook=$here/agent-spawn-check.sh
 fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
+export KOINON_MAINTAINER_HOOKS=1
 
 # run <name> <want: deny|allow> <subagent_type|-> <model|-> <prompt>
 run() {
@@ -42,5 +43,16 @@ if [ "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$out")" = PreToolUse ] \
 else
   bad "deny output shape ($out)"
 fi
+
+# Off unless KOINON_MAINTAINER_HOOKS=1 (issue 843): no output and exit 0 for a spawn it would refuse.
+for v in unset '' 0 true; do
+  rc=0
+  if [ "$v" = unset ]; then
+    out=$(env -u KOINON_MAINTAINER_HOOKS "$hook" <<<'{"tool_input":{"prompt":"x"}}') || rc=$?
+  else
+    out=$(KOINON_MAINTAINER_HOOKS=$v "$hook" <<<'{"tool_input":{"prompt":"x"}}') || rc=$?
+  fi
+  if [ -z "$out" ] && [ "$rc" -eq 0 ]; then ok "off with KOINON_MAINTAINER_HOOKS=$v"; else bad "KOINON_MAINTAINER_HOOKS=$v: rc=$rc output: $out"; fi
+done
 
 exit "$fail"

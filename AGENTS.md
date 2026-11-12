@@ -29,6 +29,7 @@ Instructions for coding agents working on Koinon.
   else (no registry, no secret store) is needed; see CONTRIBUTING.md and `docs/dev/loop.md`.
   Real-model runs on your own cluster and budget: `docs/dev/real-model-tests.md`.
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline). ADRs: `hack/adr-lint.sh`, `hack/adr-index.sh`.
+- Maintainer agent hooks (`hack/hooks/`) are opt-in with `KOINON_MAINTAINER_HOOKS=1`: `docs/maintainers/hooks.md`.
 - Before you hand over or push: `hack/lane-gates.sh` (blocks; the gates your change touches, one
   `gate=… verdict=pass|fail|notrun` line each, `docs/dev/ci.md#the-local-gate-command`) or
   `hack/preflight.sh` (the diff-selected gates without the heavy jobs).

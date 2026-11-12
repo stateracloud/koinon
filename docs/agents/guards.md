@@ -15,12 +15,14 @@ with `gh api`; the ruleset rows match it. The classifier was not re-read from Cl
 ## 1. The table
 
 Owner: "repo" means a pull request changes it. "Owner" means only the human owner can change it.
+The hooks in `hack/hooks/` are maintainer hooks: they run only with `KOINON_MAINTAINER_HOOKS=1`
+(`docs/maintainers/hooks.md`); without it they do nothing.
 
 | Rule | Guard, where | What the agent sees | Legal route | Owner |
 |---|---|---|---|---|
 | A spawn sets a model | `hack/hooks/agent-spawn-check.sh`, PreToolUse on Agent (`.claude/settings.json`). A second spawn hook, `~/.config/koinon/hooks/agent-spawn-check.sh`, is registered in the owner's local settings; both run on each spawn | deny: `set "model"` | Send the spawn again with `model` (`docs/agents/subagent-brief.md`, "Which model") | repo; the second hook: owner |
 | A spawn names the brief | same two hooks | deny: `name docs/agents/subagent-brief.md in the prompt`; the owner-local hook adds the brief digest to the reason | Put the path in the prompt. Explore, claude-code-guide, web-fetch, statusline-setup, claude-security:* and fork need no path | repo; the second hook: owner |
-| No `sleep` of 5 s or more in the foreground Bash call | `~/.config/koinon/hooks/sleep-chain.sh`, PreToolUse on Bash (not in the repository) | deny: `Sleep chain blocked` | `hack/pr-wait.sh <PR> --checks`; `run_in_background`; a Monitor call | owner |
+| No `sleep` of 5 s or more in the foreground Bash call | `hack/hooks/sleep-chain-check.sh`, PreToolUse on Bash (issue 843; replaces the owner-local `~/.config/koinon/hooks/sleep-chain.sh`) | deny: `Sleep chain blocked` | `hack/pr-wait.sh <PR> --checks`; `run_in_background`; a Monitor call | repo |
 | Read a saved tool result in small parts | `hack/hooks/read-result-check.sh` (Read of `tool-results/` needs `limit`) | deny with reason | Read with `offset` and `limit`; grep the saved file | repo |
 | Do not print much of a file or of several files in one Bash call | `hack/hooks/bash-read-check.sh` | deny: `Prints too much of a file or of several files (...)` | Read with `offset` and `limit`, `grep -n`, codegraph, or `sed -n` ranges of at most 210 lines in total per call (`max_lines` in the script) | repo |
 | Hooks need bash 5 | the bash 5 check near the top of each repository hook in `hack/hooks/`; the owner-local hooks have no such check (checked: no `BASH_VERSINFO` in `~/.config/koinon/hooks/`) | `systemMessage`: hooks skipped | `brew install bash` (ADR 0090). The hook is then off, not satisfied | repo |
@@ -59,10 +61,11 @@ Guards in the table: 29.
    classifier denies `--admin` from an agent (4 of 4 on 2026-11-08, from the audit record).
    `hack/pr-merge.sh` has `--admin`, but the agent cannot use it. Since 2026-11-11 only a PR with a `.github/` path needs `--admin` (ADR 0103 deprecated); the owner runs the command; the agent hands over
    `hack/pr-merge.sh <PR> --admin --approved-at <time>` and the evidence.
-2. **The hook set is split.** `sleep-chain.sh`, the second spawn hook and the digest live in
-   `~/.config/koinon/hooks`, not in the repository, so a cloud lane or a second contributor has
-   other guards than this table says. Smallest fix: move the repository-relevant hooks to
-   `hack/hooks/` with tests, and register them in `.claude/settings.json`.
+2. **The hook set is split.** The second spawn hook and the digest live in
+   `~/.config/koinon/hooks`, not in the repository, so a cloud lane has other guards than this
+   table says. Smallest fix: move them to `hack/hooks/` with tests, behind
+   `KOINON_MAINTAINER_HOOKS=1` (`docs/maintainers/hooks.md`, "Adding a maintainer hook").
+   `sleep-chain.sh` moved on 2026-11-12 (issue 843).
 3. **Hooks run from the main checkout.** `.claude/settings.json` starts them from
    `$CLAUDE_PROJECT_DIR`, the main checkout, not from a lane's worktree. A lane gets the hook version
    of the main checkout, which can be many commits behind `origin/main`. Smallest fix: make "main
@@ -83,7 +86,7 @@ Already repaired or not a contradiction on this tree:
   `sandbox denial`.
 - The brief against `sleep-chain.sh`. The brief (`docs/agents/subagent-brief.md`, "Work in your
   worktree", the "No standalone `sleep`" bullet) forbids a foreground sleep loop and sends waits to
-  `hack/pr-wait.sh`, `run_in_background` or a Monitor call. `sleep-chain.sh` is a PreToolUse hook on
+  `hack/pr-wait.sh`, `run_in_background` or a Monitor call. `sleep-chain-check.sh` is a PreToolUse hook on
   the Bash tool only, so it never sees a Monitor call. The two do not conflict.
 
 Not checked against the live system: the hook refusal count (about 375 on 2026-11-08) and the

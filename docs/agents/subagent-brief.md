@@ -83,7 +83,7 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 
 ## For parents
 - Every spawn prompt names this brief, a model, the worktree and the scope.
-- Spawns are checked by `hack/hooks/agent-spawn-check.sh` (a PreToolUse hook in `.claude/settings.json`): a model and this brief are required (old issue 397).
-- Reads are checked too (old issue 534): `hack/hooks/read-result-check.sh` refuses a Read of `tool-results/` without `limit`; `hack/hooks/bash-read-check.sh` refuses a Bash call that cats several files or a whole source file, loops over files, or asks `sed -n` for more than 210 lines in total (or for several reads when one has no line range).
+- With `KOINON_MAINTAINER_HOOKS=1` (`docs/maintainers/hooks.md`), spawns are checked by `hack/hooks/agent-spawn-check.sh` (a PreToolUse hook in `.claude/settings.json`): a model and this brief are required (old issue 397). The rule holds without the hook.
+- Reads are checked too, with the same variable (old issue 534): `hack/hooks/read-result-check.sh` refuses a Read of `tool-results/` without `limit`; `hack/hooks/bash-read-check.sh` refuses a Bash call that cats several files or a whole source file, loops over files, or asks `sed -n` for more than 210 lines in total (or for several reads when one has no line range).
 - No third fix round when round 2 still turns up a new class of finding: stop and ask the human through the question tool, with research as the recommended option.
 - One fix round = one fresh agent, given the worktree, the findings and the head SHA. Never resume an agent past one compaction or about 120k context.

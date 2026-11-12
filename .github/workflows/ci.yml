@@ -885,6 +885,7 @@ jobs:
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
+      - run: hack/hooks/sleep-chain-check_test.sh
       - run: hack/agent-state-test.sh
       - run: hack/release-gate-test.sh
       - run: hack/route-guard-test.sh
