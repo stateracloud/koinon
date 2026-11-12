@@ -8,7 +8,7 @@
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
-set -euo pipefail
+set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -43,6 +43,20 @@ fi
 
 out=$(mktemp -d "${TMPDIR:-/tmp}/chart-check.XXXXXX")
 trap 'rm -rf "$out"' EXIT
+# A command that fails under set -e names itself, so an exit code alone never ends the log (#608).
+# set -E carries the trap into functions and subshells. The message names the assertion file being
+# sourced (the loop variable part) and the line in it that led to the failure, also when the failing
+# command is inside a helper (found on the call stack), and the innermost location.
+chart_check_err() {
+	local rc=$1 cmd=$2 line=$3 i at=""
+	for ((i = 1; i < ${#BASH_SOURCE[@]}; i++)); do
+		if [[ ${part:-} != "" && ${BASH_SOURCE[i]} == "$part" ]]; then
+			at="$part:${BASH_LINENO[i - 1]}: " # the outermost frame in the file: the line that ran it
+		fi
+	done
+	echo "chart-check: ${at}(${BASH_SOURCE[1]:-?}:$line) exit $rc in: $cmd" >&2
+}
+trap 'chart_check_err "$?" "$BASH_COMMAND" "$LINENO"' ERR
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
 # The chart requires openshell.clientTLSSecret or openshell.insecure=true (old issue 103); the default
@@ -66,7 +80,10 @@ render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.i
 # render_raw renders without that default, for the assertions about the TLS choice itself.
 render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRESS" "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
-# the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
+# the pipeline when grep exits on the first match and the writer then dies of SIGPIPE (exit 141, #608).
+# hit is grep -q that reads all of its input: `producer | hit pattern` never closes the pipe early.
+# Never write `| grep -q` or `| head` in hack/chart-check*; hack/chart-check-test.sh refuses both.
+hit() { grep "$@" >/dev/null; }
 # fail records into a file, not only a counter: an assertion that runs in a subshell (a pipe, $(...)
 # or a ( ... ) group) cannot bump a variable of this shell, and a FAIL that does not reach the exit
 # code makes every assertion advisory (#323).
