@@ -159,13 +159,13 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 func (c *Client) Run(ctx context.Context) error {
 	backoff := c.cfg.MinBackoff
 	for ctx.Err() == nil {
-		n, err := c.session(ctx)
+		n, handled, err := c.session(ctx)
 		if ctx.Err() != nil {
 			break
 		}
 		c.log.Warn("gateway State stream ended; reconnecting", "err", err, "revisions", n, "retry_in", backoff)
-		if n > 0 {
-			backoff = c.cfg.MinBackoff // the connection worked for a while
+		if handled {
+			backoff = c.cfg.MinBackoff // the stream worked: every revision it carried applied and acked
 		}
 		select {
 		case <-ctx.Done():
@@ -176,27 +176,29 @@ func (c *Client) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// session runs one connection and returns how many revisions it handled and why it ended.
-func (c *Client) session(ctx context.Context) (int, error) {
+// session runs one connection and returns how many revisions it received, whether the session
+// ended with every received revision applied and acked (only then does Run reset its backoff; a
+// persistent apply failure must keep growing it), and why it ended.
+func (c *Client) session(ctx context.Context) (int, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := c.api.StreamState(ctx, &gwv1.StreamStateRequest{CopyId: c.cfg.CopyID})
 	if err != nil {
 		c.cfg.Metrics.Connects.WithLabelValues(connectFailed).Inc()
-		return 0, err
+		return 0, false, err
 	}
 	defer func() { _ = stream.Close() }()
 	n := 0
 	for {
 		u, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return n, errors.New("the server closed the stream")
+			return n, n > 0, errors.New("the server closed the stream")
 		}
 		if err != nil {
 			if n == 0 {
 				c.cfg.Metrics.Connects.WithLabelValues(connectFailed).Inc()
 			}
-			return n, err
+			return n, n > 0, err
 		}
 		if n == 0 {
 			c.cfg.Metrics.Connects.WithLabelValues(connectEstablished).Inc()
@@ -205,7 +207,7 @@ func (c *Client) session(ctx context.Context) (int, error) {
 		if err := c.handle(ctx, u); err != nil {
 			// An ack that could not be recorded: reconnecting replays the newest revision, which is
 			// applied (idempotent) or skipped and acked again.
-			return n, err
+			return n, false, err
 		}
 	}
 }

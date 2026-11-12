@@ -219,6 +219,21 @@ var _ = Describe("the gateway State client", func() {
 		Expect(testutil.ToFloat64(m.Applied.WithLabelValues("mcp", "ok"))).To(Equal(1.0))
 	})
 
+	It("backs off while an apply keeps failing instead of reconnecting at the minimum interval", func() {
+		start(20 * time.Millisecond)
+		st.publish(1, "wiki")
+		model.setErr(errors.New("gateway admin endpoint unreachable"))
+		m := stateclient.NewMetrics(nil)
+		run(m)
+
+		time.Sleep(600 * time.Millisecond)
+		// Backoff 10, 20, 40, 50, 50 ms (with jitter) gives about 10 attempts in 600 ms; a backoff
+		// stuck at the 10 ms minimum would give 50 or more.
+		failed := testutil.ToFloat64(m.Applied.WithLabelValues("model", "failed"))
+		Expect(failed).To(BeNumerically(">=", 2))
+		Expect(failed).To(BeNumerically("<", 25))
+	})
+
 	It("retries a half whose apply failed, without a new publish", func() {
 		start(20 * time.Millisecond)
 		st.publish(5, "wiki")
