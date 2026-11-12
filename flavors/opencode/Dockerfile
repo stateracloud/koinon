@@ -126,6 +126,9 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::E
 
 FROM ${BASE}
 ARG UBUNTU_SNAPSHOT=20261027T000000Z
+# The commit time (#176): declared so the RUN steps see it; useradd writes it into /etc/shadow
+# instead of the current day.
+ARG SOURCE_DATE_EPOCH
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # git for the repository the agent works on, ca-certificates for TLS through the OpenShell proxy. The
 # data tools: jq, sqlite3, poppler-utils (pdftotext, pdfinfo; GPL, shipped unmodified from Ubuntu
@@ -151,7 +154,9 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       xz-utils=5.6.1+really5.4.5-1ubuntu0.4 \
       python3=3.12.3-0ubuntu2.1 \
       python-is-python3=3.11.4-1 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+      /var/log/apt/* /var/log/dpkg.log /var/log/alternatives.log \
+      /var/cache/ldconfig/aux-cache /var/cache/debconf/*-old
 # OpenShell runs the sandbox as UID/GID 10001 with the home volume at /sandbox (spike 1, 8).
 RUN groupadd --gid 10001 sandbox \
  && useradd --uid 10001 --gid 10001 --home-dir /sandbox --no-create-home --shell /bin/bash sandbox \
