@@ -125,7 +125,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 
 - **Org isolation:** every query takes `org_id`, tables keep the scaffold's `(org_id, id)` keys,
   and an org-isolation test suite runs in CI from v0.1.
-- **v0.1 is private.** Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
+- **v0.1 is private.** _(Changed: the packages are public, signed first; see the amendment of 2026-11-12 below and [0027](0027-repo-and-versioning.md).)_ Images and the OCI chart go to `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
   Signing and SBOM attestations are wired in the release workflow but switched on when the
   repository goes public, because keyless cosign writes names and digests to the public Rekor log.
   The repository stays `stateracloud/koinon` (amended 2026-10-26: it was `procoduck/koinon`); the org name is chosen when going public.
@@ -366,3 +366,11 @@ from templates costs nothing until work arrives.
   read it; a new request reads "not granted" until the next pass. The agent page has a "Keep warm"
   control that says whether the cap granted it. The admin REST API (`/admin/v1`) has no keep-warm
   endpoint yet.
+
+## Amendment (#854, 2026-11-12): packages public, signed first
+
+The decision of 2026-11-12 supersedes "v0.1 is private" for the registry: the images and the OCI chart on
+`ghcr.io/stateracloud/koinon/*` are public, with signing and SBOM attestations switched on before the first
+public release (`RELEASE_SIGNING` is `true`), and a pre-alpha notice on the docs site and its README. The reason
+for deferring signing, the public Rekor log, is accepted now. Record: ADR [0027](0027-repo-and-versioning.md),
+amendment of 2026-11-12.

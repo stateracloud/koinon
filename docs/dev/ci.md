@@ -166,7 +166,8 @@ the chart's repository at the same digest when the variable is unset, so a lapto
 GHCR credentials. When the pull fails, go-test fails with a pointer to step 2, except in a fork's own
 CI, which cannot read the copy: there it warns and the tests pull the chart's repository.
 
-The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
+This package is a CI test image, not one of Koinon's released packages (those are public, ADR 0027,
+amendment of 2026-11-12), and it stays private for its own reasons: it is a third-party image copy. The go-test job pulls it with its own `GITHUB_TOKEN`
 (`packages: read` on the job), which works only while the package's settings ("Manage Actions
 access") list this repository with read. The image's `org.opencontainers.image.source` label names
 the upstream repository (changing it would change the digest), so GHCR does not link the package to

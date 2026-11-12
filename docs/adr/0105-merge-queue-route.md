@@ -74,7 +74,8 @@ only queue latency and runner slots.
    On `pull_request` the `quickstart` stays an **advisory signal**: it runs when the change is e2e-relevant
    or carries the `e2e` label, so the author and the reviewer see a red before they spend a review and a
    queue slot. For a fork pull request it runs only with the `e2e` label (a maintainer adds it): the flavor
-   images on GHCR stay private until v0.3, so a fork's run cannot pull them and would build them cold.
+   images on GHCR were private when this was written, so a fork's run could not pull them and would build them cold
+   _(Changed: the packages are public, see the amendment of 2026-11-12; the label-only rule stays for cost and trust, not for access.)_.
    `e2e result` on `pull_request` passes without reading it (the required context must exist for the entry to
    be enqueued); `pr-wait.sh` prints a red PR `quickstart` as `advisory quickstart failed`. Revisit: if a
    queue `quickstart` waits more than 5 minutes for a runner in a week, the PR run becomes label-only.
@@ -429,3 +430,9 @@ the flavor change goes through the merge queue, the `.github` change through `--
 the base, as the e2e guard does, so a pull request cannot loosen its own check.
 Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`;
 the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.
+
+## Amendment 2026-11-12 (#854): the packages are public
+
+Koinon's GHCR packages are public (ADR [0027](0027-repo-and-versioning.md), amendment of 2026-11-12), so "stay
+private until v0.3" in decision 3 no longer holds. A fork's run can pull the flavor images. The fork rule stays
+label-only anyway: a fork's run must not spend a runner or the cluster budget without a maintainer's label.
