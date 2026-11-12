@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,8 +31,11 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 		adminUser = "system:serviceaccount:koinon:koinon-key-admin"
 		recUser   = otherUser
 		managedBy = "koinon.dev/managed-by"
-		ns        = "koinon"
-		kek       = "koinon-kek"
+
+		kekMessage        = "only koinon-api and the key-admin Job may change the KEK Secret"
+		reconcilerMessage = "may write only Secrets that carry the label"
+		ns                = "koinon"
+		kek               = "koinon-kek"
 	)
 	var as map[string]*kubernetes.Clientset
 
@@ -53,6 +57,19 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 		Expect(err).To(HaveOccurred(), "admitted, want a denial containing %q", message)
 		Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy"))
 		Expect(err.Error()).To(ContainSubstring(message))
+	}
+
+	// The reconciler is covered by both policies and the API server reports only one denial, in no fixed
+	// order, so for it either policy's message is right; it must still be a policy denial.
+	deniedByEither := func(err error, messages ...string) {
+		GinkgoHelper()
+		Expect(err).To(HaveOccurred(), "admitted, want a denial containing one of %q", messages)
+		Expect(err.Error()).To(ContainSubstring("ValidatingAdmissionPolicy"))
+		matchers := make([]types.GomegaMatcher, 0, len(messages))
+		for _, m := range messages {
+			matchers = append(matchers, ContainSubstring(m))
+		}
+		Expect(err.Error()).To(Or(matchers...), "denied, but by neither policy")
 	}
 
 	BeforeAll(func(ctx SpecContext) {
@@ -106,17 +123,22 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 
 	It("refuses DELETE of the KEK Secret to every identity, cluster-admin included", func(ctx SpecContext) {
 		dry := metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}}
-		for _, c := range as {
-			denied(c.CoreV1().Secrets(ns).Delete(ctx, kek, dry), "cannot be deleted")
+		for user, c := range as {
+			err := c.CoreV1().Secrets(ns).Delete(ctx, kek, dry)
+			if user == recUser {
+				deniedByEither(err, "cannot be deleted", reconcilerMessage)
+				continue
+			}
+			denied(err, "cannot be deleted")
 		}
 	})
 
 	It("lets koinon-api and the key-admin Job update the KEK Secret, and nobody else", func(ctx SpecContext) {
 		Expect(update(ctx, apiUser, kek)).To(Succeed())
 		Expect(update(ctx, adminUser, kek)).To(Succeed())
-		denied(update(ctx, recUser, kek), "only koinon-api and the key-admin Job may change the KEK Secret")
-		denied(update(ctx, "admin", kek), "only koinon-api and the key-admin Job may change the KEK Secret")
-		denied(update(ctx, "system:serviceaccount:koinon:somebody", kek), "only koinon-api and the key-admin Job may change the KEK Secret")
+		deniedByEither(update(ctx, recUser, kek), kekMessage, reconcilerMessage)
+		denied(update(ctx, "admin", kek), kekMessage)
+		denied(update(ctx, "system:serviceaccount:koinon:somebody", kek), kekMessage)
 	})
 
 	It("leaves other Secrets to RBAC for everyone but the reconciler (control)", func(ctx SpecContext) {
@@ -132,7 +154,7 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 	})
 
 	It("refuses the reconciler every other Secret", func(ctx SpecContext) {
-		const message = "may write only Secrets that carry the label"
+		const message = reconcilerMessage
 		denied(update(ctx, recUser, "foreign"), message)
 		_, err := as[recUser].CoreV1().Secrets(ns).Create(ctx, secret("new-foreign", nil), metav1.CreateOptions{})
 		denied(err, message)
