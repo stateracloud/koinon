@@ -254,7 +254,7 @@ changes `flavors/`.
 ### Reproducible flavor layers
 
 One commit builds the same flavor image layers (#176), as `ko` already does for the Go images.
-`hack/release-flavor.sh` sets the build arg `SOURCE_DATE_EPOCH` to the
+`hack/release-flavor.sh` and the `flavor-publish` job set the build arg `SOURCE_DATE_EPOCH` to the
 commit time (`git show -s --format=%ct`) and push with BuildKit's `rewrite-timestamp=true` exporter
 option, which clamps every file time in the layers to that epoch. The base image and every download
 are pinned by digest and the apt packages by the Ubuntu snapshot date, so those inputs do not move.
@@ -262,9 +262,11 @@ are pinned by digest and the apt packages by the Ubuntu snapshot date, so those 
 `hack/flavor-repro-check.sh [flavor [platform]]` is the check: it builds the flavor twice on
 a fresh builder with no cache, for one platform, and fails when the two image digests differ (it keeps
 both OCI layouts and prints their paths). It always checks `HEAD` and refuses to run when `flavors/`
-has uncommitted changes, because the build reads the working tree. Run it by hand after a commit
-that changes `flavors/`; it needs Docker with buildx and the network, and takes as long as two
-uncached builds.
+has uncommitted changes, because the build reads the working tree. The advisory `flavor-repro` job
+(`.github/workflows/flavor-repro.yml`) runs it for the runner's platform on a push to main, nightly
+and on dispatch; it is not in the pull request or merge queue path, so it never blocks a merge. Run it
+by hand after a commit that changes `flavors/`; it needs Docker with buildx and the network, and takes
+as long as two uncached builds.
 
 What it does not cover: the BuildKit SBOM and provenance attestations of a release carry build data,
 so the release's index digest (the one the `sign` job signs) differs between two runs while the image

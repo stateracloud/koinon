@@ -50,6 +50,9 @@ advisory warm-caches
 advisory warm-caches-web
 advisory warm-caches-opencode-plugins
 
+# The `flavor-repro` job of .github/workflows/flavor-repro.yml (#176) is advisory, and is not a pull request or
+# merge queue check at all: it runs on a push to main, nightly and on dispatch, so it can never be required.
+
 # The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514) is advisory, and is not a pull request or
 # merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
 # required (a required name must report on every PR, push and merge_group build). It is `continue-on-error`, so a red

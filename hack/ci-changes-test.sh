@@ -153,6 +153,7 @@ expect "go flavors opencodeplugin" flavors/opencode/Dockerfile
 expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh
+expect "" hack/flavor-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
 expect "go flavors" hack/spike/probe/Dockerfile
 # Negative: a package neither suite imports.
 expect "go" internal/zzz-not-imported/x.go

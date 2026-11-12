@@ -1157,7 +1157,10 @@ jobs:
           [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
           # The new cache goes to its own directory (buildx must not read and write one), then
           # replaces the restored one for the save step below.
-          docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
+          # The commit time pins the timestamps, as in the release (hack/release-flavor.sh, #176).
+          docker buildx build --output type=registry,rewrite-timestamp=true \
+            --build-arg "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" \
+            --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
             --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode
