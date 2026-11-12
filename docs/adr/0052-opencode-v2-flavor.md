@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Area: runtime-sandbox
+- Tags: flavors, harness, mcp, dependencies
 - Amended by: [0079](0079-dependency-cooldown.md) (the minimum age in the 2026-10-28 amendment)
 - Amends: [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository) (the OpenCode version and the
   OpenCode details of decision 4; decision 4's flavor contract stands)

@@ -2,6 +2,8 @@
 
 - Status: Accepted; the lab as merge evidence (note of 2026-11-07 below) amended by [0105](0105-merge-queue-route.md)
 - Date: 2026-11-02
+- Area: engineering-process
+- Tags: tooling, ci
 - Relates to: [0079](0079-dependency-cooldown.md), [0082](0082-work-claims-and-ready-queue.md)
 - Issue: old issue 553
 

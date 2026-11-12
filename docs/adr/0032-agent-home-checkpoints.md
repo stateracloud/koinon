@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: agent-home, backup-restore, object-storage, encryption
 - Decision: [design.md#32](../design.md)
 
 ## Context

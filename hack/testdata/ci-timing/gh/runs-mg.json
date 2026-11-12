@@ -1,0 +1,22 @@
+{
+ "workflow_runs": [
+  {
+   "id": 201,
+   "name": "ci",
+   "event": "merge_group",
+   "conclusion": "success",
+   "head_sha": null,
+   "pull_requests": [],
+   "head_branch": "gh-readonly-queue/main/pr-11-abc"
+  },
+  {
+   "id": 202,
+   "name": "ci",
+   "event": "merge_group",
+   "conclusion": "success",
+   "head_sha": null,
+   "pull_requests": [],
+   "head_branch": "gh-readonly-queue/main/pr-99-xyz"
+  }
+ ]
+}

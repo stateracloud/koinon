@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: security-audit
+- Tags: credentials, gitea, github, secrets
 - Relates to: old issue 144 (decided in conversation on
   2026-10-26), [0062](0062-code-host-connectors.md)
 - Amends: [0043](0043-workload-identity-adapters-and-koinon-issuer.md) (a narrow exception for

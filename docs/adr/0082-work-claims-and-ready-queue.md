@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0094](0094-work-claims-on-the-public-repository.md) (2026-11-05) and [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: no lease, heartbeat, sweeper, takeover or board mirror; holder `<login>#<lane>`); decision 8 (the updater) retired by [0094](0094-work-claims-on-the-public-repository.md) (amendment of 2026-11-10) and the merge route set by [0105](0105-merge-queue-route.md); decision 9 (approval on sensitive paths) amended by [0103](0103-recorded-review-verdict-check.md), which is itself deprecated (2026-11-11, #546: the check is removed), so only the CODEOWNERS approval on `.github/**` remains ([0105](0105-merge-queue-route.md))
 - Date: 2026-10-30
+- Area: engineering-process
+- Tags: claims, ci, github
 - Relates to: [0038](0038-governance.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Verification: ref compare-and-set semantics spiked on 2026-10-30 (see Upstream verification)
 

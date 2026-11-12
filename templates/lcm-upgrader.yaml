@@ -7,7 +7,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: lcm-upgrader
-  version: 0.1.0
+  version: 0.1.1
   displayName: LCM upgrader (Gitea)
   description: >-
     Checks one Gitea repository weekly for outdated Helm charts, images, Argo CD apps and
@@ -26,6 +26,9 @@ spec:
     memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
+  # The tools the instructions call or describe ("the search and fetch tools you were allowed"); the
+  # legs test reads this list (ADR 0084 decision 9).
+  tools: [ask_user, create_pull_request, gitea_create_pull_request, web_url_read, searxng_web_search]
   questions:
     reminderAfter: 24h
     expireAfter: 144h

@@ -188,9 +188,16 @@ type Agent struct {
 	// The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when
 	// it follows the template and the platform default.
 	SandboxResources *SandboxResources `protobuf:"bytes,25,opt,name=sandbox_resources,json=sandboxResources,proto3" json:"sandbox_resources,omitempty"`
+	// Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049
+	// amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org.
+	KeepWarm bool `protobuf:"varint,26,opt,name=keep_warm,json=keepWarm,proto3" json:"keep_warm,omitempty"`
+	// Whether the reconciler granted the request under the operator's per-org cap
+	// (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
+	// request reads false until the reconciler's next pass.
+	KeepWarmGranted bool `protobuf:"varint,27,opt,name=keep_warm_granted,json=keepWarmGranted,proto3" json:"keep_warm_granted,omitempty"`
 	// The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
 	// agent is created.
-	Harness       string `protobuf:"bytes,26,opt,name=harness,proto3" json:"harness,omitempty"`
+	Harness       string `protobuf:"bytes,28,opt,name=harness,proto3" json:"harness,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -399,6 +406,20 @@ func (x *Agent) GetSandboxResources() *SandboxResources {
 		return x.SandboxResources
 	}
 	return nil
+}
+
+func (x *Agent) GetKeepWarm() bool {
+	if x != nil {
+		return x.KeepWarm
+	}
+	return false
+}
+
+func (x *Agent) GetKeepWarmGranted() bool {
+	if x != nil {
+		return x.KeepWarmGranted
+	}
+	return false
 }
 
 func (x *Agent) GetHarness() string {
@@ -2268,6 +2289,112 @@ func (x *SetAgentSandboxResourcesResponse) GetState() *SandboxResourcesState {
 	return nil
 }
 
+// SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
+type SetAgentKeepWarmRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	KeepWarm      bool                   `protobuf:"varint,3,opt,name=keep_warm,json=keepWarm,proto3" json:"keep_warm,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentKeepWarmRequest) Reset() {
+	*x = SetAgentKeepWarmRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentKeepWarmRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentKeepWarmRequest) ProtoMessage() {}
+
+func (x *SetAgentKeepWarmRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentKeepWarmRequest.ProtoReflect.Descriptor instead.
+func (*SetAgentKeepWarmRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *SetAgentKeepWarmRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetAgentKeepWarmRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SetAgentKeepWarmRequest) GetKeepWarm() bool {
+	if x != nil {
+		return x.KeepWarm
+	}
+	return false
+}
+
+// SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
+type SetAgentKeepWarmResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentKeepWarmResponse) Reset() {
+	*x = SetAgentKeepWarmResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentKeepWarmResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentKeepWarmResponse) ProtoMessage() {}
+
+func (x *SetAgentKeepWarmResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentKeepWarmResponse.ProtoReflect.Descriptor instead.
+func (*SetAgentKeepWarmResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *SetAgentKeepWarmResponse) GetAgent() *Agent {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
 // RunAgentTriggerRequest names the trigger to fire.
 type RunAgentTriggerRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -2281,7 +2408,7 @@ type RunAgentTriggerRequest struct {
 
 func (x *RunAgentTriggerRequest) Reset() {
 	*x = RunAgentTriggerRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2293,7 +2420,7 @@ func (x *RunAgentTriggerRequest) String() string {
 func (*RunAgentTriggerRequest) ProtoMessage() {}
 
 func (x *RunAgentTriggerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2306,7 +2433,7 @@ func (x *RunAgentTriggerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAgentTriggerRequest.ProtoReflect.Descriptor instead.
 func (*RunAgentTriggerRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{32}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RunAgentTriggerRequest) GetOrgId() string {
@@ -2340,7 +2467,7 @@ type RunAgentTriggerResponse struct {
 
 func (x *RunAgentTriggerResponse) Reset() {
 	*x = RunAgentTriggerResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2352,7 +2479,7 @@ func (x *RunAgentTriggerResponse) String() string {
 func (*RunAgentTriggerResponse) ProtoMessage() {}
 
 func (x *RunAgentTriggerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2365,7 +2492,7 @@ func (x *RunAgentTriggerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAgentTriggerResponse.ProtoReflect.Descriptor instead.
 func (*RunAgentTriggerResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{33}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RunAgentTriggerResponse) GetTaskId() string {
@@ -2379,7 +2506,7 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xb1\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xfa\n" +
 	"\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
@@ -2411,8 +2538,10 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\tephemeral\x18\x16 \x01(\bR\tephemeral\x12J\n" +
 	"\x13sandbox_archived_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x11sandboxArchivedAt\x12#\n" +
 	"\rmodel_setting\x18\x18 \x01(\tR\fmodelSetting\x12T\n" +
-	"\x11sandbox_resources\x18\x19 \x01(\v2'.koinon.agent.v1alpha1.SandboxResourcesR\x10sandboxResources\x12\x18\n" +
-	"\aharness\x18\x1a \x01(\tR\aharness\"\xc1\x02\n" +
+	"\x11sandbox_resources\x18\x19 \x01(\v2'.koinon.agent.v1alpha1.SandboxResourcesR\x10sandboxResources\x12\x1b\n" +
+	"\tkeep_warm\x18\x1a \x01(\bR\bkeepWarm\x12*\n" +
+	"\x11keep_warm_granted\x18\x1b \x01(\bR\x0fkeepWarmGranted\x12\x18\n" +
+	"\aharness\x18\x1c \x01(\tR\aharness\"\xc1\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
@@ -2530,7 +2659,13 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12E\n" +
 	"\tresources\x18\x03 \x01(\v2'.koinon.agent.v1alpha1.SandboxResourcesR\tresources\"f\n" +
 	" SetAgentSandboxResourcesResponse\x12B\n" +
-	"\x05state\x18\x01 \x01(\v2,.koinon.agent.v1alpha1.SandboxResourcesStateR\x05state\"i\n" +
+	"\x05state\x18\x01 \x01(\v2,.koinon.agent.v1alpha1.SandboxResourcesStateR\x05state\"h\n" +
+	"\x17SetAgentKeepWarmRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x1b\n" +
+	"\tkeep_warm\x18\x03 \x01(\bR\bkeepWarm\"N\n" +
+	"\x18SetAgentKeepWarmResponse\x122\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\"i\n" +
 	"\x16RunAgentTriggerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x1d\n" +
@@ -2548,7 +2683,7 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x12MODEL_SOURCE_AGENT\x10\x01\x12\x18\n" +
 	"\x14MODEL_SOURCE_VERSION\x10\x02\x12\x1c\n" +
 	"\x18MODEL_SOURCE_ORG_DEFAULT\x10\x03\x12\x15\n" +
-	"\x11MODEL_SOURCE_NONE\x10\x042\xf8\v\n" +
+	"\x11MODEL_SOURCE_NONE\x10\x042\xed\f\n" +
 	"\fAgentService\x12\x88\x01\n" +
 	"\x17CreateAgentFromTemplate\x125.koinon.agent.v1alpha1.CreateAgentFromTemplateRequest\x1a6.koinon.agent.v1alpha1.CreateAgentFromTemplateResponse\x12`\n" +
 	"\bGetAgent\x12&.koinon.agent.v1alpha1.GetAgentRequest\x1a'.koinon.agent.v1alpha1.GetAgentResponse\"\x03\x90\x02\x01\x12f\n" +
@@ -2559,7 +2694,8 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\vResumeAgent\x12).koinon.agent.v1alpha1.ResumeAgentRequest\x1a*.koinon.agent.v1alpha1.ResumeAgentResponse\x12o\n" +
 	"\rGetAgentModel\x12+.koinon.agent.v1alpha1.GetAgentModelRequest\x1a,.koinon.agent.v1alpha1.GetAgentModelResponse\"\x03\x90\x02\x01\x12j\n" +
 	"\rSetAgentModel\x12+.koinon.agent.v1alpha1.SetAgentModelRequest\x1a,.koinon.agent.v1alpha1.SetAgentModelResponse\x12s\n" +
-	"\x10SetAgentThinking\x12..koinon.agent.v1alpha1.SetAgentThinkingRequest\x1a/.koinon.agent.v1alpha1.SetAgentThinkingResponse\x12\x90\x01\n" +
+	"\x10SetAgentThinking\x12..koinon.agent.v1alpha1.SetAgentThinkingRequest\x1a/.koinon.agent.v1alpha1.SetAgentThinkingResponse\x12s\n" +
+	"\x10SetAgentKeepWarm\x12..koinon.agent.v1alpha1.SetAgentKeepWarmRequest\x1a/.koinon.agent.v1alpha1.SetAgentKeepWarmResponse\x12\x90\x01\n" +
 	"\x18GetAgentSandboxResources\x126.koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest\x1a7.koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse\"\x03\x90\x02\x01\x12\x8b\x01\n" +
 	"\x18SetAgentSandboxResources\x126.koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest\x1a7.koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse\x12p\n" +
 	"\x0fRunAgentTrigger\x12-.koinon.agent.v1alpha1.RunAgentTriggerRequest\x1a..koinon.agent.v1alpha1.RunAgentTriggerResponse\x12g\n" +
@@ -2578,7 +2714,7 @@ func file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_agent_v1alpha1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(AgentStatus)(0),                         // 0: koinon.agent.v1alpha1.AgentStatus
 	(ModelSource)(0),                         // 1: koinon.agent.v1alpha1.ModelSource
@@ -2614,29 +2750,31 @@ var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(*GetAgentSandboxResourcesResponse)(nil), // 31: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
 	(*SetAgentSandboxResourcesRequest)(nil),  // 32: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
 	(*SetAgentSandboxResourcesResponse)(nil), // 33: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
-	(*RunAgentTriggerRequest)(nil),           // 34: koinon.agent.v1alpha1.RunAgentTriggerRequest
-	(*RunAgentTriggerResponse)(nil),          // 35: koinon.agent.v1alpha1.RunAgentTriggerResponse
-	(v1alpha1.Flavor)(0),                     // 36: koinon.template.v1alpha1.Flavor
-	(*v1alpha1.Grant)(nil),                   // 37: koinon.template.v1alpha1.Grant
-	(*v1alpha1.RunLimits)(nil),               // 38: koinon.template.v1alpha1.RunLimits
-	(*timestamppb.Timestamp)(nil),            // 39: google.protobuf.Timestamp
-	(*v1alpha1.Trigger)(nil),                 // 40: koinon.template.v1alpha1.Trigger
+	(*SetAgentKeepWarmRequest)(nil),          // 34: koinon.agent.v1alpha1.SetAgentKeepWarmRequest
+	(*SetAgentKeepWarmResponse)(nil),         // 35: koinon.agent.v1alpha1.SetAgentKeepWarmResponse
+	(*RunAgentTriggerRequest)(nil),           // 36: koinon.agent.v1alpha1.RunAgentTriggerRequest
+	(*RunAgentTriggerResponse)(nil),          // 37: koinon.agent.v1alpha1.RunAgentTriggerResponse
+	(v1alpha1.Flavor)(0),                     // 38: koinon.template.v1alpha1.Flavor
+	(*v1alpha1.Grant)(nil),                   // 39: koinon.template.v1alpha1.Grant
+	(*v1alpha1.RunLimits)(nil),               // 40: koinon.template.v1alpha1.RunLimits
+	(*timestamppb.Timestamp)(nil),            // 41: google.protobuf.Timestamp
+	(*v1alpha1.Trigger)(nil),                 // 42: koinon.template.v1alpha1.Trigger
 }
 var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	0,  // 0: koinon.agent.v1alpha1.Agent.status:type_name -> koinon.agent.v1alpha1.AgentStatus
-	36, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	37, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
-	37, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
-	38, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
-	39, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
-	39, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
-	39, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
-	39, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
-	40, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	40, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	39, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
+	38, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	39, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
+	39, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
+	40, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
+	41, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
+	41, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
+	41, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
+	41, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
+	42, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	42, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	41, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
 	26, // 12: koinon.agent.v1alpha1.Agent.sandbox_resources:type_name -> koinon.agent.v1alpha1.SandboxResources
-	36, // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	38, // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
 	4,  // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
 	2,  // 15: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
 	2,  // 16: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
@@ -2644,7 +2782,7 @@ var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	2,  // 18: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
 	2,  // 19: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
 	2,  // 20: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	40, // 21: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
+	42, // 21: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
 	2,  // 22: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
 	1,  // 23: koinon.agent.v1alpha1.GetAgentModelResponse.source:type_name -> koinon.agent.v1alpha1.ModelSource
 	19, // 24: koinon.agent.v1alpha1.GetAgentModelResponse.available:type_name -> koinon.agent.v1alpha1.ServedModel
@@ -2662,37 +2800,40 @@ var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	30, // 36: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
 	26, // 37: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest.resources:type_name -> koinon.agent.v1alpha1.SandboxResources
 	30, // 38: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
-	3,  // 39: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	6,  // 40: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
-	8,  // 41: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
-	10, // 42: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
-	16, // 43: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
-	12, // 44: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
-	18, // 45: koinon.agent.v1alpha1.AgentService.GetAgentModel:input_type -> koinon.agent.v1alpha1.GetAgentModelRequest
-	22, // 46: koinon.agent.v1alpha1.AgentService.SetAgentModel:input_type -> koinon.agent.v1alpha1.SetAgentModelRequest
-	24, // 47: koinon.agent.v1alpha1.AgentService.SetAgentThinking:input_type -> koinon.agent.v1alpha1.SetAgentThinkingRequest
-	29, // 48: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
-	32, // 49: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
-	34, // 50: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:input_type -> koinon.agent.v1alpha1.RunAgentTriggerRequest
-	14, // 51: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
-	5,  // 52: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	7,  // 53: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
-	9,  // 54: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
-	11, // 55: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
-	17, // 56: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
-	13, // 57: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
-	20, // 58: koinon.agent.v1alpha1.AgentService.GetAgentModel:output_type -> koinon.agent.v1alpha1.GetAgentModelResponse
-	23, // 59: koinon.agent.v1alpha1.AgentService.SetAgentModel:output_type -> koinon.agent.v1alpha1.SetAgentModelResponse
-	25, // 60: koinon.agent.v1alpha1.AgentService.SetAgentThinking:output_type -> koinon.agent.v1alpha1.SetAgentThinkingResponse
-	31, // 61: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
-	33, // 62: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
-	35, // 63: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:output_type -> koinon.agent.v1alpha1.RunAgentTriggerResponse
-	15, // 64: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
-	52, // [52:65] is the sub-list for method output_type
-	39, // [39:52] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	2,  // 39: koinon.agent.v1alpha1.SetAgentKeepWarmResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	3,  // 40: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	6,  // 41: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
+	8,  // 42: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
+	10, // 43: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
+	16, // 44: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
+	12, // 45: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
+	18, // 46: koinon.agent.v1alpha1.AgentService.GetAgentModel:input_type -> koinon.agent.v1alpha1.GetAgentModelRequest
+	22, // 47: koinon.agent.v1alpha1.AgentService.SetAgentModel:input_type -> koinon.agent.v1alpha1.SetAgentModelRequest
+	24, // 48: koinon.agent.v1alpha1.AgentService.SetAgentThinking:input_type -> koinon.agent.v1alpha1.SetAgentThinkingRequest
+	34, // 49: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:input_type -> koinon.agent.v1alpha1.SetAgentKeepWarmRequest
+	29, // 50: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
+	32, // 51: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
+	36, // 52: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:input_type -> koinon.agent.v1alpha1.RunAgentTriggerRequest
+	14, // 53: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
+	5,  // 54: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	7,  // 55: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
+	9,  // 56: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
+	11, // 57: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
+	17, // 58: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
+	13, // 59: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
+	20, // 60: koinon.agent.v1alpha1.AgentService.GetAgentModel:output_type -> koinon.agent.v1alpha1.GetAgentModelResponse
+	23, // 61: koinon.agent.v1alpha1.AgentService.SetAgentModel:output_type -> koinon.agent.v1alpha1.SetAgentModelResponse
+	25, // 62: koinon.agent.v1alpha1.AgentService.SetAgentThinking:output_type -> koinon.agent.v1alpha1.SetAgentThinkingResponse
+	35, // 63: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:output_type -> koinon.agent.v1alpha1.SetAgentKeepWarmResponse
+	31, // 64: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
+	33, // 65: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
+	37, // 66: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:output_type -> koinon.agent.v1alpha1.RunAgentTriggerResponse
+	15, // 67: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
+	54, // [54:68] is the sub-list for method output_type
+	40, // [40:54] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_koinon_agent_v1alpha1_agent_proto_init() }
@@ -2707,7 +2848,7 @@ func file_koinon_agent_v1alpha1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_agent_v1alpha1_agent_proto_rawDesc), len(file_koinon_agent_v1alpha1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   34,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

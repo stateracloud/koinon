@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
+import { AgentKeepWarm } from '@/components/agent-keep-warm'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentModel } from '@/components/agent-model'
 import { AgentRunLimits } from '@/components/agent-run-limits'
@@ -128,6 +129,7 @@ export function AgentPage() {
       </section>
       {isApprover(org.role) && <AgentModel agent={a} />}
       {isApprover(org.role) && <AgentSandboxResources agent={a} />}
+      {isApprover(org.role) && <AgentKeepWarm agent={a} />}
       {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}

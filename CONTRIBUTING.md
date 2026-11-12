@@ -64,7 +64,7 @@ Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose, oapi-codegen
 tools in `go.mod` and run through `go tool`. `setup-envtest` for the admission tests is fetched by
 `make test-admission`.
 
-Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint,
+Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint, zizmor,
 goreleaser, cosign, kubeconform and golangci-lint, with the sha256 of each release asset the e2e image
 or a workflow downloads (Go stays in `go.mod`). Scripts source the file and workflows load it into the
 job environment; the copies that cannot (the `hack/e2e-toolchain/Dockerfile` ARGs, the `version:` input

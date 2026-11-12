@@ -3,6 +3,8 @@
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core
   release, except the groundwork under "Timing"
 - Date: 2026-11-11
+- Area: runtime-sandbox
+- Tags: harness, flavors, dependencies, models
 - Amends: [0035](0035-v01-flavors.md) and [0059](0059-v01-opencode-only.md) (the flavor concept and how
   a harness is added), [0079](0079-dependency-cooldown.md) (the cooldown also covers harness packages)
 - Relates to: [0016](0016-harness-and-deployment.md) (agentd drives the harness over ACP),

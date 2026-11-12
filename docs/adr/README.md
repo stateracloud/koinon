@@ -9,7 +9,9 @@ are in [0046](0046-adr-conventions.md).
 1. Reserve the number: `hack/claim.sh adr` creates the ref `claim/adr-NNNN` and prints `NNNN`, so two
    sessions cannot take one number. Gaps are fine; duplicates fail `hack/adr-lint.sh`.
 2. Copy [`0000-template.md`](0000-template.md) to `NNNN-short-title.md`. The first line must be
-   `# NNNN. Title` and the file needs a `- Status:` line: the index is generated from them.
+   `# NNNN. Title` and the file needs a `- Status:` line: the index is generated from them. Fill
+   in `- Area:` and `- Tags:` from [`docs/metadata/`](../metadata/) ([ADR 0115](0115-document-metadata.md),
+   [how to choose](../dev/doc-metadata.md)); `hack/doc-meta-lint.sh` checks them.
 3. Fill in every section; mark reconstructed alternatives and inferred consequences.
 4. If it changes an earlier ADR, add "Amends" here and "Amended by" there, or "Superseded by".
 5. Run `hack/adr-index.sh` to regenerate the index below (never edit the table by hand; CI checks it
@@ -59,13 +61,13 @@ are in [0046](0046-adr-conventions.md).
 | [0037](0037-tooling.md) | Tooling: goose, Starlight, ACP Go SDK, Tilt | Accepted; the migration run (on startup or by a subcommand) amended by [0060](0060-migrations-as-a-job.md); the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md) |
 | [0038](0038-governance.md) | Governance: BDFL with a written path to maintainership | Accepted |
 | [0039](0039-development-setup.md) | Development setup: a maintainer's Mac plus a Talos+Kata cluster | Accepted |
-| [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below) |
+| [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 and 2026-11-12 (below) |
 | [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted; amended 2026-10-30 (below) |
 | [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md) |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md) |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md) |
-| [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
+| [0046](0046-adr-conventions.md) | ADR conventions | Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header) |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted; amended 2026-10-26 (below); the pull request e2e rule amended by [0105](0105-merge-queue-route.md) (amendment of 2026-11-11, #572) |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Accepted (2026-10-26, accepted after implementation) |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes and agentd placement | Accepted |
@@ -133,3 +135,4 @@ are in [0046](0046-adr-conventions.md).
 | [0112](0112-harness-definitions.md) | Harness definitions: any harness that speaks ACP, described as data | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
 | [0113](0113-agent-package-access.md) | Agent package access: straight to allow-listed registries, in four levels | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release |
 | [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
+| [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |

@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: testing, ci, e2e, security
 - Decision: [design.md#25](../design.md)
 - Verification: escape suite design depends on the OpenShell spike (old issue 3)
 

@@ -16,6 +16,7 @@ spec:
     default: opencode
   model:
     name: default
+  tools: [web_url_read, post_webhook]
   grants:
     - connector: gitea
       scopes: [repo.read]

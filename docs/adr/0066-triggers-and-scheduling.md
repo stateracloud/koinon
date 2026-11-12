@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: work-model
+- Tags: triggers, eventing, runs, database
 - Amended by: [0078](0078-sandbox-observer.md) (the wait cause set and where its input comes from)
 - Relates to: old issue 146 (rounds 1 and 3, and the
   releases)

@@ -109,11 +109,15 @@ type Spec struct {
 	Harness   Harness   `json:"harness,omitzero"`
 	// Ephemeral makes agents created from the template ephemeral: each task gets a fresh sandbox
 	// without a persistent home, deleted when the task ends (ADR 0065 decision 13c). Off by default.
-	Ephemeral    bool    `json:"ephemeral,omitempty"`
-	Model        Model   `json:"model"`
-	Instructions string  `json:"instructions"`
-	Grants       []Grant `json:"grants"`
-	Limits       Limits  `json:"limits"`
+	Ephemeral    bool   `json:"ephemeral,omitempty"`
+	Model        Model  `json:"model"`
+	Instructions string `json:"instructions"`
+	// Tools names the tools the instructions expect the agent to call, by tool name (the names the
+	// MCP guard classifies, ADR 0091). Optional; the templates legs test reads it, so a tool the
+	// instructions only describe in prose is still classified.
+	Tools  []string `json:"tools,omitempty"`
+	Grants []Grant  `json:"grants"`
+	Limits Limits   `json:"limits"`
 	// Triggers start work on the agent: a schedule or a direct message in v0.1 (ADR 0066).
 	Triggers []Trigger `json:"triggers,omitempty"`
 	// Questions sets when a question an agent asked with ask_user gets its reminder and when it

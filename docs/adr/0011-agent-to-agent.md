@@ -5,6 +5,8 @@
   replaced by [0065](0065-work-model-tasks-inbox.md) (`ask_agent` and `reply` over Postgres). A2A
   stays the protocol at the edge (external agents, v1.0).
 - Date: 2026-10-21
+- Area: work-model
+- Tags: tasks, mcp, runs
 - Decision: [design.md#11](../design.md)
 
 ## Context

@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -398,6 +399,13 @@ var _ = Describe("Reconciler latency defaults", func() {
 			var phaseOfLast string
 			Expect(pool.QueryRow(ctx, `SELECT phase FROM agent_sandboxes WHERE agent_id = $1`, agents[3].ID).Scan(&phaseOfLast)).To(Succeed())
 			Expect(phaseOfLast).To(Equal("Idle"), "over the cap: it starts on demand")
+			granted := func(a store.Agent) bool {
+				var g bool
+				Expect(pool.QueryRow(ctx, `SELECT keep_warm_granted FROM agents WHERE id = $1`, a.ID).Scan(&g)).To(Succeed())
+				return g
+			}
+			Expect([]bool{granted(agents[0]), granted(agents[1]), granted(agents[2]), granted(agents[3])}).To(Equal([]bool{true, true, true, false}),
+				"the pass records which requests the cap granted, for the API (#100)")
 
 			By("the cap is per org")
 			org2, user2 := newOrg(ctx)
@@ -406,6 +414,11 @@ var _ = Describe("Reconciler latency defaults", func() {
 			Expect(capped.ReconcileAll(ctx)).To(Succeed())
 			Expect(created()).To(Equal(4))
 			Expect(other.ID.Valid).To(BeTrue())
+
+			By("withdrawing a request frees its place for the next agent")
+			coolDown(ctx, org, agents[0].ID)
+			Expect(capped.ReconcileAll(ctx)).To(Succeed())
+			Expect([]bool{granted(agents[0]), granted(agents[3])}).To(Equal([]bool{false, true}))
 		})
 
 		It("grants no keep-warm when the cap is negative", func(ctx SpecContext) {
@@ -416,6 +429,37 @@ var _ = Describe("Reconciler latency defaults", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(none.ReconcileAll(ctx)).To(Succeed())
 			Expect(created()).To(Equal(0))
+			var g bool
+			Expect(pool.QueryRow(ctx, `SELECT keep_warm_granted FROM agents WHERE id = $1`, a.ID).Scan(&g)).To(Succeed())
+			Expect(g).To(BeFalse(), "the request stays, not granted")
+		})
+
+		It("keeps the grant of an agent whose prepare fails once, and the next agent does not take its place", func(ctx SpecContext) {
+			first, second := onDemand(ctx), onDemand(ctx)
+			keepWarm(ctx, org, first.ID)
+			keepWarm(ctx, org, second.ID)
+			one, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
+				func() reconciler.Config { c := cfg; c.KeepWarmPerOrg = 1; return c }())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(one.ReconcileAll(ctx)).To(Succeed())
+			granted := func(a store.Agent) bool {
+				var g bool
+				Expect(pool.QueryRow(ctx, `SELECT keep_warm_granted FROM agents WHERE id = $1`, a.ID).Scan(&g)).To(Succeed())
+				return g
+			}
+			Expect([]bool{granted(first), granted(second)}).To(Equal([]bool{true, false}))
+
+			By("the first agent has no sandbox row, so its prepare needs the workspace, and that fails once")
+			_, err = pool.Exec(ctx, `DELETE FROM agent_sandboxes WHERE agent_id = $1`, first.ID)
+			Expect(err).NotTo(HaveOccurred())
+			osg.FailNext("GetWorkspace", errors.New("gateway unavailable"))
+			Expect(one.ReconcileAll(ctx)).NotTo(Succeed(), "the failed prepare is reported")
+			Expect([]bool{granted(first), granted(second)}).To(Equal([]bool{true, false}),
+				"no decision for the first agent: it keeps its grant and the second does not take its place")
+
+			By("the next pass decides again")
+			Expect(one.ReconcileAll(ctx)).To(Succeed())
+			Expect([]bool{granted(first), granted(second)}).To(Equal([]bool{true, false}))
 		})
 	})
 })

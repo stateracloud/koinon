@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: testing, isolation, tooling
 - Decision: [design.md#39](../design.md)
 
 ## Context

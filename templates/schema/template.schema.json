@@ -122,6 +122,17 @@
           "minLength": 1,
           "maxLength": 32768
         },
+        "tools": {
+          "description": "Tools the instructions expect the agent to call, by tool name as the MCP guard classifies them (ADR 0091). Optional. Name every tool the instructions use, also one they describe only in prose; the template legs check (ADR 0084 decision 9) reads this list. MCP servers are not named: an admin allows them on the agent.",
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+            "maxLength": 128
+          }
+        },
         "grants": {
           "description": "Suggested grants. The template proposes; an admin or owner approves on activation (ADR 0020). Each scope must exist on the connector type, which is checked when the template is synced.",
           "type": "array",

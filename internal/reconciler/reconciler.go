@@ -507,6 +507,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
 		warm := 0
+		// granted holds the agents decided in this pass: true when granted, false when refused. An
+		// agent without an entry (prepare failed, or nothing to do) keeps its stored value.
+		granted := map[pgtype.UUID]bool{}
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
@@ -514,20 +517,31 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return err
 			}
-			if err != nil {
-				r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
-				errs = append(errs, err)
-				continue
-			}
-			if w == nil {
+			if err != nil || w == nil {
+				if err != nil {
+					r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
+					errs = append(errs, err)
+				}
+				if a.KeepWarm && a.KeepWarmGranted && a.Status == store.AgentStatusActive {
+					// Its slot stays held, so a passing error does not hand it to the next agent.
+					warm++
+				}
 				continue
 			}
 			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
 				// The list is oldest first, so the cap keeps the same agents from pass to pass.
 				w.keepWarm = true
+				granted[a.ID] = true
 				warm++
+			} else {
+				granted[a.ID] = false
 			}
 			items = append(items, w)
+		}
+		if err := r.recordKeepWarmGrants(ctx, org.ID, agents, granted); err != nil {
+			// The grant itself holds; only the API's view of it is late. The next pass retries.
+			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+			errs = append(errs, err)
 		}
 		if err := r.claimHarnessProfiles(ctx, org, agents); err != nil {
 			if errors.Is(err, errAbortPass) {
@@ -1544,6 +1558,36 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 // (the OpenShell backend with an owner).
 type profileClaimer interface {
 	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
+}
+
+// recordKeepWarmGrants writes the pass's keep-warm decision to agents.keep_warm_granted, so the API and
+// the agent page can say whether the operator's cap granted an admin's request (#100). Only the agents
+// whose recorded decision differs are written.
+func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, agents []store.Agent, granted map[pgtype.UUID]bool) error {
+	var grant, revoke []pgtype.UUID
+	for _, a := range agents {
+		g, decided := granted[a.ID]
+		switch {
+		case !decided:
+			// No decision in this pass: the stored value stays.
+		case g && !a.KeepWarmGranted:
+			grant = append(grant, a.ID)
+		case !g && a.KeepWarmGranted:
+			revoke = append(revoke, a.ID)
+		}
+	}
+	for _, c := range []struct {
+		ids     []pgtype.UUID
+		granted bool
+	}{{grant, true}, {revoke, false}} {
+		if len(c.ids) == 0 {
+			continue
+		}
+		if err := r.q.SetAgentsKeepWarmGranted(ctx, store.SetAgentsKeepWarmGrantedParams{OrgID: org, Ids: c.ids, Granted: c.granted}); err != nil {
+			return fmt.Errorf("reconciler: record keep-warm grants of org %s: %w", org.String(), err)
+		}
+	}
+	return nil
 }
 
 // claimHarnessProfiles marks, once per org and pass, the harness profiles (koinon-agentgateway-<harness>)
