@@ -134,7 +134,8 @@ you start, after `take`:
 
 - Decisions live in `docs/adr/` (ADRs are canonical; `docs/design.md` is the overview). Read the
   relevant ADR before changing architecture; write a new one for new decisions.
-- Commits: Conventional Commits, always signed off (`git commit -s`).
+- Commits: Conventional Commits, always signed off (`git commit -s`) by a human. AI use is disclosed in
+  the PR template's "AI use" field; an `Assisted-by:` trailer is optional (CONTRIBUTING.md).
 - The module path (`github.com/stateracloud/koinon`) and API domain (`koinon.dev`) are defined once in
   `internal/project`; never hard-code them elsewhere in Go.
 - Migrations are forward-only goose files `internal/db/migrations/NNNNN_name.sql`. Never edit a
