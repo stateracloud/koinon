@@ -75,9 +75,17 @@ func (t *Tool) Compare(ctx context.Context) error {
 func parseStatus(r interface{ Read([]byte) (int, error) }) (map[string]string, string, error) {
 	remote, active := map[string]string{}, ""
 	sc := bufio.NewScanner(r)
+	inTable := false
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
-		if len(f) < 5 || (f[1] != "active" && f[1] != "retained") {
+		switch {
+		case len(f) >= 5 && f[0] == "KEK" && f[1] == "STATE":
+			inTable = true
+			continue
+		case len(f) == 0:
+			inTable = false // the table ends at the first blank line; the lines after it are prose
+		}
+		if !inTable || len(f) < 5 || (f[1] != "active" && f[1] != "retained") {
 			continue
 		}
 		remote[f[0]] = f[len(f)-1]

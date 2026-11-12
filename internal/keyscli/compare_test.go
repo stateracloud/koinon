@@ -33,7 +33,7 @@ var _ = Describe("keys compare", func() {
 		status := func(s keyscli.KubeStore) string {
 			ks, err := s.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			return "KEK\tSTATE\tVALUES\tWRAPPED BY\tFINGERPRINT\n" + ks.Active + "  active  0  local  " + secretstore.Fingerprint(ks.Keys[ks.Active]) + "\n"
+			return "KEK\tSTATE\tVALUES\tWRAPPED BY\tFINGERPRINT\n" + ks.Active + "  active  0  local  " + secretstore.Fingerprint(ks.Keys[ks.Active]) + "\n\nThe active KEK " + ks.Active + " has been active for 3 of 365 days.\n"
 		}
 
 		out, err := run(ctx, src, status(src))

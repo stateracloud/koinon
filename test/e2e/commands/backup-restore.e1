@@ -6,7 +6,8 @@
 # is exactly a marker starts a block also inside a heredoc body, so never write one there.
 # Variables (each block sets its own, so a block runs alone): NS is the namespace and REL the Helm release of the
 # install the block acts on (default koinon, koinon). A restore into a fresh namespace sets both to the target's.
-# The chart names its objects <release>-api, <release>-pg, <release>-kek and so on.
+# The chart names its objects <release>-api, <release>-pg, <release>-kek and so on when the release name contains
+# "koinon" and there is no fullnameOverride and no secrets.kek.existingSecret (helm install prints the real names).
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/backup-restore.e1
 # e1=backup-keys
 NS=${NS:-koinon}
