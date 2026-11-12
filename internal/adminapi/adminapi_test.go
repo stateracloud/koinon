@@ -526,11 +526,11 @@ var _ = Describe("the admin API", func() {
 			p := decode[providerJSON](body)
 			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, "wrkspc_01Ab"}))
 
-			code, body = e.call(ctx, e.token, "PATCH", "/providers/"+p.ID, map[string]any{"costApiKey": rotated, "costScope": "default"})
+			code, body = e.call(ctx, e.token, "PATCH", "/providers/"+p.ID, map[string]any{"costApiKey": rotated, "costScope": "apikey_01Ab"})
 			Expect(code).To(Equal(200), string(body))
 			Expect(string(body)).NotTo(ContainSubstring(rotated))
 			p = decode[providerJSON](body)
-			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, "default"}))
+			Expect([]any{p.HasCostKey, p.CostScope}).To(Equal([]any{true, "apikey_01Ab"}))
 			p = decode[providerJSON](mustBody(e.call(ctx, e.token, "GET", "/providers/"+p.ID, nil)))
 			Expect(p.HasCostKey).To(BeTrue(), "a read shows the flag, not the key")
 

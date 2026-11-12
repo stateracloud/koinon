@@ -1438,8 +1438,8 @@ components:
           type: string
           example: wrkspc_01AbCdEf
           description: >-
-            The part of the account whose cost is this provider's: the Anthropic workspace ID (or
-            `default`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
+            The part of the account whose cost is this provider's: the Anthropic workspace ID
+            (`wrkspc_...`) or API key ID (`apikey_...`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
     ProviderUpdate:
       type: object
       properties:
