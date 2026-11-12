@@ -91,6 +91,14 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A client over the limit for this username is refused before the password hash runs; the
+	// refusal is counted, not audited one by one (loginlimit.go).
+	keys := newLoginKeys(r, req.Username)
+	if wait := s.limiter.Blocked(keys.user, s.cfg.Now()); wait > 0 {
+		s.limiter.Refuse(keys.user)
+		writeLoginLimited(w, wait)
+		return
+	}
 	cred, ok, err := s.checkPassword(r.Context(), req.Username, req.Password)
 	if errors.Is(err, errBusy) {
 		w.Header().Set("Retry-After", "1")
@@ -103,10 +111,15 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.log.Info("password login rejected")
+		if limited, wait := s.loginFailed(r.Context(), keys, req.Username, s.cfg.Now()); limited {
+			writeLoginLimited(w, wait)
+			return
+		}
+		s.log.Info("password login rejected", "client_address", keys.addr)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
 		return
 	}
+	s.limiter.Succeed(keys.user)
 
 	if s.afterPasswordCheck != nil {
 		s.afterPasswordCheck()

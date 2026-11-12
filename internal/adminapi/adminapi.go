@@ -40,6 +40,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/auth/ratelimit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -175,21 +176,27 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || raw == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="koinon-admin"`)
-			s.limiter.fail(limiterKey(clientIP(r), ""), time.Now())
+			s.limiter.Fail(limiterKey(clientIP(r), ""), time.Now())
 			s.log.Warn("admin API request without a bearer token", "client_ip", clientIP(r), "path", r.URL.Path)
 			writeError(w, http.StatusUnauthorized, Unauthenticated, "a bearer token is required")
 			return
 		}
 		ip := clientIP(r)
 		// A client that keeps sending bad tokens is slowed down, per IP and token prefix (bad tokens
-		// whose prefix names no token share one slot per IP). A request with a valid token is
-		// never refused for it, so a noisy neighbour behind the same ingress cannot lock admins out.
+		// whose prefix names no token share one slot per IP). A key that is already blocked is
+		// refused before the token lookup, so a blocked guess costs no database read and writes no
+		// audit event. The shared slot is decided after the lookup: a valid token is never refused
+		// for it, so a noisy neighbour behind the same ingress cannot lock admins out.
 		rawPrefix := ""
 		if rest, ok := strings.CutPrefix(raw, tokens.Prefix); ok && len(rest) >= 8 {
 			rawPrefix = rest[:8]
 		}
 		now := time.Now()
-		wait := max(s.limiter.blocked(limiterKey(ip, rawPrefix), now), s.limiter.blocked(limiterKey(ip, ""), now))
+		if wait := s.limiter.Blocked(limiterKey(ip, rawPrefix), now); wait > 0 {
+			writeTooMany(w, wait)
+			return
+		}
+		wait := s.limiter.Blocked(limiterKey(ip, ""), now)
 		p, err := s.tokens.Authenticate(r.Context(), raw)
 		if err != nil {
 			var ae *tokens.AuthError
@@ -206,10 +213,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			if ae.TokenID.Valid {
 				key = limiterKey(ip, ae.Prefix)
 			}
-			s.limiter.fail(key, time.Now())
+			s.limiter.Fail(key, time.Now())
 			if wait > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-				writeError(w, http.StatusTooManyRequests, Unauthenticated, "too many failed attempts; retry later")
+				writeTooMany(w, wait)
 				return
 			}
 			s.log.Warn("admin API authentication failed", "client_ip", ip, "token_prefix", ae.Prefix, "reason", ae.Reason, "path", r.URL.Path)
@@ -217,7 +223,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, Unauthenticated, "the token is invalid, expired or revoked")
 			return
 		}
-		s.limiter.succeed(limiterKey(ip, rawPrefix))
+		s.limiter.Succeed(limiterKey(ip, rawPrefix))
 		ctx := audit.WithRequestID(context.WithValue(r.Context(), principalKey{}, p), reqID)
 		r = r.WithContext(ctx)
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -233,6 +239,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(rec, r)
 	})
+}
+
+// writeTooMany answers 429 to a client the limiter refuses, with how long it must wait.
+func writeTooMany(w http.ResponseWriter, wait time.Duration) {
+	w.Header().Set("Retry-After", ratelimit.RetryAfter(wait))
+	writeError(w, http.StatusTooManyRequests, Unauthenticated, "too many failed attempts; retry later")
 }
 
 // auditCall records one admin API call. It is audited even when the client has gone: detach from

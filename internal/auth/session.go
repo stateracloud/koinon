@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/auth/ratelimit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/installbinding"
 )
@@ -82,6 +83,9 @@ type Service struct {
 	// a burst of login attempts cannot exhaust memory.
 	verifySlots chan struct{}
 
+	// limiter slows down password guesses per client address and username (loginlimit.go).
+	limiter *ratelimit.Limiter
+
 	// secureCookies is false only for a plain http:// PublicURL.
 	secureCookies bool
 
@@ -118,6 +122,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*Service, error) {
 		cfg:           cfg,
 		log:           cfg.Logger,
 		verifySlots:   make(chan struct{}, 4),
+		limiter:       ratelimit.New(),
 		secureCookies: secure,
 	}
 	if cfg.OIDC != nil {
