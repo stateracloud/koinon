@@ -937,6 +937,14 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
+      # The opencode plugin project's lockfile (its own cache key, same job: the post step saves each store).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: flavors/opencode/plugins
 
   # Koinon's own OpenCode plugins (koinon.core, ADR 0093 decision 4): a CI-only pnpm dev project
   # under flavors/opencode/plugins/ type-checks the plugin TypeScript against the pinned OpenCode

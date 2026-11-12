@@ -46,7 +46,8 @@ var _ = Describe("koinon.core OpenCode plugin", Ordered, func() {
 		script := contractScript(opencode)
 		gw := newGateway(script)
 		h, _ := opencodeHarness(ctx, sb, gw)
-		Eventually(h.client.availableCommands).WithTimeout(30 * time.Second).
+		Eventually(h.client.availableCommands).
+			WithTimeout(30*time.Second).
 			Should(ContainElement(koinonCoreReadyCommand), "koinon.core never reported ready")
 	})
 })
