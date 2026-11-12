@@ -3,14 +3,14 @@
 // Package recovery holds the platform admin recovery actions of ADR 0110 decision 6: reset a local
 // password and mint an admin API token. They are plain functions over the database. They take the
 // actor as a parameter and know nothing about who may ask: the caller (the reconciler's handler of
-// the PlatformAdminRecovery request object, a later change of issue #516) authorises the request with
+// the PlatformAdminRecovery request object) authorises the request with
 // Kubernetes RBAC and passes the requester's Kubernetes identity as the actor. There is no pod-exec
 // command for them: clusters can forbid exec and the images are distroless (issue #512).
-// Issue #512 stays open until the request object of #516 part (d) calls these functions end to end.
+// The request object reaches them end to end through Handler and Controller (issue #512). adopt-restore
+// is the third action of ADR 0110 decision 6 and belongs to issue #516.
 //
-// Both run inside the caller's audit transaction (q and b belong to it). The caller, the handler of
-// part (d), adds the recovery_requests nonce row and the canonical install chain event
-// recovery.<action> (actor kubernetes:<requester>, groups, CR UID, nonce) in that same transaction,
+// Both run inside the caller's audit transaction (q and b belong to it). The caller, Handler.Handle, adds the
+// recovery_requests nonce row and the canonical install chain event recovery.<action> (actor kubernetes:<requester>, groups, CR UID, nonce) in that same transaction,
 // so an action, its nonce and its event commit together or not at all and a retry after a crash
 // cannot act twice. The org events these functions add (auth.password.reset in the user's personal
 // org, token.create in the token's org) are the per-org trail of the change; the install event is

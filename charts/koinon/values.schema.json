@@ -599,6 +599,27 @@
       }
     },
     "restoreHold": {"type": "boolean"},
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": {"enum": ["User", "Group", "ServiceAccount"]},
+              "name": {"type": "string", "minLength": 1},
+              "apiGroup": {"type": "string"},
+              "namespace": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "installMark": {
       "type": "object",

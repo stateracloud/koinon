@@ -96,6 +96,8 @@ var configKeys = map[string]string{
 	"mcp-ask-url":                          "mcpAsk.url",
 	"mcp-guard-url":                        "mcpGuard.url",
 	"koinon-tools-url":                     "koinonTools.url",
+	"recovery-policy":                      "recovery.policy",
+	"recovery-binding":                     "recovery.binding",
 }
 
 // requiredFlags are the settings the reconciler cannot start without, from any source.
@@ -249,6 +251,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	restorehold.Flag(fs, &c.restoreHold)
+	fs.StringVar(&c.recoveryPolicy, "recovery-policy", "", "this release's ValidatingAdmissionPolicy for PlatformAdminRecovery requests; with --recovery-binding it turns the request handler on (issue #512)")
+	fs.StringVar(&c.recoveryBinding, "recovery-binding", "", "the binding of --recovery-policy")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
