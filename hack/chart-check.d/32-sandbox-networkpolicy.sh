@@ -20,14 +20,14 @@ has "sandbox NetworkPolicy writer limits to the configured gateway ID" "openshel
 
 # The reconciler is told the writer is on and the fixed NetworkPolicy name.
 cfg=$(render --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | grep -Fq -- 'enabled: true' || fail "the reconciler is told the sandbox NetworkPolicy is on"
-grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | grep -Fq -- 'name: "koinon-koinon-sandbox-default-deny"' || fail "the reconciler is told the sandbox NetworkPolicy name"
+grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'enabled: true' || fail "the reconciler is told the sandbox NetworkPolicy is on"
+grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'name: "koinon-koinon-sandbox-default-deny"' || fail "the reconciler is told the sandbox NetworkPolicy name"
 
 off=(--set sandboxNetworkPolicy.enabled=false)
 lacks "sandboxNetworkPolicy.enabled=false renders no writer" 'sandbox-default-deny' "${off[@]}"
 off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -Fq -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
-grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -q -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
+grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit -F -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
+grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit  -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
 # sandboxLimitRange (on by default) also requires Deny; turn it off for the NetworkPolicy-only checks.

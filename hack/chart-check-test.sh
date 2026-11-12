@@ -124,4 +124,31 @@ else
 	fail=1
 fi
 
+# #608: an early-exit reader on a pipe fails under pipefail with SIGPIPE (141), depending on timing.
+# Refuse `| grep -q` (any flag cluster with q) and `| head` in the script and its assertion files.
+# Comment lines are ignored; use hit (grep that reads all input) or sed -n 1p instead.
+early_exit='\|[[:space:]]*(grep[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)|head)([[:space:]]|$)'
+hits=$(grep -nE "$early_exit" hack/chart-check.sh hack/chart-check.d/*.sh | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)
+if [[ -n $hits ]]; then
+	echo "FAIL: early-exit reader on a pipe in chart-check (use hit or sed -n 1p, #608):"
+	sed 's/^/    /' <<<"$hits"
+	fail=1
+else
+	echo "ok: no early-exit reader on a pipe in chart-check"
+fi
+# The lint itself must catch the planted forms.
+for planted in 'x | grep -q y' 'x | grep -Fq -- y' 'x | grep -qE y' 'x | head -1' 'x |head'; do
+	if ! grep -qE "$early_exit" <<<"$planted"; then
+		echo "FAIL: lint misses: $planted"
+		fail=1
+	fi
+done
+# A failing assertion names its file and line (#608).
+run_case names-failing-line fail 'false'
+grep -q '10-case.sh:' "$tmp/names-failing-line.log" || {
+	echo "FAIL: names-failing-line: the log does not name the assertion file"
+	sed 's/^/    /' "$tmp/names-failing-line.log"
+	fail=1
+}
+
 exit "$fail"
