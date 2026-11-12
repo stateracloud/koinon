@@ -1,0 +1,5 @@
+{"schema_version":"1.7.0","id":"USN-9004-1","summary":"libdep1 vulnerability (fixture, not a real notice)","published":"2026-11-03T10:00:00Z",
+ "affected":[
+  {"package":{"ecosystem":"Ubuntu:24.04:LTS","name":"depsrc"},
+   "ecosystem_specific":{"binaries":[{"binary_name":"libdep1","binary_version":"1.0-1ubuntu0.2"}]},
+   "database_specific":{"cves_map":{"ecosystem":"Ubuntu:24.04:LTS","cves":[{"id":"CVE-2099-0004","severity":[{"type":"Ubuntu","score":"medium"}]}]}}}]}

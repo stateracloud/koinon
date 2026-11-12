@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/packfile"
@@ -40,7 +38,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/utils/ioutil"
@@ -66,6 +63,11 @@ type Options struct {
 	// CABundle is PEM certificates that sign the host's TLS certificate, besides the system
 	// roots: the connection's caBundle (ForSite).
 	CABundle []byte
+	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext): the fetch, the
+	// ref listing and the push connect only to addresses it allows, checked when the connection is
+	// made (after the host name resolves), and refuse HTTP redirects. Nil dials unchecked; redirects
+	// are refused either way.
+	DialContext DialFunc
 	// Username is the HTTP basic user name; the token is the password. Default "koinon".
 	Username string
 	// AuthorName and AuthorEmail identify the commits. Default "Koinon" and
@@ -107,7 +109,7 @@ func Wrap(p codehost.Provider, inner codehost.Access, o Options) codehost.Access
 // Open opens p's Access for scope on conn and, for a provider that writes by git push, wraps it
 // with the push writer built from the connection's base URL and CA bundle. It is the one call
 // koinon-api's executors use, so a provider's write path follows its connector data.
-func Open(ctx context.Context, p codehost.Provider, conn codehost.Connection, scope codehost.Scope) (codehost.Access, error) {
+func Open(ctx context.Context, p codehost.Provider, conn codehost.Connection, scope codehost.Scope, dial DialFunc) (codehost.Access, error) {
 	acc, err := p.Open(ctx, conn, scope)
 	if err != nil {
 		return nil, err
@@ -127,6 +129,7 @@ func Open(ctx context.Context, p codehost.Provider, conn codehost.Connection, sc
 	if err != nil {
 		return nil, fmt.Errorf("gitpush: connection %s: %w", conn.ID, err)
 	}
+	o.DialContext = dial
 	return Wrap(p, acc, o), nil
 }
 
@@ -144,7 +147,7 @@ func New(inner codehost.Access, o Options) codehost.Access {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &access{Access: inner, o: o, pending: map[string]pending{}}
+	return &access{Access: inner, o: o, tr: newTransport(o.DialContext), pending: map[string]pending{}}
 }
 
 type pending struct {
@@ -154,7 +157,8 @@ type pending struct {
 
 type access struct {
 	codehost.Access
-	o Options
+	o  Options
+	tr transport.Transport // the policy-checked, redirect-refusing HTTP transport
 
 	mu      sync.Mutex
 	pending map[string]pending
@@ -175,10 +179,6 @@ func (a *access) scrub(err error) error {
 		return errors.New(strings.ReplaceAll(err.Error(), t, "***"))
 	}
 	return err
-}
-
-func (a *access) remote(st *memory.Storage, r codehost.Repo) *git.Remote {
-	return git.NewRemote(st, &config.RemoteConfig{Name: "origin", URLs: []string{a.o.RemoteURL(r)}})
 }
 
 // WriteCommit shallow-fetches req.Base, applies the files with their exact modes and builds the
@@ -237,25 +237,13 @@ func (a *access) WriteCommit(ctx context.Context, r codehost.Repo, req codehost.
 // sha instead; the approval flow reads the base branch just before it commits, so the base is
 // that branch's tip.
 func (a *access) fetchBase(ctx context.Context, st *memory.Storage, r codehost.Repo, sha string) error {
-	rem := a.remote(st, r)
-	fetch := func(spec string) error {
-		err := rem.FetchContext(ctx, &git.FetchOptions{
-			RefSpecs: []config.RefSpec{config.RefSpec(spec + ":refs/koinon/base")},
-			Depth:    1,
-			Tags:     git.NoTags,
-			Auth:     a.auth(),
-			CABundle: a.o.CABundle,
-		})
-		if errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return nil
-		}
-		return err
-	}
+	url := a.o.RemoteURL(r)
+	fetch := func(spec string) error { return a.fetchShallow(ctx, st, url, spec) }
 	err := fetch(sha)
 	if err == nil {
 		return nil
 	}
-	refs, lerr := rem.ListContext(ctx, &git.ListOptions{Auth: a.auth(), CABundle: a.o.CABundle})
+	refs, lerr := a.listRefs(ctx, url)
 	if lerr != nil {
 		return fmt.Errorf("gitpush: listing refs of %s: %w", r, lerr)
 	}
@@ -298,16 +286,11 @@ func (a *access) CreateBranch(ctx context.Context, r codehost.Repo, name, sha st
 // descends from. go-git's PushContext would fill the old value in from the refs advertised at
 // push time and fast-forward such a branch, so the update is sent here instead.
 func (a *access) createRef(ctx context.Context, r codehost.Repo, st *memory.Storage, want plumbing.ReferenceName, sha plumbing.Hash) (err error) {
-	ep, err := transport.NewEndpoint(a.o.RemoteURL(r))
+	ep, err := a.endpoint(a.o.RemoteURL(r))
 	if err != nil {
 		return err
 	}
-	ep.CaBundle = a.o.CABundle
-	c, err := client.NewClient(ep)
-	if err != nil {
-		return err
-	}
-	sess, err := c.NewReceivePackSession(ep, a.auth())
+	sess, err := a.tr.NewReceivePackSession(ep, a.auth())
 	if err != nil {
 		return err
 	}
@@ -365,7 +348,7 @@ func (a *access) createRef(ctx context.Context, r codehost.Repo, st *memory.Stor
 
 // refExists lists the refs of r and reports whether name is among them.
 func (a *access) refExists(ctx context.Context, r codehost.Repo, name plumbing.ReferenceName) (bool, error) {
-	refs, err := a.remote(memory.NewStorage(), r).ListContext(ctx, &git.ListOptions{Auth: a.auth(), CABundle: a.o.CABundle})
+	refs, err := a.listRefs(ctx, a.o.RemoteURL(r))
 	if err != nil {
 		return false, err
 	}

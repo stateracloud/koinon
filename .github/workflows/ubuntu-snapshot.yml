@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Weekly Ubuntu snapshot bump for the OpenCode harness image (issue 33). hack/ubuntu-snapshot-bump.sh
+# picks the snapshot (midnight UTC of today minus 3 days, so ADR 0079's cooldown holds by
+# construction), resolves the newest version of every apt pin on both architectures and, when a pin or a
+# dependency of the pins changes, this workflow opens or updates ONE draft pull request from the fixed bot branch
+# bot/ubuntu-snapshot. It never pushes to main and never merges.
+#
+# No secret, no PAT, no App token: the pull request is opened with GITHUB_TOKEN. GitHub starts no
+# workflow runs for events caused by GITHUB_TOKEN, except that `pull_request` (opened, synchronize,
+# reopened) runs are created in an approval-required state. So a maintainer starts the checks with
+# "Approve workflows to run" on the pull request, or closes and reopens it (a person's `reopened`
+# event runs every required workflow normally); the pull request body says so. That step is also the
+# human review ADR 0079 asks for. docs/dev/ci.md, "Ubuntu snapshot bump".
+#
+# Prerequisite (a repository setting, an owner's decision): Settings, Actions, General, "Allow GitHub
+# Actions to create and approve pull requests". Without it the `propose` job's `gh pr create` fails and
+# the job goes red; the branch is already pushed then.
+#
+# Two jobs, so the one that fetches and parses data from the network holds no write token:
+#   resolve  contents: read. Runs the script (--check, then --write), keeps the diff and the PR body.
+#   propose  contents: write, pull-requests: write. Applies that diff on a fresh checkout, commits as
+#            github-actions[bot] with a Signed-off-by (DCO), force-updates only bot/ubuntu-snapshot,
+#            opens or updates the draft pull request.
+name: ubuntu-snapshot
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+# One bump at a time; a newer run waits instead of racing the branch push.
+concurrency:
+  group: ubuntu-snapshot
+  cancel-in-progress: false
+
+env:
+  BOT_BRANCH: bot/ubuntu-snapshot
+
+jobs:
+  resolve:
+    name: resolve the bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+      snapshot: ${{ steps.bump.outputs.snapshot }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      # Best effort: the USN annotation. A failed clone is not hidden: the script is still given the
+      # directory and reports "lookup FAILED" in the pull request body.
+      - name: fetch the Ubuntu security notices
+        id: usn
+        env:
+          USN_DIR: ${{ runner.temp }}/usn
+        run: |
+          set -uo pipefail
+          if git clone --quiet --depth 1 --filter=blob:none --sparse https://github.com/canonical/ubuntu-security-notices "$USN_DIR" \
+            && git -C "$USN_DIR" sparse-checkout set osv/usn; then
+            echo "commit=$(git -C "$USN_DIR" rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+          else
+            echo "::warning::could not fetch canonical/ubuntu-security-notices; the pull request will say the USN lookup failed"
+            echo "commit=unknown" >>"$GITHUB_OUTPUT"
+          fi
+      - name: check and write the bump
+        id: bump
+        env:
+          USN_DIR: ${{ runner.temp }}/usn
+          USN_COMMIT: ${{ steps.usn.outputs.commit }}
+          OUT_DIR: ${{ runner.temp }}/bump
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT_DIR"
+          # The step runs under bash -e: exit 10 means "changed", so take the code with || instead of $?.
+          rc=0
+          hack/ubuntu-snapshot-bump.sh --check --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            echo "No pinned package and no dependency of the pins has a newer version in the snapshot; nothing to do."
+            exit 0
+          fi
+          if [ "$rc" -ne 10 ]; then
+            echo "::error::hack/ubuntu-snapshot-bump.sh --check failed (exit $rc)"
+            exit 1
+          fi
+          rc=0
+          hack/ubuntu-snapshot-bump.sh --write --usn-dir "$USN_DIR" --usn-commit "$USN_COMMIT" --report "$OUT_DIR/report.md" || rc=$?
+          if [ "$rc" -ne 10 ]; then
+            echo "::error::hack/ubuntu-snapshot-bump.sh --write failed (exit $rc)"
+            exit 1
+          fi
+          git diff --binary >"$OUT_DIR/bump.patch"
+          git diff --stat
+          snapshot=$(sed -nE 's/^ARG UBUNTU_SNAPSHOT=([0-9]{8}T[0-9]{6}Z)$/\1/p' harnesses/opencode/Dockerfile)
+          [ -n "$snapshot" ] || { echo "::error::no UBUNTU_SNAPSHOT after --write"; exit 1; }
+          echo "$snapshot" >"$OUT_DIR/snapshot"
+          {
+            echo "changed=true"
+            echo "snapshot=$snapshot"
+          } >>"$GITHUB_OUTPUT"
+      - if: steps.bump.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ubuntu-snapshot-bump
+          path: ${{ runner.temp }}/bump
+          if-no-files-found: error
+          retention-days: 7
+
+  propose:
+    name: open or update the draft pull request
+    needs: resolve
+    if: needs.resolve.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          # The token stays in the git config of this job only, for the one push below.
+          persist-credentials: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ubuntu-snapshot-bump
+          path: ${{ runner.temp }}/bump
+      - name: commit on the bot branch
+        id: commit
+        env:
+          SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+          BUMP_DIR: ${{ runner.temp }}/bump
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          # Guard: this job writes to exactly one ref, and never to the default branch.
+          [ "$BOT_BRANCH" = "bot/ubuntu-snapshot" ] || { echo "::error::refusing to push to $BOT_BRANCH"; exit 1; }
+          [ "$BOT_BRANCH" != "$DEFAULT_BRANCH" ] || { echo "::error::refusing to push to the default branch"; exit 1; }
+          [[ $SNAPSHOT =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::bad snapshot id '$SNAPSHOT'"; exit 1; }
+          git apply --index "$BUMP_DIR/bump.patch"
+          # Only the two expected files may change.
+          unexpected=$(git diff --cached --name-only | grep -vxE 'harnesses/opencode/(Dockerfile|README\.md)' || true)
+          [ -z "$unexpected" ] || { echo "::error::the patch touches unexpected files: $unexpected"; exit 1; }
+          bot_name='github-actions[bot]'
+          bot_email='41898282+github-actions[bot]@users.noreply.github.com'
+          git -c user.name="$bot_name" -c user.email="$bot_email" commit --quiet -s \
+            -m "chore(harnesses): bump the Ubuntu snapshot to $SNAPSHOT" \
+            -m "Moves UBUNTU_SNAPSHOT and the changed apt pins (if any) of the OpenCode harness image together (hack/ubuntu-snapshot-bump.sh, weekly workflow ubuntu-snapshot). The snapshot is at least 3 days old (ADR 0079). Refs #33."
+          # Skip the push when the branch already holds this exact tree (a repeat run changes nothing).
+          if git fetch --quiet origin "+refs/heads/$BOT_BRANCH:refs/remotes/origin/$BOT_BRANCH" 2>/dev/null \
+            && [ "$(git show -s --format=%T HEAD)" = "$(git show -s --format=%T "origin/$BOT_BRANCH")" ] \
+            && [ "$(git rev-parse HEAD~1)" = "$(git rev-parse "origin/$BOT_BRANCH~1")" ]; then
+            echo "pushed=false" >>"$GITHUB_OUTPUT"
+            echo "$BOT_BRANCH already holds this bump."
+            exit 0
+          fi
+          lease="--force-with-lease=refs/heads/$BOT_BRANCH"
+          git rev-parse --verify --quiet "origin/$BOT_BRANCH" >/dev/null && lease="--force-with-lease=refs/heads/$BOT_BRANCH:$(git rev-parse "origin/$BOT_BRANCH")"
+          git push "$lease" origin "HEAD:refs/heads/$BOT_BRANCH"
+          echo "pushed=true" >>"$GITHUB_OUTPUT"
+      - name: open or update the draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+          BUMP_DIR: ${{ runner.temp }}/bump
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            cat "$BUMP_DIR/report.md"
+            echo
+            echo "## Cooldown (ADR 0079)"
+            echo
+            echo "The snapshot ID is midnight UTC of the run day minus 3 days, and a snapshot holds nothing published after its ID, so every package here is at least 3 days old. The security fast path (a reviewed advisory of high or critical severity, or KEV, with the dependency-age waiver) stays a human act: this workflow never takes it, and a USN younger than 3 days waits for the next weekly run."
+            echo
+            echo "## Before this can merge"
+            echo
+            echo "GitHub starts no checks for a pull request that \`GITHUB_TOKEN\` opened or updated until a person acts. A maintainer who has reviewed the table above does one of these:"
+            echo
+            echo "1. Click **Approve workflows to run** on this pull request (the Checks box, or the Actions tab). This starts \`ci\`, \`dco\`, \`claim\` and \`secrets\` for the current head (\`e2e-kind\` runs on a pull request only with the \`e2e\` label and is advisory)."
+            echo "2. If no approval button is offered, close and reopen this pull request. A person's \`reopened\` event runs all of them."
+            echo
+            echo "Then mark it **ready for review** (this re-runs \`ci\` in full; while it is a draft \`ci\` reports a vacuous green) and, because the change touches \`harnesses/\`, the proof is the required merge-queue jobs \`flavors\` and \`quickstart\` (ADR 0105); a dispatched e2e run is not merge evidence. Each weekly run force-updates this branch, which needs the same step again. Do not push to \`$BOT_BRANCH\`: the next run replaces it."
+            echo
+            echo "Run: $RUN_URL. Refs #33."
+          } >"$BUMP_DIR/body.md"
+          title="chore(harnesses): bump the Ubuntu snapshot to $SNAPSHOT"
+          number=$(gh pr list --head "$BOT_BRANCH" --base "$DEFAULT_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file "$BUMP_DIR/body.md"
+            echo "Updated pull request #$number."
+          else
+            gh pr create --draft --base "$DEFAULT_BRANCH" --head "$BOT_BRANCH" --title "$title" --body-file "$BUMP_DIR/body.md" || {
+              echo "::error::gh pr create failed. If GitHub says Actions may not create pull requests, an admin turns on Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests'. $BOT_BRANCH is already pushed; the next run (or a workflow_dispatch) opens the pull request."
+              exit 1
+            }
+          fi
