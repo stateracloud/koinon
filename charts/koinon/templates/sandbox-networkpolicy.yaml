@@ -35,18 +35,18 @@ is only Warn/Audit-fenced.
 {{- $sel := .Values.sandboxPolicy.namespaceSelector }}
 {{- $conds := list }}
 {{- range $k, $v := ($sel.matchLabels | default dict) }}
-{{- $conds = append $conds (printf "(%s in LBL && LBL[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
 {{- end }}
 {{- range ($sel.matchExpressions | default list) }}
 {{- $k := .key | quote }}
 {{- if eq .operator "In" }}
-{{- $conds = append $conds (printf "(%s in LBL && LBL[%s] in %s)" $k $k (.values | toJson)) }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] in %s)" $k $k (.values | toJson)) }}
 {{- else if eq .operator "NotIn" }}
-{{- $conds = append $conds (printf "(!(%s in LBL) || !(LBL[%s] in %s))" $k $k (.values | toJson)) }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels) || !(variables.labels[%s] in %s))" $k $k (.values | toJson)) }}
 {{- else if eq .operator "Exists" }}
-{{- $conds = append $conds (printf "(%s in LBL)" $k) }}
+{{- $conds = append $conds (printf "(%s in variables.labels)" $k) }}
 {{- else if eq .operator "DoesNotExist" }}
-{{- $conds = append $conds (printf "(!(%s in LBL))" $k) }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels))" $k) }}
 {{- else }}
 {{- fail (printf "sandboxPolicy.namespaceSelector.matchExpressions: operator %q is not supported by the sandbox NetworkPolicy writer policy (In, NotIn, Exists, DoesNotExist)" .operator) }}
 {{- end }}
@@ -54,7 +54,10 @@ is only Warn/Audit-fenced.
 {{- if not $conds }}
 {{- fail "sandboxPolicy.namespaceSelector selects nothing: the sandbox NetworkPolicy writer policy needs it to say which namespaces are sandbox namespaces" }}
 {{- end }}
-{{- $varConds := replace "LBL" "variables.labels" (join " && " $conds) }}
+{{- $varConds := join " && " $conds }}
+{{- /* Kubernetes' own controllers, with and without per-controller service account credentials. */ -}}
+{{- $gcUsers := list "system:serviceaccount:kube-system:generic-garbage-collector" "system:kube-controller-manager" }}
+{{- $nsUsers := list "system:serviceaccount:kube-system:namespace-controller" "system:kube-controller-manager" }}
 {{- $gatewayUsers := .Values.sandboxPolicy.identities.supervisorPods }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -116,16 +119,16 @@ spec:
       expression: >-
         variables.sandboxNamespace && (!('openshell.ai/gateway-id' in variables.labels) ||
           variables.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }})
-    # The namespace is being deleted: the namespace controller empties it, whoever it runs as.
+    # The namespace is being deleted and the namespace controller empties it.
     - name: terminating
-      expression: "request.operation == 'DELETE' && has(namespaceObject.metadata.deletionTimestamp)"
+      expression: {{ printf "request.operation == 'DELETE' && has(namespaceObject.metadata.deletionTimestamp) && request.userInfo.username in %s" (toJson $nsUsers) | quote }}
     # Metadata-only updates (labels, finalizers, owner references) stay open to system controllers.
     - name: specUnchanged
       expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
     # The garbage collector deletes OpenShell's per-sandbox policies through their owner references.
-    # Deleting an allow policy can only take traffic away while the default-deny stands.
+    # Keyed on its identity, not on the owner references, which any writer may add (issue 673).
     - name: ownedDelete
-      expression: "request.operation == 'DELETE' && has(oldObject.metadata.ownerReferences) && size(oldObject.metadata.ownerReferences) > 0"
+      expression: {{ printf "request.operation == 'DELETE' && request.userInfo.username in %s" (toJson $gcUsers) | quote }}
     - name: ourGateway
       expression: >-
         variables.sandboxNamespace && 'openshell.ai/gateway-id' in variables.labels &&

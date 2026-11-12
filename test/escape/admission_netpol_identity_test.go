@@ -33,7 +33,9 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		reconcilerUser = otherUser // system:serviceaccount:koinon:koinon-reconciler, release koinon in koinon
 		name           = "koinon-koinon-sandbox-default-deny"
 		openshellOwn   = "openshell-sandbox-workloads" // a namespace policy OpenShell 0.1.7 writes (isolation.rs)
-		owned          = "openshell-sandbox-control"   // a per-sandbox policy with an owner reference
+		gcUser         = "system:serviceaccount:kube-system:generic-garbage-collector"
+		nsUser         = "system:serviceaccount:kube-system:namespace-controller"
+		owned          = "openshell-sandbox-control" // a per-sandbox policy with an owner reference
 	)
 	var (
 		admin      *kubernetes.Clientset
@@ -86,7 +88,7 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		DeferCleanup(env.Stop)
 		admin = kubernetes.NewForConfigOrDie(cfg)
 		as = map[string]*kubernetes.Clientset{"admin": admin}
-		for _, user := range []string{reconcilerUser, gatewayUser, gatewayBUser} {
+		for _, user := range []string{reconcilerUser, gatewayUser, gatewayBUser, gcUser, nsUser} {
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "npid-" + strings.ReplaceAll(user, ":", "-")},
 				RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
@@ -185,13 +187,24 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		_, err = admin.NetworkingV1().NetworkPolicies(ws).Update(ctx, labelled, dryUpdate)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("the garbage collector deleting an owned per-sandbox policy (control: with the default-deny in place it only removes allows)")
-		Expect(del(ctx, "admin", ws, owned)).To(Succeed())
+		By("an owner reference does not let another identity delete")
+		denied(del(ctx, "admin", ws, owned), msg)
+		withOwner := cur.DeepCopy()
+		withOwner.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "forged", UID: "00000000-0000-0000-0000-000000000674"}}
+		_, err = admin.NetworkingV1().NetworkPolicies(ws).Update(ctx, withOwner, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred(), "a metadata-only update is admitted")
+		denied(del(ctx, "admin", ws, openshellOwn), msg)
+
+		By("the garbage collector deleting an owned per-sandbox policy (control)")
+		Expect(del(ctx, gcUser, ws, owned)).To(Succeed())
 	})
 
-	It("lets a namespace that is being deleted be emptied (control)", func(ctx SpecContext) {
-		Expect(del(ctx, "admin", gone, name)).To(Succeed())
-		Expect(del(ctx, "admin", gone, openshellOwn)).To(Succeed())
+	It("lets the namespace controller empty a namespace that is being deleted, and nobody else", func(ctx SpecContext) {
+		denied(del(ctx, "admin", gone, name), "only the Koinon reconciler may delete the sandbox default-deny NetworkPolicy")
+		denied(del(ctx, "admin", gone, openshellOwn), "only the OpenShell gateway may write or delete NetworkPolicies in sandbox namespaces")
+		By("the namespace controller (control)")
+		Expect(del(ctx, nsUser, gone, name)).To(Succeed())
+		Expect(del(ctx, nsUser, gone, openshellOwn)).To(Succeed())
 	})
 
 	It("leaves other gateways' and plain namespaces to RBAC (control)", func(ctx SpecContext) {
