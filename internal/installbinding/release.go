@@ -248,7 +248,7 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 // PlanHash is the hex SHA-256 of the sorted plan as JSON, recorded in restore.release so a later
 // reader can tell which plan the release settled. An empty plan hashes the empty list.
 func PlanHash(plan []Removal) string {
-	b, err := json.Marshal(append([]Removal{}, sortedRemovals(plan)...))
+	b, err := json.Marshal(append([]Removal{}, sortedRemovals(plan)...)) //nolint:gosec // Secret is the name of the declaring Kubernetes Secret, not a secret value
 	if err != nil {
 		// A struct of three strings always marshals.
 		panic(err)

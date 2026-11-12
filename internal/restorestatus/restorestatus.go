@@ -439,7 +439,7 @@ func releaseSection(ctx context.Context, pool *pgxpool.Pool, r *Report, opt Opti
 	}
 	svc := orgsettings.NewService(pool)
 	for _, id := range ids {
-		l, err := svc.RunLimits(ctx, pgtype.UUID(id))
+		l, err := svc.RunLimits(ctx, id)
 		if err != nil {
 			return fmt.Errorf("read the run limits: %w", err)
 		}

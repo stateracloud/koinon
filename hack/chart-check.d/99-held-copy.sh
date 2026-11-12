@@ -54,7 +54,8 @@ grep -q 'optional: true' <<<"$rc_job" || fail "the restore-release-check Job mus
 if grep -q 'KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS' <<<"$rc_job"; then fail "the Job sees the accept value without it being set"; fi
 rc_accept=$(render --show-only templates/restore-release-check.yaml --set restore.acceptImporterDeletions=true)
 grep -q 'KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS' <<<"$rc_accept" || fail "the Job does not get restore.acceptImporterDeletions"
-if render --set restoreHold=true --show-only templates/restore-release-check.yaml 2>&1 | grep -q 'kind: Job'; then fail "the restore-release-check Job is rendered on a held install"; fi
+rc_held=$(render --set restoreHold=true --show-only templates/restore-release-check.yaml 2>&1 || true)
+if grep -q 'kind: Job' <<<"$rc_held"; then fail "the restore-release-check Job is rendered on a held install"; fi
 n_acc=$(held_notes --set restore.acceptImporterDeletions=true)
 grep -q 'restore.acceptImporterDeletions is set' <<<"$n_acc" || fail "NOTES do not warn that restore.acceptImporterDeletions is set"
 if grep -q 'restore.acceptImporterDeletions is set' <<<"$n_plain"; then fail "NOTES warn about restore.acceptImporterDeletions when it is false"; fi
