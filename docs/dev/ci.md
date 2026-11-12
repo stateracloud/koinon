@@ -716,6 +716,16 @@ shows as `unknown`, add a row and a recorded log sample under `hack/testdata/ci-
 `# expect: <category> <retry>`); `hack/ci-fail-test.sh` checks every sample and the table shape.
 `retry=yes` means a plain re-run is a fair first step, not that it is safe to hide the failure.
 
+## Merge-time measurement
+
+`hack/ci-timing.sh [--n 20] [--since ISO] [--until ISO] [--json]` measures the target of #572: the median
+time from the last push of a pull request to merged over the last N merged code pull requests, the
+merge-queue time, the median duration of each CI job (pull request `ci` and merge queue) and the runner
+minutes per merged pull request. Read-only (`gh` and `jq`). Last push is the head commit's earliest check
+suite (the push time to within seconds); a queue merge is one whose last queue removal has reason `merged`,
+all other merges are reported apart as admin merges. The definitions
+are in the script header; `hack/ci-timing-test.sh` runs it offline on `hack/testdata/ci-timing/`.
+
 ## Merging
 
 The only merge method is a merge commit, and the merge queue is the single route to main
