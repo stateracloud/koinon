@@ -643,7 +643,8 @@ pull request workflows is a setting, not a file; it is tracked as
 
 `hack/ci-required.txt` is the list the `main` ruleset mirrors. `flavors` is required but runs only in the merge
 queue and on pushes to main (#572, #128): on a pull request its job-level `if:` skips it, which reports success,
-so the name exists on every build. `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` (CI job
+so the name exists on every build. `flavor-publish` is advisory and push-only. `flavor-repro` (`flavor-repro.yml`, #176) is advisory too: it runs on
+a push to main, nightly and on dispatch, so it is not a `ci.yml` job and has no line in the list. `hack/ci-required-test.sh` (CI job
 `scripts`) fails when a `ci.yml` job is neither required nor advisory;
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
 list in the same PR, and a required job must report on every pull request and push (a job-level

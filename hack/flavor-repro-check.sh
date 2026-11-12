@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Checks that one commit builds one flavor image twice with the same digest (#176): the flavor's
+# Checks that HEAD builds one flavor image twice with the same digest (#176): the flavor's
 # reproducibility check. Both builds run on a fresh builder with no layer cache, for one platform,
-# with SOURCE_DATE_EPOCH set to the commit time and BuildKit's rewrite-timestamp, the same two
+# with SOURCE_DATE_EPOCH set to the HEAD commit time and BuildKit's rewrite-timestamp, the same two
 # settings hack/release-flavor.sh uses. Attestations are off: provenance and SBOM carry build data
 # by design, and the check compares the image itself. Nothing is pushed or loaded.
 #
-#   hack/flavor-repro-check.sh [flavor [platform [commit]]]     (opencode, host arch, HEAD)
+#   hack/flavor-repro-check.sh [flavor [platform]]     (opencode, host arch)
 #
+# The build reads the working tree, so the script refuses to run when flavors/ has changes that HEAD
+# does not have: the result would describe a tree that is not the commit.
 # Needs docker with buildx. GITHUB_TOKEN, when set, is the BuildKit secret github_token (#145).
 # Exit 0: equal digests. Exit 1: they differ (the two image layouts are kept and named, to diff).
+# Exit 2: bad usage or a dirty flavors/ tree.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
 
-if (($# > 3)); then
-	echo "usage: $0 [flavor [platform [commit]]]" >&2
+if (($# > 2)); then
+	echo "usage: $0 [flavor [platform]]" >&2
 	exit 2
 fi
 flavor=${1:-opencode}
@@ -27,10 +30,14 @@ arm64 | aarch64) host=linux/arm64 ;;
 *) host=linux/amd64 ;;
 esac
 platform=${2:-$host}
-commit=${3:-HEAD}
+commit=HEAD
 cd "$(dirname "$0")/.."
 
 [[ -f flavors/$flavor/Dockerfile ]] || { echo "no flavors/$flavor/Dockerfile" >&2; exit 2; }
+if [[ -n $(git status --porcelain flavors/) ]]; then
+	echo "flavors/ has uncommitted or untracked changes; the build reads the working tree, so this would not check HEAD. Commit or remove them first." >&2
+	exit 2
+fi
 epoch=$(git show -s --format=%ct "$commit")
 [[ $epoch =~ ^[0-9]+$ ]] || { echo "no commit time for '$commit'" >&2; exit 2; }
 
@@ -69,4 +76,6 @@ if [[ ${digests[0]} != "${digests[1]}" ]]; then
 	echo "Compare the layers (tar -tvf on each layer blob, or diffoci) to find the differing file." >&2
 	exit 1
 fi
+# Equal: the layouts are no longer needed (they are large); free the disk now, not at exit.
+rm -f "$work/build1.tar" "$work/build2.tar"
 echo "flavors/$flavor at $commit ($platform, SOURCE_DATE_EPOCH=$epoch): ${digests[0]} twice" >&2

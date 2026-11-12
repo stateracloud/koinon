@@ -980,12 +980,6 @@ jobs:
       - run: go test -count=1 ./test/flavors/...
         env:
           KOINON_REQUIRE: docker
-      # Two builds of this commit on fresh builders must give one digest (#176, docs/dev/releasing.md).
-      # They use no cache, so they are the slow part of this job; the runner's platform only.
-      - name: flavor reproducibility (two builds, one digest)
-        run: hack/flavor-repro-check.sh opencode
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.flavorcache.outputs.cache-hit != 'true'
         with:
