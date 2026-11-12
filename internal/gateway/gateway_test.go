@@ -346,3 +346,35 @@ var _ = Describe("State halves (ADR 0097 decision 2.1)", func() {
 		Expect(err).To(MatchError(ContainSubstring("invalid name or empty URL")))
 	})
 })
+
+// agentgateway's standalone config loader expands $NAME and ${NAME} over the whole file, so the
+// org-supplied strings a driver writes there refuse '$' at the one check every driver passes (#668).
+var _ = Describe("State.Validate and '$'", func() {
+	provider := func(url string) gateway.State {
+		return gateway.State{Providers: []gateway.Provider{{Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: url}}}
+	}
+	target := func(url, header, prefix string) gateway.State {
+		t := gateway.MCPTarget{Name: "acme-wiki", Org: "acme", URL: url, CredentialHeader: header, CredentialPrefix: prefix}
+		if header != "" {
+			t.CredentialFile = "/secrets/upstream/mcp_wiki"
+		}
+		return gateway.State{MCP: []gateway.MCPTarget{t}}
+	}
+
+	It("accepts the same fields without '$'", func() {
+		Expect(provider("https://openrouter.ai/api/v1").Validate()).To(Succeed())
+		Expect(target("https://mcp.example.com/mcp", "X-Api-Key", "Token ").Validate()).To(Succeed())
+	})
+
+	DescribeTable("refuses '$' in each field, naming it",
+		func(s gateway.State, want string) {
+			err := s.Validate()
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(err).To(MatchError(ContainSubstring("environment variable")))
+		},
+		Entry("the provider base URL", provider("https://openrouter.ai/api/${HOME}/v1"), `provider "acme/openrouter": base URL contains '$'`),
+		Entry("the MCP URL", target("https://mcp.example.com/$HOME", "", ""), `mcp target "acme-wiki": URL contains '$'`),
+		Entry("the MCP credential header", target("https://mcp.example.com/mcp", "X-$HOME", ""), `mcp target "acme-wiki": credential header contains '$'`),
+		Entry("the MCP credential prefix", target("https://mcp.example.com/mcp", "Authorization", "Bearer $$ "), `mcp target "acme-wiki": credential prefix contains '$'`),
+	)
+})

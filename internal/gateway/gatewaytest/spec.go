@@ -110,6 +110,7 @@ func Register(env Env) {
 	mcpKindSpec(env)
 	budgetOvershootSpec(env)
 	revisionSpec(env)
+	dollarSpec(env)
 }
 
 func llmSpec(env Env) {
