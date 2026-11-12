@@ -27,6 +27,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/estimate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -347,15 +348,16 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(row.CostFlagged).To(BeTrue())
 		Expect(string(row.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 		Expect(ledger.FormatUSD(row.CostUsd)).To(Equal("0.0012"), "charged its input, not dropped")
-		Expect(row.OutputTokens).To(BeZero(), "nothing was streamed: no output, never max_tokens")
+		Expect(row.OutputTokens).To(BeZero(), "no status: nothing was streamed, no output, never max_tokens")
 	}, SpecTimeout(time.Minute))
 
 	// agentgateway v1.7.0 logs a cut chat-completion stream with the usage it saw, which is none
 	// (usage comes in the final chunk only), and logs the x-generation-id response header through
 	// koinon.response_id without recording the body (verified here against the real binary). The
-	// ledger charges the logged usage (here the input estimate), never max_tokens, and holds the
-	// max_tokens bound back from the key while the provider's figure is pending.
-	It("charges a stream cut short the usage the gateway logged, provisionally, with the provider's response ID", func(ctx SpecContext) {
+	// ledger charges the logged usage (here the input estimate) plus the output estimate (the response
+	// size is not logged: the bounded share of max_tokens, old issue 670), never max_tokens, and holds
+	// the max_tokens bound back from the key while the provider's figure is pending.
+	It("charges a stream cut short the usage the gateway logged and an output estimate, provisionally, with the provider's response ID", func(ctx SpecContext) {
 		c := newEnv(ctx, uniq("org"), "", "100.00")
 		c.model(ctx, "fake", cutModel)
 		_, err := prices.New(db, nil, priceList).SetOverride(ctx, c.org, audit.User(c.user), prices.OverrideInput{
@@ -403,13 +405,13 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			return db.QueryRow(ctx, `SELECT input_tokens, output_tokens, coalesce(response_id, ''), reserve_usd::text, provisional, estimated
 				FROM spend_entries WHERE org_id = $1`, c.org).Scan(&in, &out, &responseID, &reserve, &provisional, &estimated)
 		}).WithTimeout(20 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
-		Expect(out).To(BeZero(), "no output usage was logged: none is charged, not 32000")
+		Expect(out).To(Equal(int64(estimate.UnknownOutputMax)), "no output usage was logged: a bounded estimate is charged, not zero and not 32000")
 		Expect(in).To(BeNumerically(">", 0), "the input is estimated from the request bytes")
 		Expect(estimated).To(BeTrue())
 		Expect(responseID).To(Equal("gen-cut-1"), "the response header, logged without the body")
 		Expect(provisional).To(BeTrue(), "its provider can report what it billed")
-		// 32000 output tokens at $50 per million is held back from the key, not charged.
-		Expect(ledger.FormatUSD(reserve)).To(Equal("1.60"))
+		// The rest of the 32000 output tokens at $50 per million is held back from the key, not charged.
+		Expect(ledger.FormatUSD(reserve)).To(Equal("1.3952"))
 		var settlements int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_settlements WHERE org_id = $1`, c.org).Scan(&settlements)).To(Succeed())
 		Expect(settlements).To(Equal(1))

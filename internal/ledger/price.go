@@ -162,8 +162,13 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
-		if e.ResponseBytes > 0 {
-			x.ResponseBytes = e.ResponseBytes
+		switch {
+		case e.ResponseBytes >= 0:
+			// Measured: a 0 then says nothing was streamed (ADR 0056, amendment 2026-10-31, point 1).
+			x.ResponseBytes, x.ResponseKnown = e.ResponseBytes, true
+		case e.Status == 0 && !e.OutputKnown:
+			// No status: the client left before the response headers, so nothing was streamed either.
+			x.ResponseKnown = true
 		}
 		if e.InputKnown {
 			inTotal := p.totalIn()
@@ -200,12 +205,17 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		p.input, p.output = max(r.InputTokens-p.cacheRead-p.cacheWrite, 0), max(r.OutputTokens-p.reasoning, 0)
 		p.estimated = !p.waived
 		p.aborted = x.Aborted && !x.Rejected && !x.Failed
-		meta["estimate"] = map[string]any{
+		est := map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
 			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "max_output_capped": r.MaxOutputCapped, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
 			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
 			"reserve_output_tokens": r.ReserveOutputTokens,
 		}
+		if r.OutputBasis != "" {
+			// How the output of a response cut short was estimated (old issue 670).
+			est["output_basis"] = r.OutputBasis
+		}
+		meta["estimate"] = est
 		if p.aborted && r.ReserveOutputTokens > p.totalOut() {
 			// The bound the gateway key holds back while the provider's figure is pending; never charged.
 			bound, err := qt.Price(p.usage(max(r.ReserveOutputTokens-p.reasoning, 0)))
@@ -216,13 +226,28 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 	}
 	if e.Cut && e.InputKnown && e.OutputKnown {
-		// A streamed Anthropic-format response its run's cancel cut short: message_start logged
-		// usage that looks complete but is not. It is charged as logged, flagged usage_partial, and
-		// the max_tokens bound is held back from the key until the provider's figure or the deadline.
+		// A streamed Anthropic-format response cut short (its run's cancel, or a proxy error):
+		// message_start logged usage that looks complete but is not (output 1). The input is charged
+		// as logged and the output is the larger of the logged one and the output streamed, estimated
+		// as for a cut stream without usage (ADR 0056, amendment 2026-10-31, point 2; old issue 670).
+		// It is flagged usage_partial, and the max_tokens bound is held back from the key until the
+		// provider's figure or the deadline.
 		bound, fallback, capped := estimate.ReserveOutput(int64(res.Entry.MaxOutput), e.MaxTokens)
+		params, err := prices.Calibrated(ctx, q, org, e.Model, res)
+		if err != nil {
+			return p, err
+		}
+		streamed, basis := estimate.CutOutput(params, max(e.ResponseBytes, 0), e.ResponseBytes >= 0, bound)
+		if streamed > p.totalOut() {
+			p.output = max(streamed-p.reasoning, 0)
+			p.estimated = true
+		}
 		p.aborted, p.flagged = true, true
 		meta["usage_partial"] = true
-		meta["estimate"] = map[string]any{"method": "partial", "reserve_output_tokens": bound, "max_output_fallback": fallback, "max_output_capped": capped}
+		meta["estimate"] = map[string]any{
+			"method": "partial", "reserve_output_tokens": bound, "max_output_fallback": fallback, "max_output_capped": capped,
+			"output_basis": basis, "output_logged_tokens": e.OutputTokens + e.ReasoningTokens, "output_estimated": p.estimated,
+		}
 		if bound > p.totalOut() {
 			b, err := qt.Price(p.usage(max(bound-p.reasoning, 0)))
 			if err != nil {
