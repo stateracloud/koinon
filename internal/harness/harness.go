@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package flavor describes the harness flavors Koinon ships (ADR 0035; v0.1 ships OpenCode only, ADR 0059). Everything that
-// differs per flavor lives in one Descriptor here, so adding a flavor means adding one entry
-// to the table (plus its image under flavors/, the agent_flavor migration, the schema enum and
-// the proto enum, which tests keep in step).
-package flavor
+// Package harness describes the harnesses Koinon ships (ADR 0112; OpenCode is the only one, ADR
+// 0059). Everything that differs per harness lives in one Descriptor here, so adding a built-in
+// harness means adding one entry to the table (plus its image under flavors/, the schema enum and
+// the deprecated proto enum, which tests keep in step). ADR 0112 replaces this table with harness
+// definitions (#611).
+package harness
 
 import (
 	"maps"
@@ -13,17 +14,19 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 
-	"github.com/stateracloud/koinon/internal/db/store"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 )
 
-// Descriptor is what the Go side needs to know about one flavor.
+// OpenCode is the name of the built-in OpenCode harness.
+const OpenCode = "opencode"
+
+// Descriptor is what the Go side needs to know about one harness.
 type Descriptor struct {
-	// Name is the flavor's name as stored and as written in templates.
-	Name store.AgentFlavor
-	// Proto is the flavor's value in the template API.
+	// Name is the harness's name as stored and as written in templates.
+	Name string
+	// Proto is the harness's value in the template API.
 	Proto templatev1alpha1.Flavor
-	// EntryScript is the flavor's entry script, which starts the harness as an ACP agent on its
+	// EntryScript is the harness's entry script, which starts the harness as an ACP agent on its
 	// stdin and stdout (the flavor contract, ADR 0035, 0048; flavors/<flavor>/README.md). All
 	// take the same arguments.
 	EntryScript string
@@ -36,76 +39,76 @@ type Descriptor struct {
 	// "github" tools target, so the prompt is github_koinon-ready
 	// (flavors/opencode/README.md, ADR 0052).
 	//
-	// A flavor whose harness announces no MCP prompt leaves this empty; it needs no wait only if
+	// A harness whose harness announces no MCP prompt leaves this empty; it needs no wait only if
 	// its first prompt already carries the Koinon tools (the contract suite checks the first chat
-	// request of every flavor).
+	// request of every harness).
 	ReadyCommand string
-	// ModelEntries maps each model format to the flavor's provider entry for it (ADR 0069
+	// ModelEntries maps each model format to the harness's provider entry for it (ADR 0069
 	// decision 6). agentd selects "<entry>/<model>" as the session's model option
 	// (session/set_config_option), and the entry script picks the same entry from its
-	// FormatArg. OpenCode names models <provider>/<model>. Empty when the flavor takes its model
-	// from the launch command alone. A format with no row cannot run on the flavor; a new format
-	// is one row here, one in the flavor's entry script (the case on --model-format in
+	// FormatArg. OpenCode names models <provider>/<model>. Empty when the harness takes its model
+	// from the launch command alone. A format with no row cannot run on the harness; a new format
+	// is one row here, one in the harness's entry script (the case on --model-format in
 	// flavors/<flavor>/koinon-<flavor>, with its provider in the configuration) and one in the
 	// gateway's table. test/flavors checks that the script and this table agree.
 	ModelEntries map[modelformat.Format]string
 	// FormatArg is the launch switch that takes the model's format, so the entry script uses the
-	// matching entry. "" when the flavor has one entry only.
+	// matching entry. "" when the harness has one entry only.
 	FormatArg string
 	// ThinkingArg is the launch switch that takes the thinking mode Koinon decided for the run
 	// (internal/thinking.Mode, the exact form for on or off), so the harness renders it instead of guessing
-	// from the model's ID. "" when the flavor takes none. The entry script turns it into the
+	// from the model's ID. "" when the harness takes none. The entry script turns it into the
 	// harness's own setting (ADR 0069 amendment 2026-10-29).
 	ThinkingArg string
-	// InstructionLink is the path the flavor's harness reads its instructions from: a symbolic
+	// InstructionLink is the path the harness reads its instructions from: a symbolic
 	// link to the instruction file, which agentd restores before every prompt. "" when the
-	// flavor needs none.
+	// harness needs none.
 	InstructionLink string
-	// DefaultBinaries are the network-calling executables of the flavor
+	// DefaultBinaries are the network-calling executables of the harness
 	// (flavors/<flavor>/README.md). OpenShell matches the real path of the executable that
 	// opens a connection, or of one of its ancestors, never a symbolic link or a script: a
 	// script runs as its interpreter, so a harness written as scripts lists its interpreter's
 	// real path, which may name the architecture. OpenCode is a single binary.
 	DefaultBinaries []string
-	// PluginInstalls is set when the flavor supports the template option
+	// PluginInstalls is set when the harness supports the template option
 	// harness.pluginInstalls: its launch command then takes PluginInstallsArg, and the
 	// reconciler opens the npm registry for its binaries.
 	PluginInstalls    bool
 	PluginInstallsArg string
 	// CacheArgs maps a prompt-cache marker format (prices.CacheMode.Marker: "anthropic",
 	// "alibaba") to the launch switch that makes the harness send those markers (ADR 0068). A
-	// format missing here cannot be cached on this flavor. A model whose format has its own markers
+	// format missing here cannot be cached on this harness. A model whose format has its own markers
 	// (prices.CacheNative) needs no switch: the harness places them.
 	CacheArgs map[string]string
 	// NoWebToolsArg is the launch switch that removes the harness's built-in web tools (fetch and
 	// search) from the tools offered to the model. koinon-agentd passes it when the agent has no
 	// web egress (agentconfig.Config.WebEgress), so the tool set matches the sandbox's network
-	// policy (ADR 0080). "" when the flavor has no such tools.
+	// policy (ADR 0080). "" when the harness has no such tools.
 	NoWebToolsArg string
 	// SessionArg is the launch switch that takes the run ID, which the harness sends to
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
-	// the flavor cannot.
+	// the harness cannot.
 	SessionArg string
 	// CompactionArg is the launch switch that takes the context size, in tokens, at which the
 	// harness compacts the conversation (agentd's compactionTokens, ADR 0070 amendment 2026-11-11).
-	// "" when the flavor takes none.
+	// "" when the harness takes none.
 	CompactionArg string
-	// RetriesModelRequests is set when the flavor's harness retries a failed model request itself.
+	// RetriesModelRequests is set when the harness retries a failed model request itself.
 	// Exactly one layer retries (ADR 0056 amendment 2026-10-31, point 3), so koinon-agentd then
-	// skips its own turn retry for the flavor, and gives the harness Koinon's retry policy instead:
+	// skips its own turn retry for the harness, and gives the harness Koinon's retry policy instead:
 	// the entry script takes --model-tries, --model-retry-backoff-ms and --model-max-retry-after-ms
 	// (flavors/common/koinon-entry-lib.sh) and makes the harness follow them, not its own defaults.
-	// A flavor whose harness retries but cannot be given the policy has no place here.
+	// A harness whose harness retries but cannot be given the policy has no place here.
 	RetriesModelRequests bool
 	// MCPToolPrefix is what the harness puts before the name of a tool it got from Koinon's MCP
 	// server in a tool call's title (OpenCode: the server is "koinon", the title "koinon_<tool>").
 	// agentd's leak guard feed reports nothing for such a finished call: the gateway saw its
 	// result and set the legs from the tool's declaration (ADR 0091 decision 4). "" when the
-	// flavor's titles cannot be told apart, and every call of kind other then sets both legs.
+	// harness's titles cannot be told apart, and every call of kind other then sets both legs.
 	MCPToolPrefix string
-	// Tools are the command-line tools the flavor's image ships for the agent to use, by the
+	// Tools are the command-line tools the harness's image ships for the agent to use, by the
 	// name of the command (rg, fd, jq, yq, ast-grep, duckdb, sqlite3, pdftotext, pdfinfo, python3, python, file, git).
-	// agentd's "Working with large data" section names a tool only when the flavor lists it, so
+	// agentd's "Working with large data" section names a tool only when the harness lists it, so
 	// a flavor must list exactly what its image has (flavors/<flavor>/README.md). Empty when the
 	// image ships none the agent should rely on.
 	Tools []string
@@ -118,7 +121,7 @@ type Descriptor struct {
 
 var table = []Descriptor{
 	{
-		Name:         store.AgentFlavorOpencode,
+		Name:         OpenCode,
 		Proto:        templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 		EntryScript:  "/usr/local/bin/koinon-opencode",
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
@@ -156,7 +159,7 @@ var table = []Descriptor{
 	},
 }
 
-// All returns copies of the descriptors of every flavor, in a fixed order.
+// All returns copies of the descriptors of every harness, in a fixed order.
 func All() []Descriptor {
 	out := make([]Descriptor, len(table))
 	for i, d := range table {
@@ -174,17 +177,17 @@ func (d Descriptor) clone() Descriptor {
 	return d
 }
 
-// Names returns every flavor's name, in the order of All.
-func Names() []store.AgentFlavor {
-	out := make([]store.AgentFlavor, len(table))
+// Names returns every harness's name, in the order of All.
+func Names() []string {
+	out := make([]string, len(table))
 	for i, d := range table {
 		out[i] = d.Name
 	}
 	return out
 }
 
-// Lookup returns the descriptor of the flavor named name.
-func Lookup(name store.AgentFlavor) (Descriptor, bool) {
+// Lookup returns the descriptor of the harness named name.
+func Lookup(name string) (Descriptor, bool) {
 	for _, d := range table {
 		if d.Name == name {
 			return d.clone(), true
@@ -193,7 +196,7 @@ func Lookup(name store.AgentFlavor) (Descriptor, bool) {
 	return Descriptor{}, false
 }
 
-// FromProto returns the descriptor of the flavor with the API value p.
+// FromProto returns the descriptor of the harness with the API value p.
 func FromProto(p templatev1alpha1.Flavor) (Descriptor, bool) {
 	for _, d := range table {
 		if d.Proto == p {
@@ -203,8 +206,8 @@ func FromProto(p templatev1alpha1.Flavor) (Descriptor, bool) {
 	return Descriptor{}, false
 }
 
-// SupportsPluginInstalls reports whether the flavor has the harness.pluginInstalls option.
-func SupportsPluginInstalls(name store.AgentFlavor) bool {
+// SupportsPluginInstalls reports whether the harness has the harness.pluginInstalls option.
+func SupportsPluginInstalls(name string) bool {
 	d, ok := Lookup(name)
 	return ok && d.PluginInstalls
 }

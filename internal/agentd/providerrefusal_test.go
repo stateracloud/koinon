@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -50,7 +51,7 @@ var _ = Describe("Who refused the model request", func() {
 	}
 
 	It("fails a provider's 403 as policy, naming the provider's refusal, once the gateway's record arrives", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := refuse(ctx, e, 403, time.Second)
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = 10 * time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.RunStateFailed))
@@ -63,7 +64,7 @@ var _ = Describe("Who refused the model request", func() {
 	})
 
 	It("fails a provider's 401 as a provider-key fault", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := refuse(ctx, e, 401, 0)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
@@ -77,7 +78,7 @@ var _ = Describe("Who refused the model request", func() {
 	})
 
 	It("keeps a gateway-key fault when the gateway has no record of the provider refusing anything", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := refuse(ctx, e, 0, 0)
 		start := time.Now()
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = time.Second })
@@ -89,7 +90,7 @@ var _ = Describe("Who refused the model request", func() {
 	})
 
 	It("does not read another run's refusal", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		other := e.enqueue(ctx, e.task(ctx, "other"))
 		_, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			Principal: "agent", OrgID: e.org, AgentID: e.agent.ID, RunID: other.ID, TaskID: other.TaskID, RequestID: uuid.NewString(), KeyID: "k-test", Model: "m",

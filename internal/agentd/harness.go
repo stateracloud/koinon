@@ -9,22 +9,21 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/pricing"
 )
 
-// endpoints are the per-agent values a flavor's launch command takes. None is a secret:
+// endpoints are the per-agent values a harness's launch command takes. None is a secret:
 // they are visible to everything in the sandbox.
 type endpoints struct {
 	ModelBaseURL string
 	Model        string
 	MCPURL       string
-	// Format is the model's wire format (models.format). The flavor's entry script uses the
-	// provider entry for it (flavor.Descriptor.ModelEntries). Empty leaves the switch out, which
+	// Format is the model's wire format (models.format). The harness's entry script uses the
+	// provider entry for it (harness.Descriptor.ModelEntries). Empty leaves the switch out, which
 	// the entry script reads as chat completions.
 	Format modelformat.Format
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
@@ -36,8 +35,8 @@ type endpoints struct {
 	Thinking thinking.Mode
 	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".
 	SessionID string
-	// Retry is Koinon's model-retry policy, handed to a flavor whose harness retries model
-	// requests itself (flavor.Descriptor.RetriesModelRequests); other flavors ignore it.
+	// Retry is Koinon's model-retry policy, handed to a harness whose harness retries model
+	// requests itself (harness.Descriptor.RetriesModelRequests); other harnesses ignore it.
 	Retry retryPolicy
 	// CompactionTokens is the context size at which the harness compacts (compactionTokens). 0
 	// leaves the switch out and the harness on its own behaviour.
@@ -85,19 +84,19 @@ func compactionTokens(p pricing.Price) int {
 	return defaultCompactionTokens
 }
 
-// harnessRetries reports whether the flavor's harness retries model requests itself, so that
+// harnessRetries reports whether the harness retries model requests itself, so that
 // agentd must not repeat the turn as well (one retrying layer, ADR 0056 amendment 2026-10-31).
-func harnessRetries(f store.AgentFlavor) bool {
-	d, _ := flavor.Lookup(f)
+func harnessRetries(f string) bool {
+	d, _ := harness.Lookup(f)
 	return d.RetriesModelRequests
 }
 
-// launchCommand is the flavor's ACP launch command. Binaries are absolute paths: OpenShell
+// launchCommand is the harness's ACP launch command. Binaries are absolute paths: OpenShell
 // does not pass the image's PATH to exec'd processes (ADR 0048).
-func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
-	d, ok := flavor.Lookup(f)
+func launchCommand(f string, e endpoints) ([]string, error) {
+	d, ok := harness.Lookup(f)
 	if !ok || d.EntryScript == "" {
-		return nil, fmt.Errorf("flavor %q has no ACP launch command", f)
+		return nil, fmt.Errorf("harness %q has no ACP launch command", f)
 	}
 	cmd := []string{
 		d.EntryScript,
@@ -108,13 +107,13 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 	// The harness is the retrying layer: it gets Koinon's policy, never runs on its own defaults.
 	if d.RetriesModelRequests {
 		if e.Retry.Tries < 1 || e.Retry.Backoff < 0 || e.Retry.MaxRetryAfter < 0 {
-			return nil, fmt.Errorf("flavor %q retries model requests and needs Koinon's retry policy, got %+v", f, e.Retry)
+			return nil, fmt.Errorf("harness %q retries model requests and needs Koinon's retry policy, got %+v", f, e.Retry)
 		}
 		cmd = append(cmd, e.Retry.args()...)
 	}
 	if e.Format != "" && len(d.ModelEntries) > 0 {
 		if _, ok := d.ModelEntries[e.Format]; !ok {
-			return nil, fmt.Errorf("flavor %q has no provider entry for the %q model format; add a row to its ModelEntries", f, e.Format)
+			return nil, fmt.Errorf("harness %q has no provider entry for the %q model format; add a row to its ModelEntries", f, e.Format)
 		}
 		if d.FormatArg != "" {
 			cmd = append(cmd, d.FormatArg, string(e.Format))
@@ -126,7 +125,7 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 	if e.CacheMarker != "" {
 		arg, ok := d.CacheArgs[e.CacheMarker]
 		if !ok {
-			return nil, fmt.Errorf("flavor %q cannot send %q prompt-cache markers; add its switch to the flavor table", f, e.CacheMarker)
+			return nil, fmt.Errorf("harness %q cannot send %q prompt-cache markers; add its switch to the harness table", f, e.CacheMarker)
 		}
 		cmd = append(cmd, arg)
 	}
@@ -139,25 +138,25 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 	return cmd, nil
 }
 
-// readyCommand is the ACP command a flavor's harness announces once Koinon's MCP tools are
-// registered, or "" when it announces none (flavor.Descriptor.ReadyCommand).
-func readyCommand(f store.AgentFlavor) string {
-	d, _ := flavor.Lookup(f)
+// readyCommand is the ACP command a harness announces once Koinon's MCP tools are
+// registered, or "" when it announces none (harness.Descriptor.ReadyCommand).
+func readyCommand(f string) string {
+	d, _ := harness.Lookup(f)
 	return d.ReadyCommand
 }
 
-// mcpToolPrefix is the title prefix of the flavor's calls to Koinon's MCP tools, or "".
-func mcpToolPrefix(f store.AgentFlavor) string {
-	d, _ := flavor.Lookup(f)
+// mcpToolPrefix is the title prefix of the harness's calls to Koinon's MCP tools, or "".
+func mcpToolPrefix(f string) string {
+	d, _ := harness.Lookup(f)
 	return d.MCPToolPrefix
 }
 
 // modelOption is the value agentd selects for the session's model option
-// (session/set_config_option), or "" when the flavor takes its model from the launch command
-// alone. OpenCode names models <provider>/<model>; the provider is the flavor's entry for the
-// model's format (flavor.Descriptor.ModelEntries). An empty format means chat completions.
-func modelOption(f store.AgentFlavor, format modelformat.Format, model string) string {
-	d, _ := flavor.Lookup(f)
+// (session/set_config_option), or "" when the harness takes its model from the launch command
+// alone. OpenCode names models <provider>/<model>; the provider is the harness's entry for the
+// model's format (harness.Descriptor.ModelEntries). An empty format means chat completions.
+func modelOption(f string, format modelformat.Format, model string) string {
+	d, _ := harness.Lookup(f)
 	if format == "" {
 		format = modelformat.OpenAI
 	}
@@ -186,15 +185,15 @@ func versionModel(c agentconfig.Config) string {
 }
 
 // harnessArgs are the launch command's optional switches from the agent version's harness
-// settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only flavors
+// settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only harnesses
 // with the option have one (OpenCode: --plugin-installs lets it load external plugins,
 // flavors/opencode/README.md); the reconciler opens the npm registry for the same agents.
 //
-// A flavor with built-in web tools also gets its NoWebToolsArg unless the version has web egress
+// A harness with built-in web tools also gets its NoWebToolsArg unless the version has web egress
 // (agentconfig.Config.WebEgress): a tool the sandbox's network policy would only fail is not
 // offered, so the model uses the org's MCP tools instead (ADR 0080).
-func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
-	d, _ := flavor.Lookup(f)
+func harnessArgs(f string, c agentconfig.Config) []string {
+	d, _ := harness.Lookup(f)
 	var args []string
 	if c.Harness.PluginInstalls && d.PluginInstalls {
 		args = append(args, d.PluginInstallsArg)

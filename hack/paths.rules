@@ -157,6 +157,7 @@ lane web - preflight
 lane generate - preflight
 lane chart - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
+# hack/flavor-repro-check.sh (two uncached builds, one digest) is the advisory workflow flavor-repro.yml, not a ci.yml job; it has no lane.
 lane flavors docker,go test-flavors
 lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission

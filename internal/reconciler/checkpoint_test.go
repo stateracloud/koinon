@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -71,8 +72,8 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		return cp
 	}
 	bump := func() {
-		cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
-			Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+		cfg.Harnesses[harness.OpenCode] = reconciler.Harness{
+			Image: image + "-2", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
 		}
 		var err error
 		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
@@ -93,8 +94,8 @@ var _ = Describe("Reconciler home checkpoints", func() {
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
 			ProviderKeyDir: "/secrets/providers",
 			URLPolicy:      testPolicy,
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			RuntimeClassName: "kata",
 			Logger:           slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
@@ -289,7 +290,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		pass(ctx)
 		pass(ctx)
 		Expect(row(ctx).RestoreCheckpointID.Valid).To(BeTrue())
-		cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{Image: image + "-3", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]}
+		cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: image + "-3", Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
 		var err error
 		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())

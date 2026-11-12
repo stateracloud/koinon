@@ -42,7 +42,7 @@ var _ = Describe("Repository passwords and epochs", Ordered, func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		org, _, _ = pgtest.NewOrg(ctx, pool)
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`,
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`,
 			org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
 	})
 
@@ -202,7 +202,7 @@ var _ = Describe("Repository passwords and epochs", Ordered, func() {
 		ids := map[string]pgtype.UUID{}
 		for _, name := range []string{first, second} {
 			var id pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, name).Scan(&id)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, name).Scan(&id)).To(Succeed())
 			ids[name] = id
 		}
 		// Lost, so due without a later checkpoint; the higher agent ID is the longer overdue.

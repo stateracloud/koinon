@@ -103,7 +103,7 @@ var _ = Describe("the org default model", Ordered, func() {
 		rv = prices.NewResolver(pricing.Static(l, rs))
 		svc = agentmodel.New(pool, rv)
 		org, user, _ = pgtest.NewOrg(ctx, pool)
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, id, display_name, flavor, created_by)
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, id, display_name, harness, created_by)
 			VALUES ($1, uuidv7(), 'Repo helper', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
 	}, NodeTimeout(3*time.Minute))
 

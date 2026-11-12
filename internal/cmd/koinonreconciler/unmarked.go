@@ -21,14 +21,14 @@ import (
 
 // unmarkedConfig is what "koinon-reconciler unmarked list" needs: the database (to know which orgs and
 // agents exist), the OpenShell gateway (to list its objects), the install mark (to tell this
-// install's objects from another's) and the configured flavors (whose profiles the reconciler claims). The Deployment already gives the reconciler all of them, so
+// install's objects from another's) and the configured harnesses (whose profiles the reconciler claims). The Deployment already gives the reconciler all of them, so
 // `kubectl exec deploy/<reconciler> -- koinon-reconciler unmarked list` needs nothing more.
 type unmarkedConfig struct {
 	databaseURL      string
 	openshellAddress string
 	openshellTLSDir  string
 	installMark      string
-	flavors          map[store.AgentFlavor]reconciler.Flavor
+	harnesses        map[string]reconciler.Harness
 	json             bool
 }
 
@@ -50,13 +50,13 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 			"one per line: workspace, kind, name, reason. It only reads; it changes nothing on the gateway and never lists an " +
 			"object that carries another install's mark.\n\n" +
 			"Reasons:\n" +
-			"  " + reconciler.ReasonPendingClaim + "      an active agent's object, or the profile of a configured flavor no agent of the " +
+			"  " + reconciler.ReasonPendingClaim + "      an active agent's object, or the profile of a configured harness no agent of the " +
 			"org has; its next reconcile claims it (a sandbox is recreated, a provider recreated once no sandbox attaches it, " +
 			"a profile marked)\n" +
-			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object, or a flavor profile only draft and archived agents use, " +
+			"  " + reconciler.ReasonDraftAgent + "        a draft agent's object, or a harness profile only draft and archived agents use, " +
 			"that the reconciler claims on its next pass; if it is still listed after a pass, the agent's key Secret no longer " +
 			"matches its recorded key: activate or archive the agent\n" +
-			"  " + reconciler.ReasonArchivedAgent + "     an archived agent's object, or a flavor profile only archived agents use; the " +
+			"  " + reconciler.ReasonArchivedAgent + "     an archived agent's object, or a harness profile only archived agents use; the " +
 			"profile is marked by the reconcile pass of the org, the agent's provider and sandbox are deleted by its cleanup\n" +
 			"  " + reconciler.ReasonWaitsForAgent + "    the reconciler cannot claim it while the agent keeps its status: a draft agent's " +
 			"stopped sandbox and the providers it attaches (claimed when the agent is activated, removed when it is archived), an " +
@@ -72,11 +72,11 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 			if err := cmd.ValidateRequiredFlags(); err != nil {
 				return err
 			}
-			images, err := flavorImages(v)
+			images, err := harnessImages(v)
 			if err != nil {
 				return err
 			}
-			c.flavors = flavorsOf(images)
+			c.harnesses = harnessesOf(images)
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -115,7 +115,7 @@ func listUnmarked(ctx context.Context, c unmarkedConfig, out io.Writer) error {
 	defer func() { _ = backend.Close() }()
 	backend.WithOwner(execution.OwnerID(c.installMark))
 
-	objs, err := reconciler.ListUnmarked(ctx, store.New(pool), backend, c.flavors)
+	objs, err := reconciler.ListUnmarked(ctx, store.New(pool), backend, c.harnesses)
 	if err != nil {
 		return err
 	}

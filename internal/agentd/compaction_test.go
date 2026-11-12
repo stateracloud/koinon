@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -40,11 +40,11 @@ var _ = Describe("compaction point", func() {
 
 	It("is a launch switch only when set", func() {
 		e := agentd.Endpoints{ModelBaseURL: "http://gw.test/v1", Model: "m-1", MCPURL: "http://gw.test/mcp", Retry: agentd.DefaultRetryPolicy()}
-		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		cmd, err := agentd.LaunchCommand(harness.OpenCode, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd).NotTo(ContainElement("--compaction-tokens"))
 		e.CompactionTokens = 100_000
-		cmd, err = agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		cmd, err = agentd.LaunchCommand(harness.OpenCode, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd).To(ContainElements("--compaction-tokens", "100000"))
 	})

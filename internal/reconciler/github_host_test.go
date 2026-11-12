@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -120,7 +121,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 			Bindings:     []agentconfig.Binding{{Connector: "github", ConnectionID: uuidOf(conn.ID), Targets: []string{"acme/widgets"}}},
 		}.Marshal()
 		Expect(err).NotTo(HaveOccurred())
-		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "Internal helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "Internal helper", Harness: harness.OpenCode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
@@ -130,8 +131,8 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			GitHub: fixedTokens{}, URLPolicy: testPolicy,
 			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),
@@ -167,7 +168,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 			Bindings:     []agentconfig.Binding{{Connector: "github", ConnectionID: uuidOf(conn.ID), Targets: []string{"acme/widgets"}}},
 		}.Marshal()
 		Expect(err).NotTo(HaveOccurred())
-		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "GHES helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "GHES helper", Harness: harness.OpenCode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
@@ -178,8 +179,8 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			GitHub: fixedTokens{}, URLPolicy: testPolicy,
 			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),

@@ -58,7 +58,7 @@ Agent is an agent and the definition it runs.
 | org_id | 2 | `string` | singular |  |  |
 | display_name | 3 | `string` | singular |  |  |
 | status | 4 | `koinon.agent.v1alpha1.AgentStatus` | singular |  |  |
-| flavor | 5 | `koinon.template.v1alpha1.Flavor` | singular |  |  |
+| flavor | 5 | `koinon.template.v1alpha1.Flavor` | singular |  | Deprecated. Deprecated: use harness. Unspecified when the harness has no Flavor value. |
 | template_id | 6 | `string` | singular |  | The template content the agent was created from, if any. |
 | template_slug | 7 | `string` | singular |  |  |
 | latest_version | 8 | `int32` | singular |  | The newest version. ActivateAgent must name it. |
@@ -81,6 +81,7 @@ Agent is an agent and the definition it runs.
 | sandbox_resources | 25 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when it follows the template and the platform default. |
 | keep_warm | 26 | `bool` | singular |  | Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049 amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org. |
 | keep_warm_granted | 27 | `bool` | singular |  | Whether the reconciler granted the request under the operator's per-org cap (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new request reads false until the reconciler's next pass. |
+| harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 
 ### Message ArchiveAgentRequest
 
@@ -108,9 +109,10 @@ CreateAgentFromTemplateRequest names the template and the user's choices.
 | org_id | 1 | `string` | singular |  |  |
 | template_id | 2 | `string` | singular |  | A Template.id from ListTemplates. |
 | display_name | 3 | `string` | singular |  |  |
-| flavor | 4 | `koinon.template.v1alpha1.Flavor` | singular |  | One of the template's allowed flavors; unspecified picks its default. |
+| flavor | 4 | `koinon.template.v1alpha1.Flavor` | singular |  | Deprecated. Deprecated: use harness. Read only when harness is empty. |
 | grants | 5 | `koinon.agent.v1alpha1.GrantBinding` | repeated |  | Where the template's grants apply: one entry per grant on a connector type with targets. A grant whose template sets targets min above zero needs one. Stored with the agent's version; ActivateAgent approves it with the grant. |
 | ephemeral | 6 | `bool` | optional |  | Overrides the template's ephemeral setting; unset keeps it. |
+| harness | 7 | `string` | singular |  | One of the template's allowed harnesses, by name; empty picks its default (ADR 0112). |
 
 ### Message CreateAgentFromTemplateResponse
 
@@ -3315,8 +3317,8 @@ Template is one version of an agent template.
 | version | 4 | `string` | singular |  | The template's own version label, for example "0.1.0". |
 | display_name | 5 | `string` | singular |  |  |
 | description | 6 | `string` | singular |  |  |
-| allowed_flavors | 7 | `koinon.template.v1alpha1.Flavor` | repeated |  |  |
-| default_flavor | 8 | `koinon.template.v1alpha1.Flavor` | singular |  |  |
+| allowed_flavors | 7 | `koinon.template.v1alpha1.Flavor` | repeated |  | Deprecated. Deprecated: use allowed_harnesses. A harness with no Flavor value is left out. |
+| default_flavor | 8 | `koinon.template.v1alpha1.Flavor` | singular |  | Deprecated. Deprecated: use default_harness. Unspecified when the default harness has no Flavor value. |
 | model | 9 | `string` | singular |  | Logical model name; "default" is the install's default model. |
 | instructions | 10 | `string` | singular |  |  |
 | grants | 11 | `koinon.template.v1alpha1.Grant` | repeated |  |  |
@@ -3325,6 +3327,8 @@ Template is one version of an agent template.
 | triggers | 14 | `koinon.template.v1alpha1.Trigger` | repeated |  |  |
 | ephemeral | 15 | `bool` | singular |  | Agents made from the template are ephemeral by default: each task gets a fresh sandbox without a home, deleted when the task ends (ADR 0065 decision 13c). |
 | thinking | 16 | `string` | singular |  | The starting value of the agent's thinking setting, "on" or "off"; empty when the template names none, which is the default, on (ADR 0069 amendment 2026-10-29). |
+| allowed_harnesses | 17 | `string` | repeated |  | Names of the harnesses the agent may run on (ADR 0112), for example "opencode". |
+| default_harness | 18 | `string` | singular |  | The harness an agent gets when the request names none; one of allowed_harnesses. |
 
 ### Message Trigger
 
@@ -3342,7 +3346,9 @@ It belongs to a version and takes effect when that version is activated.
 
 ### Enum Flavor
 
-Flavor is the harness an agent runs on (ADR 0035).
+Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since
+ADR 0112 ("opencode" is the built-in one); the fields of this type are deprecated and kept so
+the API stays wire- and source-compatible.
 
 | Value | Number | Description |
 | --- | --- | --- |
