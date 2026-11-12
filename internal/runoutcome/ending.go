@@ -471,6 +471,11 @@ type Unavailable struct {
 	// Cap is the org's sandbox wait cap the wait applied, read once; every text about the failure
 	// uses it, so they all agree with the run's failure reason.
 	Cap time.Duration
+	// CauseSeen is how long after the start of the wait the sandbox row first named Cause, when
+	// CauseWasSeen. It tells a cause seen early (the cap was only the wait) from one seen just
+	// before the cap (issue 573).
+	CauseSeen    time.Duration
+	CauseWasSeen bool
 	// Class is the failure class recorded with the run.
 	Class store.RunFailureClass
 }
@@ -488,9 +493,13 @@ func (o *Owner) SandboxUnavailable(ctx context.Context, turn Turn, u Unavailable
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
-		if err := o.finishIn(ctx, q, src, store.RunStateFailed, u.Reason, u.Class, map[string]any{
+		payload := map[string]any{
 			"sandboxCause": string(u.Cause), "waitedSeconds": int64(u.Waited.Seconds()), "detail": u.Detail,
-		}); err != nil {
+		}
+		if u.CauseWasSeen {
+			payload["causeSeenMs"] = u.CauseSeen.Milliseconds()
+		}
+		if err := o.finishIn(ctx, q, src, store.RunStateFailed, u.Reason, u.Class, payload); err != nil {
 			return err
 		}
 		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: o.run.OrgID, ID: o.run.AgentID})
