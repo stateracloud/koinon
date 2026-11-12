@@ -20,7 +20,7 @@ CREATE TABLE sandbox_creations (
     id         uuid        NOT NULL DEFAULT gen_random_uuid(),
     agent_id   uuid        NOT NULL,
     kind       text        NOT NULL CHECK (kind IN ('create', 'start')),
-    created_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (org_id, id),
     FOREIGN KEY (org_id, agent_id) REFERENCES agents (org_id, id) ON DELETE CASCADE
 );

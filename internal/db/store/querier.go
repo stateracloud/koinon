@@ -1284,7 +1284,7 @@ type Querier interface {
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
-	RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) error
+	RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error)
 	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
 	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
 	// The router's health: a batch was accepted.
@@ -1306,6 +1306,9 @@ type Querier interface {
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
 	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
+	// Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+	// the org's healthy ones.
+	ReleaseSandboxCreation(ctx context.Context, arg ReleaseSandboxCreationParams) error
 	ReleaseSandboxRestore(ctx context.Context, arg ReleaseSandboxRestoreParams) error
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.

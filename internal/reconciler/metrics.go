@@ -115,7 +115,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
 		SandboxCreationsHeld: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "koinon_reconciler_sandbox_creations_held_total", Help: "Sandbox creations and starts deferred to a later pass because the org was at its sandbox creations per minute (issue #27, ADR 0066).",
+			Name: "koinon_reconciler_sandbox_creations_held_total", Help: "Reconciler passes that deferred a sandbox creation or start (counted per pass, not per sandbox) because the org was at its sandbox creations per minute (issue #27, ADR 0066).",
 		}),
 		AgentsUnhealthy: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_agents_marked_unhealthy_total", Help: "Agents marked unhealthy because their sandbox kept failing.",

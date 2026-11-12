@@ -112,6 +112,8 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 			MaxConcurrentRuns:    merge(row.MaxConcurrentRuns, p.MaxConcurrentRuns),
 			TriggerConcurrency:   merge(row.TriggerConcurrency, p.TriggerConcurrency),
 			TriggerRatePerMinute: merge(row.TriggerRatePerMinute, p.TriggerRatePerMinute),
+
+			SandboxCreationsPerMinute: merge(row.SandboxCreationsPerMinute, p.SandboxCreationsPerMinute),
 		}
 		if err := q.SetOrgRunLimits(ctx, next); err != nil {
 			return err
@@ -143,6 +145,6 @@ func limitsSummary(maxRuns, triggerConcurrency, ratePerMinute, creations pgtype.
 	}
 	return map[string]any{
 		"max_concurrent_runs": stored(maxRuns), "trigger_concurrency": stored(triggerConcurrency),
-		"trigger_rate_per_minute": stored(ratePerMinute),
+		"trigger_rate_per_minute": stored(ratePerMinute), "sandbox_creations_per_minute": stored(creations),
 	}
 }

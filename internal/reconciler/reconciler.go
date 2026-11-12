@@ -1347,12 +1347,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 		}
-		if held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationCreate, nil, hash); err != nil || held {
+		release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationCreate, nil, hash)
+		if err != nil || held {
 			return err
 		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
+			release()
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
@@ -1470,10 +1472,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	case execution.PhaseStopped:
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
-			if held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash); err != nil || held {
+			release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash)
+			if err != nil || held {
 				return err
 			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
+				release()
 				return err
 			}
 			r.log.Info("started sandbox for a run", w.logAttrs()...)
@@ -1489,21 +1493,29 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 // starting, the sandbox is not touched, and the next pass tries again. A burst larger than the rate
 // therefore queues behind it and no run fails for it. sb is the stopped sandbox about to start, or
 // nil when none exists yet.
-func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (held bool, err error) {
-	ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+//
+// release gives the slot back; call it when the backend call that followed failed.
+func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (release func(), held bool, err error) {
+	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
 	if err != nil {
-		return false, fmt.Errorf("reserve a sandbox creation: %w", err)
+		return nil, false, fmt.Errorf("reserve a sandbox creation: %w", err)
 	}
 	if ok {
-		return false, nil
+		return func() {
+			if err := res.Release(context.WithoutCancel(ctx), r.pool); err != nil {
+				r.log.Warn("release a sandbox creation slot", append(w.logAttrs(), "error", err)...)
+			}
+		}, false, nil
 	}
 	r.m.SandboxCreationsHeld.Inc()
-	msg := fmt.Sprintf("waiting for the org's sandbox creation rate (%d per minute); next slot in %s", tune.SandboxCreationsPerMinute, wait.Round(time.Second))
+	// The message is stable between passes (the wait is only in the log), so a held agent's row is not
+	// rewritten every pass.
+	msg := fmt.Sprintf("waiting for the org's sandbox creation rate (%d per minute)", tune.SandboxCreationsPerMinute)
 	r.log.Info("sandbox creation held by the org's rate limit", append(w.logAttrs(), "wait", wait.String())...)
 	if sb != nil {
-		return true, r.record(ctx, w, *sb, hash, msg)
+		return nil, true, r.record(ctx, w, *sb, hash, msg)
 	}
-	return true, r.recordState(ctx, w, store.SandboxStatePending, creationHeldPhase, msg)
+	return nil, true, r.recordState(ctx, w, store.SandboxStatePending, creationHeldPhase, msg)
 }
 
 // creationHeldPhase is the phase recorded while a sandbox waits for the org's creation rate.

@@ -28,6 +28,25 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		return n
 	}
 
+	It("sets the sandbox creation rate, keeps it when another limit changes, and audits it (issue #27)", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		five, three := 5, 3
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &five})).To(Succeed())
+		got, _ := svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(5))
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &three})).To(Succeed())
+		got, _ = svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(5), "a change to another limit keeps it")
+		var after int
+		Expect(pool.QueryRow(ctx, `SELECT (summary->'after'->>'sandbox_creations_per_minute')::int FROM audit_events WHERE org_id = $1 AND action = 'org.run_limits.set' ORDER BY id LIMIT 1`, org).Scan(&after)).To(Succeed())
+		Expect(after).To(Equal(5))
+		zero, over := 0, 10001
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &over})).NotTo(Succeed())
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &zero})).To(Succeed())
+		got, _ = svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(10), "0 returns it to the default")
+	})
+
 	It("defaults, changes only the patched fields, resets with 0, and audits real changes", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		got, err := svc.RunLimits(ctx, org)

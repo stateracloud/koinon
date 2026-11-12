@@ -98,8 +98,11 @@ func newOrgLimitsCommand() *cobra.Command {
 			if f.Changed("trigger-rate-per-minute") {
 				p.TriggerRatePerMinute = &trigRate
 			}
+			if f.Changed("sandbox-creations-per-minute") {
+				p.SandboxCreationsPerMinute = &creations
+			}
 			if p == (orgsettings.RunLimitsPatch{}) {
-				return errors.New("name a limit to change: --max-concurrent-runs, --trigger-concurrency or --trigger-rate-per-minute")
+				return errors.New("name a limit to change: --max-concurrent-runs, --trigger-concurrency, --trigger-rate-per-minute or --sandbox-creations-per-minute")
 			}
 			svc, id, closeFn, err := open(cmd)
 			if err != nil {
@@ -130,7 +133,7 @@ func newOrgLimitsCommand() *cobra.Command {
 }
 
 func printLimits(w io.Writer, l orgsettings.RunLimits) {
-	_, _ = fmt.Fprintf(w, "max-concurrent-runs         %d\ntrigger-concurrency         %d\ntrigger-rate-per-minute     %d\nsandbox-creations-per-minute %d\n",
+	_, _ = fmt.Fprintf(w, "max-concurrent-runs          %d\ntrigger-concurrency          %d\ntrigger-rate-per-minute      %d\nsandbox-creations-per-minute %d\n",
 		l.MaxConcurrentRuns, l.TriggerConcurrency, l.TriggerRatePerMinute, l.SandboxCreationsPerMinute)
 }
 

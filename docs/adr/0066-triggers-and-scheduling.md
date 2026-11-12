@@ -643,8 +643,10 @@ issue, 2026-11-11: with the run limits, not on the DBOS queue).
   cold starts a burst of schedules causes. Each is a row in `sandbox_creations` (migration 00086, keyed
   `(org_id, id)`, composite foreign key to the agent), written by the reconciler before the backend call
   in the same transaction that counts the last minute. A per-org advisory lock serializes concurrent
-  reconciler workers, so the limit is exact, not a racing bound. A creation whose backend call then fails
-  still counts, so a failing backend is not hammered. The writer prunes rows older than an hour.
+  reconciler workers, so the limit is exact, not a racing bound. A creation whose backend call fails gives
+  its slot back, so an agent that keeps failing cannot starve the org's healthy agents (the agent's own
+  unhealthy marking and the pass interval bound the retries). The writer prunes rows older than an hour.
+  The wake-for-backup start in the home gate of a recreate is not counted; the recreate cap bounds it.
 - **Default 10 per org per minute**, 1 to 10000 in `org_settings.sandbox_creations_per_minute` (NULL is
   the default).
 - **A burst queues; it does not fail.** An agent held back records phase `WaitingForCreationRate` with

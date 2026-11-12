@@ -90,15 +90,21 @@ SELECT pg_advisory_xact_lock(hashtextextended('sandbox_creations:' || (@org_id::
 -- name: CountOrgSandboxCreations :one
 -- Creations of the org in the last minute.
 SELECT count(*)::int FROM sandbox_creations
-WHERE org_id = @org_id AND created_at > now() - interval '1 minute';
+WHERE org_id = @org_id AND created_at > clock_timestamp() - interval '1 minute';
 
 -- name: SandboxCreationSlotFreesIn :one
 -- Seconds until the oldest creation still inside the minute leaves it, so a slot frees.
-SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - now()), 0)::float8 FROM sandbox_creations
-WHERE org_id = @org_id AND created_at > now() - interval '1 minute';
+SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - clock_timestamp()), 0)::float8 FROM sandbox_creations
+WHERE org_id = @org_id AND created_at > clock_timestamp() - interval '1 minute';
 
--- name: RecordSandboxCreation :exec
-INSERT INTO sandbox_creations (org_id, agent_id, kind) VALUES (@org_id, @agent_id, @kind);
+-- name: RecordSandboxCreation :one
+INSERT INTO sandbox_creations (org_id, agent_id, kind) VALUES (@org_id, @agent_id, @kind)
+RETURNING id;
+
+-- name: ReleaseSandboxCreation :exec
+-- Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+-- the org's healthy ones.
+DELETE FROM sandbox_creations WHERE org_id = @org_id AND id = @id;
 
 -- name: PruneOrgSandboxCreations :exec
 DELETE FROM sandbox_creations WHERE org_id = @org_id AND created_at < now() - interval '1 hour';

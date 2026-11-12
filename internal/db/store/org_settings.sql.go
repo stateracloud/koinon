@@ -33,7 +33,7 @@ func (q *Queries) AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTru
 
 const countOrgSandboxCreations = `-- name: CountOrgSandboxCreations :one
 SELECT count(*)::int FROM sandbox_creations
-WHERE org_id = $1 AND created_at > now() - interval '1 minute'
+WHERE org_id = $1 AND created_at > clock_timestamp() - interval '1 minute'
 `
 
 // Creations of the org in the last minute.
@@ -166,8 +166,9 @@ func (q *Queries) PruneOrgSandboxCreations(ctx context.Context, orgID pgtype.UUI
 	return err
 }
 
-const recordSandboxCreation = `-- name: RecordSandboxCreation :exec
+const recordSandboxCreation = `-- name: RecordSandboxCreation :one
 INSERT INTO sandbox_creations (org_id, agent_id, kind) VALUES ($1, $2, $3)
+RETURNING id
 `
 
 type RecordSandboxCreationParams struct {
@@ -176,14 +177,32 @@ type RecordSandboxCreationParams struct {
 	Kind    string
 }
 
-func (q *Queries) RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) error {
-	_, err := q.db.Exec(ctx, recordSandboxCreation, arg.OrgID, arg.AgentID, arg.Kind)
+func (q *Queries) RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, recordSandboxCreation, arg.OrgID, arg.AgentID, arg.Kind)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const releaseSandboxCreation = `-- name: ReleaseSandboxCreation :exec
+DELETE FROM sandbox_creations WHERE org_id = $1 AND id = $2
+`
+
+type ReleaseSandboxCreationParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+// the org's healthy ones.
+func (q *Queries) ReleaseSandboxCreation(ctx context.Context, arg ReleaseSandboxCreationParams) error {
+	_, err := q.db.Exec(ctx, releaseSandboxCreation, arg.OrgID, arg.ID)
 	return err
 }
 
 const sandboxCreationSlotFreesIn = `-- name: SandboxCreationSlotFreesIn :one
-SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - now()), 0)::float8 FROM sandbox_creations
-WHERE org_id = $1 AND created_at > now() - interval '1 minute'
+SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - clock_timestamp()), 0)::float8 FROM sandbox_creations
+WHERE org_id = $1 AND created_at > clock_timestamp() - interval '1 minute'
 `
 
 // Seconds until the oldest creation still inside the minute leaves it, so a slot frees.

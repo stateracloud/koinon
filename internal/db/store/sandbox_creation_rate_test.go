@@ -30,7 +30,7 @@ var _ = Describe("per-org sandbox creation rate", func() {
 		for _, ag := range agents {
 			go func() {
 				defer GinkgoRecover()
-				ok, _, err := orgsettings.ReserveSandboxCreation(ctx, pool, a.org, ag.ID, orgsettings.CreationCreate, rate.SandboxCreationsPerMinute)
+				_, ok, _, err := orgsettings.ReserveSandboxCreation(ctx, pool, a.org, ag.ID, orgsettings.CreationCreate, rate.SandboxCreationsPerMinute)
 				Expect(err).NotTo(HaveOccurred())
 				if ok {
 					granted <- 1
@@ -45,27 +45,39 @@ var _ = Describe("per-org sandbox creation rate", func() {
 		}
 		Expect(total).To(Equal(10), "exactly the rate is granted under concurrency; the other 15 wait, none fails")
 
-		ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 10)
+		_, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 10)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeFalse())
 		Expect(wait).To(BeNumerically(">", 0))
 		Expect(wait).To(BeNumerically("<=", time.Minute))
 
 		By("another org is unaffected")
-		ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, b.org, b.agent.ID, orgsettings.CreationCreate, 10)
+		_, ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, b.org, b.agent.ID, orgsettings.CreationCreate, 10)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
 		By("a raised per-org rate admits more at once")
-		ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 11)
+		_, ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 11)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
 		By("slots free as the minute passes")
 		_, err = pool.Exec(ctx, `UPDATE sandbox_creations SET created_at = now() - interval '61 seconds' WHERE org_id = $1`, a.org)
 		Expect(err).NotTo(HaveOccurred())
-		ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 10)
+		_, ok, _, err = orgsettings.ReserveSandboxCreation(ctx, pool, a.org, agents[0].ID, orgsettings.CreationStart, 10)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+	})
+
+	It("gives a slot back when the backend call failed", func(ctx SpecContext) {
+		f := newFixture(ctx)
+		res, ok, _, err := orgsettings.ReserveSandboxCreation(ctx, pool, f.org, f.agent.ID, orgsettings.CreationCreate, 1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+		_, ok, _, _ = orgsettings.ReserveSandboxCreation(ctx, pool, f.org, f.agent.ID, orgsettings.CreationCreate, 1)
+		Expect(ok).To(BeFalse())
+		Expect(res.Release(ctx, pool)).To(Succeed())
+		_, ok, _, _ = orgsettings.ReserveSandboxCreation(ctx, pool, f.org, f.agent.ID, orgsettings.CreationCreate, 1)
 		Expect(ok).To(BeTrue())
 	})
 
