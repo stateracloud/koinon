@@ -320,6 +320,9 @@ func (s *Server) approvalError(err error) error {
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, approvals.ErrScopeNotFound):
 		return connect.NewError(connect.CodeNotFound, err.Error())
+	case errors.Is(err, approvals.ErrExpired):
+		// Before ErrNotPending, which it also matches: the text names the expiry.
+		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, approvals.ErrNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}
@@ -349,7 +352,8 @@ func (s *Server) Approve(ctx context.Context, req *approvalv1alpha1.ApproveReque
 		scope.Until = req.GetScopeUntil().AsTime()
 	}
 	// A scope wider than once needs an org admin; deciding at all already does (decision above).
-	row, err := s.approvals.ApproveScoped(ctx, c.org, id, c.actor(), req.GetArgsSha256(), note, scope)
+	// The decision's audit event carries the request ID (requestCtx), like every other audited change.
+	row, err := s.approvals.ApproveScoped(requestCtx(ctx), c.org, id, c.actor(), req.GetArgsSha256(), note, scope)
 	if err != nil {
 		return nil, s.approvalError(err)
 	}
@@ -362,7 +366,7 @@ func (s *Server) Deny(ctx context.Context, req *approvalv1alpha1.DenyRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.approvals.Deny(ctx, c.org, id, c.actor(), note)
+	row, err := s.approvals.Deny(requestCtx(ctx), c.org, id, c.actor(), note)
 	if err != nil {
 		return nil, s.approvalError(err)
 	}
@@ -426,7 +430,7 @@ func (s *Server) RevokeApprovalScope(ctx context.Context, req *approvalv1alpha1.
 	if !c.actor().Valid {
 		return nil, connect.NewError(connect.CodePermissionDenied, "revoking a scope needs a signed-in user")
 	}
-	row, err := s.approvals.RevokeScope(ctx, c.org, id, c.actor())
+	row, err := s.approvals.RevokeScope(requestCtx(ctx), c.org, id, c.actor())
 	if err != nil {
 		return nil, s.approvalError(err)
 	}

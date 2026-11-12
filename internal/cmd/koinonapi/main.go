@@ -697,7 +697,20 @@ func serve(ctx context.Context, cfg config) error {
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
 	guardMetrics := mcpguard.NewMetrics(nil)
 	var guard *mcpguard.Guard
+	// approvalSvc is created below, after the guard. executeAllowed runs a call recorded approved
+	// (a Trusted preset, an approval scope) at once instead of on the next sweep.
+	var approvalSvc *approvals.Service
+	executeAllowed := func(ctx context.Context, org, id pgtype.UUID) {
+		ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
+		defer cancel()
+		if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
+			slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
+		} else if err != nil {
+			slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
+		}
+	}
 	askSrv := mcpask.New(pool, mcpask.Options{
+		Execute: executeAllowed,
 		Assess: func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
 			return guard.Assess(ctx, org, agent, srv, tool, args)
 		},
@@ -716,7 +729,7 @@ func serve(ctx context.Context, cfg config) error {
 		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
 	}
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
-	approvalSvc := approvals.New(pool, approvalOpts)
+	approvalSvc = approvals.New(pool, approvalOpts)
 	if !cfg.restoreHold {
 		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
 	}
@@ -916,15 +929,7 @@ func serve(ctx context.Context, cfg config) error {
 			Hosts: hosts,
 			Keys:  opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
-			Execute: func(ctx context.Context, org, id pgtype.UUID) {
-				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
-				defer cancel()
-				if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
-					slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
-				} else if err != nil {
-					slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
-				}
-			},
+			Execute: executeAllowed,
 		})
 		if err != nil {
 			return err

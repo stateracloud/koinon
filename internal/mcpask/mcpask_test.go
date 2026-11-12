@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -102,6 +103,8 @@ var _ = Describe("the ask-tier proxy", func() {
 		server    mcpservers.Server
 		gw        *fakeGateway
 		proxy     *httptest.Server
+		// onExecute is the proxy's executor for calls recorded approved; unset leaves them to the sweeper.
+		onExecute *hook
 	)
 
 	BeforeEach(func(ctx SpecContext) {
@@ -142,7 +145,8 @@ var _ = Describe("the ask-tier proxy", func() {
 		Expect(q.InsertAgentMCPServer(ctx, store.InsertAgentMCPServerParams{OrgID: org, AgentID: agent.ID, ServerID: sid})).To(Succeed())
 
 		mux := http.NewServeMux()
-		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
+		onExecute = &hook{}
+		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{Execute: onExecute.run}).Handler())
 		proxy = httptest.NewServer(mux)
 		DeferCleanup(func() { proxy.CloseClientConnections(); go proxy.Close() })
 	})
@@ -378,6 +382,55 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(found).To(BeTrue(), "the requested event carries the scope")
 		})
 
+		It("starts a call the scope covers at once, without a sweep, like the same code-host call (issue #659)", func(ctx SpecContext) {
+			scoped(ctx)
+			Expect(gw.count()).To(Equal(1), "the approval that granted the scope ran its own call")
+			a := exec()
+			onExecute.set(func(ctx context.Context, org, id pgtype.UUID) {
+				defer GinkgoRecover()
+				_, err := a.Execute(ctx, org, id)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			next := request(ctx, map[string]any{"title": "second"})
+			Expect(next.ScopeID.Valid).To(BeTrue())
+			// No Sweep is called anywhere in this spec: only the proxy's executor can run it.
+			Eventually(func() store.ApprovalStatus {
+				row, err := q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: org, ID: next.ID})
+				Expect(err).NotTo(HaveOccurred())
+				return row.Status
+			}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Equal(store.ApprovalStatusExecuted))
+			Expect(gw.count()).To(Equal(2))
+		})
+
+		It("grants a scope for an MCP tool name with upper case, a dot or a hyphen, as a request may name it (issue #659)", func(ctx SpecContext) {
+			_, err := svc.SyncTools(ctx, org, sid(), []mcpservers.ListedTool{
+				{Name: "create_issue", Description: "Create an issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
+				{Name: "search", Description: "Search"},
+				{Name: "drop_table", Description: "Drop"},
+				{Name: "createIssue", Description: "Create an issue, camel case", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = session(ctx, me()).CallTool(ctx, &mcp.CallToolParams{Name: "createIssue", Arguments: map[string]any{"title": "camel"}})
+			Expect(err).NotTo(HaveOccurred())
+			rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: org, TaskID: run.TaskID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).NotTo(BeEmpty())
+			row := rows[len(rows)-1]
+			Expect(row.Tool).To(Equal("createIssue"))
+
+			_, err = exec().ApproveScoped(ctx, org, row.ID, user, row.ArgsSha256, "", approvals.Scope{Kind: approvals.ScopeAgent, Until: time.Now().Add(7 * 24 * time.Hour)})
+			Expect(err).NotTo(HaveOccurred())
+			scopes, err := q.ListActiveApprovalScopesForAgent(ctx, store.ListActiveApprovalScopesForAgentParams{OrgID: org, AgentID: agent.ID, Now: pgtype.Timestamptz{Time: time.Now(), Valid: true}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(scopes).To(HaveLen(1))
+			Expect(scopes[0].Tool).To(Equal("createIssue"))
+
+			for _, tool := range []string{"tracker.v2-createIssue", "Create.Issue"} {
+				_, err := pool.Exec(ctx, `UPDATE approval_scopes SET tool = $1 WHERE org_id = $2 AND id = $3`, tool, org, scopes[0].ID)
+				Expect(err).NotTo(HaveOccurred(), "%s fits approval_requests_tool_check, so it fits a scope", tool)
+			}
+		})
+
 		It("parks the call again once the server republishes the tool or its URL changes", func(ctx SpecContext) {
 			scoped(ctx)
 			Expect(request(ctx, map[string]any{"title": "same version"}).Status).To(Equal(store.ApprovalStatusApproved))
@@ -472,6 +525,19 @@ var _ = Describe("the ask-tier proxy", func() {
 		})
 	})
 })
+
+// hook is an executor a spec sets after the proxy started; the proxy calls it in its own goroutine.
+type hook struct {
+	fn atomic.Pointer[func(ctx context.Context, org, id pgtype.UUID)]
+}
+
+func (h *hook) set(fn func(ctx context.Context, org, id pgtype.UUID)) { h.fn.Store(&fn) }
+
+func (h *hook) run(ctx context.Context, org, id pgtype.UUID) {
+	if fn := h.fn.Load(); fn != nil {
+		(*fn)(ctx, org, id)
+	}
+}
 
 func uuidOf(s string) pgtype.UUID {
 	var id pgtype.UUID
