@@ -1018,13 +1018,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// 2 minutes, the value with evidence. The cap counts from the run's first claim
 		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
 		// A 30 s cap failed in CI twice (#572 run 43091299950, #573 run 43134423089): the run ended with
-		// "the sandbox was never rendered" after 30 s. A NEW agent's sandbox is rendered only after the
-		// gateway Apply for its new key returns (internal/reconciler/reconciler.go, the "early" jobs
-		// comment), and in the kind e2e that took longer than 30 s; most likely it waits for
-		// agentgateway's hot reload, which follows the kubelet's ConfigMap sync (not proven). The
-		// reconciler's leader hand-over is not the gate here: `rollout status` below returns in about 2 s
-		// and the follower now takes the lock as soon as the old pod exits. Exit condition: lower the cap
-		// when the key delivery wait is gone (issue 573; ADR 0097 State stream, issue 279).
+		// "the sandbox was never rendered" after 30 s. Proven from the second run's logs: the new
+		// reconciler led 0.8 s after it started, but its first pass had begun before the new agent
+		// existed, and in that pass the job of the OLD agent called OpenShell DeleteSandbox (the
+		// spec-change recreate, because the flavor image had just changed). That call did not return
+		// within the 30 s (the old pods were Terminating with a 30 s grace period). A pass ends only
+		// when all its jobs end (startJobs(...).wait()), so the next pass, the first that could see
+		// the new agent, started after the cap. The leader hand-over and the gateway Apply were not
+		// the gate. Exit condition: lower the cap when a slow sandbox job of one agent no longer
+		// holds back the next reconcile pass (issue 573).
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
