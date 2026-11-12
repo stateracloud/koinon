@@ -50,6 +50,15 @@ api:
     digest: ""
   replicas: 1
   port: 8080
+  # CIDRs (or single addresses) of the proxies and load balancers in front of koinon-api, for example
+  # [10.0.0.0/8]. Empty (the default) never trusts X-Forwarded-For / Forwarded: the login and admin
+  # API limiters key on the connection's peer address, so behind an ingress every client shares one
+  # address. When listed, a request whose peer is in one of them has its client address read from the
+  # header, walking from the right and stopping at the first hop that is not listed. List only
+  # networks that overwrite or append to the header: a listed proxy that passes a client's header
+  # through lets that client choose its address and escape the limiters. Set it to the ingress
+  # controller's pod network or the load balancer's source range, not to 0.0.0.0/0.
+  trustedProxies: []
   # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
   # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
   # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.

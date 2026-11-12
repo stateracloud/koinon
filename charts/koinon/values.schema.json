@@ -115,6 +115,7 @@
         "image": {"$ref": "#/definitions/koinonImage"},
         "replicas": {"type": "integer", "minimum": 0},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "trustedProxies": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}, "description": "CIDRs or addresses of the proxies in front of koinon-api whose X-Forwarded-For / Forwarded the limiters believe; empty trusts none"},
         "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the internal OTLP/HTTP receiver for agentgateway's access log and agentd's run spans"},
         "otlpToken": {
           "type": "object",
