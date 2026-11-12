@@ -25,7 +25,7 @@ for f in "${value_files[@]}"; do
 	# exactly validatingwebhookconfigurations and endpointslices (neither can be narrowed by
 	# resourceNames).
 	clusterrole=$(sed -n '/kind: ClusterRole$/,/^---/p' <<<"$rendered")
-	if grep -qE '^ *verbs:' <<<"$clusterrole" && grep -E '^ *verbs:' <<<"$clusterrole" | grep -qvE '^ *verbs: \[(get|list)\]$'; then
+	if grep -qE '^ *verbs:' <<<"$clusterrole" && grep -E '^ *verbs:' <<<"$clusterrole" | hit -vE '^ *verbs: \[(get|list)\]$'; then
 		echo "$name: preflight ClusterRole has verbs other than get and list" >&2
 		exit 1
 	fi

@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/agentd/turnpolicy"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -132,6 +133,10 @@ type runner struct {
 
 	replaying atomic.Bool
 
+	// loop reads the harness's stream for a stuck agent (internal/agentd/loopguard); the turn driver
+	// acts on what it finds.
+	loop *loopguard.Detector
+
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
 
@@ -163,8 +168,8 @@ type runner struct {
 	// (internal/agentmodel).
 	model       string
 	modelSource agentmodel.Source
-	// flavor is the agent's harness flavor, set with the launch command.
-	flavor store.AgentFlavor
+	// harness is the agent's harness, set with the launch command.
+	harness string
 
 	// vcfg and home are the run's version config and the sandbox's home generation, for
 	// handling a stuck sandbox (stuck.go).
@@ -256,7 +261,7 @@ const (
 
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
-		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}),
+		p: p, q: p.q, run: run, cmdChanged: make(chan struct{}), loop: loopguard.New(p.cfg.LoopThresholds),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	// The text the agent types reaches watchers live, batched; only the completed items are stored (old issue 344).
@@ -487,17 +492,17 @@ func (r *runner) execute(ctx context.Context) error {
 	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
 	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
-	cmd, err := launchCommand(agent.Flavor, endpoints{
+	cmd, err := launchCommand(agent.Harness, endpoints{
 		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
-		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg),
+		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg), CompactionTokens: facts.CompactionTokens,
 	})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
-	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
+	cmd = append(cmd, harnessArgs(agent.Harness, vc)...)
 	r.vcfg = vc
-	r.flavor = agent.Flavor
-	r.taint.setMCPPrefix(mcpToolPrefix(agent.Flavor))
+	r.harness = agent.Harness
+	r.taint.setMCPPrefix(mcpToolPrefix(agent.Harness))
 	// A code-host connection whose credential was lost fails the run at once, before the waits for
 	// the model and the sandbox: nothing it would wait for can bring the credential back.
 	if err := r.checkCodeHostCredential(fctx); err != nil {
@@ -598,7 +603,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(agent.Flavor, vc.Instructions, cwd, repos, vc.WebEgress())
+	instructions := instructionsFile(agent.Harness, vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -683,7 +688,7 @@ func (r *runner) execute(ctx context.Context) error {
 			return r.dbErr(ctx, "store the session", err)
 		}
 	}
-	if command := readyCommand(agent.Flavor); command != "" {
+	if command := readyCommand(agent.Harness); command != "" {
 		if err := r.waitCommand(fctx, conn, command, cfg.ReadyTimeout); err != nil {
 			var f *failure
 			if errors.As(err, &f) {
@@ -697,7 +702,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The harness may report a model of its own choosing; agentd selects the agent's model
 	// and never relies on what the session reports.
-	if value := modelOption(agent.Flavor, format, model); value != "" {
+	if value := modelOption(agent.Harness, format, model); value != "" {
 		if err := conn.SetModel(fctx, session, value); err != nil {
 			return harnessErr("select the model "+value, err)
 		}
@@ -731,7 +736,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The agent can write its home, instruction file included; the prompt goes out only with
 	// the run's instructions in place.
-	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
+	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Harness, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
 	if !r.turnState.CompareAndSwap(turnSetup, turnRunning) {
@@ -1108,7 +1113,7 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 		case turnpolicy.OutCapReached:
 			r.cancelAtTimeLimit(ctx, turn, t.capNote)
 			return
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			reason, class, _ := t.fails()
 			r.fail(ctx, turn, reason, class)
 			return
@@ -1254,6 +1259,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if h.r.replaying.Load() {
 		return nil
 	}
+	h.r.loop.Observe(n)
 	if err := h.r.own.RecordUpdate(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
@@ -1330,6 +1336,8 @@ type modelFacts struct {
 	Format modelformat.Format
 	// Cache is the model's prompt-cache mode (ADR 0068, 0069).
 	Cache prices.CacheMode
+	// CompactionTokens is where the harness compacts the conversation (compactionTokens).
+	CompactionTokens int
 }
 
 // modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
@@ -1340,12 +1348,12 @@ func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error
 	m := qt.Model
 	if _, ok := prices.Unpriceable(err); ok {
 		if m.Name == "" {
-			return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+			return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone, CompactionTokens: defaultCompactionTokens}, nil
 		}
 		// The model exists but has no usable price: its format and provider type still apply.
-		return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}, nil
+		return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone, CompactionTokens: defaultCompactionTokens}, nil
 	} else if err != nil {
 		return modelFacts{}, err
 	}
-	return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheModeFor(m.ProviderType, m.Name, m.Format, qt.Resolution.Price)}, nil
+	return modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheModeFor(m.ProviderType, m.Name, m.Format, qt.Resolution.Price), CompactionTokens: compactionTokens(qt.Resolution.Price)}, nil
 }

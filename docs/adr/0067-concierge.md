@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: work-model
+- Tags: identity, approvals, audit, ui
 - Relates to: old issue 146 (round 4 and the releases)
 - Amends: [0005](0005-agent-identity.md) (an explicit exception: the concierge acts as the
   logged-in user)

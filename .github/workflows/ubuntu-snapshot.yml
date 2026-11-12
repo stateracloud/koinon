@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Weekly Ubuntu snapshot bump for the OpenCode flavor image (issue 33). hack/ubuntu-snapshot-bump.sh
+# Weekly Ubuntu snapshot bump for the OpenCode harness image (issue 33). hack/ubuntu-snapshot-bump.sh
 # picks the snapshot (midnight UTC of today minus 3 days, so ADR 0079's cooldown holds by
 # construction), resolves the newest version of every apt pin on both architectures and, when a pin or a
 # dependency of the pins changes, this workflow opens or updates ONE draft pull request from the fixed bot branch
@@ -97,7 +97,7 @@ jobs:
           fi
           git diff --binary >"$OUT_DIR/bump.patch"
           git diff --stat
-          snapshot=$(sed -nE 's/^ARG UBUNTU_SNAPSHOT=([0-9]{8}T[0-9]{6}Z)$/\1/p' flavors/opencode/Dockerfile)
+          snapshot=$(sed -nE 's/^ARG UBUNTU_SNAPSHOT=([0-9]{8}T[0-9]{6}Z)$/\1/p' harnesses/opencode/Dockerfile)
           [ -n "$snapshot" ] || { echo "::error::no UBUNTU_SNAPSHOT after --write"; exit 1; }
           echo "$snapshot" >"$OUT_DIR/snapshot"
           {
@@ -145,13 +145,13 @@ jobs:
           [[ $SNAPSHOT =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "::error::bad snapshot id '$SNAPSHOT'"; exit 1; }
           git apply --index "$BUMP_DIR/bump.patch"
           # Only the two expected files may change.
-          unexpected=$(git diff --cached --name-only | grep -vxE 'flavors/opencode/(Dockerfile|README\.md)' || true)
+          unexpected=$(git diff --cached --name-only | grep -vxE 'harnesses/opencode/(Dockerfile|README\.md)' || true)
           [ -z "$unexpected" ] || { echo "::error::the patch touches unexpected files: $unexpected"; exit 1; }
           bot_name='github-actions[bot]'
           bot_email='41898282+github-actions[bot]@users.noreply.github.com'
           git -c user.name="$bot_name" -c user.email="$bot_email" commit --quiet -s \
-            -m "chore(flavors): bump the Ubuntu snapshot to $SNAPSHOT" \
-            -m "Moves UBUNTU_SNAPSHOT and the changed apt pins (if any) of the OpenCode flavor image together (hack/ubuntu-snapshot-bump.sh, weekly workflow ubuntu-snapshot). The snapshot is at least 3 days old (ADR 0079). Refs #33."
+            -m "chore(harnesses): bump the Ubuntu snapshot to $SNAPSHOT" \
+            -m "Moves UBUNTU_SNAPSHOT and the changed apt pins (if any) of the OpenCode harness image together (hack/ubuntu-snapshot-bump.sh, weekly workflow ubuntu-snapshot). The snapshot is at least 3 days old (ADR 0079). Refs #33."
           # Skip the push when the branch already holds this exact tree (a repeat run changes nothing).
           if git fetch --quiet origin "+refs/heads/$BOT_BRANCH:refs/remotes/origin/$BOT_BRANCH" 2>/dev/null \
             && [ "$(git show -s --format=%T HEAD)" = "$(git show -s --format=%T "origin/$BOT_BRANCH")" ] \
@@ -188,11 +188,11 @@ jobs:
             echo "1. Click **Approve workflows to run** on this pull request (the Checks box, or the Actions tab). This starts \`ci\`, \`dco\`, \`claim\`, \`secrets\` and \`e2e-kind\` for the current head."
             echo "2. If no approval button is offered, close and reopen this pull request. A person's \`reopened\` event runs all of them."
             echo
-            echo "Then mark it **ready for review** (this re-runs \`ci\` and \`e2e-kind\` in full; while it is a draft \`ci\` reports a vacuous green) and, because the change touches \`flavors/\`, run the flavor e2e as AGENTS.md \"Merging\" describes. Each weekly run force-updates this branch, which needs the same step again. Do not push to \`$BOT_BRANCH\`: the next run replaces it."
+            echo "Then mark it **ready for review** (this re-runs \`ci\` and \`e2e-kind\` in full; while it is a draft \`ci\` reports a vacuous green) and, because the change touches \`harnesses/\`, run the harness e2e as AGENTS.md \"Merging\" describes. Each weekly run force-updates this branch, which needs the same step again. Do not push to \`$BOT_BRANCH\`: the next run replaces it."
             echo
             echo "Run: $RUN_URL. Refs #33."
           } >"$BUMP_DIR/body.md"
-          title="chore(flavors): bump the Ubuntu snapshot to $SNAPSHOT"
+          title="chore(harnesses): bump the Ubuntu snapshot to $SNAPSHOT"
           number=$(gh pr list --head "$BOT_BRANCH" --base "$DEFAULT_BRANCH" --state open --json number --jq '.[0].number // empty')
           if [ -n "$number" ]; then
             gh pr edit "$number" --title "$title" --body-file "$BUMP_DIR/body.md"

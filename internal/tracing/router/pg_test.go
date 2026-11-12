@@ -42,7 +42,7 @@ var _ = Describe("Postgres", Ordered, func() {
 		q = store.New(pool)
 		org, user, slug = pgtest.NewOrg(ctx, pool)
 
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Router agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness, created_by) VALUES ($1, 'Router agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent, Config: []byte(`{"instructions":""}`), CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent, VersionID: version.ID, ActivatedBy: user})
@@ -170,7 +170,7 @@ var _ = Describe("Postgres", Ordered, func() {
 		// An org of its own: the other specs seal this org's credentials with another keyring.
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'Epoch agent', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'Epoch agent', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		e0, err := pw.Current(ctx, org, agent)
 		Expect(err).NotTo(HaveOccurred())
 		secrets := router.NewPGSecrets(pool, ring, nil)

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/codehost/providers"
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -20,67 +19,6 @@ import (
 // The sections of the chart's config.yaml (charts/koinon/templates/config.yaml) that are not
 // flags. Every other key of the file sets a flag (see commands.go, configKeys), at the key
 // internal/cli.ConfigKey names.
-
-// fileSandboxResources is the chart's sandbox.resources (ADR 0083). Values left out keep
-// sandboxres.DefaultPolicy's.
-type fileSandboxResources struct {
-	Default struct {
-		CPU    quantitiesConfig `mapstructure:"cpu"`
-		Memory quantitiesConfig `mapstructure:"memory"`
-	} `mapstructure:"default"`
-	Bounds struct {
-		CPU struct {
-			Request rangeConfig `mapstructure:"request"`
-			Limit   rangeConfig `mapstructure:"limit"`
-		} `mapstructure:"cpu"`
-		Memory struct {
-			Request rangeConfig `mapstructure:"request"`
-			Limit   rangeConfig `mapstructure:"limit"`
-		} `mapstructure:"memory"`
-	} `mapstructure:"bounds"`
-	MemoryRequestEqualsLimit *bool `mapstructure:"memoryRequestEqualsLimit"`
-}
-
-type quantitiesConfig struct {
-	Request string `mapstructure:"request"`
-	Limit   string `mapstructure:"limit"`
-}
-
-type rangeConfig struct {
-	Min string `mapstructure:"min"`
-	Max string `mapstructure:"max"`
-}
-
-// policy lays the file's sandbox resources over sandboxres.DefaultPolicy: a value the file leaves
-// empty keeps the default.
-func (sr fileSandboxResources) policy() sandboxres.Policy {
-	p := sandboxres.DefaultPolicy()
-	set := func(dst *string, v string) {
-		if v != "" {
-			*dst = v
-		}
-	}
-	set(&p.Default.CPU.Request, sr.Default.CPU.Request)
-	set(&p.Default.CPU.Limit, sr.Default.CPU.Limit)
-	set(&p.Default.Memory.Request, sr.Default.Memory.Request)
-	set(&p.Default.Memory.Limit, sr.Default.Memory.Limit)
-	for _, r := range []struct {
-		dst *sandboxres.Range
-		src rangeConfig
-	}{
-		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request},
-		{&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
-		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request},
-		{&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
-	} {
-		set(&r.dst.Min, r.src.Min)
-		set(&r.dst.Max, r.src.Max)
-	}
-	if sr.MemoryRequestEqualsLimit != nil {
-		p.MemoryRequestEqualsLimit = *sr.MemoryRequestEqualsLimit
-	}
-	return p
-}
 
 // config is the reconciler's effective configuration, filled by internal/cli from the flags, the
 // KOINON_* environment variables and the config file, in that order.
@@ -134,7 +72,7 @@ type config struct {
 	parkWarm       time.Duration
 	sandboxJobs    int
 	keepWarmPerOrg int
-	// maxRecreates is the cap on spec-change recreates per pass; openshellConfigNS and
+	// maxRecreates is the cap on spec-change recreates (a token bucket: this many at once, this many per resync interval); openshellConfigNS and
 	// openshellConfigMap locate the gateway ConfigMap that names the supervisor image.
 	maxRecreates                          int
 	openshellConfigNS, openshellConfigMap string
@@ -142,8 +80,8 @@ type config struct {
 	homeRetention                         string
 	checkpoints                           bool
 	// restoreHold starts the process without converging anything (issue #462).
-	restoreHold  bool
-	flavorImages map[string]string
+	restoreHold   bool
+	harnessImages map[string]string
 
 	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
 	sandboxResources sandboxres.Policy
@@ -198,15 +136,15 @@ func (c *config) toolServers() map[string]string {
 	return out
 }
 
-// flavors combines the configured images with each flavor's binaries.
-func (c *config) flavors() map[store.AgentFlavor]reconciler.Flavor { return flavorsOf(c.flavorImages) }
+// harnesses combines the configured images with each harness's binaries.
+func (c *config) harnesses() map[string]reconciler.Harness { return harnessesOf(c.harnessImages) }
 
-// flavorsOf combines flavor images with each flavor's binaries.
-func flavorsOf(images map[string]string) map[store.AgentFlavor]reconciler.Flavor {
-	out := map[store.AgentFlavor]reconciler.Flavor{}
+// harnessesOf combines harness images with each harness's binaries.
+func harnessesOf(images map[string]string) map[string]reconciler.Harness {
+	out := map[string]reconciler.Harness{}
 	for name, img := range images {
-		f := store.AgentFlavor(name)
-		out[f] = reconciler.Flavor{Image: img, Binaries: reconciler.DefaultBinaries[f]}
+		f := name
+		out[f] = reconciler.Harness{Image: img, Binaries: reconciler.DefaultBinaries[f]}
 	}
 	return out
 }

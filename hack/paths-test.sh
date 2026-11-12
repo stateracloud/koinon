@@ -84,15 +84,27 @@ example() { # <name> <want jobs> <want e2e exit> <paths...>
 	ge=$(e2e_for "$@")
 	if [[ $got == "$wj" && $ge == "$we" ]]; then ok; else bad "$name: jobs [${got% }] want [${wj% }]; e2e exit $ge want $we"; fi
 }
-example "one hack script" "" 1 hack/ship.sh
-example "a workflow other than ci.yml" "" 1 .github/workflows/dco.yml
-example "the Go test wrapper" "go" 1 hack/go-test.sh
-example "e2e driver script" "go" 0 test/e2e/run.sh
-example "a chart template" "chart chartsmoke escape go" 0 charts/koinon/templates/api.yaml
+example "one hack script" "scripts shell" 1 hack/ship.sh
+example "a workflow other than ci.yml" "scripts shell" 1 .github/workflows/dco.yml
+example "the Go test wrapper" "go scripts shell" 1 hack/go-test.sh
+example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
+example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
 example "a web source file" "web" 1 web/src/app.ts
-example "a Go test file of the reconciler" "go" 1 internal/reconciler/reconcile_test.go
-example "the rules themselves" "chart chartsmoke escape flavors generate go web" 1 hack/paths.rules
-example "documentation" "" 1 docs/dev/ci.md
+example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
+example "the rules themselves" "chart chartsmoke escape flavors generate go opencodeplugin scripts shell tidy vuln web" 1 hack/paths.rules
+example "go.mod runs govulncheck" "chart chartsmoke escape flavors generate go opencodeplugin scripts shell tidy vuln web" 0 go.mod
+example "a Go file alone does not run govulncheck" "chartsmoke go scripts tidy" 0 internal/reconciler/reconcile.go
+example "documentation" "" 1 docs/design.md
+
+# The `vuln` rule itself (`everything` turns every job on for go.mod and go.sum, so the changes-level tests
+# cannot see a narrowed rule): go.mod and go.sum each trigger it, a nested spike module does not.
+for f in go.mod go.sum hack/govulncheck.sh .github/workflows/govulncheck.yml hack/versions.env; do
+	if paths_job_triggers vuln "$f"; then ok; else bad "the vuln rule must match $f"; fi
+done
+for f in hack/spike/acpdrive/go.mod hack/spike/acpdrive/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
+	if paths_job_triggers vuln "$f"; then bad "the vuln rule must not match $f"; else ok; fi
+done
+example "the CI documentation, read by ci-cache-test" "scripts" 1 docs/dev/ci.md
 
 if [[ $fails -ne 0 ]]; then
 	echo "paths-test: $fails of $total checks failed"

@@ -1,7 +1,9 @@
 # 0037. Tooling: goose, Starlight, ACP Go SDK, Tilt
 
-- Status: Accepted; the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md)
+- Status: Accepted; the migration run (on startup or by a subcommand) amended by [0060](0060-migrations-as-a-job.md); the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: tooling, migrations, database, docs
 - Decision: [design.md#37](../design.md)
 
 ## Context
@@ -21,7 +23,7 @@ read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)
 
 - **Migrations: goose** (pressly/goose, MIT).
   - Migrations are plain SQL files embedded in the API binary with `embed.FS` and
-    `goose.SetBaseFS`, and run on startup or by a migrate subcommand.
+    `goose.SetBaseFS`, and run on startup or by a migrate subcommand. _(Changed by [0060](0060-migrations-as-a-job.md): migrations run as a Job, not on start.)_
   - Each file has `-- +goose Up` only (forward-only); a `Down` section is not written.
   - File names are **zero-padded sequence numbers** (`00001_orgs.sql`). sqlc reads migration files
     in lexicographic order, and goose versions must sort correctly.

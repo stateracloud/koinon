@@ -28,17 +28,15 @@ import (
 // keys new-repositories (issue #86, ADR 0085 decision 14): after a compromise, every agent named
 // gets a new home repository that koinon-agentd seeds with its newest checkpoint.
 var _ = Describe("koinon-api keys new-repositories", func() {
-	const (
-		oldKEK = "kek-20260101-aaaa"
-		newKEK = "kek-20261023-bbbb"
-	)
+	const oldKEK = "kek-20260101-aaaa"
 	var (
-		kube *fake.Clientset
-		tool *keyscli.Tool
-		out  *bytes.Buffer
-		now  time.Time
-		q    *store.Queries
-		pw   checkpoint.Passwords
+		newKEK string
+		kube   *fake.Clientset
+		tool   *keyscli.Tool
+		out    *bytes.Buffer
+		now    time.Time
+		q      *store.Queries
+		pw     checkpoint.Passwords
 	)
 
 	ring := func(ctx SpecContext) *secretstore.Keyring {
@@ -58,7 +56,7 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 	newAgent := func(ctx SpecContext, org pgtype.UUID) pgtype.UUID {
 		GinkgoHelper()
 		var a pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
 		return a
 	}
 	// withRepository makes an agent with a home repository (epoch 0) under the active KEK.
@@ -104,6 +102,7 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		out = &bytes.Buffer{}
+		newKEK = freshKEK("n")
 		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		q = store.New(pool)
 		pw = checkpoint.Passwords{Q: q, Keys: ring(ctx), Begin: pool.Begin}

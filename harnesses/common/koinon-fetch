@@ -1,0 +1,77 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# koinon-fetch <sha256> <url> <dest>: download <url> to <dest> and fail unless its SHA-256 is <sha256>.
+#
+# Build-time only (a harness Dockerfile's fetch stages, #145). Anonymous GitHub release downloads
+# are rate limited per runner IP and sometimes return a fixed error body, which fails a pinned
+# checksum; an authenticated request has its own limit. The github.com web download URL ignores a
+# token (GitHub documents token auth for release assets on the REST API only), so with the BuildKit
+# secret github_token mounted and non-empty a github.com release URL is resolved through the API:
+#   GET api.github.com/repos/<o>/<r>/releases/tags/<tag>   -> the asset id by name
+#   GET api.github.com/repos/<o>/<r>/releases/assets/<id>  with Accept: application/octet-stream
+# Without a token (a local or fork build) the github.com URL is fetched anonymously. Mount it with
+#   RUN --mount=type=secret,id=github_token,required=false koinon-fetch ...
+# The token stays out of argv, the environment, the log and every image layer: curl reads the
+# header from stdin, and it only goes to api.github.com (curl drops it on the redirect to the
+# storage host). The response's rate-limit header is logged (never the token), which shows the
+# request was authenticated: an authenticated limit is 1000+/h, an anonymous one 60/h.
+set -eu
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: koinon-fetch <sha256> <url> <dest>" >&2
+  exit 2
+fi
+sha=$1
+url=$2
+dest=$3
+
+token_file=${KOINON_FETCH_TOKEN_FILE:-/run/secrets/github_token}
+token=
+if [ -r "$token_file" ]; then
+  token=$(tr -d '\r\n' <"$token_file")
+fi
+
+api=${KOINON_FETCH_API:-https://api.github.com}
+repo= tag= name=
+case $url in
+  # [d]: not a literal release URL, which hack/dep-age-check.sh would try to date
+  https://github.com/*/*/releases/[d]ownload/*/*)
+    rest=${url#https://github.com/}
+    repo=${rest%%/releases/download/*}
+    rest=${rest#*/releases/download/}
+    tag=${rest%%/*}
+    name=${rest#*/}
+    ;;
+  *) token= ;;
+esac
+
+# authed <curl args...>: curl with the token header read from stdin.
+authed() {
+  printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --retry-all-errors -K - "$@"
+}
+
+fetched=
+if [ -n "$token" ]; then
+  rel=$dest.release.json
+  hdr=$dest.headers
+  authed -H 'Accept: application/vnd.github+json' -o "$rel" "$api/repos/$repo/releases/tags/$tag"
+  # One asset object is `"url": ".../releases/assets/<id>", "id": ..., "name": "<name>"`; its
+  # uploader object (with braces) follows the name, so [^}]* cannot reach the next asset.
+  id=$(tr -d '\n' <"$rel" | grep -Eo '"url": *"[^"]*/releases/assets/[0-9]+"[^}]*"name": *"[^"]*"' |
+    grep -F "\"name\": \"$name\"" | head -n 1 | grep -Eo '/releases/assets/[0-9]+' | grep -Eo '[0-9]+$' || true)
+  rm -f "$rel"
+  if [ -z "$id" ]; then
+    echo "koinon-fetch: no asset $name in release $tag of $repo" >&2
+    exit 1
+  fi
+  authed -H 'Accept: application/octet-stream' -D "$hdr" -o "$dest" "$api/repos/$repo/releases/assets/$id"
+  grep -i '^x-ratelimit-limit' "$hdr" | sed 's/^/koinon-fetch: authenticated, /' >&2 || true
+  rm -f "$hdr"
+  fetched=1
+fi
+if [ -z "$fetched" ]; then
+  curl -fsSL --retry 3 --retry-all-errors -o "$dest" "$url"
+fi
+
+echo "$sha  $dest" | sha256sum -c -

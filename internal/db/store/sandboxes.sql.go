@@ -304,7 +304,7 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 }
 
 const listAgentsForUnmarked = `-- name: ListAgentsForUnmarked :many
-SELECT a.org_id, a.id, a.status, a.flavor, s.state AS sandbox_state, s.sandbox_name, s.provider_name
+SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
 FROM agents a
 JOIN orgs o ON o.id = a.org_id
 LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
@@ -316,7 +316,7 @@ type ListAgentsForUnmarkedRow struct {
 	OrgID        pgtype.UUID
 	ID           pgtype.UUID
 	Status       AgentStatus
-	Flavor       AgentFlavor
+	Harness      string
 	SandboxState NullSandboxState
 	SandboxName  pgtype.Text
 	ProviderName pgtype.Text
@@ -339,7 +339,7 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 			&i.OrgID,
 			&i.ID,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.SandboxState,
 			&i.SandboxName,
 			&i.ProviderName,
@@ -355,7 +355,7 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 }
 
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
-SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm FROM agents a
+SELECT a.org_id, a.id, a.display_name, a.status, a.harness, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit, a.keep_warm_granted FROM agents a
 WHERE a.org_id = $1
   AND (a.status <> 'archived' OR EXISTS (
       SELECT 1 FROM agent_sandboxes s
@@ -380,7 +380,7 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.ID,
 			&i.DisplayName,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.TemplateID,
 			&i.ActiveVersionID,
 			&i.LatestVersion,
@@ -397,6 +397,11 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.Model,
 			&i.Thinking,
 			&i.KeepWarm,
+			&i.SandboxCpuRequest,
+			&i.SandboxCpuLimit,
+			&i.SandboxMemoryRequest,
+			&i.SandboxMemoryLimit,
+			&i.KeepWarmGranted,
 		); err != nil {
 			return nil, err
 		}
@@ -702,6 +707,58 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		arg.OrgID,
 		arg.AgentID,
 	)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+		&i.Reason,
+		&i.HomeDirtiedAt,
+	)
+	return i, err
+}
+
+const setAgentSandboxMessage = `-- name: SetAgentSandboxMessage :one
+UPDATE agent_sandboxes
+SET message = $1
+WHERE org_id = $2 AND agent_id = $3
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+`
+
+type SetAgentSandboxMessageParams struct {
+	Message string
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Stores an operator message and nothing else. A note written from outside the agent's work item
+// (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+// what the agent's own item recorded in the meantime.
+func (q *Queries) SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandboxMessageParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxMessage, arg.Message, arg.OrgID, arg.AgentID)
 	var i AgentSandbox
 	err := row.Scan(
 		&i.OrgID,

@@ -47,7 +47,8 @@ const OpenRouterMinModels = 50
 // an entry inherit the base price."
 const TierBoundaryOffset = 0
 
-// OpenRouter is the adapter for OpenRouter's model list. Build it with NewOpenRouter.
+// OpenRouter is the adapter for OpenRouter's model list (and, for the per-install catalog, its
+// per-model endpoints route). Build it with NewOpenRouter.
 type OpenRouter struct {
 	client   *http.Client
 	endpoint string
@@ -95,14 +96,15 @@ func checkEndpoint(raw, host, port string) error {
 	return nil
 }
 
-// Fetch implements Adapter.
-func (o *OpenRouter) Fetch(ctx context.Context, now time.Time) (Snapshot, error) {
-	if err := checkEndpoint(o.endpoint, o.host, o.port); err != nil {
-		return Snapshot{}, err
+// get does one unauthenticated GET of rawURL (held to https and the pinned host and port) and returns
+// the body, capped at MaxBodyBytes, and the headers. Redirects are never followed.
+func (o *OpenRouter) get(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
+	if err := checkEndpoint(rawURL, o.host, o.port); err != nil {
+		return nil, nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return Snapshot{}, err
+		return nil, nil, err
 	}
 	// Unauthenticated: no Authorization header, no secret (ADR 0098 decision 2.3).
 	req.Header.Set("Accept", "application/json")
@@ -113,29 +115,58 @@ func (o *OpenRouter) Fetch(ctx context.Context, now time.Time) (Snapshot, error)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("pricefetch: openrouter: %w", err)
+		return nil, nil, fmt.Errorf("pricefetch: openrouter: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return Snapshot{}, fmt.Errorf("pricefetch: openrouter redirected (%d); not followed", resp.StatusCode)
+		return nil, nil, fmt.Errorf("pricefetch: openrouter redirected (%d); not followed", resp.StatusCode)
 	case resp.StatusCode != http.StatusOK:
-		return Snapshot{}, fmt.Errorf("pricefetch: openrouter answered %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("pricefetch: openrouter answered %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes+1))
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("pricefetch: openrouter: read: %w", err)
+		return nil, nil, fmt.Errorf("pricefetch: openrouter: read: %w", err)
 	}
 	if len(body) > MaxBodyBytes {
-		return Snapshot{}, errors.New("pricefetch: openrouter: the body is larger than 16 MiB")
+		return nil, nil, errors.New("pricefetch: openrouter: the body is larger than 16 MiB")
+	}
+	return body, resp.Header, nil
+}
+
+// Fetch implements Adapter.
+func (o *OpenRouter) Fetch(ctx context.Context, now time.Time) (Snapshot, error) {
+	body, hdr, err := o.get(ctx, o.endpoint)
+	if err != nil {
+		return Snapshot{}, err
 	}
 	snap, err := ParseOpenRouter(body, now)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	snap.URL = o.endpoint
-	snap.ETag = resp.Header.Get("ETag")
+	snap.ETag = hdr.Get("ETag")
 	return snap, nil
+}
+
+// FetchEndpoints implements EndpointsFetcher: GET /api/v1/models/{author}/{slug}/endpoints for one
+// model. The name comes from an org's provider settings (the caller asks only about names the list
+// carries), so it is checked here: the model name rule, no empty, "." or ".." segment (url.PathEscape
+// leaves dots alone, and a dot segment would walk the path). Each segment is escaped, and the request
+// is held to the same pinned host as the list.
+func (o *OpenRouter) FetchEndpoints(ctx context.Context, model string, now time.Time) (ModelEndpoints, error) {
+	if !validModelName(model) {
+		return ModelEndpoints{}, fmt.Errorf("pricefetch: openrouter: %q is not a model name", model)
+	}
+	segs := strings.Split(model, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	body, _, err := o.get(ctx, o.endpoint+"/"+strings.Join(segs, "/")+"/endpoints")
+	if err != nil {
+		return ModelEndpoints{}, err
+	}
+	return ParseOpenRouterEndpoints(model, body, now)
 }
 
 // orList is the list response. Unknown fields are ignored on purpose: OpenRouter adds fields to
@@ -146,9 +177,20 @@ type orList struct {
 }
 
 type orModel struct {
-	ID          string                     `json:"id"`
-	Pricing     map[string]json.RawMessage `json:"pricing"`
-	TopProvider *struct {
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	Description   string                     `json:"description"`
+	Created       json.RawMessage            `json:"created"`
+	ContextLength json.RawMessage            `json:"context_length"`
+	Pricing       map[string]json.RawMessage `json:"pricing"`
+	Architecture  *struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+		Tokenizer        string   `json:"tokenizer"`
+	} `json:"architecture"`
+	SupportedParameters []string `json:"supported_parameters"`
+	TopProvider         *struct {
+		ContextLength       json.RawMessage `json:"context_length"`
 		MaxCompletionTokens json.RawMessage `json:"max_completion_tokens"`
 	} `json:"top_provider"`
 }
@@ -171,7 +213,7 @@ func ParseOpenRouter(body []byte, now time.Time) (Snapshot, error) {
 	snap := Snapshot{Source: SourceOpenRouter, URL: OpenRouterURL, Licence: LicenceOpenRouter, FetchedAt: now.UTC(), SHA256: DigestBody(body), Count: len(l.Data)}
 	seen := map[string]bool{}
 	for _, m := range l.Data {
-		if !modelNameRE.MatchString(m.ID) {
+		if !validModelName(m.ID) {
 			continue // a name Koinon cannot use as a model name
 		}
 		if seen[m.ID] {
@@ -179,13 +221,29 @@ func ParseOpenRouter(body []byte, now time.Time) (Snapshot, error) {
 		}
 		seen[m.ID] = true
 		snap.Offers = append(snap.Offers, normalizeOpenRouter(m))
+		snap.Meta = append(snap.Meta, metaOf(m))
 	}
+	sort.Slice(snap.Meta, func(i, j int) bool { return snap.Meta[i].Model < snap.Meta[j].Model })
 	sort.Slice(snap.Offers, func(i, j int) bool { return snap.Offers[i].Model < snap.Offers[j].Model })
 	return snap, nil
 }
 
 // modelNameRE is the model name rule of the catalog (models.name), without glob characters.
 var modelNameRE = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+
+// validModelName is modelNameRE with no empty, "." or ".." path segment, so a name is safe as URL
+// path segments.
+func validModelName(name string) bool {
+	if !modelNameRE.MatchString(name) {
+		return false
+	}
+	for _, s := range strings.Split(name, "/") {
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	return true
+}
 
 // decimalRE is a non-negative decimal as OpenRouter writes per-token prices, with an optional exponent.
 var decimalRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]{1,3})?$`)

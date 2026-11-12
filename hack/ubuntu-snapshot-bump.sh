@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Ubuntu snapshot bump (issue 33): moves UBUNTU_SNAPSHOT and the exact apt pins of the OpenCode flavor
-# image (flavors/opencode/Dockerfile) to the newest versions of a snapshot.ubuntu.com snapshot.
+# Ubuntu snapshot bump (issue 33): moves UBUNTU_SNAPSHOT and the exact apt pins of the OpenCode harness
+# image (harnesses/opencode/Dockerfile) to the newest versions of a snapshot.ubuntu.com snapshot.
 #
 # What it does
 #   1. Picks the snapshot ID: midnight UTC of (today - 3 days), YYYYMMDDT000000Z. A snapshot ID
@@ -23,7 +23,7 @@
 #      a dependency that is newer in the new one counts as a change on its own: the ARG moves even when
 #      no pin does. The closure over-approximates (what the base image has is included).
 #   4. --check prints pinned vs candidate; --write rewrites UBUNTU_SNAPSHOT and the changed pins in
-#      the Dockerfile and the snapshot ID in flavors/opencode/README.md, and nothing else.
+#      the Dockerfile and the snapshot ID in harnesses/opencode/README.md, and nothing else.
 #   5. Best effort: for each changed package it lists the Ubuntu Security Notices that fix a binary
 #      version in (pinned, candidate] from canonical/ubuntu-security-notices (osv/usn/*.json, the
 #      Ubuntu:24.04:LTS records, matched on ecosystem_specific.binaries). A package in noble-security
@@ -48,8 +48,8 @@
 #   --snapshot ID        use this snapshot instead of today-3d (refused when younger than 3 days)
 #   --today YYYY-MM-DD   treat this day (00:00 UTC) as now (tests)
 #   --base-url URL|DIR   snapshot root, <base>/<ID>/dists/... (default https://snapshot.ubuntu.com/ubuntu)
-#   --dockerfile FILE    default flavors/opencode/Dockerfile
-#   --readme FILE        default flavors/opencode/README.md
+#   --dockerfile FILE    default harnesses/opencode/Dockerfile
+#   --readme FILE        default harnesses/opencode/README.md
 #   --keyring FILE       archive keyring for gpgv      --no-gpg   skip the signature check (says so)
 #   --signer FPR         accept only this primary key fingerprint (repeatable; default ARCHIVE_SIGNERS)
 #   --usn-dir DIR        a checkout of canonical/ubuntu-security-notices (or its osv/usn directory)
@@ -320,7 +320,7 @@ ARCHIVE_SIGNERS=(790BC7277767219C42C86F933B4FE6ACC0B21F32 F6ECB3762474EDA9D21B70
 signers=()
 
 mode='' snapshot_arg='' today='' base='https://snapshot.ubuntu.com/ubuntu'
-dockerfile=flavors/opencode/Dockerfile readme=flavors/opencode/README.md
+dockerfile=harnesses/opencode/Dockerfile readme=harnesses/opencode/README.md
 keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg no_gpg=0 usn_dir='' usn_commit='' report=''
 while (($#)); do
 	case $1 in

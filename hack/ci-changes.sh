@@ -13,7 +13,9 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# CI_CHANGES_ROOT (non-empty) is the checkout to read: hack/pr-merge.sh runs the base's copy of this script from a
+# temporary directory against the working tree.
+cd "${CI_CHANGES_ROOT:-$(dirname "$0")/..}"
 
 # strip_mod_dirs: repository-relative directories from `go list` .Dir lines (logical and physical).
 strip_mod_dirs() {
@@ -30,12 +32,12 @@ flavors_dirs() {
 	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
 		dirs=$CI_CHANGES_FLAVORS_DIRS
 	else
-		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
+		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/harnesses/...) || return 1
 		dirs=$(strip_mod_dirs <<<"$out")
 	fi
 	# The suite's own directory must be in the list; if not, the strip failed (a path outside
 	# the checkout, a symlink): fail closed instead of reporting "no dependency changed".
-	grep -qxF test/flavors <<<"$dirs" || return 1
+	grep -qxF test/harnesses <<<"$dirs" || return 1
 	printf '%s\n' "$dirs"
 }
 
@@ -84,13 +86,17 @@ else
 	files=$(git diff --name-only --no-renames "$(git merge-base "$base" HEAD)" HEAD)
 fi
 
-# A change to CI itself, the Makefile, the Go module or the rules runs everything.
+# A change to CI itself, the Makefile, the Go module or the rules runs everything. With
+# CI_CHANGES_IGNORE_PLUMBING=1 the CI-plumbing rule (`everything ci`) is dropped and only the build
+# inputs (`everything -`) count: hack/pr-merge.sh --admin asks "is a real flavors run owed", and a
+# change of ci.yml alone cannot get one. An empty list still runs everything.
 everything=false
 # An empty change list is not "nothing changed": a diff that failed or an empty file list runs
 # everything (fail closed); the callers that can have no change (ci-skip-heavy.sh) check before.
 [[ -n ${files//[$' \t\n']/} ]] || everything=true
 while IFS= read -r f; do
 	if [[ -n $f ]] && paths_match everything - "$f"; then everything=true; fi
+	if [[ -n $f && ${CI_CHANGES_IGNORE_PLUMBING:-} != 1 ]] && paths_match everything ci "$f"; then everything=true; fi
 done <<<"$files"
 
 # suite_graph <dirs-fn> <job>: a changed file lies in (or below, for embedded files) a package

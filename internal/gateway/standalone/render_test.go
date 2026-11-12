@@ -533,6 +533,75 @@ var _ = Describe("Render", func() {
 	})
 })
 
+// agentgateway's file loader runs shellexpand's environment expansion over the whole config file,
+// comments and quoted strings included, before it parses it (#668). Render refuses '$' in the
+// org-supplied strings (gateway.State.Validate) and writes any '$' that still reaches the document
+// as "$$", the expansion's escape for a literal '$'.
+var _ = Describe("Render and the config loader's '$'", func() {
+	provider := func(url string) gateway.State {
+		return gateway.State{Providers: []gateway.Provider{{Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: url}}}
+	}
+	target := func(url, header, prefix string) gateway.State {
+		t := gateway.MCPTarget{Name: "acme-wiki", Org: "acme", URL: url, CredentialHeader: header, CredentialPrefix: prefix}
+		if header != "" {
+			t.CredentialFile = "/secrets/upstream/mcp_wiki"
+		}
+		return gateway.State{MCP: []gateway.MCPTarget{t}}
+	}
+
+	DescribeTable("refuses '$' in each org-supplied field it writes",
+		func(s gateway.State, want string) {
+			out, _, err := standalone.Render(s, standalone.Options{})
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(out).To(BeNil())
+		},
+		Entry("the provider URL path", provider("https://openrouter.ai/api/$HOME/v1"), "base URL contains '$'"),
+		Entry("the MCP URL path", target("https://mcp.example.com/${HOME}/mcp", "", ""), "URL contains '$'"),
+		Entry("the MCP credential header name", target("https://mcp.example.com/mcp", "X-Api-$HOME", ""), "credential header contains '$'"),
+		Entry("the MCP credential prefix", target("https://mcp.example.com/mcp", "Authorization", "Bearer ${HOME} "), "credential prefix contains '$'"),
+	)
+
+	DescribeTable(`escapes every '$' as "$$", which the loader reads back as the text written`,
+		func(in, want string) {
+			Expect(string(standalone.EscapeLoader([]byte(in)))).To(Equal(want))
+			Expect(expandLikeLoader(want)).To(Equal(in), "the loader's expansion of the escaped text")
+		},
+		Entry("a variable", "path: /api/$HOME/v1", "path: /api/$$HOME/v1"),
+		Entry("a braced variable with a default", "prefix: 'Bearer ${HOME:-x} '", "prefix: 'Bearer $${HOME:-x} '"),
+		Entry("an escape already written", "name: X-$$", "name: X-$$$$"),
+		Entry("a trailing dollar", "host: https://mcp.example.com/mcp$", "host: https://mcp.example.com/mcp$$"),
+		Entry("a comment", "# $NOPE\nkey: v", "# $$NOPE\nkey: v"),
+		Entry("no dollar", "key: v", "key: v"),
+	)
+
+	It("leaves a config without '$' byte-identical", func() {
+		for _, f := range fixtures() {
+			got, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(standalone.EscapeLoader(got)).To(Equal(got), f.name)
+		}
+	})
+})
+
+// expandLikeLoader is the part of shellexpand 3.1.2's env_with_context that the pinned agentgateway
+// runs over its config file and that a "$$"-escaped text can meet: "$$" is a literal '$', and with
+// every '$' doubled no variable form is left. It fails the spec on a lone '$', so an escape that
+// misses one is caught here and not only against the image.
+func expandLikeLoader(s string) string {
+	GinkgoHelper()
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '$' {
+			b.WriteByte(s[i])
+			continue
+		}
+		Expect(i+1 < len(s) && s[i+1] == '$').To(BeTrue(), "a lone '$' at %d of %q would be expanded", i, s)
+		b.WriteByte('$')
+		i++
+	}
+	return b.String()
+}
+
 // The MCP leak guard (ADR 0091) sits on every MCP call as a remote processor that fails closed;
 // without a guard address the gateway refuses every call to an org's server instead.
 var _ = Describe("Render the MCP leak guard", func() {

@@ -41,6 +41,7 @@ func TestAgentd(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
+	requireTestingTag()
 	db = pgtest.Start(ctx)
 	q = store.New(db)
 }, NodeTimeout(3*time.Minute))
@@ -65,7 +66,7 @@ type env struct {
 	agent     store.Agent
 	gw        *fakegateway.Gateway
 	backend   *openshell.Backend
-	harness   *harness
+	harness   *fakeHarness
 	// backendOverride, if set, is the backend the pools use (a wrapper of backend).
 	backendOverride agentd.Backend
 	workspace       string
@@ -74,7 +75,7 @@ type env struct {
 }
 
 // files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
-// instruction file and the flavor's link to it.
+// instruction file and the harness's link to it.
 type files struct {
 	mu     sync.Mutex
 	data   map[string][]byte
@@ -228,13 +229,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	}
 }
 
-func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
-	return newEnvWith(ctx, flavor, nil)
+func newEnv(ctx context.Context, harness string) *env {
+	return newEnvWith(ctx, harness, nil)
 }
 
 // newEnvWith is newEnv with the agent version's config from configFor, which runs once the
 // org and user exist.
-func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*env) string) *env {
+func newEnvWith(ctx context.Context, harness string, configFor func(*env) string) *env {
 	e := &env{}
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
@@ -268,7 +269,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 	})
 
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-		OrgID: e.org, DisplayName: uniq("agent"), Flavor: flavor, CreatedBy: e.user,
+		OrgID: e.org, DisplayName: uniq("agent"), Harness: harness, CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	config := `{"model":"` + model + `","instructions":"` + instructions + `"}`
@@ -293,7 +294,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.org.Bytes, e.agent.ID.Bytes)
 	_, err = e.backend.EnsureWorkspace(ctx, e.workspace, nil)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/stateracloud/koinon/flavors/opencode:test"})
+	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
 	Expect(err).NotTo(HaveOccurred())
 	// What koinon-reconciler records for the sandbox, which is all agentd reads about it.
 	_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: e.org, Workspace: e.workspace})
@@ -335,8 +336,9 @@ func (e *env) recordSandboxWith(ctx context.Context, state store.SandboxState, r
 // recreateSandbox replaces the sandbox, and so its home volume, as the reconciler does on a
 // spec change, and records the new one ready.
 func (e *env) recreateSandbox(ctx context.Context) {
-	Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
-	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+	_, derr := e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)
+	Expect(derr).To(Succeed())
+	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/sandbox:dev"})
 	Expect(err).NotTo(HaveOccurred())
 	e.recordSandbox(ctx, store.SandboxStateReady, "")
 }

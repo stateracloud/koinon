@@ -23,14 +23,14 @@ has "sandbox LimitRange writer limits to the configured gateway ID" "openshell.a
 
 # The reconciler is told the writer is on and the fixed LimitRange name.
 cfg=$(render --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxLimitRange:' <<<"$cfg" | grep -Fq -- 'enabled: true' || fail "the reconciler is told the sandbox LimitRange is on"
-grep -A3 -F -- 'sandboxLimitRange:' <<<"$cfg" | grep -Fq -- 'name: "koinon-koinon-sandbox-limitrange"' || fail "the reconciler is told the sandbox LimitRange name"
+grep -A2 -F -- 'sandboxLimitRange:' <<<"$cfg" | hit -F -- 'enabled: true' || fail "the reconciler is told the sandbox LimitRange is on"
+grep -A3 -F -- 'sandboxLimitRange:' <<<"$cfg" | hit -F -- 'name: "koinon-koinon-sandbox-limitrange"' || fail "the reconciler is told the sandbox LimitRange name"
 
 off=(--set sandboxLimitRange.enabled=false)
 lacks "sandboxLimitRange.enabled=false renders no writer" 'sandbox-limitrange' "${off[@]}"
 off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | grep -Fq -- 'enabled: false' || fail "sandboxLimitRange.enabled=false tells the reconciler"
-grep -A3 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | grep -q -- 'name:' && fail "sandboxLimitRange.enabled=false names no LimitRange to the reconciler"
+grep -A2 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit -F -- 'enabled: false' || fail "sandboxLimitRange.enabled=false tells the reconciler"
+grep -A3 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit -- 'name:' && fail "sandboxLimitRange.enabled=false names no LimitRange to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
 if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1; then

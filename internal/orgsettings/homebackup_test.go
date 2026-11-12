@@ -79,7 +79,7 @@ var _ = Describe("Home backup retention", func() {
 	It("is the deadline a new repository epoch gives the retired one", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'homes', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'homes', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		three := 3
 		Expect(svc.SetHomeBackupRetention(ctx, org, audit.System("koinon-test:spec"), &three)).To(Succeed())
 

@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // NewRootCommand is koinon-reconciler's command tree (ADR 0088). A setting comes from the flag,
@@ -159,32 +160,29 @@ func (c *config) finish(v *viper.Viper) error {
 		return fmt.Errorf("--gateway-name is required in kubernetes mode")
 	}
 
-	var sr fileSandboxResources
-	if err := v.UnmarshalKey("sandboxResources", &sr); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
-	}
-	c.sandboxResources = sr.policy()
-	if err := c.sandboxResources.Validate(); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
-	}
-	images, err := flavorImages(v)
+	policy, err := sandboxres.FromConfig(func(key string, out any) error { return v.UnmarshalKey(key, out) })
 	if err != nil {
 		return err
 	}
-	c.flavorImages = images
+	c.sandboxResources = policy
+	images, err := harnessImages(v)
+	if err != nil {
+		return err
+	}
+	c.harnessImages = images
 	return nil
 }
 
-// flavorImages reads the config file's flavors section: each flavor's image.
-func flavorImages(v *viper.Viper) (map[string]string, error) {
-	var flavors map[string]struct {
+// harnessImages reads the config file's harnesses section: each harness's image.
+func harnessImages(v *viper.Viper) (map[string]string, error) {
+	var harnesses map[string]struct {
 		Image string `mapstructure:"image"`
 	}
-	if err := v.UnmarshalKey("flavors", &flavors); err != nil {
-		return nil, fmt.Errorf("config flavors: %w", err)
+	if err := v.UnmarshalKey("harnesses", &harnesses); err != nil {
+		return nil, fmt.Errorf("config harnesses: %w", err)
 	}
 	images := map[string]string{}
-	for name, f := range flavors {
+	for name, f := range harnesses {
 		images[name] = f.Image
 	}
 	return images, nil
@@ -245,7 +243,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.keepWarmPerOrg, "keep-warm-per-org", 0, "keep-warm sandboxes an org may have (default 2; negative grants none)")
-	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes one pass may recreate with a changed spec, such as a new supervisor image (default 4; negative is no cap)")
+	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes that may be recreated at once with a changed spec, such as a new supervisor image; the allowance comes back at this many per resync interval (default 4; negative is no cap)")
 	fs.StringVar(&c.openshellConfigNS, "openshell-config-namespace", "", "namespace of OpenShell's gateway ConfigMap, to read its supervisor image")
 	fs.StringVar(&c.openshellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty leaves the supervisor image out of the sandbox spec hash")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")

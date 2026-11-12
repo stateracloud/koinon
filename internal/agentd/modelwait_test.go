@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -59,7 +60,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	}
 
 	It("starts the harness at once when the gateway already serves the model", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serve(ctx, e, addModel(ctx, e, "served-upstream"))
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -68,7 +69,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("waits, says why, and starts the harness once the reconciler records the model served", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		id := addModel(ctx, e, "new-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
@@ -87,7 +88,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("fails with a reason naming the provider when the gateway does not serve the model in time", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		addModel(ctx, e, "stuck-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
@@ -106,7 +107,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("fails at once for a model without a price, which the gateway never serves", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		addUnpriced(ctx, e, "unpriced-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -118,7 +119,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("fails at once for an ollama-type model pointed at Ollama cloud, which the default list does not price at zero", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		var providerID pgtype.UUID
 		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, 'ollama-cloud', 'ollama', 'https://ollama.com') RETURNING id`,
 			e.org).Scan(&providerID)).To(Succeed())
@@ -134,7 +135,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("fails at once when the provider's key was lost, even while the gateway still serves it", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		id := addModel(ctx, e, "lost-upstream")
 		serve(ctx, e, id)
 		// What keys forget does (ADR 0085 decision 13); the keyless provider has no envelope to clear.
@@ -150,7 +151,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("fails at once for a model whose stored price cannot be used", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		addUnpriced(ctx, e, "bad-price-upstream")
 		price(ctx, e, "1.1234567") // seven fraction digits, from before the stricter rule
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -163,7 +164,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("waits out a database error and goes on once the model is served", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		id := addModel(ctx, e, "flaky-upstream")
 		// The lookup fails while the table is gone.
 		_, err := db.Exec(ctx, `ALTER TABLE gateway_served_models RENAME TO gateway_served_models_away`)
@@ -189,7 +190,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("stops waiting when the run is canceled", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		addModel(ctx, e, "slow-upstream")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -205,7 +206,7 @@ var _ = Describe("Waiting for the gateway to serve the model", func() {
 	})
 
 	It("does not wait for a model the org's catalog does not have", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))

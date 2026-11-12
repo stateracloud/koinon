@@ -46,6 +46,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -164,6 +165,8 @@ func (a App) validate() error {
 type Client struct {
 	baseURL string
 	http    *http.Client
+	dial    func(ctx context.Context, network, addr string) (net.Conn, error)
+	ownHTTP bool // http is the default client, so For can give a derived host the checked transport
 	now     func() time.Time
 	margin  time.Duration
 
@@ -179,8 +182,16 @@ type Options struct {
 	// BaseURL defaults to DefaultBaseURL; GitHub Enterprise Server uses
 	// https://<host>/api/v3.
 	BaseURL string
-	// HTTPClient defaults to a client with a 30-second timeout.
+	// HTTPClient defaults to a client with a 30-second timeout that dials through DialContext and
+	// returns a 3xx response instead of following it. A caller-set client turns the dial check
+	// off for every base URL, derived clients included; no production caller sets it.
 	HTTPClient *http.Client
+	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext): a Connection's
+	// base URL is admin-supplied, so the clients For derives for another base URL connect only to
+	// addresses it allows. The client's own BaseURL is the platform's setting (--github-api-url,
+	// possibly a private GHE or the e2e fake), so it dials unchecked. It is unused when HTTPClient
+	// is set. Nil dials unchecked everywhere, for tests and api.github.com-only use.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 	// RefreshMargin defaults to DefaultRefreshMargin.
 	RefreshMargin time.Duration
 	// Now defaults to time.Now.
@@ -205,6 +216,11 @@ func (c *Client) For(apiBase, caBundle string) (*Client, error) {
 		return d.(*Client), nil
 	}
 	hc := *c.http
+	hc.CheckRedirect = noRedirect
+	if c.dial != nil && c.ownHTTP && apiBase != c.baseURL {
+		// An admin-supplied host: dial it through the egress policy.
+		hc.Transport = newHTTPClient(c.dial, 0).Transport
+	}
 	if strings.TrimSpace(caBundle) != "" {
 		pool, err := codehost.CertPool(caBundle)
 		if err != nil {
@@ -225,9 +241,31 @@ func (c *Client) For(apiBase, caBundle string) (*Client, error) {
 		tr.TLSClientConfig.RootCAs = pool
 		hc.Transport = tr
 	}
-	d := &Client{baseURL: apiBase, http: &hc, now: c.now, margin: c.margin, mu: c.mu, cache: c.cache, derived: c.derived}
+	d := &Client{baseURL: apiBase, http: &hc, dial: c.dial, ownHTTP: c.ownHTTP, now: c.now, margin: c.margin, mu: c.mu, cache: c.cache, derived: c.derived}
 	got, _ := c.derived.LoadOrStore(key, d)
 	return got.(*Client), nil
+}
+
+// newHTTPClient returns the default client: it connects only through dial (when set), ignores the
+// environment's proxy (a proxy would take the traffic around the dial check) and returns a 3xx
+// response instead of following it, so a Connection's admin-supplied URL cannot send Koinon on to
+// another host. It mirrors the trace exporter's client (internal/tracing/export).
+func newHTTPClient(dial func(ctx context.Context, network, addr string) (net.Conn, error), timeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if dial != nil {
+		tr.DialContext = dial
+		tr.Proxy = nil
+	}
+	return &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: noRedirect}
+}
+
+// noRedirect makes the client return the 3xx response itself.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// DialContext returns the dial check the client was built with, nil when it has none, so the
+// providers registry can give the other code hosts the same outbound rule.
+func (c *Client) DialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.dial
 }
 
 // NewClient returns a Client.
@@ -235,8 +273,10 @@ func NewClient(o Options) *Client {
 	if o.BaseURL == "" {
 		o.BaseURL = DefaultBaseURL
 	}
-	if o.HTTPClient == nil {
-		o.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+	own := o.HTTPClient == nil
+	if own {
+		// The platform's own base URL is not an admin-supplied one: no dial check here.
+		o.HTTPClient = newHTTPClient(nil, 30*time.Second)
 	}
 	if o.RefreshMargin <= 0 {
 		o.RefreshMargin = DefaultRefreshMargin
@@ -245,7 +285,7 @@ func NewClient(o Options) *Client {
 		o.Now = time.Now
 	}
 	return &Client{
-		baseURL: strings.TrimRight(o.BaseURL, "/"), http: o.HTTPClient, now: o.Now,
+		baseURL: strings.TrimRight(o.BaseURL, "/"), http: o.HTTPClient, dial: o.DialContext, ownHTTP: own, now: o.Now,
 		margin: o.RefreshMargin, mu: new(sync.Mutex), cache: map[string]*cacheEntry{}, derived: new(sync.Map),
 	}
 }

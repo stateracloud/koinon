@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -102,6 +104,24 @@ func strs(v any) []string {
 	}
 	return out
 }
+
+// freshKEK returns a valid KEK ID no earlier spec used: the install audit chain is append-only and shared
+// by the specs, and the add paths refuse any ID it recorded, so every spec that adds a KEK draws its own.
+func freshKEK(tag string) string { return freshKEKOn("20261023", tag) }
+
+// freshKEKOn is freshKEK for a spec that prints the age the date in the ID gives.
+func freshKEKOn(date, tag string) string {
+	return fmt.Sprintf("kek-%s-%s%d", date, tag, (time.Now().UnixNano()+kekSeq.Add(1))%100_000_000_000)
+}
+
+// kekSeq keeps two IDs drawn in one clock tick apart.
+var kekSeq atomic.Int64
+
+// kekB and kekC are the IDs a spec adds; every spec gets new ones, so no spec meets an ID the shared
+// audit chain recorded for an earlier one.
+var kekB, kekC string
+
+var _ = BeforeEach(func() { kekB, kekC = freshKEK("b"), freshKEK("c") })
 
 // recordLive records the key set load returns as the chain's last state (a start-up observation with
 // no generated Secrets), so the next command or check starts from it.
@@ -254,8 +274,8 @@ var _ = Describe("key events in the install audit chain", func() {
 	Describe("the commands", func() {
 		It("writes one event for add, activate and retire, with the key-set state before and after", func(ctx SpecContext) {
 			mark := auditMark(ctx)
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			now = now.Add(6 * time.Minute)
 			Expect(tool.Retire(ctx, first)).To(Succeed())
 
@@ -268,21 +288,94 @@ var _ = Describe("key events in the install audit chain", func() {
 			}
 
 			add, activate, retire := es[0], es[1], es[2]
-			Expect(add.TargetID).To(Equal("kek-20261023-bbbb"))
+			Expect(add.TargetID).To(Equal(kekB))
 			Expect(kekIDs(section(add, "before"))).To(Equal([]string{first}))
-			Expect(kekIDs(section(add, "after"))).To(Equal([]string{first, "kek-20261023-bbbb"}))
+			Expect(kekIDs(section(add, "after"))).To(Equal([]string{first, kekB}))
 			Expect(section(add, "after")["active"]).To(Equal(first), "add does not activate")
 			for _, k := range section(add, "after")["keks"].([]any) {
 				Expect(k.(map[string]any)["fingerprint"]).NotTo(BeEmpty())
 			}
 
 			Expect(section(activate, "before")["active"]).To(Equal(first))
-			Expect(section(activate, "after")["active"]).To(Equal("kek-20261023-bbbb"))
+			Expect(section(activate, "after")["active"]).To(Equal(kekB))
 
 			Expect(kekIDs(section(retire, "before"))).To(HaveLen(2))
-			Expect(kekIDs(section(retire, "after"))).To(Equal([]string{"kek-20261023-bbbb"}))
+			Expect(kekIDs(section(retire, "after"))).To(Equal([]string{kekB}))
 			Expect(strs(section(retire, "after")["retired"])).To(ContainElement(first))
 			noKeyMaterial(ctx, es)
+		})
+
+		It("writes one keys.import event when a manifest is merged in, with the state before and after", func(ctx SpecContext) {
+			// A manifest from another install: one KEK of its own, active.
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-impo")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{"kek-20261001-impo": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-impo")},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			mark := auditMark(ctx)
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(Equal([]string{keyscli.ActionImport}))
+			Expect(es[0].ActorKind).To(Equal("cli"))
+			Expect(es[0].ActorID).To(Equal("keys import"))
+			Expect(kekIDs(section(es[0], "before"))).To(Equal([]string{first}))
+			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{first, "kek-20261001-impo"}))
+			Expect(section(es[0], "after")["active"]).To(Equal("kek-20261001-impo"))
+			noKeyMaterial(ctx, es)
+		})
+
+		It("writes one keys.import event when the manifest creates the Secret", func(ctx SpecContext) {
+			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "koinon-kek", metav1.DeleteOptions{})).To(Succeed())
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-crea")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{"kek-20261001-crea": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-crea")},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			mark := auditMark(ctx)
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(ContainElement(keyscli.ActionImport))
+			imp := es[len(es)-1]
+			Expect(imp.Action).To(Equal(keyscli.ActionImport))
+			Expect(imp.ActorID).To(Equal("keys import"))
+			Expect(kekIDs(section(imp, "before"))).To(BeEmpty())
+			Expect(kekIDs(section(imp, "after"))).To(Equal([]string{"kek-20261001-crea"}))
+			noKeyMaterial(ctx, es)
+		})
+
+		It("refuses a manifest KEK that the audit chain records as retired, unless --allow-retired", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
+			now = now.Add(6 * time.Minute)
+			Expect(tool.Retire(ctx, first)).To(Succeed())
+			// An old backup still holds the retired KEK, and names it active.
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-aaaa")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{first: secretstore.EncodeKey(raw), "active": []byte(first)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(MatchError(And(ContainSubstring(first), ContainSubstring("--allow-retired"))))
+			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(first))
+
+			tool.In, tool.AllowRetired = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+			got := newKeySet(ctx)
+			Expect(got.Keys).To(HaveKey(first))
+			Expect(got.Active).To(Equal(kekB), "a retired KEK never becomes active")
+			Expect(tool.Activate(ctx, first)).To(MatchError(ContainSubstring("retired")))
+			Expect(newKeySet(ctx).Active).To(Equal(kekB))
 		})
 
 		It("does not write an event for a command that refused", func(ctx SpecContext) {
@@ -295,8 +388,8 @@ var _ = Describe("key events in the install audit chain", func() {
 
 		It("keeps the change and says so when the event cannot be written", func(ctx SpecContext) {
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }}
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(MatchError(keyscli.ErrNotAudited))
-			Expect(newKeySet(ctx).Keys).To(HaveKey("kek-20261023-bbbb"), "the change stands")
+			Expect(tool.Add(ctx, kekB)).To(MatchError(keyscli.ErrNotAudited))
+			Expect(newKeySet(ctx).Keys).To(HaveKey(kekB), "the change stands")
 		})
 
 		DescribeTable("holds the lock from its Secret update to its event, so a start-up check in between records nothing",
@@ -317,18 +410,18 @@ var _ = Describe("key events in the install audit chain", func() {
 			},
 			Entry("add",
 				func(SpecContext) error { return nil },
-				func(ctx SpecContext) error { return tool.Add(ctx, "kek-20261023-bbbb") },
+				func(ctx SpecContext) error { return tool.Add(ctx, kekB) },
 				keyscli.ActionAdd),
 			Entry("activate",
-				func(ctx SpecContext) error { return tool.Add(ctx, "kek-20261023-bbbb") },
-				func(ctx SpecContext) error { return tool.Activate(ctx, "kek-20261023-bbbb") },
+				func(ctx SpecContext) error { return tool.Add(ctx, kekB) },
+				func(ctx SpecContext) error { return tool.Activate(ctx, kekB) },
 				keyscli.ActionActivate),
 			Entry("retire",
 				func(ctx SpecContext) error {
-					if err := tool.Add(ctx, "kek-20261023-bbbb"); err != nil {
+					if err := tool.Add(ctx, kekB); err != nil {
 						return err
 					}
-					if err := tool.Activate(ctx, "kek-20261023-bbbb"); err != nil {
+					if err := tool.Activate(ctx, kekB); err != nil {
 						return err
 					}
 					now = now.Add(6 * time.Minute)
@@ -342,7 +435,7 @@ var _ = Describe("key events in the install audit chain", func() {
 	Describe("rewrap and reencrypt", func() {
 		var ids []string
 		BeforeEach(func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			// Providers sealed under the first KEK, then a new active KEK.
 			svc := catalog.New(pool, func() *secretstore.Keyring {
 				set := newKeySet(ctx)
@@ -358,7 +451,7 @@ var _ = Describe("key events in the install audit chain", func() {
 				Expect(err).NotTo(HaveOccurred())
 				ids = append(ids, p.ID)
 			}
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 		})
 
 		It("writes one event per run, after the loop, with the counts, the failures by kind and the usage", func(ctx SpecContext) {
@@ -379,8 +472,8 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(after["done"]).To(BeEquivalentTo(3))
 			Expect(after["failed"]).To(BeEquivalentTo(1))
 			Expect(after["failures"]).To(Equal(map[string]any{"unknown_kek": float64(1)}))
-			Expect(after["active"]).To(Equal("kek-20261023-bbbb"))
-			Expect(after["kek_usage"]).To(Equal(map[string]any{"kek-20261023-bbbb": float64(3), "gone": float64(1)}))
+			Expect(after["active"]).To(Equal(kekB))
+			Expect(after["kek_usage"]).To(Equal(map[string]any{kekB: float64(3), "gone": float64(1)}))
 			Expect(section(e, "before")["kek_usage"]).To(Equal(map[string]any{first: float64(3), "gone": float64(1)}))
 			noKeyMaterial(ctx, es)
 		})
@@ -570,33 +663,33 @@ var _ = Describe("key events in the install audit chain", func() {
 		})
 
 		It("writes keys.observed for a new KEK, with the state before and after", func(ctx SpecContext) {
-			set.Keys["kek-20261023-bbbb"] = kek("bbbb")
+			set.Keys[kekB] = kek("bbbb")
 			res, es := observe(ctx)
 			Expect(res.Wrote).To(BeTrue())
 			Expect(kekIDs(section(es[0], "before"))).To(Equal([]string{first}))
-			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{first, "kek-20261023-bbbb"}))
+			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{first, kekB}))
 			noKeyMaterial2(es, set)
 			res, _ = observe(ctx)
 			Expect(res.Wrote).To(BeFalse(), "recorded once")
 		})
 
 		It("writes keys.observed for a changed active KEK", func(ctx SpecContext) {
-			set.Keys["kek-20261023-bbbb"] = kek("bbbb")
+			set.Keys[kekB] = kek("bbbb")
 			observe(ctx)
-			set.Active = "kek-20261023-bbbb"
+			set.Active = kekB
 			res, es := observe(ctx)
 			Expect(res.Wrote).To(BeTrue())
-			Expect(section(es[0], "after")["active"]).To(Equal("kek-20261023-bbbb"))
+			Expect(section(es[0], "after")["active"]).To(Equal(kekB))
 		})
 
 		It("writes keys.observed for a retired KEK, and lists it as retired", func(ctx SpecContext) {
-			set.Keys["kek-20261023-bbbb"] = kek("bbbb")
-			set.Active = "kek-20261023-bbbb"
+			set.Keys[kekB] = kek("bbbb")
+			set.Active = kekB
 			observe(ctx)
 			delete(set.Keys, first)
 			res, es := observe(ctx)
 			Expect(res.Wrote).To(BeTrue())
-			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{"kek-20261023-bbbb"}))
+			Expect(kekIDs(section(es[0], "after"))).To(Equal([]string{kekB}))
 			Expect(strs(section(es[0], "after")["retired"])).To(ContainElement(first))
 		})
 
@@ -631,9 +724,9 @@ var _ = Describe("key events in the install audit chain", func() {
 		})
 
 		It("catches an activate and a retire whose event was not written", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }}
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(MatchError(keyscli.ErrNotAudited))
+			Expect(tool.Activate(ctx, kekB)).To(MatchError(keyscli.ErrNotAudited))
 			now = now.Add(6 * time.Minute)
 			Expect(tool.Retire(ctx, first)).To(MatchError(keyscli.ErrNotAudited))
 
@@ -642,8 +735,8 @@ var _ = Describe("key events in the install audit chain", func() {
 			res, es := observe(ctx)
 			Expect(res.Wrote).To(BeTrue())
 			after := section(es[0], "after")
-			Expect(after["active"]).To(Equal("kek-20261023-bbbb"))
-			Expect(kekIDs(after)).To(Equal([]string{"kek-20261023-bbbb"}))
+			Expect(after["active"]).To(Equal(kekB))
+			Expect(kekIDs(after)).To(Equal([]string{kekB}))
 			Expect(strs(after["retired"])).To(ContainElement(first))
 			Expect(kekIDs(section(es[0], "before"))).To(ContainElement(first), "the last recorded state still had the retired KEK")
 			res, _ = observe(ctx)
@@ -651,22 +744,22 @@ var _ = Describe("key events in the install audit chain", func() {
 		})
 
 		It("keeps an activation whose event was lost: the next command records it as keys.observed before its own event", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }}
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(MatchError(keyscli.ErrNotAudited))
+			Expect(tool.Activate(ctx, kekB)).To(MatchError(keyscli.ErrNotAudited))
 			tool.Audit = nil
 
 			mark := auditMark(ctx)
-			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(Succeed())
+			Expect(tool.Add(ctx, kekC)).To(Succeed())
 			es := keyEventsSince(ctx, mark)
 			Expect(actions(es)).To(Equal([]string{keyscli.ActionObserved, keyscli.ActionAdd}))
 			observed, add := es[0], es[1]
 			Expect(observed.ActorKind).To(Equal("cli"), "the command that found the gap writes it")
 			Expect(observed.ActorID).To(Equal("keys add"))
 			Expect(section(observed, "before")["active"]).To(Equal(first))
-			Expect(section(observed, "after")["active"]).To(Equal("kek-20261023-bbbb"))
-			Expect(section(add, "before")["active"]).To(Equal("kek-20261023-bbbb"), "the add starts from the observed state")
-			Expect(section(add, "after")["active"]).To(Equal("kek-20261023-bbbb"))
+			Expect(section(observed, "after")["active"]).To(Equal(kekB))
+			Expect(section(add, "before")["active"]).To(Equal(kekB), "the add starts from the observed state")
+			Expect(section(add, "after")["active"]).To(Equal(kekB))
 
 			By("the start-up check then has nothing left to record")
 			set = newKeySet(ctx)
@@ -695,14 +788,14 @@ var _ = Describe("key events in the install audit chain", func() {
 			By("a key is added and recorded while the check waits")
 			before := newKeySet(ctx)
 			added := newKeySet(ctx)
-			added.Keys["kek-20261023-bbbb"] = kek("bbbb")
+			added.Keys[kekB] = kek("bbbb")
 			Expect(ks.Save(ctx, added)).To(Succeed())
 			recorder := &keyscli.Auditor{Pool: pool, Authoritative: true, Generated: observer.Generated}
 			prevState, err := recorder.Snapshot(ctx, before)
 			Expect(err).NotTo(HaveOccurred())
 			afterState, err := recorder.After(ctx, newKeySet(ctx), prevState)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(recorder.Record(ctx, keyscli.Event{Command: "add", Action: keyscli.ActionAdd, TargetKind: "kek", TargetID: "kek-20261023-bbbb", Before: prevState, After: afterState})).To(Succeed())
+			Expect(recorder.Record(ctx, keyscli.Event{Command: "add", Action: keyscli.ActionAdd, TargetKind: "kek", TargetID: kekB, Before: prevState, After: afterState})).To(Succeed())
 
 			mark := auditMark(ctx)
 			Expect(lock.Rollback(ctx)).To(Succeed())
@@ -711,7 +804,7 @@ var _ = Describe("key events in the install audit chain", func() {
 		})
 
 		It("writes once when replicas start together", func(ctx SpecContext) {
-			set.Keys["kek-20261023-bbbb"] = kek("bbbb")
+			set.Keys[kekB] = kek("bbbb")
 			mark := auditMark(ctx)
 			done := make(chan error, 3)
 			for range 3 {
@@ -758,7 +851,7 @@ var _ = Describe("key-admin Job events", func() {
 			Create: create, AddID: add, Out: out, Marker: marker,
 			Now:       func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC) },
 			HasValues: func(context.Context) (bool, error) { return false, nil },
-			UsedID:    func(context.Context, string) (bool, error) { return false, nil },
+			UsedID:    func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) },
 			Audit: &keyscli.Auditor{Pool: pool, Actor: keyscli.ActorKeyAdmin, Generated: func(context.Context) ([]keyscli.GeneratedSecret, error) {
 				return nil, nil
 			}},
@@ -794,16 +887,16 @@ var _ = Describe("key-admin Job events", func() {
 		Expect(kekIDs(section(es[0], "after"))).To(HaveLen(1))
 
 		mark = auditMark(ctx)
-		Expect(job(true, "kek-20261103-bbbb").Run(ctx)).To(Succeed())
+		Expect(job(true, kekB).Run(ctx)).To(Succeed())
 		es = keyEventsSince(ctx, mark)
 		Expect(actions(es)).To(Equal([]string{keyscli.ActionAdd}))
 		Expect(es[0].ActorID).To(Equal("koinon-api:key-admin"))
-		Expect(es[0].TargetID).To(Equal("kek-20261103-bbbb"))
+		Expect(es[0].TargetID).To(Equal(kekB))
 		Expect(kekIDs(section(es[0], "after"))).To(HaveLen(2))
 
 		By("a rerun changes nothing and writes nothing")
 		mark = auditMark(ctx)
-		Expect(job(true, "kek-20261103-bbbb").Run(ctx)).To(Succeed())
+		Expect(job(true, kekB).Run(ctx)).To(Succeed())
 		Expect(keyEventsSince(ctx, mark)).To(BeEmpty())
 
 		By("the start-up check finds the key set as the Job recorded it, and writes nothing")
@@ -842,7 +935,7 @@ var _ = Describe("key-admin Job events", func() {
 			m.Client = c
 			return m.Load
 		})
-		Expect(job(true, "kek-20261103-bbbb").Run(ctx)).To(Succeed())
+		Expect(job(true, kekB).Run(ctx)).To(Succeed())
 		var o observed
 		Eventually(checked).Should(Receive(&o))
 		Expect(o.err).NotTo(HaveOccurred())
@@ -907,20 +1000,20 @@ var _ = Describe("key-admin Job events", func() {
 	})
 
 	It("records a retire whose event was lost as keys.observed, before the Job's own event", func(ctx SpecContext) {
-		Expect(job(true, "kek-20261103-bbbb").Run(ctx)).To(Succeed())
+		Expect(job(true, kekB).Run(ctx)).To(Succeed())
 		tool := &keyscli.Tool{
 			Pool: pool, Store: jobStore(), Out: io.Discard, Wrappers: admin,
 			Audit: &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }},
 		}
-		Expect(tool.Retire(ctx, "kek-20261103-bbbb")).To(MatchError(keyscli.ErrNotAudited))
+		Expect(tool.Retire(ctx, kekB)).To(MatchError(keyscli.ErrNotAudited))
 
 		mark := auditMark(ctx)
-		Expect(job(true, "kek-20261103-cccc").Run(ctx)).To(Succeed())
+		Expect(job(true, kekC).Run(ctx)).To(Succeed())
 		es := keyEventsSince(ctx, mark)
 		Expect(actions(es)).To(Equal([]string{keyscli.ActionObserved, keyscli.ActionAdd}))
 		Expect(es[0].ActorID).To(Equal("koinon-api:key-admin"))
-		Expect(strs(section(es[0], "after")["retired"])).To(ContainElement("kek-20261103-bbbb"))
-		Expect(strs(section(es[1], "before")["retired"])).To(ContainElement("kek-20261103-bbbb"), "the add starts from the observed state")
+		Expect(strs(section(es[0], "after")["retired"])).To(ContainElement(kekB))
+		Expect(strs(section(es[1], "before")["retired"])).To(ContainElement(kekB), "the add starts from the observed state")
 		Expect(kekIDs(section(es[1], "after"))).To(HaveLen(2))
 	})
 
@@ -928,7 +1021,7 @@ var _ = Describe("key-admin Job events", func() {
 		unmigrated, err := pgxpool.New(ctx, pgtest.Run(ctx)) // no install_audit_events table
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(unmigrated.Close)
-		a := job(true, "kek-20261103-bbbb")
+		a := job(true, kekB)
 		a.Audit = &keyscli.Auditor{Pool: unmigrated, Actor: keyscli.ActorKeyAdmin, Wait: time.Second}
 
 		start := time.Now()
@@ -953,7 +1046,7 @@ var _ = Describe("key-admin Job events", func() {
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		a := job(true, "kek-20261103-bbbb")
+		a := job(true, kekB)
 		a.ActivateIfNoActive = true
 		recordLive(ctx, jobStore().LoadWithoutActive) // the Secret was provisioned before the Job; the chain has seen it
 		mark := auditMark(ctx)
@@ -972,9 +1065,9 @@ var _ = Describe("key-admin Job events", func() {
 		Expect(actions(es)).To(Equal([]string{keyscli.ActionAdd, keyscli.ActionActivate}))
 		for _, e := range es {
 			Expect(e.ActorID).To(Equal("koinon-api:key-admin"))
-			Expect(e.TargetID).To(Equal("kek-20261103-bbbb"))
+			Expect(e.TargetID).To(Equal(kekB))
 		}
-		Expect(section(es[1], "after")["active"]).To(Equal("kek-20261103-bbbb"))
+		Expect(section(es[1], "after")["active"]).To(Equal(kekB))
 		for _, e := range es {
 			Expect(strings.Contains(e.Raw, base64.StdEncoding.EncodeToString(local))).To(BeFalse())
 		}

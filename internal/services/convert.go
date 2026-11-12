@@ -14,10 +14,10 @@ import (
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -52,13 +52,16 @@ func payloadProto(raw []byte) *structpb.Struct {
 	return s
 }
 
-func flavorProto(f string) templatev1alpha1.Flavor {
-	d, _ := flavor.Lookup(store.AgentFlavor(f))
+// flavorProto returns the deprecated API value of the harness named name, or unspecified when it
+// has none.
+func flavorProto(name string) templatev1alpha1.Flavor {
+	d, _ := harness.Lookup(name)
 	return d.Proto
 }
 
-func flavorFromProto(f templatev1alpha1.Flavor) (store.AgentFlavor, bool) {
-	d, ok := flavor.FromProto(f)
+// flavorFromProto returns the name of the harness with the deprecated API value f.
+func flavorFromProto(f templatev1alpha1.Flavor) (string, bool) {
+	d, ok := harness.FromProto(f)
 	return d.Name, ok
 }
 
@@ -180,6 +183,7 @@ var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
 	store.RunFailureClassPolicy:             runv1alpha1.FailureClass_FAILURE_CLASS_POLICY,
 	store.RunFailureClassFatal:              runv1alpha1.FailureClass_FAILURE_CLASS_FATAL,
 	store.RunFailureClassSandboxUnavailable: runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE,
+	store.RunFailureClassLoop:               runv1alpha1.FailureClass_FAILURE_CLASS_LOOP,
 }
 
 var parkReasonToProto = map[store.RunParkReason]runv1alpha1.ParkReason{

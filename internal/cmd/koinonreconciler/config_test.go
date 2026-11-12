@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -58,9 +58,9 @@ koinonTools:
   url: http://koinon-api-tools.koinon.svc:8081/mcp-koinon
 githubTools:
   url: http://koinon-api-tools.koinon.svc:8081/mcp
-flavors:
+harnesses:
   opencode:
-    image: ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0
+    image: ghcr.io/stateracloud/koinon/sandbox:0.1.0
 bootstrapAdmin:
   enabled: true
 `
@@ -199,8 +199,8 @@ var _ = Describe("parseConfig", func() {
 			"koinon": "http://koinon-api-tools.koinon.svc:8081/mcp-koinon", // ask_user (TK3)
 		}))
 
-		f := c.flavors()[store.AgentFlavorOpencode]
-		Expect(f.Image).To(Equal("ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0"))
+		f := c.harnesses()[harness.OpenCode]
+		Expect(f.Image).To(Equal("ghcr.io/stateracloud/koinon/sandbox:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
 	})
 
@@ -298,13 +298,14 @@ sandboxResources:
       limit: {max: "8"}
     memory:
       request: {min: 256Mi}
+      limit: {min: 256Mi}
   memoryRequestEqualsLimit: false
 `)
 		Expect(err).NotTo(HaveOccurred())
 		p := c.sandboxResources
 		Expect(p.Default.CPU).To(Equal(templates.Quantities{Request: "500m", Limit: "2"}))
 		Expect(p.Default.Memory).To(Equal(templates.Quantities{Request: "1Gi", Limit: "4Gi"}))
-		Expect(p.Bounds.CPULimit).To(Equal(sandboxres.Range{Max: "8"}))
+		Expect(p.Bounds.CPULimit).To(Equal(sandboxres.Range{Min: "100m", Max: "8"}))
 		Expect(p.Bounds.MemoryRequest).To(Equal(sandboxres.Range{Min: "256Mi", Max: "8Gi"}))
 		Expect(p.MemoryRequestEqualsLimit).To(BeFalse())
 	})
@@ -317,6 +318,7 @@ sandboxResources:
 		Entry("a bad quantity", "sandboxResources:\n  default:\n    memory: {limit: 2 gigs}\n", "memory.limit"),
 		Entry("a bad bound", "sandboxResources:\n  bounds:\n    cpu:\n      limit: {max: lots}\n", `bounds.cpuLimit.max "lots"`),
 		Entry("a minimum above the maximum", "sandboxResources:\n  bounds:\n    memory:\n      limit: {min: 16Gi}\n", "bounds.memoryLimit: min 16Gi is greater than max 8Gi"),
+		Entry("a cpu limit range below the request minimum", "sandboxResources:\n  bounds:\n    cpu:\n      limit: {min: 50m}\n", "bounds.cpu: the limit range"),
 		Entry("a default request above its limit", "sandboxResources:\n  default:\n    cpu: {request: 4}\n", "cpu.request 4 is greater than cpu.limit 2"),
 	)
 })

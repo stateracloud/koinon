@@ -98,6 +98,9 @@ type Snapshot struct {
 	// Count is how many models the body listed, whether or not they could be normalized.
 	Count  int     `json:"count"`
 	Offers []Offer `json:"offers"`
+	// Meta is the model metadata of the same body (ADR 0070 amendment of 2026-11-11). It is never
+	// written to a snapshot file: OpenRouter metadata has no offline path.
+	Meta []ModelMeta `json:"-"`
 }
 
 // Adapter fetches one source.

@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: connectors-tools
+- Tags: connectors, credentials, secrets
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (where the secure inputs
   land: an encrypted column in Postgres, no longer a Kubernetes Secret per connection)
 - Decision: [design.md#21](../design.md)
@@ -28,6 +30,7 @@ license (see ADR [0043](0043-workload-identity-adapters-and-koinon-issuer.md)).
   user's org and deployment.
 - Secrets are entered through inline secure inputs that post directly to the secret store
   (Vault/OpenBao); they never enter the chat, the model context or Postgres.
+  _(Replaced by [0056](0056-model-providers-pricing-and-budgets-per-org.md): a secure input is written to an envelope-encrypted column in Postgres. The rule that a secret never enters the chat or the model context stays.)_
 - Each step is validated as it completes (e.g. "app installed on repo", "token exchange works"), so
   errors appear at the step that caused them.
 - Setup guides are data, versioned with the connector type in `connectors/`.
@@ -56,7 +59,8 @@ license (see ADR [0043](0043-workload-identity-adapters-and-koinon-issuer.md)).
 
 - Guide schema format (JSON Schema plus step list, or a small DSL) and how validation checks are
   implemented (built-in Go checks referenced by name is the likely answer).
-- Secret store choice for v0.1 (Vault vs OpenBao, or Kubernetes Secrets as a dev fallback).
+- ~~Secret store choice for v0.1 (Vault vs OpenBao, or Kubernetes Secrets as a dev fallback).~~
+  Closed: the encrypted store in Postgres, see [0056](0056-model-providers-pricing-and-budgets-per-org.md).
 
 ## Upstream verification
 

@@ -77,6 +77,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
+	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/installbinding"
@@ -91,6 +92,7 @@ import (
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/outward"
@@ -100,6 +102,7 @@ import (
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/schemagate"
@@ -129,6 +132,10 @@ type config struct {
 	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
 	// code-host scope refresh (issue #462).
 	restoreHold bool
+
+	// sandboxResources is the platform's sandbox sizing policy, from the config file's sandboxResources
+	// (ADR 0083); a per-agent override must stay inside its bounds.
+	sandboxResources sandboxres.Policy
 	// installMark is this install's random mark (the chart's koinon-install-mark Secret). Its hash
 	// binds the database to the install: tokens and sessions another install issued are refused
 	// (ADR 0110). Empty turns the binding off.
@@ -448,6 +455,7 @@ func serve(ctx context.Context, cfg config) error {
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
 		PublicURL:          cfg.publicURL,
+		DeviceCookieSecret: []byte(cfg.installMark),
 	}
 	if cfg.oidcIssuer != "" {
 		secret, err := auth.ReadSecretFile(cfg.oidcClientSecretFile)
@@ -628,7 +636,10 @@ func serve(ctx context.Context, cfg config) error {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
-		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
+		kekStore := keyscli.KubeStore{
+			Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers,
+			UsedID: func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
+		}
 		keyAudits.keySet = kekStore
 		if cfg.kekCreate {
 			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
@@ -673,9 +684,6 @@ func serve(ctx context.Context, cfg config) error {
 			slog.Info("moved connection secrets into the store", "count", n)
 		}
 	}
-	// One GitHub client, so connection checks and approved calls share its token cache.
-	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
-	hosts := providers.New(gh)
 	var opener connections.Opener
 	var keys services.Keys
 	if keyring != nil {
@@ -687,6 +695,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
 		return err
 	}
+	// One GitHub client, so connection checks and approved calls share its token cache. It and the
+	// Gitea provider dial Connection base URLs through the egress policy.
+	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+	hosts := providers.New(gh)
 	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
 	guardMetrics := mcpguard.NewMetrics(nil)
@@ -746,7 +758,7 @@ func serve(ctx context.Context, cfg config) error {
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
 	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default()).WithRestoreHold(hold)
 	svc := services.New(pool, services.Options{
-		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
+		SandboxResources: &cfg.sandboxResources, ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
@@ -774,6 +786,7 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	auth.RegisterMetrics(reg)
 	// koinon-api checks its own login against the install audit writer role, at startup and every
 	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
 	// identity). A missing grant is logged with the GRANT to run and shows as
@@ -814,6 +827,7 @@ func serve(ctx context.Context, cfg config) error {
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
 		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
 		Metrics:  priceMetrics,
+		Catalog:  orcatalog.New(pool),
 	})
 	if err != nil {
 		return fmt.Errorf("price refresh: %w", err)
@@ -879,9 +893,22 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		traceRouter.Start(bgCtx)
 		defer traceRouter.Close()
+		// The gateway State stream (ADR 0097, issue 279 slice 3) shares this listener and the gateway's
+		// token: only a holder of it can open the stream or ack a revision, and agentd's trace token
+		// never admits it. The server also sits behind the same check on its own (it refuses to start
+		// without one). Acks are recorded and gate nothing yet.
+		gwAuth := otlpauth.ScopedMiddleware(otlpTokens, map[string]*otlpauth.Tokens{tracerouter.TracesPath: otlpTraceTokens}, otlpMetrics)
+		stateSrv, err := stateserver.New(stateserver.Config{
+			Store: stateserver.NewPGStore(pool), Auth: gwAuth, Notify: stateserver.PoolNotify(pool),
+			Metrics: stateserver.NewMetrics(reg), Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		safego.Go(bgCtx, slog.Default(), "gateway-state-stream", stateSrv.Run)
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.ScopedMiddleware(otlpTokens, map[string]*otlpauth.Tokens{tracerouter.TracesPath: otlpTraceTokens}, otlpMetrics), traceRouter.Mount()); err != nil {
+			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

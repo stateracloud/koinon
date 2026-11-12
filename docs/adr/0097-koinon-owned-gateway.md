@@ -2,6 +2,8 @@
 
 - Status: Accepted (2026-11-06)
 - Date: 2026-11-06
+- Area: models-spend
+- Tags: agentgateway, mcp, models, spend-ledger, leak-guard
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md) (supersedes in part decisions 1, 2 and 6 and
   the "Our own Go proxy" rejection: agentgateway becomes the first driver, not the destination),
   [0013](0013-model-access.md) (the "Our own Go proxy" alternative), [0041](0041-koinon-spend-ledger-and-budget-stops.md)
@@ -354,6 +356,35 @@ its native format (ADR 0069), so the gateway forwards bodies and does no format 
 **Config delivery.** Both halves come from the revisioned State stream (decision 2.1); the gateway
 confirms each revision it serves. The kubelet tick, the 90 s key settle and agentd's reload waits do
 not apply to Koinon's gateway.
+
+Record (2026-11-12, #279 slice 2; the choices below are decided): the stream is backed by two
+install-wide tables (migration 00082), `gateway_state_revisions` (one revision sequence for the whole
+State, a full secret-free snapshot per revision with a digest) and `gateway_state_acks` (gateway copy,
+revision, half). The reconciler applies the state, then stores a revision only when the snapshot
+differs from the latest one, so the stored revision records what was applied. Each new revision sends
+`pg_notify` on `koinon_gateway_state`. Retention keeps the newest 100 revisions and drops any older
+than 30 days, never the newest; snapshots hold org names and URLs, so the age bound also limits how
+long a deleted org's data stays. An ack of a revision covers every earlier one for that half. The
+`copy_id` of an ack is unique per process incarnation (for example pod UID plus a boot nonce) and a
+copy never reuses it after a restart. S3 note: LISTEN does not work behind transaction-mode
+PgBouncer, so the stream client also polls the table as a fallback.
+
+Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
+with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener
+that already carries the gateway's bearer token (`internal/otlpauth`, the token the OTLP receiver
+checks): no new port, Secret or flag, and agentd's trace token never admits it. The server refuses to
+start without an authentication wrapper. One loop reads the newest revision every 5 s and on each
+`pg_notify`, so a missed notification (transaction-mode PgBouncer) costs latency and nothing else; every
+stream reads that one cached snapshot, and a new stream reads the table once at connect. A stream sends a
+revision whenever its number differs from the last one sent, so a restored database that holds a lower
+number is followed. `internal/gateway/stateclient` is the copy's side: it applies the model half
+(`ModelPathGateway.ApplyModel`) and the MCP half (`MCPGateway.ApplyMCP`) of each revision, acks each half
+after that half applied, never acks a half that failed, and reconnects with jittered backoff. A lost ack
+(three tries) ends the stream, so the reconnect replays the newest revision and acks it again without
+applying it twice. Acks are recorded and gate nothing; the reconciler still pushes state with Apply. Slice
+4 moves the gate and must first settle the stale-leader fence of issue 635. Prior art: Envoy's xDS (versioned
+full snapshots, ACK per resource type); here one revision number covers both halves, there is no NACK
+(a failed half is simply not acked) and the copy id stands in for the nonce.
 
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need

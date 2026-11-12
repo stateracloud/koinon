@@ -20,7 +20,8 @@ const (
 	errKindGatewayApply    = "gateway_apply"    // the gateway was unreachable or the reload did not complete
 	errKindGatewayRejected = "gateway_rejected" // the gateway rejected objects or keys while serving the rest
 	errKindGatewayConfig   = "gateway_config"   // the gateway refused the whole config and kept the previous one (standalone mode)
-	errKindSandbox         = "sandbox"          // converging an agent's sandbox, its provider record or its flavor profile failed
+	errKindStateRevision   = "state_revision"   // storing a revision of the gateway State (the State stream) failed
+	errKindSandbox         = "sandbox"          // converging an agent's sandbox, its provider record or its harness profile failed
 )
 
 // unmarkedKinds are the label values of koinon_openshell_unmarked_objects and
@@ -41,6 +42,9 @@ type Metrics struct {
 	Passes       *prometheus.CounterVec
 	PassErrors   *prometheus.CounterVec
 	GatewayApply prometheus.Histogram
+	// StateRevisions counts the revisions of the gateway State stored (ADR 0097 decision 2.1). No
+	// labels: a revision, an org, an agent or a key is never a label (ADR 0023).
+	StateRevisions prometheus.Counter
 	// GatewayConfigRejected is 1 while the last Apply was refused whole by the gateway.
 	GatewayConfigRejected prometheus.Gauge
 	Sandboxes             *prometheus.GaugeVec
@@ -84,6 +88,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_gateway_apply_duration_seconds", Help: "Duration of applying the gateway state, including the wait for the reload.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 		}),
+		StateRevisions: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_state_revisions_total", Help: "Revisions of the gateway State stored for the State stream (a revision is stored only when the state changed).",
+		}),
 		GatewayConfigRejected: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_gateway_config_rejected", Help: "1 while the gateway refused the whole config of the last gateway apply and kept serving the previous one, else 0. The reason is in the reconciler log.",
 		}),
@@ -126,7 +133,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, k := range []string{
 		errKindDatabase, errKindAgentPrepare, errKindProvider, errKindMCP, errKindSpendLimit,
-		errKindProviderKeys, errKindGatewayApply, errKindGatewayRejected, errKindGatewayConfig, errKindSandbox,
+		errKindProviderKeys, errKindGatewayApply, errKindGatewayRejected, errKindGatewayConfig, errKindStateRevision, errKindSandbox,
 	} {
 		m.PassErrors.WithLabelValues(k)
 	}
@@ -143,7 +150,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
 			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.GatewayIDMismatch)
 	}
 	return m

@@ -44,6 +44,9 @@ const (
 	limitWrapUpMarker = "[Koinon] This run has"
 	// wrapUpReply is what the fake writes when it is told to wrap up.
 	wrapUpReply = "Done so far: A. Left: B."
+	// loopNudgeMarker opens agentd's nudge to a looping agent. The fake answers it with end_turn
+	// (the agent changes course), or, when holdLoop is set, waits for the next cancel.
+	loopNudgeMarker = "[Koinon] You seem to be stuck in a loop"
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
 	// summaryMarker opens agentd's end-of-turn summary prompt.
@@ -53,10 +56,10 @@ const (
 	readyCommand = "koinon:github_koinon-ready"
 )
 
-// harness is a scripted ACP agent standing in for a flavor's harness behind exec. Each exec
+// harness is a scripted ACP agent standing in for a harness behind exec. Each exec
 // of the launch command is a new process, but sessions persist across them, as they do on
 // the agent's home volume.
-type harness struct {
+type fakeHarness struct {
 	mu       sync.Mutex
 	sessions map[string][]sdk.SessionUpdate
 	nextID   int
@@ -100,14 +103,16 @@ type harness struct {
 	lingers bool
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
+	// holdLoop makes the nudge to a looping agent wait for a cancel instead of ending the turn.
+	holdLoop bool
 }
 
-func newHarness() *harness {
-	return &harness{sessions: map[string][]sdk.SessionUpdate{}, hangs: make(chan struct{}, 4)}
+func newHarness() *fakeHarness {
+	return &fakeHarness{sessions: map[string][]sdk.SessionUpdate{}, hangs: make(chan struct{}, 4)}
 }
 
 // command is the fakegateway command for the launch command.
-func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, stdout, _ io.Writer) int {
+func (h *fakeHarness) command(ctx context.Context, args []string, stdin io.Reader, stdout, _ io.Writer) int {
 	h.mu.Lock()
 	h.args = append(h.args, slices.Clone(args))
 	h.mu.Unlock()
@@ -131,26 +136,26 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	}
 }
 
-func (h *harness) scriptHook() func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+func (h *fakeHarness) scriptHook() func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.script
 }
 
 // promptMetas are the _meta of the prompts that arrived, in order.
-func (h *harness) promptMetas() []map[string]any {
+func (h *fakeHarness) promptMetas() []map[string]any {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Clone(h.metas)
 }
 
-func (h *harness) selectedModels() []string {
+func (h *fakeHarness) selectedModels() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Clone(h.models)
 }
 
-func (h *harness) set(f func(h *harness)) {
+func (h *fakeHarness) set(f func(h *fakeHarness)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	f(h)
@@ -231,13 +236,13 @@ func (p *process) summary(ctx context.Context, id sdk.SessionId, text string) (s
 }
 
 // summarySnapshot returns the summary prompts and the answer to the summary's permission request.
-func (h *harness) summarySnapshot() ([]string, string) {
+func (h *fakeHarness) summarySnapshot() ([]string, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Clone(h.summaries), h.summaryAnswer
 }
 
-func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]string) {
+func (h *fakeHarness) snapshot() (prompts, loads []string, cancels int, args [][]string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Clone(h.prompts), slices.Clone(h.loads), h.cancels, slices.Clone(h.args)
@@ -246,7 +251,7 @@ func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]str
 // process is one harness process: one ACP connection.
 type process struct {
 	out       io.Writer // the command's stdout
-	h         *harness
+	h         *fakeHarness
 	conn      *sdk.AgentSideConnection
 	crash     chan struct{}
 	ready     chan struct{} // closed once conn is set
@@ -400,6 +405,14 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
+	case strings.HasPrefix(text, loopNudgeMarker) && p.holdLoop():
+		p.resetCancel()
+		select {
+		case <-p.cancelCh():
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
 	case strings.Contains(text, resumeMarker):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
 			return sdk.PromptResponse{}, err
@@ -532,6 +545,12 @@ func (p *process) Cancel(context.Context, sdk.CancelNotification) error {
 		close(p.cancelled)
 	}
 	return nil
+}
+
+func (p *process) holdLoop() bool {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	return p.h.holdLoop
 }
 
 // cancelCh is the channel a session/cancel closes.

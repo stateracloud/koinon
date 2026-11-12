@@ -23,7 +23,9 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -130,7 +132,7 @@ func coolDown(ctx context.Context, org pgtype.UUID, agents ...pgtype.UUID) {
 func newOnDemandAgent(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
 		OrgID: org, DisplayName: "Repo helper with a long display name that is no sandbox name",
-		Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+		Harness: harness.OpenCode, CreatedBy: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
@@ -189,6 +191,27 @@ type fakeModelGateway struct {
 	ledgerBudgets bool
 	// onApply, when set, sees each state as the gateway receives it, before it is recorded.
 	onApply func(gateway.State)
+	// cancelAt is when an Apply saw its context cancelled; applyAt are the starts of every Apply.
+	cancelAt time.Time
+	applyAt  []time.Time
+}
+
+func (f *fakeModelGateway) canceledAt() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelAt
+}
+
+func (f *fakeModelGateway) applyTimes() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.applyAt...)
+}
+
+func (f *fakeModelGateway) appliedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.applied)
 }
 
 func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.IssuedKey, error) {
@@ -202,15 +225,23 @@ func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (
 	return k, nil
 }
 
-func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Revision, error) {
+func (f *fakeModelGateway) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	f.mu.Lock()
 	hold, entered := f.hold, f.entered
+	f.applyAt = append(f.applyAt, time.Now())
 	f.mu.Unlock()
 	if hold != nil {
 		if entered != nil {
 			close(entered)
 		}
-		<-hold
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.cancelAt = time.Now()
+			f.mu.Unlock()
+			return "", ctx.Err()
+		}
 	}
 	if err := s.Validate(); err != nil {
 		return "", err
@@ -233,6 +264,12 @@ func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Re
 func (f *fakeModelGateway) LedgerEnforcesBudgets() bool { return f.ledgerBudgets }
 
 func (f *fakeModelGateway) Usage() gateway.UsageReader { return gateway.NoUsage{} }
+
+func (f *fakeModelGateway) issuedKeys() []gateway.IssuedKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gateway.IssuedKey(nil), f.issued...)
+}
 
 func (f *fakeModelGateway) issuedCount() int {
 	f.mu.Lock()
@@ -297,3 +334,6 @@ var testPolicy = catalog.URLPolicy{
 		return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
 	},
 }
+
+// deleteErr is the error of a DeleteSandbox call, for the specs that check only that.
+func deleteErr(_ execution.DeleteOutcome, err error) error { return err }

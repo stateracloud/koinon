@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0067](0067-concierge.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: identity, audit
 - Decision: [design.md#5](../design.md)
 
 ## Context

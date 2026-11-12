@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Tests run under Node (node --test), so node:test and node:assert need @types/node.
+    "types": ["node"]
+  },
+  "include": ["koinon-core/test/**/*.ts", "koinon-core/index.ts"]
+}

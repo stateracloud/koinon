@@ -349,6 +349,9 @@ type installRetry struct {
 	Goroutine, What string
 	// AnyError retries on every error, not only on a refused install write (the key-set check).
 	AnyError bool
+	// Log receives the lines of this write and its retry; nil means slog.Default(). It is read once, when the
+	// retry starts, so the background goroutine never touches the process-wide default afterwards.
+	Log *slog.Logger
 }
 
 // retryInstallWrite is the one startup rule for a write that records an install audit event (ADR 0100):
@@ -366,14 +369,18 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 		return first
 	}
 	state := installWriteState(first)
+	log := r.Log
+	if log == nil {
+		log = slog.Default()
+	}
 	if denied {
-		slog.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
+		log.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
 			"install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", r.What, "err", first)
 	} else {
-		slog.Error("not recorded; retrying", "what", r.What, "err", first)
+		log.Error("not recorded; retrying", "what", r.What, "err", first)
 	}
-	safego.GoOrStop(bg, slog.Default(), r.Goroutine, stop, func(ctx context.Context) {
-		installWriteLoop(ctx, r.What, state, interval, write)
+	safego.GoOrStop(bg, log, r.Goroutine, stop, func(ctx context.Context) {
+		installWriteLoop(ctx, log, r.What, state, interval, write)
 	})
 	return nil
 }
@@ -400,7 +407,7 @@ func installWriteState(err error) string {
 // change of state, not on every attempt: last is the state already logged for the first failure (the
 // caller logged it), a retry that fails in the same state stays quiet, a refusal turning into another
 // failure (or back) is a line of its own, and so is the write landing.
-func installWriteLoop(ctx context.Context, what, last string, interval time.Duration, write func(context.Context) error) {
+func installWriteLoop(ctx context.Context, log *slog.Logger, what, last string, interval time.Duration, write func(context.Context) error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -409,7 +416,7 @@ func installWriteLoop(ctx context.Context, what, last string, interval time.Dura
 		}
 		err := write(ctx)
 		if err == nil {
-			slog.Info("recorded after a retry", "what", what)
+			log.Info("recorded after a retry", "what", what)
 			return
 		}
 		if ctx.Err() != nil {
@@ -421,10 +428,10 @@ func installWriteLoop(ctx context.Context, what, last string, interval time.Dura
 		}
 		last = state
 		if state == "denied" {
-			slog.Error("still not recorded: the database refuses koinon-api's install audit event; "+
+			log.Error("still not recorded: the database refuses koinon-api's install audit event; "+
 				"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", what, "err", err)
 			continue
 		}
-		slog.Error("still not recorded; retrying", "what", what, "err", err)
+		log.Error("still not recorded; retrying", "what", what, "err", err)
 	}
 }

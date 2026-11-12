@@ -643,7 +643,7 @@ var _ = Describe("Service", func() {
 		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			var agent pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
 
 			_, err := svc.SetAgentServers(ctx, org, actor, agent, []mcpservers.Allowance{{ServerID: s.ID}})
@@ -705,4 +705,28 @@ var _ = Describe("Service", func() {
 			Expect(got.Health).To(Equal("unknown"))
 		})
 	})
+})
+
+// agentgateway's config loader expands $NAME and ${NAME} over the whole standalone config file, so
+// the strings of a server that Koinon writes into it refuse '$' (#668).
+var _ = DescribeTable("ValidateRemote refuses '$'",
+	func(rawURL, header, prefix, want string) {
+		err := mcpservers.ValidateRemote(rawURL, mcpservers.TransportStreamableHTTP, header, prefix)
+		var inv *mcpservers.InvalidError
+		Expect(err).To(BeAssignableToTypeOf(inv))
+		Expect(err).To(MatchError(ContainSubstring(want)))
+		Expect(err).To(MatchError(ContainSubstring("environment variable")))
+	},
+	Entry("a variable in the URL path", "https://mcp.example.com/$HOME/mcp", "", "", "url must not contain '$'"),
+	Entry("a braced variable in the URL path", "https://mcp.example.com/${HOME}", "", "", "url must not contain '$'"),
+	Entry("a trailing dollar in the URL", "https://mcp.example.com/mcp$", "", "", "url must not contain '$'"),
+	Entry("a dollar in the header name", "https://mcp.example.com/mcp", "X-Api-$HOME", "", "credential header must not contain '$'"),
+	Entry("an escaped dollar in the header name", "https://mcp.example.com/mcp", "X-$$", "", "credential header must not contain '$'"),
+	Entry("a variable in the prefix", "https://mcp.example.com/mcp", "Authorization", "Bearer ${HOME} ", "credential prefix must not contain '$'"),
+	Entry("a lone dollar as the prefix", "https://mcp.example.com/mcp", "Authorization", "$", "credential prefix must not contain '$'"),
+)
+
+var _ = It("ValidateRemote accepts a server without '$'", func() {
+	Expect(mcpservers.ValidateRemote("https://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "Token ")).To(Succeed())
+	Expect(mcpservers.ValidateRemote("https://mcp.example.com/%24mcp", mcpservers.TransportSSE, "", "")).To(Succeed())
 })

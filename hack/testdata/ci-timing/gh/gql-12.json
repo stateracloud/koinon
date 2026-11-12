@@ -1,0 +1,60 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "number": 12,
+    "mergedAt": "2026-11-02T09:00:00Z",
+    "createdAt": "2026-11-02T07:00:00Z",
+    "headRefName": "fix/12-b",
+    "changedFiles": 1,
+    "files": {
+     "nodes": [
+      {
+       "path": "hack/x.sh"
+      }
+     ]
+    },
+    "timelineItems": {
+     "nodes": [
+      {
+       "__typename": "AddedToMergeQueueEvent",
+       "createdAt": "2026-11-02T08:40:00Z"
+      },
+      {
+       "__typename": "RemovedFromMergeQueueEvent",
+       "createdAt": "2026-11-02T08:50:00Z",
+       "reason": "failed_checks"
+      }
+     ]
+    },
+    "headCommit": {
+     "nodes": [
+      {
+       "commit": {
+        "committedDate": "2026-11-02T07:00:00Z",
+        "pushedDate": null,
+        "checkSuites": {
+         "nodes": [
+          {
+           "createdAt": "2026-11-02T08:30:00Z"
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "allCommits": {
+     "totalCount": 1,
+     "nodes": [
+      {
+       "commit": {
+        "oid": "ccc333"
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -71,28 +72,37 @@ func servesMCP(conn store.Connection, serverURL string) error {
 	if err != nil {
 		return fmt.Errorf("the connection %q has no readable host: %w", conn.DisplayName, err)
 	}
-	return t.ServesMCP(loc, serverURL)
+	return t.ServesMCP(loc, conn.McpHosts, serverURL)
+}
+
+// MismatchedServers lists the servers of conn's org linked to conn that conn, as it is, does not
+// serve: the servers UnlinkMismatchedServers would unlink. It writes nothing. The rows are locked
+// (FOR UPDATE) until the transaction ends.
+func MismatchedServers(ctx context.Context, q *store.Queries, conn store.Connection) ([]store.McpServer, error) {
+	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(linked, func(cur store.McpServer) bool { return servesMCP(conn, cur.Url) == nil }), nil
 }
 
 // UnlinkMismatchedServers clears the code-host link of every server of org linked to conn that conn,
-// as it is now, does not serve: called in the transaction that changed the connection's config (a
-// declared connection's baseUrl), after the change. Each unlink is audited as
-// mcp_server.data_class.reset with reason connection_host_changed; the servers' kind and legs stay.
-func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection) error {
-	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
+// as it is now, does not serve: called in the transaction that changed the connection's hosts (a
+// declared connection's baseUrl, or an admin's extra MCP host removed, #240), after the change. Each
+// unlink is audited as mcp_server.data_class.reset with the given reason (connection_host_changed,
+// connection_mcp_host_removed); the servers' kind and legs stay. It returns the servers it unlinked.
+func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection, reason string) ([]store.McpServer, error) {
+	mismatched, err := MismatchedServers(ctx, q, conn)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, cur := range linked {
-		if servesMCP(conn, cur.Url) == nil {
-			continue
-		}
+	for _, cur := range mismatched {
 		out, err := q.SetMCPServerDataClass(ctx, store.SetMCPServerDataClassParams{
 			OrgID: cur.OrgID, ID: cur.ID, Kind: cur.Kind,
 			ExposesUntrustedInput: cur.ExposesUntrustedInput, ExposesPrivateData: cur.ExposesPrivateData,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		before, after := declarationOf(cur), declarationOf(out)
 		b.Org(audit.Event{
@@ -100,9 +110,39 @@ func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batc
 			Before: map[string]any{"name": cur.Name, "kind": before.Kind, "dataClass": before.Legs, "codeHostConnectionId": before.CodeHostConnection},
 			After: map[string]any{
 				"name": out.Name, "kind": after.Kind, "dataClass": after.Legs, "codeHostConnectionId": after.CodeHostConnection,
-				"reason": "connection_host_changed",
+				"reason": reason,
 			},
 		})
 	}
-	return nil
+	return mismatched, nil
+}
+
+// OwnHostClash says why a connection of type t at loc cannot own the hosts it would serve (#240): one
+// of them is an extra MCP host of another connection of the org, removed ones included, or is in its
+// own extra list (redundant: after a base URL change that extra host would keep servers of the old
+// code host linked). Two connections that share a web host stay allowed; only a clash with an extra
+// list is refused. The caller holds the org's MCP host lock (LockOrgMCPHosts), so an add of an extra
+// host and a create or base URL change cannot both pass. Empty means free.
+func OwnHostClash(ctx context.Context, q *store.Queries, org, self pgtype.UUID, t *connectors.Type, loc connectors.Location, ownExtra []string) (string, error) {
+	own := t.MCPHosts(loc, nil)
+	for _, h := range own {
+		if slices.Contains(ownExtra, h) {
+			return fmt.Sprintf("%s is already an extra MCP host of this connection; remove it from the connection's MCP hosts first", h), nil
+		}
+	}
+	rows, err := q.ListConnections(ctx, org)
+	if err != nil {
+		return "", err
+	}
+	for _, other := range rows {
+		if other.ID == self {
+			continue
+		}
+		for _, h := range own {
+			if slices.Contains(other.McpHosts, h) {
+				return fmt.Sprintf("%s is already an extra MCP host of the connection %q; one host name is one operator and serves one code host", h, other.DisplayName), nil
+			}
+		}
+	}
+	return "", nil
 }

@@ -304,7 +304,7 @@ func (e ending) reason() string {
 		switch t.out.Kind {
 		case turnpolicy.OutCapReached:
 			return "canceled"
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			return "failed"
 		case turnpolicy.OutFenced:
 			return "fenced"
@@ -376,7 +376,7 @@ func endFor(e ending, fk fence, parkedOn string) *turnEnd {
 		case turnpolicy.OutCapReached:
 			end.outcome = string(store.RunStateCanceled)
 			return end
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			_, class, _ := t.fails()
 			end.outcome, end.class = string(store.RunStateFailed), string(cmp.Or(class, classFatal))
 			return end
@@ -554,9 +554,11 @@ func (t *runTrace) addPart(tt *turnTrace, typ, text string) {
 
 // builtinTools are the harness's own tool names (OpenCode's built-ins). A tool's name is shown only
 // if it is one of these, a Koinon tool (koinon_*) or an MCP tool (mcp__*): an ACP title is free text,
-// and OpenCode fills in a file path or a URL as the title of a finished call.
+// and OpenCode fills in a file path or a URL as the title of a finished call. The shell tool is "bash" and
+// "shell": OpenCode 2.2.5 (#60687) runs a call named bash as shell, and both stay until no supported pin uses
+// bash (ADR 0093 decision 5).
 var builtinTools = map[string]bool{
-	"bash": true, "read": true, "write": true, "edit": true, "multiedit": true, "patch": true, "apply_patch": true,
+	"bash": true, "shell": true, "read": true, "write": true, "edit": true, "multiedit": true, "patch": true, "apply_patch": true,
 	"glob": true, "grep": true, "list": true, "todowrite": true, "todoread": true, "task": true, "skill": true,
 	"webfetch": true, "websearch": true, "codesearch": true, "lsp": true, "question": true, "plan": true,
 }

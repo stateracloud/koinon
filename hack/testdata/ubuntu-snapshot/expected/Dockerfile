@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Fixture for hack/ubuntu-snapshot-bump_test.sh: the shape of flavors/opencode/Dockerfile.
+# Fixture for hack/ubuntu-snapshot-bump_test.sh: the shape of harnesses/opencode/Dockerfile.
 FROM ubuntu:24.04
 ARG UBUNTU_SNAPSHOT=20261108T000000Z
 RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \

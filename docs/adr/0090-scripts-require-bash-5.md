@@ -1,7 +1,9 @@
 # 0090. Every repository script requires bash 5
 
-- Status: Accepted
+- Status: Accepted; the lab as merge evidence (note of 2026-11-07 below) amended by [0105](0105-merge-queue-route.md)
 - Date: 2026-11-02
+- Area: engineering-process
+- Tags: tooling, ci
 - Relates to: [0079](0079-dependency-cooldown.md), [0082](0082-work-claims-and-ready-queue.md)
 - Issue: old issue 553
 
@@ -87,4 +89,4 @@ configuration and the document that described the setup are no longer tracked. T
 is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
 says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
 still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
-on a commit.
+on a commit. _(Changed by [0105](0105-merge-queue-route.md): `e2e-lab` is information only and no longer counts toward a merge.)_

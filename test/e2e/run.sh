@@ -4,8 +4,10 @@
 # E1 quickstart e2e on kind (plan item E1, ADR 0049). From nothing to an approved pull request:
 #
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
-#   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
-#      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
+#   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode harness
+#      with buildx, all pushed to the local registry (kind/registry.sh, localhost:5001, #45); the fakes deployed in
+#      koinon-e2e-fakes. The build (kind/images.sh build) runs while step 1 creates the cluster: it needs the
+#      registry, not the cluster;
 #   3. the quickstart's shell commands (plan item DOC1, ADR 0108): the blocks of
 #      test/e2e/commands/quickstart.e1, run by name through hack/docs-e1.sh. The docs site
 #      (stateracloud/koinon-docs) shows the same commands and its CI compares its page with that file. They create the namespace, copy the OpenShell client
@@ -27,8 +29,8 @@
 # deleted at the end unless KEEP=1.
 #
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
-#   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
-#   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
+#   HARNESS_CACHE=<dir> imports the harness build's layer cache from <dir>/opencode (needs the docker-container driver).
+#   HARNESS_PULL_REPO=<repo> pulls the harness image <repo>:<hack/harness-tag.sh tag> instead of building it.
 #   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
 #   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
 #   changed, then the file restores both and the script checks the install is the one that was backed up
@@ -99,7 +101,10 @@ WRAP
 fi
 # The quickstart's working directory: the repository's chart and the values file.
 ln -sfn "$root/charts" "$OUT/quickstart/charts"
-cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
+# The images live under this cluster's path on the shared registry (kind/imagerepo.sh), so the static
+# localhost:5001 of the files below is rewritten to it.
+IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
+sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/koinon-values.yaml" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -148,6 +153,8 @@ diagnostics() {
 
 cleanup() {
   for p in ${pids[@]+"${pids[@]}"}; do kill "$p" 2>/dev/null || true; done
+  # The image build has children (ko, go, docker): stop its whole process group, not only the bash.
+  if [[ -n ${build_pid:-} ]]; then kill -- "-$build_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 ]]; then diagnostics; fi
   if [[ "$KEEP" != 1 ]]; then "$here/kind/down.sh" || true; fi
   echo "logs and timings in $OUT"
@@ -157,20 +164,47 @@ trap cleanup EXIT
 
 t_all=$(date +%s)
 
+# Building the images needs the Docker daemon and the local registry, not the cluster (images.sh build pushes to
+# the registry, #45), so it runs while kind/up.sh creates the cluster (#572). The registry starts first, here;
+# kind/up.sh starts it again, which is a no-op (registry.sh start is idempotent). With SKIP_UP=1 the cluster and
+# the registry exist already and the build runs in line.
+build_pid=""
+if [[ "$SKIP_BUILD" != 1 && "$SKIP_UP" != 1 ]]; then
+  step "local registry and pull-through caches (kind/registry.sh start), before the background build"
+  "$here/kind/registry.sh" start 2>&1 | tee "$OUT/registry-start.log"
+  done_step "Registry: started before the image build"
+  t_build=$(date +%s)
+  echo "== $(date -u +%H:%M:%SZ) images (kind/images.sh build), in the background while the cluster is created"
+  # `set -m` gives the background job its own process group (pgid = its pid), portable to macOS where setsid is
+  # missing; cleanup() kills that group.
+  set -m
+  CLUSTER="$CLUSTER" "$here/kind/images.sh" build >"$OUT/images-build.log" 2>&1 &
+  build_pid=$!
+  set +m
+fi
+
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell"
+  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell (the image build ran at the same time)"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
-  step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
-  CLUSTER="$CLUSTER" "$here/kind/images.sh"
-  done_step "Images: ko build and load (6 binaries), OpenCode flavor (pull or buildx) and kind load"
+  if [[ -n $build_pid ]]; then
+    step "images: wait for the build that ran during the prerequisites"
+    wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
+    cat "$OUT/images-build.log"
+    echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
+    done_step "Images: ko build and push, harness pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
+  else
+    step "images (kind/images.sh): Koinon, the fakes and the OpenCode harness"
+    CLUSTER="$CLUSTER" "$here/kind/images.sh"
+    done_step "Images: ko build and push (6 binaries), OpenCode harness (pull or buildx) and push"
+  fi
 fi
 
 step "fakes ($FAKES)"
-"${K[@]}" apply -f "$here/kind/fakes.yaml"
+sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
 "${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
 done_step "Fakes deployed"

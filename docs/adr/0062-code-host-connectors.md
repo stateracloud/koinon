@@ -2,10 +2,13 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: connectors-tools
+- Tags: connectors, github, gitea, egress
 - Relates to: old issue 144 (decided there and in
   conversation on 2026-10-26)
 - Amends: [0007](0007-connector-model.md) (hosts per connection, provider data in the type),
-  [0049](0049-v01-scope-decisions.md) (v0.1 is no longer GitHub-only; the workflow guard)
+  [0049](0049-v01-scope-decisions.md) (v0.1 is no longer GitHub-only; the workflow guard),
+  [0036](0036-v01-demo.md) (the demo's code host)
 - Credentials: [0063](0063-forge-credential-classes.md). Work trackers: [0064](0064-work-tracker-connectors.md).
 
 ## Context
@@ -299,3 +302,12 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   wrote for `koinon/*` must now match `koinon/**`, because the branch is two levels below `koinon/`. The
   agent's display name is visible in the branch name to everyone who can read the repository, as the
   requesting and approving people already are in the commit trailers.
+
+- Amendment 2026-11-12 (#657, egress at dial time): a connection's base URL is checked again
+  when the client dials, not only when it is saved. The GitHub clients derived by `Client.For`
+  for a connection's base URL and the Gitea host dial through `catalog.URLPolicy.DialContext`
+  (the address the name resolves to now must pass `egress.allowedInternalHosts`), with no proxy
+  and no redirects followed (`http.ErrUseLastResponse`, as in `internal/tracing/export`). The
+  platform's own `github.apiUrl` / `--github-api-url` is exempt: it is operator configuration,
+  not admin input, and may name a private GHE or the e2e fake. The push writer
+  (`internal/codehost/gitpush`) is not covered yet; see #860.

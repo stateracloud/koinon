@@ -1,8 +1,9 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- include "koinon.validate" . }}
 # Koinon's non-secret configuration, read by koinon-reconciler from
-# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api and koinon-agentd take their settings
-# from KOINON_* environment variables instead. Secrets are referenced by name only.
+# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api reads only the sandboxResources section
+# of it (it refuses a per-agent override outside the bounds); its other settings, and koinon-agentd's,
+# come from KOINON_* environment variables. Secrets are referenced by name only.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -99,8 +100,8 @@ data:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-koinon
     githubTools:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp
-    flavors:
-      {{- range $flavor, $f := .Values.flavors }}
-      {{ $flavor }}:
+    harnesses:
+      {{- range $harness, $f := .Values.harnesses }}
+      {{ $harness }}:
         image: {{ include "koinon.image" (list $ $f.image) }}
       {{- end }}

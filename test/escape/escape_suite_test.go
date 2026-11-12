@@ -16,7 +16,7 @@
 //	KOINON_OPENSHELL_ENDPOINT   gateway host:port, for example a port-forward (required)
 //	KOINON_OPENSHELL_MTLS_DIR   directory with tls.crt, tls.key and ca.crt (required)
 //	KOINON_OPENSHELL_IMAGE      sandbox image with sh, git, curl and python3 at /usr/bin
-//	                            (required; the spike probe image qualifies, the flavor images
+//	                            (required; the spike probe image qualifies, the harness images
 //	                            do not)
 //	KOINON_OPENSHELL_WORKSPACE  workspace to use (default koinon-escape)
 //	KOINON_ESCAPE_REPO          the repository the grant is bound to (default
@@ -36,6 +36,9 @@
 //	                            comma-separated host:port lists of the API server and platform
 //	                            service targets; no default, the specs skip likewise without them.
 //	                            test/escape/kind.sh reads the Service IPs from the cluster it targets
+//	KOINON_ESCAPE_REGISTRIES    comma-separated host:port list of the kind local registry and its
+//	                            caches (test/e2e/kind/registry.sh); test/escape/kind.sh reads them
+//	                            from Docker; the case skips without it
 //	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA
 //	                            comma-separated host:port lists that replace the default
 //	                            targets of the egress and metadata cases
@@ -48,6 +51,9 @@
 //	                            (the chart's pods policy), KOINON_ESCAPE_NETPOL (the chart's
 //	                            default-deny NetworkPolicy name) and KOINON_ESCAPE_SERVICES
 //	                            (namespace/name:port list whose ClusterIPs must be unreachable).
+//	                            When KOINON_ESCAPE_SERVICES is set, every listed Service must
+//	                            exist (a missing one fails the spec); the built-in default list
+//	                            is skipped where a Service is absent.
 //	                            The live admission case skips unless the chart's policy is bound
 //	                            to the namespace. The Kata case fails when the variable is set
 //	                            and the sandbox is not under Kata.

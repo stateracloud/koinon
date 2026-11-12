@@ -1,7 +1,10 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
+- Area: models-spend
+- Tags: models, pricing, budgets, encryption, credentials, api
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 5 in step 3: the gateway's own cost and catalog fall away)
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
   (connection secrets move into the encrypted store), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (price versions, raw
@@ -28,6 +31,7 @@ usage type, tiers and match patterns.
    org-scoped role tokens that expire. Every call is audited.
 3. **Provider keys** are envelope-encrypted in Postgres. The key-encryption key (KEK) is generated
    by the chart into a Secret, or taken from an existing Secret. A KMS is optional.
+   _(Changed: `koinon-api` creates the KEK on its first start, because the chart cannot render key material; see the amendment of 2026-10-23 (PV1) below. This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job, see the amendment of 2026-11-11 below.)_
 4. **Model names are org-scoped**: `<org>/<model>`.
 5. **Prices** follow the Langfuse style: a price per usage type, with tiers and match patterns.
    Prices are effective-dated. Each ledger entry records the price version it used. Koinon ships a
@@ -172,7 +176,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    [docs/ops/prices.md](../ops/prices.md): a pull request that cites the page, a changed entry becomes
    a new `valid_from`, and the version is bumped.
 5. **Cost truth.** Koinon recomputes the cost of every request from the raw usage and the dated price;
-   that cost counts for limits and reports. agentgateway's own cost from the access log is kept beside
+   that cost counts for limits and reports. _(Changed: an OpenRouter entry settles at the billed cost, see the amendment of 2026-11-06 (issue #47) below.)_ agentgateway's own cost from the access log is kept beside
    it (`gateway_cost_usd`). When both exist and differ by more than 1% of the gateway's cost, the
    entry is flagged and `GET /admin/v1/prices/flagged` lists the price entries with how often. A model
    without a Koinon price is still served only when the gateway can price it; the gateway's cost then
@@ -730,6 +734,50 @@ The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the
 - The cost report's generated example sends `Authorization: Bearer`; the Admin API page says an
   Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
   the Admin API page says; the first real-key run confirms it.
+
+## Amendment (2026-11-11, issue #603): koinon-api creates the KEK
+
+Maintainer decision (procoduck, 2026-11-11).
+
+- `koinon-api` keeps creating the KEK on its first start and never overwrites it (decision 3 and the
+  2026-10-23 amendment, item 2).
+- This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
+  Only a creator that can see the database can refuse to make a new key when encrypted data already
+  exists; the hook Job cannot see the database.
+- Hardening (issue #604): a native ValidatingAdmissionPolicy (`kek-guard`, chart template
+  `kek-guard.yaml`) refuses DELETE of the KEK Secret by anyone, and UPDATE by any identity except the
+  koinon-api and key-admin service accounts, so a deleted or overwritten Secret cannot silently
+  become a new key on the next upgrade or GitOps sync. The reconciler's Secret writes are fenced by a
+  second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
+  Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
+  `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
+  when the database holds encrypted values, and a skip would not help the usual restore, where the
+  new install made its first KEK before the hold.
+- Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
+  exists, which is the usual case (a new install made a first KEK on its empty database). The restore
+  therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
+  standard input and merges it into the Secret, as the koinon-api service account, which the
+  guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
+  active and never removes a key; only `keys retire` removes one, with its database check. The add paths (`keys add`,
+  the key-admin Job's plain add and its recovery) refuse any ID the install audit chain ever recorded (a `keys.retire` or
+  `keys.forget` event, or the ID in the KEKs or Retired of a recorded state), besides an ID that stored envelopes carry:
+  IDs are never reused. Import keeps the narrower `keys.retire` rule, because it restores the same bytes. A KEK ID that
+  the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
+  retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
+  removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
+  KEK never becomes the active one, with or without the flag (`keys activate` refuses it too). The rule
+  trusts the explicit `keys.retire` event, which has two costs: a retire whose audit event was lost
+  (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event
+  either (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` there is no chain
+  to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
+  change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
+  a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,
+  so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
+  is configured, also when it creates the Secret. It writes nothing unless every KEK in the manifest opens with the install's key
+  wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
+  of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
+  to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,
+  delete the Secret, apply the backup and turn the guard on again.
 
 ## Open questions
 

@@ -8,8 +8,8 @@
 #                                `git diff --name-only $(git merge-base base HEAD) HEAD`
 #   hack/needs-e2e.sh --stdin    read the changed paths from stdin, one per line (tests)
 #   --forced-only                only the FORCED set below (the e2e's own files); needs no Go toolchain.
-#                                The full rule (no flag) is what makes a pull request run the kind e2e
-#                                in its own run, so a fork PR needs no label or lab (issue #148)
+#                                The full rule (no flag) decides the merge_group and push runs of the kind
+#                                e2e; a pull request runs it only with the `e2e` label (ADR 0105, #572)
 #
 # Needs the Go toolchain (it asks `go list` for the binaries' dependencies).
 # Exit 0 and print the paths that matter when the e2e is needed; exit 1 and print "not needed"

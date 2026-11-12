@@ -2,6 +2,8 @@
 
 - Status: Accepted (maintainer decision 2026-11-04)
 - Date: 2026-11-08
+- Area: runtime-sandbox
+- Tags: openshell, isolation, harness
 - Relates to: [0011](0011-agent-to-agent.md), [0042](0042-ask-tier-park-and-execute.md), [0045](0045-openshell-hardening-defaults.md), [0073](0073-agent-passport.md), [0075](0075-isolation-tiers.md), [0081](0081-run-limits.md)
 - Issue: [#130](https://github.com/stateracloud/koinon/issues/130)
 

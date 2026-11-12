@@ -2,6 +2,9 @@
 
 - Status: Accepted (decisions by procoduck, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person)
 - Date: 2026-11-03
+- Area: security-audit
+- Tags: leak-guard, egress, mcp, github
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 4, in step 1: a reply the guard never saw sets both legs)
 - Amends: [0084](0084-leak-guard.md) (the main protection moves from the text check to where a call sends data; decisions 2, 3, 5, 7, 8 and 12 change)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0051](0051-session-home-generations.md) (home generations), [0057](0057-mcp-servers.md) (tool tiers), [0062](0062-code-host-connectors.md) (code-host repository list), [0080](0080-tool-set-matches-egress-and-escape-hosts.md) (no web egress from the sandbox)
 - Issue: old issue 625, part of #51; changes old issue 348, old issue 349, old issue 350, old issue 351, #70 and old issue 609
@@ -103,7 +106,12 @@ A derived class is decided per call from the address arguments only:
   connector's `mcpHosts` (`api.githubcopilot.com` for github.com). A GitHub Enterprise Server or
   Gitea connection accepts only its own host. Hosts are compared by name without the port. A change
   of a connection's `baseUrl` unlinks the servers it no longer serves, audited as
-  `mcp_server.data_class.reset`.
+  `mcp_server.data_class.reset`. An org admin can add extra MCP hosts to one connection (#240), for
+  a self-hosted MCP server on its own host name: exact DNS host names, lower-case, no port, wildcard
+  or IP address, at most 20, kept in `connections.mcp_hosts`. They apply to that connection only and
+  on any host. Each add and remove is audited (`connection.mcp_host.add`, `connection.mcp_host.remove`,
+  with the actor), and a removal unlinks the servers the connection no longer serves, like a
+  `baseUrl` change (reason `connection_mcp_host_removed`).
 - **Repository visibility** (settled 2026-11-06 by procoduck, #115). The connector reads each
   code-host connection's repositories and their visibility when the connection is created, given a
   new secret or tested, and every 20 minutes after that (one koinon-api replica per round). A reading
@@ -439,6 +447,36 @@ text under the work budget, cut to its ends by `JoinEndBytes`). Every order is j
 same ends, however heavy the call: shorter ends under load would let a padded call split text in
 key order unseen (an encoding of 30 bytes a character needs more than 128 bytes each side). The
 heaviest benign shape takes about 19 MB of the 32 MiB work budget; a call over it fails closed.
+
+## Amendment (2026-11-12, #240): extra MCP hosts of one connection
+
+Decision 3 links an MCP server to a code-host connection when the server's URL names a host known
+to act on that connection's host: its web and API hosts, and the connector's own MCP hosts on the
+default host. A companion MCP server on its own host (a self-hosted `gitea-mcp`) had no way in. An
+org admin can now add hosts to one connection (`AddConnectionMCPHost`, `RemoveConnectionMCPHost`).
+The list stays inside the same rule:
+
+- **Exact match only.** A host is a plain, lower-case ASCII DNS name, compared by name. No port (one
+  host name is one operator), no scheme or path, no wildcard (a wildcard trusts every subdomain,
+  also one taken over or run by another team; ADR 0075 decision 13 refuses patterns in every host
+  list), and no IP address in any form (`127.1`, `0x7f.1` and `2130706433` are refused with a name
+  that ends in a number). The https rule and TLS verification bind a name to an operator; an IP does
+  not carry that. `xn--` labels are refused: the name is shown to the admin in Unicode but compared
+  as punycode, and a refusal cannot be mistaken for a look-alike of another operator's name.
+- **One host, one connection.** A host of an embedded connector type, or the web or API host or an
+  extra host of another connection of the org, is refused, so calls to one code host never count as
+  inside the list of another (the #117 reason). Adds in one org are serialised so that two adds
+  cannot both pass. At most 20 hosts per connection. Org admins and owners only; every change is
+  audited with the actor and the list before and after.
+- **Unlink on remove.** Our check runs when a link is written, not on every request: the classifier
+  reads the stored link. A removed host would leave its links trusted, which is fail-open. A removal
+  therefore unlinks, in the same transaction, every server the connection no longer serves, each
+  audited as `mcp_server.data_class.reset` with the reason `connection_mcp_host_removed`; the
+  response lists them and a dry run shows them before the admin confirms. Adding the host again does
+  not restore a link.
+- **Two lists for a private host.** The list says who may act through the connection. Whether the
+  platform may reach a private address stays with `egress.allowedInternalHosts`; the refusal of a
+  host that looks private names both.
 
 ## Upstream verification
 

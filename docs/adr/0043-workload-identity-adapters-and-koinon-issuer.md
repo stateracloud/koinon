@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0063](0063-forge-credential-classes.md), [0073](0073-agent-passport.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: identity, credentials
 - Amends: ADR 0006 (identity layers); replaces the "Pod Identity" wording in `docs/design.md`
   ("Execution layer details")
 
@@ -51,6 +53,7 @@ cluster.
    discovery document and JWKS published to object storage (S3, GCS, Blob or similar), and JWTs with
    `sub=koinon:<org>:<agent>` plus provider-specific claims (for example AWS session tags). The
    Kubernetes API server's issuer stays private.
+   _(Changed: koinon-api serves the discovery document and the JWKS behind the Ingress; a public bucket is an optional operator mirror. See "Where the JWKS lives" in the amendment below.)_
 4. The control plane **pushes** minted values into the agent's OpenShell provider records with
    `provider update` and refreshes them at about 75% of their TTL. The supervisor injects them only
    for allowed endpoints (decision 6).
@@ -91,7 +94,7 @@ sequenceDiagram
   attribution in cloud audit logs.
 - Positive: Koinon controls issuer key rotation independently of the cluster.
 - Negative: the issuer signing key is a high-value secret; it must live in Vault/OpenBao and rotate.
-- Negative: the JWKS must be published somewhere public (object storage) for AWS and Azure.
+- Negative: the JWKS must be published somewhere public (object storage) for AWS and Azure. _(Changed: koinon-api serves it; the bucket is an optional mirror, see the amendment below.)_
 - Negative: Azure identity creation lag and throttling mean identities should be pre-provisioned
   and pooled; ADO licenses make one identity per agent expensive.
 - Follow-ups: issuer component and key rotation; adapter interface in `internal/`; refresh scheduler;

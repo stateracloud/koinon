@@ -378,13 +378,24 @@ func (o *Owner) endTask(ctx context.Context, q *store.Queries, outcome store.Run
 	if err != nil {
 		return err
 	}
-	payload, _ := json.Marshal(map[string]any{"to": string(t.State), "reason": "run_" + string(outcome)})
+	payload, _ := json.Marshal(map[string]any{"to": string(t.State), "reason": endReason(outcome)})
 	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: o.run.OrgID, TaskID: o.run.TaskID, RunID: o.run.ID,
 		Kind: "status.changed", ActorKind: store.TaskActorKindSystem, Payload: payload,
 	})
 	return err
 }
+
+// ReasonRunSucceeded is the reason of the status.changed event with which a succeeded run completes
+// its task. RequestSessionRestartForAgent (queries/stuck.sql) matches it literally to tell a task a run
+// completed from one a person completed (#81).
+const ReasonRunSucceeded = endReasonPrefix + string(store.RunStateSucceeded)
+
+// endReasonPrefix starts the reason of the status.changed event that ends a task with the run's outcome.
+const endReasonPrefix = "run_"
+
+// endReason is the reason of the status.changed event that ends a task with the run's outcome.
+func endReason(outcome store.RunState) string { return endReasonPrefix + string(outcome) }
 
 // postReply puts the agent's reply since the run's last park on the task, if it said anything
 // (interim narration before a tool call is left out).

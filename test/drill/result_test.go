@@ -164,7 +164,7 @@ func TestFakeModelManifestIsLabelledAndParses(t *testing.T) {
 
 func checkFakeModelManifest(t *testing.T, id string) {
 	t.Helper()
-	m := drill.FakeModelManifest("koinon-drill-fakes-"+id, id, "kind.local/koinon-fakemodel:e2e", "model: drill\nturns:\n  - text: x\n")
+	m := drill.FakeModelManifest("koinon-drill-fakes-"+id, id, "localhost:5001/koinon-fakemodel:e2e", "model: drill\nturns:\n  - text: x\n")
 	docs := strings.Split(m, "\n---\n")
 	if len(docs) != 4 {
 		t.Fatalf("want 4 documents, got %d", len(docs))

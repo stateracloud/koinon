@@ -209,7 +209,7 @@ func (o *SandboxObserver) Explain(ctx context.Context, workspace, sandbox, sandb
 }
 
 // truncateSupervisor marks a message as the supervisor pod's, so that an operator does not look for the
-// flavor image.
+// harness image.
 func truncateSupervisor(msg string) string {
 	return execution.TruncateWaitDetail("supervisor pod: " + msg)
 }

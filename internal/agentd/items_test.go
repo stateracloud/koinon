@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -19,11 +20,11 @@ const markChunky = "CHUNKY"
 
 var _ = Describe("Items, not chunks (old issue 344)", func() {
 	It("stores a number of run events proportional to the items, not to the ACP chunks", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		// 3n+1 = 1201 chunks exceed the SDK's 1024-notification queue; acp.NewConn holds the
 		// harness back while the handler lags, so the burst must not overflow it.
 		const n = 400
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				if !strings.Contains(text, markChunky) {

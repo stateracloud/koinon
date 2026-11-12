@@ -2,6 +2,8 @@
 
 - Status: Accepted (decisions by procoduck, 2026-11-03)
 - Date: 2026-11-03
+- Area: security-audit
+- Tags: leak-guard, models, approvals, prompt-caching
 - Amends: [0091](0091-leak-guard-by-destination.md) (decision 5: the both-legs `external-high` approval becomes rules, judge, person; decision 8: the guarantee wording)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0084](0084-leak-guard.md) (the 5 s backstop, failClosed), [0068](0068-prompt-caching-always-on.md) (prompt caching), [0023](0023-observability-and-audit.md) (metrics and audit), [0041](0041-koinon-spend-ledger-and-budget-stops.md) and [0081](0081-run-limits.md) (the run's USD ledger), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (providers and prices), [0072](0072-agent-model-run-now-echo-check.md) (calls Koinon makes itself)
 - Issue: old issue 630, part of #51; built by #116; measured by #70

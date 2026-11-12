@@ -54,7 +54,7 @@ name = "docker"
 
   [analyzers.meta]
   dockerfile_paths = [
-    "flavors/opencode/Dockerfile",
+    "harnesses/opencode/Dockerfile",
     "hack/e2e-toolchain/Dockerfile",
     "hack/e2e-toolchain/web.Dockerfile",
   ]

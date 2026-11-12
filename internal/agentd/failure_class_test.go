@@ -19,6 +19,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -97,14 +98,14 @@ var _ = Describe("Failure classes", func() {
 		return out
 	}
 	// The specs below exercise agentd's own retry layer: the fake harness does not retry, so they
-	// run as for a flavor whose harness does not either.
+	// run as for a harness whose harness does not either.
 	quick := func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond; agentd.OwnRetryLayer(c) }
 	failedClass := func(ctx context.Context, r store.Run) store.RunFailureClass {
 		return getRun(ctx, r).FailureClass.RunFailureClass
 	}
 
 	It("waits out a 429's Retry-After, then retries and succeeds with no failure class", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		model(e, fakemodel.Faults{RateLimit: 1, RetryAfter: 1})
 		start := time.Now()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -120,7 +121,7 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	It("retries a 503 with backoff and succeeds", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		model(e, fakemodel.Faults{Unavailable: 2})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick)
@@ -132,7 +133,7 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	It("fails a context-length 400 as context_overflow without retrying", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		model(e, fakemodel.Faults{ContextLength: true})
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
@@ -151,7 +152,7 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	It("retries a mid-stream overload with backoff, then fails the run as transient", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		model(e, fakemodel.Faults{OverloadedMidStream: true})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick, func(c *agentd.Config) { c.ModelRetries = 2 })
@@ -163,7 +164,7 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	It("does not wait out a Retry-After longer than it is willing to", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 30})
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", quick, func(c *agentd.Config) { c.MaxRetryAfter = 5 * time.Second })
@@ -174,17 +175,17 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	// One layer retries (ADR 0056 amendment 2026-10-31, point 3). OpenCode retries model requests
-	// itself with the policy agentd hands it (test/flavors/retry_test.go checks that end to end), so
+	// itself with the policy agentd hands it (test/harnesses/retry_test.go checks that end to end), so
 	// a retryable failure that reaches agentd has used every try: agentd does not repeat the turn,
 	// and one failed step costs the harness's tries only.
-	Describe("for a flavor whose harness retries model requests", func() {
-		harness := func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond }
+	Describe("for a harness that retries model requests itself", func() {
+		fastBackoff := func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond }
 
 		It("does not repeat the turn after a 503, and fails the run as transient", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			model(e, fakemodel.Faults{Unavailable: 5})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", harness)
+			e.pool("agentd-a", fastBackoff)
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassTransient))
 			Expect(srv.Requests()).To(HaveLen(1), "the fake harness's one request; agentd adds none")
@@ -193,11 +194,11 @@ var _ = Describe("Failure classes", func() {
 		})
 
 		It("does not wait out a 429 either, and still names a Retry-After beyond the cap", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 120})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			start := time.Now()
-			e.pool("agentd-a", harness)
+			e.pool("agentd-a", fastBackoff)
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(time.Since(start)).To(BeNumerically("<", 15*time.Second))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
@@ -208,10 +209,10 @@ var _ = Describe("Failure classes", func() {
 
 		It("fails the standalone gateway's budget refusal, a 429 with a Retry-After of hours, as throttled", func(ctx SpecContext) {
 			// The gateway cannot mark it x-should-retry: false in standalone mode (old issue 342).
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			model(e, fakemodel.Faults{RateLimit: 5, RetryAfter: 11812})
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", harness)
+			e.pool("agentd-a", fastBackoff)
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 			Expect(failedClass(ctx, r)).To(Equal(store.RunFailureClassThrottled))
 			Expect(srv.Requests()).To(HaveLen(1))
@@ -220,9 +221,9 @@ var _ = Describe("Failure classes", func() {
 		})
 
 		It("launches the harness with the pool's retry policy", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", harness, func(c *agentd.Config) { c.ModelRetries = 4; c.MaxRetryAfter = 30 * time.Second })
+			e.pool("agentd-a", fastBackoff, func(c *agentd.Config) { c.ModelRetries = 4; c.MaxRetryAfter = 30 * time.Second })
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			_, _, _, launches := e.harness.snapshot()
 			Expect(launches).To(ContainElement(ContainElements(
@@ -232,7 +233,7 @@ var _ = Describe("Failure classes", func() {
 
 	DescribeTable("classifies an error the harness answers a prompt with, and never retries what is not transient",
 		func(ctx SpecContext, err error, want store.RunFailureClass) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			calls := 0
 			e.harness.modelFault = func(context.Context, string) error { calls++; return err }
 			r := e.enqueue(ctx, e.task(ctx, "hello"))

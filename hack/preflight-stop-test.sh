@@ -33,7 +33,9 @@ mkrepo() { # <name> <adr-lint body>
 	mkdir -p "$d/hack" "$d/docs/adr"
 	printf '#!/usr/bin/env bash\n%s\n' "$2" >"$d/hack/adr-lint.sh"
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$d/hack/adr-lint-test.sh" # the adr gate runs it first
-	chmod +x "$d/hack/adr-lint.sh" "$d/hack/adr-lint-test.sh"
+	printf '#!/usr/bin/env bash\nexit 0\n' >"$d/hack/doc-meta-lint-test.sh" # and the metadata lint after it
+	printf '#!/usr/bin/env bash\nexit 0\n' >"$d/hack/doc-meta-lint.sh"
+	chmod +x "$d/hack/adr-lint.sh" "$d/hack/adr-lint-test.sh" "$d/hack/doc-meta-lint-test.sh" "$d/hack/doc-meta-lint.sh"
 	echo x >"$d/docs/adr/0001-x.md"
 	git -C "$d" init -q
 	git -C "$d" add -A

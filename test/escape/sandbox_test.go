@@ -23,9 +23,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	modelgw "github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/templates"
@@ -143,11 +143,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		g = dialGateway(ctx)
 
 		// OpenShell binds every network rule to its binaries and checks the caller at connect():
-		// the flavor's harness plus /usr/bin/curl, which sends the gateway requests below. Without
+		// the harness plus /usr/bin/curl, which sends the gateway requests below. Without
 		// curl the connect is refused with EACCES before anything leaves the pod (old issue 322).
-		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
-		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
-			reconciler.Flavor{Binaries: gwBinaries},
+		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[harness.OpenCode]), "/usr/bin/curl")
+		key := reconciler.GatewayProfile(harness.OpenCode,
+			reconciler.Harness{Binaries: gwBinaries},
 			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
@@ -230,7 +230,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		By("a binary the gateway profile does not list (the probe's python3) is refused at connect")
 		res := probe(ctx, tcp(target{gwHost, 4000}))
 		Expect(res["tcp "+target{gwHost, 4000}.String()]).To(Equal("EACCES"),
-			"the gateway rule is bound to the flavor's binaries and curl; python3 must not reach "+gwHost+":4000")
+			"the gateway rule is bound to the harness's binaries and curl; python3 must not reach "+gwHost+":4000")
 	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
@@ -373,19 +373,32 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_INTERNAL")))
 	}, NodeTimeout(2*time.Minute))
 
+	It("cannot reach the kind local registry or its caches", func(ctx SpecContext) {
+		// test/e2e/kind/registry.sh (#45): the push registry and the pull-through caches are on the kind
+		// network, with no authentication, and the push registry accepts pushes. A sandbox that reached it
+		// could replace an image the e2e pulls (pullPolicy Always). test/escape/kind.sh lists them by
+		// container name and kind network address; the names resolve to the synthetic range, so the
+		// refusal has to come from the connect.
+		testenv.Require(testenv.Var("escape-kind-registry", "KOINON_ESCAPE_REGISTRIES"))
+		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_REGISTRIES")))
+	}, NodeTimeout(2*time.Minute))
+
 	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
 		// The Services are looked up with the cluster client (see admission_live_test.go);
 		// KOINON_ESCAPE_SERVICES is a comma-separated namespace/name:port list.
 		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE")) // and KOINON_ESCAPE_KUBECONFIG, to look up Service IPs
 		cs := kubeClient()
 		var ts []target
+		// A Service the run lists itself must exist: a typo or a missing component would
+		// otherwise read as "unreachable". The built-in defaults may be absent on a bare install.
+		_, explicit := os.LookupEnv("KOINON_ESCAPE_SERVICES")
 		for _, s := range strings.Split(envOr("KOINON_ESCAPE_SERVICES", "openshell/openshell:8080,agentgateway/agentgateway-mgmt:4001,agentgateway/agentgateway:8080"), ",") {
 			nsName, port, _ := strings.Cut(strings.TrimSpace(s), ":")
 			ns, name, _ := strings.Cut(nsName, "/")
 			svc, err := cs.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				// The e2e lists the install's own Services, which must exist (KOINON_ESCAPE_POLICY_REQUIRED=1).
-				Expect(os.Getenv("KOINON_ESCAPE_POLICY_REQUIRED")).NotTo(Equal("1"), "listed platform Service %s cannot be read: %v", nsName, err)
+				Expect(explicit || os.Getenv("KOINON_ESCAPE_POLICY_REQUIRED") == "1").To(BeFalse(), "listed platform Service %s cannot be read: %v", nsName, err)
 				GinkgoWriter.Printf("service %s: %v\n", nsName, err)
 				continue
 			}
@@ -424,7 +437,9 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(code).To(Equal(0), stderr)
 		ip := strings.TrimSpace(out)
 		Expect(netip.ParseAddr(ip)).NotTo(BeZero(), "the second sandbox's address: %q", out)
-		Expect(netip.MustParseAddr(ip).IsLoopback()).To(BeFalse(), "a pod IP, not loopback")
+		addr := netip.MustParseAddr(ip)
+		Expect(addr.IsLoopback()).To(BeFalse(), "a pod IP, not loopback")
+		Expect(synthetic.Contains(addr)).To(BeFalse(), "a real pod IP, not an address from the sandbox's synthetic DNS range (198.18.0.0/15): %s", ip)
 		deniedAtConnect(ctx, []target{{ip, 8099}})
 	}, NodeTimeout(8*time.Minute))
 
@@ -450,6 +465,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			check{"id": "shm", "op": "write", "path": "/dev/shm/koinon-escape"},
 			check{"id": "vartmp", "op": "write", "path": "/var/tmp/koinon-escape"},
 			check{"id": "tmp", "op": "write", "path": "/tmp/koinon-escape"},
+			check{"id": "shm mode", "op": "mode", "path": "/dev/shm"},
+			check{"id": "vartmp mode", "op": "mode", "path": "/var/tmp"},
 			check{"id": "mount", "op": "syscall", "name": "mount"},
 			check{"id": "unshare user", "op": "syscall", "name": "unshare_user"},
 			check{"id": "unshare mount", "op": "syscall", "name": "unshare_mount"},
@@ -462,6 +479,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		)
 		Expect(res["tmp"]).To(Equal("ok"), "control: /tmp is writable")
 		for _, id := range []string{"shm", "vartmp"} {
+			Expect(res[id+" mode"]).To(Equal("1777"), "control: "+id+" is sticky and world-writable, so only Landlock stops the write")
 			Expect(res[id]).To(BeElementOf("EACCES", "EPERM"), id)
 		}
 		for _, id := range []string{"mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {

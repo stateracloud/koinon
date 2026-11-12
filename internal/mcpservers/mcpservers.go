@@ -392,9 +392,14 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return invalid("url must not have a query or fragment, which could carry a secret; use a credential header")
 	case len(rawURL) > 2048:
 		return invalid("url is longer than 2048 characters")
+	case strings.Contains(rawURL, "$"):
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	if transport != TransportStreamableHTTP && transport != TransportSSE {
 		return invalid("transport must be %q or %q", TransportStreamableHTTP, TransportSSE)
+	}
+	if err := CheckCredentialLoader(header, prefix); err != nil {
+		return err
 	}
 	if header != "" {
 		if !headerPattern.MatchString(header) {
@@ -406,6 +411,20 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	}
 	if !prefixPattern.MatchString(prefix) {
 		return invalid("credential prefix must be at most 32 printable ASCII characters, for example \"Bearer \"")
+	}
+	return nil
+}
+
+// CheckCredentialLoader refuses a credential header name or prefix with '$', which the gateway's
+// config loader reads as an environment variable (#668). ValidateRemote calls it when a server is
+// saved, and the reconciler calls it for each stored server, so a row saved before the rule is left
+// out of the gateway's config instead of failing the config every org shares.
+func CheckCredentialLoader(header, prefix string) error {
+	if strings.Contains(header, "$") {
+		return invalid("credential header must not contain '$': the gateway's config loader reads $NAME as an environment variable")
+	}
+	if strings.Contains(prefix, "$") {
+		return invalid("credential prefix must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	return nil
 }

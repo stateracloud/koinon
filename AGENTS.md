@@ -7,8 +7,10 @@ Instructions for coding agents working on Koinon.
 - Build: `make build` · Test: `make test` · Lint: `make lint` · Codegen: `make generate`
 - Go only: `hack/go-test.sh` (what `make test` runs; Postgres tests need Docker and skip without it;
   exits 3 when an expected requirement was missing). One package: `go test ./internal/x` or
-  `go tool ginkgo -p ./internal/x`. A new suite joins the parallel list in that script once it shares
-  no database, fixed port or fixed path between processes. `test/flavors`: `make test-flavors`.
+  `GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the tag gives kopia an instant test key
+  derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it).
+  A new suite joins the parallel list in that script once it shares
+  no database, fixed port or fixed path between processes. `test/harnesses`: `make test-harnesses`.
   Details: `docs/dev/ci.md#go-test-suites`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
 - Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at
@@ -41,14 +43,16 @@ Instructions for coding agents working on Koinon.
   "draft: not run") and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
-  main plus the PR is the only e2e proof (ADR 0105); the PR's own run is advisory. The `e2e` label forces
-  it. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
+  main plus the PR is the only e2e proof (ADR 0105). A pull request runs it only with the `e2e` label
+  (advisory; #572). `flavors` is required but runs in the queue and on main, not on pull requests. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
 - A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a
   required job must report on every PR, push and merge_group build (no workflow-level `paths:`).
   ([required checks](docs/dev/ci.md#required-status-checks))
+- Adding or changing a CI check: read `docs/dev/ci-rules.md` first (rules R1-R8, limits L1-L6 of ADR 0111). Its first
+  section says when it does not apply. `hack/ci-rules-check.sh` checks the rules a script can decide.
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.
@@ -153,8 +157,10 @@ you start, after `take`:
 - Dependencies are at least 3 days old before they enter the tree, security fixes excepted with
   checks (ADR 0079; `hack/dep-age-check.sh origin/main`).
 - Chart renders are deterministic: no Helm `lookup` and no random values in templates. Generated
-  secrets come from the ensure-secrets hook Job; objects the reconciler owns are created by the
-  reconciler. Every image reference goes through `koinon.imageRef` and every pod spec gets
+  secrets come from the ensure-secrets hook Job, with one exception: koinon-api creates the KEK Secret
+  on its first start (ADR 0056, amendment 2026-11-11), because only it can see the database and
+  refuse a new key when encrypted values exist; a native ValidatingAdmissionPolicy guards that
+  Secret. Objects the reconciler owns are created by the reconciler. Every image reference goes through `koinon.imageRef` and every pod spec gets
   `koinon.imagePullSecrets` (ADR 0061). Values files without an OpenShell client TLS Secret must
   set `openshell.insecure: true`.
 - Metric labels never carry org, agent, user, ticket or run IDs; use fixed label sets (ADR 0023).

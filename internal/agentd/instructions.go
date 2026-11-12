@@ -12,22 +12,21 @@ import (
 
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
-	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
-// instructionsPath is where a flavor reads Koinon's instructions for the run (for OpenCode,
-// the "instructions" key of its config names it; flavors/opencode/README.md, ADR 0052). The agent can write
+// instructionsPath is where a harness reads Koinon's instructions for the run (for OpenCode,
+// the "instructions" key of its config names it; harnesses/opencode/README.md, ADR 0052). The agent can write
 // the home, so agentd writes the file before every harness start and restores it before every
 // prompt.
 const instructionsPath = "/sandbox/.koinon/AGENTS.md"
 
-// instructionLink is the path a flavor's harness reads its instructions from: a symbolic link
+// instructionLink is the path a harness reads its instructions from: a symbolic link
 // to instructionsPath. agentd checks it with the file before every prompt and puts it back if
 // the agent changed it. A link in the image's read-only file system cannot change; one in the
 // home can.
-func instructionLink(f store.AgentFlavor) string {
-	d, _ := flavor.Lookup(f)
+func instructionLink(f string) string {
+	d, _ := harness.Lookup(f)
 	return d.InstructionLink
 }
 
@@ -37,12 +36,12 @@ const instructionsPreamble = "# Koinon\n\n" +
 	"run and restores it before every prompt, so changing it has no effect.\n\n"
 
 // dataBullet is one line of the "Working with large data" section. It is shown only when the
-// flavor's image ships every tool in needs (flavor.Descriptor.Tools); a line with no needs
-// holds for any flavor. A line with savesOutput is also shown only for a harness that saves a
-// cut tool result to a file (flavor.Descriptor.TruncatedOutputSaved).
+// harness's image ships every tool in needs (harness.Descriptor.Tools); a line with no needs
+// holds for any harness. A line with savesOutput is also shown only for a harness that saves a
+// cut tool result to a file (harness.Descriptor.TruncatedOutputSaved).
 //
 // A text that names a tool the line does not require is built by render instead, which asks
-// whether the flavor ships that tool; text is then empty.
+// whether the harness ships that tool; text is then empty.
 type dataBullet struct {
 	needs       []string
 	savesOutput bool
@@ -50,11 +49,11 @@ type dataBullet struct {
 	render      func(has func(tool string) bool) string
 }
 
-// dataBullets is Koinon's guidance on how to read large inputs, with the tools the flavor image
-// ships (flavors/opencode/README.md). The section follows the preamble in every run, whatever the
+// dataBullets is Koinon's guidance on how to read large inputs, with the tools the harness image
+// ships (harnesses/opencode/README.md). The section follows the preamble in every run, whatever the
 // agent version says. The image has no network, no pip and no package manager the agent may use.
 //
-// The flavor decides which tools exist and how its harness cuts output, not this file: a flavor
+// The harness decides which tools exist and how its harness cuts output, not this file: a harness
 // that lacks a tool never hears about it, and a line that names several tools needs all of them.
 // OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full output to a file; a
 // harness with that behaviour (TruncatedOutputSaved) tells the agent to query the file rather
@@ -93,11 +92,11 @@ var dataBullets = []dataBullet{
 		"Use what is installed, or say what is missing.\n", nil},
 }
 
-// workingWithData renders the section for a flavor. A flavor that declares no tools gets the
+// workingWithData renders the section for a harness. A harness that declares no tools gets the
 // neutral form: the lines that name no tool (check the size, never install). The section is
 // never dropped, because those two rules hold on any image.
-func workingWithData(f store.AgentFlavor) string {
-	d, _ := flavor.Lookup(f)
+func workingWithData(f string) string {
+	d, _ := harness.Lookup(f)
 	return workingWithDataFor(d.Tools, d.TruncatedOutputSaved)
 }
 
@@ -201,7 +200,7 @@ func workspaceSection(cwd string) string {
 }
 
 // webSection tells an agent without web egress how it reaches the web. The harness's built-in web
-// fetch is not offered to it (flavor.Descriptor.NoWebToolsArg, ADR 0080), and curl fails the same
+// fetch is not offered to it (harness.Descriptor.NoWebToolsArg, ADR 0080), and curl fails the same
 // way, so the instructions send it to the org's MCP tools, which run outside the sandbox.
 func webSection(webEgress bool) string {
 	if webEgress {
@@ -233,9 +232,9 @@ func repositoriesSection(repos []repository) string {
 }
 
 // instructionsFile is the file's content for a version's instructions. It is never empty,
-// which the flavors' entry scripts require. cwd is the session directory, repos the agent's
-// granted repositories, f the flavor whose image runs the agent and webEgress whether it may reach arbitrary web hosts.
-func instructionsFile(f store.AgentFlavor, instructions, cwd string, repos []repository, webEgress bool) []byte {
+// which the harnesses' entry scripts require. cwd is the session directory, repos the agent's
+// granted repositories, f the harness whose image runs the agent and webEgress whether it may reach arbitrary web hosts.
+func instructionsFile(f string, instructions, cwd string, repos []repository, webEgress bool) []byte {
 	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + webSection(webEgress) + workingWithData(f)
 	if instructions = strings.TrimSpace(instructions); instructions == "" {
 		return []byte(head + "The agent version has no instructions of its own.\n")
@@ -271,12 +270,12 @@ func (r *runner) writeInstructions(ctx context.Context, workspace, sandbox strin
 }
 
 // checkInstructions restores the instruction file if its hash is not content's or it is
-// gone, and the flavor's link to it if the link changed, and records each restore.
-func (r *runner) checkInstructions(ctx context.Context, workspace, sandbox string, flavor store.AgentFlavor, content []byte) error {
+// gone, and the harness's link to it if the link changed, and records each restore.
+func (r *runner) checkInstructions(ctx context.Context, workspace, sandbox string, harness string, content []byte) error {
 	if err := r.checkInstructionFile(ctx, workspace, sandbox, content); err != nil {
 		return err
 	}
-	if link := instructionLink(flavor); link != "" {
+	if link := instructionLink(harness); link != "" {
 		return r.checkInstructionLink(ctx, workspace, sandbox, link, content)
 	}
 	return nil
@@ -307,7 +306,7 @@ func (r *runner) checkInstructionFile(ctx context.Context, workspace, sandbox st
 	return r.own.Record(ctx, "run.instructions_restored", payload)
 }
 
-// checkInstructionLink restores link, the flavor's path to the instruction file, if it is no
+// checkInstructionLink restores link, the harness's path to the instruction file, if it is no
 // longer a symbolic link to it. A link that cannot be restored fails the run.
 func (r *runner) checkInstructionLink(ctx context.Context, workspace, sandbox, link string, content []byte) error {
 	found, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox,

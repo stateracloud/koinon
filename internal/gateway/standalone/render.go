@@ -193,7 +193,17 @@ func marshal(doc document) ([]byte, error) {
 	if err := enc.Close(); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return escapeLoader(buf.Bytes()), nil
+}
+
+// escapeLoader writes every '$' of a rendered config as "$$". agentgateway's file loader runs the
+// whole file, comments included, through shellexpand's environment expansion before parsing it:
+// $NAME and ${NAME} become the value of the gateway's environment variable, and an unset one fails
+// the load of the shared config. "$$" is that expansion's escape for a literal '$'. Every string
+// Koinon renders arrives here, so a '$' that passed the validators (gateway.State.Validate refuses
+// it in the org-supplied URLs and credential headers) still reaches the upstream as written (#668).
+func escapeLoader(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte("$"), []byte("$$"))
 }
 
 // The types below mirror the subset of agentgateway's v1.7 LocalConfig that
@@ -831,8 +841,8 @@ func keyPolicy(keys []gateway.Key, s gateway.State, allowed map[string][]string)
 			}}
 			// No window: the counter accumulates for its lifetime (agentgateway v1.7), so a
 			// generation, not the gateway's clock, decides when spend starts over.
-			if l.Window > 0 {
-				ak.Budgets[0].Window = &window{Rolling: formatWindow(l.Window)}
+			if w := l.AppliedWindow(); w > 0 {
+				ak.Budgets[0].Window = &window{Rolling: formatWindow(w)}
 			}
 		}
 		p.Keys = append(p.Keys, ak)

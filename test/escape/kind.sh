@@ -6,7 +6,7 @@
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
 # nvcr.io or apt at run time, old issue 357) and loaded into the node. PROBE_PULL_REPO=<repo> pulls
-# <repo>:<hack/probe-tag.sh tag> (the image ci.yml's flavor-publish pushes on main) when
+# <repo>:<hack/probe-tag.sh tag> (the image ci.yml's harness-publish pushes on main) when
 # KOINON_OPENSHELL_IMAGE is unset, so the e2e needs no apt mirror (#482); a miss falls back to the build; the gateway is reached through a
 # port-forward with the client certificate it generated.
 #
@@ -17,11 +17,10 @@
 # The Gitea read-grant specs need a TLS server behind the host their grant names, because the proxy
 # dials an allowed host before it judges the request (old issue 371). Unless KOINON_ESCAPE_GITEA_URL is set,
 # or KOINON_ESCAPE_STANDIN=0, a stand-in (koinon-fakemodel -standin over TLS, in koinon-fixtures)
-# gets a certificate from a throwaway CA. OpenShell 0.1.7's supervisor (its own container and image,
-# not the sandbox image) verifies upstream TLS against webpki roots plus the supervisor image's
-# /etc/ssl/certs/ca-certificates.crt, so the gateway is re-pointed at a supervisor image derived
-# with that CA appended. Interim: OpenShell 0.1.7 can take an extra CA
-# (supervisor.network.additionalCaConfigMapName), so #80 replaces this. Nothing leaves the cluster.
+# gets a certificate from a throwaway CA. OpenShell 0.1.7's supervisor (its own container, not the
+# sandbox image) verifies upstream TLS against webpki roots plus an extra CA bundle, so the CA goes into a
+# ConfigMap named by supervisor.network.additionalCaConfigMapName; the supervisor image is the stock one.
+# Nothing leaves the cluster.
 #
 # The leak guard exfiltration case (exfil_test.go, #293) needs a guarded gateway this script does not
 # start: it runs when KOINON_ESCAPE_MCP_HOST, KOINON_ESCAPE_MCP_KEY and KOINON_ESCAPE_MCP_RECEIVER_URL are
@@ -37,9 +36,9 @@
 # _POLICY, _NETPOL, _SUPERVISOR_IMAGE, KOINON_ESCAPE_POLICY_REQUIRED=1), so the real
 # ValidatingAdmissionPolicy is enforced on the real supervisor and workload pods and the case fails,
 # not skips, when it is not. Bare `make test-escape-kind` leaves those unset (kindnet does not
-# enforce NetworkPolicy). KOINON_ESCAPE_GITEA_STANDIN=0 leaves the Gitea stand-in out: it re-points
-# the gateway at a derived supervisor image, which the chart's policy (pinned supervisor image)
-# refuses; the Gitea cases run in `make test-escape-kind`.
+# enforce NetworkPolicy). KOINON_ESCAPE_GITEA_STANDIN=0 leaves the Gitea stand-in out: it
+# re-points the gateway of the OpenShell install at a CA ConfigMap by helm upgrade, which would drift the
+# chart install; the Gitea cases run in `make test-escape-kind`.
 #
 # kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
 # and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
@@ -100,6 +99,22 @@ export KOINON_REQUIRE="${KOINON_REQUIRE:+$KOINON_REQUIRE,}escape-cluster-ips"
 export KOINON_ESCAPE_CLUSTER_DNS
 export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
 export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}
+# The kind local registry and its pull-through caches (test/e2e/kind/registry.sh, #45) authenticate nobody and
+# the push registry accepts pushes, so a sandbox must not reach them: by container name and by address on the
+# kind network. Read from Docker; a host without them (an older up.sh) leaves the case skipped.
+if [[ -z ${KOINON_ESCAPE_REGISTRIES:-} ]]; then
+  regs=()
+  while read -r name; do
+    regs+=("$name:5000")
+    ip=$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || true)
+    [[ -z $ip ]] || regs+=("$ip:5000")
+  done < <(docker ps --filter network=kind --format '{{.Names}}' | grep -E '^kind-(registry|proxy-)' || true)
+  KOINON_ESCAPE_REGISTRIES=$(IFS=,; echo "${regs[*]}")
+fi
+if [[ -n $KOINON_ESCAPE_REGISTRIES ]]; then
+  export KOINON_ESCAPE_REGISTRIES
+  KOINON_REQUIRE="$KOINON_REQUIRE,escape-kind-registry"
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=
@@ -163,11 +178,11 @@ else
   echo "== probe image $IMAGE (built from hack/spike/probe)"
   # KOINON_PROBE_BASE=<image> builds on an image already on this machine. With PROBE_PULL_REPO set the image
   # carries a content tag that names the pinned base (hack/probe-tag.sh), so the fallback ignores
-  # KOINON_PROBE_BASE: one tag, one image. An explicit KOINON_OPENSHELL_IMAGE keeps the override. Unset, the base is the digest pin of the OpenCode flavor
+  # KOINON_PROBE_BASE: one tag, one image. An explicit KOINON_OPENSHELL_IMAGE keeps the override. Unset, the base is the digest pin of the OpenCode harness
   # Dockerfile, the one definition of that base.
   (( ! tagged_probe )) || KOINON_PROBE_BASE=
-  probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/flavors/opencode/Dockerfile" | head -n 1)}
-  [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in flavors/opencode/Dockerfile" >&2; exit 1; }
+  probe_base=${KOINON_PROBE_BASE:-$(sed -n 's/^ARG BASE=//p' "$root/harnesses/opencode/Dockerfile" | head -n 1)}
+  [[ -n $probe_base ]] || { echo "no probe base: set KOINON_PROBE_BASE or restore ARG BASE= in harnesses/opencode/Dockerfile" >&2; exit 1; }
   probe_args=(--build-arg "BASE=$probe_base")
   docker build -q "${probe_args[@]}" -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi
@@ -179,7 +194,19 @@ need_gateway=0 need_gitea=0
 
 if (( need_gateway || need_gitea )); then
   echo "== stand-in image (koinon-fakemodel) for koinon-fixtures"
-  img=$(cd "$root" && KO_DOCKER_REPO=kind.local/rt1-fakemodel KIND_CLUSTER_NAME="$CLUSTER" \
+  # A cluster with the local registry (test/e2e/kind/registry.sh, #45; its KEP-1755 ConfigMap) gets the
+  # stand-in pushed to the cluster's path there, not kind-loaded. The kubelet has then pulled the same
+  # digest itself (the e2e's fakemodel, the same reproducible ko build), and with
+  # KubeletEnsureSecretPulledImages (beta, on since Kubernetes 1.35) a pulled image counts as verified
+  # only for the names it was pulled under: a kind-loaded kind.local name for that image is pulled
+  # again, which cannot work (ImagePullBackOff). Without the registry, nothing is pulled and kind.local
+  # stays as before.
+  stand_repo=kind.local/rt1-fakemodel
+  reg_host=$("${K[@]}" -n kube-public get configmap local-registry-hosting \
+    -o jsonpath='{.data.localRegistryHosting\.v1}' 2>/dev/null | sed -n 's/^host: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' || true)
+  [[ -z $reg_host ]] ||
+    stand_repo="$(KIND_REGISTRY="$reg_host" CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/rt1-fakemodel"
+  img=$(cd "$root" && KO_DOCKER_REPO="$stand_repo" KIND_CLUSTER_NAME="$CLUSTER" \
     ko build --bare --platform "linux/$(go env GOARCH)" --tags escape ./cmd/koinon-fakemodel 2>"$tmp/ko.log") ||
     { cat "$tmp/ko.log" >&2; exit 1; }
   "${K[@]}" create namespace koinon-fixtures --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
@@ -213,34 +240,34 @@ if (( need_gitea )); then
     "${K[@]}" -n koinon-fixtures apply -f - >/dev/null
   "${K[@]}" -n koinon-fixtures rollout status deploy/escape-gitea-standin --timeout=180s
 
-  # OpenShell 0.1.7's supervisor verifies the upstream certificate against webpki roots plus
-  # /etc/ssl/certs/ca-certificates.crt in the SUPERVISOR image (distroless, no shell), not in the
-  # sandbox image. Derive a supervisor image from the exact one the install runs, with the throwaway
-  # CA appended, and point the gateway at it. Interim: OpenShell 0.1.7 can take an extra CA
-  # (supervisor.network.additionalCaConfigMapName), so #80 removes this block. The chart ref is the one
-  # test/e2e/kind/up.sh installs.
+  # OpenShell 0.1.7's supervisor verifies the upstream certificate against webpki roots plus the extra
+  # CA bundle the gateway hands it. The chart takes that bundle from an operator-owned ConfigMap with a
+  # ca.crt key in the gateway namespace (supervisor.network.additionalCaConfigMapName, chart README
+  # "Additional destination CAs"). The gateway reads it at startup and the chart does not checksum the
+  # ConfigMap, so the name carries a digest of the CA: every run makes a new CA, a new name changes the helm
+  # value, and the upgrade (--wait) rolls the gateway. The same upgrade resets supervisor.image.* to the
+  # chart's 0.1.7 defaults (values.yaml: registry "" = global registry, repository openshell/supervisor,
+  # tag "" = appVersion, pullPolicy null = global): --reuse-values would otherwise keep the derived
+  # kind.local/koinon/escape-supervisor image that an older kind.sh set on a dev cluster.
+  # The chart ref is the one test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")
-  sup_src=ghcr.io/nvidia/openshell/supervisor:$os_version
-  sup_reg=kind.local sup_repo=koinon/escape-supervisor sup_tag=$os_version-escape-ca
-  sup_ref=$sup_reg/$sup_repo:$sup_tag # built, loaded and rendered by the chart under exactly this name
-  echo "== supervisor image $sup_src + throwaway CA"
-  mkdir -p "$tmp/sup"
-  docker pull -q "$sup_src" >/dev/null
-  cid=$(docker create "$sup_src" /bin/true)
-  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$tmp/sup/ca-certificates.crt" || { docker rm "$cid" >/dev/null; exit 1; }
-  docker rm "$cid" >/dev/null
-  cat "$pki/ca.crt" >>"$tmp/sup/ca-certificates.crt"
-  printf 'FROM %s\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n' "$sup_src" >"$tmp/sup/Dockerfile"
-  docker build -q -t "$sup_ref" "$tmp/sup" >/dev/null
-  kind load docker-image --name "$CLUSTER" "$sup_ref"
-  # supervisor.image.{registry,repository,tag,pullPolicy} are the 0.1.7 chart's keys (values.yaml);
-  # the registry is set so the image is kind.local/..., never pulled from anywhere.
+  echo "== additional destination CA (throwaway CA) for the supervisor"
+  ca_sum=$(openssl x509 -in "$pki/ca.crt" -noout -fingerprint -sha256 | tr -d ':' | sed 's/.*=//' | tr 'A-F' 'a-f' | cut -c1-12)
+  ca_cm="escape-destination-ca-$ca_sum"
+  "${K[@]}" -n openshell create configmap "$ca_cm" \
+    --from-file=ca.crt="$pki/ca.crt" --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
   helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
     --version "$os_version" --namespace openshell --reuse-values \
-    --set "supervisor.image.registry=$sup_reg" --set "supervisor.image.repository=$sup_repo" \
-    --set "supervisor.image.tag=$sup_tag" --set supervisor.image.pullPolicy=IfNotPresent \
+    --set supervisor.network.additionalCaConfigMapName="$ca_cm" \
+    --set supervisor.image.registry="" \
+    --set supervisor.image.repository=openshell/supervisor \
+    --set supervisor.image.tag="" \
+    --set supervisor.image.pullPolicy=null \
     --wait --timeout 5m
+  # Older CA ConfigMaps from earlier runs are no longer referenced.
+  "${K[@]}" -n openshell get configmap -o name | grep '^configmap/escape-destination-ca-' |
+    grep -v "/$ca_cm\$" | xargs -r "${K[@]}" -n openshell delete >/dev/null || true
   export KOINON_ESCAPE_GITEA_URL="https://$gitea_host/gitea"
 fi
 

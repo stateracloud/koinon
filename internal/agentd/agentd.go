@@ -3,7 +3,7 @@
 // Package agentd drives runs (plan item AG1; ADRs 0016 as amended by 0049, 0029, 0030).
 //
 // A [Pool] of workers claims runs from Postgres, takes ownership under a new epoch, waits
-// until koinon-reconciler reports the agent's sandbox ready in agent_sandboxes, execs the flavor's ACP launch command through the execution
+// until koinon-reconciler reports the agent's sandbox ready in agent_sandboxes, execs the harness's ACP launch command through the execution
 // backend (OpenShell's non-TTY exec) and speaks ACP to the harness over the stream's stdin
 // and stdout:
 //
@@ -11,7 +11,7 @@
 //     (/sandbox/.koinon/AGENTS.md), and their hash is recorded with the session;
 //   - initialize, then session/new on a task's first run (the session ID is stored on the
 //     task) or session/load afterwards;
-//   - for flavors that announce it, agentd waits until Koinon's MCP tools are there and
+//   - for harnesses that announce it, agentd waits until Koinon's MCP tools are there and
 //     selects the agent's model on the session;
 //   - the task's new messages are sent as the prompt, after the instruction file is checked
 //     and, if it changed, restored;
@@ -47,6 +47,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -123,7 +124,7 @@ type Config struct {
 	// CancelGrace is how long the harness gets to end its turn after session/cancel.
 	// Default 10s.
 	CancelGrace time.Duration
-	// ReadyTimeout bounds the wait, after session/new or session/load, for a flavor's harness
+	// ReadyTimeout bounds the wait, after session/new or session/load, for a harness
 	// to announce Koinon's MCP tools (readyCommand). Default 1m.
 	ReadyTimeout time.Duration
 	// ReadySettle is the pause after that announcement before the first prompt: OpenCode
@@ -154,10 +155,10 @@ type Config struct {
 	MaxTakeovers int
 	// ModelRetries, RetryBackoff and MaxRetryAfter are Koinon's policy for retrying a model request
 	// that failed with a transient or throttled error (ADR 0030 failure classes; ADR 0056
-	// amendment 2026-10-31, point 3). Exactly one layer applies it: for a flavor whose harness
-	// retries model requests itself (flavor.Descriptor.RetriesModelRequests, OpenCode) the
+	// amendment 2026-10-31, point 3). Exactly one layer applies it: for a harness whose harness
+	// retries model requests itself (harness.Descriptor.RetriesModelRequests, OpenCode) the
 	// harness gets the policy as launch switches and agentd does not repeat the turn; for any
-	// other flavor agentd repeats the turn. Either way one failed step costs at most
+	// other harness agentd repeats the turn. Either way one failed step costs at most
 	// ModelRetries+1 gateway requests and waits at most ModelRetries × MaxRetryAfter.
 	//
 	// ModelRetries is how many retries follow the first try before the run fails. Default 2
@@ -172,12 +173,16 @@ type Config struct {
 	// MaxRetryAfter is the longest Retry-After Koinon waits out; a provider asking for more
 	// fails the run as throttled, so a long Retry-After cannot hold a run. Default 60s.
 	MaxRetryAfter time.Duration
-	// ownRetryLayer makes agentd repeat failed turns even for a flavor whose harness retries.
+	// LoopThresholds are how many steps of each stuck pattern make a loop (ADR 0030 amendment
+	// 2026-11-11). The zero value is loopguard.DefaultThresholds; in a struct that is set, a field of zero or
+	// less turns its pattern off.
+	LoopThresholds loopguard.Thresholds
+	// ownRetryLayer makes agentd repeat failed turns even for a harness whose harness retries.
 	// Only this package's tests set it (export_test.go), to exercise agentd's own layer with the
 	// fake harness, which does not retry.
 	ownRetryLayer bool
 	// GatewayURL is agentgateway's base URL as sandboxes reach it, for example
-	// http://koinon-gateway.koinon.svc:8080. Flavors get <GatewayURL>/v1 for models and
+	// http://koinon-gateway.koinon.svc:8080. Harnesses get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
@@ -235,6 +240,9 @@ func (c *Config) defaults() error {
 	setDefault(&c.WrapUpNotice, 5*time.Minute)
 	setDefault(&c.WrapUpFraction, runlimits.WrapUpFraction)
 	setDefault(&c.UsagePoll, 5*time.Second)
+	if c.LoopThresholds == (loopguard.Thresholds{}) {
+		c.LoopThresholds = loopguard.DefaultThresholds
+	}
 	if c.Now == nil {
 		c.Now = time.Now
 	}

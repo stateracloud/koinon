@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy vuln deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy vuln deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -100,14 +100,14 @@ existing() { # <regexp>: changed files matching the regexp that still exist
 	while IFS= read -r f; do [[ -e $f ]] && echo "$f"; done < <(grep -E -- "$1" <<<"$FILES" || true)
 }
 
-# triggering <gate>: the changed files that turn the gate on. generate, chart and web are CI
+# triggering <gate>: the changed files that turn the gate on. generate, chart, web, tidy, vuln and scripts are CI
 # jobs: the job's rule (hack/paths.rules) decides, so preflight and CI cannot disagree.
 triggering() {
 	local f
 	while IFS= read -r f; do
 		[[ -n $f ]] || continue
 		case $1 in
-		generate | chart | web) paths_job_triggers "$1" "$f" && echo "$f" ;;
+		generate | chart | web | tidy | vuln | scripts) paths_job_triggers "$1" "$f" && echo "$f" ;;
 		*) paths_match gate "$1" "$f" && echo "$f" ;;
 		esac
 	done <<<"$FILES"
@@ -126,6 +126,7 @@ reason() {
 	case $1 in
 	go) echo "$n Go files changed" ;;
 	tidy) echo "Go files or go.mod/go.sum changed" ;;
+	vuln) echo "go.mod or go.sum changed" ;;
 	deps) echo "dependency manifests, lockfiles or Dockerfiles changed" ;;
 	proto) echo "proto files changed" ;;
 	generate) echo "a generator input or output changed" ;;
@@ -135,6 +136,7 @@ reason() {
 	web) echo "web/ changed" ;;
 	shell | bash5) echo "$n shell scripts changed" ;;
 	actionlint) echo "workflows or the actionlint config changed" ;;
+	zizmor) echo "workflows, composite actions or the zizmor config changed" ;;
 	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
 	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
@@ -176,7 +178,7 @@ in_nested_module() {
 	return 1
 }
 
-go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when no Go file changed;
+go_pkgs() { # changed Go packages as ./dir args; every package (minus test/harnesses) when no Go file changed;
 	# nothing when every changed Go file sits in a nested module
 	local f d out="" seen=0
 	for f in $(existing '\.go$'); do
@@ -196,7 +198,7 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 		go list -f '{{.Dir}}' ./... | while IFS= read -r d; do
 			d=${d#"$root"}
 			d=.${d}
-			[[ $d == ./test/flavors ]] || printf '%s ' "$d"
+			[[ $d == ./test/harnesses ]] || printf '%s ' "$d"
 		done
 	else
 		echo "$out"
@@ -253,7 +255,9 @@ g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
 	buf lint
-	buf breaking --against ".git#branch=${base#origin/}"
+	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
+	against=$(hack/buf-breaking-against.sh "$base")
+	buf breaking --against ".git#ref=$against"
 }
 
 tree_state() { git status --porcelain; git diff | cksum; }
@@ -270,7 +274,7 @@ g_generate() {
 }
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
-g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
+g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh && hack/doc-meta-lint-test.sh >/dev/null && hack/doc-meta-lint.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {
@@ -282,6 +286,13 @@ g_shell() {
 }
 g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
 	actionlint
+}
+g_vuln() { # govulncheck at the pinned version, as the go-vuln job does (needs the network: proxy.golang.org, vuln.go.dev)
+	hack/govulncheck-test.sh
+	hack/govulncheck.sh
+}
+g_zizmor() { # workflow security lint, offline and default persona as in CI (.github/zizmor.yml)
+	zizmor --offline --no-progress .github
 }
 g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
 	hack/runner-lint-test.sh
@@ -361,6 +372,10 @@ run_gate() { # <gate>
 	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
+	vuln) command -v go >/dev/null || { echo "vuln skip (go not installed; CI runs govulncheck $GOVULNCHECK_VERSION, hack/versions.env)"; return; } ;;
+	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; CI pins $ZIZMOR_VERSION: brew install zizmor, or the release binary, see hack/versions.env)"; return; }
+		have=$(zizmor --version 2>/dev/null | awk '{print $2}')
+		[[ $have == "$ZIZMOR_VERSION" ]] || echo "zizmor warn: CI pins $ZIZMOR_VERSION (hack/versions.env), this is ${have:-unknown}; findings can differ" ;;
 	esac
 	ran=$((ran + 1))
 	start=$SECONDS

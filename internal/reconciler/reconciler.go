@@ -5,7 +5,7 @@
 //   - an active agent gets its org's OpenShell workspace (one per org, ADR 0002), an
 //     agentgateway key issued through the ModelGateway (material in a Kubernetes Secret in
 //     Koinon's namespace, only the hash in gateway config and Postgres), a provider record
-//     holding that key behind a stable placeholder, and a sandbox on its flavor image with an
+//     holding that key behind a stable placeholder, and a sandbox on its harness image with an
 //     enforced policy (ADR 0045) and a persistent home;
 //   - a sandbox stops after IdleTimeout without an active run (parked runs included) and starts
 //     again when a run is queued or a park is resolved (ADR 0049);
@@ -39,7 +39,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -93,6 +93,10 @@ type Endpoint struct {
 
 // Config configures a Reconciler.
 type Config struct {
+	// StateRevisionDB, when set, replaces the pool for storing State stream revisions. For tests of
+	// a slow or failing store.
+	StateRevisionDB staterev.DB
+
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
@@ -128,12 +132,12 @@ type Config struct {
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
-	// GitBinaries may use the GitHub endpoints of a read grant, besides the flavor's binaries.
+	// GitBinaries may use the GitHub endpoints of a read grant, besides the harness's binaries.
 	// Default DefaultGitBinaries.
 	GitBinaries []string
-	// Flavors maps each flavor to its image and binaries. Agents of a flavor without an image
+	// Harnesses maps each harness to its image and binaries. Agents of a harness without an image
 	// are reported as errors.
-	Flavors map[store.AgentFlavor]Flavor
+	Harnesses map[string]Harness
 	// RuntimeClassName is the sandbox runtime class (ADR 0045: kata). Empty uses the
 	// gateway's default.
 	RuntimeClassName string
@@ -188,10 +192,15 @@ type Config struct {
 	// sets koinon_reconciler_openshell_gateway_id_mismatch (old issue 475). Either nil/empty skips it.
 	GatewayID  string
 	GatewayIDs GatewayIDSource
-	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
-	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
-	// DefaultMaxRecreatesPerPass; negative is no cap.
+	// MaxRecreatesPerPass caps the sandboxes deleted to recreate them with a changed spec (a new
+	// supervisor, image or resources); the others wait for a later pass. It is a token bucket: this
+	// many at once, refilled at this many per ResyncInterval (the rate of one pass per interval).
+	// Zero is DefaultMaxRecreatesPerPass; negative is no cap.
 	MaxRecreatesPerPass int
+	// WorkTimeout bounds one agent's sandbox work item (the creating, starting, stopping,
+	// recreating and recording of one sandbox). A stuck item ends after it and holds only its own
+	// agent until then. Zero is DefaultWorkTimeout.
+	WorkTimeout time.Duration
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -207,6 +216,8 @@ type Reconciler struct {
 	backend      execution.Backend
 	gw           gateway.ModelGateway
 	secrets      SecretStore
+	// states stores the revisions of the gateway State (the State stream, ADR 0097).
+	states staterev.Publisher
 
 	mu sync.Mutex
 	// wsMu guards the per-pass workspace map, which per-sandbox jobs read concurrently.
@@ -217,11 +228,11 @@ type Reconciler struct {
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
 	draftGitHubDropped map[string]bool
-	// flavorProfileSettled holds the flavor profiles, by workspace and profile ID (flavorProfileKey),
-	// that claimFlavorProfiles found marked or missing (under mu), so an org whose flavors no active
-	// agent keeps current does not cost a gateway call per flavor every pass. reconcileActive clears
+	// harnessProfileSettled holds the harness profiles, by workspace and profile ID (harnessProfileKey),
+	// that claimHarnessProfiles found marked or missing (under mu), so an org whose harnesses no active
+	// agent keeps current does not cost a gateway call per harness every pass. reconcileActive clears
 	// the entry when it imports the profile again; a new workspace is a new key.
-	flavorProfileSettled map[string]bool
+	harnessProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -239,8 +250,11 @@ type Reconciler struct {
 	// gwMu guards gwMismatch, the last result of the gateway ID check (gatewayid.go).
 	gwMu       sync.Mutex
 	gwMismatch bool
-	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
-	recreates atomic.Int32
+	// bucketMu guards the recreate token bucket (takeRecreate).
+	bucketMu     sync.Mutex
+	bucketTokens float64
+	bucketAt     time.Time
+	recreating   map[agentKey]bool // agents holding a token for a recreate not yet started
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
@@ -271,6 +285,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.MaxRecreatesPerPass == 0 {
 		cfg.MaxRecreatesPerPass = DefaultMaxRecreatesPerPass
+	}
+	if cfg.WorkTimeout <= 0 {
+		cfg.WorkTimeout = DefaultWorkTimeout
 	}
 	if cfg.KeepWarmPerOrg == 0 {
 		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
@@ -334,14 +351,48 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
+		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
-		flavorProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
 		}),
 	}, nil
+}
+
+// stateDB is the database the State stream's revisions go to: the pool, unless the config names one.
+func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
+	if cfg.StateRevisionDB != nil {
+		return cfg.StateRevisionDB
+	}
+	return pool
+}
+
+// statePublishTimeout bounds publishState.
+const statePublishTimeout = 5 * time.Second
+
+// publishState stores the state of this pass as a revision of the State stream when it differs from
+// the latest one (ADR 0097 decision 2.1), after the Apply, so the stored revision records what was
+// applied. Nothing reads the stream yet, so a failure is logged and
+// counted and never holds the pass back: the Apply below is what serves the state. The state is the
+// one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
+// gateway that follows the stream serves what the agentgateway drivers serve.
+func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
+	// Its own short deadline: a slow database must not hold the pass.
+	ctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
+	defer cancel()
+	served, _ := s.WithoutInvalidLimits()
+	p, err := r.states.Publish(ctx, served)
+	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
+		r.log.Warn("storing the gateway state revision failed; the gateway is applied as before", "err", err)
+		return
+	}
+	if p.Changed {
+		r.m.StateRevisions.Inc()
+		r.log.Debug("gateway state revision stored", "revision", p.Revision)
+	}
 }
 
 // notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
@@ -372,6 +423,41 @@ type work struct {
 	tools []gateway.ToolGrant
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
+
+	// submitted is set by the pass when the item went to the work queue (pass goroutine only).
+	submitted bool
+	// wantsRecreate is set when the item asked for a recreate slot; an item that ends without it
+	// releases the agent's hold (runJob).
+	wantsRecreate bool
+	// rej holds the gateway's rejection message for this agent's org, which is recorded after the
+	// agent's own work item, by whichever side comes last. A pointer, so a copy of the work (a
+	// temporary variation of it) shares it.
+	rej *rejectionNote
+}
+
+// rejectionNote is the shared state of w.rej; mu guards it.
+type rejectionNote struct {
+	mu   sync.Mutex
+	done bool
+	msg  string
+}
+
+// markDone says the agent's work item for this pass has ended or will not run, and returns the
+// rejection message set by then, which the caller records.
+func (w *work) markDone() string {
+	w.rej.mu.Lock()
+	defer w.rej.mu.Unlock()
+	w.rej.done = true
+	return w.rej.msg
+}
+
+// setRejection stores the rejection message. It returns true when the work item is already done:
+// the caller records the message itself. Otherwise the item records it when it ends.
+func (w *work) setRejection(msg string) bool {
+	w.rej.mu.Lock()
+	defer w.rej.mu.Unlock()
+	w.rej.msg = msg
+	return w.rej.done
 }
 
 // names are the agent's object names: the recorded ones, and the GitHub ones derived from the
@@ -392,23 +478,44 @@ func (w *work) logAttrs() []any {
 // It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
 // runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
-	err := r.reconcilePass(ctx)
+	q := r.newWorkQueue(ctx)
+	defer q.Stop()
+	b, err := r.reconcilePass(ctx, q)
+	// The loop leaves the sandbox work to the queue; a caller of ReconcileAll wants it done.
+	err = errors.Join(append([]error{err}, b.wait()...)...)
+	r.observeSandboxes(ctx)
 	r.observeUnmarked(ctx)
 	return err
 }
 
 // reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
-func (r *Reconciler) reconcilePass(ctx context.Context) error {
+// A pass loads the state, runs the gateway step (plan, Apply, recordServed) and hands each agent's
+// sandbox work to q; it does not wait for that work. The returned batch holds the work of this pass.
+func (r *Reconciler) reconcilePass(ctx context.Context, q *workQueue) (*jobs, error) {
 	start := time.Now()
-	err := r.reconcileAll(ctx)
-	r.m.PassDuration.Observe(time.Since(start).Seconds())
+	b := &jobs{}
+	r.log.Info("reconcile pass started")
+	err := r.reconcileAll(ctx, q, b)
+	took := time.Since(start)
+	r.m.PassDuration.Observe(took.Seconds())
 	result := "ok"
 	if err != nil {
 		result = "error"
 	}
 	r.m.Passes.WithLabelValues(result).Inc()
-	r.observeSandboxes(ctx)
-	return err
+	r.log.Info("reconcile pass ended", "duration", took.Round(time.Millisecond), "jobs", b.count(), "result", result)
+	// The jobs end later. Then the recorded states are current: count them, and say how long the
+	// slowest job took, so a slow backend call is in the log.
+	safego.Go(ctx, r.log, "reconcile-jobs-report", func(ctx context.Context) {
+		b.wg.Wait()
+		octx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		r.observeSandboxes(octx)
+		name, d := b.slowest()
+		r.log.Info("reconcile jobs finished", "since_pass_start", time.Since(start).Round(time.Millisecond),
+			"jobs", b.count(), "slowest", name, "slowest_took", d.Round(time.Millisecond))
+	})
+	return b, err
 }
 
 // observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
@@ -462,7 +569,7 @@ func (r *Reconciler) observeUnmarked(ctx context.Context) {
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
-	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Flavors)
+	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Harnesses)
 	if err != nil {
 		if ctx.Err() == nil {
 			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
@@ -485,8 +592,7 @@ func (r *Reconciler) observeUnmarked(ctx context.Context) {
 	r.m.UnmarkedStale.Set(0)
 }
 
-func (r *Reconciler) reconcileAll(ctx context.Context) error {
-	r.recreates.Store(0)
+func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) error {
 	r.refreshSupervisor(ctx)
 	r.checkGatewayID(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
@@ -507,6 +613,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
 		warm := 0
+		// granted holds the agents decided in this pass: true when granted, false when refused. An
+		// agent without an entry (prepare failed, or nothing to do) keeps its stored value.
+		granted := map[pgtype.UUID]bool{}
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
@@ -514,27 +623,38 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return err
 			}
-			if err != nil {
-				r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
-				errs = append(errs, err)
-				continue
-			}
-			if w == nil {
+			if err != nil || w == nil {
+				if err != nil {
+					r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
+					errs = append(errs, err)
+				}
+				if a.KeepWarm && a.KeepWarmGranted && a.Status == store.AgentStatusActive {
+					// Its slot stays held, so a passing error does not hand it to the next agent.
+					warm++
+				}
 				continue
 			}
 			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
 				// The list is oldest first, so the cap keeps the same agents from pass to pass.
 				w.keepWarm = true
+				granted[a.ID] = true
 				warm++
+			} else {
+				granted[a.ID] = false
 			}
 			items = append(items, w)
 		}
-		if err := r.claimFlavorProfiles(ctx, org, agents); err != nil {
+		if err := r.recordKeepWarmGrants(ctx, org.ID, agents, granted); err != nil {
+			// The grant itself holds; only the API's view of it is late. The next pass retries.
+			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+			errs = append(errs, err)
+		}
+		if err := r.claimHarnessProfiles(ctx, org, agents); err != nil {
 			if errors.Is(err, errAbortPass) {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return errors.Join(append(errs, err)...)
 			}
-			// A flavor profile is part of what an agent's sandbox converges (reconcileActive and
+			// A harness profile is part of what an agent's sandbox converges (reconcileActive and
 			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
 			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 			errs = append(errs, err)
@@ -570,6 +690,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	if limitFor == nil {
 		limitFor = ledger.AgentLimit
 	}
+	live := make(map[agentKey]bool, len(items))
+	for _, w := range items {
+		live[agentKey{w.org.ID, w.agent.ID}] = true
+	}
+	r.releaseRecreatesExcept(live, q.Busy)
 	agents := make([]gatewayplan.Agent, len(items))
 	for i, w := range items {
 		agents[i] = gatewayplan.Agent{
@@ -649,21 +774,24 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.m.PassErrors.WithLabelValues(kind).Inc()
 		errs = append(errs, pr.Err)
 	}
-	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
-	// An agent whose key the gateway already serves does not depend on the Apply below, which may
-	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,
-	// concurrently with it. An agent with a new key waits for the Apply, as before.
-	early := workOf(items, plan.Early)
-	// One semaphore for the whole pass, so the early and the late jobs together stay within
-	// SandboxJobs.
-	sem := make(chan struct{}, r.cfg.SandboxJobs)
-	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
+	// Sandbox work is a per-agent work queue, outside the sequential pass (plan item LT1, practice B4,
+	// issue 573). An agent whose key the gateway already serves does not depend on the Apply below,
+	// which may wait for agentgateway's hot reload for about a minute: its sandbox work is queued now,
+	// concurrently with it. An agent with a new key is queued after the Apply, as before. The pass
+	// never waits for the queue: a slow call for one agent holds only that agent.
+	r.submit(q, b, workOf(items, plan.Early), workspaces)
 
 	var res gatewayplan.ApplyResult
 	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, plan.State)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
+	// Record what was applied. A gateway that took nothing (unreachable, whole config refused) has
+	// nothing to record; a partial rejection still left the rest live.
+	var applyRej *gateway.RejectedError
+	if applyErr == nil || errors.As(applyErr, &applyRej) {
+		r.publishState(ctx, plan.State)
+	}
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
 		// but the objects named, which are reported on their org and do not hold back the others.
@@ -725,31 +853,62 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.recordMessage(ctx, w, errors.New(msg))
 		heldBack++
 	}
-	rejections := res.Rejections
-	errs = append(errs, r.startJobs(ctx, workOf(items, outcome.Run), workspaces, sem).wait()...)
-	errs = append(errs, earlyJobs.wait()...)
-	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
-	// Several rejections of one org are joined into one message, not overwritten.
+	r.submit(q, b, workOf(items, outcome.Run), workspaces)
+	// Each rejected object is reported on its org's agents, after their own work item has recorded its
+	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
-	for _, x := range rejections {
+	for _, x := range res.Rejections {
 		byOrg[x.Org] = append(byOrg[x.Org], fmt.Sprintf("the gateway rejected %s %s: %s", x.Kind, x.Name, x.Reason))
 	}
 	for _, w := range items {
-		if msgs := byOrg[w.org.Slug]; len(msgs) > 0 {
+		if !w.submitted {
+			w.markDone()
+		}
+		if msgs := byOrg[w.org.Slug]; len(msgs) > 0 && w.setRejection(strings.Join(msgs, "; ")) {
 			r.recordMessage(ctx, w, errors.New(strings.Join(msgs, "; ")))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// jobs is a set of per-sandbox jobs started by startJobs.
+// agentKey identifies an agent in the work queue.
+type agentKey struct{ org, agent pgtype.UUID }
+
+// sandboxJob is one agent's sandbox work of one pass.
+type sandboxJob struct {
+	w          *work
+	workspaces map[string]string
+	batch      *jobs
+}
+
+// workQueue is the per-agent queue of sandbox jobs (workqueue.go).
+type workQueue = keyedQueue[agentKey, *sandboxJob]
+
+// newWorkQueue returns the queue the leader's passes feed. Its workers stop with ctx or with Stop,
+// and SandboxJobs bounds how many agents are worked on at once.
+func (r *Reconciler) newWorkQueue(ctx context.Context) *workQueue {
+	return newKeyedQueue(ctx, r.cfg.SandboxJobs, r.runJob, func(j *sandboxJob) {
+		// Replaced by a newer item of the same agent, or left when the leader ended: it never runs.
+		j.w.markDone()
+		j.batch.wg.Done()
+	})
+}
+
+// DefaultWorkTimeout bounds one agent's sandbox work item.
+const DefaultWorkTimeout = 5 * time.Minute
+
+// jobs is the set of sandbox jobs one pass handed to the queue.
 type jobs struct {
 	wg   sync.WaitGroup
 	mu   sync.Mutex
 	errs []error
+	n    int
+	// slowestName and slowestTook are the longest job that ended.
+	slowestName string
+	slowestTook time.Duration
 }
 
-// wait blocks until every job has ended and returns their errors.
+// wait blocks until every job has ended (or was dropped) and returns their errors.
 func (j *jobs) wait() []error {
 	j.wg.Wait()
 	j.mu.Lock()
@@ -757,45 +916,73 @@ func (j *jobs) wait() []error {
 	return j.errs
 }
 
-// startJobs starts one job per agent, holding a slot of sem (sized SandboxJobs, shared by every call of a pass), and returns at once. A job
-// is everything the reconciler does for one agent's sandbox: creating, starting, stopping,
-// recreating and recording it. A slow start (an image pull, a stuck OpenShell call) holds up
-// only its own agent, not the rest of the pass and not the gateway update.
-func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string, sem chan struct{}) *jobs {
-	j := &jobs{}
-	j.wg.Add(1)
-	safego.Go(ctx, r.log, "reconcile-pass", func(context.Context) {
-		defer j.wg.Done()
-		for _, w := range ws {
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			j.wg.Add(1)
-			go func() {
-				defer j.wg.Done()
-				defer func() { <-sem }()
-				var err error
-				if safego.Do(r.log, "reconcile-agent", func() { err = r.reconcileAgent(ctx, w, workspaces) }) {
-					err = errors.New("internal error: reconciling the agent panicked")
-				}
-				if err != nil {
-					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
-					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
-					if errors.Is(err, execution.ErrForeign) {
-						r.recordForeign(ctx, w, err)
-					} else {
-						r.recordMessage(ctx, w, err)
-					}
-					j.mu.Lock()
-					j.errs = append(j.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
-					j.mu.Unlock()
-				}
-			}()
+func (j *jobs) count() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.n
+}
+
+func (j *jobs) slowest() (string, time.Duration) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.slowestName, j.slowestTook
+}
+
+// submit queues one job per agent. A job is everything the reconciler does for one agent's sandbox:
+// creating, starting, stopping, recreating and recording it. Queued behind another job of the same
+// agent it replaces any older queued one; it never runs in parallel with it.
+func (r *Reconciler) submit(q *workQueue, b *jobs, ws []*work, workspaces map[string]string) {
+	for _, w := range ws {
+		w.submitted = true
+		b.wg.Add(1)
+		b.mu.Lock()
+		b.n++
+		b.mu.Unlock()
+		q.Add(agentKey{w.org.ID, w.agent.ID}, &sandboxJob{w: w, workspaces: workspaces, batch: b})
+	}
+}
+
+// runJob is the queue's worker function: one agent's sandbox work, with its own timeout.
+func (r *Reconciler) runJob(ctx context.Context, _ agentKey, j *sandboxJob) {
+	defer j.batch.wg.Done()
+	w := j.w
+	start := time.Now()
+	jctx, cancel := context.WithTimeout(ctx, r.cfg.WorkTimeout)
+	defer cancel()
+	// An item that waited behind a running one of the same agent starts from the row as that one left
+	// it, not from the row its pass loaded.
+	if sb, gerr := r.q.GetAgentSandbox(jctx, store.GetAgentSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID}); gerr == nil {
+		w.sb = sb
+	}
+	var err error
+	if safego.Do(r.log, "reconcile-agent", func() { err = r.reconcileAgent(jctx, w, j.workspaces) }) {
+		err = errors.New("internal error: reconciling the agent panicked")
+	}
+	if err != nil {
+		// Recorded under the queue's context: the job's own may have run out.
+		r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
+		r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
+		if errors.Is(err, execution.ErrForeign) {
+			r.recordForeign(ctx, w, err)
+		} else {
+			r.recordMessage(ctx, w, err)
 		}
-	})
-	return j
+	}
+	if msg := w.markDone(); msg != "" {
+		r.recordMessage(ctx, w, errors.New(msg))
+	}
+	if !w.wantsRecreate {
+		r.recreateReleased(agentKey{w.org.ID, w.agent.ID})
+	}
+	took := time.Since(start)
+	j.batch.mu.Lock()
+	if err != nil {
+		j.batch.errs = append(j.batch.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+	}
+	if took > j.batch.slowestTook {
+		j.batch.slowestName, j.batch.slowestTook = execution.UUIDString(w.agent.ID.Bytes), took
+	}
+	j.batch.mu.Unlock()
 }
 
 // workOf returns the items at the given indexes.
@@ -875,7 +1062,7 @@ func (l planLookups) ServedKeyFile(ctx context.Context, org, provider pgtype.UUI
 // prepare loads or creates the agent's row and, for an active agent, its key. It returns nil
 // for agents with nothing rendered and nothing to render.
 func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileRow, a store.Agent, workspaces map[string]string) (*work, error) {
-	w := &work{org: org, agent: a}
+	w := &work{org: org, agent: a, rej: &rejectionNote{}}
 	sb, err := r.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org.ID, AgentID: a.ID})
 	switch {
 	case err == nil:
@@ -1055,9 +1242,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if w.keyErr != nil {
 		return w.keyErr
 	}
-	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || !flavor.rendered() {
-		return fmt.Errorf("flavor %q has no image or binaries configured", w.agent.Flavor)
+	harness, ok := r.cfg.Harnesses[w.agent.Harness]
+	if !ok || !harness.rendered() {
+		return fmt.Errorf("harness %q has no image or binaries configured", w.agent.Harness)
 	}
 	ws, err := r.ensureWorkspace(ctx, w.org, workspaces)
 	if err != nil {
@@ -1069,7 +1256,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	ensureKey := func(claim bool) error {
 		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
 			Name:               names.Provider,
-			Profile:            r.profile(w.agent.Flavor, flavor),
+			Profile:            r.profile(w.agent.Harness, harness),
 			Credentials:        map[string]string{keyEnvVar: w.material},
 			CredentialRevision: w.key.ID,
 			Labels:             ownerLabels(w.org.ID, w.agent.ID),
@@ -1079,10 +1266,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err := ensureKey(false); err != nil {
 		return err
 	}
-	// The ensure imported the flavor profile: once no active agent keeps it current, the org pass
+	// The ensure imported the harness profile: once no active agent keeps it current, the org pass
 	// looks at it again.
 	r.mu.Lock()
-	delete(r.flavorProfileSettled, flavorProfileKey(ws, r.profile(w.agent.Flavor, flavor).ID))
+	delete(r.harnessProfileSettled, harnessProfileKey(ws, r.profile(w.agent.Harness, harness).ID))
 	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
@@ -1097,13 +1284,13 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, false); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, harness, read, false); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
-		network[githubRule] = GitHubRule(read, r.githubBinaries(flavor))
+		network[githubRule] = GitHubRule(read, r.githubBinaries(harness))
 	}
-	if rule, ok := PluginInstallRule(w.cfg, w.agent.Flavor, flavor); ok {
+	if rule, ok := PluginInstallRule(w.cfg, w.agent.Harness, harness); ok {
 		network[npmRule] = rule
 	}
 
@@ -1117,7 +1304,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	names = w.names()
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network, r.sandboxResources(w))
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
@@ -1134,7 +1321,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 			if hasRead {
-				if err := r.ensureGitHub(ctx, ws, w, names, flavor, read, true); err != nil {
+				if err := r.ensureGitHub(ctx, ws, w, names, harness, read, true); err != nil {
 					return err
 				}
 			}
@@ -1168,7 +1355,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			// error on this path would never be counted.
 			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
 			if !lrReady {
-				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+				if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the LimitRange was applied after the create"); err != nil {
 					return err
 				}
 				if ensureErr != nil {
@@ -1202,7 +1389,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			}
 			return r.record(ctx, w, sb, hash, note)
 		}
-		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+		if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the sandbox is stuck"); err != nil {
 			return err
 		}
 		r.m.SandboxRepairs.Inc()
@@ -1233,11 +1420,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
-		if !r.takeRecreate() {
-			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass. It is
-			// taken before the home gate, which requests checkpoints and wakes stopped sandboxes: a
-			// sandbox whose gate is still waiting keeps its slot, so at most the cap starts per pass.
-			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
+		w.wantsRecreate = true
+		if !r.takeRecreate(agentKey{w.org.ID, w.agent.ID}) {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet at once. It is taken
+			// before the home gate, which requests checkpoints and wakes stopped sandboxes: a sandbox
+			// whose gate is still waiting keeps its slot, so at most the cap are in the gate at a time.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot")
 		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
@@ -1245,9 +1433,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			}
 			return r.record(ctx, w, sb, hash, note)
 		}
-		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+		if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the spec changed"); err != nil {
 			return err
 		}
+		r.recreateStarted(agentKey{w.org.ID, w.agent.ID})
 		r.log.Info("deleting sandbox to recreate it with a changed spec", w.logAttrs()...)
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating with a changed spec")
@@ -1281,6 +1470,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// deleteSandbox requests the deletion of a sandbox. The OpenShell DeleteSandbox RPC can still block
+// until the pods end; the per-agent queue makes that cost one agent and one worker slot, not the
+// pass. The next pass observes the end (GetSandbox reports PhaseDeleting until it is gone). It logs before the call and
+// after it, with the call's duration and OpenShell's outcome, so a slow backend call shows in the log
+// with the agent it held (issue 573).
+func (r *Reconciler) deleteSandbox(ctx context.Context, w *work, ws, name, why string) error {
+	r.log.Info("requesting the deletion of a sandbox", append(w.logAttrs(), "name", name, "reason", why)...)
+	start := time.Now()
+	outcome, err := r.backend.DeleteSandbox(ctx, ws, name)
+	r.log.Info("sandbox deletion requested", append(w.logAttrs(), "name", name, "outcome", string(outcome),
+		"took", time.Since(start).Round(time.Millisecond), "err", err)...)
+	return err
 }
 
 // unmarked reports a sandbox without the install label while the backend owns what it makes: it
@@ -1336,7 +1539,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		}
 		return r.record(ctx, w, sb, hash, note)
 	}
-	if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
+	if err := r.deleteSandbox(ctx, w, ws, name, "the sandbox failed"); err != nil {
 		return err
 	}
 	r.m.SandboxRepairs.Inc()
@@ -1401,7 +1604,7 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
 // for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
-// provider and flavor profile for this install (claimDraft), which no other path does for a draft.
+// provider and harness profile for this install (claimDraft), which no other path does for a draft.
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
 	if errors.Is(err, execution.ErrNotFound) {
@@ -1431,8 +1634,8 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 //
 // The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
 // re-activation; without a Secret that still matches it nothing is touched and no key is issued).
-// The ensure imports the flavor profile with the mark; without it the org pass marks the profile
-// (claimFlavorProfiles), which needs no key. The provider record itself is recreated with
+// The ensure imports the harness profile with the mark; without it the org pass marks the profile
+// (claimHarnessProfiles), which needs no key. The provider record itself is recreated with
 // the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
 // OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
 // claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
@@ -1442,8 +1645,8 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 	if !r.owns() || w.key.ID == "" {
 		return nil
 	}
-	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || !flavor.rendered() {
+	harness, ok := r.cfg.Harnesses[w.agent.Harness]
+	if !ok || !harness.rendered() {
 		return nil
 	}
 	_, material, ok, err := r.recordedMaterial(ctx, w)
@@ -1457,7 +1660,7 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 	ws, names := w.sb.Workspace, w.names()
 	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
 		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Flavor, flavor),
+		Profile:            r.profile(w.agent.Harness, harness),
 		Credentials:        map[string]string{keyEnvVar: material},
 		CredentialRevision: w.key.ID,
 		Labels:             ownerLabels(w.org.ID, w.agent.ID),
@@ -1506,7 +1709,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		final = store.SandboxStateRetained
 	default:
 		if sb.Phase != execution.PhaseDeleting {
-			if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
+			if err := r.deleteSandbox(ctx, w, ws, name, "the agent is archived"); err != nil {
 				return err
 			}
 			r.log.Info("deleting sandbox of an archived agent", w.logAttrs()...)
@@ -1546,28 +1749,58 @@ type profileClaimer interface {
 	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
 }
 
-// claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)
-// that no active agent keeps current (issue 511). A profile belongs to the workspace and the flavor, not
-// to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to delete one a
+// recordKeepWarmGrants writes the pass's keep-warm decision to agents.keep_warm_granted, so the API and
+// the agent page can say whether the operator's cap granted an admin's request (#100). Only the agents
+// whose recorded decision differs are written.
+func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, agents []store.Agent, granted map[pgtype.UUID]bool) error {
+	var grant, revoke []pgtype.UUID
+	for _, a := range agents {
+		g, decided := granted[a.ID]
+		switch {
+		case !decided:
+			// No decision in this pass: the stored value stays.
+		case g && !a.KeepWarmGranted:
+			grant = append(grant, a.ID)
+		case !g && a.KeepWarmGranted:
+			revoke = append(revoke, a.ID)
+		}
+	}
+	for _, c := range []struct {
+		ids     []pgtype.UUID
+		granted bool
+	}{{grant, true}, {revoke, false}} {
+		if len(c.ids) == 0 {
+			continue
+		}
+		if err := r.q.SetAgentsKeepWarmGranted(ctx, store.SetAgentsKeepWarmGrantedParams{OrgID: org, Ids: c.ids, Granted: c.granted}); err != nil {
+			return fmt.Errorf("reconciler: record keep-warm grants of org %s: %w", org.String(), err)
+		}
+	}
+	return nil
+}
+
+// claimHarnessProfiles marks, once per org and pass, the harness profiles (koinon-agentgateway-<harness>)
+// that no active agent keeps current (issue 511). A profile belongs to the workspace and the harness, not
+// to an agent: every agent of the harness in the org shares it, and OpenShell refuses to delete one a
 // provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
-// flavors whose agents are all draft or archived, or that have none. A draft agent does not count as
-// keeping its flavor: claimDraft imports the profile only when the agent's key Secret still matches
+// harnesses whose agents are all draft or archived, or that have none. A draft agent does not count as
+// keeping its harness: claimDraft imports the profile only when the agent's key Secret still matches
 // the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
 // archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
 // it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
 // is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
 // un-archive needs. A profile that does not exist is not created, and an org with no recorded
 // workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
-// missing is not asked for again (flavorProfileSettled) until an active agent imports it.
-func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
+// missing is not asked for again (harnessProfileSettled) until an active agent imports it.
+func (r *Reconciler) claimHarnessProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
 	c, ok := r.backend.(profileClaimer)
 	if !ok || !r.owns() {
 		return nil
 	}
-	kept := map[store.AgentFlavor]bool{}
+	kept := map[string]bool{}
 	for _, a := range agents {
 		if a.Status == store.AgentStatusActive {
-			kept[a.Flavor] = true
+			kept[a.Harness] = true
 		}
 	}
 	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
@@ -1578,36 +1811,36 @@ func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgs
 		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
 	}
 	var errs []error
-	for _, flavor := range slices.Sorted(maps.Keys(r.cfg.Flavors)) {
-		f := r.cfg.Flavors[flavor]
-		if kept[flavor] || !f.rendered() {
+	for _, harness := range slices.Sorted(maps.Keys(r.cfg.Harnesses)) {
+		f := r.cfg.Harnesses[harness]
+		if kept[harness] || !f.rendered() {
 			continue
 		}
-		p := r.profile(flavor, f)
-		k := flavorProfileKey(row.Workspace, p.ID)
+		p := r.profile(harness, f)
+		k := harnessProfileKey(row.Workspace, p.ID)
 		r.mu.Lock()
-		settled := r.flavorProfileSettled[k]
+		settled := r.harnessProfileSettled[k]
 		r.mu.Unlock()
 		if settled {
 			continue
 		}
 		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("reconciler: claim flavor profile %s of org %s: %w", flavor, org.Slug, err))
+			errs = append(errs, fmt.Errorf("reconciler: claim harness profile %s of org %s: %w", harness, org.Slug, err))
 			continue
 		}
 		if claimed {
-			r.log.Info("marked a flavor profile no active agent keeps current", "org", org.Slug, "flavor", string(flavor))
+			r.log.Info("marked a harness profile no active agent keeps current", "org", org.Slug, "harness", harness)
 		}
 		r.mu.Lock()
-		r.flavorProfileSettled[k] = true
+		r.harnessProfileSettled[k] = true
 		r.mu.Unlock()
 	}
 	return errors.Join(errs...)
 }
 
-// flavorProfileKey is the key of a flavor profile in flavorProfileSettled.
-func flavorProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
+// harnessProfileKey is the key of a harness profile in harnessProfileSettled.
+func harnessProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
@@ -1662,8 +1895,12 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 	if w.sb.SandboxName == "" {
 		return
 	}
-	// The message is for operators; the reason of the latest condition stays as observed.
-	_ = r.recordRow(ctx, w, w.sb.State, w.sb.Phase, err.Error(), w.sb.Reason, w.sb.SpecHash, "")
+	// The message is for operators. Only the message column changes: the state, phase and reason
+	// stay as the agent's own work item recorded them, even when this call comes from a pass that
+	// ran while that item was still working (issue 573).
+	_, _ = r.q.SetAgentSandboxMessage(ctx, store.SetAgentSandboxMessageParams{
+		OrgID: w.org.ID, AgentID: w.agent.ID, Message: err.Error(),
+	})
 }
 
 func b2f(b bool) float64 {
