@@ -9,6 +9,9 @@
 #     trailing `# vX.Y.Z` comment; the younger counts; a tag that does not point at the SHA warns)
 #   - any non-doc file: image references pinned by digest (`name:tag@sha256:...`): the registry's
 #     build time of the newest platform image
+#   - Dockerfile `ARG UBUNTU_SNAPSHOT=YYYYMMDDTHHMMSSZ` (the Ubuntu snapshot, issue 33): the ID's own
+#     timestamp is the age, since a snapshot holds nothing published after its ID (a bot bump takes
+#     today minus 3 days by construction; a hand-written bump must not take a younger one)
 #   - Dockerfile `ADD` and `koinon-fetch` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
 #   - the `<TOOL>_VERSION` pins in hack/versions.env (the release's publish time)
 #   - the ADR 0077 platform pins in test/e2e/kind/up.sh, and any line that carries a marker
@@ -331,6 +334,18 @@ check_chart_dep() { # check_chart_dep <name> <version> <repository>
 
 # --- diff scanning ------------------------------------------------------------------------------
 
+# snapshot_pin <line>: prints the ISO 8601 time of an `ARG UBUNTU_SNAPSHOT=YYYYMMDDTHHMMSSZ` line, nothing otherwise.
+snapshot_pin() {
+	local re='^[[:space:]]*ARG[[:space:]]+UBUNTU_SNAPSHOT=([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z[[:space:]]*$'
+	if [[ $1 =~ $re ]]; then
+		echo "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}T${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}Z"
+	fi
+}
+
+check_snapshot() { # check_snapshot <iso time> <ID>
+	report "ubuntu snapshot $2" "$(age_days "$1")" "snapshot.ubuntu.com ID $1"
+}
+
 # Dispatch --------------------------------------------------------------------------------------
 case ${1:-} in
 go|action|image|github|npm|url)
@@ -495,6 +510,16 @@ while IFS=$'\t' read -r file line; do
 		fi
 	fi
 done < <(added_lines 'hack/versions.env')
+
+# 4c. The Ubuntu snapshot of the harness images (issue 33): the age of the ID itself. hack/ubuntu-snapshot-bump.sh
+# picks today minus 3 days, so its PRs pass by construction; this catches a hand-edited ID.
+while IFS=$'\t' read -r file line; do
+	t=$(snapshot_pin "$line")
+	[[ -n $t ]] || continue
+	id=${line#*=}
+	id=${id//[[:space:]]/}
+	once "snapshot $id" && check_snapshot "$t" "$id"
+done < <(added_lines "${dockerfile_specs[@]}")
 
 # 5. ADR 0077 platform pins: the variables in test/e2e/kind/up.sh and marked lines anywhere.
 # pin_repo <VARIABLE>: "<owner/repo> <tag prefix>" for the pins in test/e2e/kind/up.sh.

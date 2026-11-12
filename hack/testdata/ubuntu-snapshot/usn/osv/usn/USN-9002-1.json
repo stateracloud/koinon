@@ -1,0 +1,5 @@
+{"schema_version":"1.7.0","id":"USN-9002-1","summary":"Git vulnerability (fixture, not a real notice)","published":"2026-11-02T10:00:00Z",
+ "affected":[
+  {"package":{"ecosystem":"Ubuntu:24.04:LTS","name":"git"},
+   "ecosystem_specific":{"binaries":[{"binary_name":"git","binary_version":"1:2.43.0-1ubuntu7.5"},{"binary_name":"git-man","binary_version":"1:2.43.0-1ubuntu7.5"}]},
+   "database_specific":{"cves_map":{"ecosystem":"Ubuntu:24.04:LTS","cves":[{"id":"CVE-2099-0001","severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N"},{"type":"Ubuntu","score":"high"}]}]}}}]}

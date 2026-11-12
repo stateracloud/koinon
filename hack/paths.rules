@@ -252,6 +252,7 @@ script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
+script-check - hack/ubuntu-snapshot-bump_test.sh
 script-check - hack/buf-breaking-against-test.sh
 script-check - hack/lane-gates-test.sh
 script-check - hack/generate-test.sh
