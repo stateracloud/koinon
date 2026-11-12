@@ -50,15 +50,19 @@ api:
     digest: ""
   replicas: 1
   port: 8080
-  # CIDRs (or single addresses) of the proxies and load balancers in front of koinon-api, for example
-  # [10.0.0.0/8]. Empty (the default) never trusts X-Forwarded-For / Forwarded: the login and admin
+  # CIDRs (or single addresses) of the proxies in front of koinon-api, for example the load
+  # balancer's source range. Empty (the default) never trusts forwarding headers: the login and admin
   # API limiters key on the connection's peer address, so behind an ingress every client shares one
-  # address. When listed, a request whose peer is in one of them has its client address read from the
-  # header, walking from the right and stopping at the first hop that is not listed. List only
-  # networks that overwrite or append to the header: a listed proxy that passes a client's header
-  # through lets that client choose its address and escape the limiters. Set it to the ingress
-  # controller's pod network or the load balancer's source range, not to 0.0.0.0/0.
+  # address. When listed, a request whose peer is in one of them has its client address read from
+  # trustedProxyHeader, walking from the right and stopping at the first hop that is not listed.
+  # List only addresses that nothing but your proxy connects from, never a whole pod network or
+  # 0.0.0.0/0: any listed peer chooses the client address, so it escapes the limiters and can lock
+  # others out. Also set networkPolicy.apiFrom so only the proxy can reach the API port. The proxies
+  # must overwrite or append to the header.
   trustedProxies: []
+  # The header those proxies write: x-forwarded-for (ingress-nginx, most load balancers) or forwarded.
+  # Only this one is read; the other is the client's and is ignored.
+  trustedProxyHeader: x-forwarded-for
   # The internal OTLP/HTTP receiver (spend ledger, plan item L1; run traces, ADR 0074).
   # agentgateway exports its access log here and koinon-agentd exports run spans. Every request
   # needs a bearer token; the NetworkPolicy admits only those two senders as a second layer.

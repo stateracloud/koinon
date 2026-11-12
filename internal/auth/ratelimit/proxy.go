@@ -19,6 +19,28 @@ const maxHops = 32
 // and nil trust nothing: the client address is the connection's peer, as when no list is configured.
 type TrustedProxies struct {
 	nets []netip.Prefix
+	// forwarded selects the Forwarded header (RFC 7239); false is X-Forwarded-For. Exactly one is read:
+	// the one the operator's proxies write. The other is the client's and is ignored.
+	forwarded bool
+}
+
+// Header names for UseHeader.
+const (
+	HeaderXForwardedFor = "x-forwarded-for"
+	HeaderForwarded     = "forwarded"
+)
+
+// UseHeader picks the header the trusted proxies write ("" is X-Forwarded-For).
+func (t *TrustedProxies) UseHeader(name string) error {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", HeaderXForwardedFor:
+		t.forwarded = false
+	case HeaderForwarded:
+		t.forwarded = true
+	default:
+		return fmt.Errorf("trusted proxy header %q: want %s or %s", name, HeaderXForwardedFor, HeaderForwarded)
+	}
+	return nil
 }
 
 // ParseTrustedProxies parses CIDRs or bare addresses (a bare address is a single-host network).
@@ -71,8 +93,8 @@ func (t *TrustedProxies) trusts(a netip.Addr) bool {
 // is not itself a trusted proxy is the client (the hops to its left are written by the client or by
 // proxies it passed through, and are not believed). The walk stops at the nearest hop it can read: a
 // malformed or unknown hop ends it with the hop to its right, never with a value the client typed.
-// Both X-Forwarded-For and Forwarded are read; when both are present and disagree the peer is used,
-// since a proxy that sets only one of them leaves the other to the client.
+// Only the configured header is read (UseHeader): a proxy that sets one of them leaves the other to
+// the client.
 func (t *TrustedProxies) Resolve(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -82,22 +104,12 @@ func (t *TrustedProxies) Resolve(r *http.Request) string {
 	if perr != nil || !t.Enabled() || !t.trusts(peer) {
 		return host
 	}
-	xff, hasXFF := r.Header["X-Forwarded-For"]
-	fwd, hasFwd := r.Header["Forwarded"]
-	var cx, cf netip.Addr
-	if hasXFF {
-		cx = t.walk(peer, xffHops(xff))
-	}
-	if hasFwd {
-		cf = t.walk(peer, forwardedHops(fwd))
-	}
-	switch {
-	case hasXFF && hasFwd && cx != cf:
-		return peer.String()
-	case hasXFF:
-		return cx.String()
-	case hasFwd:
-		return cf.String()
+	if t.forwarded {
+		if lines, ok := r.Header["Forwarded"]; ok {
+			return t.walk(peer, forwardedHops(lines)).String()
+		}
+	} else if lines, ok := r.Header["X-Forwarded-For"]; ok {
+		return t.walk(peer, xffHops(lines)).String()
 	}
 	return peer.String()
 }

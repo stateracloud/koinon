@@ -18,6 +18,10 @@ var _ = Describe("TrustedProxies", func() {
 	via := func(trusted []string, peer string, hdr ...string) string {
 		t, err := ratelimit.ParseTrustedProxies(trusted)
 		Expect(err).NotTo(HaveOccurred())
+		// the Forwarded header is the configured one when the request carries only that
+		if len(hdr) > 0 && hdr[0] == "Forwarded" {
+			Expect(t.UseHeader("Forwarded")).To(Succeed())
+		}
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.RemoteAddr = peer
 		for i := 0; i+1 < len(hdr); i += 2 {
@@ -77,9 +81,25 @@ var _ = Describe("TrustedProxies", func() {
 		// an IPv4 peer arriving as ::ffff:a.b.c.d matches an IPv4 network
 		Expect(via([]string{"10.0.0.0/8"}, "[::ffff:10.0.0.1]:1", xff, "203.0.113.7")).To(Equal("203.0.113.7"))
 	})
-	It("uses the peer when both headers are present and disagree", func() {
-		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", xff, "203.0.113.7", "Forwarded", "for=6.6.6.6")).To(Equal("10.0.0.1"))
-		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", xff, "203.0.113.7", "Forwarded", "for=203.0.113.7")).To(Equal("203.0.113.7"))
+	It("reads only the configured header", func() {
+		// default X-Forwarded-For: a client-written Forwarded is ignored
+		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", xff, "203.0.113.7", "Forwarded", "for=6.6.6.6")).To(Equal("203.0.113.7"))
+		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", "Forwarded", "for=6.6.6.6")).To(Equal("6.6.6.6"))
+		t, _ := ratelimit.ParseTrustedProxies([]string{"10.0.0.0/8"})
+		Expect(t.UseHeader("forwarded")).To(Succeed())
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = "10.0.0.1:1"
+		r.Header.Set(xff, "6.6.6.6")
+		r.Header.Set("Forwarded", "for=203.0.113.7")
+		Expect(t.Resolve(r)).To(Equal("203.0.113.7"))
+		Expect(t.UseHeader("x-real-ip")).NotTo(Succeed())
+	})
+	It("reads several Forwarded lines, any case and bracketed IPv6 without a port", func() {
+		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", "Forwarded", "For=6.6.6.6", "Forwarded", `FOR="[2001:db8:1:2::1]", for=10.0.0.9`)).To(Equal("2001:db8:1:2::"))
+	})
+	It("reads mapped and zoned hops", func() {
+		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", xff, "::ffff:203.0.113.7")).To(Equal("203.0.113.7"))
+		Expect(via([]string{"fd00::/8"}, "[fd00::1]:1", xff, "2001:db8::7%eth0")).To(Equal("2001:db8::"))
 	})
 	It("bounds the hops it reads", func() {
 		h := "6.6.6.6"

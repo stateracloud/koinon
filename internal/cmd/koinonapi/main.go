@@ -147,6 +147,8 @@ type config struct {
 	trustedOrigins string
 	// trustedProxies lists the proxy networks whose X-Forwarded-For / Forwarded the login and admin API limiters believe.
 	trustedProxies string
+	// trustedProxyHeader is the header those proxies write: x-forwarded-for or forwarded.
+	trustedProxyHeader string
 
 	publicURL string
 
@@ -245,6 +247,9 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"comma-separated CIDRs of the proxies and load balancers in front of koinon-api; from a peer in one of them the "+
 			"login and admin API limiters read the client address from X-Forwarded-For / Forwarded (rightmost untrusted hop); "+
 			"empty never trusts those headers")
+
+	fs.StringVar(&c.trustedProxyHeader, "trusted-proxy-header", ratelimit.HeaderXForwardedFor,
+		"the header the --trusted-proxies write the client address to: x-forwarded-for or forwarded; the other is ignored")
 
 	fs.StringVar(&c.publicURL, "public-url", "",
 		"URL browsers reach Koinon at, e.g. https://koinon.example.com; an http:// URL drops the "+
@@ -955,6 +960,9 @@ func serve(ctx context.Context, cfg config) error {
 	proxies, err := ratelimit.ParseTrustedProxies(splitList(cfg.trustedProxies))
 	if err != nil {
 		return fmt.Errorf("--trusted-proxies: %w", err)
+	}
+	if err := proxies.UseHeader(cfg.trustedProxyHeader); err != nil {
+		return fmt.Errorf("--trusted-proxy-header: %w", err)
 	}
 	srv := &http.Server{Addr: cfg.addr, Handler: proxies.Middleware(handler), ReadHeaderTimeout: 10 * time.Second}
 	servers := []*http.Server{srv}

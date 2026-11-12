@@ -115,7 +115,8 @@
         "image": {"$ref": "#/definitions/koinonImage"},
         "replicas": {"type": "integer", "minimum": 0},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "trustedProxies": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}, "description": "CIDRs or addresses of the proxies in front of koinon-api whose X-Forwarded-For / Forwarded the limiters believe; empty trusts none"},
+        "trustedProxies": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"}, "description": "CIDRs or addresses of the proxies in front of koinon-api whose X-Forwarded-For / Forwarded the limiters believe; empty trusts none"},
+        "trustedProxyHeader": {"enum": ["x-forwarded-for", "forwarded"], "description": "the header the trustedProxies write"},
         "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the internal OTLP/HTTP receiver for agentgateway's access log and agentd's run spans"},
         "otlpToken": {
           "type": "object",

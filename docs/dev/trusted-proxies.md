@@ -11,12 +11,15 @@ proxy, so without help all clients share one address: one client's failures can 
 Set `api.trustedProxies` (flag `--trusted-proxies`) when koinon-api is reached through an ingress
 controller, a cloud load balancer or any other proxy that **sets or appends to `X-Forwarded-For` or
 `Forwarded`**. List the networks the proxy connects from, for example the ingress controller's pod
-network, never `0.0.0.0/0`. Leave it empty when clients connect directly: then the headers are never
+addresses or the load balancer's source range. Never list a whole pod network or `0.0.0.0/0`: a
+listed peer chooses the client address, so any pod that can reach the API port directly could escape the
+limiters or lock a user out. Set `networkPolicy.apiFrom` too, so only the proxy reaches the port. Leave it empty when clients connect directly: then the headers are never
 read, which is the default.
 
 ```yaml
 api:
-  trustedProxies: [10.42.0.0/16]
+  trustedProxies: [203.0.113.10/32]
+  trustedProxyHeader: x-forwarded-for   # or forwarded
 ```
 
 ## What it does
@@ -27,8 +30,8 @@ api:
   never read (the client wrote them).
 - A hop that is not an IP address (`unknown`, `_obfuscated`, garbage), or a `Forwarded` element with no
   `for`, ends the walk with the hop to its right. No header means the peer.
-- When both headers are present and name different clients, the peer is used: a proxy that sets only
-  one leaves the other to the client.
+- Only `trustedProxyHeader` is read (`x-forwarded-for` by default, or `forwarded`); the other is the
+  client's and is ignored, since a proxy that writes one leaves the other to the client.
 - IPv6 clients are still grouped by /64 by the limiters.
 
 A listed proxy that passes a client's `X-Forwarded-For` through unchanged lets that client pick its

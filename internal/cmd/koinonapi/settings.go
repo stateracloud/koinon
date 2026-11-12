@@ -74,6 +74,7 @@ var recordedSettings = []platformSetting{
 	setting("public-url", kindURL),
 	setting("trusted-origins", kindValue),
 	setting("trusted-proxies", kindValue),
+	setting("trusted-proxy-header", kindValue),
 
 	// network and gateway
 	setting("egress-allowed-hosts", kindValue),
