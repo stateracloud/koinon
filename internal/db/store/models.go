@@ -11,47 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AgentFlavor string
-
-const (
-	AgentFlavorOpencode AgentFlavor = "opencode"
-)
-
-func (e *AgentFlavor) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = AgentFlavor(s)
-	case string:
-		*e = AgentFlavor(s)
-	default:
-		return fmt.Errorf("unsupported scan type for AgentFlavor: %T", src)
-	}
-	return nil
-}
-
-type NullAgentFlavor struct {
-	AgentFlavor AgentFlavor
-	Valid       bool // Valid is true if AgentFlavor is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullAgentFlavor) Scan(value interface{}) error {
-	if value == nil {
-		ns.AgentFlavor, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.AgentFlavor.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullAgentFlavor) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.AgentFlavor), nil
-}
-
 type AgentStatus string
 
 const (
@@ -1543,7 +1502,7 @@ type Agent struct {
 	ID                   pgtype.UUID
 	DisplayName          string
 	Status               AgentStatus
-	Flavor               AgentFlavor
+	Harness              string
 	TemplateID           pgtype.UUID
 	ActiveVersionID      pgtype.UUID
 	LatestVersion        int32
@@ -1564,6 +1523,7 @@ type Agent struct {
 	SandboxCpuLimit      pgtype.Text
 	SandboxMemoryRequest pgtype.Text
 	SandboxMemoryLimit   pgtype.Text
+	KeepWarmGranted      bool
 }
 
 type AgentBudget struct {

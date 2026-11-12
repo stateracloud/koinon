@@ -23,7 +23,7 @@ import (
 func newOrgWithAgent(ctx context.Context) (org, agent pgtype.UUID) {
 	GinkgoHelper()
 	org, _, _ = pgtest.NewOrg(ctx, pool)
-	Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'helper', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+	Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'helper', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 	return org, agent
 }
 

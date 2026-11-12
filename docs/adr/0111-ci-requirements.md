@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- Area: engineering-process
+- Tags: ci, testing, release
 - Relates to: [0025](0025-testing-strategy.md) (testing layers), [0047](0047-repository-scaffold.md) (GitHub-hosted runners only),
   [0079](0079-dependency-cooldown.md) (3-day age), [0085](0085-upgrade-compatibility-and-recovery-policy.md) and
   [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) (no upgrade promise before v0.3),
@@ -140,8 +142,8 @@ in part 2 too.
   flow-style `on:` is not seen. `zizmor` (added in part 2) parses the workflow.
 - Negative: T7 (a timeout on every job) was a report at first. 14 of 21 `ci.yml` jobs had none on
   2026-11-11. The CI speed work (#572, pull request 2 of 3, #589) added them, and `hack/runner-lint.sh` now fails a job without one.
-- Follow-ups: part 2 of #579 (`zizmor` is in; `govulncheck` on pull requests, remove the Playwright retry); the
-  proofs in #580; a review of the guide when a premise in its "Valid while" section stops being true
+- Follow-ups: part 2 of #579 (`zizmor` is in and the Playwright retry is removed, so T1 now fails;
+  `govulncheck` on pull requests is left); the proofs in #580; a review of the guide when a premise in its "Valid while" section stops being true
   (paid runners, a second maintainer, a second repository's CI).
 
 ## Open questions

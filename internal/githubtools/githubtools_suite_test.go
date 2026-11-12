@@ -16,6 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -77,7 +78,7 @@ func newFixture(ctx context.Context, config string) fixture {
 	var err error
 	f.org, err = q.GetOrgBySlug(ctx, slug)
 	Expect(err).NotTo(HaveOccurred())
-	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: orgID, DisplayName: "helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: orgID, DisplayName: "helper", Harness: harness.OpenCode, CreatedBy: user})
 	Expect(err).NotTo(HaveOccurred())
 	v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: orgID, AgentID: agent.ID, Config: []byte(config), CreatedBy: user})
 	Expect(err).NotTo(HaveOccurred())

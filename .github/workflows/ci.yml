@@ -74,6 +74,7 @@ jobs:
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
+      opencodeplugin: ${{ steps.paths.outputs.opencodeplugin }}
       tidy: ${{ steps.paths.outputs.tidy }}
       vuln: ${{ steps.paths.outputs.vuln }}
       shell: ${{ steps.paths.outputs.shell }}
@@ -319,6 +320,8 @@ jobs:
       - run: mkdir -p reports/go && go tool ginkgo -race -p --keep-going --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
+          # As hack/go-test.sh: kopia's instant test key derivation instead of scrypt, which costs ~1 s a repository open under -race (#576).
+          GOFLAGS: -tags=testing
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -427,14 +430,22 @@ jobs:
       - name: proto (buf breaking)
         if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
         env:
-          # The main this entry lands on (ADR 0094 decision 4), not the one the PR head was checked against.
+          # merge_group: the base tip this entry lands on (ADR 0094 decision 4). pull_request: the
+          # merge base of the head and origin/<base> (#542), so a PR behind a proto change on main
+          # is not told it "deleted" fields it never had.
           BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          base="$BASE"
-          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
-            buf breaking --against ".git#ref=$base"
+          if [[ $EVENT_NAME == merge_group ]]; then
+            against=$(hack/buf-breaking-against.sh "$BASE" --merge-group)
           else
-            echo "no buf.yaml on $base yet; nothing to compare"
+            against=$(hack/buf-breaking-against.sh "$BASE")
+          fi
+          echo "buf breaking against $against"
+          if git cat-file -e "$against:buf.yaml" 2>/dev/null; then
+            buf breaking --against ".git#ref=$against"
+          else
+            echo "no buf.yaml on $against yet; nothing to compare"
           fi
       - name: migrations (tests)
         if: ${{ !cancelled() }}
@@ -452,6 +463,13 @@ jobs:
       - name: adr-lint
         if: ${{ !cancelled() }}
         run: hack/adr-lint.sh
+      # Area and tags on every ADR, research note and spike (hack/doc-meta-lint.sh, ADR 0115).
+      - name: doc metadata (tests)
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint-test.sh
+      - name: doc metadata
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint.sh
       # Scans every tracked file, Markdown included, so it cannot sit in the path-gated `scripts` job (#572).
       - name: old-issue references
         if: ${{ !cancelled() }}
@@ -869,6 +887,7 @@ jobs:
       - run: hack/release-gate-test.sh
       - run: hack/route-guard-test.sh
       - run: hack/dep-age-check-test.sh
+      - run: hack/buf-breaking-against-test.sh
       - run: hack/ci-changes-test.sh
       - run: hack/paths-test.sh
       - run: hack/lane-gates-test.sh
@@ -918,9 +937,9 @@ jobs:
         run: |
           go mod download
           go build ./...
-          go test -count=1 -run '^$' ./...
+          GOFLAGS=-tags=testing go test -count=1 -run '^$' ./...
           go tool ginkgo version
-          go test -race -count=1 -run '^$' ./internal/reconciler/ ./internal/ledger/ ./internal/agentd/ ./internal/durable/
+          GOFLAGS=-tags=testing go test -race -count=1 -run '^$' ./internal/reconciler/ ./internal/ledger/ ./internal/agentd/ ./internal/durable/
       - if: steps.go.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1010,6 +1029,65 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
+
+  warm-caches-opencode-plugins:
+    name: warm-caches-opencode-plugins
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: flavors/opencode/plugins/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: flavors/opencode/plugins
+
+  # Koinon's own OpenCode plugins (koinon.core, ADR 0093 decision 4): a CI-only pnpm dev project
+  # under flavors/opencode/plugins/ type-checks the plugin TypeScript against the pinned OpenCode
+  # release's own types and runs its unit tests. Nothing it installs enters the image (only
+  # index.ts is COPYed, flavors/opencode/Dockerfile); the `flavors` job below, which builds that
+  # image and runs test/flavors, is the proof the plugin loads at runtime. Steps mirror web-lint's
+  # pnpm setup (same action pins).
+  opencode-plugin:
+    needs: changes
+    if: needs.changes.outputs.opencodeplugin == 'true'
+    name: opencode plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: flavors/opencode/plugins
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: flavors/opencode/plugins/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - name: types pin matches the image's OpenCode pin (ADR 0093 decisions 4 and 5)
+        run: |
+          types=$(node -p "require('./package.json').devDependencies['@opencode/plugin']")
+          image=$(sed -nE 's#.*/cli-linux-(x64|arm64)-([0-9][0-9.]*)\.tgz.*#\2#p' ../Dockerfile | sort -u | paste -sd ' ' -)
+          if [ "$image" != "$types" ]; then
+            echo "::error file=flavors/opencode/plugins/package.json::@opencode/plugin is $types; flavors/opencode/Dockerfile pins OpenCode $image"
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run test
 
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
@@ -1109,7 +1187,10 @@ jobs:
           [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
           # The new cache goes to its own directory (buildx must not read and write one), then
           # replaces the restored one for the save step below.
-          docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
+          # The commit time pins the timestamps, as in the release (hack/release-flavor.sh, #176).
+          docker buildx build --output type=registry,rewrite-timestamp=true \
+            --build-arg "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" \
+            --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
             --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode

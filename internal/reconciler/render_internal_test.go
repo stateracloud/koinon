@@ -52,7 +52,7 @@ func TestSandboxSpecRendersRequestsAndLimits(t *testing.T) {
 		CPU:    templates.Quantities{Request: "250m", Limit: "2"},
 		Memory: templates.Quantities{Request: "2Gi", Limit: "2Gi"},
 	}
-	spec, hash := r.sandboxSpec(pgtype.UUID{}, pgtype.UUID{}, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, res)
+	spec, hash := r.sandboxSpec(pgtype.UUID{}, pgtype.UUID{}, execution.AgentNames{Sandbox: "sb"}, Harness{Image: "img"}, nil, nil, res)
 	if spec.CPURequest != "250m" || spec.CPULimit != "2" || spec.MemoryRequest != "2Gi" || spec.MemoryLimit != "2Gi" {
 		t.Errorf("resources not carried into the spec: %+v", spec)
 	}

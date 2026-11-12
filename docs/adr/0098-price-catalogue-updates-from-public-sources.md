@@ -2,6 +2,8 @@
 
 - Status: Accepted (2026-11-06)
 - Date: 2026-11-06
+- Area: models-spend
+- Tags: pricing, models, spend-ledger, prompt-caching
 - Amends: [0070](0070-model-metadata.md) (decisions 4 and 8: price differences can now become
   prices), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the price order of the
   2026-10-24 amendment, decision 3, and the `price_ref` forms)

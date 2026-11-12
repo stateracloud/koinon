@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runoutcome"
@@ -41,7 +42,8 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		OrgId:            idString(a.OrgID),
 		DisplayName:      a.DisplayName,
 		Status:           agentStatusToProto[a.Status],
-		Flavor:           flavorProto(string(a.Flavor)),
+		Flavor:           flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
+		Harness:          a.Harness,
 		TemplateId:       idString(a.TemplateID),
 		LatestVersion:    a.LatestVersion,
 		CreatedAt:        tsProto(a.CreatedAt),
@@ -51,6 +53,10 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		UnhealthyReason:  a.UnhealthyReason.String,
 		ModelSetting:     a.Model.String,
 		SandboxResources: sandboxResourcesProto(agentresources.OverrideOf(a)),
+		KeepWarm:         a.KeepWarm,
+		// The reconciler records its decision; it grants only active agents, so a stale true on an
+		// archived or draft agent is not shown.
+		KeepWarmGranted: a.KeepWarm && a.KeepWarmGranted && a.Status == store.AgentStatusActive,
 	}
 	if archived != nil {
 		out.SandboxArchivedAt = tsProto(archived[a.ID])
@@ -122,13 +128,22 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	if err != nil {
 		return nil, s.dbError(err, "template")
 	}
-	flavor := store.AgentFlavor(t.Spec.Flavors.Default)
-	if req.GetFlavor() != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED {
-		f, ok := flavorFromProto(req.GetFlavor())
-		if !ok || !slices.Contains(t.Spec.Flavors.Allowed, templates.Flavor(f)) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, "flavor is not allowed by the template")
+	// The harness the agent runs on, by name (ADR 0112). The deprecated harness field is read only
+	// when the request names no harness.
+	chosen := string(t.Spec.Harness.Default)
+	requested := strings.TrimSpace(req.GetHarness())
+	if requested == "" && req.GetFlavor() != templatev1alpha1.Flavor_FLAVOR_UNSPECIFIED { //nolint:staticcheck // deprecated field, read for older clients
+		f, ok := flavorFromProto(req.GetFlavor()) //nolint:staticcheck // deprecated field, read for older clients
+		if !ok {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "harness is not allowed by the template")
 		}
-		flavor = f
+		requested = f
+	}
+	if requested != "" {
+		if _, ok := harness.Lookup(requested); !ok || !slices.Contains(t.Spec.Harness.Allowed, templates.HarnessName(requested)) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "harness is not allowed by the template")
+		}
+		chosen = requested
 	}
 	name := strings.TrimSpace(req.GetDisplayName())
 	if name == "" {
@@ -154,7 +169,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	var out *agentv1alpha1.Agent
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{
-			OrgID: c.org, DisplayName: name, Flavor: flavor, TemplateID: row.ID, CreatedBy: c.actor(),
+			OrgID: c.org, DisplayName: name, Harness: chosen, TemplateID: row.ID, CreatedBy: c.actor(),
 		})
 		if err != nil {
 			return err
@@ -180,7 +195,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		}
 		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.create", TargetKind: "agent", TargetID: a.ID.String(),
-			After: map[string]any{"displayName": name, "flavor": string(flavor), "templateId": row.ID.String()},
+			After: map[string]any{"displayName": name, "harness": chosen, "templateId": row.ID.String()},
 		})
 		return nil
 	})
@@ -703,4 +718,46 @@ func (s *Server) SetAgentSandboxResources(ctx context.Context, req *agentv1alpha
 		return nil, s.agentResourcesError(err)
 	}
 	return &agentv1alpha1.SetAgentSandboxResourcesResponse{State: sandboxResourcesStateProto(v)}, nil
+}
+
+// SetAgentKeepWarm implements AgentService. Admins and owners: keeping a sandbox up costs the
+// org's resources, and the operator's cap is shared by the org's admins (ADR 0049 amendment
+// 2026-11-01).
+func (s *Server) SetAgentKeepWarm(ctx context.Context, req *agentv1alpha1.SetAgentKeepWarmRequest) (*agentv1alpha1.SetAgentKeepWarmResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	var out *agentv1alpha1.Agent
+	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
+		cur, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		if cur.Status == store.AgentStatusArchived {
+			return connect.NewError(connect.CodeFailedPrecondition, "the agent is archived")
+		}
+		a := cur
+		if cur.KeepWarm != req.GetKeepWarm() {
+			a, err = q.SetAgentKeepWarm(ctx, store.SetAgentKeepWarmParams{OrgID: c.org, ID: id, KeepWarm: req.GetKeepWarm()})
+			if err != nil {
+				return err
+			}
+			b.Org(audit.Event{
+				Org: c.org, Actor: c.auditActor(), Action: "agent.keep_warm.set", TargetKind: "agent", TargetID: id.String(),
+				Before: map[string]any{"keepWarm": cur.KeepWarm},
+				After:  map[string]any{"keepWarm": a.KeepWarm},
+			})
+		}
+		out, err = s.agentView(ctx, q, a, nil, nil)
+		return err
+	})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	return &agentv1alpha1.SetAgentKeepWarmResponse{Agent: out}, nil
 }

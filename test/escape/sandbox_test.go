@@ -23,9 +23,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	modelgw "github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/templates"
@@ -143,11 +143,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		g = dialGateway(ctx)
 
 		// OpenShell binds every network rule to its binaries and checks the caller at connect():
-		// the flavor's harness plus /usr/bin/curl, which sends the gateway requests below. Without
+		// the harness plus /usr/bin/curl, which sends the gateway requests below. Without
 		// curl the connect is refused with EACCES before anything leaves the pod (old issue 322).
-		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
-		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
-			reconciler.Flavor{Binaries: gwBinaries},
+		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[harness.OpenCode]), "/usr/bin/curl")
+		key := reconciler.GatewayProfile(harness.OpenCode,
+			reconciler.Harness{Binaries: gwBinaries},
 			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
@@ -230,7 +230,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		By("a binary the gateway profile does not list (the probe's python3) is refused at connect")
 		res := probe(ctx, tcp(target{gwHost, 4000}))
 		Expect(res["tcp "+target{gwHost, 4000}.String()]).To(Equal("EACCES"),
-			"the gateway rule is bound to the flavor's binaries and curl; python3 must not reach "+gwHost+":4000")
+			"the gateway rule is bound to the harness's binaries and curl; python3 must not reach "+gwHost+":4000")
 	}, NodeTimeout(2*time.Minute))
 
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {

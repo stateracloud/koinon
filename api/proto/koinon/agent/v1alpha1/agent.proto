@@ -60,6 +60,14 @@ service AgentService {
   // and the new value. Admins and owners only.
   rpc SetAgentThinking(SetAgentThinkingRequest) returns (SetAgentThinkingResponse);
 
+  // SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts
+  // when found stopped), or withdraws the request. A request, not a promise: the operator caps
+  // the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests
+  // oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a
+  // setting of the agent, not a new version. Audited, with the old and the new value. Fails with
+  // FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
+  rpc SetAgentKeepWarm(SetAgentKeepWarmRequest) returns (SetAgentKeepWarmResponse);
+
   // GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,
   // the template's values, what the next sandbox gets, and the platform bounds an override must
   // stay inside (ADR 0083). Admins and owners only.
@@ -99,7 +107,8 @@ message Agent {
   string org_id = 2;
   string display_name = 3;
   AgentStatus status = 4;
-  koinon.template.v1alpha1.Flavor flavor = 5;
+  // Deprecated: use harness. Unspecified when the harness has no Flavor value.
+  koinon.template.v1alpha1.Flavor flavor = 5 [deprecated = true];
   // The template content the agent was created from, if any.
   string template_id = 6;
   string template_slug = 7;
@@ -137,6 +146,16 @@ message Agent {
   // The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when
   // it follows the template and the platform default.
   SandboxResources sandbox_resources = 25;
+  // Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049
+  // amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org.
+  bool keep_warm = 26;
+  // Whether the reconciler granted the request under the operator's per-org cap
+  // (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
+  // request reads false until the reconciler's next pass.
+  bool keep_warm_granted = 27;
+  // The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
+  // agent is created.
+  string harness = 28;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -145,8 +164,8 @@ message CreateAgentFromTemplateRequest {
   // A Template.id from ListTemplates.
   string template_id = 2;
   string display_name = 3;
-  // One of the template's allowed flavors; unspecified picks its default.
-  koinon.template.v1alpha1.Flavor flavor = 4;
+  // Deprecated: use harness. Read only when harness is empty.
+  koinon.template.v1alpha1.Flavor flavor = 4 [deprecated = true];
   // Where the template's grants apply: one entry per grant on a connector
   // type with targets. A grant whose template sets targets min above zero
   // needs one. Stored with the agent's version; ActivateAgent approves it with
@@ -154,6 +173,8 @@ message CreateAgentFromTemplateRequest {
   repeated GrantBinding grants = 5;
   // Overrides the template's ephemeral setting; unset keeps it.
   optional bool ephemeral = 6;
+  // One of the template's allowed harnesses, by name; empty picks its default (ADR 0112).
+  string harness = 7;
 }
 
 // GrantBinding binds a template grant to one of the org's connections and
@@ -410,6 +431,18 @@ message SetAgentSandboxResourcesRequest {
 // SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.
 message SetAgentSandboxResourcesResponse {
   SandboxResourcesState state = 1;
+}
+
+// SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
+message SetAgentKeepWarmRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  bool keep_warm = 3;
+}
+
+// SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
+message SetAgentKeepWarmResponse {
+  Agent agent = 1;
 }
 
 // RunAgentTriggerRequest names the trigger to fire.

@@ -7,17 +7,16 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: researcher
-  version: 0.1.0
+  version: 0.1.1
   displayName: Researcher
   description: >-
     Researches a question over several runs and answers with a cited Markdown report. It reads up to
     five Gitea repositories. It never writes to a repository and reads nothing from the web; for
     web research use Web researcher.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:
@@ -25,6 +24,7 @@ spec:
     memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
+  tools: [ask_user]
   grants:
     - connector: gitea
       scopes: [repo.read]

@@ -3,6 +3,8 @@
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core
   release, except the groundwork under "Timing"
 - Date: 2026-11-11
+- Area: runtime-sandbox
+- Tags: harness, flavors, dependencies, models
 - Amends: [0035](0035-v01-flavors.md) and [0059](0059-v01-opencode-only.md) (the flavor concept and how
   a harness is added), [0079](0079-dependency-cooldown.md) (the cooldown also covers harness packages)
 - Relates to: [0016](0016-harness-and-deployment.md) (agentd drives the harness over ACP),
@@ -143,6 +145,35 @@ product.
 22. **Build after the core release.** Before it, only what avoids rework later: the rename from flavor to
     harness in templates, API and database while there is no upgrade promise (ADR 0099), and moving
     OpenCode's Go descriptor to the definition format.
+
+### Groundwork decisions (2026-11-11, #610)
+
+Decided by procoduck when the rename of decision 22 was scoped:
+
+- **API.** New `harness` fields beside the `flavor` ones, which are deprecated and still filled. The
+  breaking-change check stays as it is; the `Flavor` enum cannot be renamed or removed under it, and
+  a harness an install registers cannot be an enum value.
+- **Reference.** A harness is referenced by its name, a string (`agents.harness`, `Agent.harness`,
+  `Template.allowed_harnesses`). Only `opencode` is accepted until definitions exist; the name then
+  refers to a definition.
+- **Names users see.** The sandbox image becomes `sandbox`, and the chart key `flavors` becomes
+  `harnesses`. This follows in a second change, with the template format and the directory names.
+
+Decided by procoduck on 2026-11-12, when that second change was scoped:
+
+- **Template format.** `spec.flavors` is merged into the existing `spec.harness` block, which then
+  holds `allowed`, `default` and the harness settings (`pluginInstalls`). Two keys named `harnesses`
+  and `harness` side by side were rejected as easy to confuse. Stored template versions are rewritten
+  by a migration.
+- **Chart.** `flavors` becomes `harnesses` and `flavorPrepull` becomes `harnessPrepull`; the
+  reconciler's config key follows.
+- **Image.** The image is published as `<registry>/sandbox`, not `<registry>/sandbox/opencode`: one
+  image, into which other harnesses are delivered (decision 12).
+- **Everything is renamed, in four changes,** because the CI workflows name the directory, the make
+  targets and the required check, and a change to `.github/**` merges by another route than a change
+  to the harness inputs (ADR 0105): (1) the template format, the chart keys and the config key; (2)
+  the new directory, script and make names, with the old ones kept as aliases; (3) the workflows and
+  the required check switched to the new names, with the image name; (4) the aliases removed.
 
 ## Alternatives considered
 

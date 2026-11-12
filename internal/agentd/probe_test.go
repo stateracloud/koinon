@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -107,9 +108,9 @@ var _ = Describe("storage probes", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		store0 = &checkpoint.Writer{Storage: checkpoint.Dir(GinkgoT().TempDir()), Scratch: GinkgoT().TempDir()}
-		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'probed', 'opencode') RETURNING id`, e.org).Scan(&agent)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'probed', 'opencode') RETURNING id`, e.org).Scan(&agent)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 			e.org, agent, checkpoint.Prefix(e.org.String(), agent.String()))
 		Expect(err).NotTo(HaveOccurred())
@@ -146,7 +147,7 @@ var _ = Describe("storage probes", func() {
 	It("answers probes while a resync is slow in restore-hold mode", func(ctx SpecContext) {
 		// The resync of another agent blocks in its listing; the probe is answered beside it.
 		var other pgtype.UUID
-		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'resynced', 'opencode') RETURNING id`, e.org).Scan(&other)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'resynced', 'opencode') RETURNING id`, e.org).Scan(&other)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 			e.org, other, checkpoint.Prefix(e.org.String(), other.String()))
 		Expect(err).NotTo(HaveOccurred())
@@ -237,7 +238,7 @@ var _ = Describe("storage probes", func() {
 		var probes []store.HomeRepositoryProbe
 		for i := 0; i < agents; i++ {
 			var a pgtype.UUID
-			Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'bulk', 'opencode') RETURNING id`, e.org).Scan(&a)).To(Succeed())
+			Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'bulk', 'opencode') RETURNING id`, e.org).Scan(&a)).To(Succeed())
 			_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 				e.org, a, checkpoint.Prefix(e.org.String(), a.String()))
 			Expect(err).NotTo(HaveOccurred())

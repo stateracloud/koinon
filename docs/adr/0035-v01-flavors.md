@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0059](0059-v01-opencode-only.md) and [0112](0112-harness-definitions.md)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: flavors, harness
 - Decision: [design.md#35](../design.md)
 
 ## Context

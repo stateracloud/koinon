@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: openshell, isolation, kubernetes, security
 - Amends: none (implements ADR 0002, ADR 0006, ADR 0016 and "Execution layer details")
 - Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 

@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-30 and 2026-11-07 (below)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: sandbox, runs, agent-home
 - Decision: [design.md#9](../design.md)
 
 ## Context

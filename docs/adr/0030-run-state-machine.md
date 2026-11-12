@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
+- Area: work-model
+- Tags: runs, database, tasks, triggers
 - Decision: [design.md#30](../design.md)
 
 > Note (2026-11-11): `agentd` runs in the control plane, not in the sandbox ([0049](0049-v01-scope-decisions.md); see the amendment in [0016](0016-harness-and-deployment.md)). Read "the `agentd` instance in the sandbox" below as the `agentd` instance that owns the agent's run. The alarms table and the `AgentStateStore` interface were replaced; the amendments below say how.

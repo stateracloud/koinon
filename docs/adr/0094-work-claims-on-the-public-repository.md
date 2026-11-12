@@ -13,6 +13,8 @@
 
   Probe 3 is skipped; decision 1 has a built-in fallback instead.
 - Date: 2026-11-05
+- Area: engineering-process
+- Tags: claims, github, ci
 - Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e);
   [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
   claims, outsider classes, leases or sweeper);

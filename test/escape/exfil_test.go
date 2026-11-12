@@ -13,8 +13,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
@@ -180,8 +180,8 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		}
 		url = fmt.Sprintf("http://%s:%d/mcp", host, port)
 
-		binaries := append(slices.Clone(reconciler.DefaultBinaries[store.AgentFlavorOpencode]), "/usr/bin/curl")
-		profile := reconciler.GatewayProfile(store.AgentFlavorOpencode, reconciler.Flavor{Binaries: binaries},
+		binaries := append(slices.Clone(reconciler.DefaultBinaries[harness.OpenCode]), "/usr/bin/curl")
+		profile := reconciler.GatewayProfile(harness.OpenCode, reconciler.Harness{Binaries: binaries},
 			reconciler.Endpoint{Host: host, Port: uint32(port)}, true)
 		profile.ID = fmt.Sprintf("koinon-escape-mcp-%d", n)
 		g.provider(ctx, execution.Provider{

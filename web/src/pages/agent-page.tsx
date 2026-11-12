@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
+import { AgentKeepWarm } from '@/components/agent-keep-warm'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentModel } from '@/components/agent-model'
 import { AgentRunLimits } from '@/components/agent-run-limits'
@@ -20,7 +21,7 @@ import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { runLimitsLabel } from '@/lib/cost'
-import { agentStatusLabel, flavorLabel, presetLabel } from '@/lib/labels'
+import { agentStatusLabel, harnessLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
@@ -100,8 +101,8 @@ export function AgentPage() {
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
           <dt className="text-muted-foreground">Template</dt>
           <dd>{a.templateSlug || 'none'}</dd>
-          <dt className="text-muted-foreground">Flavor</dt>
-          <dd>{flavorLabel(a.flavor)}</dd>
+          <dt className="text-muted-foreground">Harness</dt>
+          <dd>{harnessLabel(a.harness)}</dd>
           <dt className="text-muted-foreground">Model</dt>
           <dd>{a.modelSetting ? `${a.modelSetting} (set on this agent)` : a.model || 'default'}</dd>
           <dt className="text-muted-foreground">Sandbox</dt>
@@ -128,6 +129,7 @@ export function AgentPage() {
       </section>
       {isApprover(org.role) && <AgentModel agent={a} />}
       {isApprover(org.role) && <AgentSandboxResources agent={a} />}
+      {isApprover(org.role) && <AgentKeepWarm agent={a} />}
       {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}

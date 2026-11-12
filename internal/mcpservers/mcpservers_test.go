@@ -643,7 +643,7 @@ var _ = Describe("Service", func() {
 		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			var agent pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
 
 			_, err := svc.SetAgentServers(ctx, org, actor, agent, []mcpservers.Allowance{{ServerID: s.ID}})

@@ -19,16 +19,41 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 
 1. Merge everything to `main` and wait for the `ci` and `secrets` checks on the merge commit. `ci`
    cancels a run when a newer commit lands on `main`, so a superseded merge commit can be left with
-   cancelled checks: tag the newest commit whose checks are green.
-2. Tag the merge commit and push the tag (signed tags are fine; the workflow only needs the commit):
+   cancelled checks: tag the newest commit whose checks are green. Write down its SHA: step 3 tags this SHA, not
+   whatever `main` is by then.
+2. Re-check the gateway fallback, for every release, rc and final (ADR 0040, amendment 2026-11-12).
+   Do it before you push the tag. Koinon stays on agentgateway behind `ModelGateway`; Agent Router
+   (formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback
+   for the model path while agentgateway is the driver (ADR 0097 amends ADR 0040: agentgateway is
+   only the first driver behind Koinon's own gateway). The change that ships ADR 0097 step 3
+   (agentgateway removed) deletes this step and closes the amendment in ADR 0040.
+
+   - Look at the upstream pull request theagentrouter/agent-router#2834
+     (https://github.com/theagentrouter/agent-router/pull/2834) and at the Agent Router release notes
+     since the last release. Note in the release pull request or the tracking issue whether it is
+     open, merged or closed, and the version of Agent Router you looked at.
+   - Check the three gaps that ADR 0040 gives as reasons not to choose it: budgets are token windows
+     of at most one day with no USD or never-reset budget; quota fails open by default; it needs
+     Envoy Gateway. That pull request would emit partial metrics when the stream is torn down mid-response.
+   - Reconsider the fallback only if one of these holds: agentgateway fails a requirement of ADR
+     0040 or ADR 0041 that we cannot fix (USD budgets per key, unpriced models, spend after a
+     streamed response, MCP authorization), or Agent Router closes all three gaps. Weigh also the
+     reasons in ADR 0097 for rejecting Agent Router as the data plane: it charges after the
+     response, it needs Redis, and it brings vendor coupling. Then open an
+     issue and write an ADR that amends or supersedes ADR 0040. Otherwise write "no change" and go
+     on.
+
+3. Tag the commit you wrote down in step 1 and push the tag (signed tags are fine; the workflow only
+   needs the commit). A commit may have landed on `main` during step 2; do not tag it, because the
+   `release` gate checks the tagged commit and tags are immutable:
 
    ```sh
-   git switch main && git pull
-   git tag -s v0.1.0-rc.1 -m "v0.1.0-rc.1"
+   git fetch origin
+   git tag -s v0.1.0-rc.1 -m "v0.1.0-rc.1" <sha-from-step-1>
    git push origin v0.1.0-rc.1
    ```
 
-3. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
+4. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
    `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required status
    check that applies to `main` has not concluded `success`. The gate reads that list at run time from
    `rules/branches/<default>` (every active repository and organization rule for the branch, branch
@@ -69,7 +94,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `main` and on `release/*` bases alike, so land the marker change before you cut `release/v0.3`.
    The change that opens the next minor line resets the file to `none`, which lets it contract. The
    file is read at the merge base, so the same change cannot lift the rule.
-4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
+5. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
    marked as a prerelease. Publishing the draft is the only manual step.
@@ -118,7 +143,7 @@ not record a release candidate. Refreshing and what to do when a folder stops lo
 
 ## Release notes: "Upgrading from vX.Y"
 
-The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from
+The generated notes list commits only. Before you publish the draft (step 5), add an "Upgrading from
 vX.Y" section by hand, where X.Y is the previous minor line (for `v0.2.0`, "Upgrading from v0.1").
 Operators follow [Upgrading Koinon](https://koinon.stateracloud.com/docs/operate/upgrading/) (ADR 0085); the notes
 say what is specific to this release. Template:
@@ -193,12 +218,12 @@ registry, for example to test an rc from a registry your cluster can reach. Inst
 
 ### The flavor image when installing a release
 
-The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
+The packaged chart defaults `harnesses.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
 which the release publishes (the `flavor` job, `hack/release-flavor.sh`) and `hack/mirror-release.sh`
 copies, so a default install needs no flavor values. To run a flavor you built yourself (`make
-flavors`, then tag and push), set `flavors.opencode.image.repository` and `.tag`.
-`flavors.<x>.image.registry` does not exist; a flavor in another registry needs
-`flavors.<x>.image.repository` to be a path below `image.registry`.
+flavors`, then tag and push), set `harnesses.opencode.image.repository` and `.tag`.
+`harnesses.<x>.image.registry` does not exist; a harness in another registry needs
+`harnesses.<x>.image.repository` to be a path below `image.registry`.
 
 ## Dry runs
 
@@ -225,6 +250,27 @@ It prints the pushed index's digest reference. The gate does not check the flavo
 builds only the runner's own platform, so the release's QEMU build of the other platform is the
 first one: dry-run it on an x86 host (where arm64 is emulated, as in the release) before an rc that
 changes `flavors/`.
+
+### Reproducible flavor layers
+
+One commit builds the same flavor image layers (#176), as `ko` already does for the Go images.
+`hack/release-flavor.sh` and the `flavor-publish` job set the build arg `SOURCE_DATE_EPOCH` to the
+commit time (`git show -s --format=%ct`) and push with BuildKit's `rewrite-timestamp=true` exporter
+option, which clamps every file time in the layers to that epoch. The base image and every download
+are pinned by digest and the apt packages by the Ubuntu snapshot date, so those inputs do not move.
+
+`hack/flavor-repro-check.sh [flavor [platform]]` is the check: it builds the flavor twice on
+a fresh builder with no cache, for one platform, and fails when the two image digests differ (it keeps
+both OCI layouts and prints their paths). It always checks `HEAD` and refuses to run when `flavors/`
+has uncommitted changes, because the build reads the working tree. The advisory `flavor-repro` job
+(`.github/workflows/flavor-repro.yml`) runs it for the runner's platform on a push to main, nightly
+and on dispatch; it is not in the pull request or merge queue path, so it never blocks a merge. Run it
+by hand after a commit that changes `flavors/`; it needs Docker with buildx and the network, and takes
+as long as two uncached builds.
+
+What it does not cover: the BuildKit SBOM and provenance attestations of a release carry build data,
+so the release's index digest (the one the `sign` job signs) differs between two runs while the image
+manifests under it stay equal. Apt content beyond the snapshot pin is out of scope.
 
 ## Not released yet
 

@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-23, 2026-10-26 and 2026-10-30 (below); platform admin audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: auth, identity, multi-tenancy
 - Decision: [design.md#4](../design.md)
 
 ## Context

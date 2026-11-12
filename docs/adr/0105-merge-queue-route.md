@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-11-09; built in PR A #479 and PR B #487; amended 2026-11-11, below)
 - Date: 2026-11-09
+- Area: engineering-process
+- Tags: ci, e2e, github, claims
 - Supersedes in part: [0102](0102-merge-queue-runs-the-kind-e2e.md) decisions 2, 3 and 6 (evidence split, the admin
   flow, the bootstrap shim); 0102 decisions 1, 4 and 5 stay
 - Amends: [0094](0094-work-claims-on-the-public-repository.md) decision 4 ("The way in is unchanged", "Admin merges

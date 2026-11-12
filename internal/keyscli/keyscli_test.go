@@ -333,7 +333,7 @@ var _ = Describe("koinon-api keys", func() {
 
 	It("rewraps and reencrypts home repository passwords, every repository epoch included", func(ctx SpecContext) {
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		pw := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}
 		e0, err := pw.Current(ctx, org, agent)
 		Expect(err).NotTo(HaveOccurred())

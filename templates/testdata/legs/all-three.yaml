@@ -11,11 +11,12 @@ metadata:
   displayName: All three legs
   description: Reads a repository and the web.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
   model:
     name: default
+  tools: [web_url_read, post_webhook]
   grants:
     - connector: gitea
       scopes: [repo.read]

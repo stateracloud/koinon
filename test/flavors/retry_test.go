@@ -15,7 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentd"
-	koinflavor "github.com/stateracloud/koinon/internal/flavor"
+	koinflavor "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 

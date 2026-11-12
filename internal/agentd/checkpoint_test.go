@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -196,13 +197,19 @@ func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer)
 	return ctx.Err()
 }
 
-// lateStore is a checkpoint store whose backup reads the whole stream and writes the snapshot, then
-// returns only after its context has expired, as one that completes just past the attempt deadline
-// does. It reads first: the exec stdout pipe is closed when the attempt context ends.
+// lateStore is a checkpoint store whose backup finishes the snapshot, then returns only after its
+// context has expired, as one that completes just past the attempt deadline does. It reads the
+// whole stream first, on the attempt context: the exec stdout pipe is closed when that context
+// ends. The repository work (kopia opens, scrypt included) then runs detached from the deadline,
+// so its duration, which depends on build tags and machine load, cannot decide the spec (#638).
 type lateStore struct{ agentd.HomeStore }
 
 func (l lateStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m checkpoint.Meta) (checkpoint.Result, error) {
-	res, err := l.HomeStore.Backup(ctx, prefix, pw, r, m)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return checkpoint.Result{}, err
+	}
+	res, err := l.HomeStore.Backup(context.WithoutCancel(ctx), prefix, pw, bytes.NewReader(data), m)
 	<-ctx.Done()
 	return res, err
 }
@@ -264,7 +271,7 @@ var _ = Describe("home checkpoints", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		// More than the supervisor's 4 MiB exec stdin cap, and incompressible.
 		raw := make([]byte, 5<<20+123)
 		_, _ = rand.Read(raw)
@@ -455,9 +462,10 @@ var _ = Describe("home checkpoints", func() {
 		id := request(ctx, store.CheckpointReasonStop)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {
 			c.Store = lateStore{HomeStore: writer}
-			// The deadline must outlast the real work (connecting to the repository, the backup), and
-			// lateStore holds the result until the deadline: so the spec lasts as long as Timeout.
-			c.Timeout = racescale.D(10 * time.Second)
+			// The deadline only has to outlast the database lookups and the in-memory read of the
+			// stream: lateStore runs the repository work detached from it and holds the result
+			// until the deadline, so the spec lasts as long as Timeout. Not racescaled (#576).
+			c.Timeout = 10 * time.Second
 			c.Attempts = 1
 		}))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.CheckpointStatusComplete))

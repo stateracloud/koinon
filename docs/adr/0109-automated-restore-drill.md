@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Area: install-operations
+- Tags: backup-restore, testing, e2e
 - Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, by reference)
 - Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
   [0105](0105-merge-queue-route.md) (the only merge evidence is the queue; the drill is not a merge check)

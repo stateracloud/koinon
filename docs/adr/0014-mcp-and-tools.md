@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md) and [0057](0057-mcp-servers.md)
 - Date: 2026-10-21
+- Area: connectors-tools
+- Tags: mcp, agentgateway, credentials
 - Decision: [design.md#14](../design.md)
 
 ## Context

@@ -96,6 +96,15 @@
               "deprecated": false
             },
             {
+              "name": "SetAgentKeepWarm",
+              "description": "SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts\nwhen found stopped), or withdraws the request. A request, not a promise: the operator caps\nthe keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests\noldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a\nsetting of the agent, not a new version. Audited, with the old and the new value. Fails with\nFailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).",
+              "requestType": "koinon.agent.v1alpha1.SetAgentKeepWarmRequest",
+              "responseType": "koinon.agent.v1alpha1.SetAgentKeepWarmResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentModel",
               "description": "SetAgentModel sets the agent's model, or clears it with \"default\". It is a setting of the\nagent, not a new version: it applies to the agent's next run. The model must be one the org\nserves and has a price for. Audited, with the old and the new value. Admins and owners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentModelRequest",
@@ -256,8 +265,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use harness. Unspecified when the harness has no Flavor value."
             },
             {
               "name": "template_id",
@@ -438,6 +447,33 @@
               "oneof": "",
               "deprecated": false,
               "description": "The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when\nit follows the template and the platform default."
+            },
+            {
+              "name": "keep_warm",
+              "number": 26,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049\namendment 2026-11-01). A request: the operator caps how many the reconciler grants per org."
+            },
+            {
+              "name": "keep_warm_granted",
+              "number": 27,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whether the reconciler granted the request under the operator's per-org cap\n(reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new\nrequest reads false until the reconciler's next pass."
+            },
+            {
+              "name": "harness",
+              "number": 28,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The name of the harness the agent runs on (ADR 0112), for example \"opencode\". Fixed when the\nagent is created."
             }
           ]
         },
@@ -526,8 +562,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": "One of the template's allowed flavors; unspecified picks its default."
+              "deprecated": true,
+              "description": "Deprecated: use harness. Read only when harness is empty."
             },
             {
               "name": "grants",
@@ -546,6 +582,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Overrides the template's ephemeral setting; unset keeps it."
+            },
+            {
+              "name": "harness",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "One of the template's allowed harnesses, by name; empty picks its default (ADR 0112)."
             }
           ]
         },
@@ -1118,6 +1163,60 @@
               "name": "provider",
               "number": 2,
               "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentKeepWarmRequest",
+          "fullName": "koinon.agent.v1alpha1.SetAgentKeepWarmRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "keep_warm",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentKeepWarmResponse",
+          "fullName": "koinon.agent.v1alpha1.SetAgentKeepWarmResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentKeepWarmResponse holds the agent as GetAgent would return it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -13465,8 +13564,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "repeated",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use allowed_harnesses. A harness with no Flavor value is left out."
             },
             {
               "name": "default_flavor",
@@ -13474,8 +13573,8 @@
               "type": "koinon.template.v1alpha1.Flavor",
               "label": "singular",
               "oneof": "",
-              "deprecated": false,
-              "description": ""
+              "deprecated": true,
+              "description": "Deprecated: use default_harness. Unspecified when the default harness has no Flavor value."
             },
             {
               "name": "model",
@@ -13548,6 +13647,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The starting value of the agent's thinking setting, \"on\" or \"off\"; empty when the template\nnames none, which is the default, on (ADR 0069 amendment 2026-10-29)."
+            },
+            {
+              "name": "allowed_harnesses",
+              "number": 17,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Names of the harnesses the agent may run on (ADR 0112), for example \"opencode\"."
+            },
+            {
+              "name": "default_harness",
+              "number": 18,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The harness an agent gets when the request names none; one of allowed_harnesses."
             }
           ]
         },
@@ -13620,7 +13737,7 @@
           "name": "Flavor",
           "fullName": "koinon.template.v1alpha1.Flavor",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "Flavor is the harness an agent runs on (ADR 0035).",
+          "description": "Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since\nADR 0112 (\"opencode\" is the built-in one); the fields of this type are deprecated and kept so\nthe API stays wire- and source-compatible.",
           "deprecated": false,
           "values": [
             {

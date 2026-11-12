@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/savedwork"
 )
 
@@ -29,7 +30,7 @@ var _ = Describe("the saved-work receiver", func() {
 		packed []byte
 	)
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e = newEnvWith(ctx, harness.OpenCode, bound)
 		url = receiverURL()
 		key = uploadKey
 		t := e.task(ctx, "hello")
@@ -177,7 +178,7 @@ var _ = Describe("what the sandbox reports", func() {
 
 var _ = Describe("the summarizing mark", func() {
 	It("does not outlive its owner: a takeover or a new claim clears it", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "a", LeaseSeconds: 30})
 		Expect(err).NotTo(HaveOccurred())
@@ -207,7 +208,7 @@ var _ = Describe("the summarizing mark", func() {
 
 var _ = Describe("an unhealthy agent's parked run", func() {
 	It("stays parked when its approval is decided, and is claimed once the agent is resumed", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "a", LeaseSeconds: 30})

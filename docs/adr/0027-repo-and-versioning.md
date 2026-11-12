@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-25 (below)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: release, dependencies, registry, helm-chart, api
 - Decision: [design.md#27](../design.md)
 
 ## Context

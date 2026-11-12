@@ -149,10 +149,11 @@ expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml 
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors" flavors/opencode/Dockerfile
+expect "go flavors opencodeplugin" flavors/opencode/Dockerfile
 expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh
+expect "" hack/flavor-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
 expect "go flavors" hack/spike/probe/Dockerfile
 # Negative: a package neither suite imports.
 expect "go" internal/zzz-not-imported/x.go
@@ -164,7 +165,7 @@ expect "go" test/e2e/run.sh
 expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke escape flavors generate go web"
+all="chart chartsmoke escape flavors generate go opencodeplugin web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum
@@ -242,14 +243,16 @@ expect_gates "shell scripts" hack/govulncheck-test.sh
 expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
 
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
-# Read the script's output fully before grepping: chartsmoke is not the last job, so `grep -q` in
+# Read the script's output fully before grepping: flavors and chartsmoke are not the last jobs, so `grep -q` in
 # a pipefail pipeline would SIGPIPE the script mid-write and look like a miss.
 total=$((total + 4))
-if ! printf 'internal/execution/run.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/execution/run.go\n' | bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: internal/execution/run.go does not turn on flavors"
 	fails=$((fails + 1))
 fi
-if printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin) || true
+if grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: an unrelated package turns on flavors"
 	fails=$((fails + 1))
 fi
@@ -382,7 +385,8 @@ while IFS= read -r d; do
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
 total=$((total + 1))
-if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
 	fails=$((fails + 1))
 fi

@@ -1,7 +1,9 @@
 # 0046. ADR conventions
 
-- Status: Accepted
+- Status: Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: adr-process, docs
 
 ## Context
 

@@ -1,5 +1,10 @@
 # KEK and DEK rotation for Koinon's per-org secrets
 
+- Status: Complete
+- Date: 2026-10-23
+- Area: security-audit
+- Tags: encryption, secrets
+
 Researched 2026-10-23. Primary sources only. Each claim is tagged:
 
 - **[E]** established: the cited source says it.

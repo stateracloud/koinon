@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -170,7 +171,7 @@ var _ = Describe("home repository seeds", func() {
 	secondAgent := func(ctx context.Context) pgtype.UUID {
 		GinkgoHelper()
 		var b pgtype.UUID
-		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'second', 'opencode') RETURNING id`, e.org).Scan(&b)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'second', 'opencode') RETURNING id`, e.org).Scan(&b)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 			e.org, b, checkpoint.Prefix(e.org.String(), b.String()))
 		Expect(err).NotTo(HaveOccurred())
@@ -248,7 +249,7 @@ var _ = Describe("home repository seeds", func() {
 		_, err := db.Exec(ctx, `UPDATE home_repository_epochs SET seeded_at = now(), seed_failed_at = NULL
 			WHERE seed_from_epoch IS NOT NULL AND seeded_at IS NULL`)
 		Expect(err).NotTo(HaveOccurred())
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		home = &fakeHome{files: map[string]string{"notes/v.md": "live"}}
 		e.files.tar = home.tar
 		e.gw.HandleUpload(home.upload)
@@ -392,6 +393,11 @@ var _ = Describe("home repository seeds", func() {
 	})
 
 	It("records the seed of an agent that has no checkpoint, with nothing to copy", func(ctx SpecContext) {
+		// A ready sandbox whose agent never had a checkpoint is due its hourly one on the first tick,
+		// and that backup goes into epoch 1 as soon as the seed is recorded: it would race the
+		// assertion below. A seed needs no sandbox, so this agent has none running (#576).
+		_, err := db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
 		newRepositories(ctx)
 		e.pool("agentd-a", cps())
 

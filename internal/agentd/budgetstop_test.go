@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -37,7 +38,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 
 	DescribeTable("ends the run as a budget stop, recorded like the ledger's cancel",
 		func(ctx SpecContext, refusal error) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			spend(ctx, e, "2.40", "2.4038787")
 			e.harness.modelFault = func(context.Context, string) error { return refusal }
 			t := e.task(ctx, "hello")
@@ -69,7 +70,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	)
 
 	It("stops on the org's monthly cap too", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		spend(ctx, e, "100", "3")
 		_, err := q.SetOrgMonthlyCap(ctx, store.SetOrgMonthlyCapParams{OrgID: e.org, MonthlyCap: pgtype.Text{String: "3", Valid: true}, UpdatedBy: "test"})
 		Expect(err).NotTo(HaveOccurred())
@@ -81,7 +82,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	})
 
 	It("names the widest limit when several are reached, as the ledger does", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		spend(ctx, e, "1", "3")
 		_, err := q.SetOrgMonthlyCap(ctx, store.SetOrgMonthlyCapParams{OrgID: e.org, MonthlyCap: pgtype.Text{String: "3", Valid: true}, UpdatedBy: "test"})
 		Expect(err).NotTo(HaveOccurred())
@@ -93,7 +94,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	})
 
 	It("names the run's spend limit when only the run level is reached (ADR 0081)", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		_, err := q.SetAgentBudget(ctx, store.SetAgentBudgetParams{OrgID: e.org, AgentID: e.agent.ID, DailyLimit: "100", UpdatedBy: "test"})
 		Expect(err).NotTo(HaveOccurred())
 		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
@@ -117,7 +118,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	})
 
 	It("leaves the run to the control plane's cancel when that came first", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		spend(ctx, e, "2.40", "2.5")
 		// The reconciler stops the agent's runs before it revokes the key; the harness's 401 follows.
 		// The harness holds its first model request until the spec has stopped the run, so the
@@ -148,7 +149,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	})
 
 	It("keeps an authentication error as a failure when no limit is reached", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		spend(ctx, e, "2.40", "0.5")
 		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -160,7 +161,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 	})
 
 	It("does not turn an error that is not the gateway's into a budget stop", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		spend(ctx, e, "2.40", "5")
 		e.harness.modelFault = func(context.Context, string) error { return &sdk.RequestError{Code: -32603, Message: "boom"} }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))

@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -46,7 +47,7 @@ func newGiteaEnv(ctx context.Context) *ghEnv {
 	g.gt.AddRepo("secrets")
 	g.gt.Collaborate("koinon-bot", "widgets", "write")
 	ring := secretstoretest.Keyring()
-	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+	g.env = newEnvWith(ctx, harness.OpenCode, func(e *env) string {
 		connID := uuid.New()
 		id := pgtype.UUID{Bytes: connID, Valid: true}
 		envelope, err := connections.SealFields(ring, e.org, id, map[string][]byte{

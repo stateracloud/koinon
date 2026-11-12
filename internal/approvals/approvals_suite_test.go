@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -158,7 +159,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: f.org, DisplayName: "helper", Flavor: store.AgentFlavorOpencode, CreatedBy: f.owner})
+	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: f.org, DisplayName: "helper", Harness: harness.OpenCode, CreatedBy: f.owner})
 	Expect(err).NotTo(HaveOccurred())
 	v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 		OrgID: f.org, AgentID: agent.ID, Config: []byte(agentConfig(preset, connID.String())), CreatedBy: f.owner,
