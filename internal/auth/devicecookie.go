@@ -26,7 +26,17 @@ import (
 // login sets a new cookie with a new nonce. The cookie is HttpOnly, Secure (unless the public URL is
 // plain http) and SameSite=Strict, and it holds no secret: a stolen cookie lets a thief try
 // deviceFreeFails guesses per window at that one account, as the owner could.
+//
+// The cookie bypasses the account level only. The key, address and group levels, and the overflow
+// refusal for the owner's own address (BlockedTrusted), still apply.
+//
+// The signing key cannot rotate today: it is derived from the install mark, and a changed mark makes
+// every cookie fail to verify (the owner then waits like anyone else until the next login). The
+// payload starts with deviceCookieVersion so that a dedicated Secret or a rotation can be added later
+// without breaking the parsing of cookies in the field.
 const (
+	deviceCookieVersion = "v1"
+
 	deviceCookieLifetime = 30 * 24 * time.Hour
 	deviceFreeFails      = 10
 
@@ -80,9 +90,10 @@ func (s *Service) deviceNonce(r *http.Request, username string, now time.Time) s
 		return ""
 	}
 	parts := strings.Split(payload, ".")
-	if len(parts) != 3 {
+	if len(parts) != 4 || parts[0] != deviceCookieVersion {
 		return ""
 	}
+	parts = parts[1:]
 	name, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil || string(name) != deviceUsername(username) {
 		return ""
@@ -108,7 +119,7 @@ func (s *Service) setDeviceCookie(w http.ResponseWriter, username string, now ti
 	if _, err := rand.Read(nonce); err != nil {
 		return
 	}
-	payload := base64.RawURLEncoding.EncodeToString([]byte(deviceUsername(username))) + "." +
+	payload := deviceCookieVersion + "." + base64.RawURLEncoding.EncodeToString([]byte(deviceUsername(username))) + "." +
 		strconv.FormatInt(now.Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is off only for a plain http:// public URL (Config.PublicURL)
 		Name:     s.deviceCookieName(),

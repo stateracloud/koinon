@@ -142,7 +142,7 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(events(ctx)).To(HaveLen(before), "no audit event on the blocked path")
 	})
 
-	It("lets a fresh address log in while many other addresses are blocked", func(ctx SpecContext) {
+	It("lets a fresh address log in while many other addresses are blocked, below the table bound", func(ctx SpecContext) {
 		now := svc.cfg.Now()
 		for a := range 12000 {
 			addr := fmt.Sprintf("10.%d.%d.%d", a/250%250, a/62500, a%250+1)
@@ -185,6 +185,7 @@ var _ = Describe("password login limiter (issue 658)", func() {
 			if c.Name == svc.deviceCookieName() {
 				Expect(c.HttpOnly).To(BeTrue())
 				Expect(c.SameSite).To(Equal(http.SameSiteStrictMode))
+				Expect(c.MaxAge).To(Equal(30*24*3600), "30 days")
 				return c
 			}
 		}
@@ -215,6 +216,71 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(loginWithCookie(ctx, "198.51.100.203", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests), "expired")
 		advance(-31 * 24 * time.Hour)
 		Expect(loginWithCookie(ctx, "198.51.100.204", "admin", fakeLimitPassword, &forged).Code).To(Equal(http.StatusTooManyRequests), "forged")
+	})
+
+	It("names the cookie __Host- and marks it Secure for an https public URL", func(ctx SpecContext) {
+		secure, err := New(pool, Config{BootstrapLogin: true, PublicURL: "https://koinon.test", DeviceCookieSecret: []byte("koinon_test_not-a-real-secret"), Now: svc.cfg.Now})
+		Expect(err).NotTo(HaveOccurred())
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login", strings.NewReader(`{"username":"admin","password":"`+fakeLimitPassword+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "192.0.2.54:40000"
+		rec := httptest.NewRecorder()
+		secure.handleLogin(rec, req)
+		Expect(rec.Code).To(Equal(http.StatusOK))
+		var got *http.Cookie
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "__Host-koinon_device" {
+				got = c
+			}
+		}
+		Expect(got).NotTo(BeNil())
+		Expect(got.Secure).To(BeTrue())
+		Expect(got.Path).To(Equal("/"))
+		Expect(got.HttpOnly).To(BeTrue())
+	})
+
+	It("issues and honours no cookie without a secret", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.55", "admin", fakeLimitPassword, nil))
+		svc.deviceKey = nil
+		rec := loginWithCookie(ctx, "192.0.2.56", "admin", fakeLimitPassword, nil)
+		Expect(rec.Code).To(Equal(http.StatusOK))
+		for _, c := range rec.Result().Cookies() {
+			Expect(c.Name).NotTo(Equal(svc.deviceCookieName()), "no cookie is issued")
+		}
+		blockAccount(ctx, "admin")
+		Expect(loginWithCookie(ctx, "198.51.100.207", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests), "and none is honoured")
+	})
+
+	It("does not count a cookie holder's failures on the account", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.57", "admin", fakeLimitPassword, nil))
+		for i := range deviceFreeFails - 1 {
+			Expect(loginWithCookie(ctx, fmt.Sprintf("198.51.100.%d", i+20), "admin", "koinon_test_wrong", cookie).Code).To(Equal(http.StatusUnauthorized))
+		}
+		blockAccount(ctx, "admin") // blocks only after accountFreeFails failures without the cookie
+	})
+
+	It("rejects a cookie with another version", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.58", "admin", fakeLimitPassword, nil))
+		Expect(cookie.Value).To(HavePrefix(deviceCookieVersion + "."))
+		other := *cookie
+		payload := "v2." + strings.TrimPrefix(cookie.Value[:strings.LastIndexByte(cookie.Value, '.')], deviceCookieVersion+".")
+		other.Value = payload + "." + svc.deviceMAC(payload)
+		blockAccount(ctx, "admin")
+		Expect(loginWithCookie(ctx, "198.51.100.208", "admin", fakeLimitPassword, &other).Code).To(Equal(http.StatusTooManyRequests))
+	})
+
+	It("refuses untracked sources once a full table overflows, but not tracked ones or an owner with a cookie", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.59", "admin", fakeLimitPassword, nil))
+		now := svc.cfg.Now()
+		for a := range 55000 { // two entries each: the table is full of live entries
+			svc.limiter.Fail(ratelimit.Key(fmt.Sprintf("10.%d.%d.%d", a/62500, a/250%250, a%250+1), "user:x"), now)
+		}
+		for n := range ratelimit.OverflowFreeFails {
+			svc.limiter.Fail(ratelimit.Key(fmt.Sprintf("172.16.%d.%d", n/250, n%250+1), "user:y"), now)
+		}
+		Expect(login(ctx, "198.51.100.150", "admin", fakeLimitPassword).Code).To(Equal(http.StatusTooManyRequests), "an untracked source")
+		Expect(login(ctx, "10.0.0.1", "admin", fakeLimitPassword).Code).To(Equal(http.StatusOK), "a tracked source")
+		Expect(loginWithCookie(ctx, "198.51.100.151", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusOK), "an owner with a cookie")
 	})
 
 	It("gives no exemption on another account", func(ctx SpecContext) {

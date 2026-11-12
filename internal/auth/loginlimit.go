@@ -70,11 +70,10 @@ func (s *Service) deviceUsable(k loginKeys, now time.Time) bool {
 // loginWait is how long a login must wait before the password hash: the longest wait over the
 // username at its address, the address and its group, and the account unless a device cookie exempts it.
 func (s *Service) loginWait(k loginKeys, now time.Time) time.Duration {
-	w := s.limiter.Blocked(k.user, now)
-	if !s.deviceUsable(k, now) {
-		w = max(w, s.limiter.BlockedKey(k.account, now))
+	if s.deviceUsable(k, now) {
+		return s.limiter.BlockedTrusted(k.user, now)
 	}
-	return w
+	return max(s.limiter.Blocked(k.user, now), s.limiter.BlockedKey(k.account, now))
 }
 
 // loginEvents counts the outcomes of the password login limiter. The labels are fixed (ADR 0023):

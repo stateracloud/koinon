@@ -223,6 +223,15 @@ func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	return w
 }
 
+// BlockedTrusted is Blocked without the refusal of untracked sources, for a caller that has other
+// evidence that the client is genuine (a verified device cookie).
+func (l *Limiter) BlockedTrusted(key string, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	addr, group := levels(key)
+	return max(l.wait(key, now), l.wait(addr, now), l.wait(group, now))
+}
+
 // BlockedKey is Blocked for the key's own level only, for a caller that must not refuse a client
 // because of its neighbours (a valid admin token).
 func (l *Limiter) BlockedKey(key string, now time.Time) time.Duration {
