@@ -52,7 +52,9 @@ while IFS= read -r f; do
 	rel=${f#"$root"/}
 	# Exactly the registered PreToolUse hooks. Add a new hook here when .claude/settings.json registers it.
 	case $rel in
-	hack/hooks/agent-spawn-check.sh | hack/hooks/bash-read-check.sh | hack/hooks/read-result-check.sh | hack/hooks/sleep-chain-check.sh) is_hook=1 ;;
+	hack/hooks/agent-spawn-check.sh | hack/hooks/bash-read-check.sh | hack/hooks/read-result-check.sh | hack/hooks/sleep-chain-check.sh | \
+		hack/hooks/codegraph-prompt-check.sh | hack/hooks/context-cap-check.sh | hack/hooks/grilling-question-check.sh | \
+		hack/hooks/prose-question-stop-check.sh | hack/hooks/question-checklist-check.sh) is_hook=1 ;;
 	*) is_hook=0 ;;
 	esac
 	if [[ $is_hook == 1 ]]; then

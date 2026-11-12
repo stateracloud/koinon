@@ -886,6 +886,11 @@ jobs:
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
       - run: hack/hooks/sleep-chain-check_test.sh
+      - run: hack/hooks/codegraph-prompt-check_test.sh
+      - run: hack/hooks/context-cap-check_test.sh
+      - run: hack/hooks/grilling-question-check_test.sh
+      - run: hack/hooks/prose-question-stop-check_test.sh
+      - run: hack/hooks/question-checklist-check_test.sh
       - run: hack/agent-state-test.sh
       - run: hack/release-gate-test.sh
       - run: hack/route-guard-test.sh

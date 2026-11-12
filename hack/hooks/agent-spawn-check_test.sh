@@ -44,6 +44,17 @@ else
   bad "deny output shape ($out)"
 fi
 
+# The deny carries the brief digest (subagent-brief-digest.txt) so the caller sees the subagent rules.
+out=$("$hook" <<<'{"tool_input":{"subagent_type":"general-purpose","prompt":"x"}}')
+if jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out" | grep -q 'Brief digest'; then
+  ok "deny carries the brief digest"
+else
+  bad "deny lacks the brief digest ($out)"
+fi
+# An allowed spawn prints nothing: no updatedInput, no digest.
+out=$("$hook" <<<'{"tool_input":{"subagent_type":"general-purpose","model":"sonnet","prompt":"docs/agents/subagent-brief.md"}}')
+if [ -z "$out" ]; then ok "allowed spawn is silent"; else bad "allowed spawn printed: $out"; fi
+
 # Off unless KOINON_MAINTAINER_HOOKS=1 (issue 843): no output and exit 0 for a spawn it would refuse.
 for v in unset '' 0 true; do
   rc=0

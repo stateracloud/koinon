@@ -15,15 +15,22 @@ public but labelled. A committed hook that refuses a contributor's tool call doe
 
 ## The hooks
 
-All are PreToolUse hooks in `hack/hooks/`, registered in `.claude/settings.json`. Each prints a
-`deny` decision with a one-line reason and a legal route, or nothing.
+All are in `hack/hooks/`, registered in `.claude/settings.json`. A PreToolUse hook that refuses prints a
+`deny` decision with a reason and a legal route; the others add context or block a stop; otherwise a hook
+prints nothing. `agent-spawn-check.sh` adds `subagent-brief-digest.txt` (the rules every subagent
+follows; `docs/agents/subagent-brief.md` wins over it) to its deny reason.
 
 | Hook | Tool | Refuses | Test |
 |---|---|---|---|
 | `agent-spawn-check.sh` | Agent | a spawn without `model`; a spawn whose prompt does not name `docs/agents/subagent-brief.md` (Explore, claude-code-guide, web-fetch, statusline-setup, claude-security:* and fork are exempt) | `agent-spawn-check_test.sh` |
 | `read-result-check.sh` | Read | a Read of a saved `tool-results/` file without `limit` | `read-hooks_test.sh` |
 | `bash-read-check.sh` | Bash | printing much of a file or of several files in one call (`cat` of two files, `sed -n` past 210 lines, ...) | `read-hooks_test.sh` |
-| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more; `run_in_background` is allowed | `sleep-chain-check_test.sh` |
+| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more, or the same wait spelled as perl `select`, `tail -f /dev/null`, `timeout N tail -f`, `read -t N` or python `time.sleep`; `run_in_background` is allowed | `sleep-chain-check_test.sh` |
+| `grilling-question-check.sh` | Skill | nothing; when the grilling skill loads it adds the rule that every question goes through `AskUserQuestion` | `grilling-question-check_test.sh` |
+| `question-checklist-check.sh` | AskUserQuestion | nothing; it adds a checklist before each question (already answered by a rule? researched? answerable cold?) | `question-checklist-check_test.sh` |
+| `prose-question-stop-check.sh` | Stop | blocks the stop once when the reply ends in a question and the turn made no `AskUserQuestion` call; never twice in a row | `prose-question-stop-check_test.sh` |
+| `context-cap-check.sh` | PostToolUse | nothing; past 300k tokens of context (`KOINON_CONTEXT_CAP`) it adds a request to compact, once per 50k step. `context-cap-check.sh status` is a status-line text (not registered) | `context-cap-check_test.sh` |
+| `codegraph-prompt-check.sh` | UserPromptSubmit | nothing; it wraps `codegraph prompt-hook` and skips it for short prompts, notifications and the main checkout | `codegraph-prompt-check_test.sh` |
 
 The tests need only bash 5 and jq; `make adr-lint` and the `ci` workflow run them, and they check
 both the refusals and that each hook is silent without the variable. The guards table,
@@ -53,9 +60,6 @@ The value must be exactly `1`. Any other value, or no variable, leaves the hooks
 3. Start a new session. Check: a foreground `sleep 10` in the Bash tool is refused with
    `Sleep chain blocked`.
 
-If your local settings still register `~/.config/koinon/hooks/sleep-chain.sh`, remove that entry:
-`sleep-chain-check.sh` replaces it, and both would run on each Bash call.
-
 ### In a Claude Code cloud environment
 
 1. On claude.ai/code, open the environment's settings and add the environment variable
@@ -64,12 +68,22 @@ If your local settings still register `~/.config/koinon/hooks/sleep-chain.sh`, r
 2. Start a new session in that environment: a running session keeps the variables it started with.
 3. Check as on the Mac. The cloud image has bash 5 and jq.
 
-## Not in the repository yet
+## Kept outside the repository
 
-These hooks are still registered only in the owner's local settings, from `~/.config/koinon/hooks/`
-(`docs/agents/guards.md` lists them): the second `agent-spawn-check.sh` and its brief digest,
-`relay-guard.sh`, `context-cap.sh`, `grilling-question-tool.sh` and `prose-question-stop.sh`.
-Moving one follows the rule below.
+- `relay-guard.sh` (PreToolUse on SendMessage and AskUserQuestion): it refuses relaying the owner's
+  approval to a named private lab session. It only makes sense with that private setup, and the
+  lab stays out of git (ADR 0108 and the lab rule in `AGENTS.md`).
+
+A maintainer who still registers the owner-local copies of `agent-spawn-check.sh`, `sleep-chain.sh`,
+`context-cap.sh`, `grilling-question-tool.sh`, `prose-question-stop.sh`, `question-checklist.sh` or
+`codegraph-prompt.sh` in `~/.claude/settings.json` must remove those entries: the repository hooks
+replace them, and both would run.
+
+## Optional: the context status line
+
+`hack/hooks/context-cap-check.sh status` prints `ctx 205k/300k` (red past the cap) for a Claude Code
+status line. The repository does not register it, because a status line is a per-user setting. To use
+it, point your user `statusLine` command at the script, with `KOINON_MAINTAINER_HOOKS=1` set.
 
 ## Adding a maintainer hook
 
@@ -85,6 +99,10 @@ A new hook comes, in the same pull request, with:
 - its offline test `hack/hooks/<name>-check_test.sh`, which covers the off case, listed in the
   `Makefile` (`adr-lint`) and in `.github/workflows/ci.yml`;
 - its entry in `.claude/settings.json` and in the hook list of `hack/bash5-lint.sh`;
+- a `script-check -` line for its test in `hack/paths.rules`;
+- nothing personal and nothing from the private lab: no secrets, no host or cluster names, no
+  absolute home paths (use `$HOME`, `${TMPDIR:-/tmp}` or repo-relative paths), no person's name (say
+  "the maintainer");
 - its row in `docs/agents/guards.md` and in the table above.
 
 Hooks run from `$CLAUDE_PROJECT_DIR`, the main checkout, not from a lane's worktree

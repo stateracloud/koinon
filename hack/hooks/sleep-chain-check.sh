@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Claude Code PreToolUse hook on the Bash tool (issue 843; docs/agents/guards.md, "No sleep of 5 s or
-# more"). It replaces the owner-local ~/.config/koinon/hooks/sleep-chain.sh. A foreground `sleep`
+# more"). It replaces the maintainers' earlier local copy. A foreground `sleep`
 # blocks the session and burns the turn while it waits; waits belong in `hack/pr-wait.sh`,
 # `run_in_background` or a Monitor call (docs/agents/subagent-brief.md, "No standalone sleep").
 # It refuses a foreground Bash command whose literal `sleep` durations add up to 5 seconds or more
@@ -11,7 +11,9 @@
 # whose duration is not a literal (`sleep "$d"`): the hook cannot know it. Quoted text (a commit
 # message, over several lines too) and heredoc bodies are not commands. A `sleep 10 &` inside a
 # foreground call is refused too: a later `wait`, or the shell, can still hold the call. Not seen:
-# a sleep inside `bash -c "..."` or `eval`.
+# a sleep inside `bash -c "..."` or `eval`. The same wait in other spellings is refused as well (a
+# perl `select` with undef handles, `tail -f /dev/null`, `timeout N tail -f`, `read -t N`, python
+# `time.sleep`); those are matched on the raw command, so quoted text can trip them.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
 # Needs only bash, awk and jq.
 
@@ -40,7 +42,7 @@ max_seconds=5
 #   3. add up the literal arguments of every `sleep` that starts a simple command. Before it may come
 #      do/then/else/!/time, NAME=value words, command, env, exec, nohup, and `timeout DURATION`.
 #      GNU sleep sums its arguments.
-total=$(printf '%s\n' "$cmd" | awk -v sq="'" '
+total=$(printf '%s\n' "$cmd" | LC_ALL=C awk -v sq="'" '
 BEGIN { RS = "\001" }
 function sep() { out = out " ; " }
 {
@@ -114,7 +116,27 @@ function sep() { out = out " ; " }
 }
 END { printf "%d\n", sum }')
 
-[ "${total:-0}" -lt "$max_seconds" ] && exit 0
+# Other spellings of a wait of 5 s or more, matched line by line on the raw command.
+n='([5-9]|[1-9][0-9]+)'
+start='(^|[;&|(]|do|then)[[:space:]]*'
+other_pats=(
+  "select\\([[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*$n"
+  "${start}tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow[^[:space:]]*)[[:space:]]+([^|;&]*[[:space:]])?/dev/null"
+  "${start}timeout[[:space:]]+(-[^[:space:]]+[[:space:]]+)*${n}[smhd]?[[:space:]]+tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow)"
+  "${start}read[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*t[[:space:]]*$n"
+  "python[0-9.]*[[:space:]].*time\\.sleep\\([[:space:]]*$n"
+)
+other=0
+for p in "${other_pats[@]}"; do
+  if grep -Eq -- "$p" <<<"$cmd"; then other=1; break; fi
+done
+
+if [ "${total:-0}" -lt "$max_seconds" ]; then
+  [ "$other" = 1 ] || exit 0
+  reason="Sleep chain blocked: a foreground wait of ${max_seconds}s or more (perl select, tail -f /dev/null, read -t, python time.sleep). Wait with hack/pr-wait.sh <PR> --checks, run_in_background, or a Monitor call (docs/agents/subagent-brief.md)."
+  jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  exit 0
+fi
 
 reason="Sleep chain blocked: ${total}s of foreground sleep. Wait with hack/pr-wait.sh <PR> --checks, run_in_background, or a Monitor call (docs/agents/subagent-brief.md)."
 jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'

@@ -82,6 +82,17 @@ else
   bad "the deny output: $out"
 fi
 
+# Other spellings of a wait of 5 s or more (merged from the owner-local hook).
+case_ deny 'perl -e '"'"'select(undef, undef, undef, 30)'"'"
+case_ deny 'tail -f /dev/null'
+case_ deny 'timeout 20 tail -f /var/log/x'
+case_ deny 'read -t 30 x'
+case_ deny 'python3 -c "import time; time.sleep(20)"'
+case_ allow 'read -t 2 x'
+case_ allow 'python3 -c "import time; time.sleep(2)"'
+case_ allow 'tail -f /var/log/x' true
+case_ allow 'tail -n 20 /var/log/x'
+
 # Off unless KOINON_MAINTAINER_HOOKS=1: no output and exit 0 for a command it would refuse, also under
 # a POSIX sh (the opt-in line comes before any bash 4+ syntax).
 rc=0

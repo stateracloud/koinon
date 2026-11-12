@@ -241,6 +241,11 @@ script-check - hack/drill-issue-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/hooks/sleep-chain-check_test.sh
+script-check - hack/hooks/codegraph-prompt-check_test.sh
+script-check - hack/hooks/context-cap-check_test.sh
+script-check - hack/hooks/grilling-question-check_test.sh
+script-check - hack/hooks/prose-question-stop-check_test.sh
+script-check - hack/hooks/question-checklist-check_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
 script-check - hack/buf-breaking-against-test.sh

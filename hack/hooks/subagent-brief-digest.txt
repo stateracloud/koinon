@@ -1,0 +1,12 @@
+--- Brief digest (docs/agents/subagent-brief.md; the file wins) ---
+1. Find first: codegraph_explore (or `codegraph explore "<names>"`) before grep/cat. Read only the part you need (offset+limit). One file and one range per call (no `cat a b c`, no several `sed -n`); a saved large output (tool-results/): grep it or Read with offset+limit, never whole.
+2. Read or codegraph a file before you Edit it. New files: the Write tool, never heredocs or echo/sed into files.
+3. The shell tool is named Bash. Use /bin/ls, not ls. Scripts need bash 5 (ADR 0090): run them with `bash`, not /bin/bash (3.2).
+4. Waiting: no standalone sleep, no sleep loops, no Monitor that only sleeps. PRs: hack/pr-wait.sh; else run_in_background.
+5. Never pgrep/pkill/kill processes you did not start: other lanes share this machine.
+6. Never call hack/claim.sh; the parent owns claims. Never git stash (shared across worktrees).
+7. Explicit cluster: KUBECONFIG=/dev/null (or the file you were given) on every kubectl/helm/tilt/kind/test command.
+8. Work in your worktree: absolute paths or git -C <worktree>. Do not push or open PRs unless told.
+9. Commit with `git commit -s` as procoduck <coder@procodus.dev> (author, committer and sign-off), Conventional Commits. Fake secrets look fake (koinon_test_not-a-real-token).
+10. Run hack/preflight.sh before hand-back. Hand back in at most 40 lines; if a tool call is refused, stop and say which.
+11. Which model (brief section): haiku = mechanical runs, never fixes code, stops and reports evidence; sonnet = settled implementation; opus = design, review, hard bugs. Also for cloud and SendMessage briefs.
