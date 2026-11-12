@@ -64,21 +64,29 @@ printf '#!/usr/bin/env bash\n[ "${BASH_VERSINFO:-0}" -ge 4 ] || exit 2\n' >"$dri
 check "a drifted guard fails" "$(run "$drift")" 1
 
 # The fail-open hook variant: accepted in hack/hooks/*-check.sh, rejected elsewhere.
+# A hook starts with the KOINON_MAINTAINER_HOOKS opt-in line (issue 843), then the hook guard.
 hookg=$(sed -n "s/^hook_guard='\(.*\)'\$/\1/p" "$lint" | sed "s/'\"'\"'/'/g")
+gate=$(sed -n "s/^hook_gate='\(.*\)'\$/\1/p" "$lint")
 hk=$tmp/hk
 mkdir -p "$hk/hack/hooks"
 printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/bash-read-check.sh"
+check "a registered hook without the opt-in line fails" "$(run "$hk")" 1
+printf '#!/usr/bin/env bash\n%s\n%s\n' "$hookg" "$gate" >"$hk/hack/hooks/bash-read-check.sh"
+check "a registered hook with the opt-in line second fails" "$(run "$hk")" 1
+printf '#!/usr/bin/env bash\n%s\n%s\n' "$gate" "$guard" >"$hk/hack/hooks/bash-read-check.sh"
+check "a registered hook with the exit-2 guard fails" "$(run "$hk")" 1
+printf '#!/usr/bin/env bash\n# c\n%s\n\n# c\n%s\n' "$gate" "$hookg" >"$hk/hack/hooks/bash-read-check.sh"
 check "the hook variant passes in a registered hook" "$(run "$hk")" 0
 for other in hack/hooks/sub/evil-check.sh test/hack/hooks/x-check.sh hack/hooks/notahook-check.sh; do
 	rm -rf "$tmp/hk2"
 	mkdir -p "$tmp/hk2/$(dirname "$other")"
-	printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$tmp/hk2/$other"
+	printf '#!/usr/bin/env bash\n%s\n%s\n' "$gate" "$hookg" >"$tmp/hk2/$other"
 	check "the hook variant is rejected in $other" "$(run "$tmp/hk2")" 1
 done
-printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/y.sh"
+printf '#!/usr/bin/env bash\n%s\n%s\n' "$gate" "$hookg" >"$hk/hack/y.sh"
 check "the hook variant is rejected elsewhere" "$(run "$hk")" 1
 rm "$hk/hack/y.sh"
-printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/z_test.sh"
+printf '#!/usr/bin/env bash\n%s\n%s\n' "$gate" "$hookg" >"$hk/hack/hooks/z_test.sh"
 check "the hook variant is rejected in a hook test" "$(run "$hk")" 1
 
 # Any other bash shebang fails.
