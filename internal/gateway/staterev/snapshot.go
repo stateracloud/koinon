@@ -128,7 +128,7 @@ func modelToProto(m gateway.ModelState) *gwv1.ModelState {
 	for _, a := range sortedAgents(m.Limits) {
 		l := m.Limits[a]
 		out.Limits = append(out.Limits, &gwv1.AgentLimit{Agent: agentToProto(a), Limit: &gwv1.Limit{
-			Unit: string(l.Unit), AmountPicoUsd: int64(l.Amount), WindowSeconds: int64(l.Window / time.Second), Generation: l.Generation,
+			Unit: string(l.Unit), AmountPicoUsd: int64(l.Amount), WindowSeconds: int64(l.AppliedWindow() / time.Second), Generation: l.Generation,
 		}})
 	}
 	for _, p := range m.Providers {

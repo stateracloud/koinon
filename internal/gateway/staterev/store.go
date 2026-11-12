@@ -87,6 +87,14 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 		return Published{}, fmt.Errorf("staterev: read the latest revision: %w", err)
 	default:
 		if latest.Digest == digest {
+			// Unchanged: no new revision, but retention still runs, so a quiet install does not keep
+			// revisions past the ADR 0097 age bound. The newest is never pruned.
+			if err := p.prune(ctx, q); err != nil {
+				return Published{}, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return Published{}, fmt.Errorf("staterev: commit: %w", err)
+			}
 			return Published{Revision: latest.Revision}, nil
 		}
 	}
@@ -97,17 +105,24 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 	if err := q.NotifyGatewayStateRevision(ctx, strconv.FormatInt(rev, 10)); err != nil {
 		return Published{}, fmt.Errorf("staterev: notify: %w", err)
 	}
-	keep := p.Keep
-	if keep <= 0 {
-		keep = DefaultKeep
-	}
-	if _, err := q.PruneGatewayStateRevisions(ctx, store.PruneGatewayStateRevisionsParams{Keep: int32(keep), MaxAgeSeconds: int32(MaxAge / time.Second)}); err != nil {
-		return Published{}, fmt.Errorf("staterev: retention: %w", err)
+	if err := p.prune(ctx, q); err != nil {
+		return Published{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Published{}, fmt.Errorf("staterev: commit: %w", err)
 	}
 	return Published{Revision: rev, Changed: true}, nil
+}
+
+func (p Publisher) prune(ctx context.Context, q *store.Queries) error {
+	keep := p.Keep
+	if keep <= 0 {
+		keep = DefaultKeep
+	}
+	if _, err := q.PruneGatewayStateRevisions(ctx, store.PruneGatewayStateRevisionsParams{Keep: int32(keep), MaxAgeSeconds: int32(MaxAge / time.Second)}); err != nil {
+		return fmt.Errorf("staterev: retention: %w", err)
+	}
+	return nil
 }
 
 // Latest returns the newest stored revision as a StateUpdate with its revision number, or nil when

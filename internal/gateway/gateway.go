@@ -363,6 +363,16 @@ func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
 
 // Validate reports why the gateway cannot take the limit, or nil. A limit that fails it is
 // quarantined with its key by drivers that can (standalone: one bad limit must not freeze the file).
+// AppliedWindow is the window a gateway applies: agentgateway takes whole seconds at the smallest, so a
+// positive window below that rounds up to the next second and 0 stays "no window". Rendering and the
+// State snapshot (internal/gateway/staterev) both use it, so what is stored is what is applied.
+func (l Limit) AppliedWindow() time.Duration {
+	if l.Window <= 0 {
+		return 0
+	}
+	return (l.Window + time.Second - 1) / time.Second * time.Second
+}
+
 func (l Limit) Validate() error {
 	switch {
 	case l.Unit != USD:
