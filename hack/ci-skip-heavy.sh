@@ -55,7 +55,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-heavy=(go web generate chart chartsmoke escape flavors tidy shell scripts)
+heavy=(go web generate chart chartsmoke escape flavors tidy vuln shell scripts)
 
 emit() { echo "skip=$1"; echo "reason=$2"; }
 

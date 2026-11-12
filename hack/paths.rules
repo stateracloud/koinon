@@ -79,6 +79,13 @@ job tidy \.go$
 job tidy ^go\.(mod|sum)$
 job tidy ^\.golangci\.ya?ml$
 
+# --- vuln: go-vuln, govulncheck on a change of the Go dependencies (#579 part 2) --------------------------
+# Whether a known vulnerability is reachable can change only when the module's requirements change (the
+# nightly run covers a new advisory against an unchanged tree, ADR 0079), so a pull request pays for it
+# only when go.mod or go.sum changes. A change to ci.yml, the Makefile or these rules runs it through
+# `everything`. The preflight gate `vuln` uses the same rule.
+job vuln ^go\.(mod|sum)$
+
 # --- shell: lint-shell (#572) --------------------------------------------------------------------------
 # shellcheck over `git ls-files '*.sh'` (any directory), and actionlint and zizmor over .github/ (workflows,
 # the composite actions they read, their config). The tool versions and checksums are in hack/versions.env,
@@ -153,6 +160,7 @@ lane chartsmoke docker,helm,go test-chart-smoke
 lane flavors docker,go test-flavors
 lane escape helm,go test-admission
 lane tidy - preflight
+lane vuln go preflight
 lane shell - preflight
 lane scripts - preflight
 
@@ -198,6 +206,7 @@ script-check - hack/ci-fail-test.sh
 script-check - hack/ci-timing-test.sh
 script-check - hack/ci-go-gate-test.sh
 script-check - hack/ci-web-gate-test.sh
+script-check - hack/govulncheck-test.sh
 script-check - hack/ci-required-test.sh
 script-check - hack/repo-contract-test.sh
 script-check - hack/tmp-safety-test.sh

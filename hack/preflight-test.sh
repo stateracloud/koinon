@@ -56,7 +56,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test govulncheck govulncheck-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -93,7 +93,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC || true; rm -rf "$tmp/tmpdir"/*; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC FAKE_GOVULNCHECK_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
 check() { # <description> <command...>
@@ -143,6 +143,24 @@ pf "$tmp/l2" --list >/dev/null
 for g in chart web generate migrate adr shell mktemp pinned bash5; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
 check "no Go files: go not selected" hasnt '^go:' "$tmp/l2"
 check "no Go files: tidy not selected" hasnt '^tidy:' "$tmp/l2"
+check "no go.mod change: vuln not selected" hasnt '^vuln:' "$tmp/l2"
+check "a Go file change alone does not select vuln" hasnt '^vuln:' "$tmp/l1"
+
+# govulncheck (#579 part 2): a go.mod change selects the vuln gate, which runs the pinned-version wrapper
+reset_state
+w=$(fresh); cd "$w"
+echo "// require changed" >>go.mod
+commit_all
+pf "$tmp/lv" --list >/dev/null
+check "go.mod change selects vuln" has '^vuln: go.mod or go.sum changed' "$tmp/lv"
+rc=$(pf "$tmp/rv" --only vuln)
+check "vuln gate: exit 0" eq "$rc" 0
+check "vuln gate ran the test and the wrapper" has '^govulncheck.sh' "$FAKE_LOG"
+export FAKE_GOVULNCHECK_RC=1
+rc=$(pf "$tmp/rvf" --only vuln)
+check "a failing govulncheck fails preflight" eq "$rc" 1
+check "vuln FAIL line" has '^vuln FAIL' "$tmp/rvf"
+unset FAKE_GOVULNCHECK_RC
 
 # a workflow-only change selects the mktemp and actionlint gates but not the shell gate
 reset_state

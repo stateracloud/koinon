@@ -108,7 +108,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Workflow security lint | `zizmor` (step of `lint-shell`, ADR 0111) | yes | yes | yes | - | - | - | seconds | yes |
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
 | CodeQL | `codeql` workflow | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
-| govulncheck | `govulncheck.yml` | with #579 part 2, if `go.mod` or `go.sum` changed | - | - | yes | - | - | minutes | decided in part 2 |
+| govulncheck | `go-vuln` (part of `go`, only if `go.mod` or `go.sum` changed), nightly `govulncheck.yml` | yes, if `go.mod` or `go.sum` changed | yes, same rule | nightly | yes | - | - | minutes | yes (`go`) |
 | Restore drill | `drill` job (ADR 0109) | - | - | - | yes | rc tag | final tag | long | adv |
 | Upgrade from last release | planned, #83, #519 | - | - | - | from v0.3 | from v0.3 | - | long | from v0.3 |
 | VM tier (Kata) | lab only | - | - | - | - | - | yes | n/a | no |
@@ -289,8 +289,10 @@ Scope: general pattern. In force: now.
 Check: the `gitleaks` job (`secrets.yml`). Source: Koinon decision. Scope: general pattern. In force: now.
 
 **X3. MUST** run `govulncheck` nightly now, and on pull requests that change `go.mod` or `go.sum`.
-Check: `govulncheck.yml` (nightly); the pull request job arrives with #579 part 2. Source: Koinon decision, ADR 0079
-(maintainer decision 2026-11-11). Scope: general pattern. In force: now (nightly); with #579 part 2 (pull requests).
+Check: `govulncheck.yml` (nightly) and the `go-vuln` job of `ci.yml` (path rule `vuln`; part of the required
+`go` check), both through `hack/govulncheck.sh`. A fetch failure of the tool or the vulnerability database
+fails the run and is not retried (T1). Source: Koinon decision, ADR 0079 (maintainer decision 2026-11-11).
+Scope: general pattern. In force: now (nightly and pull requests, since #579 part 2).
 
 **X4. MUST** check the SPDX header on every source file, check dependency licences, and scan the published
 images for vulnerabilities. Check: planned, #580. Source: [REUSE specification](https://reuse.software/spec-3.3/).

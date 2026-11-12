@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Nightly govulncheck on main (ADR 0079). It is the only govulncheck run: a new advisory needs no
-# code change to apply, so a per-pull-request job (removed in old issue 561) added nothing. A reachable finding fails the run, which
-# notifies the maintainer and is what starts the security fast path.
+# Nightly govulncheck on main (ADR 0079): a new advisory needs no code change to apply, so only a nightly
+# run sees it on an unchanged tree. A pull request that changes go.mod or go.sum runs the same script
+# as the `go-vuln` job of ci.yml (#579 part 2); a pull request that changes neither pays nothing. A reachable
+# finding fails the run, which notifies the maintainer and is what starts the security fast path.
+# hack/govulncheck.sh installs the version pinned in hack/versions.env and fails, with a message, when the
+# vulnerability database cannot be fetched; there is no retry (rule T1 of docs/dev/ci-rules.md).
 name: govulncheck
 
 on:
@@ -24,6 +27,4 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: load tool versions
-        run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - run: go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
+      - run: hack/govulncheck.sh

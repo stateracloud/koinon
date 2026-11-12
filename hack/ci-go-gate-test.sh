@@ -33,12 +33,12 @@ trap 'rm -rf "$tmp"' EXIT
 # The gate's script: the run block of its only step.
 sed -n '/^  go:$/,/^  [a-z-]*:$/p' "$wf" | awk '/^        run: \|$/ { on = 1; next } on && /^  [a-z-]*:$/ { exit } on { sub(/^          /, ""); print }' >"$tmp/gate.sh"
 [[ -s $tmp/gate.sh ]] || { echo "FAIL: cannot extract the go gate's script"; exit 1; }
-GATE_ENV=() # extra NAME=value pairs for the next gate calls (TIDY, TIDY_RESULT, LINT_RESULT)
+GATE_ENV=() # extra NAME=value pairs for the next gate calls (TIDY, TIDY_RESULT, LINT_RESULT, VULN, VULN_RESULT)
 gate() { # gate NAME WANT_RC GO_TEST LAB RESULTS...: runs the extracted script
   local name=$1 want=$2 gt=$3 lab=$4 rc=0
   shift 4
   env CHANGES=success GO=true SKIP=false REASON=x EVENT=pull_request RESULTS="$*" GO_TEST="$gt" LAB="$lab" LAB_REASON=lab \
-    TIDY=true TIDY_RESULT=success LINT_RESULT=success "${GATE_ENV[@]}" bash "$tmp/gate.sh" >"$tmp/out" 2>&1 || rc=$?
+    TIDY=true TIDY_RESULT=success LINT_RESULT=success VULN=true VULN_RESULT=success "${GATE_ENV[@]}" bash "$tmp/gate.sh" >"$tmp/out" 2>&1 || rc=$?
   [[ $rc == "$want" ]] || { echo "FAIL: $name (rc $rc, want $want)"; cat "$tmp/out"; exit 1; }
 }
 gate "all green" 0 success false success success success success success success
@@ -58,7 +58,22 @@ GATE_ENV=(TIDY=true TIDY_RESULT=skipped LINT_RESULT=success)
 gate "go-tidy skipped although tidy=true is a failure" 1 success false success skipped success success success
 GATE_ENV=(TIDY=true TIDY_RESULT=success LINT_RESULT=skipped)
 gate "go-lint skipped although tidy=true is a failure" 1 success false success success skipped success success
+# go-vuln (govulncheck, #579 part 2) skipped by the `vuln` output: go.mod and go.sum did not change.
+GATE_ENV=(VULN=false VULN_RESULT=skipped)
+gate "go-vuln skipped because vuln=false is a pass" 0 success false success success success success success skipped
+gate "vuln=false does not excuse a skipped go-test" 1 skipped false success success success success skipped skipped
+gate "vuln=false does not excuse a failed job" 1 success false success success failure success success skipped
+GATE_ENV=(VULN=true VULN_RESULT=skipped)
+gate "go-vuln skipped although vuln=true is a failure" 1 success false success success success success success skipped
+GATE_ENV=(VULN=true VULN_RESULT=failure)
+gate "a reachable vulnerability (go-vuln failed) fails the go gate" 1 success false success success success success success failure
+GATE_ENV=(VULN=true VULN_RESULT=success)
+gate "go-vuln ran and passed" 0 success false success success success success success success
 GATE_ENV=()
+grep -qF "if: needs.changes.outputs.vuln == 'true'" <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run on the vuln output only"; exit 1; }
+grep -qF 'run: hack/govulncheck.sh' <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run hack/govulncheck.sh (the pinned version, no retry)"; exit 1; }
+grep -qF 'run: hack/govulncheck.sh' "$(dirname "$wf")/govulncheck.yml" || { echo "FAIL: the nightly govulncheck.yml must run the same script"; exit 1; }
+! sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf" | grep -qiE 'retry|attempt|continue-on-error' || { echo "FAIL: go-vuln must not retry or continue on error (rule T1)"; exit 1; }
 grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-tidy:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-tidy must run on the tidy output"; exit 1; }
 grep -qF "if: needs.changes.outputs.tidy == 'true'" <(sed -n '/^  go-lint:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-lint must run on the tidy output"; exit 1; }
 echo "ok: go gate covers $(echo "$jobs" | tr '\n' ' ')"
