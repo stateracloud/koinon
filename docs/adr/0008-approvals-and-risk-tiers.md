@@ -2,8 +2,9 @@
 
 - Status: Accepted; amended by [0042](0042-ask-tier-park-and-execute.md)
 - Date: 2026-10-21
+- Amended by: [0048](0048-openshell-spike-results.md) (resolves the spike verification)
 - Decision: [design.md#8](../design.md)
-- Verification: Pending: OpenShell spike (old issue 3)
+- Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 
 ## Context
 

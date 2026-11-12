@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // NewRootCommand is koinon-reconciler's command tree (ADR 0088). A setting comes from the flag,
@@ -159,14 +160,11 @@ func (c *config) finish(v *viper.Viper) error {
 		return fmt.Errorf("--gateway-name is required in kubernetes mode")
 	}
 
-	var sr fileSandboxResources
-	if err := v.UnmarshalKey("sandboxResources", &sr); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
+	policy, err := sandboxres.FromConfig(func(key string, out any) error { return v.UnmarshalKey(key, out) })
+	if err != nil {
+		return err
 	}
-	c.sandboxResources = sr.policy()
-	if err := c.sandboxResources.Validate(); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
-	}
+	c.sandboxResources = policy
 	images, err := flavorImages(v)
 	if err != nil {
 		return err
