@@ -1,0 +1,3 @@
+{"data":{"organization":{"projectV2":{"items":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+{"status":{"name":"Ready"},"content":{"number":12,"state":"OPEN"}},
+{"status":{"name":"Done"},"content":{"number":13,"state":"CLOSED"}}]}}}}}

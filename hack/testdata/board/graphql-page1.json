@@ -1,0 +1,4 @@
+{"data":{"organization":{"projectV2":{"items":{"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"nodes":[
+{"status":{"name":"Ready"},"content":{"number":10,"state":"OPEN"}},
+{"status":{"name":"Backlog"},"content":{"number":11,"state":"OPEN"}},
+{"status":null,"content":{}}]}}}}}

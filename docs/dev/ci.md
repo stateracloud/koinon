@@ -369,6 +369,26 @@ crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, 
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
 
+**Getting the verdict without blocking (#654).** A lane that must hand back cannot wait on a run, and a
+background task dies with its turn. `hack/lane-gates.sh --start [<base>]` runs the same command in its own
+session and prints a verdict file path at once (next to it: `pid`, and `rc` when the run ends).
+`hack/lane-gates.sh --wait <file> [--max N]` prints the `gate=…` lines and the closing `lane-gates …` line
+and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
+looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
+
+**Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
+to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs
+`gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .` (a new branch scans what the
+remote does not have), skips deletes, refuses the push on a leak, and warns when gitleaks is not
+installed. `KOINON_SKIP_GITLEAKS=1` skips it for one push; CI still scans every commit.
+
+**The board snapshot (#654).** `hack/board.sh snapshot|backlog|ready|issue N` reads the org board with
+one paginated GraphQL query (no 1000-item cap), joins it with the REST list of open issues (an issue
+missing from the board has status `none` and shows in `backlog`), and caches the result in
+`$KOINON_STATE_DIR/board.json` for 10 minutes (`--refresh` to fetch again). Use it instead of
+`gh project item-list` in triage loops. `hack/board-test.sh` is its offline test (fake gh, fixtures in
+`hack/testdata/board`).
+
 ## The race detector
 
 The `go-race-serial` and `go-race-parallel` jobs (parts of the required `go` check, so they are already in
