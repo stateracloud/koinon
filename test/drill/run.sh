@@ -42,7 +42,12 @@ if [[ -n ${DRILL_TOPOLOGY:-} ]]; then
   kubeconfig=$KUBECONFIG
   created_cluster=0
 else
-  topology=$here/topology/kind.yaml
+  # This cluster's path on the shared registry (kind/imagerepo.sh): the topology copy names it for the
+  # fake model image and, as `imageRegistry`, for the chart (drill_test.go passes it as image.registry).
+  image_repo=$(CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")
+  topology=$OUT/topology.yaml
+  sed "s#localhost:5001#$image_repo#g" "$here/topology/kind.yaml" >"$topology"
+  echo "imageRegistry: $image_repo" >>"$topology"
   SKIP_UP=${SKIP_UP:-0}
   SKIP_BUILD=${SKIP_BUILD:-0}
   kubeconfig=$OUT/kubeconfig

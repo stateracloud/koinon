@@ -373,6 +373,16 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_INTERNAL")))
 	}, NodeTimeout(2*time.Minute))
 
+	It("cannot reach the kind local registry or its caches", func(ctx SpecContext) {
+		// test/e2e/kind/registry.sh (#45): the push registry and the pull-through caches are on the kind
+		// network, with no authentication, and the push registry accepts pushes. A sandbox that reached it
+		// could replace an image the e2e pulls (pullPolicy Always). test/escape/kind.sh lists them by
+		// container name and kind network address; the names resolve to the synthetic range, so the
+		// refusal has to come from the connect.
+		testenv.Require(testenv.Var("escape-kind-registry", "KOINON_ESCAPE_REGISTRIES"))
+		deniedAtConnect(ctx, targets(os.Getenv("KOINON_ESCAPE_REGISTRIES")))
+	}, NodeTimeout(2*time.Minute))
+
 	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
 		// The Services are looked up with the cluster client (see admission_live_test.go);
 		// KOINON_ESCAPE_SERVICES is a comma-separated namespace/name:port list.

@@ -4,7 +4,8 @@
   release. Decision 5 names no qualifying auth type yet (Verification)
 - Date: 2026-11-11
 - Amends: [0013](0013-model-access.md) (decision 4, GitHub Copilot), [0044](0044-in-sandbox-credential-exception.md)
-  (how its amendment of 2026-11-11 applies to subscription logins)
+  (how its amendment of 2026-11-11 applies to subscription logins),
+  [0015](0015-agent-environment-and-browser.md) (the allowlisted in-sandbox login example)
 - Relates to: [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md),
   [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md),
   [0084](0084-leak-guard.md), [0096](0096-mcp-oauth-sign-in.md), [0097](0097-koinon-owned-gateway.md),

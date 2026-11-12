@@ -2,6 +2,7 @@
 
 - Status: Accepted (2026-10-26, accepted after implementation); amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md) and 2026-10-23 (below)
 - Date: 2026-10-22
+- Amended by: [0081](0081-run-limits.md) (decision 5, the token cap, is replaced), [0097](0097-koinon-owned-gateway.md) (the ledger reads a usage record, not access-log fields)
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (answers its open questions on the
   transport and on unpriced models, for v0.1)
 
@@ -46,6 +47,7 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
 4. **Unpriced models are not served.** Drivers render only models with a price into `llm.models`,
    so agentgateway rejects any other model with 404 and nothing is charged zero. A free model needs
    an explicit zero price. A record that still arrives without a cost is kept with `priced = false`.
+   _(Changed by [0056](0056-model-providers-pricing-and-budgets-per-org.md), amendment of 2026-10-24 (PV2) item 5: a model without a Koinon price is still served when the gateway can price it, and the gateway's cost then stands in.)_
 5. **Token cap.** Each new entry adds its tokens to its run through `scheduler.RecordTokenUsage` in
    the same transaction, which cancels the run at its token cap (plan item A4).
    *Replaced by [ADR 0081](0081-run-limits.md) (2026-10-29): tokens are still added to the run's
@@ -62,7 +64,7 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
    identical config, so idle agents cause no reload.
 7. **Hitting the limit.** When an entry brings the agent's window spend to its limit, the ledger
    cancels the run with reason `spend_limit` and a ticket event giving the amounts. agentgateway has
-   already blocked the key's next request with `429 budget_exceeded`.
+   already blocked the key's next request with `429 budget_exceeded`. _(Standalone mode only: Kubernetes mode has no gateway budgets, see [0049](0049-v01-scope-decisions.md) amendment G2. Kubernetes mode is frozen, see [0097](0097-koinon-owned-gateway.md).)_
 
 ## Alternatives considered
 
@@ -80,7 +82,7 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
 
 ## Consequences
 
-- Positive: the ledger is authoritative and the gateway enforces in the path, in either mode.
+- Positive: the ledger is authoritative and the gateway enforces in the path, in either mode. _(Standalone mode only, see the marker at decision 7.)_
 - Positive: the budget counter is correct after a gateway restart or key rotation without any
   gateway read API.
 - Negative: an agent spending continuously changes the gateway config on every reconciler pass

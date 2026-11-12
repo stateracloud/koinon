@@ -27,6 +27,7 @@ There are three levels:
    - a machine-readable setup guide ([0021](0021-connector-setup-guides.md)).
 2. **Connection**: a per-org card that configures one instance of a type (for example "our GitHub
    App installation on org X"), with its secrets in Vault/OpenBao.
+   _(Replaced: connection secrets are envelope-encrypted in Postgres, see [0056](0056-model-providers-pricing-and-budgets-per-org.md); the amendment of [0049](0049-v01-scope-decisions.md) below is replaced the same way.)_
 3. **Grant**: per agent, a subset of the connection's scopes plus an approval preset.
 
 Built-in types: Slack, Teams, GitHub, Azure DevOps, AWS, Azure and a generic HTTP API.
@@ -43,6 +44,7 @@ flowchart LR
 store. Connection secrets are Kubernetes Secrets; organisations that keep them in OpenBao, Vault,
 AWS Secrets Manager or Azure Key Vault sync them in with the External Secrets Operator. Secrets
 entered in the UI are written by Koinon as Kubernetes Secrets.
+_(Replaced by [0056](0056-model-providers-pricing-and-budgets-per-org.md): connection secrets move into the encrypted store, an envelope-encrypted column in Postgres. The statement that Koinon has no hard dependency on a secret store stays.)_
 
 ## Alternatives considered
 
