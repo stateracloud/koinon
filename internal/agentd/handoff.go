@@ -9,8 +9,9 @@ package agentd
 // carries what Koinon kept: the task's title, the agent's latest end-of-turn summary, its last
 // three replies, every message of the people on the task and the outcomes of approvals not yet
 // sent. The whole prompt is capped at about 8,000 tokens, estimated as bytes / 3; when it is
-// longer, the oldest replies go first, then the oldest messages (the newest message always
-// stays), and last the summary is cut.
+// longer, the oldest replies go first, then the oldest messages, then the summary is cut, then
+// the newest message. The newest message stays as long as the fixed parts (title, notice,
+// outcomes) leave room for it; when they alone are over the cap, the whole prompt is cut.
 
 import (
 	"context"
@@ -63,7 +64,11 @@ func (h handoff) build() string {
 			summary = cutMarked(summary, len(summary)-over)
 		case len(messages) == 1 && messages[0] != "":
 			// Only the newest message and the fixed parts are left; cut the message.
-			messages = []string{cutMarked(messages[0], len(messages[0])-over)}
+			if m := cutMarked(messages[0], len(messages[0])-over); m != "" {
+				messages = []string{m}
+			} else {
+				messages = nil
+			}
 		default:
 			// The fixed parts alone are too long (a huge title or outcome), or there is no
 			// message to cut (a fresh session on a task without one): cut the whole.

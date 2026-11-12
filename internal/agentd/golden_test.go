@@ -101,8 +101,20 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(len(out)).To(BeNumerically("<", 4*agentd.OutsideMaxBytes+4096))
 		Expect(strings.Count(out, "Quoted values")).To(Equal(1))
 		Expect(agentd.QuoteOutside(huge)).To(HavePrefix(`"xxx`))
-		Expect(agentd.QuoteOutside(huge)).To(HaveSuffix(fmt.Sprintf(`" [truncated: %d of %d bytes shown]`, agentd.OutsideMaxBytes, len(huge))))
+		Expect(agentd.QuoteOutside(huge)).To(HaveSuffix(fmt.Sprintf(`" [truncated: %d of %d bytes shown]`, agentd.OutsideMaxBytes-2, len(huge))))
 		Expect(agentd.QuoteOutside("short")).To(Equal(`"short"`))
+		for _, raw := range []string{huge, strings.Repeat("\x00", 2*agentd.OutsideMaxBytes), strings.Repeat("\xff", agentd.OutsideMaxBytes),
+			strings.Repeat("​", agentd.OutsideMaxBytes), strings.Repeat("\x00", agentd.OutsideMaxBytes-10)} {
+			q := agentd.QuoteOutside(raw)
+			if i := strings.LastIndex(q, ` [truncated:`); i >= 0 {
+				q = q[:i]
+			}
+			Expect(len(q)).To(BeNumerically("<=", agentd.OutsideMaxBytes), "the quoted form fits the budget")
+			_, err := strconv.Unquote(q)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(agentd.QuoteOutside(strings.Repeat("\x00", agentd.OutsideMaxBytes-10))).To(ContainSubstring("[truncated:"),
+			"escapes count toward the cap")
 
 		cut := agentd.QuoteOutside(strings.Repeat("日本語", agentd.OutsideMaxBytes))
 		unq, err := strconv.Unquote(cut[:strings.LastIndex(cut, ` [truncated:`)])
