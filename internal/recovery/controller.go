@@ -4,6 +4,7 @@ package recovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -112,6 +113,12 @@ func (c *Controller) now() time.Time {
 
 func (c *Controller) process(ctx context.Context, req Request) Outcome {
 	if err := c.CheckPolicy(ctx, req.Created); err != nil {
+		var ce *checkError
+		if !errors.As(err, &ce) && !apierrors.IsNotFound(err) {
+			// The Kubernetes API did not answer: not a verdict on the policy. Try again.
+			c.Log.Warn("recovery request: policy lookup failed, will retry", "name", req.Name, "err", err)
+			return Outcome{Reason: errRetry}
+		}
 		return Outcome{Reason: "admission policy is not in force: " + err.Error()}
 	}
 	o, err := c.Handler.Handle(ctx, req)
@@ -183,32 +190,42 @@ func (c *Controller) CheckPolicy(ctx context.Context, created time.Time) error {
 	return checkPolicy(pol, bind, c.Policy, c.Namespace, created)
 }
 
+// checkError is a verdict: the policy or its binding is not what the chart made.
+type checkError struct{ msg string }
+
+func (e *checkError) Error() string { return e.msg }
+
+func checkErrf(format string, a ...any) error { return &checkError{fmt.Sprintf(format, a...)} }
+
 func checkPolicy(pol *admissionv1.ValidatingAdmissionPolicy, bind *admissionv1.ValidatingAdmissionPolicyBinding, policyName, namespace string, created time.Time) error {
 	if pol.Spec.FailurePolicy == nil || *pol.Spec.FailurePolicy != admissionv1.Fail {
-		return fmt.Errorf("policy failurePolicy is not Fail")
+		return checkErrf("policy failurePolicy is not Fail")
 	}
 	if bind.Spec.PolicyName != policyName {
-		return fmt.Errorf("binding names policy %q, not %q", bind.Spec.PolicyName, policyName)
+		return checkErrf("binding names policy %q, not %q", bind.Spec.PolicyName, policyName)
 	}
 	if !slices.Equal(bind.Spec.ValidationActions, []admissionv1.ValidationAction{admissionv1.Deny}) {
-		return fmt.Errorf("binding validationActions is not exactly [Deny]")
+		return checkErrf("binding validationActions is not exactly [Deny]")
 	}
 	mr := bind.Spec.MatchResources
 	if mr == nil || mr.NamespaceSelector == nil || len(mr.NamespaceSelector.MatchExpressions) != 0 ||
 		len(mr.NamespaceSelector.MatchLabels) != 1 || mr.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != namespace {
-		return fmt.Errorf("binding does not select exactly the release namespace")
+		return checkErrf("binding does not select exactly the release namespace")
 	}
 	if mr.ObjectSelector != nil && (len(mr.ObjectSelector.MatchLabels) != 0 || len(mr.ObjectSelector.MatchExpressions) != 0) {
-		return fmt.Errorf("binding has an objectSelector")
+		return checkErrf("binding has an objectSelector")
 	}
 	if len(mr.ExcludeResourceRules) != 0 {
-		return fmt.Errorf("binding has excludeResourceRules")
+		return checkErrf("binding has excludeResourceRules")
 	}
 	if len(mr.ResourceRules) != 0 {
-		return fmt.Errorf("binding narrows resourceRules")
+		return checkErrf("binding narrows resourceRules")
+	}
+	if created.Before(pol.CreationTimestamp.Time) {
+		return checkErrf("the request is older than the policy")
 	}
 	if created.Before(bind.CreationTimestamp.Time) {
-		return fmt.Errorf("the request is older than the binding")
+		return checkErrf("the request is older than the binding")
 	}
 	return nil
 }

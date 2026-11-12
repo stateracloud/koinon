@@ -79,7 +79,11 @@ type Handler struct {
 	Now func() time.Time
 }
 
-var errNonceUsed = errors.New("nonce already used")
+var (
+	errNonceUsed = errors.New("nonce already used")
+	// errNoAdmin is a refusal: there is nobody to act for.
+	errNoAdmin = errors.New("no bootstrap platform admin to act for: name a user in spec.user")
+)
 
 // Expired reports whether the request's TTL, counted from the object's creation, has passed.
 func (r Request) Expired(now time.Time) bool { return now.After(r.Created.Add(r.ttl())) }
@@ -100,17 +104,20 @@ func (h *Handler) Handle(ctx context.Context, req Request) (Outcome, error) {
 	if h.Now != nil {
 		now = h.Now()
 	}
+	q := store.New(h.Pool)
+	// A retry of an object whose status write failed finds its own row and hands the stored result back,
+	// even after the TTL: the one-time result must not be lost to an "expired" refusal.
+	if req.Nonce != "" && nonceRE.MatchString(req.Nonce) {
+		if o, found, err := h.storedOutcome(ctx, q, req); err != nil || found {
+			return o, err
+		}
+	}
 	if o, ok := validate(req, now); !ok {
 		return o, nil
 	}
 	rcpt, err := ParseRecipient(req.RecipientPublicKey)
 	if err != nil {
 		return refused("%v", err), nil
-	}
-	q := store.New(h.Pool)
-	// A retry of an object whose status write failed finds its own row and hands the stored result back.
-	if o, found, err := h.storedOutcome(ctx, q, req); err != nil || found {
-		return o, err
 	}
 
 	var sealed string
@@ -125,7 +132,7 @@ func (h *Handler) Handle(ctx context.Context, req Request) (Outcome, error) {
 		user := req.User
 		if user == "" {
 			if user, err = q.FirstBootstrapAdminUsername(ctx); errors.Is(err, pgx.ErrNoRows) {
-				return errors.New("no bootstrap platform admin to act for: name a user in spec.user")
+				return errNoAdmin
 			} else if err != nil {
 				return err
 			}
@@ -178,7 +185,7 @@ func (h *Handler) Handle(ctx context.Context, req Request) (Outcome, error) {
 			return o, err
 		}
 		return refused("the nonce was used by an earlier request"), nil
-	case errors.Is(err, ErrNoLocalUser), errors.Is(err, ErrNotPlatformAdmin), errors.Is(err, ErrNoOrg):
+	case errors.Is(err, ErrNoLocalUser), errors.Is(err, ErrNotPlatformAdmin), errors.Is(err, ErrNoOrg), errors.Is(err, errNoAdmin):
 		return refused("%v", err), nil
 	case err != nil:
 		return Outcome{}, err
