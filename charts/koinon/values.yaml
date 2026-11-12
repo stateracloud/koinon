@@ -644,6 +644,16 @@ installMark:
 # upgrade. It is read at start, so a release is a rollout of the three Deployments.
 restoreHold: false
 
+# Platform admin recovery (issue #512, ADR 0110 decision 6): a PlatformAdminRecovery request object asks the
+# reconciler to mint an admin API token or reset a password, with no kubectl exec. Kubernetes RBAC decides
+# who may create it: the chart renders a Role and binds it to the subjects listed here, nobody by default.
+# Each entry is an RBAC subject, e.g. {kind: User, name: alice, apiGroup: rbac.authorization.k8s.io}.
+# The request is created with kubectl create, never from a Git repository (see the "Recover admin access"
+# guide). Works while the API is down and while restoreHold is on.
+recovery:
+  enabled: true
+  subjects: []
+
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
 # <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works:
 # enabled=false turns the API's password login off and revokes the bootstrap sessions. The bootstrap admin

@@ -89,7 +89,11 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
 	defer pool.Close()
-	audit.WarnSharedWriterLogin(ctx, pool, "koinon-reconciler", slog.Default())
+	// With recovery on the reconciler holds the install audit writer role on purpose, to append the
+	// recovery.<action> events (ADR 0110 decision 6); the warning is for a login that holds it by accident.
+	if cfg.recoveryPolicy == "" {
+		audit.WarnSharedWriterLogin(ctx, pool, "koinon-reconciler", slog.Default())
+	}
 
 	kube, err := kubeClient(cfg.kubeconfig)
 	if err != nil {
@@ -187,14 +191,18 @@ func serve(ctx context.Context, cfg config) error {
 	restorehold.Metric(reg, cfg.restoreHold)
 	// The install binding (ADR 0110 decision 0): the reconciler owns no outward target column. It claims
 	// the row when it is the first binary to start unheld, and a held reconciler re-asserts the hold.
+	var binding *installbinding.Binding
 	if cfg.installMark != "" {
-		binding := installbinding.New(pool, execution.OwnerID(cfg.installMark), cfg.restoreHold, log)
+		binding = installbinding.New(pool, execution.OwnerID(cfg.installMark), cfg.restoreHold, log)
 		if _, err := binding.Claim(ctx, installbinding.Targets{}); err != nil {
 			// The schema may not be migrated yet; Run retries the claim and credentials are refused until it succeeds.
 			log.Warn("install binding: first claim failed, retrying in the background", "err", err)
 		}
 		binding.StateMetric(reg)
 		safego.Go(ctx, log, "install-binding", binding.Run)
+	}
+	if err := startRecovery(ctx, cfg, pool, kube, binding, log); err != nil {
+		return err
 	}
 	if cfg.restoreHold {
 		// Nothing converges: no sandbox is created, stopped or recreated, no provider key is applied, and the

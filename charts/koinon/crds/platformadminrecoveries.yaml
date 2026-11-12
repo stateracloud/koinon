@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# PlatformAdminRecovery (issue #512, ADR 0110 decision 6): a one-shot request a platform admin creates to
+# regain access (mint an admin token, reset a password) without kubectl exec. The reconciler handles it.
+# Helm installs crds/ on the first install only and never upgrades it; the CRD is shared by every release
+# on the cluster, so apply a newer file by hand (the guide says how). A release-scoped
+# ValidatingAdmissionPolicy (templates/platform-recovery.yaml) pins spec.requester to the authenticated
+# Kubernetes user, so the CRD alone grants nothing.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: platformadminrecoveries.recovery.koinon.dev
+spec:
+  group: recovery.koinon.dev
+  scope: Namespaced
+  names:
+    kind: PlatformAdminRecovery
+    listKind: PlatformAdminRecoveryList
+    plural: platformadminrecoveries
+    singular: platformadminrecovery
+    shortNames: [par]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Action, type: string, jsonPath: .spec.action}
+        - {name: Requester, type: string, jsonPath: .spec.requester}
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [action, requester, nonce]
+              properties:
+                action:
+                  type: string
+                  enum: [mint-admin-token, reset-password]
+                  description: What to do. A closed set; a new action is a new decision.
+                user:
+                  type: string
+                  maxLength: 200
+                  description: The local login name the action is for. Default, the bootstrap admin.
+                org:
+                  type: string
+                  maxLength: 200
+                  description: For mint-admin-token, the slug or ID of the org the token belongs to. Default, the default org.
+                requester:
+                  type: string
+                  maxLength: 253
+                  description: The Kubernetes username of the creator. The admission policy refuses any other value.
+                requesterGroups:
+                  type: array
+                  items: {type: string, maxLength: 253}
+                  description: The creator's Kubernetes groups. The admission policy refuses any other value.
+                nonce:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{16,64}$'
+                  description: Chosen by the requester. A nonce is used once, ever.
+                ttl:
+                  type: string
+                  default: 15m
+                  pattern: '^[0-9]+(s|m|h)$'
+                  description: How long the request may be acted on, counted from metadata.creationTimestamp. At most 1h.
+                tokenTTL:
+                  type: string
+                  pattern: '^[0-9]+(s|m|h)$'
+                  description: For mint-admin-token, how long the token lives. At most 24h; default 24h.
+                recipientPublicKey:
+                  type: string
+                  pattern: '^age1[0-9a-z]{58}$'
+                  description: An age X25519 recipient (age1...) the requester made for this request. The result is sealed to it.
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase: {type: string, enum: [Done, Refused]}
+                reason: {type: string}
+                sealedResult:
+                  type: string
+                  description: The token or one-time password, age-armored to spec.recipientPublicKey. Open it with age -d.
+                completedAt: {type: string}
+                observedUID: {type: string}
