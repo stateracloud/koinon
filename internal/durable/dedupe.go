@@ -34,6 +34,10 @@ const (
 	SourceChildTask = "child_task"
 	// SourceDirectMessage keys on the client's message ID of a direct message (TR3).
 	SourceDirectMessage = "direct_message"
+	// SourcePoll keys on an item a code-host poller found: the connection, the resource and the
+	// item's key at the provider (an event or comment ID), so a re-poll, a restart or a second
+	// replica produce the same key (ADR 0066, amendment of 2026-11-12).
+	SourcePoll = "poll"
 )
 
 // TriggerFireKey is the dedupe key of one fire of a trigger: the trigger's ID and the scheduled

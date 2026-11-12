@@ -16,8 +16,9 @@ import (
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
-// DefaultMaxRecreatesPerPass is how many sandboxes one reconcile pass may delete to recreate them
-// with a changed spec (ADR 0085 decision 9).
+// DefaultMaxRecreatesPerPass is how many sandboxes may be deleted at once to recreate them with a
+// changed spec, and how many more per ResyncInterval (ADR 0085 decision 9; a token bucket since
+// issue 573).
 const DefaultMaxRecreatesPerPass = 4
 
 // supervisorReadTimeout bounds the ConfigMap read, so a slow API server cannot hold a pass.
@@ -115,12 +116,90 @@ func (r *Reconciler) supervisorChanged(sb execution.Sandbox) bool {
 	return have != want
 }
 
-// takeRecreate spends one of the pass's recreates; false when the cap is used up (ADR 0085
-// decision 9: an OpenShell upgrade must not recreate the whole fleet at once).
-func (r *Reconciler) takeRecreate() bool {
+// takeRecreate says whether the agent may start a recreate now. The bucket holds
+// MaxRecreatesPerPass tokens and gets them back at MaxRecreatesPerPass per ResyncInterval, which is
+// the rate of the per-pass cap it replaces (a pass ran at least once per interval). Work items run
+// in parallel and outside any pass, so the pass is no unit to count in (ADR 0085 decision 9: an
+// OpenShell upgrade must not recreate the whole fleet at once).
+//
+// An agent keeps the token it took until it has deleted its sandbox (recreateStarted): its home gate
+// may wait many passes for a backup, and each of them asks again without spending a second token.
+// At most MaxRecreatesPerPass agents hold one at a time, so at most that many sit in the gate and
+// delete together. A hold ends when the agent's work item ends without wanting a recreate
+// (recreateReleased): the spec went back, the agent was archived or deleted, a run holds it.
+func (r *Reconciler) takeRecreate(key agentKey) bool {
 	limit := r.cfg.MaxRecreatesPerPass
 	if limit < 0 {
 		return true
 	}
-	return r.recreates.Add(1) <= int32(limit) //nolint:gosec // a small configured count
+	now := time.Now()
+	if r.cfg.Now != nil {
+		now = r.cfg.Now()
+	}
+	interval := r.cfg.ResyncInterval
+	if interval <= 0 {
+		interval = DefaultResyncInterval
+	}
+	r.bucketMu.Lock()
+	defer r.bucketMu.Unlock()
+	if r.bucketAt.IsZero() {
+		r.bucketTokens = float64(limit)
+	} else if d := now.Sub(r.bucketAt); d > 0 {
+		r.bucketTokens = min(float64(limit), r.bucketTokens+d.Seconds()*float64(limit)/interval.Seconds())
+	}
+	r.bucketAt = now
+	if r.recreating[key] {
+		return true
+	}
+	// The bucket bounds the rate; the holds bound how many agents are in the recreate path at once.
+	// Without the second bound, N slow intervals would leave about N*limit agents behind their home
+	// gates, and they could all delete together.
+	if len(r.recreating) >= limit || r.bucketTokens < 1 {
+		return false
+	}
+	r.bucketTokens--
+	if r.recreating == nil {
+		r.recreating = map[agentKey]bool{}
+	}
+	r.recreating[key] = true
+	return true
+}
+
+// recreateStarted ends the agent's hold on its recreate token: its sandbox is deleted.
+func (r *Reconciler) recreateStarted(key agentKey) {
+	r.bucketMu.Lock()
+	defer r.bucketMu.Unlock()
+	delete(r.recreating, key)
+}
+
+// recreateReleased ends the agent's hold without a recreate and gives its token back: the agent did
+// not delete anything, so the allowance it took is unspent. A no-op for an agent without a hold.
+func (r *Reconciler) recreateReleased(key agentKey) {
+	r.bucketMu.Lock()
+	defer r.bucketMu.Unlock()
+	if !r.recreating[key] {
+		return
+	}
+	delete(r.recreating, key)
+	if limit := r.cfg.MaxRecreatesPerPass; limit > 0 {
+		r.bucketTokens = min(float64(limit), r.bucketTokens+1)
+	}
+}
+
+// releaseRecreatesExcept ends the holds of agents that are not in keep: agents that were archived or
+// deleted since they took a hold have no work item that could release it. An agent whose item runs
+// (busy) keeps its hold: the item may be between takeRecreate and the delete, and a refunded token
+// there would let the delete pass the cap. The item ends the hold itself, or the next pass does.
+func (r *Reconciler) releaseRecreatesExcept(keep map[agentKey]bool, busy func(agentKey) bool) {
+	r.bucketMu.Lock()
+	var gone []agentKey
+	for k := range r.recreating {
+		if !keep[k] && (busy == nil || !busy(k)) {
+			gone = append(gone, k)
+		}
+	}
+	r.bucketMu.Unlock()
+	for _, k := range gone {
+		r.recreateReleased(k)
+	}
 }

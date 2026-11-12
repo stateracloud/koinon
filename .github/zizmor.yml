@@ -7,9 +7,6 @@
 # Every entry has a reason. An ignore that is a deferred fix names its exit condition. A composite
 # action cannot be ignored here; it carries an inline `# zizmor: ignore[...]` comment instead.
 rules:
-  # release.yml: the deferred findings (artipacked at the three checkouts, cache-poisoning at setup-go and
-  # setup-node) are ignored inline there, each naming #579 (release workflow hardening: persist-credentials
-  # false at the three checkouts, no setup-go/setup-node cache; prove with the next -rc tag).
   # e2e-kind.yml: three inline ignores for the tag trigger (`tags: ['v*-rc.*']`); the jobs publish nothing.
   dependabot-cooldown:
     config:

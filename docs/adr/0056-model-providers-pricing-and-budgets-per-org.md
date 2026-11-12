@@ -369,7 +369,8 @@ replaces decision 6.3 for responses cut short.
    (`AmendOnDrop`, `crates/agentgateway/src/llm/mod.rs`) with whatever usage it had seen. For an
    OpenAI chat-completion stream, the format every model is served in today, usage arrives only in
    the final chunk, so a cut stream logs no input and no output usage and a cost of `0`; the input
-   is then estimated from the request bytes as in decision 6.2, and the output is zero. Verified
+   is then estimated from the request bytes as in decision 6.2, and the output is zero (*superseded
+   by the 2026-11-12 amendment below: the output is estimated*). Verified
    against the v1.7.0 container in `internal/ledger/agentgateway_test.go`. The entry is marked
    `estimated` and flagged `usage_missing`.
 2. **The provider's response ID comes from a response header.** OpenRouter returns
@@ -444,7 +445,9 @@ replaces decision 6.3 for responses cut short.
    run it is attributed to (`FindRunAt`) was canceled at or before the record's time. Only that run
    counts, so a later run's complete response is not marked cut by an earlier run's cancel. The
    three fields come with the Messages routes; a record without them is OpenAI, unstreamed and
-   without error, which is today's behaviour. Such an entry is charged as logged and flagged `usage_partial`. Via OpenRouter
+   without error, which is today's behaviour. Such an entry is charged as logged and flagged `usage_partial`
+   (*superseded by the 2026-11-12 amendment below: it is charged the larger of the logged output and
+   the output estimate*). Via OpenRouter
    it is provisional and settled by generation ID like any cut response. From a provider that cannot
    report (direct Anthropic) it is provisional without a lookup: the `max_tokens` reserve is held
    back from the key until the settlement deadline, then released, and the logged usage is final
@@ -744,7 +747,73 @@ Maintainer decision (procoduck, 2026-11-11).
 - This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
   Only a creator that can see the database can refuse to make a new key when encrypted data already
   exists; the hook Job cannot see the database.
-- Hardening of this path, and the matching text in AGENTS.md, follow in issue #604.
+- Hardening (issue #604): a native ValidatingAdmissionPolicy (`kek-guard`, chart template
+  `kek-guard.yaml`) refuses DELETE of the KEK Secret by anyone, and UPDATE by any identity except the
+  koinon-api and key-admin service accounts, so a deleted or overwritten Secret cannot silently
+  become a new key on the next upgrade or GitOps sync. The reconciler's Secret writes are fenced by a
+  second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
+  Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
+  `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
+  when the database holds encrypted values, and a skip would not help the usual restore, where the
+  new install made its first KEK before the hold.
+- Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
+  exists, which is the usual case (a new install made a first KEK on its empty database). The restore
+  therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
+  standard input and merges it into the Secret, as the koinon-api service account, which the
+  guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
+  active and never removes a key; only `keys retire` removes one, with its database check. The add paths (`keys add`,
+  the key-admin Job's plain add and its recovery) refuse any ID the install audit chain ever recorded (a `keys.retire` or
+  `keys.forget` event, or the ID in the KEKs or Retired of a recorded state), besides an ID that stored envelopes carry:
+  IDs are never reused. Import keeps the narrower `keys.retire` rule, because it restores the same bytes. A KEK ID that
+  the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
+  retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
+  removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
+  KEK never becomes the active one, with or without the flag (`keys activate` refuses it too). The rule
+  trusts the explicit `keys.retire` event, which has two costs: a retire whose audit event was lost
+  (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event
+  either (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` there is no chain
+  to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
+  change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
+  a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,
+  so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
+  is configured, also when it creates the Secret. It writes nothing unless every KEK in the manifest opens with the install's key
+  wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
+  of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
+  to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,
+  delete the Secret, apply the backup and turn the guard on again.
+
+## Amendment (2026-11-12, issue #670): a cut response without usage is charged an output estimate
+
+Maintainer decision (procoduck, 2026-11-12, on PR #874). The 2026-10-28 RT1 amendment charged a
+cut chat-completions stream zero output (its point 1) and a cut Messages stream as logged, that is
+`message_start`'s placeholder output of about one token (its point 5). A run could therefore cut
+its streams and pay for input only. Point 2 of the 2026-10-31 amendment already says a cut response
+is charged "its input plus the output actually streamed, estimated when the provider did not report
+usage"; this amendment makes the code follow it, supersedes those two sentences of the 2026-10-28
+amendment, and records the estimate (`estimate.CutOutput`).
+
+1. **The estimate.** A response cut short (aborted: no output usage logged, or a proxy error; not
+   a 4xx refusal and not a 5xx failure, which keep the 2026-10-29 and 2026-10-31 amendments) is
+   charged its input plus an output estimate. `bound` is the existing reserve bound: `max_tokens`
+   capped at the entry's `max_output`, or `max_output` when `max_tokens` was not logged.
+   - Response size measured and above zero: the bytes at the effective bytes-per-token ratio of
+     decision 6.2, at most `bound` (`estimate.output_basis` `response_bytes`).
+   - Response size measured as zero, or a stream that logged no status (the client left before the
+     response headers): nothing was streamed, so no output (point 1 of the 2026-10-31 amendment;
+     `nothing_streamed`). A request not known to stream that logged no status is not in this case:
+     its headers come only once the provider has generated it, so it falls under the next one.
+   - Response size unknown: `min(ceil(bound / 4), 4096)` output tokens (`UnknownOutputDivisor`,
+     `UnknownOutputMax`; `bounded_reserve`). agentgateway v1.7.0 logs no response size, so this is
+     the case that runs today. For RT1's `max_tokens: 32000` a cancel is charged 4,096 output tokens:
+     not 32,000 (the 2026-10-28 problem) and not zero (this issue's).
+2. **A cut Messages stream** (`usage_partial`, point 5 of the 2026-10-28 amendment) is charged the
+   larger of the logged output and the estimate, so the placeholder is not the charge. Only a
+   streamed Anthropic-format record is raised; any other logged usage is the provider's own and
+   stands. The entry records `output_basis`, `output_logged_tokens` and `output_estimated`.
+3. **Unchanged.** The `max_tokens` reserve is still held back from the gateway key (the bound
+   minus the charge, decision 4 of the 2026-10-28 amendment), and a settlement with the provider's
+   own figure (OpenRouter's generation, the 2026-11-06 amendment) still replaces the estimate. The
+   estimate is never `max_tokens`.
 
 ## Open questions
 
@@ -753,7 +822,7 @@ Maintainer decision (procoduck, 2026-11-11).
 - The OpenAI tokenizer for the gpt-6 family is not published; `o200k_base` is assumed and calibration
   can only raise estimates.
 - Whether agentgateway should expose response bytes (or Koinon should buffer the stream) so aborted
-  outputs can be estimated from text rather than settled at `max_tokens`.
+  outputs can be estimated from text rather than from the bounded reserve (2026-11-12 amendment).
 - Email delivery for budget alerts.
 
 ## Upstream verification

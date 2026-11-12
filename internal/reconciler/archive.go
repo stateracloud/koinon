@@ -81,7 +81,7 @@ func (r *Reconciler) archive(ctx context.Context, w *work, ws string, sb executi
 			return false, fmt.Errorf("record the home restore: %w", err)
 		}
 	}
-	if err := r.backend.DeleteSandbox(ctx, ws, w.names().Sandbox); err != nil {
+	if err := r.deleteSandbox(ctx, w, ws, w.names().Sandbox, "archive of a stopped sandbox"); err != nil {
 		return false, err
 	}
 	r.log.Info("archived a stopped sandbox and its volume", w.logAttrs()...)

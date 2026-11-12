@@ -246,15 +246,26 @@ func (b *Backend) settle(ctx context.Context, op, workspace, name string, err er
 	return execution.Sandbox{}, werr
 }
 
-// DeleteSandbox implements execution.Backend.
-func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) error {
+// DeleteSandbox implements execution.Backend. It returns the gateway's outcome; an unspecified
+// one counts as accepted, because completion is never inferred from it.
+func (b *Backend) DeleteSandbox(ctx context.Context, workspace, name string) (execution.DeleteOutcome, error) {
 	if err := b.guardSandbox(ctx, workspace, name); err != nil {
-		return err
+		return "", err
 	}
-	_, err := b.c.DeleteSandbox(ctx, &openshellv1.DeleteSandboxRequest{
+	resp, err := b.c.DeleteSandbox(ctx, &openshellv1.DeleteSandboxRequest{
 		WorkspaceScope: scope(workspace), Name: name, AllowMissing: true,
 	})
-	return wrap("DeleteSandbox", err)
+	if err != nil {
+		return "", wrap("DeleteSandbox", err)
+	}
+	switch resp.GetOutcome() {
+	case openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED:
+		return execution.DeleteCompleted, nil
+	case openshellv1.DeletionOutcome_DELETION_OUTCOME_ALREADY_ABSENT:
+		return execution.DeleteAbsent, nil
+	default:
+		return execution.DeleteAccepted, nil
+	}
 }
 
 // EnsurePolicy implements execution.Backend. The gateway deduplicates a policy whose

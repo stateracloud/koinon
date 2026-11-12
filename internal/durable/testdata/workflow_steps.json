@@ -1,6 +1,7 @@
 {
-  "version": "1",
+  "version": "2",
   "workflows": {
+    "koinon.code-host-poll-event": ["RunAsStep:deliver"],
     "koinon.direct-message": ["RunAsStep:deliver-direct-message"],
     "koinon.notify": ["RunAsStep:deliver:<kind>"],
     "koinon.trigger-fire": ["RunAsStep:create-task"],

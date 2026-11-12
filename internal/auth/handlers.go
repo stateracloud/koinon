@@ -8,6 +8,8 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -91,6 +93,19 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A client over the limit for this username, its address or its group is refused
+	// before the password hash runs and before any database read; the refusal is counted, not audited
+	// one by one (loginlimit.go).
+	keys := newLoginKeys(r, req.Username)
+	if nonce := s.deviceNonce(r, req.Username, s.cfg.Now()); nonce != "" {
+		keys.device = deviceLimiterKey(nonce)
+	}
+	if wait := s.loginWait(keys, s.cfg.Now()); wait > 0 {
+		s.limiter.Refuse(keys.user)
+		loginEvents.WithLabelValues(loginEventRefused).Inc()
+		writeLoginLimited(w, wait)
+		return
+	}
 	cred, ok, err := s.checkPassword(r.Context(), req.Username, req.Password)
 	if errors.Is(err, errBusy) {
 		w.Header().Set("Retry-After", "1")
@@ -103,9 +118,21 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.log.Info("password login rejected")
+		if limited, wait := s.loginFailed(r.Context(), keys, req.Username, s.cfg.Now()); limited {
+			writeLoginLimited(w, wait)
+			return
+		}
+		s.log.Info("password login rejected", "client_address", keys.addr)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
 		return
+	}
+	// Failures counted but never written (the client stopped failing, or logged in) are written now.
+	if refused := s.limiter.TakeRefused(keys.user) + s.limiter.TakeRefused(keys.shared); refused > 0 {
+		s.auditLoginFailure(r.Context(), keys, req.Username, refused, map[string]any{"then_succeeded": true})
+	}
+	s.limiter.Succeed(keys.user)
+	if keys.device != "" {
+		s.limiter.Succeed(keys.device)
 	}
 
 	if s.afterPasswordCheck != nil {
@@ -134,6 +161,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSessionCookie(w, token)
+	s.setDeviceCookie(w, req.Username, s.cfg.Now())
 	s.log.Info("user logged in", "method", "password")
 	writeJSON(w, http.StatusOK, loginResponse{PasswordChangeRequired: cred.MustChangePassword})
 }
@@ -170,6 +198,11 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 		defer func() { <-s.verifySlots }()
 	default:
 		return store.LocalCredential{}, false, errBusy
+	}
+	// A username Postgres text cannot hold (invalid UTF-8, NUL) names nobody; the lookup would fail.
+	if !utf8.ValidString(username) || strings.ContainsRune(username, 0) {
+		_, _ = VerifyPasswordContext(ctx, dummyHash(), password)
+		return store.LocalCredential{}, false, nil
 	}
 	cred, err := s.q.GetLocalCredentialByUsername(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {

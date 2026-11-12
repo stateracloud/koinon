@@ -86,7 +86,7 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		ws := execution.WorkspaceName(org.Bytes)
 		DeferCleanup(func(ctx context.Context) error {
-			if err := backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+			if _, err := backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
 			return backend.DeleteProvider(ctx, ws, names.Provider)

@@ -95,6 +95,10 @@ type Querier interface {
 	// effect. A concurrent claim of the same key waits for the first transaction, so exactly one
 	// claims it; if that one rolls back, the waiting one claims it.
 	ClaimDedupeKey(ctx context.Context, arg ClaimDedupeKeyParams) (DedupeRecord, error)
+	// Claims the org's pollers due at @now by moving next_poll_at to @lease_until, so a poll that
+	// dies with its leader is retried after the lease and not polled twice meanwhile (SKIP LOCKED
+	// leaves a row another transaction holds). SavePoll writes the real next_poll_at.
+	ClaimDueCodeHostPollers(ctx context.Context, arg ClaimDueCodeHostPollersParams) ([]CodeHostPoller, error)
 	// The org's provisional entries due for an attempt, locked for this settler; another settler skips
 	// them. The row is the work item; the entry is read with it.
 	ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlementsParams) ([]ClaimDueSettlementsRow, error)
@@ -290,6 +294,9 @@ type Querier interface {
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
 	DeleteCodeHostConnectionReading(ctx context.Context, arg DeleteCodeHostConnectionReadingParams) error
 	DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteCodeHostConnectionReposParams) (int64, error)
+	// Drops the org's pollers no trigger in effect needs any more; keep holds connection_id || ' ' ||
+	// resource of the needed ones.
+	DeleteCodeHostPollersNotIn(ctx context.Context, arg DeleteCodeHostPollersNotInParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
@@ -321,6 +328,12 @@ type Querier interface {
 	// no run of it is queued (a follow-up message already asked for another turn). No row: the task is
 	// elsewhere (canceled, ended by a person) or has more work queued.
 	EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The shared code-host pollers (ADR 0066, amendment of 2026-11-12; migration 00083).
+	// A trigger needs the poller of (connection, resource): created due at @now (the pass's clock),
+	// or left as it is.
+	EnsureCodeHostPoller(ctx context.Context, arg EnsureCodeHostPollerParams) error
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The leak guard's state (ADR 0084, ADR 0091; old issue 349): sessions per home generation with their legs,
@@ -434,6 +447,7 @@ type Querier interface {
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	// One connection's last reading (also an empty one), to compare a new reading with.
 	GetCodeHostConnectionReading(ctx context.Context, arg GetCodeHostConnectionReadingParams) (GetCodeHostConnectionReadingRow, error)
+	GetCodeHostPoller(ctx context.Context, arg GetCodeHostPollerParams) (CodeHostPoller, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	// The connection a server is being linked to, locked against a change of its host (a declared
 	// connection's baseUrl) until the link is written, so the host check sees the host the link keeps.
@@ -763,6 +777,7 @@ type Querier interface {
 	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
 	// One connection's part of the scope, to tell whether a new reading changes it.
 	ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error)
+	ListCodeHostPollers(ctx context.Context, orgID pgtype.UUID) ([]CodeHostPoller, error)
 	// Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 	// agent has seen is not restored (ADR 0032).
 	ListCompleteHomeCheckpoints(ctx context.Context, arg ListCompleteHomeCheckpointsParams) ([]HomeCheckpoint, error)
@@ -913,6 +928,9 @@ type Querier interface {
 	// cannot be checkpointed is not returned on every poll. A superset is fine: the hourly request,
 	// the fail queries and the claim re-check every condition.
 	ListOrgIDsWithCheckpointWork(ctx context.Context, intervalSeconds int32) ([]pgtype.UUID, error)
+	// The orgs that have a poller, returning org ids only; the sync and the claim after it are scoped
+	// by @org_id.
+	ListOrgIDsWithCodeHostPollers(ctx context.Context) ([]pgtype.UUID, error)
 	// The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
 	// for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the
 	// orgs with probes, not every org that ever existed (as ListOrgIDsWithRunWork, koinon issue 378).
@@ -1190,6 +1208,9 @@ type Querier interface {
 	// The files are dropped once they are on GitHub.
 	MarkSavedWorkPushed(ctx context.Context, arg MarkSavedWorkPushedParams) (int64, error)
 	MaxAgentEpoch(ctx context.Context, arg MaxAgentEpochParams) (int64, error)
+	// The earliest next_poll_at over every org's pollers, NULL when there are none: how long the
+	// leader may sleep. A time only, no org.
+	NextCodeHostPollAt(ctx context.Context) (pgtype.Timestamptz, error)
 	NotifyGatewayStateRevision(ctx context.Context, payload string) error
 	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
@@ -1346,6 +1367,8 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	// Ends every live session of the user (the operator's password reset).
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Stores one poll's outcome.
+	SaveCodeHostPoll(ctx context.Context, arg SaveCodeHostPollParams) error
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
@@ -1358,6 +1381,10 @@ type Querier interface {
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
+	// Stores an operator message and nothing else. A note written from outside the agent's work item
+	// (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+	// what the agent's own item recorded in the meantime.
+	SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandboxMessageParams) (AgentSandbox, error)
 	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 	// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged

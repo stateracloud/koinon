@@ -11,10 +11,12 @@
 //     Opus 4.7: 3.0, Opus 4.7 and later: 2.3, others 3.0), plus fixed overheads for tool
 //     definitions, images and PDF pages. Nobody ships an exact offline tokenizer for current
 //     Claude models, and the tokenizers that exist undercount them, so none is used for Claude.
-//  3. An aborted response without usage (a stream cut short) is charged the usage the gateway
-//     logged before the cut and nothing more, never its max_tokens (ADR 0056, amendment
-//     2026-10-28): agentgateway 1.7 logs the usage it saw, which for an OpenAI chat-completion
-//     stream is none, so the input is estimated as in 2 and the output is zero. The request's
+//  3. An aborted response without usage (a stream cut short) is charged its input plus the output
+//     streamed, estimated, and never its max_tokens (ADR 0056, amendment 2026-10-31, point 2):
+//     agentgateway 1.7 logs the usage it saw, which for an OpenAI chat-completion stream is none,
+//     so the input is estimated as in 2 and the output by [CutOutput]: from the response bytes when
+//     they were measured (none: nothing was streamed, no output), otherwise a bounded share of the
+//     reserve ([UnknownOutputDivisor], at most [UnknownOutputMax]). The request's
 //     max_tokens is the bound the gateway key holds back while the provider's own figure is
 //     pending ([Result.ReserveOutputTokens]): the provider may bill tokens it generated but did not
 //     stream, and hidden thinking. When max_tokens was not logged (OpenAI's
@@ -67,9 +69,12 @@ type Input struct {
 	// received before the stream ended (-1 or 0 when unknown). No text is passed: Koinon never
 	// logs or buffers prompt or response text.
 	RequestBytes, ResponseBytes int64
-	HasTools                    bool
-	Images                      []Image
-	PDFPages                    int
+	// ResponseKnown says ResponseBytes was measured, so a 0 means nothing was streamed rather than
+	// "not recorded". It only matters for an aborted response ([CutOutput]).
+	ResponseKnown bool
+	HasTools      bool
+	Images        []Image
+	PDFPages      int
 	// PDFPageTokens is the allowance per PDF page (0 when the entry gives none).
 	PDFPageTokens int
 	// Aborted is true when the response did not complete.
@@ -101,7 +106,10 @@ type Result struct {
 	// max_tokens was not logged.
 	MaxOutputFallback bool
 	// MaxOutputCapped is set when the request's max_tokens exceeded the entry's max_output.
-	MaxOutputCapped             bool
+	MaxOutputCapped bool
+	// OutputBasis says how an aborted response's output was estimated (an Output* constant); empty
+	// for any other response.
+	OutputBasis                 string
 	Method                      string // reported, bytes, partial
 	RatioStatic, RatioEffective float64
 	LearnedP90TokensPerByte     float64
@@ -114,6 +122,24 @@ type Result struct {
 const (
 	HardMaxOutput = 1_000_000
 	HardMaxInput  = 10_000_000
+)
+
+// The output charged to a response cut short whose streamed size was not measured: a quarter of
+// its reserve bound ([ReserveOutput]), at most 4,096 tokens (ADR 0056, amendment 2026-10-31,
+// point 2; old issue 670). Zero would let a run dodge its limit by cutting its streams, and the
+// whole bound is the max_tokens charge the 2026-10-28 amendment removed (32,000 output tokens a
+// cancel). The provider's own figure replaces it where one can be fetched; the reserve stays
+// held back from the key until then.
+const (
+	UnknownOutputDivisor = 4
+	UnknownOutputMax     = 4096
+)
+
+// How [CutOutput] estimated an aborted response's output ([Result].OutputBasis).
+const (
+	OutputFromBytes       = "response_bytes"
+	OutputNothingStreamed = "nothing_streamed"
+	OutputBounded         = "bounded_reserve"
 )
 
 // MinRatio is the smallest bytes-per-token ratio (the lower bound of pricing.ParseRatio).
@@ -192,6 +218,28 @@ func ReserveOutput(maxOutput, maxTokens int64) (tokens int64, fallback, capped b
 	return min(maxTokens, bound), false, maxTokens > bound
 }
 
+// CutOutput is the output charged to a response cut short that reported none (or only
+// message_start's placeholder), as a total with its reasoning: the measured response bytes at the
+// effective ratio, never above bound (the provider stops at max_tokens); none when the response was
+// measured empty (nothing was streamed); otherwise ceil(bound / UnknownOutputDivisor), at most
+// UnknownOutputMax. bound is the reserve from [ReserveOutput].
+func CutOutput(p Params, responseBytes int64, responseKnown bool, bound int64) (tokens int64, basis string) {
+	switch {
+	case responseKnown && responseBytes > 0:
+		t := p.Tokens(responseBytes)
+		if bound > 0 {
+			t = min(t, bound)
+		}
+		return t, OutputFromBytes
+	case responseKnown:
+		return 0, OutputNothingStreamed
+	}
+	if bound <= 0 {
+		return 0, OutputBounded
+	}
+	return min((bound+UnknownOutputDivisor-1)/UnknownOutputDivisor, UnknownOutputMax), OutputBounded
+}
+
 // Estimate fills in whatever in is missing.
 func Estimate(p Params, in Input) Result {
 	res := Result{RatioStatic: p.Ratio, RatioEffective: p.EffectiveRatio(), LearnedP90TokensPerByte: p.LearnedP90, Method: "reported"}
@@ -216,13 +264,12 @@ func Estimate(p Params, in Input) Result {
 	case in.Rejected || in.Failed:
 		res.Estimated, res.Method = true, "bytes"
 	case in.Aborted:
-		// Charge what was reported. Reserve up to the request's max_tokens, but never above the
-		// entry's max_output (or the hard ceiling when the entry has none): a lenient upstream
-		// answers a huge max_tokens with 2xx.
+		// Reserve up to the request's max_tokens, but never above the entry's max_output (or the
+		// hard ceiling when the entry has none): a lenient upstream answers a huge max_tokens with
+		// 2xx. No output was reported (ReportedOutput is nil here): the output streamed is estimated.
 		res.Estimated, res.Method = true, "partial"
 		res.ReserveOutputTokens, res.MaxOutputFallback, res.MaxOutputCapped = ReserveOutput(p.MaxOutput, in.MaxTokens)
-		// No output was reported (ReportedOutput is nil here): none is charged.
-		res.OutputTokens = 0
+		res.OutputTokens, res.OutputBasis = CutOutput(p, in.ResponseBytes, in.ResponseKnown, res.ReserveOutputTokens)
 		res.ThinkingUnmeasured = p.HiddenThinking
 	default:
 		res.OutputTokens, res.Estimated = p.Tokens(in.ResponseBytes), true

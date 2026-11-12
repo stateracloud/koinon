@@ -67,7 +67,10 @@ var _ = Describe("OpenShell gateway", Label("integration"), Ordered, func() {
 			}},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) error { return b.DeleteSandbox(ctx, workspace, name) })
+		DeferCleanup(func(ctx context.Context) error {
+			_, err := b.DeleteSandbox(ctx, workspace, name)
+			return err
+		})
 
 		Eventually(func(g Gomega) {
 			sb, err := b.GetSandbox(ctx, workspace, name)
