@@ -27,8 +27,8 @@ import (
 // plain http) and SameSite=Strict, and it holds no secret: a stolen cookie lets a thief try
 // deviceFreeFails guesses per window at that one account, as the owner could.
 //
-// The cookie bypasses the account level only. The key, address and group levels, and the overflow
-// refusal for the owner's own address (BlockedTrusted), still apply.
+// The cookie bypasses the account level only. The key, address and group levels still apply
+// (BlockedTrusted); the overflow refusal for untracked sources does not.
 //
 // The signing key cannot rotate today: it is derived from the install mark, and a changed mark makes
 // every cookie fail to verify (the owner then waits like anyone else until the next login). The
