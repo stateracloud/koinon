@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): the worktrees of parallel agent lanes. It needs no GitHub rights and works from a
+# fork; the root is KOINON_WT_ROOT (default /tmp/kw).
+#
 # Short-lived git worktrees under one root, so agents do not carry long paths or worktree plumbing.
 # The root is ${KOINON_WT_ROOT:-/tmp/kw}, independent of TMPDIR. Run it from any checkout; it
 # never changes the checkout you run it from.
@@ -36,6 +39,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 root=${KOINON_WT_ROOT:-/tmp/kw}

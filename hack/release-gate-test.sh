@@ -200,6 +200,17 @@ run_on "$pr_head" claim failure "2026-01-01T12:00:00Z"
 set_ruleset go dco claim "e2e result"
 check "a claim run that failed before the merge fails" "$(gate_rc)" 1
 
+# contributor gate (#848) has no push trigger: once required, its pull request run decides
+new_case
+run_on "$pr_head" "contributor gate" success
+set_ruleset go dco "e2e result" "contributor gate"
+check "a required contributor gate is read from the PR head" "$(gate_rc)" 0
+
+new_case
+run_on "$pr_head" "contributor gate" failure
+set_ruleset go dco "e2e result" "contributor gate"
+check "a red contributor gate on the PR head fails" "$(gate_rc)" 1
+
 new_case
 run_on "$sha" "quick checks" success
 set_ruleset go dco "quick checks" "e2e result"
@@ -344,6 +355,15 @@ for c in dco "e2e result"; do
 	run_on "$pr_head" "$c" success
 	jq --arg c "$c" '.check_runs |= map(if .name == $c and (.details_url | test("/runs/(910|930)/")) then .conclusion = "failure" else . end)' "$FX/checks-$qh.json" >"$FX/x" && mv "$FX/x" "$FX/checks-$qh.json"
 	check "fast-forward queue commit: a red queue $c with a green PR head and a newer push skipped is refused" "$(gate_rc)" 1
+done
+# contributor gate (#848) in the queue run: success passes; skipped (a commit queued while the switch was off,
+# docs/maintainers/contributor-gate.md) is refused, not excused by the PR head.
+for c in success skipped; do
+	ff_case success
+	set_ruleset go dco "e2e result" "contributor gate"
+	run_on "$qh" "contributor gate" "$c" "2026-01-01T00:00:00Z" 900
+	run_on "$pr_head" "contributor gate" success
+	check "queue run with contributor gate $c" "$(gate_rc)" "$([[ $c == success ]] && echo 0 || echo 1)"
 done
 ff_case success
 set_ruleset go dco claim "e2e result"

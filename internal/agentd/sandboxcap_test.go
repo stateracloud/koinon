@@ -98,12 +98,45 @@ var _ = Describe("the sandbox wait cap", func() {
 		Expect(testutil.ToFloat64(m.SandboxWaitCap.WithLabelValues("image_pull"))).To(Equal(1.0))
 	})
 
+	It("reports when the sandbox row first named the cause, apart from the cap (issue 573)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.recordSandbox(ctx, store.SandboxStateStarting, "")
+		t := e.task(ctx, "hello")
+		r := e.enqueue(ctx, t)
+		clock := &fakeClock{t: time.Now()}
+		e.pool("agentd-a", func(c *agentd.Config) {
+			c.SandboxTimeout, c.SandboxWaitCap, c.Now = 30*time.Minute, 10*time.Minute, clock.Now
+		})
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
+		clock.awaitWait()
+		clock.Advance(3 * time.Minute)
+		e.recordSandboxWith(ctx, store.SandboxStateStarting, "ErrImagePull", `pulling image "registry.example.test/x:1"`)
+		// Polls run on real time; let the loop read the new row before the cap runs out.
+		reads := func() int { clock.mu.Lock(); defer clock.mu.Unlock(); return clock.reads }
+		before := reads()
+		Eventually(reads).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", before+6))
+		clock.Advance(7*time.Minute + time.Second)
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
+
+		var failEvent map[string]any
+		for _, ev := range taskEvents(ctx, e, t) {
+			if ev.Kind == "run.failed" {
+				Expect(json.Unmarshal(ev.Payload, &failEvent)).To(Succeed())
+			}
+		}
+		Expect(failEvent).To(HaveKeyWithValue("sandboxCause", "image_pull"))
+		Expect(failEvent).To(HaveKey("causeSeenMs"))
+		Expect(failEvent["causeSeenMs"]).To(BeNumerically("~", (3*time.Minute).Milliseconds(), 1),
+			"the time to the cause, not the 10 minute cap")
+	})
+
 	It("uses the org's sandbox wait cap, which comes before the queue wait", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStarting, "")
 		capd := 10 * time.Minute
 		Expect(orgsettings.Set(ctx, q, e.org, orgsettings.Override{SandboxWaitCap: &capd})).To(Succeed())
-		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		t := e.task(ctx, "hello")
+		r := e.enqueue(ctx, t)
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout, c.Now = 30*time.Minute, clock.Now })
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
@@ -111,6 +144,11 @@ var _ = Describe("the sandbox wait cap", func() {
 		clock.Advance(10*time.Minute + time.Second)
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		Expect(kinds(events(ctx, r))).NotTo(ContainElement("run.requeued"))
+		for _, ev := range taskEvents(ctx, e, t) {
+			if ev.Kind == "run.failed" {
+				Expect(string(ev.Payload)).NotTo(ContainSubstring("causeSeenMs"), "no cause was named, so no time to it")
+			}
+		}
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("never became ready in 10m"))
 	})

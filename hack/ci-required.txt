@@ -47,6 +47,8 @@ external e2e result
 # runs after a push to main cannot gate a pull request.
 advisory flavor-publish
 advisory warm-caches
+# Time-boxed fuzzing of the untrusted-text parsers (#684). Advisory until it has run stable (ci-rules S3).
+advisory fuzz
 advisory warm-caches-web
 advisory warm-caches-opencode-plugins
 

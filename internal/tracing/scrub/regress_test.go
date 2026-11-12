@@ -367,8 +367,9 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 					b.WriteRune(c)
 				}
 			}
-			// A vendor key has entropy; a seed like "aaaaaaaa" is not one, and the gitleaks rules
-			// rightly leave it alone.
+			// A seed like "aaaaaaaa" is a placeholder that several detectors rightly leave alone.
+			// The vendor shapes that are redacted whatever their entropy have their own test,
+			// TestFixedVendorShapesBelowTheFloor.
 			if b.Len() >= 8 && distinctBytes(b.String()) >= 10 {
 				w = b.String()
 			}

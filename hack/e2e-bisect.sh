@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): runs in the upstream CI (opens an issue with the workflow's token).
+#
 # The kind e2e failed on main. Find which merge broke it and record it in one issue.
 #
 #   hack/e2e-bisect.sh [--dry-run] [--green SHA] [--head SHA] [--results SHA=pass|fail|unknown,...]

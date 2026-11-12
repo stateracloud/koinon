@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -142,6 +143,8 @@ type providerJSON struct {
 	HasCostKey           bool     `json:"hasCostKey"`
 	CostScope            string   `json:"costScope"`
 	Formats              []string `json:"formats"`
+	ServingState         string   `json:"servingState"`
+	ServingReason        string   `json:"servingReason"`
 }
 
 type modelJSON struct {
@@ -361,6 +364,19 @@ var _ = Describe("the admin API", func() {
 			Expect(code).To(Equal(400), string(body))
 		})
 
+		It("never refuses a valid token for tokenless or bad-token floods from its address", func(ctx SpecContext) {
+			for range 200 {
+				_, _ = e.call(ctx, "", "GET", "/providers", nil)
+			}
+			code, _ := e.call(ctx, "koinon_abcdefgh_wrong", "GET", "/providers", nil)
+			Expect(code).To(Equal(429), "a failing request of the flooding address is slowed down")
+			for i := range 200 {
+				_, _ = e.call(ctx, fmt.Sprintf("koinon_flood%03d_wrong", i), "GET", "/providers", nil)
+			}
+			code, _ = e.call(ctx, e.token, "GET", "/providers", nil)
+			Expect(code).To(Equal(200), "a valid token is never refused for its neighbours' failures")
+		})
+
 		It("slows down a client that keeps sending bad tokens", func(ctx SpecContext) {
 			var last int
 			for range 8 {
@@ -374,19 +390,61 @@ var _ = Describe("the admin API", func() {
 			Expect(code).To(Equal(200))
 		})
 
-		It("slows down guesses at a real token's secret, but not that token's valid use", func(ctx SpecContext) {
+		// Issue 658: a blocked address and prefix is refused before tokens.Authenticate, so a blocked
+		// request reads no token and writes no audit event, even with the right secret.
+		It("refuses guesses at a real token's secret before the token lookup once the address and prefix are blocked", func(ctx SpecContext) {
 			_, victim := mint(ctx, e, e.token, "admin", map[string]any{})
 			guess := "koinon_" + victim.Token.Prefix + "_wrong-secret"
-			var last int
-			for range 8 {
-				last, _ = e.call(ctx, guess, "GET", "/providers", nil)
+			count := func(action, target string) int {
+				GinkgoHelper()
+				var n int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2 AND target_id = $3`, e.org, action, target).Scan(&n)).To(Succeed())
+				return n
+			}
+			last := 0
+			for range 20 {
+				if last, _ = e.call(ctx, guess, "GET", "/providers", nil); last == 429 {
+					break
+				}
 			}
 			Expect(last).To(Equal(429))
-			code, _ := e.call(ctx, victim.Secret, "GET", "/providers", nil)
-			Expect(code).To(Equal(200), "the real holder still gets in")
-			var n int
-			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'token.use_failed' AND target_id = $2`, e.org, victim.Token.ID).Scan(&n)).To(Succeed())
-			Expect(n).To(BeNumerically(">=", 6))
+			failed := count("token.use_failed", victim.Token.ID)
+			Expect(failed).To(Equal(5), "every guess before the block was looked up and audited")
+			calls := count("admin_api.call", "/admin/v1/providers")
+
+			code, _ := e.call(ctx, guess, "GET", "/providers", nil)
+			Expect(code).To(Equal(429))
+			code, _ = e.call(ctx, victim.Secret, "GET", "/providers", nil)
+			Expect(code).To(Equal(429), "the address and prefix are blocked, whatever the secret")
+			Expect(count("token.use_failed", victim.Token.ID)).To(Equal(failed), "a blocked request writes no audit event")
+			Expect(count("admin_api.call", "/admin/v1/providers")).To(Equal(calls))
+
+			By("the holder from another address still gets in")
+			req := httptest.NewRequestWithContext(ctx, "GET", "/admin/v1/providers", nil)
+			req.RemoteAddr = "192.0.2.50:40000"
+			req.Header.Set("Authorization", "Bearer "+victim.Secret)
+			rec := httptest.NewRecorder()
+			e.srv.Config.Handler.ServeHTTP(rec, req)
+			Expect(rec.Code).To(Equal(200), rec.Body.String())
+		})
+
+		It("answers a blocked address and prefix with Retry-After", func(ctx SpecContext) {
+			_, victim := mint(ctx, e, e.token, "admin", map[string]any{})
+			guess := "koinon_" + victim.Token.Prefix + "_wrong-secret"
+			send := func() *httptest.ResponseRecorder {
+				req := httptest.NewRequestWithContext(ctx, "GET", "/admin/v1/providers", nil)
+				req.RemoteAddr = "192.0.2.51:40000"
+				req.Header.Set("Authorization", "Bearer "+guess)
+				rec := httptest.NewRecorder()
+				e.srv.Config.Handler.ServeHTTP(rec, req)
+				return rec
+			}
+			for range 5 {
+				Expect(send().Code).To(Equal(401))
+			}
+			rec := send()
+			Expect(rec.Code).To(Equal(429))
+			Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
 		})
 
 		It("cannot create a child while the parent is being revoked", func(ctx SpecContext) {
@@ -438,6 +496,9 @@ var _ = Describe("the admin API", func() {
 			m := decode[modelJSON](body)
 			Expect(m.Format).To(Equal("anthropic"))
 			Expect(m.FormatOverridden).To(BeFalse())
+			p = decode[providerJSON](mustBody(e.call(ctx, e.token, "GET", "/providers/"+p.ID, nil)))
+			Expect(p.ServingState).To(Equal("saved"), "a model the gateway has not served yet: saved, not failed")
+			Expect(p.ServingReason).To(BeEmpty())
 
 			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{"providerId": p.ID, "name": "other", "format": "openai"})
 			Expect(code).To(Equal(400), string(body))

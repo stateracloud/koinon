@@ -1682,6 +1682,25 @@ type AuditEvent struct {
 	Hash       []byte
 }
 
+type CodeHostPoller struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	ConnectionID        pgtype.UUID
+	Resource            string
+	ValidatorKind       string
+	Validator           string
+	Cursor              string
+	BaselineAt          pgtype.Timestamptz
+	ProviderIntervalS   int32
+	NextPollAt          pgtype.Timestamptz
+	BackoffUntil        pgtype.Timestamptz
+	ConsecutiveFailures int32
+	LastStatus          string
+	LastError           string
+	LastPolledAt        pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+}
+
 type Connection struct {
 	OrgID                  pgtype.UUID
 	ID                     pgtype.UUID
@@ -1724,6 +1743,14 @@ type DefaultPriceList struct {
 	Seq      pgtype.Int8
 	Entries  []byte
 	LoadedAt pgtype.Timestamptz
+}
+
+type GatewayProviderFailure struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+	UpdatedAt  pgtype.Timestamptz
 }
 
 type GatewayServedModel struct {

@@ -11,10 +11,12 @@
 //	retire      remove a KEK, only when no value uses it
 //	reencrypt   seal every value again under a new data key: the compromise path
 //	forget      give up on a lost KEK: mark what it sealed lost, start new home repositories
-//	export      print the key set as a Secret manifest: the KEK backup and its restore
+//	export      print the key set as a Secret manifest: the KEK backup
+//	import      read that manifest and put it in the KEK Secret: the restore, as koinon-api's own identity
 package keyscli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -31,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
@@ -111,6 +114,10 @@ type KeySet struct {
 	Active string
 	// ActivatedAt is when Active became active, if known.
 	ActivatedAt time.Time
+	// ResourceVersion is the version of the KEK Secret this key set was loaded at (empty when it was
+	// not loaded from one). KubeStore.Save updates with it, so a concurrent writer causes a conflict
+	// instead of a lost KEK.
+	ResourceVersion string
 }
 
 // Store loads and saves the KeySet.
@@ -121,9 +128,11 @@ type Store interface {
 
 // Tool runs the commands.
 type Tool struct {
-	Pool         *pgxpool.Pool
-	Store        Store
-	Out          io.Writer
+	Pool  *pgxpool.Pool
+	Store Store
+	Out   io.Writer
+	// In is what Import reads (the manifest Export wrote).
+	In           io.Reader
 	ActivePeriod time.Duration
 	Now          func() time.Time
 	// Prompt asks the person for what is missing and confirms what is hard to undo. Nil means do
@@ -139,6 +148,14 @@ type Tool struct {
 	// UsedID tells whether the database carries an envelope under a KEK ID. Add asks it; nil means
 	// the probe on Pool.
 	UsedID func(ctx context.Context, id string) (bool, error)
+	// Retired tells whether the audit chain records a keys.retire for a KEK ID. Import asks it; nil means
+	// the probe on Pool, and with no Pool Import warns that it cannot check.
+	Retired func(ctx context.Context, id string) (bool, error)
+	// AllowRetired lets Import add KEKs that keys retire removed (--allow-retired), inactive.
+	AllowRetired bool
+	// NoDatabase lets Import run without a database (--no-database): the retired-KEK check is then
+	// skipped, with a warning. Without it, Import with no database refuses (fail closed).
+	NoDatabase bool
 	// Audit records the key events in the install audit chain (ADR 0100 decision 3). Nil means one
 	// on Pool, with the CLI actor; with no Pool nothing is recorded.
 	Audit *Auditor
@@ -173,12 +190,17 @@ func (t *Tool) auditor() *Auditor {
 // AuditOptional a chain that cannot be read is not an error: the key set is loaded without the lock,
 // no Change is returned and notAudited says so. The caller clears the key set and commits the Change.
 func (t *Tool) begin(ctx context.Context, command string) (c *Change, ks KeySet, notAudited, err error) {
+	return t.beginWith(ctx, command, t.Store.Load)
+}
+
+// beginWith is begin with another loader, for a command that starts from a key set the Store cannot load.
+func (t *Tool) beginWith(ctx context.Context, command string, load KeyLoader) (c *Change, ks KeySet, notAudited, err error) {
 	a := t.auditor()
 	if a == nil {
-		ks, err = t.Store.Load(ctx)
+		ks, err = load(ctx)
 		return nil, ks, nil, err
 	}
-	c, ks, err = a.Baseline(ctx, t.Store.Load, command)
+	c, ks, err = a.Baseline(ctx, load, command)
 	if err == nil {
 		return c, ks, nil, nil
 	}
@@ -191,7 +213,7 @@ func (t *Tool) begin(ctx context.Context, command string) (c *Change, ks KeySet,
 	// The key-admin Job: a chain it cannot read is a warning, not a failure. The Secret changes without an
 	// event and the next koinon-api start records the key set as keys.observed.
 	notAudited = fmt.Errorf("%w: %w", ErrNotAudited, err)
-	ks, err = t.Store.Load(ctx)
+	ks, err = load(ctx)
 	return nil, ks, notAudited, err
 }
 
@@ -254,6 +276,40 @@ func NewID(now time.Time) (string, error) {
 	return "kek-" + now.UTC().Format("20060102") + "-" + hex.EncodeToString(b), nil
 }
 
+// newIDTries bounds the redraws of [DrawID]: a collision needs a 16-bit suffix to repeat on one day, so
+// a handful of tries is plenty and a longer run means the probe is wrong.
+const newIDTries = 8
+
+// DrawID returns a new KEK ID that no key set holds (taken, when not nil) and that the used probe does not
+// refuse (an ID with envelopes, or one the audit chain recorded: [ErrIDRetired]). It redraws a bounded
+// number of times, then fails. A nil probe accepts the first untaken ID; callers that need the check
+// to fail closed still pass the ID through [RefuseUsedID].
+func DrawID(ctx context.Context, now time.Time, taken func(string) bool, used func(context.Context, string) (bool, error)) (string, error) {
+	for range newIDTries {
+		id, err := NewID(now)
+		if err != nil {
+			return "", err
+		}
+		if taken != nil && taken(id) {
+			continue
+		}
+		if used == nil {
+			return id, nil
+		}
+		u, err := used(ctx, id)
+		if errors.Is(err, ErrIDRetired) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("check that KEK ID %s is unused: %w", id, err)
+		}
+		if !u {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("could not draw an unused KEK ID in %d tries; run the command again", newIDTries)
+}
+
 // Usage counts the stored values per KEK ID.
 func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	out := map[string]int{}
@@ -280,6 +336,51 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	return out, nil
 }
 
+// ErrIDRetired is what [AddableID] returns for a KEK ID that the install audit chain has ever recorded.
+var ErrIDRetired = errors.New("KEK ID was used before; IDs are never reused: pick a new ID")
+
+// AddableID is the probe for every KEK add path (keys add, the key-admin Job's plain add and its
+// recovery): it reports true when the ID may not be added, either because a stored value carries an
+// envelope under it ([UsedID]) or because the install audit chain ever recorded it ([RecordedID]; the
+// error is then [ErrIDRetired]). A retired or forgotten ID has no envelopes, yet old database backups may
+// still seal under it, so new bytes under it would break "IDs are never reused".
+func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	if used, err := UsedID(ctx, pool, id); err != nil || used {
+		return used, err
+	}
+	seen, err := RecordedID(ctx, pool, id)
+	if err != nil {
+		return false, fmt.Errorf("check whether KEK %s was used before: %w", id, err)
+	}
+	if seen {
+		return true, ErrIDRetired
+	}
+	return false, nil
+}
+
+// RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
+// keys.forget event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
+// after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
+//
+// Not covered: an add whose event was lost (the audit is optional, [AuditOptional]) and whose KEK was
+// removed by hand before the next start-up observation records a key-set state is never recorded (interim
+// gap, tracked in #862; exit: Add records the ID durably before it saves the Secret). The
+// query scans the keys.% events; that is fine while the chain is small (add a partial index on action if
+// it grows).
+func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	var found bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS (
+SELECT 1 FROM install_audit_events
+WHERE (action IN ($1, $2) AND target_kind = 'kek' AND target_id = $3)
+   OR (action LIKE 'keys.%' AND (
+        summary #> '{before,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
+     OR summary #> '{after,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
+     OR summary #> '{before,retired}' @> to_jsonb($3::text)
+     OR summary #> '{after,retired}' @> to_jsonb($3::text))))`,
+		ActionRetire, ForgetAction, id).Scan(&found)
+	return found, err
+}
+
 // UsedID reports whether any stored value carries an envelope under the KEK ID: the usage query
 // that keys status and keys forget use, asked about one ID.
 func UsedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
@@ -298,6 +399,9 @@ func RefuseUsedID(ctx context.Context, used func(context.Context, string) (bool,
 		return fmt.Errorf("check that KEK ID %s is unused: no database to ask; IDs are never reused", id)
 	}
 	u, err := used(ctx, id)
+	if errors.Is(err, ErrIDRetired) {
+		return fmt.Errorf("KEK ID %s was used before; IDs are never reused: pick a new ID", id)
+	}
 	if err != nil {
 		return fmt.Errorf("check that KEK ID %s is unused: %w", id, err)
 	}
@@ -523,7 +627,7 @@ func storedName(ks KeySet, id string) string {
 const ExportName = "koinon-kek"
 
 // Export writes the key set as a Kubernetes Secret manifest: the backup of the KEKs, and what a
-// restore applies (kubectl apply -n <namespace> -f). It writes each KEK as the Secret holds it, so
+// restore merges in (koinon-api keys import). It writes each KEK as the Secret holds it, so
 // a KMS-wrapped KEK stays wrapped and a local KEK is the key itself: keep the file with your other
 // secrets, apart from the database backups. The manifest has no namespace, so it restores into a
 // fresh one (ADR 0085 decision 15), and a comment line per KEK gives its fingerprint.
@@ -568,7 +672,7 @@ func (t *Tool) Export(ctx context.Context) error {
 		return err
 	}
 	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "# Koinon KEK export, %s. Restore: kubectl apply -n <namespace> -f <this file>\n", t.now().UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(&b, "# Koinon KEK export, %s. Restore: kubectl exec -i deploy/koinon-api -- koinon-api keys import --yes < <this file>\n", t.now().UTC().Format(time.RFC3339))
 	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
 		_, _ = fmt.Fprintf(&b, "# %s fingerprint %s, wrapped by %s\n", id, secretstore.Fingerprint(ks.Keys[id]), storedName(ks, id))
 	}
@@ -577,15 +681,232 @@ func (t *Tool) Export(ctx context.Context) error {
 	return err
 }
 
-// Add generates a KEK, stores it in the key set (inactive) and prints its ID.
-func (t *Tool) Add(ctx context.Context, id string) error {
-	var err error
-	if id == "" {
-		if id, err = NewID(t.now()); err != nil {
-			return err
+// Importer is a Store that can create the KEK Secret from an exported manifest, for an install that
+// has none yet. When the Secret exists, Import merges through Load and Save instead.
+type Importer interface {
+	Import(ctx context.Context, data map[string][]byte, annotations map[string]string) error
+}
+
+// errImportUnconfirmed refuses keys import without --yes. The manifest arrives on standard input, so
+// nobody can be asked.
+var errImportUnconfirmed = errors.New("keys import changes the KEK Secret and reads the manifest from standard input, so it cannot ask: pass --yes")
+
+// ActionImport is the audit action of keys import.
+const ActionImport = "keys.import"
+
+// RetiredID reports whether the install audit chain records a keys.retire event for the KEK ID: the
+// operator removed that KEK on purpose (a compromised one, say), and an old backup must not bring it back.
+func RetiredID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	var found bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM install_audit_events WHERE action = $1 AND target_kind = 'kek' AND target_id = $2)`, ActionRetire, id).Scan(&found)
+	return found, err
+}
+
+// retiredIn returns the IDs among ids that the audit chain records as retired. Without a probe (no
+// database) it returns none and checked is false.
+func (t *Tool) retiredIn(ctx context.Context, ids []string) (retired []string, checked bool, err error) {
+	probe := t.Retired
+	if probe == nil && t.Pool != nil {
+		if len(ids) == 0 {
+			return nil, true, nil
+		}
+		rows, err := t.Pool.Query(ctx, `SELECT DISTINCT target_id FROM install_audit_events WHERE action = $1 AND target_kind = 'kek' AND target_id = ANY($2)`, ActionRetire, ids)
+		if err != nil {
+			return nil, true, fmt.Errorf("check whether KEKs were retired: %w", err)
+		}
+		retired, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return nil, true, fmt.Errorf("check whether KEKs were retired: %w", err)
+		}
+		return retired, true, nil
+	}
+	if probe == nil {
+		return nil, false, nil
+	}
+	for _, id := range ids {
+		r, err := probe(ctx, id)
+		if err != nil {
+			return nil, true, fmt.Errorf("check whether KEK %s was retired: %w", id, err)
+		}
+		if r {
+			retired = append(retired, id)
 		}
 	}
-	if !secretstore.ValidKEKID(id) {
+	return retired, true, nil
+}
+
+// Import reads the manifest that Export wrote and merges it into the KEK Secret (ADR 0056
+// amendment, issue #604): it adds the manifest's KEKs to the key set, makes the manifest's active KEK
+// active and never removes a key; only keys retire does, with its database check. A KEK ID that the
+// Secret already holds with other key bytes is refused, because IDs are never reused. A KEK ID that
+// the audit chain records as retired (keys retire) is refused too, so an old backup cannot bring back
+// a KEK that was removed on purpose, unless AllowRetired is set; even then a retired KEK is added
+// inactive and never becomes active. Without a database the chain cannot be asked: Import says so. The
+// KEK Secret is guarded against any other writer, and kubectl apply by an operator is one, so the
+// restore runs here, through kubectl exec, as koinon-api's service account. Every KEK in the manifest
+// must unwrap before anything is written, so a manifest this install cannot open changes nothing.
+// With no Secret yet it creates one. With a database it records keys.import in both cases.
+func (t *Tool) Import(ctx context.Context) error {
+	imp, ok := t.Store.(Importer)
+	if !ok {
+		return errors.New("keys import needs --kek-secret: the key set is a mounted directory here and cannot be changed")
+	}
+	if !t.Yes {
+		return errImportUnconfirmed
+	}
+	if t.In == nil {
+		return errors.New("keys import reads the manifest from standard input")
+	}
+	raw, err := io.ReadAll(io.LimitReader(t.In, 1<<20))
+	defer clear(raw)
+	if err != nil {
+		return err
+	}
+	var sec corev1.Secret
+	if err := yaml.Unmarshal(raw, &sec); err != nil {
+		return fmt.Errorf("the input is not a Secret manifest: %w", err)
+	}
+	if sec.Kind != "" && sec.Kind != "Secret" {
+		return fmt.Errorf("the input is a %s, not a Secret", sec.Kind)
+	}
+	data := map[string][]byte{}
+	defer func() {
+		for _, v := range data {
+			clear(v)
+		}
+		for _, v := range sec.Data {
+			clear(v)
+		}
+	}()
+	// Export never writes StringData; accepting it would leave key text in Go strings that cannot be cleared.
+	if len(sec.StringData) > 0 {
+		return errors.New("the manifest has stringData; keys export writes data only, so nothing was imported")
+	}
+	for k, v := range sec.Data {
+		data[k] = v
+	}
+	in, err := openKeySet(ctx, t.Wrappers, data)
+	defer clearKeySet(in)
+	if err != nil {
+		return fmt.Errorf("the manifest does not open with this install's key wrapping: %w", err)
+	}
+	var activatedAt time.Time
+	var ann map[string]string
+	if v := sec.Annotations[ActivatedAnnotation]; v != "" {
+		ann = map[string]string{ActivatedAnnotation: v}
+		activatedAt, _ = time.Parse(time.RFC3339, v)
+	}
+
+	// A missing Secret is an empty key set to begin from, so the Change (and its lock) covers the
+	// create path as well and the event's "before" is the key set without the Secret.
+	missing := false
+	load := func(ctx context.Context) (KeySet, error) {
+		missing = false
+		ks, err := t.Store.Load(ctx)
+		if err != nil && apierrors.IsNotFound(err) {
+			missing = true
+			return KeySet{}, nil
+		}
+		return ks, err
+	}
+	c, ks, _, err := t.beginWith(ctx, "import", load)
+	defer clearKeySet(ks)
+	defer func() {
+		if c != nil {
+			_ = c.Commit(ctx)
+		}
+	}()
+	if err != nil {
+		return err
+	}
+
+	retired, checked, err := t.retiredIn(ctx, slices.Sorted(maps.Keys(in.Keys)))
+	if err != nil {
+		return err
+	}
+	if !checked {
+		if !t.NoDatabase {
+			return errors.New("keys import needs --database-url: without the audit chain it cannot say which KEKs keys retire removed, and an old backup would bring them back; nothing was imported (pass --no-database to skip the check)")
+		}
+		_, _ = fmt.Fprintln(t.Out, "Warning: no database is configured (--database-url) and --no-database is set, so the audit chain cannot say which KEKs were retired: a KEK that keys retire removed would come back. Check the manifest's KEK IDs yourself.")
+	}
+	if len(retired) > 0 {
+		if !t.AllowRetired {
+			return fmt.Errorf("the manifest holds KEK(s) that keys retire removed (%s): an old backup would bring them back, so nothing was imported; pass --allow-retired to add them inactive", strings.Join(retired, ", "))
+		}
+		_, _ = fmt.Fprintf(t.Out, "Warning: adding retired KEK(s) %s, inactive (--allow-retired); a retired KEK never becomes active here.\n", strings.Join(retired, ", "))
+	}
+	isRetired := func(id string) bool { return slices.Contains(retired, id) }
+	// The manifest's active KEK becomes active, so Activate's rule holds for it too.
+	if !isRetired(in.Active) {
+		if err := t.refuseLocalUnderKMS(in.Active, in.Stored[in.Active]); err != nil {
+			return fmt.Errorf("%w; nothing was imported", err)
+		}
+	}
+
+	if missing {
+		if isRetired(in.Active) {
+			return fmt.Errorf("the manifest's active KEK %s was retired and there is no KEK Secret to keep another one active: nothing was imported", in.Active)
+		}
+		// Write what was opened, not the raw manifest, so keys the key set does not define do not pass through.
+		clean, err := encodeKeySet(ctx, t.Wrappers, in)
+		defer func() {
+			for _, v := range clean {
+				clear(v)
+			}
+		}()
+		if err != nil {
+			return err
+		}
+		if err := imp.Import(ctx, clean, ann); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(t.Out, "Created the KEK Secret with %d KEK(s); the active one is %s. Check it: koinon-api keys verify\n", len(in.Keys), in.Active)
+		return t.recordChange(ctx, c, ActionImport, "kek", in.Active)
+	}
+
+	if ks.Keys == nil {
+		ks.Keys = map[string][]byte{}
+	}
+	if ks.Stored == nil {
+		ks.Stored = map[string]secretstore.StoredKEK{}
+	}
+	added := 0
+	for _, id := range slices.Sorted(maps.Keys(in.Keys)) {
+		if have, ok := ks.Keys[id]; ok {
+			if !bytes.Equal(have, in.Keys[id]) {
+				return fmt.Errorf("KEK %s is in the key set with other key bytes than the manifest holds; IDs are never reused, so nothing was imported", id)
+			}
+			continue
+		}
+		ks.Keys[id] = bytes.Clone(in.Keys[id])
+		ks.Stored[id] = in.Stored[id]
+		added++
+	}
+	if from := ks.Active; !isRetired(in.Active) {
+		ks.Active = in.Active
+		ks.ActivatedAt = activatedAt
+		if ks.ActivatedAt.IsZero() {
+			ks.ActivatedAt = t.now()
+		}
+		if from != ks.Active {
+			_, _ = fmt.Fprintf(t.Out, "The active KEK changes: %s -> %s\n", from, ks.Active)
+		}
+	} else {
+		_, _ = fmt.Fprintf(t.Out, "The manifest's active KEK %s was retired, so the active KEK stays %s.\nValues sealed under the retired KEK still need it until you run keys rewrap; run keys verify.\n", in.Active, ks.Active)
+	}
+	if err := t.Store.Save(ctx, ks); err != nil {
+		return err
+	}
+	t.recordActivation(ctx, ks)
+	_, _ = fmt.Fprintf(t.Out, "Merged the manifest into the KEK Secret: %d KEK(s) added, none removed, %d in all; the active one is %s. Check it: koinon-api keys verify\n", added, len(ks.Keys), ks.Active)
+	return t.recordChange(ctx, c, ActionImport, "kek", ks.Active)
+}
+
+// Add generates a KEK, stores it in the key set (inactive) and prints its ID.
+func (t *Tool) Add(ctx context.Context, id string) error {
+	generate := id == ""
+	if !generate && !secretstore.ValidKEKID(id) {
 		return fmt.Errorf("%q is not a valid KEK ID", id)
 	}
 	c, ks, notAudited, err := t.begin(ctx, "add")
@@ -597,15 +918,20 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	if ks.Keys == nil {
 		ks.Keys = map[string][]byte{}
 	}
-	if _, ok := ks.Keys[id]; ok {
-		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
-	}
 	// A KEK removed from the Secret may still seal values: a new KEK under its ID would be tried
 	// against them, and keys forget would then refuse the ID.
 	used := t.UsedID
 	if used == nil && t.Pool != nil {
 		pool := t.Pool
-		used = func(ctx context.Context, id string) (bool, error) { return UsedID(ctx, pool, id) }
+		used = func(ctx context.Context, id string) (bool, error) { return AddableID(ctx, pool, id) }
+	}
+	if generate {
+		if id, err = DrawID(ctx, t.now(), func(id string) bool { _, ok := ks.Keys[id]; return ok }, used); err != nil {
+			return err
+		}
+	}
+	if _, ok := ks.Keys[id]; ok {
+		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
 	}
 	if err := RefuseUsedID(ctx, used, id); err != nil {
 		return err
@@ -634,12 +960,14 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 		if _, ok := ks.Keys[id]; !ok {
 			return fmt.Errorf("KEK %s is not in the key set", id)
 		}
-		// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
-		// set the configured primary to local first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
-		if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
-			return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+		retired, _, err := t.retiredIn(ctx, []string{id})
+		if err != nil {
+			return err
 		}
-		return nil
+		if len(retired) > 0 {
+			return fmt.Errorf("KEK %s was retired (keys retire); a retired KEK never becomes active", id)
+		}
+		return t.refuseLocalUnderKMS(id, ks.Stored[id])
 	}
 	if id == "" || t.asks() {
 		// The picker and the confirmation wait for a person, so they run before the lock, on a key set
@@ -677,6 +1005,16 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
 	return t.recordChange(ctx, c, ActionActivate, "kek", id)
+}
+
+// refuseLocalUnderKMS is the rule that an install that opted in to a KMS never activates a local KEK
+// (procoduck, 2026-11-03), for Activate and Import. To roll back, set the configured primary to local
+// first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
+func (t *Tool) refuseLocalUnderKMS(id string, stored secretstore.StoredKEK) error {
+	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && stored.Backend == secretstore.BackendLocal {
+		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+	}
+	return nil
 }
 
 // asks reports whether confirm will ask a person.
@@ -723,11 +1061,23 @@ func (t *Tool) pickInactive(ctx context.Context, ks KeySet) (string, error) {
 			return "", err
 		}
 	}
-	var choices []cli.Choice
+	var inactive []string
 	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
 		if id != ks.Active {
-			choices = append(choices, cli.Choice{Label: t.describeKEK(id, usage), Value: id})
+			inactive = append(inactive, id)
 		}
+	}
+	retired, _, err := t.retiredIn(ctx, inactive)
+	if err != nil {
+		return "", err
+	}
+	var choices []cli.Choice
+	for _, id := range inactive {
+		ch := cli.Choice{Label: t.describeKEK(id, usage), Value: id}
+		if slices.Contains(retired, id) {
+			ch.Disabled = "retired"
+		}
+		choices = append(choices, ch)
 	}
 	if len(choices) == 0 {
 		return "", errors.New("there is no inactive KEK to activate; create one with: koinon-api keys add")

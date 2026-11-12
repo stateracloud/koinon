@@ -2,7 +2,7 @@
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import type { Timestamp } from '@bufbuild/protobuf/wkt'
-import type { Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ServingState, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { Token } from '@/gen/koinon/token/v1alpha1/token_pb'
 
 /** The provider type that has a routing guard (ADR 0048, 0056). */
@@ -49,11 +49,33 @@ export function modelsOf(models: readonly Model[], providerId: string): Model[] 
 
 /** How long a new or changed provider takes to reach the gateway, measured on kind (about 170 s). */
 export const availabilityMinutes = 3
-export const savedNotice = `Saved. It will be available to agents within about ${availabilityMinutes} minutes.`
+export const savedNotice = 'Saved. The provider shows Serving here once the gateway serves it.'
 
-/** savedRecently is true while a provider or model saved at ts may not be served yet. */
-export function savedRecently(ts: Timestamp | undefined, now = Date.now()): boolean {
-  return !!ts && now - timestampDate(ts).getTime() < availabilityMinutes * 60_000
+/** servingPollMs is how often the Providers page re-reads while a provider is saved but not served yet. */
+export const servingPollMs = 5_000
+
+/** failedPollMs is the slower interval while a provider is failed: a failure can be transient (an unreachable upstream, a price not added yet). */
+export const failedPollMs = 15_000
+
+/** servingBadge words a provider's serving status (issue #17); undefined for a provider that is not served by design. */
+export function servingBadge(p: Pick<Provider, 'servingState' | 'servingReason'>): { state: 'saved' | 'serving' | 'failed'; label: string; variant: 'secondary' | 'outline' | 'destructive' } | undefined {
+  switch (p.servingState) {
+    case ServingState.SAVED:
+      return { state: 'saved', label: 'Saved, waiting for the gateway', variant: 'outline' }
+    case ServingState.SERVING:
+      return { state: 'serving', label: 'Serving', variant: 'secondary' }
+    case ServingState.FAILED:
+      return { state: 'failed', label: `Not served: ${p.servingReason || 'unknown'}`, variant: 'destructive' }
+    default:
+      return undefined
+  }
+}
+
+/** servingPollInterval is how often to re-read the providers: fast while one waits for the gateway, slower while one is failed, never when all are settled. */
+export function servingPollInterval(list: readonly Pick<Provider, 'servingState'>[]): number | false {
+  if (list.some((p) => p.servingState === ServingState.SAVED)) return servingPollMs
+  if (list.some((p) => p.servingState === ServingState.FAILED)) return failedPollMs
+  return false
 }
 
 export const defaultTokenDays = 30

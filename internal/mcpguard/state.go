@@ -113,6 +113,7 @@ func Fingerprinter(row store.LeakGuardSession, threshold int) (*leakguard.Finger
 // store. The texts are fingerprinted here and never stored. It returns the legs after the change.
 func (s *State) Record(ctx context.Context, sess Session, legs Legs, threshold int, texts []string) (Legs, error) {
 	var out Legs
+	var evicted int64
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		row, err := ensure(ctx, q, sess)
@@ -143,15 +144,20 @@ func (s *State) Record(ctx context.Context, sess Session, legs Legs, threshold i
 				fps = append(fps, int64(f)) //nolint:gosec // two's complement, as stored
 			}
 		}
-		return s.add(ctx, q, sess, fps)
+		evicted, err = s.add(ctx, q, sess, fps)
+		return err
 	})
+	if err == nil {
+		s.metrics.evicted(evicted)
+	}
 	return out, err
 }
 
 // AddFingerprints adds fingerprints a caller computed with the session's key (agentd's feed) and
 // sets legs.
 func (s *State) AddFingerprints(ctx context.Context, sess Session, legs Legs, fps []leakguard.Fingerprint) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	var evicted int64
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		if _, err := ensure(ctx, q, sess); err != nil {
 			return err
@@ -168,15 +174,22 @@ func (s *State) AddFingerprints(ctx context.Context, sess Session, legs Legs, fp
 		for i, f := range fps {
 			out[i] = int64(f) //nolint:gosec // the bits are kept: a fingerprint is stored as its two's complement
 		}
-		return s.add(ctx, q, sess, out)
+		var err error
+		evicted, err = s.add(ctx, q, sess, out)
+		return err
 	})
+	if err == nil {
+		s.metrics.evicted(evicted)
+	}
+	return err
 }
 
 // add inserts fingerprints in chunks and evicts the oldest past the bound. The texts of one result
 // winnow to the same fingerprints more than once (a tool's content and its raw output, an edit's two
 // sides), so each is inserted once (AddLeakGuardFingerprints dedupes too: one statement may not
-// upsert a row twice).
-func (s *State) add(ctx context.Context, q *store.Queries, sess Session, fps []int64) error {
+// upsert a row twice). It returns the number of fingerprints it evicted; the caller counts them once
+// the transaction commits, so a rolled-back eviction is not counted.
+func (s *State) add(ctx context.Context, q *store.Queries, sess Session, fps []int64) (int64, error) {
 	fps = slices.Compact(slices.Sorted(slices.Values(fps)))
 	const chunk = 8192
 	for len(fps) > 0 {
@@ -184,26 +197,27 @@ func (s *State) add(ctx context.Context, q *store.Queries, sess Session, fps []i
 		if _, err := q.AddLeakGuardFingerprints(ctx, store.AddLeakGuardFingerprintsParams{
 			OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation, Fps: fps[:n],
 		}); err != nil {
-			return err
+			return 0, err
 		}
 		fps = fps[n:]
 	}
 	count, err := q.CountLeakGuardFingerprints(ctx, store.CountLeakGuardFingerprintsParams{OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if over := count - int64(s.maxFingerprints); over > 0 {
-		if _, err := q.EvictLeakGuardFingerprints(ctx, store.EvictLeakGuardFingerprintsParams{
+		n, err := q.EvictLeakGuardFingerprints(ctx, store.EvictLeakGuardFingerprintsParams{
 			OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation, N: int32(min(over, 1<<30)),
-		}); err != nil {
-			return err
+		})
+		if err != nil {
+			return 0, err
 		}
 		if err := q.MarkLeakGuardEvicted(ctx, store.MarkLeakGuardEvictedParams{OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation}); err != nil {
-			return err
+			return 0, err
 		}
-		s.metrics.evicted()
+		return n, nil
 	}
-	return nil
+	return 0, nil
 }
 
 // taintStore is the leakguard.Store of one session's table rows, for the TaintChecker.

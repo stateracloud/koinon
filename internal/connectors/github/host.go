@@ -146,6 +146,19 @@ func (*Host) MetadataScope(repositories []string) codehost.Scope {
 	return codehost.Scope{Repositories: repositories, Permissions: map[string]string{"metadata": "read"}}
 }
 
+// PollScope implements codehost.PollScoper: the events feed needs metadata read, the issue
+// comments issues read, each for the one repository.
+func (*Host) PollScope(res codehost.Resource) (codehost.Scope, error) {
+	repos := []string{res.Repo.String()}
+	switch res.Kind {
+	case codehost.ResourceRepoEvents:
+		return codehost.Scope{Repositories: repos, Permissions: map[string]string{"metadata": "read"}}, nil
+	case codehost.ResourceIssueComments:
+		return codehost.Scope{Repositories: repos, Permissions: map[string]string{"metadata": "read", "issues": "read"}}, nil
+	}
+	return codehost.Scope{}, fmt.Errorf("%w: github %s", codehost.ErrResourceUnsupported, res.Kind)
+}
+
 // ValidateSecrets implements codehost.Provider.
 func (*Host) ValidateSecrets(fields map[string][]byte) error {
 	_, err := ParsePrivateKey(fields[PrivateKeyField])

@@ -426,6 +426,9 @@ type ServedModels struct {
 	// IDs and Files are parallel: each served model and the key file it is served with.
 	IDs   []pgtype.UUID
 	Files []string
+	// Unpriced are the org's enabled models that carry no price: the gateway does not serve them by
+	// design (ADR 0041), and the provider status says so (issue #17).
+	Unpriced []pgtype.UUID
 	// PruneOnly is set for an org whose model objects the gateway rejected: nothing new is recorded,
 	// but models no longer in the state are removed.
 	PruneOnly bool
@@ -469,8 +472,9 @@ func (pl *Plan) Applied(res ApplyResult) Outcome {
 func (pl *Plan) served(rejections []gateway.Rejection) []ServedModels {
 	rejected := rejectedModelOrgs(rejections)
 	type entries struct {
-		ids   []pgtype.UUID
-		files []string
+		ids      []pgtype.UUID
+		files    []string
+		unpriced []pgtype.UUID
 	}
 	byOrg := map[string]*entries{}
 	for _, p := range pl.State.Providers {
@@ -484,10 +488,14 @@ func (pl *Plan) served(rejections []gateway.Rejection) []ServedModels {
 			file = path.Base(p.APIKeyFile)
 		}
 		for _, m := range p.Models {
+			id, ok := pl.in.ModelIDs[gateway.ModelRef(p.Org, m.Name)]
 			if m.Price == nil {
+				if ok {
+					e.unpriced = append(e.unpriced, id)
+				}
 				continue // not served (ADR 0041)
 			}
-			if id, ok := pl.in.ModelIDs[gateway.ModelRef(p.Org, m.Name)]; ok {
+			if ok {
 				e.ids = append(e.ids, id)
 				e.files = append(e.files, file)
 			}
@@ -499,6 +507,7 @@ func (pl *Plan) served(rejections []gateway.Rejection) []ServedModels {
 		s := ServedModels{Org: org, IDs: []pgtype.UUID{}, Files: []string{}, PruneOnly: rejected[org.Slug]}
 		if got := byOrg[org.Slug]; got != nil {
 			s.IDs, s.Files = append(s.IDs, got.ids...), append(s.Files, got.files...)
+			s.Unpriced = got.unpriced
 		}
 		out = append(out, s)
 	}

@@ -1025,8 +1025,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// within the 30 s (the old pods were Terminating with a 30 s grace period). A pass ends only
 		// when all its jobs end (startJobs(...).wait()), so the next pass, the first that could see
 		// the new agent, started after the cap. The leader hand-over and the gateway Apply were not
-		// the gate. Exit condition: lower the cap when a slow sandbox job of one agent no longer
-		// holds back the next reconcile pass (issue 573).
+		// the gate. PR 870 made sandbox work per agent, so that pass no longer waits. Exit condition:
+		// lower the cap once the "named the cause image_pull N s" line below stays well under 30 s in
+		// the merge queue (issue 573). The terminal-state line is always about the cap: the run fails
+		// only when the cap runs out.
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
@@ -1061,7 +1063,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return terminal(r.GetState())
 		})
 
-		// Data for the KOINON_SANDBOX_WAIT_CAP above: how long the image_pull failure took on this runner.
+		// The whole wait, which is the cap; the time to the cause is printed further down.
 		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 2 minutes)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
@@ -1072,12 +1074,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 		got, err := c.Tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		var cause string
+		var causeSeenMs float64
+		seen := false
 		for _, ev := range got.GetEvents() {
 			if ev.GetKind() == "run.failed" {
-				cause, _ = ev.GetPayload().AsMap()["sandboxCause"].(string)
+				p := ev.GetPayload().AsMap()
+				cause, _ = p["sandboxCause"].(string)
+				causeSeenMs, seen = p["causeSeenMs"].(float64)
 			}
 		}
 		Expect(cause).To(Equal("image_pull"))
+		// The run fails only when the cap runs out, so the terminal-state time above is the cap. This is
+		// the number that decides when the cap can go down (issue 573): how long the observer took to
+		// name the cause.
+		Expect(seen).To(BeTrue(), "the run.failed payload says when the cause was first seen")
+		By(fmt.Sprintf("the sandbox row named the cause image_pull %.1f s after the wait began", causeSeenMs/1000))
 
 		By("the metrics count it, by cause")
 		metrics := func(target, port string) string {

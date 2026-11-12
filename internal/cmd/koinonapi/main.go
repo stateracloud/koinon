@@ -113,6 +113,7 @@ import (
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
 	tracerouter "github.com/stateracloud/koinon/internal/tracing/router"
+	"github.com/stateracloud/koinon/internal/triggers/poll"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
@@ -455,6 +456,7 @@ func serve(ctx context.Context, cfg config) error {
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
 		PublicURL:          cfg.publicURL,
+		DeviceCookieSecret: []byte(cfg.installMark),
 	}
 	if cfg.oidcIssuer != "" {
 		secret, err := auth.ReadSecretFile(cfg.oidcClientSecretFile)
@@ -551,6 +553,7 @@ func serve(ctx context.Context, cfg config) error {
 	var notifier *durable.Notifier
 	var durableRT *durable.Runtime // for its metrics, registered once the registry exists
 	var sched *schedule.Scheduler
+	var pollers *poll.Poller
 	runDurable := cfg.durable && !cfg.restoreHold
 	if !cfg.durable {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
@@ -587,6 +590,13 @@ func serve(ctx context.Context, cfg config) error {
 		// due time fire once. It starts below, once the services exist.
 		sched = schedule.New(schedule.Config{Logger: slog.Default()}, pool, orgWork)
 		if err := rt.Register(sched.Registrar()); err != nil {
+			return err
+		}
+		// The shared code-host pollers (#25): one poller per (connection, resource), run by the
+		// replica that holds their leader lock. No trigger subscribes yet (the code_host_event
+		// filter is not defined), so they have no rows; they start below with the schedule.
+		pollers = poll.New(poll.Config{Logger: slog.Default()}, pool, orgWork, poll.NoSubscriptions)
+		if err := rt.Register(pollers.Registrar()); err != nil {
 			return err
 		}
 		// Direct messages in the inbox chat (TR3) create their tasks on that queue.
@@ -635,7 +645,10 @@ func serve(ctx context.Context, cfg config) error {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
-		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers}
+		kekStore := keyscli.KubeStore{
+			Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret, Wrappers: wrappers,
+			UsedID: func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
+		}
 		keyAudits.keySet = kekStore
 		if cfg.kekCreate {
 			// The first KEK of an install makes it bound-only (old issue 615): no KEK stored unbound belongs here.
@@ -699,7 +712,20 @@ func serve(ctx context.Context, cfg config) error {
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
 	guardMetrics := mcpguard.NewMetrics(nil)
 	var guard *mcpguard.Guard
+	// approvalSvc is created below, after the guard. executeAllowed runs a call recorded approved
+	// (a Trusted preset, an approval scope) at once instead of on the next sweep.
+	var approvalSvc *approvals.Service
+	executeAllowed := func(ctx context.Context, org, id pgtype.UUID) {
+		ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
+		defer cancel()
+		if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
+			slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
+		} else if err != nil {
+			slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
+		}
+	}
 	askSrv := mcpask.New(pool, mcpask.Options{
+		Execute: executeAllowed,
 		Assess: func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
 			return guard.Assess(ctx, org, agent, srv, tool, args)
 		},
@@ -718,7 +744,7 @@ func serve(ctx context.Context, cfg config) error {
 		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
 	}
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
-	approvalSvc := approvals.New(pool, approvalOpts)
+	approvalSvc = approvals.New(pool, approvalOpts)
 	if !cfg.restoreHold {
 		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
 	}
@@ -768,6 +794,10 @@ func serve(ctx context.Context, cfg config) error {
 		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
 		slog.Info("schedule triggers started")
 	}
+	if pollers != nil {
+		pollers.Bind(poll.ConnectionOpener{Hosts: hosts, Keys: opener}, poll.LogDeliverer{Logger: slog.Default()})
+		safego.GoOrStop(bgCtx, slog.Default(), "code-host-pollers", stop, func(ctx context.Context) { pollers.Run(ctx) })
+	}
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
@@ -782,6 +812,7 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	auth.RegisterMetrics(reg)
 	// koinon-api checks its own login against the install audit writer role, at startup and every
 	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
 	// identity). A missing grant is logged with the GRANT to run and shows as
@@ -807,6 +838,9 @@ func serve(ctx context.Context, cfg config) error {
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
+	}
+	if pollers != nil {
+		reg.MustRegister(pollers.Collector())
 	}
 	// The price refresh (ADR 0098, amended 2026-11-07). Off, koinon-api makes no request to any price
 	// source; auto fetches a source only while a provider of a type it prices exists.
@@ -931,15 +965,7 @@ func serve(ctx context.Context, cfg config) error {
 			Hosts: hosts,
 			Keys:  opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
-			Execute: func(ctx context.Context, org, id pgtype.UUID) {
-				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
-				defer cancel()
-				if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
-					slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
-				} else if err != nil {
-					slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
-				}
-			},
+			Execute: executeAllowed,
 		})
 		if err != nil {
 			return err

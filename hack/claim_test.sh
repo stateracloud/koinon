@@ -85,7 +85,7 @@ eq "conflict text: ADR number" "$(conflict_adr_text docs/adr/0095-x.md 0095 proc
 # JQ_PR_CLOSERS: closingIssuesReferences of this repository plus the body's closing keywords.
 closers_page='[{"data":{"repository":{"pullRequests":{"nodes":[
  {"number":200,"body":"Closes #5\nfixes: #6","author":{"login":"Carol"},"closingIssuesReferences":{"nodes":[{"number":5,"repository":{"nameWithOwner":"acme/koinon"}},{"number":9,"repository":{"nameWithOwner":"acme/other"}}]}},
- {"number":201,"body":null,"author":{"login":"alice"},"closingIssuesReferences":{"nodes":[{"number":7,"repository":{"nameWithOwner":"acme/koinon"}}]}},
+ {"number":201,"body":null,"author":{"login":"alice"},"closingIssuesReferences":{"nodes":[{"number":7,"repository":{"nameWithOwner":"Acme/Koinon"}}]}},
  {"number":202,"body":"see #8","author":null,"closingIssuesReferences":{"nodes":[]}}]}}}}]'
 CL=$(jq -c --arg repo acme/koinon "$JQ_PR_CLOSERS" <<<"$closers_page")
 eq "closers: references and body keywords, this repository only" "$(jq -c '[.[] | [.number, .author, .issues]]' <<<"$CL")" '[[200,"Carol",[5,6]],[201,"alice",[7]],[202,"",[]]]'
@@ -375,5 +375,27 @@ if ((rm_rc != 0)); then ok "release-merged exits non-zero when a release fails";
 rm -f "$LOG"
 r=$(run release-merged 1111111 nothex)
 eq "release-merged: needs a commit sha" "$(rc_of "$r")" 1
+
+# ---- init_repo: the repository, the board and its owner (hack/repo-lib.sh) ----
+# ir ENV...: REPO PROJECT PROJECT_OWNER after init_repo, with only ENV set.
+ir() {
+  (
+    unset KOINON_REPO GH_REPO KOINON_UPSTREAM KOINON_BOARD KOINON_BOARD_OWNER KOINON_CLAIM_PROJECT KOINON_CLAIM_PROJECT_OWNER
+    local kv
+    for kv in "$@"; do export "${kv?}"; done
+    REPO=${KOINON_CLAIM_REPO:-} PROJECT=${KOINON_CLAIM_PROJECT:-} PROJECT_OWNER=${KOINON_CLAIM_PROJECT_OWNER:-}
+    init_repo
+    echo "$REPO $PROJECT $PROJECT_OWNER"
+  ) 2>&1
+}
+eq "init_repo: upstream has board 1, owned by the org" "$(ir KOINON_CLAIM_REPO=acme/koinon KOINON_UPSTREAM=acme/koinon)" "acme/koinon 1 acme"
+eq "init_repo: the upstream in any case" "$(ir KOINON_CLAIM_REPO=Acme/Koinon KOINON_UPSTREAM=acme/koinon)" "Acme/Koinon 1 Acme"
+eq "init_repo: a fork has no board" "$(ir KOINON_CLAIM_REPO=me/koinon KOINON_UPSTREAM=acme/koinon)" "me/koinon none me"
+eq "init_repo: KOINON_BOARD on a fork, owned by the fork" "$(ir KOINON_CLAIM_REPO=me/koinon KOINON_UPSTREAM=acme/koinon KOINON_BOARD=4)" "me/koinon 4 me"
+eq "init_repo: KOINON_BOARD_OWNER names the board owner" "$(ir KOINON_CLAIM_REPO=acme/koinon KOINON_UPSTREAM=acme/koinon KOINON_BOARD_OWNER=org2)" "acme/koinon 1 org2"
+eq "init_repo: KOINON_CLAIM_PROJECT_OWNER wins over the board's owner" "$(ir KOINON_CLAIM_REPO=acme/koinon KOINON_UPSTREAM=acme/koinon KOINON_BOARD_OWNER=org2 KOINON_CLAIM_PROJECT_OWNER=org3)" "acme/koinon 1 org3"
+eq "init_repo: KOINON_CLAIM_PROJECT skips the board lookup" "$(ir KOINON_CLAIM_REPO=me/koinon KOINON_UPSTREAM=acme/koinon KOINON_CLAIM_PROJECT=9 KOINON_BOARD_OWNER=org2)" "me/koinon 9 org2"
+eq "init_repo: KOINON_BOARD=none on the upstream" "$(ir KOINON_CLAIM_REPO=acme/koinon KOINON_UPSTREAM=acme/koinon KOINON_BOARD=none)" "acme/koinon none acme"
+eq "init_repo: KOINON_REPO picks the repository" "$(ir KOINON_REPO=me/koinon KOINON_UPSTREAM=acme/koinon)" "me/koinon none me"
 
 exit "$fail"
