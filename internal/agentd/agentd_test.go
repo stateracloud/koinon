@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -432,8 +435,33 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markHang)
 		r := e.enqueue(ctx, t)
+		// Watch the run's live text before the worker starts. The fake's own signal (hangs) only
+		// says the harness wrote its lines; the live chunk says agentd holds the text, so the
+		// stop below has a cut-off message to store whatever the scheduling.
+		hub := runwatch.New(db.Config().ConnConfig, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		hubCtx, stopHub := context.WithCancel(context.Background())
+		DeferCleanup(stopHub)
+		go hub.Run(hubCtx)
+		Eventually(hub.Listening()).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
+		sub := hub.Subscribe(e.org, r.ID)
+		DeferCleanup(sub.Close)
 		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
 		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
+		var live strings.Builder
+		Eventually(func() string {
+			for {
+				select {
+				case cs := <-sub.Chunks:
+					for _, c := range cs {
+						if c.Kind == "acp.agent_message_chunk" {
+							live.WriteString(c.Text)
+						}
+					}
+				default:
+					return live.String()
+				}
+			}
+		}).WithTimeout(racescale.D(10 * time.Second)).WithPolling(20 * time.Millisecond).Should(HavePrefix("one "))
 		claimed := getRun(ctx, r)
 		Expect(claimed.OwnerID.String).To(HavePrefix("agentd-a/"))
 
