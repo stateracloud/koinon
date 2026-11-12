@@ -240,6 +240,7 @@ script-check - hack/kind-registry-test.sh
 script-check - hack/drill-issue-test.sh
 script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
+script-check - hack/hooks/sleep-chain-check_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
 script-check - hack/buf-breaking-against-test.sh
