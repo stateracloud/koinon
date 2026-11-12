@@ -15,6 +15,11 @@ networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
+# The KEK guard policies are cluster-scoped too (issue #604).
+secrets:
+  kek:
+    guard:
+      enabled: false
 # The observer, NetworkPolicy writer and LimitRange writer need the policy.
 sandboxObserver:
   enabled: false

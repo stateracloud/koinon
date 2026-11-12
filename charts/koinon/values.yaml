@@ -364,6 +364,16 @@ secrets:
     # helm template, Argo CD and Flux cannot replace it). Back it up: without it, stored provider keys
     # and connection secrets cannot be read.
     existingSecret: ""
+    # A native ValidatingAdmissionPolicy (issue #604) refuses DELETE of the KEK Secret, and UPDATE by
+    # any identity except the koinon-api and key-admin service accounts, so a deleted or replaced
+    # Secret cannot become a new key quietly. extraWriters are further user names (for example
+    # "system:serviceaccount:argocd:argocd-application-controller") that may update it: needed when
+    # a GitOps tool applies a Secret you named in existingSecret. It also renders the policy that
+    # limits the reconciler to Secrets labelled koinon.dev/managed-by=koinon-reconciler. To delete
+    # the Secret on purpose, set enabled=false, upgrade, delete it, then set it back.
+    guard:
+      enabled: true
+      extraWriters: []
     # "koinon-api keys status" warns when the active key is older than this.
     activePeriod: 8760h
     # Wrapping the KEKs with a KMS (optional; ADR 0085 decision 12, https://koinon.stateracloud.com/docs/operate/secret-keys/). The

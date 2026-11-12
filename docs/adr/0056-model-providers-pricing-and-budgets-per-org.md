@@ -744,7 +744,15 @@ Maintainer decision (procoduck, 2026-11-11).
 - This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
   Only a creator that can see the database can refuse to make a new key when encrypted data already
   exists; the hook Job cannot see the database.
-- Hardening of this path, and the matching text in AGENTS.md, follow in issue #604.
+- Hardening (issue #604): a native ValidatingAdmissionPolicy (`kek-guard`, chart template
+  `kek-guard.yaml`) refuses DELETE of the KEK Secret by anyone, and UPDATE by any identity except the
+  koinon-api and key-admin service accounts, so a deleted or overwritten Secret cannot silently
+  become a new key on the next upgrade or GitOps sync. The reconciler's Secret writes are fenced by a
+  second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
+  Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
+  `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
+  when the database holds encrypted values, which is the case a restore produces, and a held install
+  with an empty database may still create its first key.
 
 ## Open questions
 

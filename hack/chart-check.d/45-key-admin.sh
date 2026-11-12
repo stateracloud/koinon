@@ -9,7 +9,8 @@ kms=(--set secrets.kek.kms.backend=openbao --set secrets.kek.kms.openbao.address
 ka=(--show-only templates/key-admin.yaml)
 
 # Local is the default: no Job, no KMS settings, koinon-api creates the KEK Secret as before.
-lacks "no key-admin objects with the local KEK" 'koinon-key-admin'
+# (The KEK guard names the key-admin service account as an allowed writer; it is off here.)
+lacks "no key-admin objects with the local KEK" 'koinon-key-admin' --set secrets.kek.guard.enabled=false
 lacks "no KMS env with the local KEK" 'KOINON_KEK_BACKEND|KOINON_OPENBAO_'
 env_is KOINON_KEK_CREATE '"true"'
 

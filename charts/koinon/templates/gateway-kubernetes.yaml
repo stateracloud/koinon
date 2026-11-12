@@ -17,6 +17,7 @@ metadata:
   labels:
     {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
     koinon.dev/owner: reconciler
+    koinon.dev/managed-by: koinon-reconciler
 # The reconciler fills this Secret, one data key per provider or MCP credential. The chart renders no
 # data, so an upgrade leaves what the reconciler wrote.
 type: Opaque

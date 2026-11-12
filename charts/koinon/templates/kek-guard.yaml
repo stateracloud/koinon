@@ -1,0 +1,117 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Guards for Secrets in Koinon's namespace (issue #604, ADR 0056 amendment 2026-11-11). Native
+ValidatingAdmissionPolicies, never Kyverno. Cluster-scoped objects, prefixed <namespace>-<fullname>,
+each bound to this release's namespace only (namespaceSelector on kubernetes.io/metadata.name).
+
+1. kek-guard. koinon-api creates the KEK Secret on its first start and every stored secret depends on
+   it, so the Secret must not be deleted or replaced quietly. The policy refuses DELETE of it, and
+   UPDATE by any identity except the koinon-api and key-admin service accounts (and
+   secrets.kek.guard.extraWriters, for a GitOps identity that manages secrets.kek.existingSecret).
+   A DELETE is allowed while the namespace is being deleted, so the namespace does not hang in
+   Terminating. To delete the Secret on purpose (for example to start over on an install with no
+   stored secrets), set secrets.kek.guard.enabled=false, helm upgrade, delete it, set it back.
+2. reconciler-secrets. The reconciler needs create, get, update and delete on Secrets whose names are
+   per-agent and recorded in Postgres, and RBAC cannot name those, so its Role cannot be narrowed by
+   resourceNames. This policy narrows what it may write: only Secrets that carry the label
+   koinon.dev/managed-by=koinon-reconciler (the key Secrets and the provider keys Secret). It can
+   therefore never change or delete the KEK Secret, the declarative Secrets or the ones koinon-api
+   owns, even though its Role would allow the verb.
+
+secrets.kek.guard.enabled=false renders neither.
+*/ -}}
+{{- if .Values.secrets.kek.guard.enabled }}
+{{- $prefix := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
+{{- $kek := include "koinon.kekSecretName" . }}
+{{- $ns := .Release.Namespace }}
+{{- $api := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "api")) }}
+{{- $admin := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "key-admin")) }}
+{{- $reconciler := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "reconciler")) }}
+{{- $writers := concat (list $api $admin) (.Values.secrets.kek.guard.extraWriters | default list) }}
+{{- $kekPolicy := printf "%s-kek-guard" $prefix }}
+{{- $recPolicy := printf "%s-reconciler-secrets" $prefix }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $kekPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE, DELETE]
+        resources: [secrets]
+        resourceNames: [{{ $kek | quote }}]
+  variables:
+    - name: writers
+      expression: {{ toJson $writers | quote }}
+    - name: terminating
+      expression: "has(namespaceObject.status) && has(namespaceObject.status.phase) && namespaceObject.status.phase == 'Terminating'"
+  validations:
+    - expression: "request.operation != 'DELETE' || variables.terminating"
+      reason: Forbidden
+      message: {{ printf "the KEK Secret %s cannot be deleted: every stored secret depends on it. Restore it from your backup instead of replacing it; to delete it on purpose, set secrets.kek.guard.enabled=false and upgrade the chart (ADR 0056, issue #604)" $kek | quote }}
+    - expression: "request.operation != 'UPDATE' || request.userInfo.username in variables.writers"
+      reason: Forbidden
+      messageExpression: {{ printf "'only koinon-api and the key-admin Job may change the KEK Secret %s, not ' + request.userInfo.username" $kek | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $kekPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $kekPolicy }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $recPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [secrets]
+  matchConditions:
+    - name: reconciler
+      expression: {{ printf "request.userInfo.username == %s" ($reconciler | quote) | quote }}
+  variables:
+    - name: old
+      expression: "request.operation == 'CREATE' ? object : oldObject"
+    - name: ownedBefore
+      expression: "has(variables.old.metadata.labels) && 'koinon.dev/managed-by' in variables.old.metadata.labels && variables.old.metadata.labels['koinon.dev/managed-by'] == 'koinon-reconciler'"
+    - name: ownedAfter
+      expression: "request.operation == 'DELETE' || (has(object.metadata.labels) && 'koinon.dev/managed-by' in object.metadata.labels && object.metadata.labels['koinon.dev/managed-by'] == 'koinon-reconciler')"
+  validations:
+    - expression: "variables.ownedBefore && variables.ownedAfter"
+      reason: Forbidden
+      message: "the Koinon reconciler may write only Secrets that carry the label koinon.dev/managed-by=koinon-reconciler (issue #604)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $recPolicy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $recPolicy }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+{{- end }}
