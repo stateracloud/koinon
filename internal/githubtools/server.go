@@ -88,6 +88,27 @@ type Options struct {
 	// Keys opens the connection's secrets so create_pull_request can check, before it asks for
 	// approval, that the branch is free. Nil skips the check; the executor still makes it.
 	Keys connections.Opener
+	// LeakCheck is the leak guard's check (ADR 0091) of a call that no person decides: one the
+	// Trusted preset allows or an approval scope covers. The guard lets the agent's calls to these
+	// tools through (mcpguard.Options.OwnTargets) because a person approves the exact call; a call
+	// without that person runs only when LeakCheck returns a nil risk. A risk, or an error, records
+	// the call for a person's approval of the exact call, with the risk on its card. Nil checks
+	// nothing, so every such call waits for a person.
+	LeakCheck func(ctx context.Context, call LeakCall) (map[string]any, error)
+}
+
+// LeakCall is a call that would run without a person deciding it, as Options.LeakCheck gets it.
+type LeakCall struct {
+	Org   store.Org
+	Agent store.Agent
+	// Connection is the code-host connection the agent's grant is bound to; invalid when the
+	// binding names none.
+	Connection pgtype.UUID
+	Tool       string
+	// Repo is the call's repository, owner/name.
+	Repo string
+	// Arguments are the call's canonical arguments, as they are recorded.
+	Arguments json.RawMessage
 }
 
 // KindApprovalRequested is the task event written when a call is recorded.
@@ -104,6 +125,7 @@ type Server struct {
 	mcp   *mcp.Server
 	exec  func(ctx context.Context, org, id pgtype.UUID)
 	keys  connections.Opener
+	leak  func(ctx context.Context, call LeakCall) (map[string]any, error)
 }
 
 // New returns a Server recording requests in pool.
@@ -125,7 +147,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, hosts: opts.Hosts, exec: opts.Execute, keys: opts.Keys}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, hosts: opts.Hosts, exec: opts.Execute, keys: opts.Keys, leak: opts.LeakCheck}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-github-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCreatePullRequest,
@@ -490,11 +512,15 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	if err != nil {
 		return nil, Result{}, err
 	}
-	riskJSON, err := json.Marshal(risk)
+	binding, err := s.callBinding(ctx, c, connector)
 	if err != nil {
 		return nil, Result{}, err
 	}
-	binding, err := s.callBinding(ctx, c, connector)
+	clean, leak, err := s.leakCheck(ctx, c, decision, risk, connector, tool, repo, canonical, binding)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	riskJSON, err := cardRisk(risk, leak)
 	if err != nil {
 		return nil, Result{}, err
 	}
@@ -506,8 +532,9 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(s.ttl), Valid: true},
 	}
-	if decision == connectors.Allow {
-		// The Trusted preset: no human decision; Koinon executes it (P1).
+	if decision == connectors.Allow && clean {
+		// The Trusted preset: no human decision; Koinon executes it (P1) once the leak check
+		// finds it clean.
 		params.Decision, params.Status = store.ApprovalDecisionAllow, store.ApprovalStatusApproved
 	}
 	var row store.ApprovalRequest
@@ -517,9 +544,10 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		var err error
 		// A scoped approval of this agent (or task) for exactly this connector, tool and target
 		// lets the call run without parking; the timeline records the scope. Calls that could
-		// push and run code are never covered.
+		// push and run code are never covered, and neither is a call the leak check did not find
+		// clean (a scope granted after the check, too: the call waits for a person).
 		var scope store.ApprovalScope
-		if params.Status == store.ApprovalStatusPending {
+		if params.Status == store.ApprovalStatusPending && clean {
 			if scopeable(risk) {
 				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, binding, s.now())
 				if err != nil {
@@ -573,6 +601,70 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	}
 	out := resultOf(row)
 	return textResult(statusLine(out)), out, nil
+}
+
+// leakCheck runs Options.LeakCheck on a call that no person would decide: the Trusted preset
+// allows it, or an approval scope covers it now. clean reports that the call may run without a
+// person. A call already recorded in the run keeps its stored decision and is not checked again,
+// and a call a person decides needs no check; neither is clean. leak is the risk for the card
+// when the check holds the call for a person.
+func (s *Server) leakCheck(ctx context.Context, c caller, decision connectors.Decision, risk any, connector, tool, repo string, canonical, binding []byte) (clean bool, leak map[string]any, err error) {
+	target := connector + ":" + repo
+	_, err = s.q.GetApprovalRequestByCall(ctx, store.GetApprovalRequestByCallParams{
+		OrgID: c.org.ID, RunID: c.run.ID, Tool: tool, Target: target, ArgsSha256: HashArgs(canonical),
+	})
+	switch {
+	case err == nil:
+		return false, nil, nil // recorded: record answers it with the stored decision
+	case !errors.Is(err, pgx.ErrNoRows):
+		s.log.Error("github tools: look up the recorded call", append(c.attrs(), "tool", tool, "err", err)...)
+		return false, nil, errors.New("internal error recording the request; try again later")
+	}
+	unattended := decision == connectors.Allow
+	if !unattended && scopeable(risk) {
+		_, unattended, err = approvalscope.Match(ctx, s.q, c.org.ID, c.agent.ID, c.run.TaskID, connector, tool, target, binding, s.now())
+		if err != nil {
+			s.log.Error("github tools: match an approval scope", append(c.attrs(), "tool", tool, "err", err)...)
+			return false, nil, errors.New("internal error recording the request; try again later")
+		}
+	}
+	if !unattended {
+		return false, nil, nil
+	}
+	if s.leak == nil {
+		return false, nil, nil
+	}
+	call := LeakCall{Org: c.org, Agent: c.agent, Tool: tool, Repo: repo, Arguments: canonical}
+	if b, ok := c.config.Binding(connector); ok {
+		_ = call.Connection.Scan(b.ConnectionID) // an id that does not parse is no connection
+	}
+	leak, err = s.leak(ctx, call)
+	if err != nil {
+		s.log.Error("github tools: the leak check failed; the call waits for a person", append(c.attrs(), "tool", tool, "err", err)...)
+		return false, map[string]any{"leak": map[string]any{"reasons": []string{"error"}}}, nil
+	}
+	if leak != nil {
+		s.log.Info("github tools: the leak check holds the call for a person", append(c.attrs(), "tool", tool)...)
+		return false, leak, nil
+	}
+	return true, nil, nil
+}
+
+// cardRisk is the risk recorded on the call's card: the tool's own risk, with the leak check's
+// keys next to it.
+func cardRisk(risk any, leak map[string]any) ([]byte, error) {
+	b, err := json.Marshal(risk)
+	if err != nil || len(leak) == 0 {
+		return b, err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range leak {
+		m[k] = v
+	}
+	return json.Marshal(m)
 }
 
 func (s *Server) getApprovalStatus(ctx context.Context, req *mcp.CallToolRequest, in StatusArgs) (*mcp.CallToolResult, Result, error) {
