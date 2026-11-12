@@ -8,8 +8,10 @@
 #                     line of this checkout's go.mod (the module path of internal/project, AGENTS.md).
 #                     KOINON_UPSTREAM overrides it.
 #   koinon_repo       the repository the scripts act on: KOINON_REPO, else GH_REPO (gh's own variable), else
-#                     the GitHub repository of the `origin` remote of the current directory's checkout, else
-#                     koinon_upstream. A fork's clone therefore acts on the fork.
+#                     the remote gh itself would pick in the current directory's checkout (the one
+#                     `gh repo set-default` chose, else `upstream`, else `origin`), else koinon_upstream. So
+#                     the scripts and their plain `gh pr` calls agree: a fork cloned with an `upstream`
+#                     remote acts on the upstream, a fork cloned alone acts on the fork.
 #   koinon_board      prints "<owner> <number>" of the project board, or nothing when there is none.
 #                     KOINON_BOARD is the number, or `none`; its default is 1 on the upstream repository and
 #                     none elsewhere (a fork has no board). KOINON_BOARD_OWNER defaults to koinon_repo's owner.
@@ -45,8 +47,13 @@ koinon_github_slug() {
 
 koinon_repo() {
 	local r=${KOINON_REPO:-${GH_REPO:-}}
+	local remote
 	if [[ -z $r ]]; then
-		r=$(koinon_github_slug "$(git remote get-url origin 2>/dev/null || true)")
+		for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream origin; do
+			[[ -n $remote ]] || continue
+			r=$(koinon_github_slug "$(git remote get-url "$remote" 2>/dev/null || true)")
+			[[ -z $r ]] || break
+		done
 	fi
 	[[ -n $r ]] || r=$(koinon_upstream) || return 1
 	r=${r#https://github.com/}

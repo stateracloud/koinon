@@ -11,7 +11,7 @@ a checkout and the tools in CONTRIBUTING.md.
 The scripts below drive the maintainers' workflow: claims, shipping and merging pull requests, the
 lab, and releases. Each one says so in its header (`# Maintainer script (hack/README.md): ...`) and
 names what needs the upstream project's rights and what still works from a fork.
-`hack/maintainer-scripts-test.sh` checks that this list and those headers agree.
+`hack/repo-contract-test.sh` checks that this list and those headers agree.
 
 | Script | Needs maintainer rights for |
 | --- | --- |
@@ -40,10 +40,10 @@ is for Go:
 | Variable | Default |
 | --- | --- |
 | `KOINON_UPSTREAM` | the `module github.com/<owner>/<name>` line of `go.mod` |
-| `KOINON_REPO` | `GH_REPO`, else the `origin` remote's GitHub repository, else the upstream |
+| `KOINON_REPO` | `GH_REPO`, else the remote gh would pick (`gh repo set-default`, else `upstream`, else `origin`), else the upstream |
 | `KOINON_BOARD` | `1` on the upstream repository, `none` on a fork |
 | `KOINON_BOARD_OWNER` | the owner of `KOINON_REPO` |
 | `KOINON_WT_ROOT` | `/tmp/kw` (`hack/wt.sh`; the repository's Claude sandbox settings allow it) |
 
-A fork's clone therefore acts on the fork with no settings: claims and pull requests go to the fork,
-and the board step is skipped.
+A fork cloned alone acts on the fork with no settings: claims and pull requests go to the fork, and
+the board step is skipped. With an `upstream` remote the scripts act on the upstream, as `gh` does.

@@ -267,7 +267,8 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "ready"
 		fi
 		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
-		if [[ $ready == 1 && $pr_url == */"$(koinon_upstream)"/pull/* ]]; then
+		up=$(koinon_upstream)
+		if [[ $ready == 1 && ${pr_url,,} == */"${up,,}"/pull/* ]]; then
 			# A head this run pushed is new: ask without the date check (GitHub moves the PR head after the push, and a
 			# request on the old head says nothing about this one). Otherwise a request dated after the head commit counts.
 			if [[ $cr_fresh == 1 ]]; then

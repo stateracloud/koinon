@@ -8,6 +8,7 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+unset KOINON_REPO GH_REPO KOINON_BOARD KOINON_BOARD_OWNER KOINON_UPSTREAM # hack/repo-lib.sh defaults
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ship=$repo/hack/ship.sh

@@ -45,12 +45,13 @@ labelled=$(cd hack && grep -rl --include='*.sh' -m1 '^# Maintainer script (hack/
 if [[ $listed == "$labelled" ]]; then ok "hack/README.md lists exactly the labelled maintainer scripts"; else
 	bad "hack/README.md and the 'Maintainer script' headers disagree: $(diff <(echo "$listed") <(echo "$labelled") | grep '^[<>]' | tr '\n' ' ')"
 fi
+org_ok=1
 for s in $listed; do
-	[[ -L hack/$s ]] && continue
-	sed -n '1,8p' "hack/$s" | grep -q '^# Maintainer script (hack/README.md): ' || bad "hack/$s: the label is not in its header"
-	if grep -n 'stateracloud' "hack/$s" | grep -v '^[0-9]*:#' >/dev/null; then bad "hack/$s names the org in code; use hack/repo-lib.sh"; fi
+	sed -n '1,8p' "hack/$s" | grep -q '^# Maintainer script (hack/README.md): ' || { bad "hack/$s: the label is not in its header"; org_ok=0; }
+	# Comment lines (indented ones too) may name the org; code may not.
+	if grep -n 'stateracloud' "hack/$s" | grep -vE '^[0-9]+:[[:space:]]*#' >/dev/null; then bad "hack/$s names the org in code; use hack/repo-lib.sh"; org_ok=0; fi
 done
-ok "maintainer scripts name no org outside comments"
+[[ $org_ok == 0 ]] || ok "maintainer scripts carry the label and name no org outside comments"
 
 # shellcheck source=hack/repo-lib.sh
 (
@@ -70,6 +71,15 @@ ok "maintainer scripts name no org outside comments"
 	chk "fork board override" "$(KOINON_REPO=someone/koinon KOINON_BOARD=3 koinon_board)" "someone 3"
 	chk "board owner override" "$(KOINON_REPO=$up KOINON_BOARD_OWNER=acme koinon_board)" "acme 1"
 	chk "board none" "$(KOINON_REPO=$up KOINON_BOARD=none koinon_board)" ""
+	g=$(mktemp -d "${TMPDIR:-/tmp}/rc-remote.XXXXXX")
+	git -C "$g" init -q
+	git -C "$g" remote add origin https://github.com/someone/koinon.git
+	chk "origin remote" "$(cd "$g" && koinon_repo)" someone/koinon
+	git -C "$g" remote add upstream git@github.com:acme/koinon.git
+	chk "upstream remote before origin" "$(cd "$g" && koinon_repo)" acme/koinon
+	git -C "$g" config remote.origin.gh-resolved base
+	chk "gh repo set-default wins" "$(cd "$g" && koinon_repo)" someone/koinon
+	rm -rf "$g"
 	if (KOINON_BOARD=x koinon_board 2>/dev/null); then bad "repo-lib: a bad KOINON_BOARD is refused"; else ok "repo-lib: a bad KOINON_BOARD is refused"; fi
 	exit "$fail"
 ) || fail=1
