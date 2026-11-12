@@ -190,6 +190,27 @@ type fakeModelGateway struct {
 	ledgerBudgets bool
 	// onApply, when set, sees each state as the gateway receives it, before it is recorded.
 	onApply func(gateway.State)
+	// cancelAt is when an Apply saw its context cancelled; applyAt are the starts of every Apply.
+	cancelAt time.Time
+	applyAt  []time.Time
+}
+
+func (f *fakeModelGateway) canceledAt() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelAt
+}
+
+func (f *fakeModelGateway) applyTimes() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.applyAt...)
+}
+
+func (f *fakeModelGateway) appliedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.applied)
 }
 
 func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.IssuedKey, error) {
@@ -203,15 +224,23 @@ func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (
 	return k, nil
 }
 
-func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Revision, error) {
+func (f *fakeModelGateway) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	f.mu.Lock()
 	hold, entered := f.hold, f.entered
+	f.applyAt = append(f.applyAt, time.Now())
 	f.mu.Unlock()
 	if hold != nil {
 		if entered != nil {
 			close(entered)
 		}
-		<-hold
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.cancelAt = time.Now()
+			f.mu.Unlock()
+			return "", ctx.Err()
+		}
 	}
 	if err := s.Validate(); err != nil {
 		return "", err
