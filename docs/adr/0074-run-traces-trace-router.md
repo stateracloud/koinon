@@ -842,3 +842,16 @@ does not hold.
 6. **Gateway spans.** If the gateway ever exports model-call spans to `/v1/traces` (decision 1 of the
    original text), it needs a third credential of its own for that path; it must not be given agentd's.
    Nothing exports them today.
+
+## Amendment (2026-11-12, issue 684): fixed vendor key shapes are applied without the entropy floor
+
+The scrubber applies a gitleaks rule with its entropy floor, except for the rules whose secret is a
+literal vendor prefix followed by a body of one fixed length (AWS key IDs, the GitHub and GitLab
+tokens, npm and others; `gitleaksNoFloor` in `internal/tracing/scrub/gitleaks.go`). gitleaks uses the
+floor to skip placeholders in source code. In a trace, a real key whose characters happen to repeat
+is still a key: about 2 in 10,000 random AWS key IDs fall under the floor of 3. Redacting a
+placeholder of that shape costs little, and the shape is too specific to match prose. The rules' own
+allowlists still apply. A test derives the shape from each rule's expression and fails when a gitleaks
+bump renames or drops a listed rule, takes its floor away, changes its shape, or adds a fixed-shape
+rule that is not listed. One fixed-shape rule keeps its floor because its prefix is the base64 of
+ordinary text, not a vendor marker.

@@ -167,10 +167,9 @@ func literalPrefix(n *syntax.Regexp) int {
 
 // keepFloor lists the fixed-shape rules that keep their entropy floor, with the reason.
 var keepFloor = map[string]string{
-	// The prefix is the base64 of ordinary text ("ref", "eyJ"), not a vendor marker: any base64
-	// of text that starts that way has the shape, and the floor is what tells a token apart.
+	// The prefix is the base64 of ordinary text ("ref"), not a vendor marker: any base64 of text
+	// that starts that way has the shape, and the floor is what tells a token apart.
 	"artifactory-reference-token": "base64 prefix of ordinary text",
-	"jwt-base64":                  "base64 prefix of ordinary text",
 }
 
 // TestNoFloorRulesAreFixedVendorShapes keeps the list of rules applied without an entropy floor
@@ -187,16 +186,25 @@ func TestNoFloorRulesAreFixedVendorShapes(t *testing.T) {
 	for _, r := range set.Rules {
 		byID[r.ID] = r
 	}
-	for id := range listed {
+	check := func(id string) {
 		r, ok := byID[id]
 		switch {
 		case !ok:
-			t.Errorf("%s: listed without an entropy floor but not in gitleaks %s: renamed or dropped", id, set.Version)
+			t.Errorf("%s: listed but not in gitleaks %s: renamed or dropped", id, set.Version)
 		case r.Entropy == 0:
-			t.Errorf("%s: has no entropy floor in gitleaks %s: remove it from the list", id, set.Version)
+			t.Errorf("%s: has no entropy floor in gitleaks %s: remove it from its list", id, set.Version)
 		case !fixedVendorShape(r):
 			t.Errorf("%s: no longer a fixed vendor prefix with a fixed-length body: %s", id, r.Regex)
 		}
+	}
+	for id := range listed {
+		check(id)
+	}
+	for id := range keepFloor {
+		if _, ok := listed[id]; ok {
+			t.Errorf("%s: both listed without a floor and in keepFloor", id)
+		}
+		check(id) // a stale keepFloor entry fails like a stale list entry
 	}
 	var missing []string
 	for _, r := range set.Rules {
@@ -218,17 +226,17 @@ func TestNoFloorRulesAreFixedVendorShapes(t *testing.T) {
 }
 
 // TestFixedVendorShapesBelowTheFloor: a key of a fixed vendor shape whose characters repeat
-// enough to fall under the rule's entropy floor is still a key in a trace. The first case is the
-// key ID FuzzAlwaysShapesNeverSurvive produced.
+// enough to fall under the rule's entropy floor is still a key in a trace. FuzzAlwaysShapesNeverSurvive
+// found an AWS key ID of that kind.
 func TestFixedVendorShapesBelowTheFloor(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	for name, key := range map[string]string{
-		"aws key id (fuzz finding)": "AKIA" + "5NN2KKK7FTANNYAK",
-		"aws key id, one letter":    "AKIA" + strings.Repeat("Q", 16),
-		"github pat":                "ghp_" + strings.Repeat("ab", 18),
-		"github app":                "ghs_" + strings.Repeat("z", 36),
-		"gitlab pat":                "glpat-" + strings.Repeat("x", 20),
-		"npm":                       "npm_" + strings.Repeat("a", 36),
+		"aws key id, two letters": "AKIA" + strings.Repeat("QZ", 8),
+		"aws key id, one letter":  "AKIA" + strings.Repeat("Q", 16),
+		"github pat":              "ghp_" + strings.Repeat("ab", 18),
+		"github app":              "ghs_" + strings.Repeat("z", 36),
+		"gitlab pat":              "glpat-" + strings.Repeat("x", 20),
+		"npm":                     "npm_" + strings.Repeat("a", 36),
 	} {
 		for _, in := range []string{key, "id " + key + " ok", `{"k":"` + key + `"}`, "x/" + key} {
 			if out := s.Text(in); strings.Contains(out, key) {
