@@ -4,8 +4,8 @@
 //
 // A property runs Cases times; case i draws from rand.New(rand.NewSource(Seed()+i)). The default
 // seed is fixed (DefaultSeed), so `make test` is deterministic. A failing case prints the exact
-// seed that reproduces it, and KOINON_PROPERTY_SEED=<n> reruns that case first (with
-// KOINON_PROPERTY_CASES=1). It uses only the standard library: testing/quick cannot generate
+// seed that reproduces it: KOINON_PROPERTY_SEED=<n> KOINON_PROPERTY_CASES=1 replays exactly that
+// case (the base seed replaces the default, so case 0 draws from <n>). It uses only the standard library: testing/quick cannot generate
 // event orderings with a printed per-case seed (issue 26).
 package propseed
 
@@ -44,25 +44,35 @@ func envInt(name string, def int64) int64 {
 	return def
 }
 
-// ForEach runs body once per case with that case's generator. If body fails (a Gomega failure or
-// a panic), ForEach reports the seed of the case before the failure propagates.
+// ForEach runs body once per case with that case's generator and stops at the first failing
+// case. If body fails (a Gomega failure, a panic, or a failure recorded by a goroutine's
+// GinkgoRecover), ForEach reports the seed of the case.
 func ForEach(body func(rng *rand.Rand)) {
 	GinkgoHelper()
 	for i := 0; i < Cases(); i++ {
 		Run(Seed()+int64(i), body)
+		if CurrentSpecReport().Failed() {
+			return
+		}
 	}
 }
 
 // Run runs body with the generator of one seed, printing the seed if body fails.
 func Run(seed int64, body func(rng *rand.Rand)) {
 	GinkgoHelper()
+	report := func() {
+		msg := fmt.Sprintf("property failed with seed %d: rerun with %s=%d %s=1", seed, SeedVar, seed, CasesVar)
+		AddReportEntry("property seed", msg)
+		fmt.Fprintln(GinkgoWriter, msg)
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			msg := fmt.Sprintf("property failed with seed %d: rerun with %s=%d %s=1", seed, SeedVar, seed, CasesVar)
-			AddReportEntry("property seed", msg)
-			fmt.Fprintln(GinkgoWriter, msg)
+			report()
 			panic(r)
 		}
 	}()
 	body(rand.New(rand.NewSource(seed))) //nolint:gosec // a reproducible test generator, not security
+	if CurrentSpecReport().Failed() {
+		report()
+	}
 }

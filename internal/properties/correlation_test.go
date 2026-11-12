@@ -4,6 +4,7 @@ package properties_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -22,6 +23,8 @@ import (
 // event is one delivery: the same (source, key) may arrive many times (redelivery, a re-poll, a
 // second replica).
 type event struct{ source, key string }
+
+var errEffectFailed = errors.New("effect failed")
 
 var sources = []string{durable.SourceWebhook, durable.SourceSlack, durable.SourcePoll, durable.SourceDirectMessage, durable.SourceQuestion}
 
@@ -57,7 +60,7 @@ func tasksByKey(ctx context.Context, org pgtype.UUID) map[string]int {
 
 // deliver runs one delivery the way every source does: durable.Once whose effect creates the
 // task the event correlates to. It returns the task the event reached.
-func deliver(ctx context.Context, org, user, agent pgtype.UUID, e event) (pgtype.UUID, error) {
+func deliver(ctx context.Context, org, user, agent pgtype.UUID, e event, fail bool) (pgtype.UUID, error) {
 	var out durable.Outcome
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		var err error
@@ -66,6 +69,11 @@ func deliver(ctx context.Context, org, user, agent pgtype.UUID, e event) (pgtype
 				OrgID: org, Title: e.source + "/" + e.key, AgentID: agent,
 				CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user,
 			})
+			if err == nil && fail {
+				// The effect wrote its task and then failed: the transaction rolls back, and the key
+				// must be free for the redelivery.
+				return "", pgtype.UUID{}, errEffectFailed
+			}
 			return "task", t.ID, err
 		})
 		return err
@@ -85,45 +93,91 @@ var _ = Describe("correlation (issue 26)", func() {
 				return org, user, newAgent(ctx, org, user)
 			}
 
+			// failing marks about a third of the first deliveries: their effect fails and the
+			// source redelivers them at the end, so the result must not depend on who failed.
+			failing := func(order []event) []bool {
+				f := make([]bool, len(order))
+				seen := map[event]bool{}
+				for i, e := range order {
+					if !seen[e] && rng.Intn(3) == 0 {
+						f[i] = true
+					}
+					seen[e] = true
+				}
+				return f
+			}
+
 			// World A: one shuffled order, one at a time.
 			orgA, userA, agentA := world()
 			a := append([]event(nil), evs...)
 			rng.Shuffle(len(a), func(i, j int) { a[i], a[j] = a[j], a[i] })
+			fa := failing(a)
 			reached := map[event]pgtype.UUID{}
-			for _, e := range a {
-				id, err := deliver(ctx, orgA, userA, agentA, e)
-				Expect(err).NotTo(HaveOccurred())
+			var redeliver []event
+			check := func(e event, id pgtype.UUID) {
+				GinkgoHelper()
 				if prev, seen := reached[e]; seen {
 					Expect(id).To(Equal(prev), "a replay of %v must reach the task of its first delivery", e)
 				}
 				reached[e] = id
 			}
+			for i, e := range a {
+				id, err := deliver(ctx, orgA, userA, agentA, e, fa[i])
+				if fa[i] {
+					Expect(err).To(MatchError(errEffectFailed))
+					redeliver = append(redeliver, e)
+					continue
+				}
+				Expect(err).NotTo(HaveOccurred())
+				check(e, id)
+			}
+			for _, e := range redeliver {
+				id, err := deliver(ctx, orgA, userA, agentA, e, false)
+				Expect(err).NotTo(HaveOccurred())
+				check(e, id)
+			}
 
-			// World B: another shuffle, all deliveries racing.
+			// World B: another shuffle, all deliveries racing, failed ones redelivered after.
 			orgB, userB, agentB := world()
 			b := append([]event(nil), evs...)
 			rng.Shuffle(len(b), func(i, j int) { b[i], b[j] = b[j], b[i] })
+			fb := failing(b)
 			var (
-				wg  sync.WaitGroup
-				mu  sync.Mutex
-				ids = map[event]map[pgtype.UUID]bool{}
+				wg   sync.WaitGroup
+				mu   sync.Mutex
+				ids  = map[event]map[pgtype.UUID]bool{}
+				errs []error
 			)
-			for _, e := range b {
-				wg.Add(1)
-				go func() {
-					defer GinkgoRecover()
-					defer wg.Done()
-					id, err := deliver(ctx, orgB, userB, agentB, e)
-					Expect(err).NotTo(HaveOccurred())
-					mu.Lock()
-					defer mu.Unlock()
-					if ids[e] == nil {
-						ids[e] = map[pgtype.UUID]bool{}
-					}
-					ids[e][id] = true
-				}()
+			race := func(order []event, fail []bool) []event {
+				var failed []event
+				for i, e := range order {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						id, err := deliver(ctx, orgB, userB, agentB, e, fail != nil && fail[i])
+						mu.Lock()
+						defer mu.Unlock()
+						switch {
+						case errors.Is(err, errEffectFailed):
+							failed = append(failed, e)
+						case err != nil:
+							errs = append(errs, err)
+						default:
+							if ids[e] == nil {
+								ids[e] = map[pgtype.UUID]bool{}
+							}
+							ids[e][id] = true
+						}
+					}()
+				}
+				wg.Wait()
+				return failed
 			}
-			wg.Wait()
+			// A failing delivery races a succeeding one of the same key: whichever claims the key
+			// first, the other waits for it, and a rollback frees the key for the waiting one.
+			again := race(b, fb)
+			race(again, nil)
+			Expect(errs).To(BeEmpty())
 			for e, set := range ids {
 				Expect(set).To(HaveLen(1), "racing deliveries of %v reached different tasks", e)
 			}
