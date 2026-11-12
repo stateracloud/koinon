@@ -1743,6 +1743,20 @@ type GatewayServedModel struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type GatewayStateAck struct {
+	CopyID   string
+	Revision int64
+	Half     string
+	AckedAt  pgtype.Timestamptz
+}
+
+type GatewayStateRevision struct {
+	Revision  int64
+	Snapshot  []byte
+	Digest    string
+	CreatedAt pgtype.Timestamptz
+}
+
 type HomeCheckpoint struct {
 	OrgID             pgtype.UUID
 	ID                pgtype.UUID

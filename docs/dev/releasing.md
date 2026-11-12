@@ -4,8 +4,9 @@
 
 A release is a Git tag. Pushing `vX.Y.Z` or `vX.Y.Z-rc.N` runs
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which publishes to the
-private `ghcr.io/stateracloud/koinon` (every package lives under the repository that builds it, so
-the workflow's own token owns it; #167) and drafts the GitHub release. Nothing is committed for a version:
+`ghcr.io/stateracloud/koinon` (every package lives under the repository that builds it, so
+the workflow's own token owns it; #167; the packages are public from the first signed rc, see
+[Make the packages public](#make-the-packages-public)) and drafts the GitHub release. Nothing is committed for a version:
 the images, the chart's `version` and `appVersion` all come from the tag, without the leading `v`.
 
 | Artifact | Where |
@@ -178,21 +179,77 @@ reinstall) and that it cannot roll back to an earlier release.
 
 ## Signing and SBOM attestations
 
-The workflow can sign with cosign keyless and attest the SBOMs, but its `sign` job runs only when
+The workflow signs with cosign keyless and attests the SBOMs, but its `sign` job runs only when
 the repository variable `RELEASE_SIGNING` is `true` (default: unset, off). Keyless signing writes
-image names and digests to the public Rekor log (ADR 0049), so leave it off while the repository is
-private.
+image names and digests to the public Rekor log (ADR 0049), which is fine now that the packages are
+public (owner decision 2026-11-12).
 
 The `sign` job runs after `release` and `harness` and is the only job with `id-token: write`. It gets
 `dist/digests.txt` and the SPDX SBOMs from the release job as an uploaded artifact (`hack/release-refs.sh`
 turns the digests into image references), signs every image by digest and the pushed chart artifact,
 and attaches each Go image's SBOM as a cosign attestation (`cosign attest --type spdxjson`). The
 harness image is signed by the digest the `harness` job reports; its SBOM is BuildKit's attestation,
-pushed with the image. Verify with
-`cosign verify` against the workflow's identity once it is on.
+pushed with the image. Verify as shown under [Verify with no login](#verify-with-no-login).
 
 Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again with
 `gh variable delete RELEASE_SIGNING`.
+
+## Make the packages public
+
+Koinon is pre-alpha (README). The packages go public with the first rc cut after `RELEASE_SIGNING` is
+on, so that no public image is unsigned. Making a package public cannot be undone: GitHub does not
+let a public package become private again, and pulls and mirrors cannot be taken back. Check the rc
+first. Do the steps in this order:
+
+1. `gh variable set RELEASE_SIGNING --body true` (repository admin).
+2. Tag an rc as in "Cut a release candidate".
+3. Check the `sign` job passed in the release run. If it failed, fix it and cut the next rc; do not
+   make anything public.
+4. Org owner: for each package under `github.com/orgs/stateracloud/packages` set **Package settings →
+   Change visibility → Public**: `koinon/api`, `koinon/reconciler`, `koinon/agentd`, `koinon/sandbox`,
+   `koinon/charts/koinon` and any other `koinon/*` package the run pushed (the run's package list is
+   the check). A package that was created earlier stays private until you change it.
+5. Verify with no login (below).
+
+### Verify with no login
+
+Run these on a machine with no `docker login ghcr.io` and no `gh auth` (for example
+`DOCKER_CONFIG=$(mktemp -d)`), with `V` set to the rc tag without the leading `v`:
+
+```sh
+V=0.1.0-rc.N
+for p in api reconciler agentd sandbox; do
+  docker pull ghcr.io/stateracloud/koinon/$p:$V
+  cosign verify ghcr.io/stateracloud/koinon/$p:$V \
+    --certificate-identity-regexp '^https://github.com/stateracloud/koinon/\.github/workflows/release\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+done
+helm pull oci://ghcr.io/stateracloud/koinon/charts/koinon --version $V
+cosign verify ghcr.io/stateracloud/koinon/charts/koinon:$V \
+  --certificate-identity-regexp '^https://github.com/stateracloud/koinon/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Every command must succeed. A `denied` or `unauthorized` error means that package is still private.
+
+## Stand-ins for owner-only steps
+
+One person (the project lead) holds each of these today. Any other maintainer (`MAINTAINERS.md`) can do
+the ones that need only repository write access; the others need an
+org owner, and the stand-in is a written procedure. Until a second org owner exists, the org-owner
+steps wait for the project lead. Adding one is the fix and is tracked in #853. The stale "private until v0.3" records are tracked in #854.
+
+| Step | Needs | Stand-in or procedure |
+| --- | --- | --- |
+| Cut an rc | repository admin (ruleset `release tags: admins create`) | Any maintainer with the repository admin role is the stand-in: "Cut a release candidate". A maintainer without the admin role cannot push the tag and waits for an admin. Final `vX.Y.Z` tags stay with the project lead |
+| Publish the draft release | repository write | Any maintainer, after reading the notes |
+| Package visibility | org owner | Org owner only: "Make the packages public" |
+| `RELEASE_SIGNING` variable | repository admin | Repository admin only; steps above |
+| Docs deploy | write access to `stateracloud/koinon-docs` | Any maintainer: the docs repository's README says how its CI deploys; the page checks run against the release tag you name |
+| Mirror dispatch (release) | none beyond registry login | Any maintainer: "Mirror a release to a registry" (`hack/mirror-release.sh`); run it from your own machine |
+| Mirror dispatch (agentgateway test image) | repository write to dispatch; org owner or package admin for the package | Dispatch with `gh workflow run mirror-agentgateway-test-image.yml` (any maintainer). After the first run, someone must set **Manage Actions access** on `ghcr.io/stateracloud/agentgateway`: org owner only, waits for the project lead (#853). This package is a CI test image and stays private; it is not in "Make the packages public". The workflow comment still says "private until v0.3" (#854) |
+| Red `main` | repository write | Fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh` opens the issue); a maintainer other than the author may revert. Do not cut a tag from a red commit (`hack/release-gate.sh`) |
+| Conduct and security reports | none | Security: GitHub private vulnerability reporting (`SECURITY.md`). Conduct: `CODE_OF_CONDUCT.md`, a private report to the maintainers, not to one login. A report about a maintainer must not use the advisory (every admin sees it): send a private GitHub message to another maintainer |
 
 ## What protects release tags
 
@@ -274,7 +331,6 @@ manifests under it stay equal. Apt content beyond the snapshot pin is out of sco
 
 ## Not released yet
 
-- Signatures and attestations (the `sign` job), until `RELEASE_SIGNING` is switched on (when the repository goes
-  public).
+- Signatures and attestations (the `sign` job) exist only for releases cut after `RELEASE_SIGNING` is switched on.
 - Binary archives and checksums; the release ships images and the chart.
 - A "local checks recorded" gate in place of the CI status gate (`hack/release-gate.sh`).

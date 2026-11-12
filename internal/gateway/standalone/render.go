@@ -831,8 +831,8 @@ func keyPolicy(keys []gateway.Key, s gateway.State, allowed map[string][]string)
 			}}
 			// No window: the counter accumulates for its lifetime (agentgateway v1.7), so a
 			// generation, not the gateway's clock, decides when spend starts over.
-			if l.Window > 0 {
-				ak.Budgets[0].Window = &window{Rolling: formatWindow(l.Window)}
+			if w := l.AppliedWindow(); w > 0 {
+				ak.Budgets[0].Window = &window{Rolling: formatWindow(w)}
 			}
 		}
 		p.Keys = append(p.Keys, ak)

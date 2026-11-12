@@ -167,6 +167,14 @@ def write(c):
         return err_name(e)
 
 
+def mode(c):
+    """The permission bits of a path as an octal string (sticky included), or the errno name."""
+    try:
+        return format(os.stat(c["path"]).st_mode & 0o7777, "o")
+    except OSError as e:
+        return err_name(e)
+
+
 libc = ctypes.CDLL(None, use_errno=True)
 # System call numbers by machine: bpf, keyctl, add_key, perf_event_open.
 NR = {
@@ -229,5 +237,5 @@ def kernel(_):
 
 
 OPS = {"tcp": tcp, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "syscall": syscall, "kernel": kernel}
+       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
