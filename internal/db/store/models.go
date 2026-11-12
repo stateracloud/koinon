@@ -1707,6 +1707,7 @@ type Connection struct {
 	AdminDisabledNote      pgtype.Text
 	AdminDisabledUnderBy   pgtype.Text
 	AdminDisabledUnderNote pgtype.Text
+	McpHosts               []string
 }
 
 type DedupeRecord struct {

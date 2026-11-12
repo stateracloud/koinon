@@ -58,6 +58,21 @@ service ConnectionService {
   // bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
   rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
 
+  // AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server
+  // whose https URL names that exact host may then be linked to this connection as its code host
+  // (ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP
+  // address (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is
+  // already there changes nothing. Audited (connection.mcp_host.add). Admins and owners.
+  rpc AddConnectionMCPHost(AddConnectionMCPHostRequest) returns (AddConnectionMCPHostResponse);
+
+  // RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
+  // linked to the connection that it no longer serves loses the link (and its code-host tool class),
+  // each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+  // lists them. With dry_run nothing is written: the response lists the servers a removal would
+  // unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+  // added again does not restore a link. Admins and owners.
+  rpc RemoveConnectionMCPHost(RemoveConnectionMCPHostRequest) returns (RemoveConnectionMCPHostResponse);
+
   // ListInstallationRepos lists the repositories a GitHub connection's App
   // installation can access, for choosing what to bind an agent to. Koinon
   // asks GitHub with a metadata-read installation token; nothing is written.
@@ -189,6 +204,9 @@ message Connection {
   // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
   // not called, probed or offered to runs. Unset otherwise.
   koinon.outward.v1alpha1.AdminDisabled admin_disabled = 16;
+  // mcp_hosts are the extra host names an admin added for MCP servers that act on this connection
+  // (#240), sorted. They come on top of the connection's own hosts and the connector's declared ones.
+  repeated string mcp_hosts = 17;
 
   oneof settings {
     GitHubConnection github = 10;
@@ -300,6 +318,39 @@ message DeleteConnectionRequest {
 }
 
 message DeleteConnectionResponse {}
+
+message AddConnectionMCPHostRequest {
+  string org_id = 1;
+  string connection_id = 2;
+  string host = 3;
+}
+
+// AddConnectionMCPHostResponse holds the connection with its new list.
+message AddConnectionMCPHostResponse {
+  Connection connection = 1;
+}
+
+message RemoveConnectionMCPHostRequest {
+  string org_id = 1;
+  string connection_id = 2;
+  string host = 3;
+  // dry_run reports the servers the removal would unlink and writes nothing.
+  bool dry_run = 4;
+}
+
+// UnlinkedMCPServer is an MCP server that lost its link to a connection.
+message UnlinkedMCPServer {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+}
+
+// RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)
+// and the MCP servers the removal unlinked (with dry_run: would unlink).
+message RemoveConnectionMCPHostResponse {
+  Connection connection = 1;
+  repeated UnlinkedMCPServer unlinked_servers = 2;
+}
 
 // BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because
 // agents are still bound to the connection.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/outward"
 )
@@ -92,8 +94,8 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		Id: idString(c.ID), OrgId: idString(c.OrgID), Connector: c.Connector, DisplayName: c.DisplayName,
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
 		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
-		CredentialLostAt: tsProto(c.CredentialLostAt),
-		AdminDisabled:    adminDisabledProto(outward.FromRow(c.AdminDisabledAt, c.AdminDisabledBy, c.AdminDisabledNote)),
+		CredentialLostAt: tsProto(c.CredentialLostAt), McpHosts: c.McpHosts,
+		AdminDisabled: adminDisabledProto(outward.FromRow(c.AdminDisabledAt, c.AdminDisabledBy, c.AdminDisabledNote)),
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -222,7 +224,17 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	}
 	var row store.Connection
 	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
-		var err error
+		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
+		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
+			return err
+		}
+		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return connect.NewError(connect.CodeInvalidArgument, "base_url: "+why)
+		}
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
 			SecretEnvelope: envelope, SecretFingerprint: key.Fingerprint(), Source: store.ConfigSourceUi, CreatedBy: c.actor(),
@@ -341,7 +353,17 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFingerprint
 	var row store.Connection
 	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
-		var err error
+		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
+		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
+			return err
+		}
+		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return connect.NewError(connect.CodeInvalidArgument, "base_url: "+why)
+		}
 		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
 			SecretEnvelope: envelope, SecretFingerprint: fingerprint, Source: store.ConfigSourceUi, CreatedBy: c.actor(),
@@ -570,6 +592,176 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 		return nil, s.dbError(err, "connection")
 	}
 	return &connectionv1alpha1.DeleteConnectionResponse{}, nil
+}
+
+// AddConnectionMCPHost implements ConnectionService.
+func (s *Server) AddConnectionMCPHost(ctx context.Context, req *connectionv1alpha1.AddConnectionMCPHostRequest) (*connectionv1alpha1.AddConnectionMCPHostResponse, error) {
+	row, _, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), true, false)
+	if err != nil {
+		return nil, err
+	}
+	return &connectionv1alpha1.AddConnectionMCPHostResponse{Connection: s.connectionProto(row)}, nil
+}
+
+// RemoveConnectionMCPHost implements ConnectionService.
+func (s *Server) RemoveConnectionMCPHost(ctx context.Context, req *connectionv1alpha1.RemoveConnectionMCPHostRequest) (*connectionv1alpha1.RemoveConnectionMCPHostResponse, error) {
+	row, unlinked, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), false, req.GetDryRun())
+	if err != nil {
+		return nil, err
+	}
+	res := &connectionv1alpha1.RemoveConnectionMCPHostResponse{Connection: s.connectionProto(row)}
+	for _, m := range unlinked {
+		res.UnlinkedServers = append(res.UnlinkedServers, &connectionv1alpha1.UnlinkedMCPServer{Id: m.ID.String(), Name: m.Name, Url: m.Url})
+	}
+	return res, nil
+}
+
+// claimedMCPHost says why host cannot be an extra MCP host of connection self: it is a host of an
+// embedded connector type, or the web or API host or an extra host of another connection of the org
+// (#240). One host name is one operator, so it serves one code host; the caller holds the org's MCP host
+// lock, so two adds cannot both pass. Empty means free.
+func claimedMCPHost(ctx context.Context, q *store.Queries, org pgtype.UUID, self pgtype.UUID, host string) (string, error) {
+	if name, ok := connectors.ReservedMCPHost(host); ok {
+		return fmt.Sprintf("%s is a host of the %s connector", host, name), nil
+	}
+	rows, err := q.ListConnections(ctx, org)
+	if err != nil {
+		return "", err
+	}
+	for _, other := range rows {
+		// A removed declared connection keeps its hosts and returns with its Secret: it still claims them.
+		if other.ID == self {
+			continue
+		}
+		t, ok := connectors.Get(other.Connector)
+		if !ok || t.Spec.Capabilities == nil {
+			continue
+		}
+		site, err := codehost.SiteOf(other.Config)
+		if err != nil {
+			return "", fmt.Errorf("the connection %q has no readable host: %w", other.DisplayName, err)
+		}
+		loc, err := site.Location(t)
+		if err != nil {
+			return "", fmt.Errorf("the connection %q has no readable host: %w", other.DisplayName, err)
+		}
+		if slices.Contains(t.MCPHosts(loc, other.McpHosts), host) {
+			return fmt.Sprintf("%s is already a host of the connection %q", host, other.DisplayName), nil
+		}
+	}
+	return "", nil
+}
+
+// changeMCPHosts adds or removes one host of a connection's extra MCP hosts (#240), for an admin. The
+// change and its audit row are one transaction. A removal also unlinks the MCP servers the connection
+// no longer serves, each audited, and returns them; with dryRun it writes nothing and returns the
+// servers it would unlink. Adding a present host or removing an absent one writes nothing.
+func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host string, add, dryRun bool) (store.Connection, []store.McpServer, error) {
+	c, err := authorize(ctx, orgID, store.OrgRoleAdmin)
+	if err != nil {
+		return store.Connection{}, nil, err
+	}
+	id, err := parseID("connection_id", connectionID)
+	if err != nil {
+		return store.Connection{}, nil, err
+	}
+	host, err = connectors.ParseMCPHost(host)
+	if err != nil {
+		return store.Connection{}, nil, connect.NewError(connect.CodeInvalidArgument, "host: "+err.Error())
+	}
+	rctx := requestCtx(ctx)
+	var (
+		out      store.Connection
+		unlinked []store.McpServer
+	)
+	// The lock order is the org's MCP host lock, the connection, then its linked MCP servers (see
+	// DeleteConnection).
+	err = s.inAuditTx(rctx, func(q *store.Queries, b audit.Batch) error {
+		if add {
+			if err := q.LockOrgMCPHosts(rctx, c.org); err != nil {
+				return err
+			}
+		}
+		row, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		out = row
+		if row.RemovedAt.Valid {
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection was removed")
+		}
+		if _, ok := connectors.Get(row.Connector); !ok {
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection is not a code-host connection")
+		}
+		present := slices.Contains(row.McpHosts, host)
+		if present == add {
+			return nil
+		}
+		if add {
+			// The connection's own web or API host is served already; as an extra host it would outlive a
+			// base URL change and keep servers of the old code host linked.
+			if t, ok := connectors.Get(row.Connector); ok {
+				if site, err := codehost.SiteOf(row.Config); err == nil {
+					if loc, err := site.Location(t); err == nil && slices.Contains(t.MCPHosts(loc, nil), host) {
+						return connect.NewError(connect.CodeInvalidArgument, "host: "+host+" is already a host of this connection (its own web or API host)")
+					}
+				}
+			}
+		}
+		hosts := slices.Clone(row.McpHosts)
+		action := "connection.mcp_host.remove"
+		if add {
+			if len(hosts) >= connectors.MaxExtraMCPHosts {
+				return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("a connection has at most %d extra MCP hosts; remove one first", connectors.MaxExtraMCPHosts))
+			}
+			why, err := claimedMCPHost(rctx, q, c.org, id, host)
+			if err != nil {
+				return err
+			}
+			if why != "" {
+				return connect.NewError(connect.CodeInvalidArgument, "host: "+why+"; one host name is one operator and serves one code host")
+			}
+			hosts = append(hosts, host)
+			slices.Sort(hosts)
+			action = "connection.mcp_host.add"
+		} else {
+			hosts = slices.DeleteFunc(hosts, func(h string) bool { return h == host })
+		}
+		if dryRun {
+			// Nothing is written: the servers the connection would stop serving.
+			preview := row
+			preview.McpHosts = hosts
+			unlinked, err = mcpservers.MismatchedServers(rctx, q, preview)
+			return err
+		}
+		updated, err := q.SetConnectionMCPHosts(rctx, store.SetConnectionMCPHostsParams{OrgID: c.org, ID: id, McpHosts: hosts})
+		if err != nil {
+			return err
+		}
+		out = updated
+		b.Org(audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: action, TargetKind: "connection", TargetID: id.String(),
+			Before: map[string]any{"displayName": row.DisplayName, "mcpHosts": nonNil(row.McpHosts)},
+			After:  map[string]any{"displayName": row.DisplayName, "mcpHosts": nonNil(hosts), "host": host},
+		})
+		if add {
+			return nil
+		}
+		unlinked, err = mcpservers.UnlinkMismatchedServers(rctx, q, b, c.auditActor(), updated, "connection_mcp_host_removed")
+		return err
+	})
+	if err != nil {
+		return store.Connection{}, nil, s.dbError(err, "connection")
+	}
+	return out, unlinked, nil
+}
+
+// nonNil is hosts for an audit payload: an empty list is [], not null.
+func nonNil(hosts []string) []string {
+	if hosts == nil {
+		return []string{}
+	}
+	return hosts
 }
 
 // GetConnection implements ConnectionService.

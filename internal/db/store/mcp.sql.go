@@ -212,7 +212,7 @@ func (q *Queries) GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerPa
 }
 
 const getConnectionForMCPLink = `-- name: GetConnectionForMCPLink :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, mcp_hosts FROM connections
 WHERE org_id = $1 AND id = $2
 FOR SHARE
 `
@@ -252,6 +252,7 @@ func (q *Queries) GetConnectionForMCPLink(ctx context.Context, arg GetConnection
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.McpHosts,
 	)
 	return i, err
 }
