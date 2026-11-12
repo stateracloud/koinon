@@ -58,7 +58,7 @@ var _ = Describe("koinon-reconciler unmarked list", func() {
 		Expect(c.openshellTLSDir).To(Equal("/etc/koinon/openshell-tls"))
 		Expect(c.installMark).To(Equal("koinon_test_not-a-real-mark"))
 		Expect(c.harnesses).To(HaveKeyWithValue(harness.OpenCode, reconciler.Harness{
-			Image: "ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
+			Image: "ghcr.io/stateracloud/koinon/sandbox:0.1.0", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
 		}), "the configured harnesses, whose profiles the reconciler claims")
 		Expect(strings.Fields(out)).To(Equal([]string{"kw-1", "sandbox", "ka-x", "org-not-in-db"}), "one line: workspace, kind, name, reason")
 	})

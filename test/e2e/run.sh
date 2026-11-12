@@ -4,7 +4,7 @@
 # E1 quickstart e2e on kind (plan item E1, ADR 0049). From nothing to an approved pull request:
 #
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
-#   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
+#   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode harness
 #      with buildx, all pushed to the local registry (kind/registry.sh, localhost:5001, #45); the fakes deployed in
 #      koinon-e2e-fakes. The build (kind/images.sh build) runs while step 1 creates the cluster: it needs the
 #      registry, not the cluster;
@@ -29,8 +29,8 @@
 # deleted at the end unless KEEP=1.
 #
 #   SUITE_LABEL=smoke runs only the Ginkgo specs with that label (SUITE=go; smoke is steps 1-6).
-#   FLAVOR_CACHE=<dir> imports the flavor build's layer cache from <dir>/opencode (needs the docker-container driver).
-#   FLAVOR_PULL_REPO=<repo> pulls the flavor image <repo>:<hack/flavor-tag.sh tag> instead of building it.
+#   HARNESS_CACHE=<dir> imports the harness build's layer cache from <dir>/opencode (needs the docker-container driver).
+#   HARNESS_PULL_REPO=<repo> pulls the harness image <repo>:<hack/harness-tag.sh tag> instead of building it.
 #   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
 #   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
 #   changed, then the file restores both and the script checks the install is the one that was backed up
@@ -195,11 +195,11 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
     cat "$OUT/images-build.log"
     echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
-    done_step "Images: ko build and push, flavor pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
+    done_step "Images: ko build and push, harness pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
   else
-    step "images (kind/images.sh): Koinon, the fakes and the OpenCode flavor"
+    step "images (kind/images.sh): Koinon, the fakes and the OpenCode harness"
     CLUSTER="$CLUSTER" "$here/kind/images.sh"
-    done_step "Images: ko build and push (6 binaries), OpenCode flavor (pull or buildx) and push"
+    done_step "Images: ko build and push (6 binaries), OpenCode harness (pull or buildx) and push"
   fi
 fi
 

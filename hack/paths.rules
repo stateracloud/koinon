@@ -65,8 +65,8 @@ except go ^hack/testdata/ci-timing/
 except go ^hack/chart-check\.d/
 # The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
 # wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
-# (internal/compat) and flavor-tag.sh (test/flavors).
-keep go ^hack/(go-test|go-test-host|golangci-lint|agentgateway-pin|record-compat-fixtures|flavor-tag)\.sh$
+# (internal/compat) and harness-tag.sh (test/harnesses).
+keep go ^hack/(go-test|go-test-host|golangci-lint|agentgateway-pin|record-compat-fixtures|harness-tag)\.sh$
 keep go \.go$
 
 # --- tidy: go-tidy and go-lint (#572) ----------------------------------------------------------------
@@ -157,14 +157,14 @@ except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
 
 # --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
-job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
+job flavors ^(harnesses/|internal/(agentd|harness|acp)/|test/harnesses/|hack/harness-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
 # --- opencodeplugin: tsc and node --test of Koinon's OpenCode plugins' CI-only dev project ----------
-# (ADR 0093 decision 4). A change under flavors/opencode/plugins/ also matches `job flavors` above
-# (the Dockerfile COPYs the plugin module, and test/flavors proves it loads), so both jobs run; this
+# (ADR 0093 decision 4). A change under harnesses/opencode/plugins/ also matches `job flavors` above
+# (the Dockerfile COPYs the plugin module, and test/harnesses proves it loads), so both jobs run; this
 # one is the fast, Docker-free type-check and unit-test pass. The Dockerfile is a trigger too: the job
 # checks that the types pin equals the image's OpenCode pin, so a re-pin type-checks against new types.
-job opencodeplugin ^flavors/opencode/(plugins/|Dockerfile$)
+job opencodeplugin ^harnesses/opencode/(plugins/|Dockerfile$)
 
 # --- local gates of the CI jobs (hack/lane-gates.sh) -------------------------------------------------
 # A job without a lane line has no local gate and is reported as not run.
@@ -173,8 +173,8 @@ lane web - preflight
 lane generate - preflight
 lane chart - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
-# hack/flavor-repro-check.sh (two uncached builds, one digest) is the advisory workflow flavor-repro.yml, not a ci.yml job; it has no lane.
-lane flavors docker,go test-flavors
+# hack/harness-repro-check.sh (two uncached builds, one digest) is the advisory workflow flavor-repro.yml, not a ci.yml job; it has no lane.
+lane flavors docker,go test-harnesses
 lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission
 lane tidy - preflight
@@ -275,7 +275,8 @@ script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
 script-skip - hack/migrate-lint.sh
 # Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
-script-skip - hack/flavor-tag-test.sh
+script-skip - hack/harness-tag-test.sh
+script-skip - hack/flavor-tag-test.sh # the earlier name, an alias link ci.yml still calls (#610)
 # Fail on a Mac with the sandbox's /private/tmp paths or its git setup; they run on Linux in CI.
 script-skip - hack/wt-test.sh
 script-skip - hack/wt-install-test.sh
@@ -317,7 +318,7 @@ e2e-needed - ^cmd/
 e2e-needed - ^vendor/
 e2e-needed - ^charts/
 e2e-needed - ^internal/db/migrations/
-e2e-needed - ^flavors/
+e2e-needed - ^harnesses/
 # Dependency changes reach the binaries.
 e2e-needed - ^go\.(mod|sum)$
 e2e-needed - ^go\.work(\.sum)?$
@@ -337,12 +338,14 @@ e2e-forced - ^test/escape/
 e2e-forced - ^hack/(spike/probe/|probe-tag\.sh$)
 e2e-forced - ^\.github/workflows/e2e-kind\.yml$
 # Agent prompts and instructions may be Markdown.
-e2e-forced - ^flavors/.*\.md$
-# run.sh runs the quickstart blocks (test/e2e/commands/*.e1) through docs-e1.sh, names the flavor image with flavor-tag.sh
-# and sets its base image with flavor-base.sh (FLAVOR_BASE, #200).
+e2e-forced - ^harnesses/.*\.md$
+# run.sh runs the quickstart blocks (test/e2e/commands/*.e1) through docs-e1.sh, names the flavor image with harness-tag.sh
+# and sets its base image with harness-base.sh (HARNESS_BASE, #200).
 e2e-forced - ^hack/docs-e1\.sh$
-e2e-forced - ^hack/flavor-tag\.sh$
-e2e-forced - ^hack/flavor-base\.sh$
+e2e-forced - ^hack/harness-tag\.sh$
+e2e-forced - ^hack/harness-base\.sh$
+# The earlier names, alias links the workflows still call until they use the new names (#610).
+e2e-forced - ^hack/flavor-(tag|base)\.sh$
 # The kind, ko and helm versions e2e-kind.yml installs (old issue 565), the filter that loads them
 # into the workflow's environment, and the downloader it uses (#431).
 e2e-forced - ^hack/versions\.env$

@@ -178,7 +178,7 @@ in_nested_module() {
 	return 1
 }
 
-go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavors) when no Go file changed;
+go_pkgs() { # changed Go packages as ./dir args; every package (minus test/harnesses) when no Go file changed;
 	# nothing when every changed Go file sits in a nested module
 	local f d out="" seen=0
 	for f in $(existing '\.go$'); do
@@ -198,7 +198,7 @@ go_pkgs() { # changed Go packages as ./dir args; every package (minus test/flavo
 		go list -f '{{.Dir}}' ./... | while IFS= read -r d; do
 			d=${d#"$root"}
 			d=.${d}
-			[[ $d == ./test/flavors ]] || printf '%s ' "$d"
+			[[ $d == ./test/harnesses ]] || printf '%s ' "$d"
 		done
 	else
 		echo "$out"

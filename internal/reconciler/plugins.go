@@ -13,7 +13,7 @@ import (
 // Plugin installs (template option harness.pluginInstalls, off by default). An OpenCode agent
 // whose version turns it on gets the sandbox policy entry npm_registry: read-only access to
 // the public npm registry, enforced at L7, for the harness's own binaries (OpenCode installs
-// plugins in-process, flavors/opencode/README.md). No credential is attached: the registry
+// plugins in-process, harnesses/opencode/README.md). No credential is attached: the registry
 // is read anonymously. With the option off nothing is rendered, so the sandbox cannot reach
 // the registry at all.
 const npmRule = "npm_registry"

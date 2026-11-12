@@ -812,7 +812,7 @@ var _ = Describe("Pool", func() {
 
 		// The reconciler renders the task's sandbox and moves the row.
 		name := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, task.ID.Bytes)
-		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/koinon/flavors/opencode:test"})
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: name})
 		Expect(err).NotTo(HaveOccurred())

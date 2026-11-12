@@ -29,8 +29,8 @@ stub() { # <name> <body>: a stub that logs its call (with KUBECONFIG) and then r
 }
 stub go 'case "$1 $2" in
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
-"list ./...") echo example.com/m/a; echo example.com/m/test/flavors ;;
-"list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/flavors" ;; # go list -f {{.Dir}} ./...: absolute directories
+"list ./...") echo example.com/m/a; echo example.com/m/test/harnesses ;;
+"list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/harnesses" ;; # go list -f {{.Dir}} ./...: absolute directories
 "test "*) [[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"; exit "${FAKE_GO_TEST_RC:-0}" ;;
 "run mvdan.cc/gofumpt@v0.12.0") [[ -z ${FAKE_GOFUMPT_OUT:-} ]] || echo "$FAKE_GOFUMPT_OUT" ;;
 esac
@@ -245,7 +245,7 @@ check "falls back to go vet" has '^go vet ./internal/foo ' "$FAKE_LOG"
 check "no golangci-lint call" hasnt '^golangci-lint' "$FAKE_LOG"
 
 # 3b. no Go file changed (--only go): golangci-lint and go-test.sh get ./-relative directories, never
-# import paths (golangci-lint reads each as a directory: "directory not found"), and not test/flavors
+# import paths (golangci-lint reads each as a directory: "directory not found"), and not test/harnesses
 reset_state
 w=$(fresh); cd "$w"
 echo "x" >>README.txt; commit_all
@@ -253,7 +253,7 @@ echo "x" >>README.txt; commit_all
 check "no Go file: go gate exit 0" eq "$(pf "$tmp/r3b" --only go)" 0
 check "no Go file: lint gets directories" has '^golangci-lint run [.] [.]/internal/foo ' "$FAKE_LOG"
 check "no Go file: no import path" hasnt 'example[.]com/m' "$FAKE_LOG"
-check "no Go file: no test/flavors" hasnt 'test/flavors' "$FAKE_LOG"
+check "no Go file: no test/harnesses" hasnt 'test/harnesses' "$FAKE_LOG"
 check "no Go file: go-test.sh gets the same directories" has '^go-test.sh [.] [.]/internal/foo ' "$FAKE_LOG"
 
 # 4. failures: exit 1, the gate is named, the log path is shown, at most 5 error lines, other gates still run

@@ -16,7 +16,7 @@ import (
 )
 
 // instructionsPath is where a harness reads Koinon's instructions for the run (for OpenCode,
-// the "instructions" key of its config names it; flavors/opencode/README.md, ADR 0052). The agent can write
+// the "instructions" key of its config names it; harnesses/opencode/README.md, ADR 0052). The agent can write
 // the home, so agentd writes the file before every harness start and restores it before every
 // prompt.
 const instructionsPath = "/sandbox/.koinon/AGENTS.md"
@@ -50,7 +50,7 @@ type dataBullet struct {
 }
 
 // dataBullets is Koinon's guidance on how to read large inputs, with the tools the harness image
-// ships (flavors/opencode/README.md). The section follows the preamble in every run, whatever the
+// ships (harnesses/opencode/README.md). The section follows the preamble in every run, whatever the
 // agent version says. The image has no network, no pip and no package manager the agent may use.
 //
 // The harness decides which tools exist and how its harness cuts output, not this file: a harness

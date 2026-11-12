@@ -117,7 +117,7 @@ expect "go generate" third_party/openshell/proto/openshell.proto # buf.gen.opens
 expect "go generate" buf.gen.openshell.yaml                      # buf generate --template
 expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agentgateway.yaml input
 expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
-expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/flavors)
+expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)
 expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
@@ -139,7 +139,7 @@ expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
 expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the admission specs import it
 
-# F5, flavors: test/flavors imports these (go list -deps -test ./test/flavors/...).
+# F5, flavors: test/harnesses imports these (go list -deps -test ./test/harnesses/...).
 expect "go chartsmoke flavors" internal/execution/run.go
 expect "go chartsmoke flavors" internal/modelformat/format.go
 expect "go chartsmoke flavors" internal/prices/prices.go
@@ -149,11 +149,11 @@ expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml 
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors opencodeplugin" flavors/opencode/Dockerfile
-expect "go flavors" test/flavors/contract_test.go
-expect "go flavors" hack/flavor-tag.sh
+expect "go flavors opencodeplugin" harnesses/opencode/Dockerfile
+expect "go flavors" test/harnesses/contract_test.go
+expect "go flavors" hack/harness-tag.sh
 expect "flavors" hack/probe-tag.sh
-expect "" hack/flavor-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
+expect "" hack/harness-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
 expect "go flavors" hack/spike/probe/Dockerfile
 # Negative: a package neither suite imports.
 expect "go" internal/zzz-not-imported/x.go
@@ -192,7 +192,7 @@ expect_ignoring false .github/workflows/ci.yml .github/CODEOWNERS
 expect_ignoring true Makefile
 expect_ignoring true go.mod
 expect_ignoring true go.sum
-expect_ignoring true .github/workflows/ci.yml flavors/base/Dockerfile
+expect_ignoring true .github/workflows/ci.yml harnesses/base/Dockerfile
 expect_ignoring true .github/workflows/ci.yml internal/execution/run.go
 expect_ignoring true # an empty change list still fails closed
 # Several paths together: the union.
@@ -215,7 +215,7 @@ expect_gates "scripts" web/package.json
 expect_gates "scripts" web/pnpm-lock.yaml
 expect_gates "scripts" charts/koinon/values.yaml
 expect_gates "scripts" test/e2e/commands/quickstart.e1
-expect_gates "scripts" flavors/opencode/Dockerfile
+expect_gates "scripts" harnesses/opencode/Dockerfile
 expect_gates "scripts" some-new-top-level-file
 expect_gates "tidy scripts" internal/zzz-new/x.go
 expect_gates "tidy scripts" web/webui.go
@@ -370,11 +370,11 @@ done
 # no path stripping is shared with ci-changes.sh). The packages the audit named, and the suite
 # itself, must be in it; then each package directory (and a file below it) must turn flavors on.
 mod=$(go list -m)
-real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/flavors/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
-for pkg in test/flavors internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
+real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/harnesses/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
+for pkg in test/harnesses internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
 	total=$((total + 1))
 	if ! grep -qxF "$pkg" <<<"$real_dirs"; then
-		echo "FAIL: go list of test/flavors does not contain $pkg (the audit's F5 package)"
+		echo "FAIL: go list of test/harnesses does not contain $pkg (the audit's F5 package)"
 		fails=$((fails + 1))
 	fi
 done
