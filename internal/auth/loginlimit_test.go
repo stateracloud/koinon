@@ -131,7 +131,7 @@ var _ = Describe("password login limiter (issue 658)", func() {
 	})
 
 	It("refuses an address that spent its budget over many usernames before the hash and without a database read", func(ctx SpecContext) {
-		for i := range addressFreeFails {
+		for i := range ratelimit.AddressFreeFails {
 			Expect(login(ctx, "192.0.2.20", "many-"+strconv.Itoa(i), "koinon_test_wrong").Code).To(BeElementOf(http.StatusUnauthorized, http.StatusTooManyRequests))
 		}
 		fillVerifySlots()

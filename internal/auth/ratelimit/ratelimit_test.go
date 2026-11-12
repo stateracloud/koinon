@@ -111,125 +111,99 @@ var _ = Describe("Limiter", func() {
 		Expect(ratelimit.ClientAddr(a)).NotTo(Equal(ratelimit.ClientAddr(b)))
 	})
 
-	It("never tracks more keys than its cap, and drops the least recently used", func() {
-		l.Fail("first", t0)
-		for i := range 25000 {
-			l.Fail(ratelimit.Key("192.0.2.1", "user:"+strconv.Itoa(i)), t0)
-		}
-		Expect(l.Len()).To(BeNumerically("<=", 10000))
-		Expect(l.TakeRefused("first")).To(BeZero())
-	})
-
-	It("keeps a blocked key blocked while fresh keys flood the limiter", func() {
-		failN(ratelimit.FreeFails+3, t0)
-		want := l.Blocked(key, t0)
-		Expect(want).To(BeNumerically(">", ratelimit.BaseBackoff))
-		for i := range 25000 {
-			l.Fail(ratelimit.Key("192.0.2.2", "user:"+strconv.Itoa(i)), t0)
-		}
-		Expect(l.Blocked(key, t0)).To(Equal(want))
-		failN(1, t0)
-		Expect(l.Blocked(key, t0)).To(Equal(2 * want))
-	})
-
 	blockKey := func(k string, at time.Time) {
 		for range ratelimit.FreeFails {
 			l.Fail(k, at)
 		}
 	}
-
-	It("keeps a key that was tracked before it became blocked, through a flood of fresh keys", func() {
-		failN(2, t0)
-		failN(ratelimit.FreeFails-2, t0) // tracked first, blocked now
-		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0))
-		for i := range 25000 {
-			l.Fail(ratelimit.Key("192.0.2.6", "user:"+strconv.Itoa(i)), t0)
-		}
-		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0))
-	})
-
-	It("never keeps more than maxTracked unblocked keys when blocks end", func() {
-		for a := range 1500 {
-			addr := "10.1." + strconv.Itoa(a/250) + "." + strconv.Itoa(a%250+1)
-			for u := range 8 {
-				blockKey(ratelimit.Key(addr, "user:"+strconv.Itoa(u)), t0)
-			}
-		}
-		Expect(l.Blocked(key, t0.Add(2*ratelimit.BaseBackoff))).To(BeZero())
-		Expect(l.Len()).To(BeNumerically("<=", 10000))
-	})
-
-	It("blocks only the address that overflows its cap", func() {
-		for u := range 8 {
-			blockKey(ratelimit.Key("192.0.2.7", "user:"+strconv.Itoa(u)), t0)
-		}
-		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeZero(), "within the cap")
-		blockKey(ratelimit.Key("192.0.2.7", "user:overflow"), t0)
-		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeNumerically(">", 0))
-		Expect(l.Blocked(ratelimit.Key("192.0.2.7", "all-users"), t0)).To(BeNumerically(">", 0))
-		Expect(l.Blocked(ratelimit.Key("192.0.2.7", "abcdefgh"), t0)).To(BeNumerically(">", 0), "a prefix the address never used is refused too")
-		Expect(l.Blocked(ratelimit.Key("192.0.2.8", ""), t0)).To(BeZero())
-		Expect(l.Blocked(ratelimit.Key("192.0.2.8", "all-users"), t0)).To(BeZero())
-		Expect(l.Blocked(ratelimit.Key("192.0.2.8", "user:admin"), t0)).To(BeZero())
-	})
-
-	It("counts an IPv6 address per /48 for the cap", func() {
-		for u := range 8 {
-			blockKey(ratelimit.Key("2001:db8:1:"+strconv.Itoa(u)+"::", "user:x"), t0)
-		}
-		blockKey(ratelimit.Key("2001:db8:1:ff::", "user:x"), t0)
-		Expect(l.Blocked(ratelimit.Key("2001:db8:1:ff::", ""), t0)).To(BeNumerically(">", 0))
-		Expect(l.Blocked(ratelimit.Key("2001:db8:2::", ""), t0)).To(BeZero())
-	})
-
-	It("keeps one /48 within its bound however many /64s it spreads over", func() {
-		for n := range 100 {
-			for u := range 20 {
-				blockKey(ratelimit.Key("2001:db8:7:"+strconv.Itoa(n)+"::", "user:"+strconv.Itoa(u)), t0)
-			}
-		}
-		Expect(l.Len()).To(BeNumerically("<=", 10), "8 blocked keys and the overflow slot")
-		Expect(l.Blocked(ratelimit.Key("2001:db8:7:ffff::", "user:new"), t0)).To(BeNumerically(">", 0))
-		Expect(l.Blocked(ratelimit.Key("2001:db8:8::", "user:new"), t0)).To(BeZero())
-	})
-
-	// overflowRounds is a client that waits out each group block, then blocks nine fresh keys of its
-	// group again; it returns the group's wait after each round.
-	overflowRounds := func(rounds int, at time.Time, k func(round, i int) string) ([]time.Duration, time.Time) {
-		var waits []time.Duration
-		for r := range rounds {
-			for i := range 9 {
-				blockKey(k(r, i), at)
-			}
-			w := l.Blocked(k(r, 0), at)
-			waits = append(waits, w)
-			at = at.Add(w + time.Millisecond)
-		}
-		return waits, at
+	ipv6 := func(group, n int) string { return "2001:db8:" + strconv.Itoa(group) + ":" + strconv.Itoa(n) + "::" }
+	ipv4 := func(n int) string {
+		return "10." + strconv.Itoa(n/62500) + "." + strconv.Itoa(n/250%250) + "." + strconv.Itoa(n%250+1)
 	}
-	escalates := func(k func(round, i int) string) {
-		waits, at := overflowRounds(13, t0, k)
+
+	It("keeps its table within the bound", func() {
+		for i := range 200000 {
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0)
+		}
+		Expect(l.Len()).To(BeNumerically("<=", 110000))
+	})
+
+	It("resets nothing of a key, an address or a group when fresh keys flood the table", func() {
+		blockKey(key, t0)
+		for n := range 20 { // the address of key: 5 + 20 failures, 5 short of its budget
+			l.Fail(ratelimit.Key("192.0.2.1", "user:"+strconv.Itoa(n)), t0)
+		}
+		for n := range 100 { // a group: 100 of its 120 failures, over many /64s
+			l.Fail(ratelimit.Key(ipv6(1, n), "user:x"), t0)
+		}
+		want := l.Blocked(key, t0)
+		for i := range 10000 {
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0)
+		}
+		Expect(l.Blocked(key, t0)).To(Equal(want), "the key keeps its block")
+		for n := range 5 {
+			l.Fail(ratelimit.Key("192.0.2.1", "more:"+strconv.Itoa(n)), t0)
+		}
+		Expect(l.Blocked(ratelimit.Key("192.0.2.1", "new"), t0)).To(BeNumerically(">", 0), "the address kept its count")
+		for n := 100; n < 120; n++ {
+			l.Fail(ratelimit.Key(ipv6(1, n), "user:x"), t0)
+		}
+		Expect(l.Blocked(ratelimit.Key(ipv6(1, 999), "new"), t0)).To(BeNumerically(">", 0), "the group kept its count")
+	})
+
+	It("refuses a /48 that spreads a few failures over many /64s, and no other group", func() {
+		for n := range 40 {
+			for range ratelimit.FreeFails - 1 {
+				l.Fail(ratelimit.Key(ipv6(2, n), "user:x"), t0)
+			}
+		}
+		Expect(l.Blocked(ratelimit.Key(ipv6(2, 4000), "user:new"), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key(ipv6(3, 0), "user:new"), t0)).To(BeZero())
+		Expect(l.Blocked(ratelimit.Key("203.0.113.9", "abcdefgh"), t0)).To(BeZero())
+	})
+
+	It("refuses an address that spreads failures over many credentials, and no other address", func() {
+		for n := range ratelimit.AddressFreeFails {
+			l.Fail(ratelimit.Key("192.0.2.2", "user:"+strconv.Itoa(n)), t0)
+		}
+		Expect(l.Blocked(ratelimit.Key("192.0.2.2", "abcdefgh"), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("192.0.2.3", "abcdefgh"), t0)).To(BeZero())
+	})
+
+	// escalation is a client that waits out each block and fails once more; the wait of its level
+	// doubles to MaxBackoff, and a quiet FailWindow starts it afresh.
+	escalation := func(fresh func(n int) string, budget int) {
+		n := 0
+		next := func() string { n++; return fresh(n) }
+		probe := fresh(0)
+		for range budget - 1 {
+			l.Fail(next(), t0)
+		}
+		now := t0
+		var waits []time.Duration
+		for range 13 {
+			l.Fail(next(), now)
+			w := l.Blocked(probe, now)
+			waits = append(waits, w)
+			now = now.Add(w + time.Millisecond)
+		}
 		Expect(waits[0]).To(Equal(ratelimit.BaseBackoff))
 		Expect(waits[1]).To(Equal(2 * ratelimit.BaseBackoff))
 		Expect(waits[len(waits)-1]).To(Equal(ratelimit.MaxBackoff))
-		after, _ := overflowRounds(1, at.Add(ratelimit.FailWindow+time.Second), func(r, i int) string { return k(100+r, i) })
-		Expect(after[0]).To(Equal(ratelimit.BaseBackoff), "a quiet window starts the group afresh")
+		now = now.Add(ratelimit.MaxBackoff + ratelimit.FailWindow + time.Second)
+		l.Fail(next(), now)
+		Expect(l.Blocked(probe, now)).To(BeZero(), "a quiet window starts the level afresh")
 	}
 
-	It("escalates the block of an IPv6 /48 that rotates /64s and usernames", func() {
-		escalates(func(r, i int) string {
-			return ratelimit.Key("2001:db8:9:"+strconv.Itoa(r*10+i)+"::", "user:"+strconv.Itoa(r*10+i))
-		})
+	It("escalates the block of a /48 past its budget", func() {
+		escalation(func(n int) string { return ratelimit.Key(ipv6(4, n), "user:"+strconv.Itoa(n)) }, ratelimit.GroupFreeFails)
 	})
 
-	It("escalates the block of an IPv4 address whatever mix of keys overflows it", func() {
-		parts := []string{"", "all-users", "abcdefgh", "user:a", "ijklmnop", "user:b", "qrstuvwx", "user:c", "yzabcdef"}
-		escalates(func(r, i int) string {
-			return ratelimit.Key("203.0.113.5", parts[(i+r)%len(parts)]+strconv.Itoa(r*10+i))
-		})
+	It("escalates the block of an IPv4 address past its budget", func() {
+		escalation(func(n int) string { return ratelimit.Key("203.0.113.5", "part:"+strconv.Itoa(n)) }, ratelimit.AddressFreeFails)
 	})
 
-	It("limits every key of a family whose parts are not addresses, however many are blocked", func() {
+	It("limits each user of a family whose parts are not addresses", func() {
 		for u := range 30 {
 			k := ratelimit.Key("user-"+strconv.Itoa(u), "change-password")
 			blockKey(k, t0)
@@ -237,19 +211,19 @@ var _ = Describe("Limiter", func() {
 		}
 	})
 
-	It("refuses nobody else when many addresses fill the blocked set", func() {
-		for a := range 12600 {
-			addr := "10." + strconv.Itoa(a/250%250) + "." + strconv.Itoa(a/62500) + "." + strconv.Itoa(a%250+1)
-			for u := range 8 {
-				blockKey(ratelimit.Key(addr, "user:"+strconv.Itoa(u)), t0)
-			}
+	It("refuses nobody when many addresses fill the table, and keeps the soonest-ending state last", func() {
+		blockKey(key, t0)
+		want := l.Blocked(key, t0)
+		for i := range 70000 { // two entries each: past the bound
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0.Add(time.Duration(i)*time.Microsecond))
 		}
 		fresh := "198.51.100.1"
-		for _, part := range []string{"", "all-users", "user:admin", "abcdefgh"} {
+		for _, part := range []string{"", "user:admin", "abcdefgh"} {
 			Expect(l.Blocked(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
 		}
+		Expect(l.Blocked(key, t0)).To(Equal(want), "a key with a long block outlives the entries that end sooner")
 		blockKey(ratelimit.Key(fresh, "user:admin"), t0)
-		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), t0)).To(BeNumerically(">", 0), "a full set drops the soonest block to make room")
+		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), t0)).To(BeNumerically(">", 0))
 	})
 
 	It("keeps the credential name out of the key", func() {

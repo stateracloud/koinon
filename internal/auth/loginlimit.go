@@ -25,23 +25,17 @@ const ActionLoginFailed = "auth.login_failed"
 // maxAuditedUsername bounds the username kept in a key and an audit event, in runes.
 const maxAuditedUsername = 128
 
-// loginKeys are the limiter slots of one login attempt: the client address with the username, and the
-// address with a larger budget over all usernames (wide), both checked before the password hash runs, and the address's shared slot, which is decided after it
-// (as the admin API's shared slot is), so a neighbour behind the same ingress who keeps failing does
-// not lock out a user who knows their password.
+// loginKeys are the limiter slots of one login attempt: the client address with the username, checked
+// before the password hash runs (with the address and group levels the limiter adds to it), and the
+// address's shared slot, which is decided after it (as the admin API's shared slot is), so a neighbour
+// behind the same ingress who keeps failing does not lock out a user who knows their password.
 type loginKeys struct {
-	addr, user, shared, wide string
+	addr, user, shared string
 }
-
-// addressFreeFails is the failures per FailWindow one client address may make, over all usernames,
-// before its logins are refused ahead of the password hash. It is larger than ratelimit.FreeFails
-// because clients behind one ingress share an address; it still bounds the hashes a single address
-// can make an instance run by guessing many usernames.
-const addressFreeFails = 30
 
 func newLoginKeys(r *http.Request, username string) loginKeys {
 	addr := ratelimit.ClientAddr(r)
-	return loginKeys{addr: addr, user: ratelimit.Key(addr, "user:"+auditedUsername(username)), shared: ratelimit.Key(addr, ""), wide: ratelimit.Key(addr, "all-users")}
+	return loginKeys{addr: addr, user: ratelimit.Key(addr, "user:"+auditedUsername(username)), shared: ratelimit.Key(addr, "")}
 }
 
 // auditedUsername is the username as a key and an audit event keep it: valid UTF-8 without NUL (which
@@ -67,8 +61,7 @@ func writeLoginLimited(w http.ResponseWriter, wait time.Duration) {
 func (s *Service) loginFailed(ctx context.Context, k loginKeys, username string, now time.Time) (limited bool, wait time.Duration) {
 	wait = s.limiter.Blocked(k.shared, now)
 	s.limiter.Fail(k.user, now)
-	s.limiter.Fail(k.shared, now)
-	s.limiter.FailAfter(k.wide, addressFreeFails, now)
+	s.limiter.FailAfter(k.shared, ratelimit.FreeFails, now)
 	if wait > 0 {
 		s.limiter.Refuse(k.shared)
 		return true, wait

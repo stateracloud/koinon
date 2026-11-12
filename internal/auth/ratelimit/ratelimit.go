@@ -4,22 +4,21 @@
 // Koinon's credential entry points: the admin API's bearer tokens (internal/adminapi) and the
 // password login (internal/auth).
 //
-// A key is a client address and the credential it names (Key). After FreeFails failures within
-// FailWindow a key is refused for BaseBackoff, then twice as long for each further failure, up to
-// MaxBackoff. A key that was refused starts afresh only after a quiet FailWindow that follows the end
-// of its block, so a client that waits out each block keeps doubling it. A success resets the key.
+// A key is a client address and the credential it names (Key). Every Fail counts at three levels: the
+// key, the client address (an IPv6 one masked to its /64) and the group (an IPv6 /48; for IPv4 the
+// address is the group and has no level of its own). Each level has its own free budget within
+// FailWindow (FreeFails for a key, AddressFreeFails, GroupFreeFails). Past it the level is refused for
+// BaseBackoff, then twice as long for each further failure, up to MaxBackoff. A level that was refused
+// starts afresh only after a quiet FailWindow that follows the end of its block, so a client that
+// waits out each block keeps doubling it. Blocked(key) is the longest wait over the three levels, so a
+// client that spreads its failures over many credentials, or many /64s of one /48, is refused once it
+// passes the address or group budget. The /64 neighbours of an IPv6 client share the group budget. A
+// success resets the key only. X-Forwarded-For is not trusted.
 //
-// The state lives in memory, per replica. At most maxTracked keys that are not blocked are kept (the
-// least recently used is dropped first), and at most maxBlocked blocked ones. A blocked key is not
-// dropped to make room for a fresh key, so flooding the limiter with fresh keys does not reset a
-// backoff. One group (an IPv4 address, or an IPv6 /48) may hold at most maxBlockedPerAddr blocked
-// keys, so the /64 neighbours of an IPv6 client share that cap: a neighbour can push your failures
-// onto the group. A key that would be the ninth is not tracked; the group's overflow slot counts an
-// overflow instead and blocks the group, for BaseBackoff and then twice as long for each further
-// overflow, up to MaxBackoff, and Blocked returns it for every key of the group, so both entry
-// points refuse the whole group before any lookup or hash, and only that group. When the blocked set
-// is full, the block that ends soonest is dropped to make room, and nobody else is refused. The
-// address is the connection's peer, an IPv6 one masked to its /64; X-Forwarded-For is not trusted.
+// The state lives in memory, per replica, in one table of at most maxEntries entries. When it is full
+// the entry closest to its natural end is dropped: the one whose block and quiet window end first, so
+// stale entries go before live ones and a flood of fresh keys drops the oldest state, never a
+// long backoff ahead of a short one. No request is refused because the table is full.
 //
 // Lockout risk behind an ingress: every client then shares the ingress's address, because the peer
 // address is the ingress's and the forwarded address is not read. One client can therefore lock all
@@ -35,12 +34,12 @@ package ratelimit
 
 import (
 	"container/heap"
-	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,29 +53,27 @@ const (
 	BaseBackoff = time.Second
 	MaxBackoff  = 15 * time.Minute
 
-	// maxTracked is the bound on the keys kept that are not blocked; past it the least recently used
-	// key is dropped. maxBlocked bounds the blocked keys; past it the block that ends soonest is dropped.
-	maxTracked = 10000
-	maxBlocked = 100000
+	// AddressFreeFails and GroupFreeFails are the failures per FailWindow one client address (/64 or
+	// IPv4) and one group (/48) may make over all credentials. They are larger than FreeFails because
+	// clients behind one ingress share an address.
+	AddressFreeFails = 30
+	GroupFreeFails   = 120
 
-	// maxBlockedPerAddr bounds the blocked keys one address (an IPv6 one: its /48) may hold.
-	maxBlockedPerAddr = 8
+	// maxEntries is the bound on the entries of the table.
+	maxEntries = 110000
 )
 
-// Limiter counts failures per key. The zero value is not usable; call New.
+// Limiter counts failures per key, address and group. The zero value is not usable; call New.
 //
-// Keys that are blocked live in a heap ordered by the end of their block, apart from the keys that are
-// not blocked (a recency list). Only the recency list evicts, so a flood of fresh keys cannot reset the
-// backoff of a blocked one. A block that has ended moves its key back to the recency list.
+// All entries sit in one heap ordered by the time their state ends (expiry), so the root is the
+// entry that costs least to drop.
 type Limiter struct {
-	mu      sync.Mutex
-	keys    map[string]*attempts
-	lru     *list.List     // unblocked keys; front: most recently used
-	blocked blockHeap      // blocked keys, earliest block end first
-	perAddr map[string]int // non-exempt blocked keys per group
+	mu   sync.Mutex
+	keys map[string]*entry
+	h    entryHeap
 }
 
-type attempts struct {
+type entry struct {
 	key     string
 	fails   int
 	first   time.Time
@@ -84,63 +81,61 @@ type attempts struct {
 	// refused counts the requests refused while the key was over the limit, and failures that were
 	// not recorded one by one, since the caller last took the count (TakeRefused).
 	refused int
-	elem    *list.Element // in lru, or nil
-	hidx    int           // index in the blocked heap, or -1
-	group   string        // the address, or an IPv6 address's /48, for the per-address cap
-	exempt  bool          // a group overflow slot: not counted in the cap
+	idx     int // index in the heap
 }
 
-type blockHeap []*attempts
+// quietSince is when the entry's quiet window starts: its first failure, or the end of its block.
+func (a *entry) quietSince() time.Time {
+	if a.blocked.After(a.first) {
+		return a.blocked
+	}
+	return a.first
+}
 
-func (h blockHeap) Len() int           { return len(h) }
-func (h blockHeap) Less(i, j int) bool { return h[i].blocked.Before(h[j].blocked) }
-func (h blockHeap) Swap(i, j int) {
+// expiry is when the entry's state ends: a quiet FailWindow after quietSince.
+func (a *entry) expiry() time.Time { return a.quietSince().Add(FailWindow) }
+
+type entryHeap []*entry
+
+func (h entryHeap) Len() int           { return len(h) }
+func (h entryHeap) Less(i, j int) bool { return h[i].expiry().Before(h[j].expiry()) }
+func (h entryHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
-	h[i].hidx, h[j].hidx = i, j
+	h[i].idx, h[j].idx = i, j
 }
 
-func (h *blockHeap) Push(x any) {
-	a := x.(*attempts)
-	a.hidx = len(*h)
+func (h *entryHeap) Push(x any) {
+	a := x.(*entry)
+	a.idx = len(*h)
 	*h = append(*h, a)
 }
 
-func (h *blockHeap) Pop() any {
+func (h *entryHeap) Pop() any {
 	old := *h
 	a := old[len(old)-1]
 	old[len(old)-1] = nil
 	*h = old[:len(old)-1]
-	a.hidx = -1
 	return a
 }
 
 // New returns an empty Limiter.
-func New() *Limiter {
-	return &Limiter{keys: map[string]*attempts{}, lru: list.New(), perAddr: map[string]int{}}
-}
+func New() *Limiter { return &Limiter{keys: map[string]*entry{}} }
 
-// Len is the number of keys tracked.
+// Len is the number of entries tracked (keys, addresses and groups).
 func (l *Limiter) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.keys)
 }
 
-// expire moves the keys whose block has ended from the blocked heap to the recency list.
-func (l *Limiter) expire(now time.Time) {
-	for len(l.blocked) > 0 && !now.Before(l.blocked[0].blocked) {
-		a := l.dropBlocked(l.blocked[0])
-		a.elem = l.lru.PushFront(a)
-	}
-	for l.lru.Len() > maxTracked {
-		l.forget(l.lru.Back().Value.(*attempts))
-	}
+// addrOf is the address part of a key: everything before the first "|".
+func addrOf(key string) string {
+	addr, _, _ := strings.Cut(key, "|")
+	return addr
 }
 
-// groupOf is the address part of a key (everything before the first "|"), an IPv6 address widened
-// to its /48.
-func groupOf(key string) string {
-	addr, _, _ := strings.Cut(key, "|")
+// groupOf is the group of an address: an IPv6 address widened to its /48, anything else itself.
+func groupOf(addr string) string {
 	if ip, err := netip.ParseAddr(addr); err == nil && ip.Is6() {
 		if p, err := ip.Prefix(48); err == nil {
 			return p.String()
@@ -149,74 +144,19 @@ func groupOf(key string) string {
 	return addr
 }
 
-// dropBlocked takes a from the blocked heap, keeps it in the key map, and returns it.
-func (l *Limiter) dropBlocked(a *attempts) *attempts {
-	heap.Remove(&l.blocked, a.hidx)
-	if !a.exempt {
-		if l.perAddr[a.group]--; l.perAddr[a.group] <= 0 {
-			delete(l.perAddr, a.group)
-		}
-	}
-	return a
-}
+// The keys of a key's address and group levels. No Key is ever of this form.
+func addrSlot(addr string) string   { return "\x00a|" + addr }
+func groupSlot(group string) string { return "\x00g|" + group }
 
-// forget removes a from every structure.
-func (l *Limiter) forget(a *attempts) {
-	if a.elem != nil {
-		l.lru.Remove(a.elem)
-		a.elem = nil
-	} else if a.hidx >= 0 {
-		l.dropBlocked(a)
+// levels returns the keys of the address and group levels of key; the group level is empty when the
+// group is the address itself.
+func levels(key string) (addr, group string) {
+	a := addrOf(key)
+	addr = addrSlot(a)
+	if g := groupOf(a); g != a {
+		group = groupSlot(g)
 	}
-	delete(l.keys, a.key)
-}
-
-// addBlocked moves a to the blocked heap, first dropping the block that ends soonest when the heap is
-// full.
-func (l *Limiter) addBlocked(a *attempts) {
-	if len(l.blocked) >= maxBlocked {
-		l.forget(l.blocked[0])
-	}
-	if a.elem != nil {
-		l.lru.Remove(a.elem)
-		a.elem = nil
-	}
-	heap.Push(&l.blocked, a)
-	if !a.exempt {
-		l.perAddr[a.group]++
-	}
-}
-
-// groupSlot is the key of a group's overflow slot. No Key is ever of this form.
-func groupSlot(group string) string { return "\x00group|" + group }
-
-// blockGroup counts one overflow of the group on its overflow slot, which Blocked checks for every key
-// of the group. The slot has its own backoff: the first overflow blocks the group for BaseBackoff, each
-// further one for twice as long, up to MaxBackoff, and a quiet FailWindow after a block starts it
-// afresh. When a block ends the slot stays, in the recency list, with its count.
-func (l *Limiter) blockGroup(group string, now time.Time) {
-	k := groupSlot(group)
-	a := l.keys[k]
-	if a == nil {
-		if l.lru.Len() >= maxTracked {
-			l.forget(l.lru.Back().Value.(*attempts))
-		}
-		a = &attempts{key: k, first: now, group: group, exempt: true, hidx: -1}
-		a.elem = l.lru.PushFront(a)
-		l.keys[k] = a
-	} else if a.elem != nil {
-		l.lru.MoveToFront(a.elem)
-	}
-	if now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
-		a.fails, a.first, a.blocked = 0, now, time.Time{}
-	}
-	a.fails++
-	a.blocked = now.Add(min(BaseBackoff<<min(a.fails-1, 20), MaxBackoff))
-	if a.hidx >= 0 {
-		heap.Fix(&l.blocked, a.hidx)
-		return
-	}
-	l.addBlocked(a)
+	return addr, group
 }
 
 // Key is the slot of a client address and the credential it names (a token prefix, a username);
@@ -256,40 +196,74 @@ func RetryAfter(d time.Duration) string {
 	return strconv.Itoa(int((d + time.Second - 1) / time.Second))
 }
 
-// Blocked returns how long key must wait, or zero: the longer of its own block and its group's
-// overflow block.
+// Blocked returns how long key must wait, or zero: the longest wait over the key, its address and its
+// group.
 func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.expire(now)
+	addr, group := levels(key)
 	var wait time.Duration
-	if a, ok := l.keys[key]; ok && now.Before(a.blocked) {
-		wait = a.blocked.Sub(now)
-	}
-	if g, ok := l.keys[groupSlot(groupOf(key))]; ok && now.Before(g.blocked) {
-		wait = max(wait, g.blocked.Sub(now))
+	for _, k := range []string{key, addr, group} {
+		if a, ok := l.keys[k]; ok && now.Before(a.blocked) {
+			wait = max(wait, a.blocked.Sub(now))
+		}
 	}
 	return wait
 }
 
-// Fail records a failure for key; the key is blocked after FreeFails failures.
-func (l *Limiter) Fail(key string, now time.Time) { l.FailAfter(key, FreeFails, now) }
+// Fail records a failure of key, and of its address and group; the key is blocked after FreeFails
+// failures, the address after AddressFreeFails and the group after GroupFreeFails.
+func (l *Limiter) Fail(key string, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	addr, group := levels(key)
+	l.makeRoom(key, addr, group)
+	l.record(key, FreeFails, now)
+	l.record(addr, AddressFreeFails, now)
+	if group != "" {
+		l.record(group, GroupFreeFails, now)
+	}
+}
 
-// FailAfter records a failure for key, which is blocked after freeFails failures within FailWindow.
+// FailAfter records a failure of key alone, which is blocked after freeFails failures within
+// FailWindow.
 func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.expire(now)
-	a := l.keys[key]
-	if a == nil {
-		if l.lru.Len() >= maxTracked {
-			l.forget(l.lru.Back().Value.(*attempts))
+	l.makeRoom(key)
+	l.record(key, freeFails, now)
+}
+
+// makeRoom drops the entries closest to their end until the keys of a call that are not yet in the
+// table fit. The call's own entries are never the ones dropped.
+func (l *Limiter) makeRoom(keys ...string) {
+	need := 0
+	for _, k := range keys {
+		if k != "" && l.keys[k] == nil {
+			need++
 		}
-		a = &attempts{key: key, first: now, hidx: -1, group: groupOf(key)}
-		a.elem = l.lru.PushFront(a)
-		l.keys[key] = a
-	} else if a.elem != nil {
-		l.lru.MoveToFront(a.elem)
+	}
+	var kept []*entry
+	for len(l.keys)+need > maxEntries && len(l.h) > 0 {
+		old := heap.Pop(&l.h).(*entry)
+		if slices.Contains(keys, old.key) {
+			kept = append(kept, old)
+			continue
+		}
+		delete(l.keys, old.key)
+	}
+	for _, e := range kept {
+		heap.Push(&l.h, e)
+	}
+}
+
+// record counts one failure on the entry k, creating it, and blocks it once it is past freeFails.
+func (l *Limiter) record(k string, freeFails int, now time.Time) {
+	a := l.keys[k]
+	if a == nil {
+		a = &entry{key: k, first: now}
+		l.keys[k] = a
+		heap.Push(&l.h, a)
 	}
 	if now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
 		// The refusals not yet taken stay counted when the failures start afresh.
@@ -300,27 +274,7 @@ func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 		d := BaseBackoff << min(over, 20)
 		a.blocked = now.Add(min(d, MaxBackoff))
 	}
-	if !now.Before(a.blocked) {
-		return
-	}
-	switch {
-	case a.hidx >= 0:
-		heap.Fix(&l.blocked, a.hidx)
-	case !a.exempt && l.perAddr[a.group] >= maxBlockedPerAddr:
-		// The group holds as many blocked keys as it may: block the group, not this key.
-		l.forget(a)
-		l.blockGroup(a.group, now)
-	default:
-		l.addBlocked(a)
-	}
-}
-
-// quietSince is when the key's quiet window starts: its first failure, or the end of its block.
-func (a *attempts) quietSince() time.Time {
-	if a.blocked.After(a.first) {
-		return a.blocked
-	}
-	return a.first
+	heap.Fix(&l.h, a.idx)
 }
 
 // Refuse counts one request refused for key without an event of its own. It does nothing for a key
@@ -346,11 +300,12 @@ func (l *Limiter) TakeRefused(key string) int {
 	return n
 }
 
-// Succeed forgets key.
+// Succeed forgets key (not its address or group).
 func (l *Limiter) Succeed(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if a, ok := l.keys[key]; ok {
-		l.forget(a)
+		heap.Remove(&l.h, a.idx)
+		delete(l.keys, key)
 	}
 }
