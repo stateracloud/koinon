@@ -32,6 +32,9 @@ type KubeStore struct {
 	// Wrappers unwrap the stored KEKs and wrap new ones; the zero value is the local Secret-held
 	// KEK (secretstore.Local).
 	Wrappers secretstore.Wrappers
+	// UsedID, when set, is the probe the first KEK's ID is drawn against (see [DrawID]); production sets
+	// the same probe as the add paths. Nil accepts the first draw.
+	UsedID func(context.Context, string) (bool, error)
 }
 
 // Load implements Store. When the KEKs cannot be unwrapped it returns the error with the stored
@@ -225,7 +228,7 @@ func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func
 			return false, fmt.Errorf("before creating the KEK Secret %s/%s: %w", namespace, name, err)
 		}
 	}
-	id, err := NewID(now)
+	id, err := DrawID(ctx, now, nil, k.UsedID)
 	if err != nil {
 		return false, err
 	}

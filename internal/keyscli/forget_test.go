@@ -40,16 +40,14 @@ import (
 
 // keys forget (issue #216, ADR 0085 decision 13): a KEK of which no copy exists any more.
 var _ = Describe("koinon-api keys forget", func() {
-	const (
-		lostKEK = "kek-20260101-aaaa"
-		nextKEK = "kek-20261023-bbbb"
-	)
+	const lostKEK = "kek-20260101-aaaa"
 	var (
-		kube *fake.Clientset
-		ks   keyscli.KubeStore
-		tool *keyscli.Tool
-		out  *bytes.Buffer
-		now  time.Time
+		nextKEK string
+		kube    *fake.Clientset
+		ks      keyscli.KubeStore
+		tool    *keyscli.Tool
+		out     *bytes.Buffer
+		now     time.Time
 		// lostKey is the lost KEK's bytes, for a spec that restores it from "escrow".
 		lostKey []byte
 	)
@@ -169,7 +167,8 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		nextKEK = freshKEK("n")
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		freeStorage()
 	})
 
@@ -730,7 +729,8 @@ var _ = Describe("koinon-api keys forget", func() {
 	// Issue #322: IDs are never reused on any add path, not only in the recovery from a lost active KEK.
 	Describe("adding a KEK under an ID that database envelopes still carry", func() {
 		It("is refused by keys add and by the key-admin Job, with or without the recovery flag, and changes nothing", func(ctx SpecContext) {
-			const removed, freshKEK = "kek-20251201-eeee", "kek-20261201-ffff"
+			const removed = "kek-20251201-eeee"
+			addedKEK := freshKEK("f")
 			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
 				ON CONFLICT (singleton) DO NOTHING`)
 			Expect(err).NotTo(HaveOccurred())
@@ -747,7 +747,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
-			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }
 			job := func(add string, recovery bool, used func(context.Context, string) (bool, error)) keyscli.KeyAdmin {
 				return keyscli.KeyAdmin{Store: adminStore, AddID: add, ActivateIfNoActive: recovery, UsedID: used, Out: out, Now: func() time.Time { return now }}
 			}
@@ -770,12 +770,12 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
 
 			By("keys add fails closed without a database")
-			Expect((&keyscli.Tool{Store: ks, Out: out, Now: func() time.Time { return now }}).Add(ctx, freshKEK)).To(MatchError(ContainSubstring("check that KEK ID")))
+			Expect((&keyscli.Tool{Store: ks, Out: out, Now: func() time.Time { return now }}).Add(ctx, addedKEK)).To(MatchError(ContainSubstring("check that KEK ID")))
 			Expect(snapshot()).To(Equal(before))
 
 			By("an unused ID still adds")
-			Expect(job(freshKEK, false, probe).Run(ctx)).To(Succeed())
-			Expect(snapshot()).To(HaveKey(freshKEK))
+			Expect(job(addedKEK, false, probe).Run(ctx)).To(Succeed())
+			Expect(snapshot()).To(HaveKey(addedKEK))
 		})
 	})
 
@@ -944,7 +944,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: otherRemoved, ActivateIfNoActive: true, Out: out,
-				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }, Now: func() time.Time { return now },
 			}).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
 			after, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -958,14 +958,14 @@ var _ = Describe("koinon-api keys forget", func() {
 			By("with a new ID the recovery goes through")
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out,
-				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }, Now: func() time.Time { return now },
 			}).Run(ctx)).To(Succeed())
 			set, err := ks.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(set.Active).To(Equal(nextKEK))
 
 			By("keys status and keys forget now run")
-			tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 			Expect(usage(ctx)).To(BeEmpty())

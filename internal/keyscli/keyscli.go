@@ -273,6 +273,40 @@ func NewID(now time.Time) (string, error) {
 	return "kek-" + now.UTC().Format("20060102") + "-" + hex.EncodeToString(b), nil
 }
 
+// newIDTries bounds the redraws of [DrawID]: a collision needs a 16-bit suffix to repeat on one day, so
+// a handful of tries is plenty and a longer run means the probe is wrong.
+const newIDTries = 8
+
+// DrawID returns a new KEK ID that no key set holds (taken, when not nil) and that the used probe does not
+// refuse (an ID with envelopes, or one the audit chain recorded: [ErrIDRetired]). It redraws a bounded
+// number of times, then fails. A nil probe accepts the first untaken ID; callers that need the check
+// to fail closed still pass the ID through [RefuseUsedID].
+func DrawID(ctx context.Context, now time.Time, taken func(string) bool, used func(context.Context, string) (bool, error)) (string, error) {
+	for range newIDTries {
+		id, err := NewID(now)
+		if err != nil {
+			return "", err
+		}
+		if taken != nil && taken(id) {
+			continue
+		}
+		if used == nil {
+			return id, nil
+		}
+		u, err := used(ctx, id)
+		if errors.Is(err, ErrIDRetired) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("check that KEK ID %s is unused: %w", id, err)
+		}
+		if !u {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("could not draw an unused KEK ID in %d tries; run the command again", newIDTries)
+}
+
 // Usage counts the stored values per KEK ID.
 func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	out := map[string]int{}
@@ -324,6 +358,11 @@ func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 // RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
 // keys.forget event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
 // after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
+//
+// Not covered: an add whose event was lost (the audit is optional, [AuditOptional]) and whose KEK was
+// removed by hand before the next start-up observation records a key-set state is never recorded. The
+// query scans the keys.% events; that is fine while the chain is small (add a partial index on action if
+// it grows).
 func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	var found bool
 	err := pool.QueryRow(ctx, `SELECT EXISTS (
@@ -843,13 +882,8 @@ func (t *Tool) Import(ctx context.Context) error {
 
 // Add generates a KEK, stores it in the key set (inactive) and prints its ID.
 func (t *Tool) Add(ctx context.Context, id string) error {
-	var err error
-	if id == "" {
-		if id, err = NewID(t.now()); err != nil {
-			return err
-		}
-	}
-	if !secretstore.ValidKEKID(id) {
+	generate := id == ""
+	if !generate && !secretstore.ValidKEKID(id) {
 		return fmt.Errorf("%q is not a valid KEK ID", id)
 	}
 	c, ks, notAudited, err := t.begin(ctx, "add")
@@ -861,15 +895,20 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	if ks.Keys == nil {
 		ks.Keys = map[string][]byte{}
 	}
-	if _, ok := ks.Keys[id]; ok {
-		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
-	}
 	// A KEK removed from the Secret may still seal values: a new KEK under its ID would be tried
 	// against them, and keys forget would then refuse the ID.
 	used := t.UsedID
 	if used == nil && t.Pool != nil {
 		pool := t.Pool
 		used = func(ctx context.Context, id string) (bool, error) { return AddableID(ctx, pool, id) }
+	}
+	if generate {
+		if id, err = DrawID(ctx, t.now(), func(id string) bool { _, ok := ks.Keys[id]; return ok }, used); err != nil {
+			return err
+		}
+	}
+	if _, ok := ks.Keys[id]; ok {
+		return fmt.Errorf("KEK %s already exists; IDs are never reused", id)
 	}
 	if err := RefuseUsedID(ctx, used, id); err != nil {
 		return err

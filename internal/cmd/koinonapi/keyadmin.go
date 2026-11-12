@@ -92,8 +92,9 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	usedID := func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) }
 	job := keyscli.KeyAdmin{
-		Store:  keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers},
+		Store:  keyscli.KubeStore{Client: client, Namespace: o.namespace, Name: o.kekSecret, Wrappers: wrappers, UsedID: usedID},
 		Create: o.create,
 		AddID:  o.addID,
 
@@ -101,7 +102,7 @@ func runKeyAdmin(ctx context.Context, o keyAdminOptions, out io.Writer) error {
 		RewrapUnbound:      o.rewrapUnbound,
 		Marker:             installid.Marker{DB: pool},
 		HasValues:          func(ctx context.Context) (bool, error) { return anyEnvelopeYet(ctx, pool) },
-		UsedID:             func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) },
+		UsedID:             usedID,
 		Out:                out,
 		// The Job writes as the koinon_api database role, like koinon-api (the chart gives it the api
 		// database Secret). It runs next to the migration Job, so it waits up to --wait for the install

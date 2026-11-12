@@ -94,7 +94,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		freeStorage()
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 	})
@@ -655,21 +655,21 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("adds wrapped KEKs, keeps the local one readable, and moves the values over", func(ctx SpecContext) {
 			ids := seed(ctx, 2)
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			raw, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HavePrefix(`{"fmt":2,"backend":"fakekms","key":"koinon-test"`))
+			Expect(string(raw.Data[kekB])).To(HavePrefix(`{"fmt":2,"backend":"fakekms","key":"koinon-test"`))
 			install, err := installid.Read(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HaveSuffix(`"install":"`+install+`"}`), "bound to this database's install ID")
+			Expect(string(raw.Data[kekB])).To(HaveSuffix(`"install":"`+install+`"}`), "bound to this database's install ID")
 			Expect(raw.Data["kek-20260101-aaaa"]).NotTo(HavePrefix("{"), "the local KEK is not rewrapped")
 
 			By("koinon-api, decrypt-only, can activate and rewrap: no KEK is wrapped again")
 			use(service)
 			kms.DecryptOnly.Store(true)
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			Expect(tool.Rewrap(ctx)).To(Succeed())
-			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261023-bbbb": 2}))
+			Expect(usage(ctx)).To(Equal(map[string]int{kekB: 2}))
 			openAll(ctx, ring(ctx), ids)
 
 			out.Reset()
@@ -680,7 +680,7 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("does not open a KEK Secret of another install, and says so (old issue 615)", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			install, err := installid.Read(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -718,7 +718,7 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (old issue 615)", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			// Its own database: the suite's pool must stay without the marker for the other specs.
 			marked := pgtest.Start(ctx)
 			_, err := installid.SetBoundOnly(ctx, marked, secretstore.BoundOnlyRewrap)
@@ -752,15 +752,15 @@ var _ = Describe("koinon-api keys", func() {
 				ContainSubstring("REFUSED: KEK kek-20261001-old1 is stored unbound"),
 				ContainSubstring("REFUSED: KEK kek-20261001-old2 is stored unbound"),
 				ContainSubstring("rerun the key-admin Job"),
-				Not(ContainSubstring("REFUSED: KEK kek-20261023-bbbb")),
+				Not(ContainSubstring("REFUSED: KEK "+kekB)),
 			))
 		})
 
 		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {
 			use(service)
 			kms.DecryptOnly.Store(true)
-			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(secretstore.ErrKeyAdminWraps))
-			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
+			Expect(tool.Add(ctx, kekC)).To(MatchError(secretstore.ErrKeyAdminWraps))
+			Expect(tool.Add(ctx, kekC)).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
 
 			fresh := fake.NewClientset()
 			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek", Wrappers: service}
@@ -792,15 +792,15 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("exports a wrapped KEK still wrapped", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			use(service)
 			set, _ := ks.Load(ctx)
 			out.Reset()
 			Expect(tool.Export(ctx)).To(Succeed())
-			Expect(out.String()).To(ContainSubstring("kek-20261023-bbbb fingerprint " + secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]) + ", wrapped by fakekms:koinon-test"))
+			Expect(out.String()).To(ContainSubstring(kekB + " fingerprint " + secretstore.Fingerprint(set.Keys[kekB]) + ", wrapped by fakekms:koinon-test"))
 			var sec corev1.Secret
 			Expect(yaml.Unmarshal(out.Bytes(), &sec)).To(Succeed())
-			Expect(string(sec.Data["kek-20261023-bbbb"])).To(HavePrefix("{"))
+			Expect(string(sec.Data[kekB])).To(HavePrefix("{"))
 		})
 	})
 
@@ -821,15 +821,15 @@ var _ = Describe("koinon-api keys", func() {
 		}
 
 		It("records the fingerprint and activation time when a KEK is activated, and status is quiet", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
-			_, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			_, ok := recorded(ctx, kekB)
 			Expect(ok).To(BeFalse(), "add records nothing")
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			set, err := ks.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			r, ok := recorded(ctx, kekB)
 			Expect(ok).To(BeTrue())
-			Expect(r).To(Equal(row{fp: secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]), backend: "local", activated: true}))
+			Expect(r).To(Equal(row{fp: secretstore.Fingerprint(set.Keys[kekB]), backend: "local", activated: true}))
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
 
 			out.Reset()
@@ -922,26 +922,28 @@ var _ = Describe("koinon-api keys", func() {
 		}
 
 		It("activate without an ID picks an inactive KEK, with its age and values, and confirms", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			ask("1\nn\n")
 			Expect(tool.Activate(ctx, "")).To(MatchError(cli.ErrCancelled))
-			Expect(asked.String()).To(And(ContainSubstring("kek-20261001-bbbb  added 22 days ago  wraps 0 value(s)"),
-				ContainSubstring("Activate kek-20261001-bbbb?")))
+			Expect(asked.String()).To(And(ContainSubstring(kekB+"  added 22 days ago  wraps 0 value(s)"),
+				ContainSubstring("Activate "+kekB+"?")))
 			Expect(asked.String()).NotTo(ContainSubstring("kek-20260101-aaaa"), "the active KEK is not offered")
 			Expect(active(ctx)).To(Equal("kek-20260101-aaaa"), "declining changes nothing")
 
 			ask("1\ny\n")
 			Expect(tool.Activate(ctx, "")).To(Succeed())
-			Expect(active(ctx)).To(Equal("kek-20261001-bbbb"))
+			Expect(active(ctx)).To(Equal(kekB))
 		})
 
 		It("activate with an ID confirms too, and --yes skips the confirmation", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			ask("n\n")
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(MatchError(cli.ErrCancelled))
+			Expect(tool.Activate(ctx, kekB)).To(MatchError(cli.ErrCancelled))
 			ask("")
 			tool.Yes = true
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			Expect(asked.String()).To(BeEmpty())
 		})
 
@@ -952,24 +954,26 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("retire without an ID lists KEKs in use as unavailable and confirms with the escrow warning", func(ctx SpecContext) {
 			seed(ctx, 2)
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
-			Expect(tool.Add(ctx, "kek-20261002-cccc")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			kekC = freshKEKOn("20261002", "c")
+			Expect(tool.Add(ctx, kekC)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			now = now.Add(6 * time.Minute)
 
 			ask("1\nn\n")
 			Expect(tool.Retire(ctx, "")).To(MatchError(cli.ErrCancelled))
 			Expect(asked.String()).To(And(
 				ContainSubstring("kek-20260101-aaaa  added"), ContainSubstring("2 value(s) still use KEK kek-20260101-aaaa"),
-				ContainSubstring("kek-20261001-bbbb  added"), ContainSubstring("is the active KEK"),
-				ContainSubstring("1. kek-20261002-cccc"), ContainSubstring("backup escrow")))
+				ContainSubstring(kekB+"  added"), ContainSubstring("is the active KEK"),
+				ContainSubstring("1. "+kekC), ContainSubstring("backup escrow")))
 			set, _ := ks.Load(ctx)
 			Expect(set.Keys).To(HaveLen(3))
 
 			ask("1\ny\n")
 			Expect(tool.Retire(ctx, "")).To(Succeed())
 			set, _ = ks.Load(ctx)
-			Expect(set.Keys).NotTo(HaveKey("kek-20261002-cccc"))
+			Expect(set.Keys).NotTo(HaveKey(kekC))
 		})
 
 		It("retire says so when no KEK can be retired", func(ctx SpecContext) {
@@ -980,15 +984,16 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("rewrap confirms with the count of values it will change", func(ctx SpecContext) {
 			seed(ctx, 3)
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			ask("n\n")
 			Expect(tool.Rewrap(ctx)).To(MatchError(cli.ErrCancelled))
-			Expect(asked.String()).To(ContainSubstring("Rewrap 3 value(s) under kek-20261001-bbbb?"))
+			Expect(asked.String()).To(ContainSubstring("Rewrap 3 value(s) under " + kekB + "?"))
 			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 3}))
 			ask("y\n")
 			Expect(tool.Rewrap(ctx)).To(Succeed())
-			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261001-bbbb": 3}))
+			Expect(usage(ctx)).To(Equal(map[string]int{kekB: 3}))
 		})
 
 		It("reencrypt wants the active KEK ID typed", func(ctx SpecContext) {

@@ -28,17 +28,15 @@ import (
 // keys new-repositories (issue #86, ADR 0085 decision 14): after a compromise, every agent named
 // gets a new home repository that koinon-agentd seeds with its newest checkpoint.
 var _ = Describe("koinon-api keys new-repositories", func() {
-	const (
-		oldKEK = "kek-20260101-aaaa"
-		newKEK = "kek-20261023-bbbb"
-	)
+	const oldKEK = "kek-20260101-aaaa"
 	var (
-		kube *fake.Clientset
-		tool *keyscli.Tool
-		out  *bytes.Buffer
-		now  time.Time
-		q    *store.Queries
-		pw   checkpoint.Passwords
+		newKEK string
+		kube   *fake.Clientset
+		tool   *keyscli.Tool
+		out    *bytes.Buffer
+		now    time.Time
+		q      *store.Queries
+		pw     checkpoint.Passwords
 	)
 
 	ring := func(ctx SpecContext) *secretstore.Keyring {
@@ -104,7 +102,8 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		newKEK = freshKEK("n")
+		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		q = store.New(pool)
 		pw = checkpoint.Passwords{Q: q, Keys: ring(ctx), Begin: pool.Begin}
 		freeStorage()

@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Two koinon-api replicas that start together both find no KEK Secret and both decide to create it
@@ -63,5 +64,24 @@ var _ = Describe("EnsureWith on a first start", func() {
 		Expect(loaded[0].Active).NotTo(BeEmpty())
 		Expect(loaded[1].Active).To(Equal(loaded[0].Active))
 		Expect(loaded[1].Keys).To(Equal(loaded[0].Keys))
+	})
+})
+
+var _ = Describe("DrawID", func() {
+	It("redraws while the probe refuses an ID, then gives up", func(ctx SpecContext) {
+		calls := 0
+		id, err := keyscli.DrawID(ctx, time.Now(), nil, func(context.Context, string) (bool, error) {
+			calls++
+			if calls < 3 {
+				return true, keyscli.ErrIDRetired
+			}
+			return false, nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(calls).To(Equal(3))
+		Expect(secretstore.ValidKEKID(id)).To(BeTrue())
+
+		_, err = keyscli.DrawID(ctx, time.Now(), nil, func(context.Context, string) (bool, error) { return true, nil })
+		Expect(err).To(MatchError(ContainSubstring("could not draw an unused KEK ID")))
 	})
 })
