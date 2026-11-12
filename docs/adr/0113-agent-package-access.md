@@ -69,7 +69,11 @@ Facts checked on 2026-11-11 (sources under "Upstream verification"):
    path where a host serves more than packages, and with no wildcard over a cloud provider's domain.
 6. **Unrestricted is off for an install until a platform admin enables it**, with the consequence stated:
    an unrestricted agent can send data to any host, so Koinon's egress controls no longer protect it. Each
-   such agent shows a badge, and setting the level is audited.
+   such agent shows a badge, and setting the level is audited. Unrestricted lowers only Koinon's own
+   egress limit for that agent. It does not change [0045](0045-openshell-hardening-defaults.md): the policy
+   still runs with `enforcement: enforce` in every tier, no secret enters the sandbox environment, no
+   credential goes uninspected, and this level does not relax the default-deny NetworkPolicy of that ADR.
+   Nothing here leaves room to weaken [0045](0045-openshell-hardening-defaults.md).
 7. **The tool set follows the level** (ADR 0080): a harness's built-in web tools are offered only when the
    sandbox can use them, which is the unrestricted level.
 8. **A minimum age is set by default and is advisory.** Koinon configures each package manager's native

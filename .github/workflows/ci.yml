@@ -763,6 +763,7 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/pr-merge-test.sh
       - run: hack/ci-fail-test.sh
+      - run: hack/ci-timing-test.sh
       - run: hack/ci-go-gate-test.sh
       - run: hack/ci-web-gate-test.sh
       - run: hack/ci-required-test.sh
@@ -789,6 +790,7 @@ jobs:
       - run: hack/golangci-lint-test.sh
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
+      - run: hack/kind-registry-test.sh
       - run: hack/drill-issue-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh

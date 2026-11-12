@@ -47,7 +47,7 @@ locked out when IdP groups are misconfigured.
 
 ## Amendment (2026-10-23): org roles
 
-An org has three roles: **owner**, **admin** and **member**. Members use agents and create tickets,
+An org has three roles: **owner**, **admin** and **member** _(Changed: there is a fourth role, viewer; see the amendment of 2026-10-30 below)_. Members use agents and create tickets,
 and see approvals **read-only**; admins and owners decide them, as in
 [0049](0049-v01-scope-decisions.md). A viewer role is not part of this decision.
 

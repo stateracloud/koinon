@@ -1,0 +1,17 @@
+[
+ {
+  "number": 11,
+  "mergedAt": "2026-11-02T10:30:00Z",
+  "headRefName": "feat/11-a"
+ },
+ {
+  "number": 12,
+  "mergedAt": "2026-11-02T09:00:00Z",
+  "headRefName": "fix/12-b"
+ },
+ {
+  "number": 13,
+  "mergedAt": "2026-11-02T08:00:00Z",
+  "headRefName": "docs/13-c"
+ }
+]

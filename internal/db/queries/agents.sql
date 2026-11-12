@@ -128,3 +128,12 @@ RETURNING *;
 UPDATE agents
 SET keep_warm_granted = @granted
 WHERE org_id = @org_id AND id = ANY(@ids::uuid[]) AND keep_warm_granted <> @granted;
+
+-- name: SetAgentSandboxResources :one
+-- An agent's sandbox resource override (NULL: follow the version's template values, then the platform
+-- default; ADR 0083). The API checks the platform bounds. Not a new version.
+UPDATE agents
+SET sandbox_cpu_request = sqlc.narg(cpu_request), sandbox_cpu_limit = sqlc.narg(cpu_limit),
+    sandbox_memory_request = sqlc.narg(memory_request), sandbox_memory_limit = sqlc.narg(memory_limit)
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+RETURNING *;

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (the patch-line rule; recovery policy),
   [0100](0100-install-audit-chain.md) (`restore-hold` is a recorded setting), [0023](0023-observability-and-audit.md) (fixed metric label sets)
 - Issues: closes #462; refs #275 (the restore drill)
@@ -45,7 +46,9 @@ not yet trusted.
      of every trigger fire. The declarative importer skips an
      `mcp-server` Secret whose apply would dial out (a new server or a changed URL): it logs
      `held: MCP server <name> not applied until release` once per pass, records no Invalid Event, and carries on
-     with the other Secrets and the removal pass; the Secret is imported after the release. The
+     with the other Secrets and the removal pass; the Secret is imported after the release. _(Amended by
+     [0110](0110-held-copy-isolation.md), decided but not built yet (#516): the importer logs `held: would <action> <kind> <name>`
+     once per change and records one Event per Secret, reason `HeldNotApplied`. The code still does what this paragraph says.)_ The
      connection and binding handlers call the code host themselves, with no service in between, so they keep a
      check of their own (`Server.refuseWhileHeld`).
    - `koinon-agentd` claims and takes over no run and touches no sandbox. It still serves `checkpoints resync`, which

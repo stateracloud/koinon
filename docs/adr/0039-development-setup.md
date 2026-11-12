@@ -17,7 +17,7 @@ hard to undo and need a human check first.
 ## Decision
 
 - **Code:** development happens in a local git repository on procoduck's Mac.
-- **Remote:** pushed to the private `stateracloud/koinon` (amended 2026-10-26; it was `procoduck/koinon`, see [0034](0034-project-identity.md)). Work goes on branches with PRs, one per
+- **Remote:** pushed to the private _(changed: the repository is public since 2026-11-05, see [0094](0094-work-claims-on-the-public-repository.md))_ `stateracloud/koinon` (amended 2026-10-26; it was `procoduck/koinon`, see [0034](0034-project-identity.md)). Work goes on branches with PRs, one per
   deliverable during the bootstrap.
 - **Tests:** tests that need real isolation deploy to the **maintainer's Talos+Kata cluster** with Kata
   (RuntimeClass `kata`). That cluster is for development and local testing only, never public CI

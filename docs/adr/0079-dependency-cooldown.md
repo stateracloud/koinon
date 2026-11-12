@@ -48,7 +48,8 @@ cooldown (golang/go#76485 is on hold).
 
 ### The rule
 
-1. **No dependency version enters Koinon until it has been published for at least 3 days.** This
+1. _(Changed 2026-11-11, see the amendment at the end: for what agents install in a sandbox the 3 days are an advisory default that the agent can change ([0113](0113-agent-package-access.md) decision 8); for a harness package a platform admin can turn it off or waive one version ([0112](0112-harness-definitions.md) decision 13).)_
+   **No dependency version enters Koinon until it has been published for at least 3 days.** This
    applies to Go modules (direct and indirect, and the `go` directive), npm packages (direct and
    transitive, runtime and development tooling), GitHub Actions, container images and digests,
    release binaries and tarballs fetched by Dockerfiles, Helm chart dependencies, and platform pins

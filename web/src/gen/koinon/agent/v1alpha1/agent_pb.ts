@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/agent/v1alpha1/agent.proto.
  */
 export const file_koinon_agent_v1alpha1_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSK5BwoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDHVuaGVhbHRoeV9hdBgSIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQdW5oZWFsdGh5X3JlYXNvbhgTIAEoCRI8ChFwcm9wb3NlZF90cmlnZ2VycxgUIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEjwKEWFwcHJvdmVkX3RyaWdnZXJzGBUgAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXISEQoJZXBoZW1lcmFsGBYgASgIEjcKE3NhbmRib3hfYXJjaGl2ZWRfYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDW1vZGVsX3NldHRpbmcYGCABKAkSEQoJa2VlcF93YXJtGBkgASgIEhkKEWtlZXBfd2FybV9ncmFudGVkGBogASgIIugBCh5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3RlbXBsYXRlX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIwCgZmbGF2b3IYBCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEjMKBmdyYW50cxgFIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HcmFudEJpbmRpbmcSFgoJZXBoZW1lcmFsGAYgASgISACIAQFCDAoKX2VwaGVtZXJhbCJOCgxHcmFudEJpbmRpbmcSEQoJY29ubmVjdG9yGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSFAoMcmVwb3NpdG9yaWVzGAMgAygJIk4KH0NyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiMwoPR2V0QWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSI/ChBHZXRBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IiMKEUxpc3RBZ2VudHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJCChJMaXN0QWdlbnRzUmVzcG9uc2USLAoGYWdlbnRzGAEgAygLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50ImgKFEFjdGl2YXRlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd2ZXJzaW9uGAMgASgFEh0KFWFwcGx5X3RvX29wZW5fdGlja2V0cxgEIAEoCCJgChVBY3RpdmF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQSGgoSdGlja2V0c19yZXN0YXJ0aW5nGAIgASgFIjYKElJlc3VtZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiQgoTUmVzdW1lQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCI3ChNBcmNoaXZlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJDChRBcmNoaXZlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCKGAQoXU2V0QWdlbnRUcmlnZ2Vyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhQKDGJhc2VfdmVyc2lvbhgDIAEoBRIzCgh0cmlnZ2VycxgEIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyIkcKGFNldEFnZW50VHJpZ2dlcnNSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCI4ChRHZXRBZ2VudE1vZGVsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiLQoLU2VydmVkTW9kZWwSDAoEbmFtZRgBIAEoCRIQCghwcm92aWRlchgCIAEoCSKGAgoVR2V0QWdlbnRNb2RlbFJlc3BvbnNlEg8KB3NldHRpbmcYASABKAkSFQoNdmVyc2lvbl9tb2RlbBgCIAEoCRIRCgllZmZlY3RpdmUYAyABKAkSMgoGc291cmNlGAQgASgOMiIua29pbm9uLmFnZW50LnYxYWxwaGExLk1vZGVsU291cmNlEg8KB3Byb2JsZW0YBSABKAkSNQoJYXZhaWxhYmxlGAYgAygLMiIua29pbm9uLmFnZW50LnYxYWxwaGExLlNlcnZlZE1vZGVsEjYKCHRoaW5raW5nGAcgASgLMiQua29pbm9uLmFnZW50LnYxYWxwaGExLlRoaW5raW5nU3RhdGUirAEKDVRoaW5raW5nU3RhdGUSDwoHc2V0dGluZxgBIAEoCRIXCg92ZXJzaW9uX3NldHRpbmcYAiABKAkSEQoJZWZmZWN0aXZlGAMgASgJEhEKCXN1cHBvcnRlZBgEIAEoCBIMCgRtb2RlGAUgASgJEhUKDWFsd2F5c190aGlua3MYBiABKAgSFgoOb2ZmX292ZXJyaWRkZW4YByABKAgSDgoGbm90aWNlGAggASgJIkcKFFNldEFnZW50TW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgVtb2RlbBgDIAEoCSJUChVTZXRBZ2VudE1vZGVsUmVzcG9uc2USOwoFbW9kZWwYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlc3BvbnNlIk0KF1NldEFnZW50VGhpbmtpbmdSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIQCgh0aGlua2luZxgDIAEoCSJXChhTZXRBZ2VudFRoaW5raW5nUmVzcG9uc2USOwoFbW9kZWwYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlc3BvbnNlIk4KF1NldEFnZW50S2VlcFdhcm1SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIRCglrZWVwX3dhcm0YAyABKAgiRwoYU2V0QWdlbnRLZWVwV2FybVJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50Ik4KFlJ1bkFnZW50VHJpZ2dlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhIKCnRyaWdnZXJfaWQYAyABKAkiKgoXUnVuQWdlbnRUcmlnZ2VyUmVzcG9uc2USDwoHdGFza19pZBgBIAEoCSp3CgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJBR0VOVF9TVEFUVVNfRFJBRlQQARIXChNBR0VOVF9TVEFUVVNfQUNUSVZFEAISGQoVQUdFTlRfU1RBVFVTX0FSQ0hJVkVEEAMqkgEKC01vZGVsU291cmNlEhwKGE1PREVMX1NPVVJDRV9VTlNQRUNJRklFRBAAEhYKEk1PREVMX1NPVVJDRV9BR0VOVBABEhgKFE1PREVMX1NPVVJDRV9WRVJTSU9OEAISHAoYTU9ERUxfU09VUkNFX09SR19ERUZBVUxUEAMSFQoRTU9ERUxfU09VUkNFX05PTkUQBDLMCgoMQWdlbnRTZXJ2aWNlEogBChdDcmVhdGVBZ2VudEZyb21UZW1wbGF0ZRI1LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QaNi5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRJgCghHZXRBZ2VudBImLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlcXVlc3QaJy5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRSZXNwb25zZSIDkAIBEmYKCkxpc3RBZ2VudHMSKC5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1JlcXVlc3QaKS5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1Jlc3BvbnNlIgOQAgESagoNQWN0aXZhdGVBZ2VudBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVzcG9uc2UScwoQU2V0QWdlbnRUcmlnZ2VycxIuLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRyaWdnZXJzUmVxdWVzdBovLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRyaWdnZXJzUmVzcG9uc2USZAoLUmVzdW1lQWdlbnQSKS5rb2lub24uYWdlbnQudjFhbHBoYTEuUmVzdW1lQWdlbnRSZXF1ZXN0Gioua29pbm9uLmFnZW50LnYxYWxwaGExLlJlc3VtZUFnZW50UmVzcG9uc2USbwoNR2V0QWdlbnRNb2RlbBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiA5ACARJqCg1TZXRBZ2VudE1vZGVsEisua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50TW9kZWxSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50TW9kZWxSZXNwb25zZRJzChBTZXRBZ2VudFRoaW5raW5nEi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VGhpbmtpbmdSZXF1ZXN0Gi8ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VGhpbmtpbmdSZXNwb25zZRJzChBTZXRBZ2VudEtlZXBXYXJtEi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50S2VlcFdhcm1SZXF1ZXN0Gi8ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50S2VlcFdhcm1SZXNwb25zZRJwCg9SdW5BZ2VudFRyaWdnZXISLS5rb2lub24uYWdlbnQudjFhbHBoYTEuUnVuQWdlbnRUcmlnZ2VyUmVxdWVzdBouLmtvaW5vbi5hZ2VudC52MWFscGhhMS5SdW5BZ2VudFRyaWdnZXJSZXNwb25zZRJnCgxBcmNoaXZlQWdlbnQSKi5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVxdWVzdBorLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXNwb25zZUJRWk9naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hZ2VudC92MWFscGhhMTthZ2VudHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
+  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSL9BwoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDHVuaGVhbHRoeV9hdBgSIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQdW5oZWFsdGh5X3JlYXNvbhgTIAEoCRI8ChFwcm9wb3NlZF90cmlnZ2VycxgUIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEjwKEWFwcHJvdmVkX3RyaWdnZXJzGBUgAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXISEQoJZXBoZW1lcmFsGBYgASgIEjcKE3NhbmRib3hfYXJjaGl2ZWRfYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDW1vZGVsX3NldHRpbmcYGCABKAkSQgoRc2FuZGJveF9yZXNvdXJjZXMYGSABKAsyJy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlcxIRCglrZWVwX3dhcm0YGiABKAgSGQoRa2VlcF93YXJtX2dyYW50ZWQYGyABKAgi6AEKHkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLdGVtcGxhdGVfaWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEjAKBmZsYXZvchgEIAEoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3ISMwoGZ3JhbnRzGAUgAygLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLkdyYW50QmluZGluZxIWCgllcGhlbWVyYWwYBiABKAhIAIgBAUIMCgpfZXBoZW1lcmFsIk4KDEdyYW50QmluZGluZxIRCgljb25uZWN0b3IYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRIUCgxyZXBvc2l0b3JpZXMYAyADKAkiTgofQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIzCg9HZXRBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIj8KEEdldEFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiIwoRTGlzdEFnZW50c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkIKEkxpc3RBZ2VudHNSZXNwb25zZRIsCgZhZ2VudHMYASADKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiaAoUQWN0aXZhdGVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3ZlcnNpb24YAyABKAUSHQoVYXBwbHlfdG9fb3Blbl90aWNrZXRzGAQgASgIImAKFUFjdGl2YXRlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudBIaChJ0aWNrZXRzX3Jlc3RhcnRpbmcYAiABKAUiNgoSUmVzdW1lQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJCChNSZXN1bWVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjcKE0FyY2hpdmVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIkMKFEFyY2hpdmVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IoYBChdTZXRBZ2VudFRyaWdnZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSFAoMYmFzZV92ZXJzaW9uGAMgASgFEjMKCHRyaWdnZXJzGAQgAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXIiRwoYU2V0QWdlbnRUcmlnZ2Vyc1Jlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjgKFEdldEFnZW50TW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSItCgtTZXJ2ZWRNb2RlbBIMCgRuYW1lGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJIoYCChVHZXRBZ2VudE1vZGVsUmVzcG9uc2USDwoHc2V0dGluZxgBIAEoCRIVCg12ZXJzaW9uX21vZGVsGAIgASgJEhEKCWVmZmVjdGl2ZRgDIAEoCRIyCgZzb3VyY2UYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuTW9kZWxTb3VyY2USDwoHcHJvYmxlbRgFIAEoCRI1CglhdmFpbGFibGUYBiADKAsyIi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2VydmVkTW9kZWwSNgoIdGhpbmtpbmcYByABKAsyJC5rb2lub24uYWdlbnQudjFhbHBoYTEuVGhpbmtpbmdTdGF0ZSKsAQoNVGhpbmtpbmdTdGF0ZRIPCgdzZXR0aW5nGAEgASgJEhcKD3ZlcnNpb25fc2V0dGluZxgCIAEoCRIRCgllZmZlY3RpdmUYAyABKAkSEQoJc3VwcG9ydGVkGAQgASgIEgwKBG1vZGUYBSABKAkSFQoNYWx3YXlzX3RoaW5rcxgGIAEoCBIWCg5vZmZfb3ZlcnJpZGRlbhgHIAEoCBIOCgZub3RpY2UYCCABKAkiRwoUU2V0QWdlbnRNb2RlbFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg0KBW1vZGVsGAMgASgJIlQKFVNldEFnZW50TW9kZWxSZXNwb25zZRI7CgVtb2RlbBgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiTQoXU2V0QWdlbnRUaGlua2luZ1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhAKCHRoaW5raW5nGAMgASgJIlcKGFNldEFnZW50VGhpbmtpbmdSZXNwb25zZRI7CgVtb2RlbBgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiaAoQU2FuZGJveFJlc291cmNlcxITCgtjcHVfcmVxdWVzdBgBIAEoCRIRCgljcHVfbGltaXQYAiABKAkSFgoObWVtb3J5X3JlcXVlc3QYAyABKAkSFAoMbWVtb3J5X2xpbWl0GAQgASgJIigKDFNhbmRib3hSYW5nZRILCgNtaW4YASABKAkSCwoDbWF4GAIgASgJIvkBCg1TYW5kYm94Qm91bmRzEjgKC2NwdV9yZXF1ZXN0GAEgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZRI2CgljcHVfbGltaXQYAiABKAsyIy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJhbmdlEjsKDm1lbW9yeV9yZXF1ZXN0GAMgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZRI5CgxtZW1vcnlfbGltaXQYBCABKAsyIy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJhbmdlIkMKH0dldEFnZW50U2FuZGJveFJlc291cmNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIqQCChVTYW5kYm94UmVzb3VyY2VzU3RhdGUSOQoIb3ZlcnJpZGUYASABKAsyJy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlcxI5Cgh0ZW1wbGF0ZRgCIAEoCzInLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzEjoKCWVmZmVjdGl2ZRgDIAEoCzInLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzEjQKBmJvdW5kcxgEIAEoCzIkLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94Qm91bmRzEiMKG21lbW9yeV9yZXF1ZXN0X2VxdWFsc19saW1pdBgFIAEoCCJfCiBHZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXNwb25zZRI7CgVzdGF0ZRgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzU3RhdGUifwofU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSOgoJcmVzb3VyY2VzGAMgASgLMicua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXMiXwogU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVzcG9uc2USOwoFc3RhdGUYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlc1N0YXRlIk4KF1NldEFnZW50S2VlcFdhcm1SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIRCglrZWVwX3dhcm0YAyABKAgiRwoYU2V0QWdlbnRLZWVwV2FybVJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50Ik4KFlJ1bkFnZW50VHJpZ2dlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhIKCnRyaWdnZXJfaWQYAyABKAkiKgoXUnVuQWdlbnRUcmlnZ2VyUmVzcG9uc2USDwoHdGFza19pZBgBIAEoCSp3CgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJBR0VOVF9TVEFUVVNfRFJBRlQQARIXChNBR0VOVF9TVEFUVVNfQUNUSVZFEAISGQoVQUdFTlRfU1RBVFVTX0FSQ0hJVkVEEAMqkgEKC01vZGVsU291cmNlEhwKGE1PREVMX1NPVVJDRV9VTlNQRUNJRklFRBAAEhYKEk1PREVMX1NPVVJDRV9BR0VOVBABEhgKFE1PREVMX1NPVVJDRV9WRVJTSU9OEAISHAoYTU9ERUxfU09VUkNFX09SR19ERUZBVUxUEAMSFQoRTU9ERUxfU09VUkNFX05PTkUQBDLtDAoMQWdlbnRTZXJ2aWNlEogBChdDcmVhdGVBZ2VudEZyb21UZW1wbGF0ZRI1LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QaNi5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRJgCghHZXRBZ2VudBImLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlcXVlc3QaJy5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRSZXNwb25zZSIDkAIBEmYKCkxpc3RBZ2VudHMSKC5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1JlcXVlc3QaKS5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1Jlc3BvbnNlIgOQAgESagoNQWN0aXZhdGVBZ2VudBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVzcG9uc2UScwoQU2V0QWdlbnRUcmlnZ2VycxIuLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRyaWdnZXJzUmVxdWVzdBovLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRyaWdnZXJzUmVzcG9uc2USZAoLUmVzdW1lQWdlbnQSKS5rb2lub24uYWdlbnQudjFhbHBoYTEuUmVzdW1lQWdlbnRSZXF1ZXN0Gioua29pbm9uLmFnZW50LnYxYWxwaGExLlJlc3VtZUFnZW50UmVzcG9uc2USbwoNR2V0QWdlbnRNb2RlbBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiA5ACARJqCg1TZXRBZ2VudE1vZGVsEisua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50TW9kZWxSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50TW9kZWxSZXNwb25zZRJzChBTZXRBZ2VudFRoaW5raW5nEi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VGhpbmtpbmdSZXF1ZXN0Gi8ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VGhpbmtpbmdSZXNwb25zZRJzChBTZXRBZ2VudEtlZXBXYXJtEi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50S2VlcFdhcm1SZXF1ZXN0Gi8ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50S2VlcFdhcm1SZXNwb25zZRKQAQoYR2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzEjYua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50U2FuZGJveFJlc291cmNlc1JlcXVlc3QaNy5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVzcG9uc2UiA5ACARKLAQoYU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzEjYua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50U2FuZGJveFJlc291cmNlc1JlcXVlc3QaNy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVzcG9uc2UScAoPUnVuQWdlbnRUcmlnZ2VyEi0ua29pbm9uLmFnZW50LnYxYWxwaGExLlJ1bkFnZW50VHJpZ2dlclJlcXVlc3QaLi5rb2lub24uYWdlbnQudjFhbHBoYTEuUnVuQWdlbnRUcmlnZ2VyUmVzcG9uc2USZwoMQXJjaGl2ZUFnZW50Eioua29pbm9uLmFnZW50LnYxYWxwaGExLkFyY2hpdmVBZ2VudFJlcXVlc3QaKy5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVzcG9uc2VCUVpPZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYWdlbnQvdjFhbHBoYTE7YWdlbnR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
 
 /**
  * Agent is an agent and the definition it runs.
@@ -172,10 +172,18 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
   modelSetting: string;
 
   /**
+   * The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when
+   * it follows the template and the platform default.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxResources sandbox_resources = 25;
+   */
+  sandboxResources?: SandboxResources | undefined;
+
+  /**
    * Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049
    * amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org.
    *
-   * @generated from field: bool keep_warm = 25;
+   * @generated from field: bool keep_warm = 26;
    */
   keepWarm: boolean;
 
@@ -184,7 +192,7 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
    * (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
    * request reads false until the reconciler's next pass.
    *
-   * @generated from field: bool keep_warm_granted = 26;
+   * @generated from field: bool keep_warm_granted = 27;
    */
   keepWarmGranted: boolean;
 };
@@ -886,6 +894,243 @@ export const SetAgentThinkingResponseSchema: GenMessage<SetAgentThinkingResponse
   messageDesc(file_koinon_agent_v1alpha1_agent, 23);
 
 /**
+ * SandboxResources are the four sandbox sizing values, as Kubernetes quantities such as "250m" or
+ * "2Gi". An empty value is unset.
+ *
+ * @generated from message koinon.agent.v1alpha1.SandboxResources
+ */
+export type SandboxResources = Message<"koinon.agent.v1alpha1.SandboxResources"> & {
+  /**
+   * @generated from field: string cpu_request = 1;
+   */
+  cpuRequest: string;
+
+  /**
+   * @generated from field: string cpu_limit = 2;
+   */
+  cpuLimit: string;
+
+  /**
+   * @generated from field: string memory_request = 3;
+   */
+  memoryRequest: string;
+
+  /**
+   * @generated from field: string memory_limit = 4;
+   */
+  memoryLimit: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SandboxResources.
+ * Use `create(SandboxResourcesSchema)` to create a new message.
+ */
+export const SandboxResourcesSchema: GenMessage<SandboxResources> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 24);
+
+/**
+ * SandboxRange bounds one value. An empty min or max is unbounded on that side.
+ *
+ * @generated from message koinon.agent.v1alpha1.SandboxRange
+ */
+export type SandboxRange = Message<"koinon.agent.v1alpha1.SandboxRange"> & {
+  /**
+   * @generated from field: string min = 1;
+   */
+  min: string;
+
+  /**
+   * @generated from field: string max = 2;
+   */
+  max: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SandboxRange.
+ * Use `create(SandboxRangeSchema)` to create a new message.
+ */
+export const SandboxRangeSchema: GenMessage<SandboxRange> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 25);
+
+/**
+ * SandboxBounds are the platform's range for each of the four values (chart sandbox.resources.bounds).
+ *
+ * @generated from message koinon.agent.v1alpha1.SandboxBounds
+ */
+export type SandboxBounds = Message<"koinon.agent.v1alpha1.SandboxBounds"> & {
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxRange cpu_request = 1;
+   */
+  cpuRequest?: SandboxRange | undefined;
+
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxRange cpu_limit = 2;
+   */
+  cpuLimit?: SandboxRange | undefined;
+
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxRange memory_request = 3;
+   */
+  memoryRequest?: SandboxRange | undefined;
+
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxRange memory_limit = 4;
+   */
+  memoryLimit?: SandboxRange | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SandboxBounds.
+ * Use `create(SandboxBoundsSchema)` to create a new message.
+ */
+export const SandboxBoundsSchema: GenMessage<SandboxBounds> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 26);
+
+/**
+ * GetAgentSandboxResourcesRequest names the agent.
+ *
+ * @generated from message koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
+ */
+export type GetAgentSandboxResourcesRequest = Message<"koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest.
+ * Use `create(GetAgentSandboxResourcesRequestSchema)` to create a new message.
+ */
+export const GetAgentSandboxResourcesRequestSchema: GenMessage<GetAgentSandboxResourcesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 27);
+
+/**
+ * SandboxResourcesState is the agent's sandbox sizing and where it comes from.
+ *
+ * @generated from message koinon.agent.v1alpha1.SandboxResourcesState
+ */
+export type SandboxResourcesState = Message<"koinon.agent.v1alpha1.SandboxResourcesState"> & {
+  /**
+   * The agent's own override; empty values follow the template.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxResources override = 1;
+   */
+  override?: SandboxResources | undefined;
+
+  /**
+   * The active version's (or, before activation, the latest version's) template values; empty
+   * values take the platform default.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxResources template = 2;
+   */
+  template?: SandboxResources | undefined;
+
+  /**
+   * What the next sandbox gets: override, else template, else platform default, clamped to the bounds.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxResources effective = 3;
+   */
+  effective?: SandboxResources | undefined;
+
+  /**
+   * The platform bounds an override must stay inside.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxBounds bounds = 4;
+   */
+  bounds?: SandboxBounds | undefined;
+
+  /**
+   * Whether the platform raises the memory request to the memory limit (Kata, ADR 0083); a memory
+   * request in an override then has no effect.
+   *
+   * @generated from field: bool memory_request_equals_limit = 5;
+   */
+  memoryRequestEqualsLimit: boolean;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SandboxResourcesState.
+ * Use `create(SandboxResourcesStateSchema)` to create a new message.
+ */
+export const SandboxResourcesStateSchema: GenMessage<SandboxResourcesState> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 28);
+
+/**
+ * GetAgentSandboxResourcesResponse holds the state.
+ *
+ * @generated from message koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
+ */
+export type GetAgentSandboxResourcesResponse = Message<"koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse"> & {
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxResourcesState state = 1;
+   */
+  state?: SandboxResourcesState | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse.
+ * Use `create(GetAgentSandboxResourcesResponseSchema)` to create a new message.
+ */
+export const GetAgentSandboxResourcesResponseSchema: GenMessage<GetAgentSandboxResourcesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 29);
+
+/**
+ * SetAgentSandboxResourcesRequest sets the agent's override.
+ *
+ * @generated from message koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
+ */
+export type SetAgentSandboxResourcesRequest = Message<"koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+
+  /**
+   * The whole override: a value left empty is cleared.
+   *
+   * @generated from field: koinon.agent.v1alpha1.SandboxResources resources = 3;
+   */
+  resources?: SandboxResources | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest.
+ * Use `create(SetAgentSandboxResourcesRequestSchema)` to create a new message.
+ */
+export const SetAgentSandboxResourcesRequestSchema: GenMessage<SetAgentSandboxResourcesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 30);
+
+/**
+ * SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.
+ *
+ * @generated from message koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
+ */
+export type SetAgentSandboxResourcesResponse = Message<"koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse"> & {
+  /**
+   * @generated from field: koinon.agent.v1alpha1.SandboxResourcesState state = 1;
+   */
+  state?: SandboxResourcesState | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse.
+ * Use `create(SetAgentSandboxResourcesResponseSchema)` to create a new message.
+ */
+export const SetAgentSandboxResourcesResponseSchema: GenMessage<SetAgentSandboxResourcesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 31);
+
+/**
  * SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
  *
  * @generated from message koinon.agent.v1alpha1.SetAgentKeepWarmRequest
@@ -912,7 +1157,7 @@ export type SetAgentKeepWarmRequest = Message<"koinon.agent.v1alpha1.SetAgentKee
  * Use `create(SetAgentKeepWarmRequestSchema)` to create a new message.
  */
 export const SetAgentKeepWarmRequestSchema: GenMessage<SetAgentKeepWarmRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 24);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 32);
 
 /**
  * SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
@@ -931,7 +1176,7 @@ export type SetAgentKeepWarmResponse = Message<"koinon.agent.v1alpha1.SetAgentKe
  * Use `create(SetAgentKeepWarmResponseSchema)` to create a new message.
  */
 export const SetAgentKeepWarmResponseSchema: GenMessage<SetAgentKeepWarmResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 25);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 33);
 
 /**
  * RunAgentTriggerRequest names the trigger to fire.
@@ -962,7 +1207,7 @@ export type RunAgentTriggerRequest = Message<"koinon.agent.v1alpha1.RunAgentTrig
  * Use `create(RunAgentTriggerRequestSchema)` to create a new message.
  */
 export const RunAgentTriggerRequestSchema: GenMessage<RunAgentTriggerRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 26);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 34);
 
 /**
  * RunAgentTriggerResponse names the task the fire created.
@@ -981,7 +1226,7 @@ export type RunAgentTriggerResponse = Message<"koinon.agent.v1alpha1.RunAgentTri
  * Use `create(RunAgentTriggerResponseSchema)` to create a new message.
  */
 export const RunAgentTriggerResponseSchema: GenMessage<RunAgentTriggerResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 27);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 35);
 
 /**
  * AgentStatus is the agent lifecycle (ADR 0020).
@@ -1190,6 +1435,33 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof SetAgentKeepWarmRequestSchema;
     output: typeof SetAgentKeepWarmResponseSchema;
+  },
+  /**
+   * GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,
+   * the template's values, what the next sandbox gets, and the platform bounds an override must
+   * stay inside (ADR 0083). Admins and owners only.
+   *
+   * @generated from rpc koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources
+   */
+  getAgentSandboxResources: {
+    methodKind: "unary";
+    input: typeof GetAgentSandboxResourcesRequestSchema;
+    output: typeof GetAgentSandboxResourcesResponseSchema;
+  },
+  /**
+   * SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left
+   * empty so the template's value and then the platform default apply. A value outside the
+   * platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the
+   * model it is a setting of the agent, not a new version; a change recreates the sandbox at the
+   * next run (the size is part of the sandbox spec hash). Audited, with the old and the new
+   * override. Admins and owners only.
+   *
+   * @generated from rpc koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources
+   */
+  setAgentSandboxResources: {
+    methodKind: "unary";
+    input: typeof SetAgentSandboxResourcesRequestSchema;
+    output: typeof SetAgentSandboxResourcesResponseSchema;
   },
   /**
    * RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would

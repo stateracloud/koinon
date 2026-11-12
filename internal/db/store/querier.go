@@ -1316,6 +1316,9 @@ type Querier interface {
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
 	// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
+	// An agent's sandbox resource override (NULL: follow the version's template values, then the platform
+	// default; ADR 0083). The API checks the platform bounds. Not a new version.
+	SetAgentSandboxResources(ctx context.Context, arg SetAgentSandboxResourcesParams) (Agent, error)
 	// An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
 	SetAgentThinking(ctx context.Context, arg SetAgentThinkingParams) (Agent, error)
 	// The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of

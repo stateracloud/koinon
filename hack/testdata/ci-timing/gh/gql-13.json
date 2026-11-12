@@ -1,0 +1,50 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "number": 13,
+    "mergedAt": "2026-11-02T08:00:00Z",
+    "createdAt": "2026-11-02T07:00:00Z",
+    "headRefName": "docs/13-c",
+    "changedFiles": 1,
+    "files": {
+     "nodes": [
+      {
+       "path": "README.md"
+      }
+     ]
+    },
+    "timelineItems": {
+     "nodes": []
+    },
+    "headCommit": {
+     "nodes": [
+      {
+       "commit": {
+        "committedDate": "2026-11-02T07:00:00Z",
+        "pushedDate": null,
+        "checkSuites": {
+         "nodes": [
+          {
+           "createdAt": "2026-11-02T07:30:00Z"
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "allCommits": {
+     "totalCount": 1,
+     "nodes": [
+      {
+       "commit": {
+        "oid": "ddd444"
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

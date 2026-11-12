@@ -50,6 +50,12 @@ const (
 	// AgentServiceSetAgentKeepWarmProcedure is the procedure name of the AgentService's
 	// SetAgentKeepWarm RPC.
 	AgentServiceSetAgentKeepWarmProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentKeepWarm"
+	// AgentServiceGetAgentSandboxResourcesProcedure is the procedure name of the AgentService's
+	// GetAgentSandboxResources RPC.
+	AgentServiceGetAgentSandboxResourcesProcedure = "/koinon.agent.v1alpha1.AgentService/GetAgentSandboxResources"
+	// AgentServiceSetAgentSandboxResourcesProcedure is the procedure name of the AgentService's
+	// SetAgentSandboxResources RPC.
+	AgentServiceSetAgentSandboxResourcesProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentSandboxResources"
 	// AgentServiceRunAgentTriggerProcedure is the procedure name of the AgentService's RunAgentTrigger
 	// RPC.
 	AgentServiceRunAgentTriggerProcedure = "/koinon.agent.v1alpha1.AgentService/RunAgentTrigger"
@@ -131,6 +137,21 @@ var (
 			Procedure:  AgentServiceSetAgentKeepWarmProcedure,
 		}
 	})
+	agentServiceGetAgentSandboxResourcesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("GetAgentSandboxResources"),
+			Procedure:        AgentServiceGetAgentSandboxResourcesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	agentServiceSetAgentSandboxResourcesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("SetAgentSandboxResources"),
+			Procedure:  AgentServiceSetAgentSandboxResourcesProcedure,
+		}
+	})
 	agentServiceRunAgentTriggerSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -189,6 +210,17 @@ type AgentServiceClient interface {
 	// setting of the agent, not a new version. Audited, with the old and the new value. Fails with
 	// FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
 	SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error)
+	// GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,
+	// the template's values, what the next sandbox gets, and the platform bounds an override must
+	// stay inside (ADR 0083). Admins and owners only.
+	GetAgentSandboxResources(context.Context, *v1alpha1.GetAgentSandboxResourcesRequest) (*v1alpha1.GetAgentSandboxResourcesResponse, error)
+	// SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left
+	// empty so the template's value and then the platform default apply. A value outside the
+	// platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the
+	// model it is a setting of the agent, not a new version; a change recreates the sandbox at the
+	// next run (the size is part of the sandbox spec hash). Audited, with the old and the new
+	// override. Admins and owners only.
+	SetAgentSandboxResources(context.Context, *v1alpha1.SetAgentSandboxResourcesRequest) (*v1alpha1.SetAgentSandboxResourcesResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -246,6 +278,17 @@ type AgentServiceHandler interface {
 	// setting of the agent, not a new version. Audited, with the old and the new value. Fails with
 	// FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01).
 	SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error)
+	// GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,
+	// the template's values, what the next sandbox gets, and the platform bounds an override must
+	// stay inside (ADR 0083). Admins and owners only.
+	GetAgentSandboxResources(context.Context, *v1alpha1.GetAgentSandboxResourcesRequest) (*v1alpha1.GetAgentSandboxResourcesResponse, error)
+	// SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left
+	// empty so the template's value and then the platform default apply. A value outside the
+	// platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the
+	// model it is a setting of the agent, not a new version; a change recreates the sandbox at the
+	// next run (the size is part of the sandbox spec hash). Audited, with the old and the new
+	// override. Admins and owners only.
+	SetAgentSandboxResources(context.Context, *v1alpha1.SetAgentSandboxResourcesRequest) (*v1alpha1.SetAgentSandboxResourcesResponse, error)
 	// RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
 	// at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
 	// Admins and owners only.
@@ -270,6 +313,8 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceSetAgentModelSpec(), Handler: adapter.setAgentModel},
 		connect.Method{Spec: agentServiceSetAgentThinkingSpec(), Handler: adapter.setAgentThinking},
 		connect.Method{Spec: agentServiceSetAgentKeepWarmSpec(), Handler: adapter.setAgentKeepWarm},
+		connect.Method{Spec: agentServiceGetAgentSandboxResourcesSpec(), Handler: adapter.getAgentSandboxResources},
+		connect.Method{Spec: agentServiceSetAgentSandboxResourcesSpec(), Handler: adapter.setAgentSandboxResources},
 		connect.Method{Spec: agentServiceRunAgentTriggerSpec(), Handler: adapter.runAgentTrigger},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
 	)
@@ -316,6 +361,14 @@ func (UnimplementedAgentServiceHandler) SetAgentThinking(context.Context, *v1alp
 
 func (UnimplementedAgentServiceHandler) SetAgentKeepWarm(context.Context, *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) GetAgentSandboxResources(context.Context, *v1alpha1.GetAgentSandboxResourcesRequest) (*v1alpha1.GetAgentSandboxResourcesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) SetAgentSandboxResources(context.Context, *v1alpha1.SetAgentSandboxResourcesRequest) (*v1alpha1.SetAgentSandboxResourcesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources is not implemented")
 }
 
 func (UnimplementedAgentServiceHandler) RunAgentTrigger(context.Context, *v1alpha1.RunAgentTriggerRequest) (*v1alpha1.RunAgentTriggerResponse, error) {
@@ -405,6 +458,22 @@ func (c *agentServiceClient) SetAgentThinking(ctx context.Context, req *v1alpha1
 func (c *agentServiceClient) SetAgentKeepWarm(ctx context.Context, req *v1alpha1.SetAgentKeepWarmRequest) (*v1alpha1.SetAgentKeepWarmResponse, error) {
 	var res v1alpha1.SetAgentKeepWarmResponse
 	if err := c.client.CallUnary(ctx, agentServiceSetAgentKeepWarmSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) GetAgentSandboxResources(ctx context.Context, req *v1alpha1.GetAgentSandboxResourcesRequest) (*v1alpha1.GetAgentSandboxResourcesResponse, error) {
+	var res v1alpha1.GetAgentSandboxResourcesResponse
+	if err := c.client.CallUnary(ctx, agentServiceGetAgentSandboxResourcesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) SetAgentSandboxResources(ctx context.Context, req *v1alpha1.SetAgentSandboxResourcesRequest) (*v1alpha1.SetAgentSandboxResourcesResponse, error) {
+	var res v1alpha1.SetAgentSandboxResourcesResponse
+	if err := c.client.CallUnary(ctx, agentServiceSetAgentSandboxResourcesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -542,6 +611,30 @@ func (h agentServiceHandler) setAgentKeepWarm(ctx context.Context, _ connect.Spe
 		return err
 	}
 	res, err := h.svc.SetAgentKeepWarm(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) getAgentSandboxResources(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetAgentSandboxResourcesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetAgentSandboxResources(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) setAgentSandboxResources(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentSandboxResourcesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentSandboxResources(ctx, &req)
 	if err != nil {
 		return err
 	}

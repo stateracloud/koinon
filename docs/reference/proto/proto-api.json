@@ -60,6 +60,15 @@
               "deprecated": false
             },
             {
+              "name": "GetAgentSandboxResources",
+              "description": "GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,\nthe template's values, what the next sandbox gets, and the platform bounds an override must\nstay inside (ADR 0083). Admins and owners only.",
+              "requestType": "koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest",
+              "responseType": "koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListAgents",
               "description": "ListAgents returns the org's agents, oldest first. Viewers and above.",
               "requestType": "koinon.agent.v1alpha1.ListAgentsRequest",
@@ -100,6 +109,15 @@
               "description": "SetAgentModel sets the agent's model, or clears it with \"default\". It is a setting of the\nagent, not a new version: it applies to the agent's next run. The model must be one the org\nserves and has a price for. Audited, with the old and the new value. Admins and owners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentModelRequest",
               "responseType": "koinon.agent.v1alpha1.SetAgentModelResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetAgentSandboxResources",
+              "description": "SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left\nempty so the template's value and then the platform default apply. A value outside the\nplatform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the\nmodel it is a setting of the agent, not a new version; a change recreates the sandbox at the\nnext run (the size is part of the sandbox spec hash). Audited, with the old and the new\noverride. Admins and owners only.",
+              "requestType": "koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest",
+              "responseType": "koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -422,8 +440,17 @@
               "description": "The agent's own model setting (SetAgentModel); empty when it follows the version and the org\ndefault. When set it wins over `model`, which is the latest version's."
             },
             {
-              "name": "keep_warm",
+              "name": "sandbox_resources",
               "number": 25,
+              "type": "koinon.agent.v1alpha1.SandboxResources",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when\nit follows the template and the platform default."
+            },
+            {
+              "name": "keep_warm",
+              "number": 26,
               "type": "bool",
               "label": "singular",
               "oneof": "",
@@ -432,7 +459,7 @@
             },
             {
               "name": "keep_warm_granted",
-              "number": 26,
+              "number": 27,
               "type": "bool",
               "label": "singular",
               "oneof": "",
@@ -712,6 +739,51 @@
           ]
         },
         {
+          "name": "GetAgentSandboxResourcesRequest",
+          "fullName": "koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "GetAgentSandboxResourcesRequest names the agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentSandboxResourcesResponse",
+          "fullName": "koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "GetAgentSandboxResourcesResponse holds the state.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "state",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.SandboxResourcesState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "GrantBinding",
           "fullName": "koinon.agent.v1alpha1.GrantBinding",
           "file": "koinon/agent/v1alpha1/agent.proto",
@@ -883,6 +955,177 @@
           ]
         },
         {
+          "name": "SandboxBounds",
+          "fullName": "koinon.agent.v1alpha1.SandboxBounds",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SandboxBounds are the platform's range for each of the four values (chart sandbox.resources.bounds).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "cpu_request",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.SandboxRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cpu_limit",
+              "number": 2,
+              "type": "koinon.agent.v1alpha1.SandboxRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "memory_request",
+              "number": 3,
+              "type": "koinon.agent.v1alpha1.SandboxRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "memory_limit",
+              "number": 4,
+              "type": "koinon.agent.v1alpha1.SandboxRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SandboxRange",
+          "fullName": "koinon.agent.v1alpha1.SandboxRange",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SandboxRange bounds one value. An empty min or max is unbounded on that side.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "min",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SandboxResources",
+          "fullName": "koinon.agent.v1alpha1.SandboxResources",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SandboxResources are the four sandbox sizing values, as Kubernetes quantities such as \"250m\" or\n\"2Gi\". An empty value is unset.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "cpu_request",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cpu_limit",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "memory_request",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "memory_limit",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SandboxResourcesState",
+          "fullName": "koinon.agent.v1alpha1.SandboxResourcesState",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SandboxResourcesState is the agent's sandbox sizing and where it comes from.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "override",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.SandboxResources",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The agent's own override; empty values follow the template."
+            },
+            {
+              "name": "template",
+              "number": 2,
+              "type": "koinon.agent.v1alpha1.SandboxResources",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The active version's (or, before activation, the latest version's) template values; empty\nvalues take the platform default."
+            },
+            {
+              "name": "effective",
+              "number": 3,
+              "type": "koinon.agent.v1alpha1.SandboxResources",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "What the next sandbox gets: override, else template, else platform default, clamped to the bounds."
+            },
+            {
+              "name": "bounds",
+              "number": 4,
+              "type": "koinon.agent.v1alpha1.SandboxBounds",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The platform bounds an override must stay inside."
+            },
+            {
+              "name": "memory_request_equals_limit",
+              "number": 5,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whether the platform raises the memory request to the memory limit (Kata, ADR 0083); a memory\nrequest in an override then has no effect."
+            }
+          ]
+        },
+        {
           "name": "ServedModel",
           "fullName": "koinon.agent.v1alpha1.ServedModel",
           "file": "koinon/agent/v1alpha1/agent.proto",
@@ -1010,6 +1253,60 @@
               "name": "model",
               "number": 1,
               "type": "koinon.agent.v1alpha1.GetAgentModelResponse",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentSandboxResourcesRequest",
+          "fullName": "koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentSandboxResourcesRequest sets the agent's override.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "resources",
+              "number": 3,
+              "type": "koinon.agent.v1alpha1.SandboxResources",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The whole override: a value left empty is cleared."
+            }
+          ]
+        },
+        {
+          "name": "SetAgentSandboxResourcesResponse",
+          "fullName": "koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "state",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.SandboxResourcesState",
               "label": "singular",
               "oneof": "",
               "deprecated": false,

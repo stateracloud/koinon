@@ -45,6 +45,12 @@ t0=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 
+# The push registry and the pull-through caches (#45) outlive the cluster; they start before it so a
+# cache is warm for the first pull, and join the cluster's network once it exists.
+step "local registry and pull-through caches"
+"$here/registry.sh" start
+done_step registry-start
+
 # The add-ons do not depend on each other once the cluster is up (#572): fetch the three manifests together,
 # apply them, then wait for the rollouts together. Only OpenShell still waits for Agent Sandbox (and the
 # RuntimeClass, applied before). `bg` starts a part in its own process group, `wait_all` fails when any part
@@ -64,6 +70,10 @@ else
   kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --config "$here/kind-config.yaml" --wait 120s
 fi
 done_step kind
+
+step "registry attach"
+"$here/registry.sh" attach "$CLUSTER"
+done_step registry-attach
 
 step "fetch the add-on manifests (kube-network-policies $KNP_VERSION, CloudNativePG $CNPG_VERSION, Agent Sandbox $AS_VERSION)"
 bg "$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"

@@ -1,0 +1,28 @@
+{
+ "workflow_runs": [
+  {
+   "id": 101,
+   "name": "ci",
+   "event": "pull_request",
+   "conclusion": "success",
+   "head_sha": "bbb222",
+   "pull_requests": []
+  },
+  {
+   "id": 102,
+   "name": "ci",
+   "event": "pull_request",
+   "conclusion": "success",
+   "head_sha": "zzz999",
+   "pull_requests": []
+  },
+  {
+   "id": 103,
+   "name": "claims",
+   "event": "pull_request",
+   "conclusion": "success",
+   "head_sha": "aaa111",
+   "pull_requests": []
+  }
+ ]
+}

@@ -48,7 +48,7 @@ A spike on 2026-10-22 rebuilt the flavor on `@opencode/cli` 2.0.24 (tag `v2.0.24
 
 1. The OpenCode flavor uses **`@opencode/cli` 2.0.24 only**, the `linux-x64` and `linux-arm64`
    npm tarballs pinned by sha256 (checked against npm's sha512 integrity). OpenCode 1.x support is
-   dropped.
+   dropped. _(Changed: the pin is 2.2.6; see the amendments below, 2026-10-28 and later.)_
 2. **Configuration** is `/etc/koinon/opencode/opencode.jsonc`, read-only in the image and made the
    global config with `OPENCODE_CONFIG_DIR`. It defines the `koinon` provider
    (`aisdk:@ai-sdk/openai-compatible`) and the `koinon` MCP server (`codemode: false`), sets

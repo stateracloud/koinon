@@ -1,6 +1,6 @@
 # 0012. Cross-org sharing through links with exposure profiles
 
-- Status: Accepted
+- Status: Accepted; who pays amended by [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#12](../design.md)
 
@@ -23,6 +23,7 @@ allowed to do.
   - a rate limit;
   - a budget.
 - The consumer org pays.
+  _(Changed by [0065](0065-work-model-tasks-inbox.md): the called agent spends its own budget and uses its own grants. The link's budget is a cap on the calls it admits, not who pays.)_
 - Calls run in the provider org. Approvals go to the provider org's approvers.
 
 ## Alternatives considered

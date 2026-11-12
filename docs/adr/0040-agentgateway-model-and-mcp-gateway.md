@@ -2,8 +2,9 @@
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below)
 - Date: 2026-10-21
+- Amended by: [0097](0097-koinon-owned-gateway.md) (supersedes in part decisions 1, 2 and 6; agentgateway becomes the first driver, not the destination)
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
-- Verification: Pending: agentgateway spike (deployment mode, ExtMCP routing) and OpenShell spike (old issue 3)
+- Verification: the OpenShell spike is done, see [0048](0048-openshell-spike-results.md); the agentgateway spike (deployment mode, ExtMCP routing) was Pending (old issue 3)
 
 ## Context
 
@@ -33,23 +34,23 @@ similar with no enterprise gating of these features; Kubernetes-native; no CNI-s
 ## Decision
 
 1. **agentgateway** (Linux Foundation, Apache-2.0) is Koinon's model gateway. LiteLLM is removed
-   from the architecture.
+   from the architecture. _(Changed by [0097](0097-koinon-owned-gateway.md): agentgateway is the first driver behind Koinon's own gateway, not the destination.)_
 2. agentgateway is also Koinon's **MCP gateway**: the per-agent progressive endpoint from decision
    14, tool-level authorization (CEL on `mcp.tool.name`, `mcp.tool.arguments` and JWT claims) and
-   the interception point for ask-tier tools (ADR 0042).
+   the interception point for ask-tier tools (ADR 0042). _(Changed by [0097](0097-koinon-owned-gateway.md), step 2: MCP targets, credential injection and the ask target move into Koinon's MCP path.)_
 3. **Model path.** For each agent the reconciler renders an OpenShell provider record pointing at
    the in-cluster agentgateway host, using a custom provider profile. The agent's agentgateway API
    key is the provider credential: the sandbox only sees an OpenShell placeholder, which the
    supervisor swaps for the real key on requests to agentgateway. The harness's base URL
    (`OPENAI_BASE_URL`, `baseURL`, `base_url`, depending on flavor) points at agentgateway.
 4. **Provider keys** live in Vault/OpenBao and are loaded by agentgateway; they never reach the
-   sandbox or the OpenShell provider records.
+   sandbox or the OpenShell provider records. _(Changed by [0056](0056-model-providers-pricing-and-budgets-per-org.md): provider keys are envelope-encrypted in Postgres. They still never reach the sandbox or the provider records.)_
 5. **Cost data**: agentgateway's built-in price catalog yields `llm.cost` per request; access logs or
    OTel spans carry org, agent, ticket and run attribution and feed Koinon's spend ledger
    (ADR 0041).
 6. Koinon talks to agentgateway only through a `ModelGateway` interface (keys, limits, spend
    ingestion) and an `MCPGateway` interface (per-agent endpoints, tool rules), so another gateway can
-   replace it.
+   replace it. _(Changed: only `ModelGateway` exists and it carries MCP; see the amendment of 2026-10-26 below and [0097](0097-koinon-owned-gateway.md).)_
 
 ```mermaid
 flowchart LR
