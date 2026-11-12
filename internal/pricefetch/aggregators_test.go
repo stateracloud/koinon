@@ -195,6 +195,15 @@ func commitJSON(sha string, at time.Time) string {
 	return fmt.Sprintf(`[{"sha":%q,"commit":{"committer":{"date":%q}}}]`, sha, at.UTC().Format(time.RFC3339))
 }
 
+// commitsJSON is a commit list, newest first, as pairs of sha and age before t0.
+func commitsJSON(pairs ...any) string {
+	var out []string
+	for i := 0; i < len(pairs); i += 2 {
+		out = append(out, strings.Trim(commitJSON(pairs[i].(string), t0.Add(-pairs[i+1].(time.Duration))), "[]"))
+	}
+	return "[" + strings.Join(out, ",") + "]"
+}
+
 const (
 	shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -239,15 +248,46 @@ func TestLiteLLMPinsTheCommit(t *testing.T) {
 		t.Errorf("the file must be read at the commit: raw path %v, URL %s", g.rawPath.Load(), snap.URL)
 	}
 
-	// A commit reverted within a day: the bad commit (1h old) and its revert (30m old) are both in
-	// the cooldown, so the newest old-enough commit is still the last good one.
+	// A commit reverted within a day. The bad commit X (shaB) landed 30h ago and its revert 20h
+	// ago, so X is old enough but was replaced within a day: it is never pinned, the commit before
+	// it is. The revert itself is still in its cooldown until it is 24h old.
+	const shaC = "cccccccccccccccccccccccccccccccccccccccc"
+	g.commits.Store(commitsJSON(shaC, 20*time.Hour, shaB, 30*time.Hour, shaA, 100*time.Hour))
+	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaA {
+		t.Errorf("a commit reverted within a day must be skipped: %v %+v", err, snap)
+	}
+	// Once the revert is a day old it is the pin, and the bad commit is still never read.
+	g.commits.Store(commitsJSON(shaC, 25*time.Hour, shaB, 35*time.Hour, shaA, 100*time.Hour))
+	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaC {
+		t.Errorf("the revert is the pin once it is a day old: %v %+v", err, snap)
+	}
+	// A 1h-old commit alone is in the cooldown.
 	g.commits.Store(commitJSON(shaB, t0.Add(-time.Hour)))
 	if _, err := l.Fetch(context.Background(), t0); !errors.Is(err, ErrNoOldCommit) {
 		t.Errorf("a commit of 1h: err %v, want ErrNoOldCommit", err)
 	}
-	g.commits.Store(commitJSON(shaA, t0.Add(-30*time.Hour)))
+	// The stability boundary: the newest commit (shaC) is still in its cooldown, so the pin is
+	// shaB when its successor followed it by a day or more, and shaA when it followed within 23h59m.
+	g.commits.Store(commitsJSON(shaC, 23*time.Hour, shaB, 47*time.Hour, shaA, 100*time.Hour))
+	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaB {
+		t.Errorf("successor exactly 24h later: %v %+v", err, snap)
+	}
+	g.commits.Store(commitsJSON(shaC, 23*time.Hour, shaB, 46*time.Hour+59*time.Minute, shaA, 100*time.Hour))
 	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaA {
-		t.Errorf("the revert's predecessor: %v %+v", err, snap)
+		t.Errorf("successor 23h59m later: %v %+v", err, snap)
+	}
+	// Every old commit was replaced within a day: nothing is pinned.
+	g.commits.Store(commitsJSON(shaC, 40*time.Hour, shaB, 50*time.Hour))
+	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaC {
+		t.Errorf("the newest commit has no successor: %v %+v", err, snap)
+	}
+	g.commits.Store(commitsJSON(shaC, 25*time.Hour, shaB, 30*time.Hour, shaA, 40*time.Hour))
+	if snap, err = l.Fetch(context.Background(), t0); err != nil || snap.CommitSHA != shaC {
+		t.Errorf("newest old commit: %v %+v", err, snap)
+	}
+	g.commits.Store(commitsJSON(shaC, 23*time.Hour, shaB, 30*time.Hour, shaA, 40*time.Hour))
+	if _, err := l.Fetch(context.Background(), t0); !errors.Is(err, ErrNoOldCommit) {
+		t.Errorf("every old commit replaced within a day: err %v, want ErrNoOldCommit", err)
 	}
 
 	// Things that are not a commit.

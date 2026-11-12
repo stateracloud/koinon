@@ -67,12 +67,14 @@ is refused and counted as a failed fetch.
 | `genai-prices` | `api.github.com`, `raw.githubusercontent.com` | newest commit at least 24h old | MIT | `anthropic`, `deepseek`, `openai` | the same |
 | `models-dev` | `models.dev` | none | MIT | `anthropic`, `deepseek`, `openai` | none: proposals only |
 
-- A GitHub source is read at a commit. The adapter asks for the newest commit of the file that is at
-  least 24 hours old, checks the committer date itself (a server may ignore `until`), and reads the
-  file at that SHA. The SHA and commit date are in the fetch row and in each proposal's provenance. A
-  commit that is reverted within a day never reaches a proposal.
+- A GitHub source is read at a commit. The adapter lists the newest 30 commits of the file and pins
+  the newest one that is at least 24 hours old and was not replaced by a later commit of the file
+  within 24 hours of it, checks the committer dates itself (a server may ignore `until`), and reads
+  the file at that SHA. The SHA is in the fetch row; the SHA, the commit date and the licence are in
+  each proposal's provenance. A commit that is reverted or replaced within a day is skipped for good.
+  Dates are the committer's own, so this bounds a mistake, not a maintainer who backdates a commit.
 - LiteLLM floats are parsed from their decimal text, never as float64.
-- The licence of each source is recorded in the fetch row (`pricefetch.LicenceLiteLLM` and the like).
+- The licence of each source is recorded in the snapshot and the provenance (`pricefetch.LicenceLiteLLM` and the like).
 - `--prices-refresh=auto` runs an adapter only while a provider of one of its types is in use; `on`
   runs all of them.
 - Two sources that may auto-apply and return different values for a model send both proposals to

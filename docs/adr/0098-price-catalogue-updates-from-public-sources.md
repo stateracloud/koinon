@@ -164,7 +164,12 @@ off (ADR 0068), with no release.
 4. **Source pinning.** A GitHub-hosted source (LiteLLM, genai-prices) is read at a commit, never at
    a branch head. The adapter takes the newest commit of the default branch that is at least 24
    hours old, and reads the file at that SHA. A broken or malicious commit that is reverted within a
-   day therefore never reaches a proposal. This is ADR 0079's cooldown applied to data. OpenRouter
+   day therefore never reaches a proposal. Amended 2026-11-12: the adapter reads the newest 30
+   commits of the file and pins the newest commit that is at least 24 hours old **and** whose
+   successor, the next commit that touched the file, came at least 24 hours after it (or that has
+   none). A bad commit that was replaced within a day is skipped for good, not only while it is
+   young. Committer dates are set by whoever commits, so this bounds an honest mistake, not a
+   maintainer who backdates a commit. This is ADR 0079's cooldown applied to data. OpenRouter
    has no commit; for it a value counts only after two fetches at least 24 hours apart returned it
    unchanged. models.dev `api.json` has no commit either, and it only ever makes proposals (decision
    7), so it needs no pinning rule.
@@ -200,18 +205,20 @@ holds. They are constants in code. Helm can tighten them, never loosen them.
 | Same set of priced buckets: no bucket added or removed (adding `cache_read` changes caching, ADR 0068) | required |
 | Each rate moves by at most this much, measured against the **last person-reviewed rate** (the default list or the last platform version a person wrote), so repeated small moves cannot add up | 25% up or down |
 | No rate goes to zero from a non-zero value | required |
-| Agreement: the model's primary source, where one exists (OpenRouter for `openrouter` providers), or else at least two independent sources with the same normalized value | required |
+| Agreement: the source is the model's primary source (OpenRouter for `openrouter` providers) or tracks the provider type first-hand (LiteLLM and genai-prices for `anthropic`, `deepseek` and `openai`, decision 2.2 amendment of 2026-11-12), and no other source that may auto-apply returns other values | required |
 | Pinning: a GitHub source at a commit at least 24 hours old; a live source unchanged across two fetches 24 hours apart | required |
 | At most this many entries auto-applied in one day; above it, all of that day's changes wait (a large batch looks like a broken source) | 10 |
 
-"Independent" means a separate maintainer and data path. models.dev's `openrouter` provider is a bot
-copy of OpenRouter's API, so it does not count as a second source for an OpenRouter route. For a
-direct Anthropic model there is no provider list, so two independent sources, such as OpenRouter and
-LiteLLM, must agree. models.dev never counts towards auto-apply (decision 7).
+Amended 2026-11-12: agreement is a veto, not a vote. A source that tracks the provider type
+first-hand may auto-apply on its own; if another source that may auto-apply returns other values for
+the model, both proposals wait for a person. models.dev's `openrouter` provider is a bot copy of
+OpenRouter's API and is not read. For a direct Anthropic model there is no provider list, so LiteLLM
+or genai-prices supply the price. models.dev never counts towards auto-apply or agreement
+(decision 7).
 
 **Waits for a person** (class `needs_review`): a new model (until the 2026-11-07 amendment below), a new or removed bucket, a tier change, a
-move over 25%, a price only one aggregator reports, sources that disagree, and any rule above that
-fails. The proposal says which rule failed, with the numbers.
+move over 25%, a price from a source that does not track the provider type first-hand, sources that
+disagree, and any rule above that fails. The proposal says which rule failed, with the numbers.
 
 **Needs a second, typed confirmation** (class `confirm`): the admin types the model `id` to accept.
 

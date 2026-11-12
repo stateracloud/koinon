@@ -40,6 +40,7 @@ type sourceAdapter struct {
 	model     string
 	in, out   string
 	commitAge time.Duration
+	problems  []string // the source returns the model, but Koinon cannot read its price
 }
 
 func (f *sourceAdapter) Name() string { return f.name }
@@ -47,6 +48,9 @@ func (f *sourceAdapter) Fetch(_ context.Context, now time.Time) (pricefetch.Snap
 	s := pricefetch.Snapshot{
 		Source: f.name, URL: "https://example.com/fake", Licence: "fake", FetchedAt: now, SHA256: strings.Repeat("1", 64), Count: 1,
 		Offers: []pricefetch.Offer{{Model: f.model, ProviderType: "openai", Spec: pricing.Spec{Prices: pricing.Wire{Input: f.in, Output: f.out}}, MaxOutput: 1000}},
+	}
+	if len(f.problems) > 0 {
+		s.Offers[0].Problems = f.problems
 	}
 	if f.commitAge > 0 {
 		s.CommitSHA, s.CommittedAt = strings.Repeat("a", 40), now.Add(-f.commitAge)
@@ -147,6 +151,19 @@ var _ = Describe("the price refresh with several sources", func() {
 			Expect(p.Class).To(Equal(pricefetch.ClassNeedsReview))
 			Expect(p.FailedRules).To(ContainSubstring("returns other values"))
 		}
+	})
+
+	It("does not let a source that cannot read a model veto one that can", func(ctx SpecContext) {
+		m := uniq()
+		src := openaiList("2000-01-01.1", m)
+		now := time.Now()
+		ll := &sourceAdapter{name: pricefetch.SourceLiteLLM, model: m, in: "1.1", out: "2.2", commitAge: 30 * time.Hour}
+		gp := &sourceAdapter{name: pricefetch.SourceGenaiPrices, model: m, in: "1.1", out: "2.2", commitAge: 30 * time.Hour, problems: []string{"a list of price sets"}}
+		r := newRefresher(src, &now, gp, ll)
+		res, err := r.Run(ctx, prices.TriggerCLI, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Applied).To(Equal(1))
+		Expect(proposals(ctx, r, m, "accepted")).To(HaveKey(pricefetch.SourceLiteLLM))
 	})
 
 	It("never applies a models.dev proposal, however stable and however many agree", func(ctx SpecContext) {

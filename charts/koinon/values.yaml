@@ -499,7 +499,9 @@ secrets:
 #   enabled: true: on. koinon-api fetches every source it has an adapter for (OpenRouter, LiteLLM,
 #     genai-prices and models.dev), whatever providers exist.
 # IN AUTO AND ON, SMALL PRICE CHANGES APPLY BY THEMSELVES: a change of at most maxChangePercent
-# (default 25) against the last reviewed price, and only after two fetches 24 hours apart returned it,
+# (default 25) against the last reviewed price, and only once it is stable (OpenRouter: two fetches 24
+# hours apart returned it; the GitHub sources: it is in a commit at least a day old that no later commit
+# replaced within a day),
 # is written to the platform price list with no person involved, at most maxAutoPerDay (default 10) a
 # day. Larger changes wait as proposals. So a new install has no OpenRouter price estimate for its
 # first day: koinon-api logs a warning and counts the unpriced models (koinon_price_unpriced_models)

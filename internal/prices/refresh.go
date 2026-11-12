@@ -393,7 +393,7 @@ func (r *Refresher) proposeModel(ctx context.Context, q *store.Queries, v priceV
 	}
 	hash := pricefetch.SpecHash(o.Spec)
 	if len(o.Problems) > 0 {
-		hash = pricefetch.DigestBody([]byte(strings.Join(o.Problems, "\n")))
+		hash = unreadablePrefix + pricefetch.DigestBody([]byte(strings.Join(o.Problems, "\n")))
 	}
 	stable := false
 	if origin == OriginFetch {
@@ -630,6 +630,10 @@ func storedStable(ctx context.Context, q *store.Queries, source, model, valuesHa
 	return obs.ValuesHash == valuesHash && obs.Fetches >= 2 && obs.LastSeen.Time.Sub(obs.FirstSeen.Time) >= pricefetch.StabilityWindow, nil
 }
 
+// unreadablePrefix marks the observation hash of an offer a source returned but Koinon could not
+// read; such an observation says nothing about the model's price.
+const unreadablePrefix = "unreadable:"
+
 // ObservationMaxAge is how long a source's latest values for a model count when the sources are
 // compared: a source that is no longer fetched must not hold a model's proposals back for good.
 const ObservationMaxAge = 7 * 24 * time.Hour
@@ -655,6 +659,9 @@ func compareSources(ctx context.Context, q *store.Queries, source, providerType,
 			continue
 		}
 		switch {
+		case strings.HasPrefix(obs.ValuesHash, unreadablePrefix):
+			// The other source could not read the model (a price list that depends on the date, a
+			// bucket Koinon has no rate for): like a model it lacks, that is no disagreement.
 		case obs.ValuesHash == hash:
 			agreeing = append(agreeing, other)
 		case pricefetch.Agrees(providerType, other, nil):

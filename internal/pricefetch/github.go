@@ -58,14 +58,21 @@ type ghCommit struct {
 	} `json:"commit"`
 }
 
-// pinnedCommit returns the newest commit of the default branch that touches the file and is at
-// least CommitCooldown older than now. GitHub filters by `until` too, but a server that ignores it,
-// or a clock that differs, must not weaken the rule, so the date is checked here as well.
+// commitWindow is how many of the file's newest commits the adapter looks at.
+const commitWindow = 30
+
+// pinnedCommit returns the commit to read the file at: the newest commit C of the default branch
+// that touches the file such that C is at least CommitCooldown old and the next commit that touched
+// the file came at least CommitCooldown after C (or there is none). The second condition is what
+// makes a commit that is reverted or replaced within a day never reach a proposal: the bad commit
+// X is skipped for good, because its successor, the revert, followed it within a day, and the
+// commit before X is pinned instead. The dates are checked here and not left to the server's
+// `until`, which it may ignore.
 func (g githubFile) pinnedCommit(ctx context.Context, now time.Time) (sha string, at time.Time, err error) {
 	q := url.Values{}
 	q.Set("path", g.path)
-	q.Set("until", now.Add(-CommitCooldown).UTC().Format(time.RFC3339))
-	q.Set("per_page", "1")
+	q.Set("until", now.UTC().Format(time.RFC3339))
+	q.Set("per_page", fmt.Sprint(commitWindow))
 	body, _, err := httpGet(ctx, g.client, g.api+"/repos/"+g.repo+"/commits?"+q.Encode(), g.apiPin, g.name, "application/vnd.github+json")
 	if err != nil {
 		return "", time.Time{}, err
@@ -77,18 +84,26 @@ func (g githubFile) pinnedCommit(ctx context.Context, now time.Time) (sha string
 	if len(commits) == 0 {
 		return "", time.Time{}, fmt.Errorf("pricefetch: %s: the commit list is empty: %w", g.name, ErrNoOldCommit)
 	}
-	c := commits[0]
-	if !shaRE.MatchString(c.SHA) {
-		return "", time.Time{}, fmt.Errorf("pricefetch: %s: %q is not a commit SHA", g.name, c.SHA)
+	for _, c := range commits {
+		if !shaRE.MatchString(c.SHA) {
+			return "", time.Time{}, fmt.Errorf("pricefetch: %s: %q is not a commit SHA", g.name, c.SHA)
+		}
+		if c.Commit.Committer.Date.IsZero() {
+			return "", time.Time{}, fmt.Errorf("pricefetch: %s: commit %s has no date", g.name, c.SHA)
+		}
 	}
-	at = c.Commit.Committer.Date.UTC()
-	if at.IsZero() {
-		return "", time.Time{}, fmt.Errorf("pricefetch: %s: commit %s has no date", g.name, c.SHA)
+	cutoff := now.Add(-CommitCooldown)
+	for i, c := range commits { // newest first
+		d := c.Commit.Committer.Date.UTC()
+		if d.After(cutoff) {
+			continue
+		}
+		if i > 0 && commits[i-1].Commit.Committer.Date.UTC().Sub(d) < CommitCooldown {
+			continue // replaced within a day: not stable
+		}
+		return c.SHA, d, nil
 	}
-	if at.After(now.Add(-CommitCooldown)) {
-		return "", time.Time{}, fmt.Errorf("pricefetch: %s: the newest commit %s is %s old, under the %s cooldown: %w", g.name, c.SHA, now.Sub(at).Round(time.Second), CommitCooldown, ErrNoOldCommit)
-	}
-	return c.SHA, at, nil
+	return "", time.Time{}, fmt.Errorf("pricefetch: %s: no commit of the file is both %s old and unchanged for %[3]s after it among the newest %d: %w", g.name, CommitCooldown, CommitCooldown, len(commits), ErrNoOldCommit)
 }
 
 // fetch reads the file at the pinned commit and returns the body with the commit's SHA, its date
