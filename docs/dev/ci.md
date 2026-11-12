@@ -463,6 +463,12 @@ that file and nowhere else.
   locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
   the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`
   (the gate), `hack/ci-changes-test.sh` and `hack/paths-test.sh` (the path rule).
+- **Fuzzing (`fuzz`, #684).** Advisory (`hack/ci-required.txt`), not part of the `go` gate. A change of a
+  package whose input is untrusted text (`internal/leakguard`, `internal/mcpsanitize`, `internal/tracing/scrub`;
+  path rule `job fuzz`) or of `hack/go-fuzz.sh` runs every fuzz target of those packages for 20 s each
+  (`FUZZTIME`). The targets are found by name, so a new `FuzzX` in one of them joins without a CI change. A
+  failing input is uploaded as `fuzz-inputs`; commit it under the package's `testdata/fuzz/` with the fix,
+  so it runs as a seed in every `go-test` run. The preflight gate `fuzz` runs the same script.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
