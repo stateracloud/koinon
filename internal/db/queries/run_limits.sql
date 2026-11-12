@@ -6,13 +6,13 @@
 
 -- name: GetAgentRunLimits :one
 -- The agent's overrides; a NULL column falls back to the agent version's value.
-SELECT org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+SELECT org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
        updated_by, updated_at
 FROM agent_run_limits
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
 -- name: ListAgentRunLimits :many
-SELECT org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+SELECT org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
        updated_by, updated_at
 FROM agent_run_limits
 WHERE org_id = @org_id
@@ -26,11 +26,43 @@ VALUES (@org_id, @agent_id, sqlc.narg(max_model_requests), (sqlc.narg(max_spend_
 ON CONFLICT (org_id, agent_id) DO UPDATE
 SET max_model_requests = EXCLUDED.max_model_requests, max_spend_usd = EXCLUDED.max_spend_usd,
     max_duration_secs = EXCLUDED.max_duration_secs, updated_by = EXCLUDED.updated_by, updated_at = now()
-RETURNING org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+RETURNING org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
           updated_by, updated_at;
 
 -- name: DeleteAgentRunLimits :execrows
-DELETE FROM agent_run_limits WHERE org_id = @org_id AND agent_id = @agent_id;
+-- Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns
+-- those two columns); clear the run overrides first (ClearAgentRunLimits).
+DELETE FROM agent_run_limits
+WHERE org_id = @org_id AND agent_id = @agent_id
+  AND max_continuations IS NULL AND task_spend_usd IS NULL;
+
+-- name: ClearAgentRunLimits :exec
+-- Clears the agent's run-limit overrides and leaves its continuation overrides.
+UPDATE agent_run_limits
+SET max_model_requests = NULL, max_spend_usd = NULL, max_duration_secs = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: GetAgentContinuationLimits :one
+-- The agent's continuation overrides (issue #99); NULL follows the template and the org.
+SELECT max_continuations, coalesce(task_spend_usd::text, '')::text AS task_spend_usd
+FROM agent_run_limits
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: SetAgentContinuationLimits :exec
+-- Replaces the agent's continuation overrides only; the run-limit overrides stay. NULL clears one.
+INSERT INTO agent_run_limits (org_id, agent_id, max_continuations, task_spend_usd, updated_by)
+VALUES (@org_id, @agent_id, sqlc.narg(max_continuations), (sqlc.narg(task_spend_usd)::text)::numeric, @updated_by)
+ON CONFLICT (org_id, agent_id) DO UPDATE
+SET max_continuations = EXCLUDED.max_continuations, task_spend_usd = EXCLUDED.task_spend_usd,
+    updated_by = EXCLUDED.updated_by, updated_at = now();
+
+-- name: GetTaskSpend :one
+-- What the task's runs have spent, by the ledger's settled cost: the figure the per-task cap is
+-- checked against (issue #99).
+SELECT coalesce(sum(s.cost_usd), 0)::text AS cost_usd
+FROM spend_entries s
+JOIN runs r ON r.org_id = s.org_id AND r.id = s.run_id
+WHERE s.org_id = @org_id AND r.task_id = @task_id;
 
 -- name: GetRunUsage :one
 -- What a run has used, from its ledger entries: one entry per model request through the agent's

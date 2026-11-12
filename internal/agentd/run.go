@@ -33,6 +33,7 @@ import (
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
 
@@ -280,6 +281,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r.own = runoutcome.New(runoutcome.Config{
 		DB: p.db, Queries: p.q, Run: run, Log: r.log, Now: p.cfg.Now,
 		Metrics: outcomeMetrics{p.cfg.Metrics}, Stop: r.stopped, Live: live.Add, LiveFlush: live.Flush,
+		AfterTimeLimit: scheduler.ContinueAfterTimeLimit,
 	})
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
 	r.tr = p.traceStart(ctx, run, r.own.Fenced(), r.log)

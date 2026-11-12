@@ -121,3 +121,12 @@ WHERE tasks.org_id = @org_id AND tasks.id = @id AND tasks.state = ANY((@from_sta
   AND @to_state::task_state IN ('completed', 'failed')
   AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.org_id = tasks.org_id AND runs.task_id = tasks.id AND runs.state = 'queued')
 RETURNING *;
+
+-- name: BumpTaskContinuation :one
+-- Counts one more continuation run on a task that is not ended, only while the count is below
+-- max (issue #99). No row: the limit is reached or the task has ended.
+UPDATE tasks
+SET continuation_count = continuation_count + 1
+WHERE org_id = @org_id AND id = @id AND continuation_count < @max::int
+  AND state NOT IN ('completed', 'canceled', 'failed')
+RETURNING *;

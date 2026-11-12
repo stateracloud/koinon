@@ -60,6 +60,9 @@ type Querier interface {
 	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
 	AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// Counts one more continuation run on a task that is not ended, only while the count is below
+	// max (issue #99). No row: the limit is reached or the task has ended.
+	BumpTaskContinuation(ctx context.Context, arg BumpTaskContinuationParams) (Task, error)
 	// asked | open -> canceled, for a run that ended without them being answered.
 	CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQuestionsForRunParams) ([]Question, error)
 	// Archiving an agent cancels every run it has not finished.
@@ -143,6 +146,8 @@ type Querier interface {
 	// One run restores at a time; a claim older than @lease_seconds is taken over. No row: nothing
 	// to restore, or another run is restoring.
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
+	// Clears the agent's run-limit overrides and leaves its continuation overrides.
+	ClearAgentRunLimits(ctx context.Context, arg ClearAgentRunLimitsParams) error
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	// koinon-reconciler, after an apply that took effect: the org's failures are over.
@@ -302,6 +307,8 @@ type Querier interface {
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
+	// Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns
+	// those two columns); clear the run overrides first (ClearAgentRunLimits).
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
 	DeleteCodeHostConnectionReading(ctx context.Context, arg DeleteCodeHostConnectionReadingParams) error
 	DeleteCodeHostConnectionRepos(ctx context.Context, arg DeleteCodeHostConnectionReposParams) (int64, error)
@@ -424,6 +431,8 @@ type Querier interface {
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
+	// The agent's continuation overrides (issue #99); NULL follows the template and the org.
+	GetAgentContinuationLimits(ctx context.Context, arg GetAgentContinuationLimitsParams) (GetAgentContinuationLimitsRow, error)
 	// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
 	GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
@@ -624,6 +633,9 @@ type Querier interface {
 	// The highest task timeline seq already sent to the harness by the task's
 	// other runs; messages after it are new for the next run.
 	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)
+	// What the task's runs have spent, by the ledger's settled cost: the figure the per-task cap is
+	// checked against (issue #99).
+	GetTaskSpend(ctx context.Context, arg GetTaskSpendParams) (string, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
@@ -1390,6 +1402,8 @@ type Querier interface {
 	SaveCodeHostPoll(ctx context.Context, arg SaveCodeHostPollParams) error
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
+	// Replaces the agent's continuation overrides only; the run-limit overrides stay. NULL clears one.
+	SetAgentContinuationLimits(ctx context.Context, arg SetAgentContinuationLimitsParams) error
 	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 	// decides how many of the requests the reconciler grants. Not a new version.
 	// Clearing the request clears the grant with it; a new request starts not granted until the next pass.
@@ -1462,6 +1476,9 @@ type Querier interface {
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOpenRouterModelEndpoints(ctx context.Context, arg SetOpenRouterModelEndpointsParams) (int64, error)
+	// The org's default per-task USD cap for continuation runs (issue #99); NULL is the platform
+	// default. It touches only this column, so the other settings stay.
+	SetOrgContinuationTaskSpend(ctx context.Context, arg SetOrgContinuationTaskSpendParams) error
 	// Sets or clears ('') the org's default model. The old value comes back for the audit event.
 	SetOrgDefaultModel(ctx context.Context, arg SetOrgDefaultModelParams) (string, error)
 	// The org's first model becomes its default; a default that is set stays.
