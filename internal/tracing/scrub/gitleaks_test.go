@@ -74,21 +74,57 @@ func TestGitleaksKnownShapes(t *testing.T) {
 	}
 }
 
-// The shapes the scrubber adds because gitleaks has no rule for them: when a gitleaks bump adds
-// one, this fails and the shape leaves gapKeyRE (see gitleaks.go).
-func TestGapShapesAreNotInGitleaks(t *testing.T) {
+// ownedSamples has one fake sample per Koinon-owned shape (scrub.OwnedShapes), and whether
+// gitleaks may match it as well. A shape gitleaks has no rule for must stay unmatched upstream: when
+// a bump adds a rule the test fails and the shape leaves the table. A shape that is ours because
+// gitleaks' rule is narrower (a truncated key, a legacy key) is only required to be redacted.
+var ownedSamples = map[string]struct {
+	in       string
+	upstream bool
+}{
+	"openrouter":                 {"x sk-or-v1-" + fake(fakeHex, 64, 0), false},
+	"anthropic-truncated":        {"x sk-ant-api03-" + fk(20), false},
+	"openai-legacy":              {"x sk-" + fk(48), false},
+	"google-oauth-token":         {"x ya29." + fk(40), false},
+	"google-oauth-client-secret": {"x GOCSPX-" + fk(28), false},
+}
+
+func TestOwnedShapes(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
-	for name, in := range map[string]string{
-		"openrouter":      "x sk-or-v1-" + fake(fakeHex, 64, 0),
-		"anthropic short": "x sk-ant-api03-" + fk(20),
-		"google oauth":    "x ya29." + fk(40),
-		"google client":   "x GOCSPX-" + fk(28),
-	} {
-		if ids, _ := scrub.GitleaksMatches(in); len(ids) > 0 {
-			t.Errorf("%s: gitleaks now covers it (%v): remove it from gapKeyRE", name, ids)
+	seen := map[string]bool{}
+	for _, o := range scrub.OwnedShapes() {
+		seen[o.Name] = true
+		if o.Reason == "" || o.Prefix == "" {
+			t.Errorf("%s: needs a prefix and a written reason", o.Name)
 		}
-		if out := s.Text(in); !strings.Contains(out, "[redacted:api-key]") || out[:2] != "x " {
-			t.Errorf("%s: not redacted: %q", name, out)
+		smp, ok := ownedSamples[o.Name]
+		if !ok {
+			t.Errorf("%s: no sample in ownedSamples", o.Name)
+			continue
+		}
+		if !strings.Contains(smp.in, o.Prefix) {
+			t.Errorf("%s: sample lacks prefix %q", o.Name, o.Prefix)
+		}
+		if ids, _ := scrub.GitleaksMatches(smp.in); !smp.upstream && len(ids) > 0 {
+			t.Errorf("%s: gitleaks now covers it (%v): remove it from ownedShapes", o.Name, ids)
+		}
+		if out := s.Text(smp.in); !strings.Contains(out, "[redacted:api-key]") || out[:2] != "x " {
+			t.Errorf("%s: not redacted: %q", o.Name, out)
+		}
+	}
+	for name := range ownedSamples {
+		if !seen[name] {
+			t.Errorf("sample %s has no shape in ownedShapes", name)
+		}
+	}
+}
+
+// The boundary rule applies to owned shapes: a longer word that ends in a prefix is not a key.
+func TestOwnedShapesLeftBoundary(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	for _, in := range []string{"task-" + fk(30), "risk-" + fk(30)} {
+		if out := s.Text(in); out != in {
+			t.Errorf("changed: %q -> %q", in, out)
 		}
 	}
 }

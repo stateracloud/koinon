@@ -53,3 +53,15 @@ func Counting(s *Scrubber, n *int) *Scrubber {
 
 // GitleaksNoFloor is the set of gitleaks rules the scrubber applies without their entropy floor.
 func GitleaksNoFloor() map[string]struct{} { return gitleaksNoFloor }
+
+// OwnedShape describes one hand-matched credential shape for the test that checks the table.
+type OwnedShape struct{ Name, Prefix, Reason string }
+
+// OwnedShapes lists the shapes the scrubber matches itself.
+func OwnedShapes() []OwnedShape {
+	out := make([]OwnedShape, len(ownedShapes))
+	for i, o := range ownedShapes {
+		out[i] = OwnedShape{o.name, o.prefix, o.reason}
+	}
+	return out
+}

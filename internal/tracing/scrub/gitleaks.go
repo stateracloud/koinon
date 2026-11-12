@@ -111,24 +111,67 @@ var gitleaksNoFloor = map[string]struct{}{
 	"slack-config-refresh-token":          {},
 }
 
-// gapKeyRE covers the shapes that matter to Koinon and that the pinned gitleaks set does not have
-// (checked against 8.30.1 by TestGapShapesAreNotInGitleaks, which fails when a gitleaks bump
-// starts to cover one: delete that alternative then):
-//   - sk-or-v1-: OpenRouter, a provider Koinon routes to (no gitleaks rule);
-//   - sk-ant-: the Anthropic prefix of any length, because a truncated or mistyped key is as
-//     sensitive as a whole one (gitleaks only knows the full 108-character shape);
-//   - ya29.: Google OAuth access tokens, GOCSPX-: Google OAuth client secrets.
-//
-// Interim list, tracked in issue #212 (exit condition there).
-//
-// Everything else about vendor keys is gitleaks'. The exit condition of this list is an upstream
-// rule for each shape (OpenRouter, ya29, GOCSPX) and the decision to drop the truncated-key
-// cover; it is not a place to add the next vendor: send that rule to gitleaks.
-var gapKeyRE = regexp.MustCompile(`sk-or-v1-[A-Za-z0-9]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|ya29\.[A-Za-z0-9_-]{20,}|GOCSPX-[A-Za-z0-9_-]{20,}`)
+// ownedShape is a credential shape the scrubber matches itself, because the pinned gitleaks set
+// has no rule for it or its rule is narrower than what a trace must cover. The table is the whole
+// list: every entry carries the reason it exists and a sample, and TestOwnedShapes checks each
+// one (the sample is redacted and gitleaks must not match it, so a bump that adds an upstream rule
+// fails the test and the entry is deleted). It is not a place to
+// add the next vendor: send that rule to gitleaks (exit condition of issue #212).
+type ownedShape struct {
+	name   string
+	prefix string // literal every match starts with; the cheap pre-filter
+	re     *regexp.Regexp
+	// reason is why gitleaks' rule does not do (issue #212, maintainer decision 2026-11-11).
+	reason string
+}
 
-func hasGapPrefix(in string) bool {
-	return strings.Contains(in, "sk-or-v1-") || strings.Contains(in, "sk-ant-") ||
-		strings.Contains(in, "ya29.") || strings.Contains(in, "GOCSPX-")
+var ownedShapes = []ownedShape{
+	{
+		name:   "openrouter",
+		prefix: "sk-or-v1-",
+		re:     regexp.MustCompile(`sk-or-v1-[A-Za-z0-9]{8,}`),
+		reason: "OpenRouter is a provider Koinon routes to and gitleaks has no rule for its key",
+	},
+	{
+		name:   "anthropic-truncated",
+		prefix: "sk-ant-",
+		re:     regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{8,}`),
+		reason: "a cut-off or mistyped Anthropic key is as sensitive as a whole one, and gitleaks only knows the full 108-character shape",
+	},
+	{
+		name:   "openai-legacy",
+		prefix: "sk-",
+		re:     regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
+		reason: "the legacy OpenAI sk-<20+ alphanumerics> key still circulates, and gitleaks' OpenAI rule needs the T3BlbkFJ marker of newer keys",
+	},
+	{
+		name:   "google-oauth-token",
+		prefix: "ya29.",
+		re:     regexp.MustCompile(`ya29\.[A-Za-z0-9_-]{20,}`),
+		reason: "Google OAuth access token; gitleaks has no rule",
+	},
+	{
+		name:   "google-oauth-client-secret",
+		prefix: "GOCSPX-",
+		re:     regexp.MustCompile(`GOCSPX-[A-Za-z0-9_-]{20,}`),
+		reason: "Google OAuth client secret; gitleaks has no rule",
+	},
+}
+
+// findOwned appends the spans of the owned shapes in in.
+func findOwned(in string, spans []span) []span {
+	for i := range ownedShapes {
+		o := &ownedShapes[i]
+		if !strings.Contains(in, o.prefix) {
+			continue
+		}
+		for _, m := range o.re.FindAllStringIndex(in, -1) {
+			if leftOK(in, m[0]) {
+				spans = append(spans, span{m[0], m[1], KindAPIKey})
+			}
+		}
+	}
+	return spans
 }
 
 // glRule is a compiled gitleaks rule.
@@ -275,13 +318,7 @@ func (a *glAllow) allows(secret, match, line string) bool {
 // findGitleaks appends the spans of the gitleaks rules whose keywords occur in in. The span is
 // the secret, not the surrounding key name, so the trace keeps its context.
 func findGitleaks(in string, spans []span) []span {
-	if hasGapPrefix(in) {
-		for _, m := range gapKeyRE.FindAllStringIndex(in, -1) {
-			if leftOK(in, m[0]) {
-				spans = append(spans, span{m[0], m[1], KindAPIKey})
-			}
-		}
-	}
+	spans = findOwned(in, spans)
 	g := gitleaks()
 	var small [8]uint64
 	cand := g.kw.scan(in, small[:0])
