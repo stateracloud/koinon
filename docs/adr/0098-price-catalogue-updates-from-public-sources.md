@@ -305,9 +305,12 @@ records the page URL and "manual" as its source.
 
 ### 7. Sources and terms
 
-- **OpenRouter.** Each install fetches it for itself. Koinon never ships OpenRouter's data, in the
-  repository, an image or a bundle (maintainer decision of 2026-10-31 on issue #68). It is the
-  primary source for `openrouter` providers.
+- **OpenRouter.** Each install fetches it for itself. It is the primary source for `openrouter`
+  providers. Amended 2026-11-12 (maintainer decision on issue #105): prices taken from OpenRouter's
+  public price data (`/api/v1/models`) may be stored in the built-in price list, each entry with its
+  source URL and the date it was read; the weekly `review-prices` workflow keeps them fresh. This
+  replaces the decision of 2026-10-31 on issue #68 (Koinon never ships OpenRouter's data). Other
+  OpenRouter data (model metadata, descriptions, rankings) is still not shipped.
 - **models.dev, LiteLLM, genai-prices.** MIT. Their licence and copyright line go in the provenance.
   They are aggregators: on their own they never auto-apply a change for a direct provider; two must
   agree. Only LiteLLM's repository file is read, never its PyPI package.

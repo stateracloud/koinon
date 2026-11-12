@@ -166,7 +166,8 @@ the chart's repository at the same digest when the variable is unset, so a lapto
 GHCR credentials. When the pull fails, go-test fails with a pointer to step 2, except in a fork's own
 CI, which cannot read the copy: there it warns and the tests pull the chart's repository.
 
-The GHCR package stays private until v0.3. The go-test job pulls it with its own `GITHUB_TOKEN`
+This package is a CI test image, not one of Koinon's released packages (those are public, ADR 0027,
+amendment of 2026-11-12), and it stays private. The go-test job pulls it with its own `GITHUB_TOKEN`
 (`packages: read` on the job), which works only while the package's settings ("Manage Actions
 access") list this repository with read. The image's `org.opencontainers.image.source` label names
 the upstream repository (changing it would change the digest), so GHCR does not link the package to
@@ -318,6 +319,11 @@ Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session 
 SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
 source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
 waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
+
+The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
+from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
+`hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.
+The CloudNativePG backup restore is not covered yet: the chart configures no CNPG backup (ADR 0076 decision 9).
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge

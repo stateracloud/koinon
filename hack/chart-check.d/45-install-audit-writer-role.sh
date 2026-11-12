@@ -22,15 +22,22 @@ fi
 
 # Membership: koinon_api only.
 has "koinon_api is a member of the writer role" '^        inRoles: \[koinon_app, koinon_install_audit_writer\]$' "${cluster[@]}"
+# With recovery on (the default) koinon_reconciler is a member too, to append the recovery.<action> install
+# events (ADR 0110 decision 6); with recovery off koinon_api is the only member.
 n=$(grep -cE 'koinon_install_audit_writer\]' <<<"$sql" || true)
-[[ $n == 1 ]] || fail "exactly one managed role is a member of koinon_install_audit_writer (found $n)"
+[[ $n == 2 ]] || fail "recovery on: koinon_api and koinon_reconciler are members of koinon_install_audit_writer (found $n)"
 n=$(grep -cE '^        inRoles: \[koinon_app\]$' <<<"$sql" || true)
-[[ $n == 2 ]] || fail "koinon_reconciler and koinon_agentd are members of koinon_app only (found $n)"
+[[ $n == 1 ]] || fail "recovery on: koinon_agentd is a member of koinon_app only (found $n)"
+off=$(render "${cluster[@]}" --set recovery.enabled=false)
+n=$(grep -cE 'koinon_install_audit_writer\]' <<<"$off" || true)
+[[ $n == 1 ]] || fail "recovery off: exactly one managed role is a member of koinon_install_audit_writer (found $n)"
+n=$(grep -cE '^        inRoles: \[koinon_app\]$' <<<"$off" || true)
+[[ $n == 2 ]] || fail "recovery off: koinon_reconciler and koinon_agentd are members of koinon_app only (found $n)"
 
 # The member is the api role: the managed role list runs api, reconciler, agentd in that order.
 api_role=$(grep -nE '^      - name: koinon_api$' <<<"$sql" | sed -n 1p | cut -d: -f1)
 member_line=$(grep -nE 'inRoles: \[koinon_app, koinon_install_audit_writer\]' <<<"$sql" | sed -n 1p | cut -d: -f1)
-[[ -n $api_role && -n $member_line && $((member_line - api_role)) -le 5 ]] ||
+[[ -n $api_role && -n $member_line && $((member_line - api_role)) -le 12 ]] ||
 	fail "the writer role membership belongs to the koinon_api managed role"
 
 # Clusters initialised before ADR 0100 never ran the new postInitApplicationSQL, and the migrate role

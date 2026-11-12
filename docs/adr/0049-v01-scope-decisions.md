@@ -125,9 +125,9 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 
 - **Org isolation:** every query takes `org_id`, tables keep the scaffold's `(org_id, id)` keys,
   and an org-isolation test suite runs in CI from v0.1.
-- **v0.1 is private.** Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
+- **v0.1 is private.** _(Changed: the packages are public, signed first; see the amendment of 2026-11-12 below and [0027](0027-repo-and-versioning.md).)_ Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
   Signing and SBOM attestations are wired in the release workflow but switched on when the
-  repository goes public, because keyless cosign writes names and digests to the public Rekor log.
+  repository goes public _(Changed: when the packages are made public, see the amendment of 2026-11-12)_, because keyless cosign writes names and digests to the public Rekor log.
   The repository stays `stateracloud/koinon` (amended 2026-10-26: it was `procoduck/koinon`); the org name is chosen when going public.
 - **v0.1 is done** when the quickstart passes on the home lab with Kata and a real model (recorded
   run) and the same steps pass as a kind e2e test in CI without Kata, against the fake model server.
@@ -388,3 +388,11 @@ needs a backend call that creates a sandbox stopped or pulls an image alone; Ope
 it is not built. Creating and then stopping a sandbox would start the pod, which #101 rules out, and
 costs a start per agent. The spec "prepares only the keep-warm agent at activation" in
 `internal/reconciler/latency_test.go` shows that a prepared agent's first run creates nothing.
+
+## Amendment (#854, 2026-11-12): packages public, signed first
+
+The decision of 2026-11-12 supersedes "v0.1 is private" for the registry: the images and the OCI chart on
+`ghcr.io/stateracloud/koinon/*` are public, with signing and SBOM attestations switched on before the first
+public release (the `RELEASE_SIGNING` switch of the release workflow), and a pre-alpha notice on the docs site and its README. The reason
+for deferring signing, the public Rekor log, is accepted now. Record: ADR [0027](0027-repo-and-versioning.md),
+amendment of 2026-11-12.

@@ -72,8 +72,8 @@ case $EVENT in
 pull_request)
   # #572 (ADR 0105, amendment): a pull request runs the kind e2e only with the `e2e` label. The merge queue
   # runs it on every e2e-relevant entry and is the only merge evidence, so an automatic run on the pull
-  # request repeated the queue's work. Fork pull requests are no different (and the flavor images are
-  # private until v0.3, so the label is the maintainer's decision for them too).
+  # request repeated the queue's work. Fork pull requests are no different (and the label stays the
+  # maintainer's decision for them too: ADR 0105, amendment of 2026-11-12).
   labelled=1
   if jq -e 'index("e2e")' <<<"$LABELS" >/dev/null 2>&1 || jq -e 'index("e2e")' <<<"$(live_labels)" >/dev/null 2>&1; then
     labelled=0

@@ -1419,7 +1419,7 @@ type ProviderCreate struct {
 	// CostApiKey An admin key with which the daily reconciliation reads the provider's cost API. Write-only, never returned. Only for `anthropic` and `openai` providers at their own API URL; needs `costScope`.
 	CostApiKey *string `json:"costApiKey,omitempty"`
 
-	// CostScope The part of the account whose cost is this provider's: the Anthropic workspace ID (or `default`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
+	// CostScope The part of the account whose cost is this provider's: the Anthropic workspace ID (`wrkspc_...`) or API key ID (`apikey_...`), or the OpenAI project ID (`proj_...`) or API key ID (`key_...`).
 	CostScope *string `json:"costScope,omitempty"`
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`

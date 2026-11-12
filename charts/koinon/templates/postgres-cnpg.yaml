@@ -68,7 +68,10 @@ spec:
                postInitApplicationSQL, on an older one CNPG creates the writer role in the same managed-role
                reconcile. `koinon-api migrate` grants the writer role its table privileges after the goose
                migrations (and the post-upgrade hook, once CNPG has created the writer role). */}}
-        inRoles: [koinon_app{{ if eq $role "api" }}, koinon_install_audit_writer{{ end }}]
+        {{- /* The reconciler joins the writer role only while recovery is on: it appends the recovery.<action>
+               install events of a PlatformAdminRecovery request (ADR 0110 decision 6, amendment of ADR 0100
+               decision 1.1a). Nothing else in the reconciler writes that chain. */}}
+        inRoles: [koinon_app{{ if or (eq $role "api") (and (eq $role "reconciler") $.Values.recovery.enabled) }}, koinon_install_audit_writer{{ end }}]
         passwordSecret:
           name: {{ include "koinon.pgSecret" (list $ $role) }}
       {{- end }}

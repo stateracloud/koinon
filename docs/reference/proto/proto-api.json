@@ -11575,7 +11575,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "cost_scope is the part of the provider's account whose cost is this provider key's: the\nAnthropic workspace ID (\"default\" for the default workspace), or the OpenAI project ID or API\nkey ID (key_..., the key's ID, never the key)."
+              "description": "cost_scope is the part of the provider's account whose cost is this provider key's: the\nAnthropic workspace ID (wrkspc_...) or API key ID (apikey_...), or the OpenAI project ID or API\nkey ID (key_...); a key's ID, never the key."
             },
             {
               "name": "cost_key_lost_at",
