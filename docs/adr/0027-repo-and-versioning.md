@@ -77,7 +77,23 @@ SBOMs.
   toolchain images are `koinon/e2e-toolchain` and `koinon/e2e-toolchain-web`. Where a workflow can,
   the prefix comes from `github.repository`; elsewhere it is the chart's `image.registry` default.
   The old packages (`koinon-api`, `flavor-opencode` and the rest) are neither deleted nor changed.
-  The packages stay private until v0.3. The spike probe image is no longer built.
+  _(Changed: the packages are made public; see the amendment of 2026-11-12 below.)_ The spike probe image is no longer built.
+
+## Amendment (#854, 2026-11-12): the packages are public
+
+The decision of 2026-11-12 replaces "the packages stay private until v0.3": Koinon's GHCR packages (images and
+the OCI chart under `ghcr.io/stateracloud/koinon/*`) are made public.
+
+- The packages are made public with signing on first: releases are signed from the first public one (cosign
+  over the pushed digests and the chart, SBOM attestations; see ADR [0049](0049-v01-scope-decisions.md)).
+  Nothing is made public before signing is on. The steps are in `docs/dev/releasing.md`, "Make the packages public".
+- The project is pre-alpha and says so: a notice on the docs site and in its README. A public package is not a
+  stability or upgrade promise; the schema and upgrade promise still begins at v0.3 (ADR 0085, 0099).
+- A fork's CI can pull the public packages without credentials. The CI test image copies (the agentgateway
+  mirror, `ghcr.io/stateracloud/agentgateway`) are not Koinon packages and stay private; their "Manage Actions
+  access" step stays (`docs/dev/ci.md`).
+- Rejected: keeping the packages private until v0.3. It kept forks and outside contributors from reproducing
+  CI.
 
 ## Upstream verification
 

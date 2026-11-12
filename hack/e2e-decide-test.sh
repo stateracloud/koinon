@@ -120,7 +120,7 @@ out=$(env "${MG[@]}" hack/e2e-decide.sh)
 if grep -q '^required=' <<<"$out"; then echo "FAIL: decide still prints required=" >&2; fail=1; else echo "ok: no required= output"; fi
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
-# Fork pull requests: the same rule, the label decides (the flavor images are private until v0.3).
+# Fork pull requests: the same rule, the label decides (the label stays maintainer-only, see ADR 0105's amendment of 2026-11-12).
 FORK=(EVENT=pull_request HEAD_REPO=fork/r BASE_REPO=o/r)
 want false "fork PR that is e2e-relevant does not run unlabelled" "${FORK[@]}" STUB_FULL=0
 want false "fork PR touching the e2e's files does not run unlabelled" "${FORK[@]}" STUB_FORCED=0
