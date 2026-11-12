@@ -299,6 +299,27 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	return out, nil
 }
 
+// ErrIDRetired is what [AddableID] returns for a KEK ID that the install audit chain records as retired.
+var ErrIDRetired = errors.New("KEK ID was retired")
+
+// AddableID is the probe for every KEK add path: it reports true when the ID may not be added, either
+// because a stored value carries an envelope under it ([UsedID]) or because keys retire removed it
+// ([RetiredID]; the error is then [ErrIDRetired]). A retired ID has no envelopes, yet re-adding it with
+// new bytes would break "IDs are never reused" and let an old backup's KEK be mistaken for it.
+func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	if used, err := UsedID(ctx, pool, id); err != nil || used {
+		return used, err
+	}
+	retired, err := RetiredID(ctx, pool, id)
+	if err != nil {
+		return false, fmt.Errorf("check whether KEK %s was retired: %w", id, err)
+	}
+	if retired {
+		return true, ErrIDRetired
+	}
+	return false, nil
+}
+
 // UsedID reports whether any stored value carries an envelope under the KEK ID: the usage query
 // that keys status and keys forget use, asked about one ID.
 func UsedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
@@ -317,6 +338,9 @@ func RefuseUsedID(ctx context.Context, used func(context.Context, string) (bool,
 		return fmt.Errorf("check that KEK ID %s is unused: no database to ask; IDs are never reused", id)
 	}
 	u, err := used(ctx, id)
+	if errors.Is(err, ErrIDRetired) {
+		return fmt.Errorf("KEK ID %s was retired; IDs are never reused: pick a new ID", id)
+	}
 	if err != nil {
 		return fmt.Errorf("check that KEK ID %s is unused: %w", id, err)
 	}
@@ -622,8 +646,18 @@ func RetiredID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 func (t *Tool) retiredIn(ctx context.Context, ids []string) (retired []string, checked bool, err error) {
 	probe := t.Retired
 	if probe == nil && t.Pool != nil {
-		pool := t.Pool
-		probe = func(ctx context.Context, id string) (bool, error) { return RetiredID(ctx, pool, id) }
+		if len(ids) == 0 {
+			return nil, true, nil
+		}
+		rows, err := t.Pool.Query(ctx, `SELECT DISTINCT target_id FROM install_audit_events WHERE action = $1 AND target_kind = 'kek' AND target_id = ANY($2)`, ActionRetire, ids)
+		if err != nil {
+			return nil, true, fmt.Errorf("check whether KEKs were retired: %w", err)
+		}
+		retired, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return nil, true, fmt.Errorf("check whether KEKs were retired: %w", err)
+		}
+		return retired, true, nil
 	}
 	if probe == nil {
 		return nil, false, nil
@@ -817,7 +851,7 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	used := t.UsedID
 	if used == nil && t.Pool != nil {
 		pool := t.Pool
-		used = func(ctx context.Context, id string) (bool, error) { return UsedID(ctx, pool, id) }
+		used = func(ctx context.Context, id string) (bool, error) { return AddableID(ctx, pool, id) }
 	}
 	if err := RefuseUsedID(ctx, used, id); err != nil {
 		return err
@@ -942,17 +976,23 @@ func (t *Tool) pickInactive(ctx context.Context, ks KeySet) (string, error) {
 			return "", err
 		}
 	}
-	var choices []cli.Choice
+	var inactive []string
 	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
 		if id != ks.Active {
-			ch := cli.Choice{Label: t.describeKEK(id, usage), Value: id}
-			if retired, _, err := t.retiredIn(ctx, []string{id}); err != nil {
-				return "", err
-			} else if len(retired) > 0 {
-				ch.Disabled = "retired"
-			}
-			choices = append(choices, ch)
+			inactive = append(inactive, id)
 		}
+	}
+	retired, _, err := t.retiredIn(ctx, inactive)
+	if err != nil {
+		return "", err
+	}
+	var choices []cli.Choice
+	for _, id := range inactive {
+		ch := cli.Choice{Label: t.describeKEK(id, usage), Value: id}
+		if slices.Contains(retired, id) {
+			ch.Disabled = "retired"
+		}
+		choices = append(choices, ch)
 	}
 	if len(choices) == 0 {
 		return "", errors.New("there is no inactive KEK to activate; create one with: koinon-api keys add")

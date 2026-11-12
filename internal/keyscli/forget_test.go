@@ -779,6 +779,56 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 
+	// A retired ID has no envelopes, so the envelope probe alone calls it unused; every add path asks the
+	// audit chain too (review of #604).
+	Describe("adding a KEK under an ID that keys retire removed", func() {
+		It("is refused by keys add, the key-admin Job's plain add and the lost-active recovery, and changes nothing", func(ctx SpecContext) {
+			// The install audit chain is shared and append-only: the ID is random, so no other spec retires it.
+			retiredID := fmt.Sprintf("kek-20260301-%x", time.Now().UnixNano())
+			tool.Yes = true
+			Expect(tool.Add(ctx, retiredID)).To(Succeed())
+			now = now.Add(6 * time.Minute)
+			Expect(tool.Retire(ctx, retiredID)).To(Succeed())
+			Expect(keyscli.UsedID(ctx, pool, retiredID)).To(BeFalse(), "no envelope carries it")
+
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
+			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }
+			job := func(recovery bool) keyscli.KeyAdmin {
+				return keyscli.KeyAdmin{Store: adminStore, AddID: retiredID, ActivateIfNoActive: recovery, UsedID: probe, Out: out, Now: func() time.Time { return now }}
+			}
+			snapshot := func() map[string][]byte {
+				sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return sec.Data
+			}
+			before := snapshot()
+			retired := ContainSubstring("KEK ID " + retiredID + " was retired; IDs are never reused")
+
+			By("keys add")
+			Expect(tool.Add(ctx, retiredID)).To(MatchError(retired))
+			By("the Job's plain add")
+			Expect(job(false).Run(ctx)).To(MatchError(retired))
+			By("the Job's recovery flag while the active KEK works")
+			Expect(job(true).Run(ctx)).To(MatchError(retired))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+
+			By("the recovery from a lost active KEK")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, lostKEK)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			before = snapshot()
+			Expect(job(true).Run(ctx)).To(MatchError(retired))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+	})
+
 	// Issue #255: the KMS key that wrapped the active KEK is gone for good, so the key set does not load
 	// (the active KEK is not among the keys). The key-admin Job adds a new active KEK, then keys forget runs.
 	Describe("when the lost KEK was the active one", func() {

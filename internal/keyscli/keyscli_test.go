@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -858,10 +859,16 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("says a KMS key is unreachable, and warns about a local active KEK only when a KMS is configured", func(ctx SpecContext) {
+			// The install audit chain cannot be emptied, and other specs retire the shared IDs; this spec
+			// runs on IDs of its own, so the retired-ID guard sees none of them as retired.
+			fresh, fresh2 := fmt.Sprintf("kek-20260102-%x", newKey()[:4]), fmt.Sprintf("kek-20261023-%x", newKey()[:4])
+			sec, err0 := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err0).NotTo(HaveOccurred())
+			sec.Data = map[string][]byte{fresh: secretstore.EncodeKey(newKey()), "active": []byte(fresh)}
+			_, err0 = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err0).NotTo(HaveOccurred())
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
-			// The shared audit chain holds an earlier spec's keys.retire for this ID; this spec is about the KMS.
-			tool.Retired = func(context.Context, string) (bool, error) { return false, nil }
 
 			kms := &secretstoretest.FakeKMS{}
 			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
@@ -871,22 +878,22 @@ var _ = Describe("koinon-api keys", func() {
 			tool.Store, tool.Wrappers = ks, admin
 			out.Reset()
 			Expect(tool.Status(ctx)).To(Succeed())
-			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK kek-20260101-aaaa is a local key but a KMS (fakekms)"))
+			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK " + fresh + " is a local key but a KMS (fakekms)"))
 
 			By("activating a local KEK is refused while the KMS is the primary")
-			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
+			Expect(tool.Activate(ctx, fresh)).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
 
 			By("and allowed once the configured primary is local again (the rollback)")
 			localOnly := secretstore.Wrappers{}
 			ks.Wrappers = localOnly
 			tool.Store, tool.Wrappers = ks, localOnly
-			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(Succeed())
+			Expect(tool.Activate(ctx, fresh)).To(Succeed())
 			ks.Wrappers = admin
 			tool.Store, tool.Wrappers = ks, admin
 
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
-			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(tool.Add(ctx, fresh2)).To(Succeed())
+			Expect(tool.Activate(ctx, fresh2)).To(Succeed())
+			r, ok := recorded(ctx, fresh2)
 			Expect(ok).To(BeTrue())
 			Expect(r.backend).To(Equal("fakekms"))
 			out.Reset()
