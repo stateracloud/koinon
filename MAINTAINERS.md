@@ -11,6 +11,13 @@ The GitHub handles in this table are the people whose `dependency-age-waiver` la
 honours (ADR 0079); the check reads this file from the base branch, so adding a row takes effect only
 once that pull request is merged.
 
+## Stand-ins and private contact
+
+Each step that only one person can do today has a stand-in or a written procedure in
+[`docs/dev/releasing.md`](docs/dev/releasing.md#stand-ins-for-owner-only-steps). Security reports go
+through GitHub private vulnerability reporting ([SECURITY.md](SECURITY.md)); conduct reports follow
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Both reach every maintainer, not one login.
+
 ## Roles
 
 - **Contributor**: anyone whose pull request has been merged.
