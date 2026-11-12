@@ -197,9 +197,9 @@ Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again w
 ## Make the packages public
 
 Koinon is pre-alpha (README). The packages go public with the first rc cut after `RELEASE_SIGNING` is
-on, so that no public image is unsigned. Making a package public is hard to undo: pulls, forks and
-mirrors cannot be taken back, and GitHub lets only an org owner change visibility back, and only
-while the package has few downloads. Check the rc first. Do the steps in this order:
+on, so that no public image is unsigned. Making a package public cannot be undone: GitHub does not
+let a public package become private again, and pulls and mirrors cannot be taken back. Check the rc
+first. Do the steps in this order:
 
 1. `gh variable set RELEASE_SIGNING --body true` (repository admin).
 2. Tag an rc as in "Cut a release candidate".
