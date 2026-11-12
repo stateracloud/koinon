@@ -16,3 +16,8 @@ bootConfig:
   minimumReleaseAge: 4320
   minimumReleaseAgeStrict: true
   trustPolicy: no-downgrade
+# GHSA-g3hv-75wg-m249 (minimatch >= 7.0.0, < 11.0.1), issue #895: pulled in through
+# @opencode/plugin's dependency tree; 11.0.1 is the first patched release. Remove when the tree
+# no longer resolves a vulnerable range.
+overrides:
+  'minimatch@>=7.0.0 <11.0.1': 11.0.1

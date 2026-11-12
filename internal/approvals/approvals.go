@@ -78,7 +78,29 @@ var (
 	ErrHashMismatch = errors.New("approval does not match the requested arguments")
 	// ErrNotPending: the request was already decided otherwise, expired or canceled.
 	ErrNotPending = errors.New("approval request is no longer pending")
+	// ErrExpired: the request's expires_at has passed, whether or not the sweeper has marked it
+	// expired yet. An error that matches it also matches ErrNotPending, and its text names the expiry.
+	ErrExpired = errors.New("approval request has expired")
 )
+
+// expiredError is the decision error for a request whose expires_at has passed.
+type expiredError struct{ at time.Time }
+
+func (e expiredError) Error() string {
+	return "approval request expired at " + e.at.UTC().Format(time.RFC3339) + " and can no longer be decided"
+}
+
+func (e expiredError) Is(target error) bool { return target == ErrExpired || target == ErrNotPending }
+
+// decideErr maps the no-row answer of a guarded decision query on a request that was locked and
+// pending: the query refuses a request past its expires_at (measured by the database's clock, the
+// sweeper's), so no row means it expired.
+func decideErr(err error, cur store.ApprovalRequest) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return expiredError{at: cur.ExpiresAt.Time}
+	}
+	return err
+}
 
 // ExecKeys yields an org's gateway executor key (package mcpservers).
 type ExecKeys interface {
@@ -265,6 +287,8 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 			row = cur // a replay: the same decision again
 			return nil
 		case store.ApprovalStatusPending:
+		case store.ApprovalStatusExpired:
+			return expiredError{at: cur.ExpiresAt.Time}
 		default:
 			return ErrNotPending
 		}
@@ -305,7 +329,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 			if !cur.FirstApprover.Valid {
 				row, err = q.SetApprovalFirstApprover(ctx, store.SetApprovalFirstApproverParams{OrgID: org, ID: id, Approver: approver})
 				if err != nil {
-					return err
+					return decideErr(err, cur)
 				}
 				if err := taskEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note}); err != nil {
 					return err
@@ -321,7 +345,7 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 			DecisionNote: pgtype.Text{String: note, Valid: note != ""},
 		})
 		if err != nil {
-			return err
+			return decideErr(err, cur)
 		}
 		extra := map[string]any{"note": note}
 		if scope.Kind != ScopeOnce {
@@ -361,6 +385,9 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 			row = cur
 			return nil
 		}
+		if cur.Status == store.ApprovalStatusExpired {
+			return expiredError{at: cur.ExpiresAt.Time}
+		}
 		if cur.Status != store.ApprovalStatusPending {
 			return ErrNotPending
 		}
@@ -369,7 +396,7 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 			DecisionNote: pgtype.Text{String: note, Valid: note != ""},
 		})
 		if err != nil {
-			return err
+			return decideErr(err, cur)
 		}
 		if err := taskEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
 			return err
