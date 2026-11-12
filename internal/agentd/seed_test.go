@@ -293,8 +293,9 @@ var _ = Describe("home repository seeds", func() {
 		By("the new repository holds the newest home: the sweeper deletes the old one")
 		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		Expect(writer.Restore(ctx, e0, pw0, newest.SnapshotID.String, io.Discard)).NotTo(Succeed(), "the old repository's blobs are gone")
-		Expect(gauge("pending")()).To(BeZero())
-		Expect(gauge("failed")()).To(BeZero())
+		By("the gauge counts at the end of a tick, so it follows the delete by a tick")
+		Eventually(gauge("pending")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())
+		Eventually(gauge("failed")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())
 	})
 
 	It("falls back to an older checkpoint when the newest does not copy", func(ctx SpecContext) {
