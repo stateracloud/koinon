@@ -125,7 +125,7 @@ var _ = Describe("Limiter", func() {
 		for i := range 200000 {
 			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0)
 		}
-		Expect(l.Len()).To(BeNumerically("<=", 110000))
+		Expect(l.Len()).To(BeNumerically("<=", 110001), "the bound and the overflow entry")
 	})
 
 	It("resets nothing of a key, an address or a group when fresh keys flood the table", func() {
@@ -217,12 +217,12 @@ var _ = Describe("Limiter", func() {
 		for i := range 200000 {
 			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t1)
 		}
-		Expect(l.Len()).To(BeNumerically("<=", 110000))
+		Expect(l.Len()).To(BeNumerically("<=", 110001), "the bound and the overflow entry")
 		l.Fail(key, t1)
 		Expect(l.Blocked(key, t1)).To(Equal(2*ratelimit.BaseBackoff), "the sixth failure doubles the block")
 	})
 
-	It("refuses nobody when the table is full of live entries, and tracks sources again once they expire", func() {
+	It("refuses no key of its own when the table is full of live entries, and tracks sources again once they expire", func() {
 		blockKey(key, t0)
 		want := l.Blocked(key, t0)
 		for i := range 70000 { // two entries each: past the bound
@@ -230,12 +230,26 @@ var _ = Describe("Limiter", func() {
 		}
 		fresh := "198.51.100.1"
 		for _, part := range []string{"", "user:admin", "abcdefgh"} {
-			Expect(l.Blocked(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
+			Expect(l.BlockedKey(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
 		}
 		Expect(l.Blocked(key, t0)).To(Equal(want), "state that exists is kept")
 		later := t0.Add(2 * ratelimit.FailWindow)
 		blockKey(ratelimit.Key(fresh, "user:admin"), later)
 		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), later)).To(BeNumerically(">", 0))
+	})
+
+	It("counts the failures it cannot track, and then refuses untracked sources only", func() {
+		for i := range 55000 { // two entries each: the table is exactly full of live entries
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0)
+		}
+		fresh := func(n int) string { return ratelimit.Key("198.51.100."+strconv.Itoa(n%250+1), "abcdefgh") }
+		Expect(l.Blocked(fresh(0), t0)).To(BeZero())
+		for n := range ratelimit.OverflowFreeFails {
+			l.Fail(fresh(n), t0)
+		}
+		Expect(l.Blocked(fresh(1), t0)).To(BeNumerically(">", 0), "an untracked source is refused")
+		Expect(l.BlockedKey(fresh(1), t0)).To(BeZero(), "a valid token is not")
+		Expect(l.Blocked(ratelimit.Key(ipv4(0), "user:y"), t0)).To(BeZero(), "a tracked source is not")
 	})
 
 	It("checks the own level of a key alone with BlockedKey", func() {

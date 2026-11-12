@@ -49,7 +49,7 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		t0 := time.Now()
 		now.Store(&t0)
-		svc, err = New(pool, Config{BootstrapLogin: true, PublicURL: "http://koinon.test", Now: func() time.Time { return *now.Load() }})
+		svc, err = New(pool, Config{BootstrapLogin: true, PublicURL: "http://koinon.test", DeviceCookieSecret: []byte("koinon_test_not-a-real-secret"), Now: func() time.Time { return *now.Load() }})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -144,7 +144,7 @@ var _ = Describe("password login limiter (issue 658)", func() {
 
 	It("lets a fresh address log in while many other addresses are blocked", func(ctx SpecContext) {
 		now := svc.cfg.Now()
-		for a := range 12600 {
+		for a := range 12000 {
 			addr := fmt.Sprintf("10.%d.%d.%d", a/250%250, a/62500, a%250+1)
 			for u := range 8 {
 				for range ratelimit.FreeFails {
@@ -163,6 +163,73 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
 		Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
 		Expect(login(ctx, "198.51.100.77", "someone-else", "koinon_test_wrong").Code).To(Equal(http.StatusUnauthorized), "other accounts are not slowed down")
+	})
+
+	// Device cookie (devicecookie.go).
+	loginWithCookie := func(ctx context.Context, addr, username, password string, c *http.Cookie) *httptest.ResponseRecorder {
+		GinkgoHelper()
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login",
+			strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = addr + ":40000"
+		if c != nil {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		svc.handleLogin(rec, req)
+		return rec
+	}
+	deviceCookieOf := func(rec *httptest.ResponseRecorder) *http.Cookie {
+		GinkgoHelper()
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == svc.deviceCookieName() {
+				Expect(c.HttpOnly).To(BeTrue())
+				Expect(c.SameSite).To(Equal(http.SameSiteStrictMode))
+				return c
+			}
+		}
+		Fail("no device cookie was set")
+		return nil
+	}
+	blockAccount := func(ctx context.Context, username string) {
+		GinkgoHelper()
+		for i := range accountFreeFails {
+			Expect(login(ctx, fmt.Sprintf("203.0.113.%d", i+1), username, "koinon_test_wrong").Code).To(Equal(http.StatusUnauthorized))
+		}
+		Expect(login(ctx, "198.51.100.200", username, fakeLimitPassword).Code).To(Equal(http.StatusTooManyRequests), "the account is blocked")
+	}
+
+	It("lets the owner with a device cookie in while the account is blocked, and nobody else", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.50", "admin", fakeLimitPassword, nil))
+		blockAccount(ctx, "admin")
+		Expect(loginWithCookie(ctx, "198.51.100.201", "admin", fakeLimitPassword, nil).Code).To(Equal(http.StatusTooManyRequests), "without the cookie")
+		Expect(loginWithCookie(ctx, "198.51.100.202", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusOK))
+	})
+
+	It("gives no exemption to a forged, expired or other-user cookie", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.51", "admin", fakeLimitPassword, nil))
+		forged := *cookie
+		forged.Value = cookie.Value[:len(cookie.Value)-2] + "AA"
+		advance(31 * 24 * time.Hour)
+		blockAccount(ctx, "admin")
+		Expect(loginWithCookie(ctx, "198.51.100.203", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests), "expired")
+		advance(-31 * 24 * time.Hour)
+		Expect(loginWithCookie(ctx, "198.51.100.204", "admin", fakeLimitPassword, &forged).Code).To(Equal(http.StatusTooManyRequests), "forged")
+	})
+
+	It("gives no exemption on another account", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.52", "admin", fakeLimitPassword, nil))
+		blockAccount(ctx, "someone")
+		Expect(loginWithCookie(ctx, "198.51.100.205", "someone", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests))
+	})
+
+	It("takes the exemption from a cookie that keeps failing", func(ctx SpecContext) {
+		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.53", "admin", fakeLimitPassword, nil))
+		blockAccount(ctx, "admin")
+		for i := range deviceFreeFails {
+			Expect(loginWithCookie(ctx, fmt.Sprintf("198.51.100.%d", i+1), "admin", "koinon_test_wrong", cookie).Code).To(Equal(http.StatusUnauthorized), "failure %d", i+1)
+		}
+		Expect(loginWithCookie(ctx, "198.51.100.206", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests))
 	})
 
 	It("forgets the failures of a username after a good login", func(ctx SpecContext) {

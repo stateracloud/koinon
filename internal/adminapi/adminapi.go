@@ -176,7 +176,11 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || raw == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="koinon-admin"`)
-			s.limiter.Fail(limiterKey(clientIP(r), ""), time.Now())
+			// A source that is already refused is not counted again: its block would grow with requests
+			// that cost nothing.
+			if now := time.Now(); s.limiter.Blocked(limiterKey(clientIP(r), ""), now) == 0 {
+				s.limiter.Fail(limiterKey(clientIP(r), ""), now)
+			}
 			s.log.Warn("admin API request without a bearer token", "client_ip", clientIP(r), "path", r.URL.Path)
 			writeError(w, http.StatusUnauthorized, Unauthenticated, "a bearer token is required")
 			return

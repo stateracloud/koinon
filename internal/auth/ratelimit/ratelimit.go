@@ -14,12 +14,17 @@
 // client that spreads its failures over many credentials, or many /64s of one /48, is refused once it
 // passes the address or group budget. The /64 neighbours of an IPv6 client share the group budget. A
 // success resets the key only. X-Forwarded-For is not trusted.
+// The password login adds an account level over all addresses, which a device cookie set by an earlier
+// successful login exempts (internal/auth/devicecookie.go).
 //
 // The state lives in memory, in one table of at most maxEntries entries, and it is per replica: with N
 // replicas of koinon-api a client has N times the budget (shared state is a follow-up). Only an entry
 // past its expiry (its block and its quiet window have ended) is dropped to make room. When the table
 // is full of live entries a new source is not tracked, and its failures are not counted, until
-// entries expire; no request is refused because the table is full, and a flood of fresh keys cannot
+// entries expire. The failures of sources it cannot track are counted on one overflow entry; while
+// that is over OverflowFreeFails per window, Blocked refuses sources the table does not track, and
+// BlockedKey, tracked sources and valid tokens are not affected. No request is refused because the
+// table is full alone, and a flood of fresh keys cannot
 // reset a backoff. The limiter checks, then the caller hashes or looks up, then records: requests
 // that run at the same time can all pass the check before the first failure is recorded, so a burst
 // can overshoot a budget by about the number of concurrent checks.
@@ -65,6 +70,10 @@ const (
 
 	// maxEntries is the bound on the entries of the table.
 	maxEntries = 110000
+
+	// OverflowFreeFails is the failures per FailWindow, over all sources the full table cannot track,
+	// before those sources are refused (see Blocked).
+	OverflowFreeFails = 600
 )
 
 // Limiter counts failures per key, address and group. The zero value is not usable; call New.
@@ -201,12 +210,17 @@ func RetryAfter(d time.Duration) string {
 }
 
 // Blocked returns how long key must wait, or zero: the longest wait over the key, its address and its
-// group.
+// group. A source the table cannot track (it is full of live entries) is refused while the failures of
+// all such sources together are over OverflowFreeFails per window.
 func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	addr, group := levels(key)
-	return max(l.wait(key, now), l.wait(addr, now), l.wait(group, now))
+	w := max(l.wait(key, now), l.wait(addr, now), l.wait(group, now))
+	if l.keys[addr] == nil {
+		w = max(w, l.wait(overflowKey, now))
+	}
+	return w
 }
 
 // BlockedKey is Blocked for the key's own level only, for a caller that must not refuse a client
@@ -216,6 +230,9 @@ func (l *Limiter) BlockedKey(key string, now time.Time) time.Duration {
 	defer l.mu.Unlock()
 	return l.wait(key, now)
 }
+
+// overflowKey is the one entry that counts the failures the table has no room to track.
+const overflowKey = "\x00overflow"
 
 func (l *Limiter) wait(k string, now time.Time) time.Duration {
 	if a, ok := l.keys[k]; ok && now.Before(a.blocked) {
@@ -233,11 +250,15 @@ func (l *Limiter) Fail(key string, now time.Time) {
 	l.makeRoom(now, key, addr, group)
 	// The group and the address come first: when the table has room for some of the entries only, the
 	// key's own is the one left untracked.
+	tracked := true
 	if group != "" {
-		l.record(group, GroupFreeFails, MaxBackoff, now)
+		tracked = l.record(group, GroupFreeFails, MaxBackoff, now)
 	}
-	l.record(addr, AddressFreeFails, MaxBackoff, now)
-	l.record(key, FreeFails, MaxBackoff, now)
+	tracked = l.record(addr, AddressFreeFails, MaxBackoff, now) && tracked
+	tracked = l.record(key, FreeFails, MaxBackoff, now) && tracked
+	if !tracked {
+		l.record(overflowKey, OverflowFreeFails, MaxBackoff, now)
+	}
 }
 
 // FailAfter records a failure of key alone, which is blocked after freeFails failures within
@@ -251,7 +272,9 @@ func (l *Limiter) FailCapped(key string, freeFails int, maxBackoff time.Duration
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.makeRoom(now, key)
-	l.record(key, freeFails, maxBackoff, now)
+	if !l.record(key, freeFails, maxBackoff, now) {
+		l.record(overflowKey, OverflowFreeFails, MaxBackoff, now)
+	}
 }
 
 // makeRoom drops entries past their expiry until the keys of a call that are not yet in the table
@@ -277,13 +300,14 @@ func (l *Limiter) makeRoom(now time.Time, keys ...string) {
 	}
 }
 
-// record counts one failure on the entry k, creating it if the table has room, and blocks it once it
-// is past freeFails, for at most maxBackoff.
-func (l *Limiter) record(k string, freeFails int, maxBackoff time.Duration, now time.Time) {
+// record counts one failure on the entry k, creating it if the table has room (the overflow entry
+// always has), and blocks it once it is past freeFails, for at most maxBackoff. It reports false when
+// the table had no room for the entry.
+func (l *Limiter) record(k string, freeFails int, maxBackoff time.Duration, now time.Time) bool {
 	a := l.keys[k]
 	if a == nil {
-		if len(l.keys) >= maxEntries {
-			return
+		if len(l.keys) >= maxEntries && k != overflowKey {
+			return false
 		}
 		a = &entry{key: k, first: now}
 		l.keys[k] = a
@@ -299,6 +323,7 @@ func (l *Limiter) record(k string, freeFails int, maxBackoff time.Duration, now 
 		a.blocked = now.Add(min(d, maxBackoff))
 	}
 	heap.Fix(&l.h, a.idx)
+	return true
 }
 
 // Refuse counts one request refused for key without an event of its own. It does nothing for a key

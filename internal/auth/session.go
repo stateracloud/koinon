@@ -68,6 +68,10 @@ type Config struct {
 	// Binding stamps new sessions with the install's mark and refuses sessions that another install
 	// issued (a restored copy, ADR 0110 decision 3). Nil: no mark, nothing refused.
 	Binding *installbinding.Binding
+	// DeviceCookieSecret is the secret the password login's device cookies are signed with (the
+	// install mark, which the chart keeps in a Secret). Empty: no device cookie is issued or honoured,
+	// and the account level of the login limiter has no exemption (devicecookie.go).
+	DeviceCookieSecret []byte
 }
 
 // Service authenticates requests and serves the login endpoints and the
@@ -82,6 +86,9 @@ type Service struct {
 	// verifySlots bounds concurrent argon2id verifications (64 MiB each), so
 	// a burst of login attempts cannot exhaust memory.
 	verifySlots chan struct{}
+
+	// deviceKey signs device cookies (devicecookie.go); nil turns them off.
+	deviceKey []byte
 
 	// limiter slows down password guesses per client address and username (loginlimit.go).
 	limiter *ratelimit.Limiter
@@ -123,6 +130,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*Service, error) {
 		log:           cfg.Logger,
 		verifySlots:   make(chan struct{}, 4),
 		limiter:       ratelimit.New(),
+		deviceKey:     deriveDeviceKey(cfg.DeviceCookieSecret),
 		secureCookies: secure,
 	}
 	if cfg.OIDC != nil {

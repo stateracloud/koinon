@@ -454,6 +454,7 @@ func serve(ctx context.Context, cfg config) error {
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
 		PublicURL:          cfg.publicURL,
+		DeviceCookieSecret: []byte(cfg.installMark),
 	}
 	if cfg.oidcIssuer != "" {
 		secret, err := auth.ReadSecretFile(cfg.oidcClientSecretFile)

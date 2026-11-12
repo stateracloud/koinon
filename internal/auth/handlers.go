@@ -97,6 +97,9 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// before the password hash runs and before any database read; the refusal is counted, not audited
 	// one by one (loginlimit.go).
 	keys := newLoginKeys(r, req.Username)
+	if nonce := s.deviceNonce(r, req.Username, s.cfg.Now()); nonce != "" {
+		keys.device = deviceLimiterKey(nonce)
+	}
 	if wait := s.loginWait(keys, s.cfg.Now()); wait > 0 {
 		s.limiter.Refuse(keys.user)
 		loginEvents.WithLabelValues(loginEventRefused).Inc()
@@ -128,6 +131,9 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.auditLoginFailure(r.Context(), keys, req.Username, refused, map[string]any{"then_succeeded": true})
 	}
 	s.limiter.Succeed(keys.user)
+	if keys.device != "" {
+		s.limiter.Succeed(keys.device)
+	}
 
 	if s.afterPasswordCheck != nil {
 		s.afterPasswordCheck()
@@ -155,6 +161,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSessionCookie(w, token)
+	s.setDeviceCookie(w, req.Username, s.cfg.Now())
 	s.log.Info("user logged in", "method", "password")
 	writeJSON(w, http.StatusOK, loginResponse{PasswordChangeRequired: cred.MustChangePassword})
 }
