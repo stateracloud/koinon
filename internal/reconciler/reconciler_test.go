@@ -1224,6 +1224,65 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).To(MatchError(pgx.ErrNoRows))
 	})
 
+	It("revokes the key after spend crosses the limit: ledger transaction, NOTIFY, reconcile pass (Kubernetes mode, #20)", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"0.05"}}`)
+		mg.ledgerBudgets = true
+		var slug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, org).Scan(&slug)).To(Succeed())
+
+		// The first pass issues the key; Run then makes its own passes, so the only thing that can
+		// wake it after them is the ledger's NOTIFY (the resync timer is an hour).
+		cfg.ResyncInterval = time.Hour
+		r := newReconciler()
+		pass(ctx, r)
+		row := sandboxRow(ctx, agent.ID)
+		ref := agentKeys(mg.last())[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("0.05")))
+
+		var applies atomic.Int64
+		var revokedAt atomic.Pointer[time.Time]
+		mg.onApply = func(s gateway.State) {
+			applies.Add(1)
+			if l, ok := s.Limits[ref]; ok && l.Amount <= 0 {
+				t := time.Now()
+				revokedAt.CompareAndSwap(nil, &t)
+			}
+		}
+		runCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(runCtx) }()
+		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
+		Eventually(applies.Load).WithTimeout(10*time.Second).Should(BeNumerically(">=", 1), "the leader's first pass")
+		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
+
+		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
+		entry := func(cost string) ledger.Entry {
+			return ledger.Entry{
+				RequestID: uniq("req"), KeyID: row.GatewayKeyID.String, Model: "fake/model", CostUSD: cost,
+				Agent: gateway.AgentRef{Org: slug, Name: agent.ID.String()}, InputTokens: 1, OutputTokens: 1, Time: time.Now(),
+			}
+		}
+		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		Expect(err).NotTo(HaveOccurred())
+		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit nothing wakes the reconciler")
+
+		By("the request that reaches the limit")
+		start := time.Now()
+		_, err = ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		committed := time.Now()
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(revokedAt.Load).WithTimeout(10*time.Second).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
+		revoked := *revokedAt.Load()
+
+		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
+		AddReportEntry("budget overshoot window", fmt.Sprintf("ledger transaction %s + NOTIFY and reconcile pass %s = %s from the crossing request to the revoke", ledgerTx, reconcilePass, total))
+		// The gateway keeps serving until the revoke, so this window (times the spend rate) is the
+		// overshoot beyond the one in-flight response of ADR 0097. The bound is generous for a loaded
+		// CI host and far below the one-hour resync, which proves the NOTIFY path did the waking.
+		Expect(total).To(BeNumerically("<", 5*time.Second))
+		Expect(mg.last().Limits[ref].Amount).To(BeZero())
+	})
+
 	It("joins several rejections of one org into one message", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		var slug string
