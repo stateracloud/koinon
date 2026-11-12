@@ -107,7 +107,7 @@ for f in harnesses:
     local_resource(
         'harness-' + f,
         'T=$(hack/harness-tag.sh %s) && make harness-%s HARNESS_TAG=$T HARNESS_PLATFORMS=%s && docker tag koinon/sandbox:$T %s && %s' %
-        (f, f, platform, f, ref, publish),
+        (f, f, platform, ref, publish),
         deps=['harnesses/' + f, 'harnesses/common'],
         labels=['harnesses'],
     )
