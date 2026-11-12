@@ -175,7 +175,7 @@ var _ = Describe("Failure classes", func() {
 	})
 
 	// One layer retries (ADR 0056 amendment 2026-10-31, point 3). OpenCode retries model requests
-	// itself with the policy agentd hands it (test/flavors/retry_test.go checks that end to end), so
+	// itself with the policy agentd hands it (test/harnesses/retry_test.go checks that end to end), so
 	// a retryable failure that reaches agentd has used every try: agentd does not repeat the turn,
 	// and one failed step costs the harness's tries only.
 	Describe("for a harness that retries model requests itself", func() {

@@ -984,7 +984,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
-	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
+	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -1009,8 +1009,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
-		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
-		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
+		broken := regexp.MustCompile(`(?m)^(\s+image: ).*/sandbox[:@].*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
+		Expect(broken).NotTo(Equal(cfgYAML), "the harness image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
@@ -1021,7 +1021,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		// "the sandbox was never rendered" after 30 s. Proven from the second run's logs: the new
 		// reconciler led 0.8 s after it started, but its first pass had begun before the new agent
 		// existed, and in that pass the job of the OLD agent called OpenShell DeleteSandbox (the
-		// spec-change recreate, because the flavor image had just changed). That call did not return
+		// spec-change recreate, because the harness image had just changed). That call did not return
 		// within the 30 s (the old pods were Terminating with a 30 s grace period). A pass ends only
 		// when all its jobs end (startJobs(...).wait()), so the next pass, the first that could see
 		// the new agent, started after the cap. The leader hand-over and the gateway Apply were not
@@ -1091,7 +1091,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(metrics("deploy/koinon-agentd", "9090")).To(MatchRegexp(`(?m)^koinon_agentd_sandbox_wait_cap_total\{cause="image_pull"\} [1-9]`))
 		Expect(metrics("deploy/koinon-reconciler", "9090")).To(MatchRegexp(`(?m)^koinon_reconciler_sandbox_observer_errors_total\{reason="forbidden"\} 0$`),
 			"the observer read the pod without being refused")
-		t.end("8. Missing flavor image: image_pull from the pod, through the observer")
+		t.end("8. Missing harness image: image_pull from the pod, through the observer")
 	})
 })
 

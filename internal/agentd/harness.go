@@ -57,7 +57,7 @@ func retryPolicyOf(cfg Config) retryPolicy {
 	return retryPolicy{Tries: cfg.ModelRetries + 1, Backoff: cfg.RetryBackoff, MaxRetryAfter: cfg.MaxRetryAfter}
 }
 
-// args are the entry-script switches that carry the policy (flavors/common/koinon-entry-lib.sh).
+// args are the entry-script switches that carry the policy (harnesses/common/koinon-entry-lib.sh).
 func (p retryPolicy) args() []string {
 	return []string{
 		"--model-tries", strconv.Itoa(p.Tries),
@@ -187,7 +187,7 @@ func versionModel(c agentconfig.Config) string {
 // harnessArgs are the launch command's optional switches from the agent version's harness
 // settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only harnesses
 // with the option have one (OpenCode: --plugin-installs lets it load external plugins,
-// flavors/opencode/README.md); the reconciler opens the npm registry for the same agents.
+// harnesses/opencode/README.md); the reconciler opens the npm registry for the same agents.
 //
 // A harness with built-in web tools also gets its NoWebToolsArg unless the version has web egress
 // (agentconfig.Config.WebEgress): a tool the sandbox's network policy would only fail is not

@@ -9,7 +9,7 @@
 #
 # Which gates: the lint, test and consistency gates of hack/preflight.sh (`--list` picks them from
 # the diff) plus the heavy CI jobs hack/ci-changes.sh turns on: chartsmoke (make test-chart-smoke),
-# flavors (make test-flavors) and escape (make test-admission). Neither list is repeated here.
+# flavors (make test-harnesses) and escape (make test-admission). Neither list is repeated here.
 # Gates run one after the other; the e2e gate of preflight is informational and is left out.
 #
 # One line per gate on stdout:

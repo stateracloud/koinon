@@ -11,7 +11,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 | Artifact | Where |
 | --- | --- |
 | `api` (with the web UI), `reconciler`, `agentd` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
-| `flavors/opencode`, the OpenCode flavor (ADR 0059) | `ghcr.io/stateracloud/koinon/flavors/opencode:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
+| `harnesses/opencode`, the OpenCode harness (ADR 0059) | `ghcr.io/stateracloud/koinon/sandbox:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
 | Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
 
@@ -94,13 +94,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `main` and on `release/*` bases alike, so land the marker change before you cut `release/v0.3`.
    The change that opens the next minor line resets the file to `none`, which lets it contract. The
    file is read at the merge base, so the same change cannot lift the rule.
-5. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
-   `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
+5. Check that every job succeeded: `release` and `harness` run side by side after `gate`, so a failed
+   `harness` still leaves a draft release and a chart whose default harness image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
    marked as a prerelease. Publishing the draft is the only manual step.
 
-A failed run can be re-run from the Actions page ("Re-run failed jobs" reruns `flavor`, then
-`sign`): the draft release is replaced, the images are pushed again (the flavor under the same tag
+A failed run can be re-run from the Actions page ("Re-run failed jobs" reruns `harness`, then
+`sign`): the draft release is replaced, the images are pushed again (the harness under the same tag
 with a new digest) and the chart tag is overwritten. Do not move a tag that was published; cut `rc.N+1`.
 
 ## Cut a final release
@@ -183,11 +183,11 @@ the repository variable `RELEASE_SIGNING` is `true` (default: unset, off). Keyle
 image names and digests to the public Rekor log (ADR 0049), so leave it off while the repository is
 private.
 
-The `sign` job runs after `release` and `flavor` and is the only job with `id-token: write`. It gets
+The `sign` job runs after `release` and `harness` and is the only job with `id-token: write`. It gets
 `dist/digests.txt` and the SPDX SBOMs from the release job as an uploaded artifact (`hack/release-refs.sh`
 turns the digests into image references), signs every image by digest and the pushed chart artifact,
 and attaches each Go image's SBOM as a cosign attestation (`cosign attest --type spdxjson`). The
-flavor image is signed by the digest the `flavor` job reports; its SBOM is BuildKit's attestation,
+harness image is signed by the digest the `harness` job reports; its SBOM is BuildKit's attestation,
 pushed with the image. Verify with
 `cosign verify` against the workflow's identity once it is on.
 
@@ -216,12 +216,12 @@ disabling the `immutable` ruleset in the repository settings lets anyone move or
 registry, for example to test an rc from a registry your cluster can reach. Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
 
-### The flavor image when installing a release
+### The harness image when installing a release
 
-The packaged chart defaults `harnesses.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
-which the release publishes (the `flavor` job, `hack/release-flavor.sh`) and `hack/mirror-release.sh`
-copies, so a default install needs no flavor values. To run a flavor you built yourself (`make
-flavors`, then tag and push), set `harnesses.opencode.image.repository` and `.tag`.
+The packaged chart defaults `harnesses.opencode.image` to `<image.registry>/sandbox:<appVersion>`,
+which the release publishes (the `harness` job, `hack/release-harness.sh`) and `hack/mirror-release.sh`
+copies, so a default install needs no harness values. To run a harness you built yourself (`make
+harnesses`, then tag and push), set `harnesses.opencode.image.repository` and `.tag`.
 `harnesses.<x>.image.registry` does not exist; a harness in another registry needs
 `harnesses.<x>.image.repository` to be a path below `image.registry`.
 
@@ -236,36 +236,36 @@ goreleaser release --snapshot --clean --skip=publish,sign   # builds the web UI 
 throwaway `registry:2`, which is how `hack/mirror-release.sh` is tested; combine it with a copy of the
 config whose `release` is disabled so that nothing reaches GitHub.
 
-The flavor image is built outside GoReleaser. Dry-run it against a throwaway registry with a
+The harness image is built outside GoReleaser. Dry-run it against a throwaway registry with a
 builder that can reach it:
 
 ```sh
 docker run -d --rm --name dryrun-registry -p 127.0.0.1:5000:5000 registry:2
 docker buildx create --name dryrun --driver docker-container --driver-opt network=host
-BUILDX_BUILDER=dryrun hack/release-flavor.sh 0.0.0-rc.0 localhost:5000 "$(git rev-parse HEAD)"
+BUILDX_BUILDER=dryrun hack/release-harness.sh 0.0.0-rc.0 localhost:5000 "$(git rev-parse HEAD)"
 ```
 
-It prints the pushed index's digest reference. The gate does not check the flavor contract suite
-(`flavors` in `ci.yml` is required but runs only in the merge queue and on main, and only when flavor files change; see `hack/ci-required.txt`), and CI
+It prints the pushed index's digest reference. The gate does not check the harness contract suite
+(`harnesses` in `ci.yml` is required but runs only in the merge queue and on main, and only when harness files change; see `hack/ci-required.txt`), and CI
 builds only the runner's own platform, so the release's QEMU build of the other platform is the
 first one: dry-run it on an x86 host (where arm64 is emulated, as in the release) before an rc that
-changes `flavors/`.
+changes `harnesses/`.
 
-### Reproducible flavor layers
+### Reproducible harness layers
 
-One commit builds the same flavor image layers (#176), as `ko` already does for the Go images.
-`hack/release-flavor.sh` and the `flavor-publish` job set the build arg `SOURCE_DATE_EPOCH` to the
+One commit builds the same harness image layers (#176), as `ko` already does for the Go images.
+`hack/release-harness.sh` and the `harness-publish` job set the build arg `SOURCE_DATE_EPOCH` to the
 commit time (`git show -s --format=%ct`) and push with BuildKit's `rewrite-timestamp=true` exporter
 option, which clamps every file time in the layers to that epoch. The base image and every download
 are pinned by digest and the apt packages by the Ubuntu snapshot date, so those inputs do not move.
 
-`hack/flavor-repro-check.sh [flavor [platform]]` is the check: it builds the flavor twice on
+`hack/harness-repro-check.sh [harness [platform]]` is the check: it builds the harness twice on
 a fresh builder with no cache, for one platform, and fails when the two image digests differ (it keeps
-both OCI layouts and prints their paths). It always checks `HEAD` and refuses to run when `flavors/`
-has uncommitted changes, because the build reads the working tree. The advisory `flavor-repro` job
-(`.github/workflows/flavor-repro.yml`) runs it for the runner's platform on a push to main, nightly
+both OCI layouts and prints their paths). It always checks `HEAD` and refuses to run when `harnesses/`
+has uncommitted changes, because the build reads the working tree. The advisory `harness-repro` job
+(`.github/workflows/harness-repro.yml`) runs it for the runner's platform on a push to main, nightly
 and on dispatch; it is not in the pull request or merge queue path, so it never blocks a merge. Run it
-by hand after a commit that changes `flavors/`; it needs Docker with buildx and the network, and takes
+by hand after a commit that changes `harnesses/`; it needs Docker with buildx and the network, and takes
 as long as two uncached builds.
 
 What it does not cover: the BuildKit SBOM and provenance attestations of a release carry build data,

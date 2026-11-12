@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # charts/koinon values shared by every Tilt profile (see Tiltfile and docs/dev/loop.md).
-# The registry, OpenShell and flavor values come from values-kind.yaml or
+# The registry, OpenShell and harness values come from values-kind.yaml or
 # the local profile (hack/dev/local.yaml); the Tiltfile adds the image tags. No secret goes here: the ensure-secrets hook
 # Job (an ordinary Job under Tilt) creates the database and bootstrap-admin passwords once.
 

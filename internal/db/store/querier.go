@@ -1100,6 +1100,9 @@ type Querier interface {
 	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the stores of several replicas for the rest of the transaction.
 	LockOpenRouterCatalog(ctx context.Context) error
+	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
+	// cannot be added to two connections at once. Held until the transaction ends.
+	LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1370,6 +1373,9 @@ type Querier interface {
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
+	// The admin's extra MCP hosts of a connection (#240). The caller holds the row (GetConnectionForUpdate)
+	// and has validated and de-duplicated the hosts.
+	SetConnectionMCPHosts(ctx context.Context, arg SetConnectionMCPHostsParams) (Connection, error)
 	// Names what a claimed key produced, in the same transaction as the claim.
 	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
 	// Changes the format of a model that is still not overridden, so a save that raced the startup

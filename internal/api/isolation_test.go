@@ -295,6 +295,16 @@ var isolationCases = map[string]isolationCase{
 			return c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: f.connection})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceAddConnectionMCPHostProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.AddConnectionMCPHost(ctx, &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: org, ConnectionId: f.connection, Host: "gitea-mcp.example.test"})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceRemoveConnectionMCPHostProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: f.connection, Host: "gitea-mcp.example.test"})
+		},
+	},
 	connectionv1alpha1connect.ConnectionServiceSetConnectionSecretProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.SetConnectionSecret(ctx, &connectionv1alpha1.SetConnectionSecretRequest{

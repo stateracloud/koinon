@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Copies one release (plan item REL2) from ghcr.io/stateracloud/koinon to another registry: the images
-# api, reconciler, agentd and flavors/opencode with every platform (BuildKit's
+# api, reconciler, agentd and sandbox with every platform (BuildKit's
 # attestation manifests included), their cosign signatures, attestations and SBOM tags when present
 # (not referrers-API-only bundles), and the Helm chart. It needs crane and jq and reads credentials
 # from the docker config (crane uses the same keychain as docker); it never prints them.
@@ -50,7 +50,7 @@ copy_one() {
 	done
 }
 
-for name in api reconciler agentd flavors/opencode; do
+for name in api reconciler agentd sandbox; do
 	copy_one "$src/$name" "$dest/$name"
 done
 copy_one "$src/charts/koinon" "$dest/charts/koinon"

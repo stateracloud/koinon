@@ -110,10 +110,10 @@ g merge -q --no-ff feat2 -m "Merge feat2" # main moved after feat2 branched: tre
 merge_diff=$(g rev-parse HEAD)
 plain=$(g rev-parse HEAD~1) # a one-parent commit
 # a merge that brings a file the flavors suite builds from
-g checkout -qb feat3; mkdir -p "$repo/flavors"; echo f >"$repo/flavors/x"; g add flavors; g commit -qm feat3
+g checkout -qb feat3; mkdir -p "$repo/harnesses"; echo f >"$repo/harnesses/x"; g add harnesses; g commit -qm feat3
 g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
-export CI_CHANGES_FLAVORS_DIRS=test/flavors # the directories the flavors suite builds (no go list in the scratch repo)
+export CI_CHANGES_FLAVORS_DIRS=test/harnesses # the directories the flavors suite builds (no go list in the scratch repo)
 
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }
