@@ -9,6 +9,7 @@ import { AgentService, AgentStatus, type Agent } from '@/gen/koinon/agent/v1alph
 
 /** keepWarmText says what the agent's keep-warm request comes to: off, granted, or asked for and held back by the operator's cap or not yet decided. */
 function keepWarmText(agent: Pick<Agent, 'keepWarm' | 'keepWarmGranted' | 'status'>): string {
+  if (agent.status === AgentStatus.ARCHIVED) return 'Keep-warm is off while the agent is archived. The sandbox starts when a run needs it and stops when it is idle.'
   if (!agent.keepWarm) return 'Off. The sandbox starts when a run needs it and stops when it is idle.'
   if (agent.keepWarmGranted) return 'Granted. The sandbox stays up and is not stopped when idle.'
   if (agent.status === AgentStatus.DRAFT) return 'Requested. It is granted once the agent is active, if the operator’s cap allows.'

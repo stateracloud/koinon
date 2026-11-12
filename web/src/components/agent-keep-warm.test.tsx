@@ -22,7 +22,7 @@ function setup(role: OrgRole, start: { keepWarm?: boolean; keepWarmGranted?: boo
       setAgentKeepWarm: (req) => {
         sets.push(req)
         if (opts.failSet) throw new ConnectError(opts.failSet, Code.FailedPrecondition)
-        agent = create(AgentSchema, { ...agent, keepWarm: req.keepWarm, keepWarmGranted: req.keepWarm && !!opts.grantOnSet })
+        agent = create(AgentSchema, { ...agent, keepWarm: req.keepWarm, keepWarmGranted: req.keepWarm && Boolean(opts.grantOnSet) })
         return { agent }
       },
     })
@@ -76,5 +76,11 @@ describe('AgentKeepWarm', () => {
   it('cannot be changed on an archived agent', async () => {
     setup(OrgRole.ADMIN, { keepWarm: true, status: AgentStatus.ARCHIVED })
     expect(await screen.findByLabelText('Keep warm')).toBeDisabled()
+  })
+
+  it('says keep-warm is off on an archived agent that still has the flag set', async () => {
+    setup(OrgRole.ADMIN, { keepWarm: true, keepWarmGranted: false, status: AgentStatus.ARCHIVED })
+    expect(await screen.findByText(/Keep-warm is off while the agent is archived/)).toBeInTheDocument()
+    expect(screen.queryByText(/Requested, not granted/)).not.toBeInTheDocument()
   })
 })
