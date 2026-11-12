@@ -6,6 +6,8 @@
 package providers
 
 import (
+	"context"
+	"net"
 	"sync"
 
 	"github.com/stateracloud/koinon/internal/codehost"
@@ -23,9 +25,15 @@ const GitHub = github.HostID
 const Gitea = gitea.HostID
 
 // New returns the registry of shipped providers. gh is the GitHub client, shared so connection
-// checks and approved calls use one token cache; nil is a client for api.github.com.
+// checks and approved calls use one token cache; nil is a client for api.github.com. Gitea
+// dials through the same egress policy check as gh (its DialContext), so one outbound rule
+// covers every admin-supplied code-host URL.
 func New(gh *github.Client) *codehost.Registry {
-	return codehost.NewRegistry(github.NewHost(gh), gitea.NewHost(gitea.Options{}))
+	var dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	if gh != nil {
+		dial = gh.DialContext()
+	}
+	return codehost.NewRegistry(github.NewHost(gh), gitea.NewHost(gitea.Options{DialContext: dial}))
 }
 
 var (

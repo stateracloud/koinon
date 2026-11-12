@@ -679,9 +679,6 @@ func serve(ctx context.Context, cfg config) error {
 			slog.Info("moved connection secrets into the store", "count", n)
 		}
 	}
-	// One GitHub client, so connection checks and approved calls share its token cache.
-	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
-	hosts := providers.New(gh)
 	var opener connections.Opener
 	var keys services.Keys
 	if keyring != nil {
@@ -693,6 +690,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
 		return err
 	}
+	// One GitHub client, so connection checks and approved calls share its token cache. It and the
+	// Gitea provider dial Connection base URLs through the egress policy.
+	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+	hosts := providers.New(gh)
 	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
 	guardMetrics := mcpguard.NewMetrics(nil)
