@@ -14,12 +14,11 @@ metadata:
     Makes small, well-defined changes to one Gitea repository and proposes them as a pull request.
     Every pull request needs your approval before it reaches Gitea.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  # No npm registry access and no external OpenCode plugins: the agent changes code, it does not
-  # extend its harness.
-  harness:
+    # No npm registry access and no external OpenCode plugins: the agent changes code, it does not
+    # extend its harness.
     pluginInstalls: false
   model:
     name: default

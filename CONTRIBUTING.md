@@ -45,7 +45,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 
 | Tool | Version | Used for |
 | --- | --- | --- |
-| Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
+| Go | `go.mod` (1.27.4) | build, tests, code generators (pinned as `go tool` entries) |
 | Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
 | Node | 24 | web UI |
 | pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |

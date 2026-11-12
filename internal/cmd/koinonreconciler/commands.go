@@ -178,8 +178,8 @@ func harnessImages(v *viper.Viper) (map[string]string, error) {
 	var harnesses map[string]struct {
 		Image string `mapstructure:"image"`
 	}
-	if err := v.UnmarshalKey("flavors", &harnesses); err != nil {
-		return nil, fmt.Errorf("config flavors: %w", err)
+	if err := v.UnmarshalKey("harnesses", &harnesses); err != nil {
+		return nil, fmt.Errorf("config harnesses: %w", err)
 	}
 	images := map[string]string{}
 	for name, f := range harnesses {

@@ -218,12 +218,12 @@ registry, for example to test an rc from a registry your cluster can reach. Inst
 
 ### The flavor image when installing a release
 
-The packaged chart defaults `flavors.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
+The packaged chart defaults `harnesses.opencode.image` to `<image.registry>/flavors/opencode:<appVersion>`,
 which the release publishes (the `flavor` job, `hack/release-flavor.sh`) and `hack/mirror-release.sh`
 copies, so a default install needs no flavor values. To run a flavor you built yourself (`make
-flavors`, then tag and push), set `flavors.opencode.image.repository` and `.tag`.
-`flavors.<x>.image.registry` does not exist; a flavor in another registry needs
-`flavors.<x>.image.repository` to be a path below `image.registry`.
+flavors`, then tag and push), set `harnesses.opencode.image.repository` and `.tag`.
+`harnesses.<x>.image.registry` does not exist; a harness in another registry needs
+`harnesses.<x>.image.repository` to be a path below `image.registry`.
 
 ## Dry runs
 
