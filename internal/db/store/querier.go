@@ -275,6 +275,7 @@ type Querier interface {
 	//
 	// Run artifacts (#22). Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
+	// Idempotent per task message: the artifact of a message that has one is returned unchanged.
 	CreateRunArtifact(ctx context.Context, arg CreateRunArtifactParams) (CreateRunArtifactRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// A request Koinon makes itself (saved work to push). No row: it exists.
@@ -1067,6 +1068,8 @@ type Querier interface {
 	ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntryRevisionsParams) ([]SpendEntryRevision, error)
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
+	// The input artifacts of a task, without their bodies: the messages the context guard already handled.
+	ListTaskInputArtifacts(ctx context.Context, arg ListTaskInputArtifactsParams) ([]ListTaskInputArtifactsRow, error)
 	// The users' messages on the task after a timeline seq, in order: what
 	// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
 	// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.

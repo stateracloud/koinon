@@ -737,8 +737,12 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if r.overflow != nil {
 		// An input is over the cap: keep it, ask a person and park; the prompt is not sent.
-		if err := r.parkOnOverflow(fctx, task, vc, through, closeHarness); err != nil {
-			return r.execErr(ctx, "park the run on an input over the context cap", err)
+		if err := r.parkOnOverflow(fctx, task, vc, closeHarness, sweepOnce); err != nil {
+			var f *failure
+			if errors.As(err, &f) {
+				return err
+			}
+			return r.dbErr(ctx, "park the run on an input over the context cap", err)
 		}
 		return nil
 	}
@@ -987,16 +991,31 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if restart {
 		return r.handoffPrompt(ctx, task, outcomes, notice)
 	}
+	handled, err := r.q.ListTaskInputArtifacts(ctx, store.ListTaskInputArtifactsParams{OrgID: r.run.OrgID, TaskID: task.ID})
+	if err != nil {
+		return "", 0, err
+	}
+	kept := make(map[int64]bool, len(handled))
+	ownKept := false
+	for _, a := range handled {
+		kept[a.MessageSeq] = true
+		ownKept = ownKept || a.RunID == r.run.ID
+	}
 	var texts []string
+	var seqs []int64
 	through := after
 	for _, m := range msgs {
+		through = m.Seq
+		if kept[m.Seq] {
+			continue // the context guard kept this one whole and asked; it is not sent
+		}
 		var body struct {
 			Text string `json:"text"`
 		}
 		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
 			texts = append(texts, body.Text)
+			seqs = append(seqs, m.Seq)
 		}
-		through = m.Seq
 	}
 	mode := promptNew
 	switch {
@@ -1006,14 +1025,22 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	// its approvals were decided. A takeover keeps the state it had.
 	case resumed && r.run.State == store.RunStateStarting:
 		mode = promptParkResume
+		if ownKept {
+			// This run parked on an input over the cap before anything was sent: the agent has not
+			// seen the task yet.
+			mode = promptParkResumeFresh
+		}
 	case resumed:
 		mode = promptTakeover
 	case loaded:
 		mode = promptContinue
 	}
+	if len(handled) > 0 && (reset || mode == promptParkResume || mode == promptParkResumeFresh) {
+		r.rehydrate(ctx, handled)
+	}
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
-	r.guardInputs(texts)
+	r.guardInputs(texts, seqs, max(after, r.run.PromptThroughSeq.Int64))
 	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
 }
 
@@ -1081,6 +1108,9 @@ const (
 	promptTakeover
 	// promptParkResume resumes a parked run after its approvals and questions were decided.
 	promptParkResume
+	// promptParkResumeFresh resumes a run that parked on an input over the context cap before it sent
+	// any prompt: the task's title comes first.
+	promptParkResumeFresh
 	// promptReset is a new session that replaces one the sandbox home lost.
 	promptReset
 )
@@ -1100,6 +1130,9 @@ func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcom
 	case promptReset, promptNew:
 		header()
 	case promptParkResume:
+		parts = append(parts, parkResumeNote+outcomes)
+	case promptParkResumeFresh:
+		header()
 		parts = append(parts, parkResumeNote+outcomes)
 	case promptTakeover:
 		parts = append(parts, resumeNote+outcomes)

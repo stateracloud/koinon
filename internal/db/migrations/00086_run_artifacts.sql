@@ -15,6 +15,7 @@ CREATE TABLE run_artifacts (
     run_id     uuid        NOT NULL,
     task_id    uuid        NOT NULL,
     kind       text        NOT NULL CHECK (kind IN ('input')),
+    message_seq bigint     NOT NULL,
     name       text        NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
     media_type text        NOT NULL DEFAULT 'text/plain; charset=utf-8',
     size_bytes bigint      NOT NULL CHECK (size_bytes >= 0),
@@ -26,3 +27,7 @@ CREATE TABLE run_artifacts (
 );
 
 CREATE INDEX run_artifacts_run ON run_artifacts (org_id, run_id);
+
+-- One artifact per task message: a retry, a takeover or a drain that meets the same oversized message
+-- finds its artifact instead of making a second one.
+CREATE UNIQUE INDEX run_artifacts_message ON run_artifacts (org_id, task_id, kind, message_seq);

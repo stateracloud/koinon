@@ -13,46 +13,51 @@ import (
 
 const createRunArtifact = `-- name: CreateRunArtifact :one
 
-INSERT INTO run_artifacts (org_id, run_id, task_id, kind, name, media_type, size_bytes, sha256, body)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, org_id, run_id, task_id, kind, name, media_type, size_bytes, sha256, created_at
+INSERT INTO run_artifacts (org_id, run_id, task_id, kind, message_seq, name, media_type, size_bytes, sha256, body)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (org_id, task_id, kind, message_seq) DO UPDATE SET name = run_artifacts.name
+RETURNING id, org_id, run_id, task_id, kind, message_seq, name, media_type, size_bytes, sha256, created_at
 `
 
 type CreateRunArtifactParams struct {
-	OrgID     pgtype.UUID
-	RunID     pgtype.UUID
-	TaskID    pgtype.UUID
-	Kind      string
-	Name      string
-	MediaType string
-	SizeBytes int64
-	Sha256    string
-	Body      []byte
+	OrgID      pgtype.UUID
+	RunID      pgtype.UUID
+	TaskID     pgtype.UUID
+	Kind       string
+	MessageSeq int64
+	Name       string
+	MediaType  string
+	SizeBytes  int64
+	Sha256     string
+	Body       []byte
 }
 
 type CreateRunArtifactRow struct {
-	ID        pgtype.UUID
-	OrgID     pgtype.UUID
-	RunID     pgtype.UUID
-	TaskID    pgtype.UUID
-	Kind      string
-	Name      string
-	MediaType string
-	SizeBytes int64
-	Sha256    string
-	CreatedAt pgtype.Timestamptz
+	ID         pgtype.UUID
+	OrgID      pgtype.UUID
+	RunID      pgtype.UUID
+	TaskID     pgtype.UUID
+	Kind       string
+	MessageSeq int64
+	Name       string
+	MediaType  string
+	SizeBytes  int64
+	Sha256     string
+	CreatedAt  pgtype.Timestamptz
 }
 
 // SPDX-License-Identifier: Apache-2.0
 //
 // Run artifacts (#22). Every query on an org-owned table takes @org_id and filters on it
 // (TestQueriesAreOrgScoped).
+// Idempotent per task message: the artifact of a message that has one is returned unchanged.
 func (q *Queries) CreateRunArtifact(ctx context.Context, arg CreateRunArtifactParams) (CreateRunArtifactRow, error) {
 	row := q.db.QueryRow(ctx, createRunArtifact,
 		arg.OrgID,
 		arg.RunID,
 		arg.TaskID,
 		arg.Kind,
+		arg.MessageSeq,
 		arg.Name,
 		arg.MediaType,
 		arg.SizeBytes,
@@ -66,6 +71,7 @@ func (q *Queries) CreateRunArtifact(ctx context.Context, arg CreateRunArtifactPa
 		&i.RunID,
 		&i.TaskID,
 		&i.Kind,
+		&i.MessageSeq,
 		&i.Name,
 		&i.MediaType,
 		&i.SizeBytes,
@@ -76,7 +82,7 @@ func (q *Queries) CreateRunArtifact(ctx context.Context, arg CreateRunArtifactPa
 }
 
 const getRunArtifact = `-- name: GetRunArtifact :one
-SELECT org_id, id, run_id, task_id, kind, name, media_type, size_bytes, sha256, body, created_at FROM run_artifacts WHERE org_id = $1 AND id = $2
+SELECT org_id, id, run_id, task_id, kind, message_seq, name, media_type, size_bytes, sha256, body, created_at FROM run_artifacts WHERE org_id = $1 AND id = $2
 `
 
 type GetRunArtifactParams struct {
@@ -93,6 +99,7 @@ func (q *Queries) GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) 
 		&i.RunID,
 		&i.TaskID,
 		&i.Kind,
+		&i.MessageSeq,
 		&i.Name,
 		&i.MediaType,
 		&i.SizeBytes,
@@ -104,7 +111,7 @@ func (q *Queries) GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) 
 }
 
 const listRunArtifacts = `-- name: ListRunArtifacts :many
-SELECT id, org_id, run_id, task_id, kind, name, media_type, size_bytes, sha256, created_at
+SELECT id, org_id, run_id, task_id, kind, message_seq, name, media_type, size_bytes, sha256, created_at
 FROM run_artifacts WHERE org_id = $1 AND run_id = $2 ORDER BY id
 `
 
@@ -114,16 +121,17 @@ type ListRunArtifactsParams struct {
 }
 
 type ListRunArtifactsRow struct {
-	ID        pgtype.UUID
-	OrgID     pgtype.UUID
-	RunID     pgtype.UUID
-	TaskID    pgtype.UUID
-	Kind      string
-	Name      string
-	MediaType string
-	SizeBytes int64
-	Sha256    string
-	CreatedAt pgtype.Timestamptz
+	ID         pgtype.UUID
+	OrgID      pgtype.UUID
+	RunID      pgtype.UUID
+	TaskID     pgtype.UUID
+	Kind       string
+	MessageSeq int64
+	Name       string
+	MediaType  string
+	SizeBytes  int64
+	Sha256     string
+	CreatedAt  pgtype.Timestamptz
 }
 
 // The artifacts of a run, without their bodies.
@@ -142,6 +150,64 @@ func (q *Queries) ListRunArtifacts(ctx context.Context, arg ListRunArtifactsPara
 			&i.RunID,
 			&i.TaskID,
 			&i.Kind,
+			&i.MessageSeq,
+			&i.Name,
+			&i.MediaType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskInputArtifacts = `-- name: ListTaskInputArtifacts :many
+SELECT id, org_id, run_id, task_id, kind, message_seq, name, media_type, size_bytes, sha256, created_at
+FROM run_artifacts WHERE org_id = $1 AND task_id = $2 AND kind = 'input' ORDER BY message_seq
+`
+
+type ListTaskInputArtifactsParams struct {
+	OrgID  pgtype.UUID
+	TaskID pgtype.UUID
+}
+
+type ListTaskInputArtifactsRow struct {
+	ID         pgtype.UUID
+	OrgID      pgtype.UUID
+	RunID      pgtype.UUID
+	TaskID     pgtype.UUID
+	Kind       string
+	MessageSeq int64
+	Name       string
+	MediaType  string
+	SizeBytes  int64
+	Sha256     string
+	CreatedAt  pgtype.Timestamptz
+}
+
+// The input artifacts of a task, without their bodies: the messages the context guard already handled.
+func (q *Queries) ListTaskInputArtifacts(ctx context.Context, arg ListTaskInputArtifactsParams) ([]ListTaskInputArtifactsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskInputArtifacts, arg.OrgID, arg.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTaskInputArtifactsRow
+	for rows.Next() {
+		var i ListTaskInputArtifactsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.TaskID,
+			&i.Kind,
+			&i.MessageSeq,
 			&i.Name,
 			&i.MediaType,
 			&i.SizeBytes,
