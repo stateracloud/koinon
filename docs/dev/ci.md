@@ -406,8 +406,9 @@ laptop; more on a runner. A longer window would have hidden that. Test binaries 
 tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`, the `go-race-parallel` job and the `warm-caches` test compile): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
 makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
 went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
-`make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
-without the tag still passes, only slower (set `GOFLAGS=-tags=testing` yourself for a quick loop).
+`make build-go` refuses it in `GO_TAGS`, and no release build uses it. `internal/agentd` refuses to
+run without the tag (its BeforeSuite fails, #638: its deadline specs assume fast key derivation); other
+suites still pass without it, only slower. Set `GOFLAGS=-tags=testing` yourself for a quick loop.
 Binaries that tests build themselves (the chart smoke images) do not get the tag: they drop it from `GOFLAGS`.
 
 ## What `ci` runs when

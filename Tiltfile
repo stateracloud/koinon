@@ -193,9 +193,9 @@ if not sandbox_policy:
     sets.append('sandboxLimitRange.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
-        sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
+        sets.append('harnesses.%s.image.tag=%s' % (f, flavor_tags[f]))
     else:
-        sets.append('flavors.%s=null' % f)  # not built, so not offered to agents
+        sets.append('harnesses.%s=null' % f)  # not built, so not offered to agents
 if os_tls:
     sets.append('openshell.clientTLSSecret=' + os_tls)
 else:

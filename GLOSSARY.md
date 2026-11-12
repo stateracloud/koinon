@@ -57,7 +57,7 @@ An agent retired from use: it takes no work and cannot be resumed.
 _Avoid_: Deleted agent, disabled agent, archived sandbox
 
 **Template**:
-A curated starting point for a new agent: flavor, instructions, suggested grants, triggers and
+A curated starting point for a new agent: harness, instructions, suggested grants, triggers and
 default limits. An agent made from it keeps its own copy and is not changed by later edits to it.
 _Avoid_: Blueprint, preset, agent type, recipe
 
@@ -70,7 +70,7 @@ Koinon's record of how to obtain and run one harness. It is built-in (shipped in
 _Avoid_: Flavor, adapter, plugin, harness image
 
 **Flavor**:
-The earlier word for a harness definition: Koinon's tested packaging of one harness as a sandbox image. It is being retired (#610): the template format, the chart values and the image and directory names still say `flavor`, and the API keeps deprecated `flavor` fields beside the `harness` ones.
+The earlier word for a harness definition: Koinon's tested packaging of one harness as a sandbox image. It is being retired (#610): the image, directory, script and CI job names still say `flavor` until the later steps of that rename (ADR 0112, groundwork decisions), and the API keeps deprecated `flavor` fields beside the `harness` ones.
 _Avoid_: Agent image, harness image, runtime; flavor for anything new
 
 **Ephemeral agent**:
