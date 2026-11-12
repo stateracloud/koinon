@@ -47,6 +47,23 @@ case_ allow "echo 'sleep 30'"
 case_ allow 'grep -n sleep 30 file.txt'
 case_ allow 'make test'
 case_ allow ''
+case_ deny 'FOO=1 sleep 7'
+case_ deny 'echo `sleep 6`'
+case_ deny 'command sleep 10'
+case_ deny 'env sleep 10'
+case_ deny 'timeout 20 sleep 10'
+case_ deny 'sleep infinity'
+case_ deny "echo \"it's\"; sleep 9; echo 'x'"
+case_ deny 'sleep 10 &'
+case_ deny $'cat > f <<EOF\nx\nEOF\nsleep 9'
+case_ deny $'grep x <<<word\nsleep 9'
+case_ allow $'git commit -m "fix: x\n\nsleep 30 was removed"'
+case_ allow $'cat > f <<EOF\nsleep 60\nEOF'
+case_ allow $'cat > f <<-\'EOF\'\n\tsleep 60\n\tEOF'
+case_ allow $'gh api x -f body="$(cat <<\'EOF\'\nwait\nsleep 10\nEOF\n)"'
+case_ deny 'echo \"; sleep 9'
+case_ allow 'for i in 1 2 3; do git push && break; sleep 2; done'
+case_ allow 'echo $((1<<3)); sleep 1'
 
 # The reason is one line and names the legal routes.
 out=$("$hook" <<<'{"tool_input":{"command":"sleep 10"}}')
@@ -58,7 +75,11 @@ else
   bad "the deny output: $out"
 fi
 
-# Off unless KOINON_MAINTAINER_HOOKS=1: no output and exit 0 for a command it would refuse.
+# Off unless KOINON_MAINTAINER_HOOKS=1: no output and exit 0 for a command it would refuse, also under
+# a POSIX sh (the opt-in line comes before any bash 4+ syntax).
+rc=0
+out=$(env -u KOINON_MAINTAINER_HOOKS sh "$hook" <<<'{"tool_input":{"command":"sleep 99"}}') || rc=$?
+if [ -z "$out" ] && [ "$rc" -eq 0 ]; then ok "off under sh"; else bad "off under sh: rc=$rc output: $out"; fi
 for v in unset '' 0 true yes; do
   rc=0
   if [ "$v" = unset ]; then

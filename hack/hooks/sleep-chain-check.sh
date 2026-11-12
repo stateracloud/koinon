@@ -6,11 +6,14 @@
 # blocks the session and burns the turn while it waits; waits belong in `hack/pr-wait.sh`,
 # `run_in_background` or a Monitor call (docs/agents/subagent-brief.md, "No standalone sleep").
 # It refuses a foreground Bash command whose literal `sleep` durations add up to 5 seconds or more
-# (`sleep 5`, `sleep 1m`, `sleep 2; sleep 3`, `sleep 1 2 2`). A background call
-# (`run_in_background: true`) is allowed, and so is a `sleep` whose duration is not a literal
-# (`sleep "$d"`): the hook cannot know it. Text inside quotes is not a command (a commit message).
+# (`sleep 5`, `sleep 1m`, `sleep 2; sleep 3`, `sleep 1 2 2`, `FOO=1 sleep 9`, `timeout 20 sleep 9`,
+# `sleep infinity`). A background call (`run_in_background: true`) is allowed, and so is a `sleep`
+# whose duration is not a literal (`sleep "$d"`): the hook cannot know it. Quoted text (a commit
+# message, over several lines too) and heredoc bodies are not commands. A `sleep 10 &` inside a
+# foreground call is refused too: a later `wait`, or the shell, can still hold the call. Not seen:
+# a sleep inside `bash -c "..."` or `eval`.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
-# Needs only bash, sed, awk and jq.
+# Needs only bash, awk and jq.
 
 # Maintainer hook: does nothing unless KOINON_MAINTAINER_HOOKS=1 (docs/maintainers/hooks.md). POSIX
 # syntax, so it runs before the bash 5 check and a contributor without the variable sees nothing.
@@ -30,20 +33,65 @@ cmd=$(jq -r '.tool_input.command // ""' <<<"$in")
 # The seconds of foreground sleep that the hook allows in one call.
 max_seconds=5
 
-# Drop quoted text, then add up the literal arguments of every `sleep` that starts a simple command
-# (after start of line, ; & | ( { or a do/then/else keyword). GNU sleep sums its arguments.
-total=$(printf '%s\n' "$cmd" | sed -e "s/'[^']*'/Q/g" -e 's/"[^"]*"/Q/g' | awk '
+# One awk pass over the whole command (RS that never matches, so multi-line quotes are seen whole):
+#   1. drop heredoc bodies (the lines after `<<WORD` up to WORD), outside quotes;
+#   2. replace quoted text with Q, honouring backslashes outside single quotes, and turn newlines,
+#      backticks and ; & | ( ) { } into separators;
+#   3. add up the literal arguments of every `sleep` that starts a simple command. Before it may come
+#      do/then/else/!/time, NAME=value words, command, env, exec, nohup, and `timeout DURATION`.
+#      GNU sleep sums its arguments.
+total=$(printf '%s\n' "$cmd" | awk -v sq="'" '
+BEGIN { RS = "\001" }
+function sep() { out = out " ; " }
 {
-  gsub(/[;&|(){}]/, " ; ")
-  n = split($0, w, /[[:space:]]+/)
-  start = 1
+  # 1. heredoc bodies, line by line, with a rough quote state per line.
+  nl = split($0, L, "\n"); text = ""; tag = ""
+  for (k = 1; k <= nl; k++) {
+    line = L[k]
+    if (tag != "") {
+      t = line; if (strip) sub(/^\t+/, "", t)
+      if (t == tag) tag = ""
+      text = text "\n"
+      continue
+    }
+    text = text line "\n"
+    if (match(line, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
+      pre = substr(line, 1, RSTART - 1)
+      # not a here-string (<<<word), and not inside quotes
+      if (substr(pre, length(pre)) != "<" && gsub(sq, sq, pre) % 2 == 0 && gsub(/"/, "\"", pre) % 2 == 0) {
+        h = substr(line, RSTART, RLENGTH)
+        strip = (h ~ /^<<-/)
+        sub(/^<<-?[ \t]*/, "", h); gsub(/["\047]/, "", h); tag = h
+      }
+    }
+  }
+  # 2. quotes and separators, character by character.
+  out = ""; st = 0; n = length(text)
+  for (k = 1; k <= n; k++) {
+    c = substr(text, k, 1)
+    if (st == 1) { if (c == sq) st = 0; continue }
+    if (st == 2) {
+      if (c == "\\") { k++; continue }
+      if (c == "\"") st = 0
+      continue
+    }
+    if (c == "\\") { k++; out = out "x"; continue }
+    if (c == sq) { st = 1; out = out "Q"; continue }
+    if (c == "\"") { st = 2; out = out "Q"; continue }
+    if (c == "\n" || c == "`" || c ~ /[;&|(){}]/) { sep(); continue }
+    out = out c
+  }
+  # 3. the sleeps.
+  n = split(out, w, /[ \t]+/); start = 1
   for (i = 1; i <= n; i++) {
     if (w[i] == "") continue
     if (w[i] == ";") { start = 1; continue }
-    if (start && (w[i] == "do" || w[i] == "then" || w[i] == "else" || w[i] == "!" || w[i] == "time")) continue
+    if (start && (w[i] ~ /^(do|then|else|!|time|command|env|exec|nohup)$/ || w[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) continue
+    if (start && w[i] == "timeout") { i++; continue }
     if (start && w[i] == "sleep") {
       for (j = i + 1; j <= n && w[j] != ";"; j++) {
-        if (w[j] ~ /^[0-9]+(\.[0-9]+)?[smhd]?$/) {
+        if (w[j] == "infinity") sum += 86400
+        else if (w[j] ~ /^[0-9]+(\.[0-9]+)?[smhd]?$/) {
           v = w[j]; u = substr(v, length(v)); m = 1
           if (u == "m") m = 60; else if (u == "h") m = 3600; else if (u == "d") m = 86400
           sub(/[smhd]$/, "", v)
