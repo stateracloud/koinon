@@ -6,7 +6,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: repo-helper
-  version: 0.2.0
+  version: 0.2.1
   displayName: Repo helper
   description: >-
     Makes small, well-defined changes to one GitHub repository and proposes them as a pull request.
@@ -21,6 +21,7 @@ spec:
     pluginInstalls: false
   model:
     name: default
+  tools: [comment_on_issue, create_pull_request, github_create_pull_request]
   grants:
     - connector: github
       scopes: [repo.read, pull_request.create, issue.comment]

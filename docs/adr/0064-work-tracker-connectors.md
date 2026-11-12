@@ -3,6 +3,8 @@
 - Status: Accepted
 - Delivery: v0.3 (design accepted 2026-10-26)
 - Date: 2026-10-26
+- Area: connectors-tools
+- Tags: work-tracker, connectors, triggers, tasks
 - Relates to: old issue 144 (decided in conversation
   and in the issue comment of 2026-10-26), old issue 146
   (releases)

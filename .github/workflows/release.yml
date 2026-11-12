@@ -44,6 +44,7 @@ jobs:
       pull-requests: read # the merged pull request's head commit, for the pull-request-only dco check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           fetch-depth: 0
       - name: tagged commit is on main and its required checks succeeded
@@ -65,12 +66,14 @@ jobs:
       chart_ref: ${{ steps.chart.outputs.ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # zizmor: ignore[cache-poisoning] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           go-version-file: go.mod
       # The before hooks of .goreleaser.yaml build the web UI that koinon-api embeds.
@@ -78,6 +81,7 @@ jobs:
         with:
           package_json_file: web/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # zizmor: ignore[cache-poisoning] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           node-version: 24
           cache: pnpm
@@ -173,6 +177,7 @@ jobs:
       id-token: write # keyless signing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # zizmor: ignore[artipacked] deferred, tracked in #579 (release workflow hardening); prove with the next -rc tag
         with:
           ref: ${{ github.sha }}
       - name: tool versions (hack/versions.env)

@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: product-scope
+- Tags: api, registry, helm-chart
 - Decision: [design.md#28](../design.md)
 
 ## Context

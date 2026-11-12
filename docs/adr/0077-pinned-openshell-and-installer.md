@@ -2,6 +2,8 @@
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)
 - Date: 2026-10-28
+- Area: install-operations
+- Tags: install, openshell, helm-chart, release
 - Amends: [0049](0049-v01-scope-decisions.md) (prerequisites "with pinned install steps in the docs")
 - Relates to: [0027](0027-repo-and-versioning.md), [0048](0048-openshell-spike-results.md), [0061](0061-image-pull-secrets-and-registry-mirrors.md), [0075](0075-isolation-tiers.md), [0076](0076-database-modes.md)
 

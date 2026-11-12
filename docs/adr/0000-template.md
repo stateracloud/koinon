@@ -2,6 +2,8 @@
 
 - Status: Proposed | Accepted | Superseded by [NNNN](NNNN-title.md) | Deprecated
 - Date: YYYY-MM-DD
+- Area: one area of [docs/metadata/areas.txt](../metadata/areas.txt)
+- Tags: one to six tags of [docs/metadata/tags.txt](../metadata/tags.txt), comma-separated
 - Decision: [design.md#N](../design.md) (omit for ADRs that are not in the design doc)
 - Verification: optional, e.g. "Pending: OpenShell spike (old issue 3)"
 

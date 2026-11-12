@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: governance, adr-process
 - Decision: [design.md#38](../design.md)
 
 ## Context
@@ -45,7 +47,7 @@ reporting channel from the first public release.
   - Bus factor of one.
   - **Private vulnerability reporting works only on public repositories.** While
     `procoduck/koinon` (amended 2026-10-26: now `stateracloud/koinon`, see [0034](0034-project-identity.md)) is private there is no reporting channel. `SECURITY.md` must say so, and
-    reporting must be switched on the day the repo goes public.
+    reporting must be switched on the day the repo goes public. _(Changed: the repository is public and private vulnerability reporting is on.)_
 - Follow-ups:
   - Scaffold `MAINTAINERS.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md` (DCO, how
     to run tests).

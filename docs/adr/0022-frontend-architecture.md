@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: frontend-ux
+- Tags: ui, api, auth, eventing
 - Decision: [design.md#22](../design.md)
 
 ## Context
@@ -53,13 +55,13 @@ sequenceDiagram
 ## Consequences
 
 - Positive: one deployable; typed client; live UI without polling.
-- Positive: replay from outbox IDs makes reconnects lossless.
+- Positive: replay from outbox IDs makes reconnects lossless. _(Changed: no outbox was built; clients resume from the run event sequence number, see the amendment in [0010](0010-eventing.md).)_
 - Negative: NOTIFY payloads are limited to under 8000 bytes and are not replayed; the design must
   never carry data in NOTIFY, only keys. _Amended 2026-11-04 (old issue 344): the one exception is the live
   text an agent is typing, which is best effort and never stored; see [0074](0074-run-traces-trace-router.md) item 8 of its 2026-10-31 amendment._
 - Negative: two client patterns (connect-query for unary, plain client for streams) to keep
   consistent in the UI code _(inferred)_.
-- Negative: outbox needs retention and pruning _(inferred)_.
+- Negative: outbox needs retention and pruning _(inferred)_. _(Void: no outbox was built, see [0010](0010-eventing.md).)_
 - Follow-ups: outbox table in the first migrations; CSRF protection for cookie auth _(inferred)_.
 
 ## Open questions

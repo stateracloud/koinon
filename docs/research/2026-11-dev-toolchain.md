@@ -1,5 +1,10 @@
 # Dev toolchain: one source for tool versions, and the bash 3.2 gap
 
+- Status: Complete
+- Date: 2026-11-02
+- Area: engineering-process
+- Tags: tooling, dependencies, ci
+
 Research date: 2026-11-02, for #536. The issue started as a Nix flake trial; procoduck widened it to
 "which option is best", so six options are scored on the same criteria. Probes ran on procoduck's Mac
 (macOS 27.2, arm64) inside the Claude Code sandbox, with nothing installed system-wide: mise and pkgx

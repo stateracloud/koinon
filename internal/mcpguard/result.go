@@ -21,13 +21,8 @@ type Result struct {
 // resultLegs are the legs a result of tool t sets: the tool's own declaration where it has one,
 // else its server's (ADR 0091 decision 4).
 func resultLegs(srv store.McpServer, d sinkclass.Declaration) Legs {
-	l := Legs{UntrustedInput: srv.ExposesUntrustedInput, PrivateData: srv.ExposesPrivateData}
-	if d.ResultUntrustedInput != nil {
-		l.UntrustedInput = *d.ResultUntrustedInput
-	}
-	if d.ResultPrivateData != nil {
-		l.PrivateData = *d.ResultPrivateData
-	}
+	var l Legs
+	l.UntrustedInput, l.PrivateData = d.ResultLegs(srv.ExposesUntrustedInput, srv.ExposesPrivateData)
 	return l
 }
 

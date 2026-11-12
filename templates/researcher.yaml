@@ -7,7 +7,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: researcher
-  version: 0.1.0
+  version: 0.1.1
   displayName: Researcher
   description: >-
     Researches a question over several runs and answers with a cited Markdown report. It reads up to
@@ -25,6 +25,7 @@ spec:
     memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
+  tools: [ask_user]
   grants:
     - connector: gitea
       scopes: [repo.read]

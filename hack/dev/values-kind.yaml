@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tilt profile "kind": a laptop with kind. Same shape as test/e2e/kind/koinon-values.yaml
-# (runc instead of Kata, the fake model server instead of a real upstream), with images loaded
-# straight into the kind node. The fake model is declared by test/e2e/kind/model-provider.yaml, which the
-# Tiltfile applies. Prerequisites: make dev-kind-up.
+# (runc instead of Kata, the fake model server instead of a real upstream), with images pushed
+# to the local registry (localhost:5001, test/e2e/kind/registry.sh). The fake model is declared by
+# test/e2e/kind/model-provider.yaml, which the Tiltfile applies. Prerequisites: make dev-kind-up.
 image:
-  registry: kind.local
+  registry: localhost:5001
+  # Always: the Tiltfile pushes every rebuild under the reused `dev` tag too (the preflight Job's probe pods run
+  # it). With the push registry the node is not reloaded as `kind load` did, so IfNotPresent would keep the old
+  # image under that tag (#45).
+  pullPolicy: Always
 
 egress:
   allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080"]

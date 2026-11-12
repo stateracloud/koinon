@@ -93,10 +93,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # merge bases, and the last green commit on main
+          persist-credentials: false
 
       # The rule asks `go list` which packages the binaries build. A pull request reads only its labels (#572).
       - if: github.event_name != 'pull_request'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
 
@@ -160,6 +162,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }} # empty: the event's own ref
+          persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
@@ -195,6 +198,7 @@ jobs:
 
       - name: Node and pnpm (web suite)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         if: inputs.suite == 'web'
         with:
           node-version: 24
@@ -265,6 +269,18 @@ jobs:
           key: flavors-${{ hashFiles('flavors/**') }}
           restore-keys: flavors-
 
+      # The pull-through caches (test/e2e/kind/registry.sh, #45) keep the third-party images the install pulls
+      # (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies, agentgateway) in this directory. Restore
+      # only: main's quickstart job saves it, as for the flavor cache above, so a pull request or a dispatch on an
+      # arbitrary commit never writes what main reads. A miss still works, the caches pull through from upstream.
+      # No restore-keys: the caches never expire blobs (TTL 0), so a new key starts empty and holds only what the
+      # current pins pull, instead of growing by every old pin set.
+      - id: kindproxy
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kind-proxy-cache
+          key: kind-proxy-${{ runner.os }}-${{ hashFiles('test/e2e/kind/up.sh', 'test/e2e/kind/registry.sh', 'charts/koinon/values.yaml', 'hack/versions.env') }}
+
       - name: Quickstart e2e (kind, images, helm install, driver or browser)
         env:
           OUT: ${{ runner.temp }}/e2e
@@ -285,6 +301,7 @@ jobs:
           # A flavor build (the pull missed) imports the restored layer cache and authenticates the
           # Dockerfile's GitHub release downloads with the workflow token as a BuildKit secret.
           FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
 
@@ -321,6 +338,20 @@ jobs:
       - name: Delete cluster
         if: always()
         run: test/e2e/kind/down.sh
+
+      # Stop the caches (they run as root and still write) and make their storage readable before it is saved.
+      - name: Stop the pull-through caches
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.kindproxy.outputs.cache-hit != 'true'
+        env:
+          KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
+        run: |
+          test/e2e/kind/registry.sh stop
+          sudo chmod -R a+rX "$KIND_PROXY_CACHE"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.kindproxy.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kind-proxy-cache
+          key: kind-proxy-${{ runner.os }}-${{ hashFiles('test/e2e/kind/up.sh', 'test/e2e/kind/registry.sh', 'charts/koinon/values.yaml', 'hack/versions.env') }}
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2ego.outputs.cache-hit != 'true'
@@ -388,7 +419,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
       - run: hack/e2e-bisect.sh
@@ -421,6 +454,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}
+          persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
@@ -473,6 +507,17 @@ jobs:
           GHCR_USER: ${{ github.actor }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
 
+      # The pull-through caches (test/e2e/kind/registry.sh, #45) keep the third-party images the install pulls
+      # (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies, agentgateway) in this directory. Restore
+      # only: main's quickstart job saves it, as for the flavor cache above, so a pull request or a dispatch on an
+      # arbitrary commit never writes what main reads. A miss still works, the caches pull through from upstream.
+      # No restore-keys: the caches never expire blobs (TTL 0), so a new key starts empty and holds only what the
+      # current pins pull, instead of growing by every old pin set.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kind-proxy-cache
+          key: kind-proxy-${{ runner.os }}-${{ hashFiles('test/e2e/kind/up.sh', 'test/e2e/kind/registry.sh', 'charts/koinon/values.yaml', 'hack/versions.env') }}
+
       - name: Restore drill (test/drill/run.sh)
         # A little below the job's 120: a hung drill is then a failed step, so the verdict step below sees it. A job
         # timeout would end as `cancelled`, which `red` must not count: a person or the concurrency group cancels too.
@@ -483,6 +528,7 @@ jobs:
           DRILL_KEEP_CLUSTER: "1" # the workflow deletes the cluster in its own step, after collecting resource use
           FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
           FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/drill/run.sh 2>&1 | tee "$RUNNER_TEMP/drill.log"
 

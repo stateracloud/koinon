@@ -16,13 +16,14 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
 var _ = Describe("the Helm-set platform settings", func() {
-	serveFlags := func() *pflag.FlagSet { return newServeCommand().Flags() }
+	serveFlags := func() *pflag.FlagSet { return newServeCommand(cli.NewViper()).Flags() }
 
 	Describe("the flag table", func() {
 		It("puts every flag of koinon-api serve on the recorded table or on the list of flags left out", func() {

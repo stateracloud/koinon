@@ -1,7 +1,9 @@
 # 0093. koinon.core: one Koinon-owned OpenCode plugin instead of a fork
 
-- Status: Proposed
+- Status: Accepted in full (maintainer decision 2026-11-11, #603; every decision of this ADR, decision 2 included)
 - Date: 2026-11-03
+- Area: runtime-sandbox
+- Tags: harness, flavors, spend-ledger
 - Relates to: [0052](0052-opencode-v2-flavor.md) (the OpenCode flavor, its config and readiness), [0059](0059-v01-opencode-only.md) (one harness in v0.1), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the `koinon.retry` plugin, amendment 2026-10-31), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (the ledger counts the title request), [0074](0074-run-traces-trace-router.md) (run traces, tool names), [0023](0023-observability-and-audit.md) (fixed metric labels), [0045](0045-openshell-hardening-defaults.md) (OpenShell defaults), [0079](0079-dependency-cooldown.md) (pin age), [0084](0084-leak-guard.md) and [0091](0091-leak-guard-by-destination.md) (the guards outside the sandbox), [0051](0051-session-home-generations.md) (the home outlives a run)
 - Issue: #122; the Go harness this contract feeds is #48
 

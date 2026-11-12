@@ -3,8 +3,10 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-23
+- Area: work-model
+- Tags: chat, tasks, audit
 - Supersedes: [0017](0017-board-and-chat-interaction-model.md) (the "chat is a ticket" rule)
-- Amends: [0011](0011-agent-to-agent.md) (read-only delegation from chat)
+- Amends: [0011](0011-agent-to-agent.md) (read-only delegation from chat), [0018](0018-v1-screens.md) (the chat screen)
 - Delivery: the ADR lands now; the feature lands in v0.2.
 
 ## Context

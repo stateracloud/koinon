@@ -192,17 +192,28 @@ image_blob() { # image_blob <host> <repo> <digest>
 	token=$(fetch "$realm?service=$service&scope=repository:$repo:pull" | jq -r '.token // .access_token')
 	fetch -H "Authorization: Bearer $token" "$url"
 }
-check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
-	local ref=$1 name tag='' digest='' host repo first rest idx created newest='' m cfg d
-	name=${ref%%@*}
-	[[ $ref == *@* ]] && digest=${ref#*@}
-	if [[ ${name##*/} == *:* ]]; then tag=${name##*:}; name=${name%:*}; fi
+# image_location <name without tag or digest> -> "<registry API host> <repository>". Docker Hub names,
+# with or without a docker.io or index.docker.io prefix, go to registry-1.docker.io: docker.io itself
+# serves no registry API (it redirects to a web page).
+image_location() {
+	local name=$1 first host repo
 	first=${name%%/*}
 	if [[ $name == */* && ($first == *.* || $first == *:* || $first == localhost) ]]; then
 		host=$first; repo=${name#*/}
 	else
-		host=registry-1.docker.io; repo=$name; [[ $repo == */* ]] || repo="library/$repo"
+		host=docker.io; repo=$name
 	fi
+	if [[ $host == docker.io || $host == index.docker.io ]]; then
+		host=registry-1.docker.io; [[ $repo == */* ]] || repo="library/$repo"
+	fi
+	echo "$host $repo"
+}
+check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
+	local ref=$1 name tag='' digest='' host repo rest idx created newest='' m cfg d
+	name=${ref%%@*}
+	[[ $ref == *@* ]] && digest=${ref#*@}
+	if [[ ${name##*/} == *:* ]]; then tag=${name##*:}; name=${name%:*}; fi
+	read -r host repo < <(image_location "$name")
 	# Reserved names (RFC 2606, RFC 6761) are test fixtures, never something a build pulls.
 	case "${host%%:*}" in
 	example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | \
@@ -212,7 +223,7 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 		;;
 	esac
 	rest=${digest:-${tag:-latest}}
-	if ! idx=$(image_manifest "$host" "$repo" "$rest"); then
+	if ! idx=$(image_manifest "$host" "$repo" "$rest") || ! jq -e . >/dev/null 2>&1 <<<"$idx"; then
 		report "image $ref" unknown "$host: manifest not readable anonymously"
 		return
 	fi
@@ -389,6 +400,7 @@ tool_repo() {
 	GITLEAKS) echo "gitleaks/gitleaks" ;;
 	SHELLCHECK) echo "koalaman/shellcheck" ;;
 	ACTIONLINT) echo "rhysd/actionlint" ;;
+	ZIZMOR) echo "zizmorcore/zizmor" ;;
 	GORELEASER) echo "goreleaser/goreleaser" ;;
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;

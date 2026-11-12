@@ -2,6 +2,9 @@
 
 - Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md), [0114](0114-model-credentials-by-type.md) and 2026-10-30 (below)
 - Date: 2026-10-21
+- Area: models-spend
+- Tags: models, agentgateway, budgets, spend-ledger, credentials
+- Amended by: [0097](0097-koinon-owned-gateway.md) (the "Our own Go proxy" alternative)
 - Decision: [design.md#13](../design.md)
 
 ## Context

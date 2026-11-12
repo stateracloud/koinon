@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md)
 - Date: 2026-10-21
+- Area: security-audit
+- Tags: credentials, security, egress
 - Amends: ADR 0006 (identity layers), ADR 0013 (model access, GitHub Copilot), ADR 0015 (agent
   environment and browser)
 
@@ -28,9 +30,11 @@ use cases besides Copilot will need in-sandbox auth.
 2. **Enabling in-sandbox auth.** A platform admin allowlists in-sandbox auth types platform-wide
    (for example `copilot-device-flow`). An org admin or owner opts in per agent, after an explicit
    "credential inside sandbox" warning. Enabling is audited and shown on the agent card.
+   _(Changed 2026-11-11, see the amendment below: no platform-wide allowlist framework, and `copilot-device-flow` is not a qualifying type. [0114](0114-model-credentials-by-type.md) decision 6: GitHub Copilot needs no exception.)_
 3. **Obtaining.** A human completes the login through takeover (device code or live view), as with
    the browser in decision 15. The agent never receives the user's password or a pasted token in
    chat.
+   _(Narrowed 2026-11-11, see the amendment below: the outside-the-sandbox ways come first, and a login that a person types or pastes into a sandbox is not covered.)_
 4. **Storage.** The token is stored in an encrypted path on the home volume, treated as a secret in
    checkpoints (decision 32), and excluded from export.
 5. **Egress.** Network policy limits the binary using the credential to the provider's hosts.
@@ -39,6 +43,7 @@ use cases besides Copilot will need in-sandbox auth.
 7. **Scope.** Personal-org agents only by default. Team orgs only if the platform admin allows it and
    the vendor's terms permit it (vendor terms review, open item #4).
 8. **Timing.** Both modes ship in v0.2 with the connector framework; not in the v0.1 demo.
+   _(Replaced 2026-11-11, see the amendment below: no release is assigned; nothing of the exception is built until the first qualifying auth type has its decision.)_
 
 ## Alternatives considered
 

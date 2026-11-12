@@ -2,8 +2,10 @@
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md)
 - Date: 2026-10-21
+- Area: work-model
+- Tags: approvals, runs, mcp, leak-guard
 - Amends: ADR 0008 (approvals)
-- Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike (old issue 3)
+- Verification: the OpenShell spike is done, see [0048](0048-openshell-spike-results.md); the agentgateway spike (routing ask-tier tools) was Pending (old issue 3)
 
 ## Context
 

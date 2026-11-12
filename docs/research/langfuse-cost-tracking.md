@@ -1,5 +1,10 @@
 # Langfuse token counting, cost and limits: research for Koinon
 
+- Status: Complete
+- Date: 2026-10-23
+- Area: models-spend
+- Tags: pricing, spend-ledger, budgets
+
 Researched 2026-10-23. Primary sources only: Langfuse docs (fetched as Markdown via `<page>.md`) and the
 `langfuse/langfuse` repository at commit **`5005e702a699646dabd7ef832013651fd8b0d4d8`** (main, 2026-10-23;
 the newest release tag on the remote is v4.9.0). Source links below are pinned to that commit; `SRC` stands for

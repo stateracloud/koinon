@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0113](0113-agent-package-access.md)
 - Date: 2026-10-29
+- Area: runtime-sandbox
+- Tags: egress, harness, testing
 - Relates to: [0025](0025-testing-strategy.md), [0045](0045-openshell-hardening-defaults.md), [0052](0052-opencode-v2-flavor.md), [0069](0069-native-model-formats.md), [0075](0075-isolation-tiers.md)
 
 ## Context
