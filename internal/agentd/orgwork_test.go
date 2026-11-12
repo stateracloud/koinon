@@ -11,6 +11,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 // The checkpoint, seed, resync and sweep ticks list only the orgs with work (#576, as the claim loop
@@ -41,7 +42,7 @@ var _ = Describe("agentd org lists for the checkpoint ticks", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 	})
 
 	Describe("checkpoints", func() {
