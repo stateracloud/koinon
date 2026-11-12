@@ -177,7 +177,7 @@ dirs=$(go list -f '{{.Dir}}' "${pkgs[@]}") || { echo "go-test.sh: go list ${pkgs
 while IFS= read -r dir; do
 	[[ -n $dir ]] || continue
 	dir=${dir/#"$PWD"/.}
-	[[ $# == 0 && $dir == ./test/flavors ]] && continue # needs the flavor images, see make test-flavors
+	[[ $# == 0 && $dir == ./test/harnesses ]] && continue # needs the harness images, see make test-harnesses
 	is_parallel=0
 	for s in "${PARALLEL_SUITES[@]}"; do
 		[[ $dir == "$s" ]] && is_parallel=1

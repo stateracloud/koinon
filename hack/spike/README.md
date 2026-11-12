@@ -3,7 +3,7 @@
 # hack/spike: historical
 
 These are the scripts, manifests, probes and raw results of the early spikes (October 2026) that
-settled the OpenShell, Agent Sandbox, agentgateway and flavor decisions in the ADRs and in
+settled the OpenShell, Agent Sandbox, agentgateway and harness decisions in the ADRs and in
 `docs/spikes/`. They are kept as evidence, not as supported tooling:
 
 - They were written against the maintainer's own cluster (a private registry, a shared OpenShell) and are not

@@ -20,7 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
-const helperPath = "../../flavors/common/koinon-git-credential"
+const helperPath = "../../harnesses/common/koinon-git-credential"
 
 // pkt is a git pkt-line.
 func pkt(s string) string { return fmt.Sprintf("%04x%s", len(s)+4, s) }

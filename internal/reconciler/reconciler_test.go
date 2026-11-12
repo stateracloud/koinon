@@ -49,7 +49,7 @@ import (
 
 const (
 	namespace = "koinon"
-	image     = "ghcr.io/stateracloud/koinon/flavors/opencode:test"
+	image     = "ghcr.io/stateracloud/koinon/sandbox:test"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
@@ -242,7 +242,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(ep.GetEnforcement()).To(Equal(sandboxv1.NetworkEnforcementMode_NETWORK_ENFORCEMENT_MODE_ENFORCE))
 			Expect(profile.GetBinaries()[0].GetPath()).To(Equal("/usr/local/bin/opencode"))
 
-			By("the sandbox runs the flavor image under an enforced policy")
+			By("the sandbox runs the harness image under an enforced policy")
 			sb := osg.Sandbox(ws, names.Sandbox)
 			Expect(sb).NotTo(BeNil())
 			Expect(sb.GetSpec().GetTemplate().GetImage()).To(Equal(image))
@@ -418,7 +418,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(baseline + 1))
 		})
 
-		It("still recreates the sandbox for a changed flavor image when the gateway ConfigMap can never be read", func(ctx SpecContext) {
+		It("still recreates the sandbox for a changed harness image when the gateway ConfigMap can never be read", func(ctx SpecContext) {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			cfg.Supervisor = &fakeSupervisor{err: errors.New("forbidden")}
 			r = newReconciler()

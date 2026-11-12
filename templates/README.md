@@ -25,7 +25,7 @@ Agent templates: building blocks for the agent builder; the result is always a d
 
 `spec.harness` holds harness settings, all off when omitted. `harness.pluginInstalls: true` lets an
 OpenCode agent install plugins: its sandbox may read the npm registry (GET and HEAD, no credentials)
-from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
+from the OpenCode binary, and OpenCode loads external plugins (`harnesses/opencode/README.md`). It
 needs `opencode` among the allowed harnesses. `repo-helper` sets it to `false` explicitly.
 
 `spec.tools` (optional) lists the tool names the instructions expect the agent to call, also the ones
