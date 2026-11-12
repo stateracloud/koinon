@@ -132,19 +132,68 @@ var _ = Describe("Limiter", func() {
 		Expect(l.Blocked(key, t0)).To(Equal(2 * want))
 	})
 
-	It("refuses a new key when the blocked set is full, and recovers when blocks end", func() {
-		for i := range 10000 {
-			k := ratelimit.Key("192.0.2.3", "user:"+strconv.Itoa(i))
-			for range ratelimit.FreeFails {
-				l.Fail(k, t0)
+	blockKey := func(k string, at time.Time) {
+		for range ratelimit.FreeFails {
+			l.Fail(k, at)
+		}
+	}
+
+	It("keeps a key that was tracked before it became blocked, through a flood of fresh keys", func() {
+		failN(2, t0)
+		failN(ratelimit.FreeFails-2, t0) // tracked first, blocked now
+		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0))
+		for i := range 25000 {
+			l.Fail(ratelimit.Key("192.0.2.6", "user:"+strconv.Itoa(i)), t0)
+		}
+		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0))
+	})
+
+	It("never keeps more than maxTracked unblocked keys when blocks end", func() {
+		for a := range 1500 {
+			addr := "10.1." + strconv.Itoa(a/250) + "." + strconv.Itoa(a%250+1)
+			for u := range 8 {
+				blockKey(ratelimit.Key(addr, "user:"+strconv.Itoa(u)), t0)
 			}
 		}
-		fresh := ratelimit.Key("192.0.2.4", "user:new")
-		Expect(l.Blocked(fresh, t0)).To(BeNumerically(">", 0))
-		l.Fail(fresh, t0)
-		Expect(l.Len()).To(Equal(10000), "an untracked key is not added")
-		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0), "and so are all keys that were never seen")
-		Expect(l.Blocked(fresh, t0.Add(ratelimit.BaseBackoff+time.Millisecond))).To(BeZero())
+		Expect(l.Blocked(key, t0.Add(2*ratelimit.BaseBackoff))).To(BeZero())
+		Expect(l.Len()).To(BeNumerically("<=", 10000))
+	})
+
+	It("blocks only the address that overflows its cap", func() {
+		for u := range 8 {
+			blockKey(ratelimit.Key("192.0.2.7", "user:"+strconv.Itoa(u)), t0)
+		}
+		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeZero(), "within the cap")
+		blockKey(ratelimit.Key("192.0.2.7", "user:overflow"), t0)
+		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ""), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("192.0.2.7", ratelimit.WidePart), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("192.0.2.8", ""), t0)).To(BeZero())
+		Expect(l.Blocked(ratelimit.Key("192.0.2.8", ratelimit.WidePart), t0)).To(BeZero())
+		Expect(l.Blocked(ratelimit.Key("192.0.2.8", "user:admin"), t0)).To(BeZero())
+	})
+
+	It("counts an IPv6 address per /48 for the cap", func() {
+		for u := range 8 {
+			blockKey(ratelimit.Key("2001:db8:1:"+strconv.Itoa(u)+"::", "user:x"), t0)
+		}
+		blockKey(ratelimit.Key("2001:db8:1:ff::", "user:x"), t0)
+		Expect(l.Blocked(ratelimit.Key("2001:db8:1:ff::", ""), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(ratelimit.Key("2001:db8:2::", ""), t0)).To(BeZero())
+	})
+
+	It("refuses nobody else when many addresses fill the blocked set", func() {
+		for a := range 12600 {
+			addr := "10." + strconv.Itoa(a/250%250) + "." + strconv.Itoa(a/62500) + "." + strconv.Itoa(a%250+1)
+			for u := range 8 {
+				blockKey(ratelimit.Key(addr, "user:"+strconv.Itoa(u)), t0)
+			}
+		}
+		fresh := "198.51.100.1"
+		for _, part := range []string{"", ratelimit.WidePart, "user:admin", "abcdefgh"} {
+			Expect(l.Blocked(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
+		}
+		blockKey(ratelimit.Key(fresh, "user:admin"), t0)
+		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), t0)).To(BeNumerically(">", 0), "a full set drops the soonest block to make room")
 	})
 
 	It("keeps the credential name out of the key", func() {

@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -139,6 +140,19 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
 		Expect(rec.Body.String()).To(ContainSubstring("too many failed login attempts"), "the limiter answered, not the busy hash")
 		Expect(events(ctx)).To(HaveLen(before), "no audit event on the blocked path")
+	})
+
+	It("lets a fresh address log in while many other addresses are blocked", func(ctx SpecContext) {
+		now := svc.cfg.Now()
+		for a := range 12600 {
+			addr := fmt.Sprintf("10.%d.%d.%d", a/250%250, a/62500, a%250+1)
+			for u := range 8 {
+				for range ratelimit.FreeFails {
+					svc.limiter.Fail(ratelimit.Key(addr, fmt.Sprintf("user:%d", u)), now)
+				}
+			}
+		}
+		Expect(login(ctx, "198.51.100.9", "admin", fakeLimitPassword).Code).To(Equal(http.StatusOK))
 	})
 
 	It("forgets the failures of a username after a good login", func(ctx SpecContext) {
