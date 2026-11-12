@@ -35,6 +35,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -170,6 +172,9 @@ type Config struct {
 	// NetworkPolicy applies the chart's default-deny NetworkPolicy in each workspace namespace
 	// (spike 8.15, ADR 0045). Nil turns it off (sandboxNetworkPolicy.enabled=false).
 	NetworkPolicy *SandboxNetworkPolicy
+	// LimitRange applies the chart's LimitRange in each workspace namespace (#76, ADR 0083 follow-up).
+	// Nil turns it off (sandboxLimitRange.enabled=false).
+	LimitRange *SandboxLimitRange
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -208,6 +213,15 @@ type Reconciler struct {
 	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
+	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
+	// record again.
+	draftGitHubDropped map[string]bool
+	// flavorProfileSettled holds the flavor profiles, by workspace and profile ID (flavorProfileKey),
+	// that claimFlavorProfiles found marked or missing (under mu), so an org whose flavors no active
+	// agent keeps current does not cost a gateway call per flavor every pass. reconcileActive clears
+	// the entry when it imports the profile again; a new workspace is a new key.
+	flavorProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -309,11 +323,20 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 			cfg.NetworkPolicy.Log = cfg.Logger
 		}
 	}
+	if cfg.LimitRange != nil {
+		if err := cfg.LimitRange.validate(); err != nil {
+			return nil, err
+		}
+		cfg.LimitRange.Errors = cfg.Metrics.LimitRangeErrors
+		if cfg.LimitRange.Log == nil {
+			cfg.LimitRange.Log = cfg.Logger
+		}
+	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
-		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
-		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
+		flavorProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
@@ -420,36 +443,44 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	}
 }
 
-// unmarkedCounter is implemented by a backend that counts, from the gateway, the objects in this
-// install's workspaces that carry no install mark (the OpenShell backend with an owner).
-type unmarkedCounter interface {
-	CountUnmarked(ctx context.Context) (map[string]int, error)
-}
-
-// observeUnmarked sets koinon_openshell_unmarked_objects from one list of the gateway's sandboxes,
-// providers and profiles, whatever this pass did or failed to do (issue 461). A list that fails keeps
-// the previous values and sets koinon_openshell_unmarked_objects_stale to 1; a complete one sets it
-// to 0. Without an install mark ownership is off, no object can be claimed and nothing is safe: the
-// kinds read 0 and stale reads 1, so the drill condition ("0 and stale 0") is not met.
+// observeUnmarked sets koinon_openshell_unmarked_objects and
+// koinon_openshell_unmarked_objects_waiting_for_agent from one classified unmarked list (the one
+// koinon-reconciler unmarked list prints: the gateway's sandboxes, providers and profiles, whatever
+// this pass did or failed to do, issue 461, with each object's reason from the database, issue 511).
+// waits-for-agent objects go to the second gauge, every other reason to the first, so the drill gate
+// ("0 and stale 0") means no object without a known owner is left. A list that fails, on the gateway
+// or in the database, keeps the previous values and sets koinon_openshell_unmarked_objects_stale to
+// 1; a complete one sets it to 0. Without an install mark ownership is off, no object can be claimed
+// and nothing is safe: the kinds read 0 and stale reads 1, so the drill condition is not met.
 func (r *Reconciler) observeUnmarked(ctx context.Context) {
-	c, ok := r.backend.(unmarkedCounter)
+	_, ok := r.backend.(unmarkedLister)
 	if !ok || !r.owns() {
 		for _, k := range unmarkedKinds {
 			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
+			r.m.UnmarkedWaiting.WithLabelValues(k).Set(0)
 		}
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
-	counts, err := c.CountUnmarked(ctx)
+	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Flavors)
 	if err != nil {
 		if ctx.Err() == nil {
-			r.log.Warn("counting unmarked OpenShell objects failed; the gauge keeps its last values", "err", err)
+			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
 		}
 		r.m.UnmarkedStale.Set(1)
 		return
 	}
+	unowned, waiting := map[string]int{}, map[string]int{}
+	for _, o := range objs {
+		if o.Reason == ReasonWaitsForAgent {
+			waiting[o.Kind]++
+		} else {
+			unowned[o.Kind]++
+		}
+	}
 	for _, k := range unmarkedKinds {
-		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(counts[k]))
+		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(unowned[k]))
+		r.m.UnmarkedWaiting.WithLabelValues(k).Set(float64(waiting[k]))
 	}
 	r.m.UnmarkedStale.Set(0)
 }
@@ -497,6 +528,16 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				warm++
 			}
 			items = append(items, w)
+		}
+		if err := r.claimFlavorProfiles(ctx, org, agents); err != nil {
+			if errors.Is(err, errAbortPass) {
+				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+				return errors.Join(append(errs, err)...)
+			}
+			// A flavor profile is part of what an agent's sandbox converges (reconcileActive and
+			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
+			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
+			errs = append(errs, err)
 		}
 	}
 
@@ -900,17 +941,31 @@ func recordedKey(org store.ListOrgsToReconcileRow, sb store.AgentSandbox) (gatew
 	return gateway.Key{ID: sb.GatewayKeyID.String, Agent: agentRef(org, sb.AgentID), Hash: sb.GatewayKeyHash.String}, true
 }
 
+// recordedMaterial returns the agent's recorded key and its material when the key Secret holds
+// that key (same ID, same hash); ok is false when there is no recorded key or the Secret does not
+// match it.
+func (r *Reconciler) recordedMaterial(ctx context.Context, w *work) (gateway.Key, string, bool, error) {
+	sec, found, err := r.secrets.Get(ctx, w.sb.KeySecretName)
+	if err != nil {
+		return gateway.Key{}, "", false, err
+	}
+	if recorded, ok := recordedKey(w.org, w.sb); ok && found &&
+		sec.KeyID == recorded.ID && gateway.HashKey(sec.Material) == recorded.Hash {
+		return recorded, sec.Material, true, nil
+	}
+	return gateway.Key{}, "", false, nil
+}
+
 // ensureKey returns the agent's key and its material from the key Secret, issuing a new key
 // when there is none or the Secret no longer matches the recorded hash (a hand edit or a
 // deleted Secret: the old material is gone, so the key is rotated).
 func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, string, error) {
-	sec, found, err := r.secrets.Get(ctx, w.sb.KeySecretName)
+	recorded, material, ok, err := r.recordedMaterial(ctx, w)
 	if err != nil {
 		return gateway.Key{}, "", err
 	}
-	if recorded, ok := recordedKey(w.org, w.sb); ok && found &&
-		sec.KeyID == recorded.ID && gateway.HashKey(sec.Material) == recorded.Hash {
-		return recorded, sec.Material, nil
+	if ok {
+		return recorded, material, nil
 	}
 	reason := "no key yet"
 	if w.sb.GatewayKeyID.Valid {
@@ -964,7 +1019,6 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	}); err != nil {
 		return "", fmt.Errorf("reconciler: record workspace of org %s: %w", org.Slug, err)
 	}
-	done[id] = name
 	if r.cfg.Observer != nil && ws.Active {
 		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
 		_ = r.cfg.Observer.EnsureAccess(ctx, name)
@@ -973,6 +1027,16 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		// Defense in depth: a missing NetworkPolicy is counted and logged there, never fatal here.
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
+	if r.cfg.LimitRange != nil && ws.Active {
+		// LimitRange sizes pods only at admission (ADR 0083 amendment). A missing workspace
+		// namespace is expected until the first CreateSandbox (OpenShell creates it then); other
+		// Ensure failures hold this org so CreateSandbox cannot run without a writable LimitRange.
+		// Mark done only after a definitive outcome so a failed pass does not let another agent skip it.
+		if err := r.cfg.LimitRange.Ensure(ctx, name); err != nil && !limitRangeNamespaceMissing(err) {
+			return "", fmt.Errorf("reconciler: sandbox LimitRange of org %s: %w", org.Slug, err)
+		}
+	}
+	done[id] = name
 	return name, nil
 }
 
@@ -992,7 +1056,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		return w.keyErr
 	}
 	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
-	if !ok || flavor.Image == "" || len(flavor.Binaries) == 0 {
+	if !ok || !flavor.rendered() {
 		return fmt.Errorf("flavor %q has no image or binaries configured", w.agent.Flavor)
 	}
 	ws, err := r.ensureWorkspace(ctx, w.org, workspaces)
@@ -1015,6 +1079,11 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err := ensureKey(false); err != nil {
 		return err
 	}
+	// The ensure imported the flavor profile: once no active agent keeps it current, the org pass
+	// looks at it again.
+	r.mu.Lock()
+	delete(r.flavorProfileSettled, flavorProfileKey(ws, r.profile(w.agent.Flavor, flavor).ID))
+	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
 	baseURL, err := r.baseURLOf(ctx, w)
@@ -1085,11 +1154,34 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 		}
+		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
+		if r.cfg.LimitRange != nil {
+			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
+			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
+			// admits them sized (#76). Delete even when Ensure fails: otherwise the sandbox stays
+			// BestEffort forever on the sandbox-exists branch, and a missing-namespace Ensure
+			// error on this path would never be counted.
+			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
+			if !lrReady {
+				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+					return err
+				}
+				if ensureErr != nil {
+					return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+				}
+				r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
+				sb.Phase = execution.PhaseDeleting
+				return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
+			}
+			if ensureErr != nil {
+				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+			}
+		}
 		return r.record(ctx, w, sb, hash, "")
 	}
 	if err != nil {
@@ -1308,10 +1400,14 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 }
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
-// for its re-activation. Runs cannot be queued for a draft agent.
+// for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
+// provider and flavor profile for this install (claimDraft), which no other path does for a draft.
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
 	if errors.Is(err, execution.ErrNotFound) {
+		if err := r.claimDraft(ctx, w, true); err != nil {
+			return err
+		}
 		return r.recordState(ctx, w, store.SandboxStatePending, "", "")
 	}
 	if err != nil {
@@ -1323,7 +1419,68 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
 	}
+	if err := r.claimDraft(ctx, w, false); err != nil {
+		return err
+	}
 	return r.record(ctx, w, sb, w.sb.SpecHash, "")
+}
+
+// claimDraft marks a draft agent's objects with the install mark (issue 511, ADR 0106 decision 5).
+// Only reconcileActive claimed them before, so the objects of an agent that went back to draft stayed
+// unmarked for good and the unmarked gauge never reached 0.
+//
+// The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
+// re-activation; without a Secret that still matches it nothing is touched and no key is issued).
+// The ensure imports the flavor profile with the mark; without it the org pass marks the profile
+// (claimFlavorProfiles), which needs no key. The provider record itself is recreated with
+// the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
+// OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
+// claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
+// provider and profile are dropped: the agent has no use for them until it is active, and
+// reconcileActive makes them again, marked, before it creates a sandbox.
+func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) error {
+	if !r.owns() || w.key.ID == "" {
+		return nil
+	}
+	flavor, ok := r.cfg.Flavors[w.agent.Flavor]
+	if !ok || !flavor.rendered() {
+		return nil
+	}
+	_, material, ok, err := r.recordedMaterial(ctx, w)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		r.log.Debug("not claiming the objects of a draft agent: its key Secret does not match the recorded key", w.logAttrs()...)
+		return nil
+	}
+	ws, names := w.sb.Workspace, w.names()
+	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
+		Name:               names.Provider,
+		Profile:            r.profile(w.agent.Flavor, flavor),
+		Credentials:        map[string]string{keyEnvVar: material},
+		CredentialRevision: w.key.ID,
+		Labels:             ownerLabels(w.org.ID, w.agent.ID),
+		ClaimLegacy:        noSandbox,
+	}); err != nil {
+		return err
+	}
+	if !noSandbox {
+		return nil
+	}
+	r.mu.Lock()
+	done := r.draftGitHubDropped[names.GitHubProvider]
+	r.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := r.deleteGitHub(ctx, ws, names); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.draftGitHubDropped[names.GitHubProvider] = true
+	r.mu.Unlock()
+	return nil
 }
 
 // reconcileArchived deletes the agent's sandbox (or, with RetentionRetain, stops it), then its
@@ -1382,6 +1539,75 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	}
 	return r.recordState(ctx, w, final, phase, "")
 }
+
+// profileClaimer is implemented by a backend that marks an existing provider profile
+// (the OpenShell backend with an owner).
+type profileClaimer interface {
+	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
+}
+
+// claimFlavorProfiles marks, once per org and pass, the flavor profiles (koinon-agentgateway-<flavor>)
+// that no active agent keeps current (issue 511). A profile belongs to the workspace and the flavor, not
+// to an agent: every agent of the flavor in the org shares it, and OpenShell refuses to delete one a
+// provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
+// flavors whose agents are all draft or archived, or that have none. A draft agent does not count as
+// keeping its flavor: claimDraft imports the profile only when the agent's key Secret still matches
+// the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
+// archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
+// it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
+// is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
+// un-archive needs. A profile that does not exist is not created, and an org with no recorded
+// workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
+// missing is not asked for again (flavorProfileSettled) until an active agent imports it.
+func (r *Reconciler) claimFlavorProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
+	c, ok := r.backend.(profileClaimer)
+	if !ok || !r.owns() {
+		return nil
+	}
+	kept := map[store.AgentFlavor]bool{}
+	for _, a := range agents {
+		if a.Status == store.AgentStatusActive {
+			kept[a.Flavor] = true
+		}
+	}
+	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
+	}
+	var errs []error
+	for _, flavor := range slices.Sorted(maps.Keys(r.cfg.Flavors)) {
+		f := r.cfg.Flavors[flavor]
+		if kept[flavor] || !f.rendered() {
+			continue
+		}
+		p := r.profile(flavor, f)
+		k := flavorProfileKey(row.Workspace, p.ID)
+		r.mu.Lock()
+		settled := r.flavorProfileSettled[k]
+		r.mu.Unlock()
+		if settled {
+			continue
+		}
+		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("reconciler: claim flavor profile %s of org %s: %w", flavor, org.Slug, err))
+			continue
+		}
+		if claimed {
+			r.log.Info("marked a flavor profile no active agent keeps current", "org", org.Slug, "flavor", string(flavor))
+		}
+		r.mu.Lock()
+		r.flavorProfileSettled[k] = true
+		r.mu.Unlock()
+	}
+	return errors.Join(errs...)
+}
+
+// flavorProfileKey is the key of a flavor profile in flavorProfileSettled.
+func flavorProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,

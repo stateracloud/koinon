@@ -2,12 +2,13 @@
 #
 # charts/koinon values for the E1 quickstart e2e on kind: runc instead of Kata (kind has no VM
 # runtime), CNPG and the fake GitHub as the GitHub API. The fake model server is declared by
-# model-provider.yaml next to this file. Images come from ko/buildx and are loaded into the node (kind.local).
+# model-provider.yaml next to this file. Images come from ko/buildx and are pushed to the local registry (test/e2e/kind/registry.sh, localhost:5001).
 # test/e2e/run.sh installs this file as the quickstart's values.yaml.
 image:
-  registry: kind.local
+  registry: localhost:5001
   tag: e2e
-  pullPolicy: IfNotPresent
+  # Always: a reused cluster (KEEP=1, SKIP_UP=1) must not run an older image under the same tag.
+  pullPolicy: Always
 
 postgres:
   mode: cnpg

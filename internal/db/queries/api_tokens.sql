@@ -7,8 +7,8 @@
 -- (TestQueriesAreOrgScoped).
 
 -- name: CreateAPIToken :one
-INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, created_at, install_mark)
-VALUES (@org_id, @id, @name, @prefix, @token_hash, @role, @created_by, sqlc.narg(parent_token_id), @expires_at, @created_at, sqlc.narg(install_mark))
+INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, created_at, install_mark, requires_platform_admin)
+VALUES (@org_id, @id, @name, @prefix, @token_hash, @role, @created_by, sqlc.narg(parent_token_id), @expires_at, @created_at, sqlc.narg(install_mark), @requires_platform_admin)
 RETURNING *;
 
 -- name: GetAPITokenByPrefix :one

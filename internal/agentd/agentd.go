@@ -47,6 +47,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -172,6 +173,10 @@ type Config struct {
 	// MaxRetryAfter is the longest Retry-After Koinon waits out; a provider asking for more
 	// fails the run as throttled, so a long Retry-After cannot hold a run. Default 60s.
 	MaxRetryAfter time.Duration
+	// LoopThresholds are how many steps of each stuck pattern make a loop (ADR 0030 amendment
+	// 2026-11-11). The zero value is loopguard.DefaultThresholds; in a struct that is set, a field of zero or
+	// less turns its pattern off.
+	LoopThresholds loopguard.Thresholds
 	// ownRetryLayer makes agentd repeat failed turns even for a flavor whose harness retries.
 	// Only this package's tests set it (export_test.go), to exercise agentd's own layer with the
 	// fake harness, which does not retry.
@@ -235,6 +240,9 @@ func (c *Config) defaults() error {
 	setDefault(&c.WrapUpNotice, 5*time.Minute)
 	setDefault(&c.WrapUpFraction, runlimits.WrapUpFraction)
 	setDefault(&c.UsagePoll, 5*time.Second)
+	if c.LoopThresholds == (loopguard.Thresholds{}) {
+		c.LoopThresholds = loopguard.DefaultThresholds
+	}
 	if c.Now == nil {
 		c.Now = time.Now
 	}
@@ -397,15 +405,30 @@ func (p *Pool) Run(ctx context.Context) error {
 
 // RunHeld is Run for restore-hold mode (issue #462): no worker starts, so no run is claimed or taken
 // over, and the checkpoint loop does not start, so no sandbox is checkpointed, stopped or restored.
-// The one thing it does is the checkpoint resync (resync.go): "koinon-api checkpoints resync" is a
-// step of the restore runbook that must finish before the hold is released, and it reads the
-// bucket and writes the database only. It returns when ctx ends.
+// It does two things, both of which read the bucket and write the database only: the checkpoint
+// resync (resync.go), since "koinon-api checkpoints resync" is a step of the restore runbook that
+// must finish before the hold is released, and the storage probes of keys commands (probe.go),
+// beside it. It returns when ctx ends.
 func (p *Pool) RunHeld(ctx context.Context) error {
 	c := p.cfg.Checkpoints
 	if c == nil {
 		<-ctx.Done()
 		return nil
 	}
+	// Keys commands of the restore runbook (keys forget) ask for a storage probe too (probe.go). The
+	// probes have a loop of their own beside the resync's: the command waits for the answer, and a
+	// long resync (one tick lists every agent's repositories) must not hold them past its wait. One
+	// probe tick at a time, as in checkpointLoop.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			safego.Do(p.log, "repository-probe", func() { p.probeTick(ctx) })
+			if !sleep(ctx, c.Poll) {
+				return
+			}
+		}
+	})
 	for ctx.Err() == nil {
 		safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
 		if !sleep(ctx, c.Poll) {

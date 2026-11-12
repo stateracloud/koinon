@@ -304,7 +304,7 @@ func (e ending) reason() string {
 		switch t.out.Kind {
 		case turnpolicy.OutCapReached:
 			return "canceled"
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			return "failed"
 		case turnpolicy.OutFenced:
 			return "fenced"
@@ -376,7 +376,7 @@ func endFor(e ending, fk fence, parkedOn string) *turnEnd {
 		case turnpolicy.OutCapReached:
 			end.outcome = string(store.RunStateCanceled)
 			return end
-		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded:
+		case turnpolicy.OutHarnessCancelled, turnpolicy.OutRetriesExhausted, turnpolicy.OutRefusalsExceeded, turnpolicy.OutLoop:
 			_, class, _ := t.fails()
 			end.outcome, end.class = string(store.RunStateFailed), string(cmp.Or(class, classFatal))
 			return end

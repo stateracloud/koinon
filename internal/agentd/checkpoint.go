@@ -132,6 +132,7 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	var swept time.Time
 	sweeping := make(chan struct{}, 1)
 	resyncing := make(chan struct{}, 1)
+	probing := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
@@ -144,6 +145,16 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 			wg.Go(func() {
 				defer func() { <-resyncing }()
 				safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
+			})
+		default:
+		}
+		// Storage probes of keys commands (probe.go), beside the loop: a keys command waits for
+		// the answer, and a slow listing must not delay the ticks nor wait for a backup slot.
+		select {
+		case probing <- struct{}{}:
+			wg.Go(func() {
+				defer func() { <-probing }()
+				safego.Do(p.log, "repository-probe", func() { p.probeTick(ctx) })
 			})
 		default:
 		}

@@ -1,7 +1,9 @@
 # 0059. v0.1 ships one harness: OpenCode v2
 
-- Status: Accepted
+- Status: Accepted; amended by [0112](0112-harness-definitions.md)
 - Date: 2026-10-26
+- Area: runtime-sandbox
+- Tags: flavors, harness, migrations, roadmap
 - Amends: [0035](0035-v01-flavors.md) (v0.1 ships one flavor instead of three)
 - Supersedes: [0053](0053-hermes-context-file-patch.md)
 
@@ -82,6 +84,13 @@ Old issues 36 (F2, Hermes flavor) and old issue 37 (F3, pi flavor) are closed as
 
 Follow-ups: old issue 54 (OpenCode re-pin); publish
 `flavor-opencode` in `release.yml`.
+
+## Amendment (2026-11-11)
+
+[0112](0112-harness-definitions.md) decides how harnesses come back: as harness definitions fetched from npm, not as
+flavor images. OpenCode stays the one harness in the sandbox image. Koinon will again track Claude Code
+and Codex, as tested definition files. "What stays" above (the descriptor table, the `flavor` fields and
+columns) is renamed and reshaped by that ADR's groundwork.
 
 ## Links
 

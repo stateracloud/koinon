@@ -1,0 +1,6 @@
+# expect: infra yes
+Reading package lists...
+Err:1 http://security.ubuntu.com/ubuntu noble-security InRelease
+  Temporary failure resolving 'security.ubuntu.com'
+E: Failed to fetch http://security.ubuntu.com/ubuntu/dists/noble-security/InRelease
+##[error]Process completed with exit code 100.

@@ -34,3 +34,23 @@ func TestTableMatchesTemplates(t *testing.T) {
 		t.Errorf("templates.AllFlavors = %v, descriptors = %d", templates.AllFlavors, len(flavor.All()))
 	}
 }
+
+func TestOpenCodeDeclaresItsTools(t *testing.T) {
+	d, ok := flavor.Lookup("opencode")
+	if !ok {
+		t.Fatal("no opencode flavor")
+	}
+	for _, tool := range []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"} {
+		found := false
+		for _, have := range d.Tools {
+			found = found || have == tool
+		}
+		if !found {
+			t.Errorf("opencode does not declare %q", tool)
+		}
+	}
+	d.Tools[0] = "changed"
+	if again, _ := flavor.Lookup("opencode"); again.Tools[0] == "changed" {
+		t.Error("Lookup shares the Tools slice with the table")
+	}
+}

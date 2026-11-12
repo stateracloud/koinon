@@ -1,0 +1,199 @@
+{
+  "schema": "koinon-proto-api/v1",
+  "packages": [
+    {
+      "name": "alpha.v1",
+      "files": [
+        "alpha/v1/alpha.proto"
+      ],
+      "services": [],
+      "messages": [
+        {
+          "name": "Empty",
+          "fullName": "alpha.v1.Empty",
+          "file": "alpha/v1/alpha.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        }
+      ],
+      "enums": []
+    },
+    {
+      "name": "demo.v1",
+      "files": [
+        "demo/v1/demo.proto"
+      ],
+      "services": [
+        {
+          "name": "Greeter",
+          "fullName": "demo.v1.Greeter",
+          "file": "demo/v1/demo.proto",
+          "description": "Greets people.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "Hello",
+              "description": "Says hello.",
+              "requestType": "demo.v1.HelloRequest",
+              "responseType": "demo.v1.HelloReply",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": true
+            },
+            {
+              "name": "Watch",
+              "description": "",
+              "requestType": "demo.v1.HelloRequest",
+              "responseType": "demo.v1.HelloReply",
+              "clientStreaming": false,
+              "serverStreaming": true,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "HelloReply",
+          "fullName": "demo.v1.HelloReply",
+          "file": "demo/v1/demo.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "HelloRequest",
+          "fullName": "demo.v1.HelloRequest",
+          "file": "demo/v1/demo.proto",
+          "description": "Request to greet.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Who to greet, as org#<id> or `org#<id>`."
+            },
+            {
+              "name": "tags",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "labels",
+              "number": 3,
+              "type": "map<string, string>",
+              "label": "map",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "mode",
+              "number": 4,
+              "type": "demo.v1.Mode",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "note",
+              "number": 5,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "by_id",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "target",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "by_name",
+              "number": 7,
+              "type": "demo.v1.HelloRequest.Inner",
+              "label": "singular",
+              "oneof": "target",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "old",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": true,
+              "description": ""
+            },
+            {
+              "name": "created",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "HelloRequest.Inner",
+          "fullName": "demo.v1.HelloRequest.Inner",
+          "file": "demo/v1/demo.proto",
+          "description": "Nested type.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "enums": [
+        {
+          "name": "Mode",
+          "fullName": "demo.v1.Mode",
+          "file": "demo/v1/demo.proto",
+          "description": "Mode picks the speed.\nIt has a | pipe.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "MODE_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "MODE_FAST",
+              "number": 1,
+              "deprecated": false,
+              "description": "The fast mode."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

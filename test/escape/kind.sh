@@ -70,6 +70,7 @@ if [[ -n ${KOINON_ESCAPE_CHART_NAMESPACE:-} ]]; then
   export KOINON_ESCAPE_NAMESPACE="openshell-openshell-${KOINON_OPENSHELL_WORKSPACE:-koinon-escape}"
   export KOINON_ESCAPE_POLICY="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-pods"
   export KOINON_ESCAPE_NETPOL="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-default-deny"
+  export KOINON_ESCAPE_LIMITRANGE="${KOINON_ESCAPE_CHART_NAMESPACE}-koinon-sandbox-limitrange"
   export KOINON_ESCAPE_POLICY_REQUIRED=1
   # The class the install's policy admits for workload pods: openshell.runtimeClassName of
   # test/e2e/kind/koinon-values.yaml (runc on kind), which sandboxPolicy.runtimeClasses lists.
@@ -99,6 +100,22 @@ export KOINON_REQUIRE="${KOINON_REQUIRE:+$KOINON_REQUIRE,}escape-cluster-ips"
 export KOINON_ESCAPE_CLUSTER_DNS
 export KOINON_ESCAPE_API=${KOINON_ESCAPE_API:-${api_ip}:443,kubernetes.default.svc.cluster.local:443,kubernetes.default.svc:443}
 export KOINON_ESCAPE_INTERNAL=${KOINON_ESCAPE_INTERNAL:-${api_ip}:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080}
+# The kind local registry and its pull-through caches (test/e2e/kind/registry.sh, #45) authenticate nobody and
+# the push registry accepts pushes, so a sandbox must not reach them: by container name and by address on the
+# kind network. Read from Docker; a host without them (an older up.sh) leaves the case skipped.
+if [[ -z ${KOINON_ESCAPE_REGISTRIES:-} ]]; then
+  regs=()
+  while read -r name; do
+    regs+=("$name:5000")
+    ip=$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || true)
+    [[ -z $ip ]] || regs+=("$ip:5000")
+  done < <(docker ps --filter network=kind --format '{{.Names}}' | grep -E '^kind-(registry|proxy-)' || true)
+  KOINON_ESCAPE_REGISTRIES=$(IFS=,; echo "${regs[*]}")
+fi
+if [[ -n $KOINON_ESCAPE_REGISTRIES ]]; then
+  export KOINON_ESCAPE_REGISTRIES
+  KOINON_REQUIRE="$KOINON_REQUIRE,escape-kind-registry"
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kind.XXXXXX")
 pf=
@@ -178,7 +195,19 @@ need_gateway=0 need_gitea=0
 
 if (( need_gateway || need_gitea )); then
   echo "== stand-in image (koinon-fakemodel) for koinon-fixtures"
-  img=$(cd "$root" && KO_DOCKER_REPO=kind.local/rt1-fakemodel KIND_CLUSTER_NAME="$CLUSTER" \
+  # A cluster with the local registry (test/e2e/kind/registry.sh, #45; its KEP-1755 ConfigMap) gets the
+  # stand-in pushed to the cluster's path there, not kind-loaded. The kubelet has then pulled the same
+  # digest itself (the e2e's fakemodel, the same reproducible ko build), and with
+  # KubeletEnsureSecretPulledImages (beta, on since Kubernetes 1.35) a pulled image counts as verified
+  # only for the names it was pulled under: a kind-loaded kind.local name for that image is pulled
+  # again, which cannot work (ImagePullBackOff). Without the registry, nothing is pulled and kind.local
+  # stays as before.
+  stand_repo=kind.local/rt1-fakemodel
+  reg_host=$("${K[@]}" -n kube-public get configmap local-registry-hosting \
+    -o jsonpath='{.data.localRegistryHosting\.v1}' 2>/dev/null | sed -n 's/^host: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' || true)
+  [[ -z $reg_host ]] ||
+    stand_repo="$(KIND_REGISTRY="$reg_host" CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/rt1-fakemodel"
+  img=$(cd "$root" && KO_DOCKER_REPO="$stand_repo" KIND_CLUSTER_NAME="$CLUSTER" \
     ko build --bare --platform "linux/$(go env GOARCH)" --tags escape ./cmd/koinon-fakemodel 2>"$tmp/ko.log") ||
     { cat "$tmp/ko.log" >&2; exit 1; }
   "${K[@]}" create namespace koinon-fixtures --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null

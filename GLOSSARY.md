@@ -62,12 +62,16 @@ default limits. An agent made from it keeps its own copy and is not changed by l
 _Avoid_: Blueprint, preset, agent type, recipe
 
 **Harness**:
-The agent program that runs in a sandbox and talks to the model, such as OpenCode, driven by Koinon.
+The agent program that runs in a sandbox and talks to the model, such as OpenCode, driven by Koinon. An agent selects one.
 _Avoid_: Agent runtime, CLI, framework, flavor (for the program itself)
 
+**Harness definition**:
+Koinon's record of how to obtain and run one harness. It is built-in (shipped in the sandbox image) or custom (registered on an install), and experimental or verified.
+_Avoid_: Flavor, adapter, plugin, harness image
+
 **Flavor**:
-Koinon's tested packaging of one harness as a sandbox image, and the choice an agent makes between them. v0.1 has one flavor, OpenCode.
-_Avoid_: Agent image, harness image, runtime
+The earlier word for a harness definition: Koinon's tested packaging of one harness as a sandbox image. It is being retired; templates, API and database still say `flavor` until the rename lands.
+_Avoid_: Agent image, harness image, runtime; flavor for anything new
 
 **Ephemeral agent**:
 An agent whose every task gets a fresh sandbox without a home, deleted when the task ends. Agents are persistent by default.
@@ -156,7 +160,7 @@ another agent's reply; it resumes exactly where it stopped.
 _Avoid_: Suspend, pause, block, sleep, hold
 
 **Failure class**:
-The kind of failure a failed run carries, such as transient, throttled, context overflow, budget, policy, fatal or sandbox unavailable. It decides retries and what people are told.
+The kind of failure a failed run carries, such as transient, throttled, context overflow, budget, policy, fatal, sandbox unavailable or loop. It decides retries and what people are told.
 _Avoid_: Error type, error code, failure reason
 
 ### Isolation and sandboxes

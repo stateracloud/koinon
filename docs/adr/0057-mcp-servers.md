@@ -2,6 +2,9 @@
 
 - Status: Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below)
 - Date: 2026-10-23
+- Area: connectors-tools
+- Tags: mcp, connectors, approvals, egress, credentials
+- Amended by: [0096](0096-mcp-oauth-sign-in.md) (amendment 2026-10-24, items 2 and 5: the OAuth refusal and the injection path), [0097](0097-koinon-owned-gateway.md) (items 4, 5 and 7 in step 2)
 - Amends: [0014](0014-mcp-and-tools.md) (how MCP servers are provided and allowed per agent)
 - Delivery: remote MCP servers and per-agent allowlists land in v0.1. Container servers, the
   catalog, discovery and platform-offered servers land in v0.2.

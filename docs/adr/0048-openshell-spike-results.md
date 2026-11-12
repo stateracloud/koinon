@@ -2,7 +2,9 @@
 
 - Status: Accepted (2026-10-26, accepted after implementation)
 - Date: 2026-10-21
-- Amended by: [0052](0052-opencode-v2-flavor.md) and 2026-10-26 (below)
+- Area: runtime-sandbox
+- Tags: openshell, isolation, credentials, agentgateway, approvals
+- Amended by: [0052](0052-opencode-v2-flavor.md), [0049](0049-v01-scope-decisions.md) (extends it), [0075](0075-isolation-tiers.md) (decision 2), [0078](0078-sandbox-observer.md) (decision 3) and 2026-10-26 (below)
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0042](0042-ask-tier-park-and-execute.md),
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
@@ -41,7 +43,7 @@ network egress at all; the supervisor relays its traffic through a connection in
 ### Execution layer
 
 1. OpenShell 0.1.5 on Agent Sandbox stays Koinon's execution backend (ADR 0016). The OpenSandbox
-   fallback is not needed.
+   fallback is not needed. _(Changed by [0077](0077-pinned-openshell-and-installer.md), amendment of 2026-11-09: the pin is OpenShell 0.1.7.)_
 2. **Install requirements**, documented and checked by Koinon's preflight:
    - Kata with **guest seccomp enabled** (`disable_guest_seccomp = false`). Without it the pod's
      `RuntimeDefault` profile is not applied inside the VM and OpenShell's default-allow filter

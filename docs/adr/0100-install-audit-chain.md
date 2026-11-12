@@ -2,6 +2,8 @@
 
 - Status: Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1)
 - Date: 2026-11-07
+- Area: security-audit
+- Tags: audit, database, migrations, helm-chart
 - Amends: [0023](0023-observability-and-audit.md) (the 2026-10-26 amendment's "no org-less events
   and no platform chain"; the lock order; the deferred superuser item and open question 1)
   and [0004](0004-human-identity.md) (where platform admin grants are audited)
@@ -638,15 +640,20 @@ chain would.
 - **Header size (amended #406).** Each `audit.anchor` event is followed by an `anchor_heads` stream
   line (`{"line":"anchor_heads",...}`) with that anchor's org heads. The header never carries
   `anchors`, so its size does not grow with the anchor count. `VerifyExport` checks each stream line
-  as it reads and discards it unless `CollectAnchors` is set (for `--anchors`). Format
+  as it reads and discards it unless `CollectAnchors` is set (for `--anchors`). With `--anchors` the
+  CLI passes the target file's org (`AnchorOrgID`), so each collected anchor keeps that org's head
+  only, after every head was checked against `heads_root` (#540). An `anchor_heads` line with a key
+  twice, at the top level or inside a head, is refused as an event line is. Format
   `koinon.audit.export.v2` (a break from v1; before the v0.3 upgrade promise, ADR 0099).
 - **Export.** An install export writes one `anchor_heads` stream line after each `audit.anchor`
   event in the exported range (`chain_seq`, event ID, `org_count`, `heads_root` and heads).
   `VerifyExport` checks each line against its event (a missing, forged or orphaned line, a wrong
   root or count) with no database. `audit verify --file <org export> --anchors <install export>`
   then checks an org export's hashes at the anchored `chain_seq` values. The install export
-  verifies on its own first. An org export with no `--anchors` is internally consistent only, and
-  says so.
+  verifies on its own first. It keeps only the heads of the org export's own org (memory stays
+  bounded), and the anchor set records that org: `VerifyExport` refuses an org export of another
+  org against it, which would otherwise pass with no anchor checked. An org export with no
+  `--anchors` is internally consistent only, and says so.
 
 *Prior art (sources read 2026-11-08).*
 

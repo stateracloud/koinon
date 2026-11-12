@@ -1,8 +1,9 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- include "koinon.validate" . }}
 # Koinon's non-secret configuration, read by koinon-reconciler from
-# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api and koinon-agentd take their settings
-# from KOINON_* environment variables instead. Secrets are referenced by name only.
+# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api reads only the sandboxResources section
+# of it (it refuses a per-agent override outside the bounds); its other settings, and koinon-agentd's,
+# come from KOINON_* environment variables. Secrets are referenced by name only.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -61,6 +62,11 @@ data:
       enabled: {{ .Values.sandboxNetworkPolicy.enabled }}
       {{- if .Values.sandboxNetworkPolicy.enabled }}
       name: {{ include "koinon.sandboxDefaultDeny" . | quote }}
+      {{- end }}
+    sandboxLimitRange:
+      enabled: {{ .Values.sandboxLimitRange.enabled }}
+      {{- if .Values.sandboxLimitRange.enabled }}
+      name: {{ include "koinon.sandboxLimitRange" . | quote }}
       {{- end }}
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}

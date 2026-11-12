@@ -84,6 +84,7 @@ var eventClasses = map[string]EventClass{
 	"run.waiting_for_model":     ClassDiagnostic,
 	"run.refusal":               ClassDiagnostic,
 	"run.retry":                 ClassDiagnostic,
+	"run.loop_nudge":            ClassDiagnostic,
 	"run.wrap_up_notice":        ClassDiagnostic,
 	"run.summary":               ClassDiagnostic,
 	"run.summary_failed":        ClassDiagnostic,

@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-10-28; built with the UI milestone after v0.1.0)
 - Date: 2026-10-28
+- Area: connectors-tools
+- Tags: skills, security, harness, flavors
 - Relates to: [0003](0003-postgres-source-of-truth.md), [0007](0007-connector-model.md),
   [0020](0020-agent-builder-and-templates.md), [0023](0023-observability-and-audit.md),
   [0031](0031-artifacts-in-object-storage.md), [0033](0033-file-based-memory.md),

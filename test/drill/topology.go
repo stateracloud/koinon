@@ -40,13 +40,6 @@ type Install struct {
 	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
-// S3 is the object store checkpoints use. Phase 1 runs with checkpoints off; the fields are the
-// place phase 2 fills.
-type S3 struct {
-	Endpoint string `yaml:"endpoint" json:"endpoint"`
-	Bucket   string `yaml:"bucket" json:"bucket"`
-}
-
 // Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
 // outside the repository, only this schema is in it).
 type Topology struct {
@@ -56,7 +49,7 @@ type Topology struct {
 	Context string  `yaml:"context" json:"context"`
 	Source  Install `yaml:"source" json:"source"`
 	Target  Install `yaml:"target" json:"target"`
-	// FakesNamespace holds the drill's fake model server.
+	// FakesNamespace holds the drill's fake model server and its object store.
 	FakesNamespace string `yaml:"fakesNamespace" json:"fakesNamespace"`
 	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root).
 	ChartPath  string `yaml:"chartPath" json:"chartPath"`
@@ -67,9 +60,13 @@ type Topology struct {
 	GatewayValues  string `yaml:"gatewayValues" json:"gatewayValues"`
 	// FakeModelImage is the fake model server's image on this cluster.
 	FakeModelImage string `yaml:"fakeModelImage" json:"fakeModelImage"`
-	S3             *S3    `yaml:"s3,omitempty" json:"s3,omitempty"`
+	// ObjectStoreImage is the S3 server for home checkpoints (phase 2), pinned by digest: SeaweedFS, Apache-2.0.
+	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
 	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
 	Registry string `yaml:"registry,omitempty" json:"registry,omitempty"`
+	// ImageRegistry, when set, is passed to the chart as image.registry. Only run.sh writes it, for the kind
+	// topology copy: the cluster's path on the shared local registry (test/e2e/kind/imagerepo.sh).
+	ImageRegistry string `yaml:"imageRegistry,omitempty" json:"imageRegistry,omitempty"`
 	// StorageClass for the databases; empty is the cluster default.
 	StorageClass string `yaml:"storageClass,omitempty" json:"storageClass,omitempty"`
 	// RunNowCalls is N: the number of Run-now calls; N-1 stay ENQUEUED behind the low trigger limits.
@@ -155,6 +152,7 @@ func (t *Topology) Validate() error {
 	for name, v := range map[string]string{
 		"chartPath": t.ChartPath, "valuesFile": t.ValuesFile, "gatewayChart": t.GatewayChart,
 		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage,
+		"objectStoreImage": t.ObjectStoreImage,
 	} {
 		if v == "" {
 			return fmt.Errorf("%s is empty", name)

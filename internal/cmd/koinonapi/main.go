@@ -91,6 +91,7 @@ import (
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/outward"
@@ -100,6 +101,7 @@ import (
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/schemagate"
@@ -129,6 +131,10 @@ type config struct {
 	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
 	// code-host scope refresh (issue #462).
 	restoreHold bool
+
+	// sandboxResources is the platform's sandbox sizing policy, from the config file's sandboxResources
+	// (ADR 0083); a per-agent override must stay inside its bounds.
+	sandboxResources sandboxres.Policy
 	// installMark is this install's random mark (the chart's koinon-install-mark Secret). Its hash
 	// binds the database to the install: tokens and sessions another install issued are refused
 	// (ADR 0110). Empty turns the binding off.
@@ -746,7 +752,7 @@ func serve(ctx context.Context, cfg config) error {
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
 	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default()).WithRestoreHold(hold)
 	svc := services.New(pool, services.Options{
-		ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
+		SandboxResources: &cfg.sandboxResources, ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
@@ -814,6 +820,7 @@ func serve(ctx context.Context, cfg config) error {
 		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
 		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
 		Metrics:  priceMetrics,
+		Catalog:  orcatalog.New(pool),
 	})
 	if err != nil {
 		return fmt.Errorf("price refresh: %w", err)

@@ -2,7 +2,7 @@
 #
 # Test doubles for the E1 quickstart e2e, in their own namespace: the fake model server (the
 # OpenAI-compatible upstream, scripts from test/fakemodel/scripts) and the fake GitHub App API
-# (internal/connectors/github/githubtest). Images are built with ko into kind (KO_DOCKER_REPO=kind.local).
+# (internal/connectors/github/githubtest). Images are built with ko and pushed to the local registry (KO_DOCKER_REPO=localhost:5001).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -25,8 +25,8 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: fakemodel
-          image: kind.local/koinon-fakemodel:e2e
-          imagePullPolicy: IfNotPresent
+          image: localhost:5001/koinon-fakemodel:e2e
+          imagePullPolicy: Always
           # Strict Messages mode: the fake refuses what api.anthropic.com refuses (unknown fields, beta-only
           # fields without their beta), so a body the gateway cannot vouch for fails the run (rc.7, old issue 240).
           args: ["-addr", ":8080", "-strict-messages"]
@@ -67,8 +67,8 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: fakegithub
-          image: kind.local/koinon-fakegithub:e2e
-          imagePullPolicy: IfNotPresent
+          image: localhost:5001/koinon-fakegithub:e2e
+          imagePullPolicy: Always
           # The repository the repo-helper fake-model script targets (koinon-demo/hello).
           args: ["-addr", ":8080", "-account", "koinon-demo", "-repos", "hello"]
           ports:
@@ -110,8 +110,8 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: fakemcp
-          image: kind.local/koinon-fakemcp:e2e
-          imagePullPolicy: IfNotPresent
+          image: localhost:5001/koinon-fakemcp:e2e
+          imagePullPolicy: Always
           args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token"]
           ports:
             - {name: http, containerPort: 8080}

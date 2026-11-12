@@ -277,6 +277,9 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	}); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	delete(r.draftGitHubDropped, names.GitHubProvider)
+	r.mu.Unlock()
 	if r.noteGitHubRevision(names.GitHubProvider, rev) {
 		what := "installation token"
 		if tok.Revision != "" {

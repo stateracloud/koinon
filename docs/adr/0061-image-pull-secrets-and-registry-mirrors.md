@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: install-operations
+- Tags: registry, helm-chart, openshell
 - Closes: old issue 130
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md)
 

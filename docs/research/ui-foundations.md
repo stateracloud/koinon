@@ -1,5 +1,10 @@
 # Koinon UI foundations: research and storyboards
 
+- Status: Complete
+- Date: 2026-10-22
+- Area: frontend-ux
+- Tags: ui, approvals, chat
+
 Date: 2026-10-22
 Status: research note. Input to the v0.2 design pass (issue #91) and to the v0.1 UI follow-ups.
 

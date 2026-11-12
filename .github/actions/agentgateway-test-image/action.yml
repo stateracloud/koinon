@@ -18,7 +18,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
         OWNER: ${{ github.repository_owner }}
         FORK: ${{ github.event.repository.fork }}
-      run: |
+      run: | # zizmor: ignore[github-env] writes the repository owner (lower case), never pull request text
         read -r _ _ digest < <(hack/agentgateway-pin.sh)
         mirror="ghcr.io/${OWNER,,}/agentgateway"
         if docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN" && docker pull "$mirror@$digest"; then

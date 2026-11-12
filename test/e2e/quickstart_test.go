@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
@@ -31,6 +33,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
@@ -435,6 +438,36 @@ var _ = Describe("the quickstart", Ordered, func() {
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Pulls).To(BeEmpty())
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
+
+		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		kc := func(args ...string) string {
+			GinkgoHelper()
+			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			return strings.TrimSpace(string(out))
+		}
+		orgID, err := uuid.Parse(org)
+		Expect(err).NotTo(HaveOccurred())
+		ws := execution.WorkspaceName(orgID)
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(Equal("openshell-openshell-" + ws))
+		Expect(kc("-n", ns, "get", "limitrange", "koinon-koinon-sandbox-limitrange", "-o", "jsonpath={.metadata.name}")).
+			To(Equal("koinon-koinon-sandbox-limitrange"))
+		var supervisors corev1.PodList
+		Expect(json.Unmarshal([]byte(kc("-n", ns, "get", "pods", "-l", "openshell.ai/boundary-role=supervisor", "-o", "json")), &supervisors)).To(Succeed())
+		Expect(supervisors.Items).NotTo(BeEmpty(), "OpenShell created at least one supervisor pod")
+		for _, p := range supervisors.Items {
+			for _, c := range append(slices.Clone(p.Spec.InitContainers), p.Spec.Containers...) {
+				Expect(c.Resources.Requests).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange requests")
+				Expect(c.Resources.Limits).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange limits")
+				cpuReq, memReq := c.Resources.Requests[corev1.ResourceCPU], c.Resources.Requests[corev1.ResourceMemory]
+				cpuLim, memLim := c.Resources.Limits[corev1.ResourceCPU], c.Resources.Limits[corev1.ResourceMemory]
+				Expect((&cpuReq).Cmp(reconciler.LimitRangeCPURequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memReq).Cmp(reconciler.LimitRangeMemoryRequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&cpuLim).Cmp(reconciler.LimitRangeCPULimit)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memLim).Cmp(reconciler.LimitRangeMemoryLimit)).To(Equal(0), p.Name+"/"+c.Name)
+			}
+		}
 		t.end("4. Task → run streamed → approval pending")
 	})
 
@@ -975,16 +1008,25 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		By("pointing the flavor at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
-		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}kind.local/koinon-escape/agent:nope")
+		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
 		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
+		// 2 minutes, the value with evidence. The cap counts from the run's first claim
+		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
+		// A 30 s cap failed in CI (#572, PR 595, run 43091299950): after 30 s the new sandbox's pods were
+		// still behind OpenShell's openshell.ai/bootstrap scheduling gate, so no pull had been tried and
+		// the cause was "unknown". Only the OpenShell gateway removes that gate (in its CreateSandbox);
+		// in that run the config change above was recreating the org's other OpenCode sandbox at the
+		// same time. Why the gate stays that long is the slow-start question of #573; this step goes
+		// back to a short cap when that has a cause and a fix, not by a guess.
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
+		missingImageStart := time.Now()
 		By("a task for a new agent: its sandbox is rendered with the broken image")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1014,6 +1056,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return terminal(r.GetState())
 		})
 
+		// Data for the KOINON_SANDBOX_WAIT_CAP above: how long the image_pull failure took on this runner.
+		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 2 minutes)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
 		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))

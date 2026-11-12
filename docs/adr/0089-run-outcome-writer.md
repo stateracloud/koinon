@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-01
+- Area: work-model
+- Tags: runs, tasks, tracing
 - Relates to: [0030](0030-run-state-machine.md), [0065](0065-work-model-tasks-inbox.md), [0074](0074-run-traces-trace-router.md), [0087](0087-turn-policy-is-a-pure-state-machine.md)
 - Issue: old issue 453
 

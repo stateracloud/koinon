@@ -34,3 +34,21 @@ env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8
 env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080"'
 env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:4000"' "${k8s[@]}"
 has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.cluster.local:4001$' "${k8s[@]}" --set gateway.kubernetes.port=4001 --show-only templates/config.yaml
+
+# The tool servers trust the agent header the gateway sets (gateway.AgentHeader, X-Koinon-Agent; #281,
+# ADR 0097 decision 5), so the tools port of koinon-api admits the gateway's pods and nothing else, in
+# both gateway modes. A request that skips the gateway never reaches the listener, so a client cannot
+# forge the header. The header's overwrite is tested in internal/gateway (drivers) and the refusal of a
+# call without it in internal/githubtools.
+tools_from() { # prints the 'from' selectors of the ingress rule on the tools port
+  render "$@" --show-only templates/networkpolicy.yaml |
+    awk '/^  ingress:/{i=1} i&&/^    - ports:/{blk=""; grab=1} grab{blk=blk $0 "\n"} /^    # /{if(grab&&blk ~ /- port: tools/){printf "%s", blk; exit} grab=0}'
+}
+tf=$(tools_from)
+printf '%s\n' "$tf" | grep -q 'component: gateway' || fail "the tools port does not admit the gateway (standalone)"
+for c in agentd sandbox api reconciler web; do
+  ! printf '%s\n' "$tf" | grep -q "component: $c" || fail "the tools port admits $c (standalone)"
+done
+tf=$(tools_from "${k8s[@]}")
+printf '%s\n' "$tf" | grep -q 'gateway.networking.k8s.io/gateway-name: koinon-gateway' || fail "the tools port does not admit the controller's proxy (kubernetes)"
+! printf '%s\n' "$tf" | grep -q 'component: agentd' || fail "the tools port admits koinon-agentd (kubernetes)"

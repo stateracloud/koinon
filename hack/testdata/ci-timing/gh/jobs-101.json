@@ -1,0 +1,16 @@
+{
+ "jobs": [
+  {
+   "name": "go-test",
+   "conclusion": "success",
+   "started_at": "2026-11-02T10:00:10Z",
+   "completed_at": "2026-11-02T10:08:10Z"
+  },
+  {
+   "name": "lint",
+   "conclusion": "skipped",
+   "started_at": null,
+   "completed_at": null
+  }
+ ]
+}

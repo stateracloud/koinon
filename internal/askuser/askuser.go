@@ -142,11 +142,11 @@ type caller struct {
 }
 
 func (s *Server) identify(ctx context.Context, req *mcp.CallToolRequest) (caller, error) {
-	var h string
+	var h http.Header
 	if req != nil && req.Extra != nil {
-		h = req.Extra.Header.Get(gateway.AgentHeader)
+		h = req.Extra.Header
 	}
-	ref, err := gateway.ParseAgentRef(h)
+	ref, err := gateway.AgentFromHeader(h)
 	if err != nil {
 		return caller{}, errNoIdentity
 	}

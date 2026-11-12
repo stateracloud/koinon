@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-01
+- Area: work-model
+- Tags: runs, harness, testing
 - Relates to: [0081](0081-run-limits.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md)
 - Issue: old issue 449
 

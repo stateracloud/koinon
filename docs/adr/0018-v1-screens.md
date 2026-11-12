@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
+- Area: frontend-ux
+- Tags: ui, multi-tenancy, tasks, triggers
 - Decision: [design.md#18](../design.md)
 
 ## Context

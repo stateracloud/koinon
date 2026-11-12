@@ -44,6 +44,9 @@ const (
 	limitWrapUpMarker = "[Koinon] This run has"
 	// wrapUpReply is what the fake writes when it is told to wrap up.
 	wrapUpReply = "Done so far: A. Left: B."
+	// loopNudgeMarker opens agentd's nudge to a looping agent. The fake answers it with end_turn
+	// (the agent changes course), or, when holdLoop is set, waits for the next cancel.
+	loopNudgeMarker = "[Koinon] You seem to be stuck in a loop"
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
 	// summaryMarker opens agentd's end-of-turn summary prompt.
@@ -100,6 +103,8 @@ type harness struct {
 	lingers bool
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
+	// holdLoop makes the nudge to a looping agent wait for a cancel instead of ending the turn.
+	holdLoop bool
 }
 
 func newHarness() *harness {
@@ -400,6 +405,14 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
+	case strings.HasPrefix(text, loopNudgeMarker) && p.holdLoop():
+		p.resetCancel()
+		select {
+		case <-p.cancelCh():
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
 	case strings.Contains(text, resumeMarker):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
 			return sdk.PromptResponse{}, err
@@ -532,6 +545,12 @@ func (p *process) Cancel(context.Context, sdk.CancelNotification) error {
 		close(p.cancelled)
 	}
 	return nil
+}
+
+func (p *process) holdLoop() bool {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	return p.h.holdLoop
 }
 
 // cancelCh is the channel a session/cancel closes.

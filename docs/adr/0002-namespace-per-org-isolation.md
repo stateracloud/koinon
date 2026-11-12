@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: multi-tenancy, openshell, kubernetes, isolation
 - Decision: [design.md#2](../design.md)
 
 ## Context

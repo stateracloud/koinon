@@ -556,6 +556,50 @@ func (q *Queries) LockBootstrap(ctx context.Context) error {
 	return err
 }
 
+const lockLocalCredentialShare = `-- name: LockLocalCredentialShare :one
+SELECT user_id, username, password_hash, must_change_password, password_changed_at, created_at, updated_at FROM local_credentials WHERE user_id = $1 FOR SHARE
+`
+
+// A password login holds a share lock on the credential while it creates its session, so a password
+// change or reset (an UPDATE of the row) cannot commit between the check and the session: the
+// login either sees the new hash and is refused, or commits first and the reset revokes its session.
+func (q *Queries) LockLocalCredentialShare(ctx context.Context, userID pgtype.UUID) (LocalCredential, error) {
+	row := q.db.QueryRow(ctx, lockLocalCredentialShare, userID)
+	var i LocalCredential
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.MustChangePassword,
+		&i.PasswordChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockLocalCredentialUpdate = `-- name: LockLocalCredentialUpdate :one
+SELECT user_id, username, password_hash, must_change_password, password_changed_at, created_at, updated_at FROM local_credentials WHERE user_id = $1 FOR UPDATE
+`
+
+// A password change locks the credential row before it writes, so it can refuse when an operator
+// reset changed the hash after the old password was checked. Lock order: the credential, then the
+// sessions (as the reset does).
+func (q *Queries) LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error) {
+	row := q.db.QueryRow(ctx, lockLocalCredentialUpdate, userID)
+	var i LocalCredential
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.MustChangePassword,
+		&i.PasswordChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const recordUserLogin = `-- name: RecordUserLogin :exec
 UPDATE users
 SET email = $1, display_name = $2, last_login_at = $3
@@ -655,6 +699,25 @@ type RevokeSessionsByMethodParams struct {
 
 func (q *Queries) RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeSessionsByMethod, arg.Now, arg.AuthMethod)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeUserSessions = `-- name: RevokeUserSessions :execrows
+UPDATE sessions SET revoked_at = $1
+WHERE user_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeUserSessionsParams struct {
+	Now    pgtype.Timestamptz
+	UserID pgtype.UUID
+}
+
+// Ends every live session of the user (the operator's password reset).
+func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserSessions, arg.Now, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
