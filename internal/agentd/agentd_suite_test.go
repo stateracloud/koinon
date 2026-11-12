@@ -336,7 +336,8 @@ func (e *env) recordSandboxWith(ctx context.Context, state store.SandboxState, r
 // recreateSandbox replaces the sandbox, and so its home volume, as the reconciler does on a
 // spec change, and records the new one ready.
 func (e *env) recreateSandbox(ctx context.Context) {
-	Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
+	_, derr := e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)
+	Expect(derr).To(Succeed())
 	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
 	Expect(err).NotTo(HaveOccurred())
 	e.recordSandbox(ctx, store.SandboxStateReady, "")

@@ -39,7 +39,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -188,10 +187,15 @@ type Config struct {
 	// sets koinon_reconciler_openshell_gateway_id_mismatch (old issue 475). Either nil/empty skips it.
 	GatewayID  string
 	GatewayIDs GatewayIDSource
-	// MaxRecreatesPerPass caps the sandboxes one pass deletes to recreate them with a changed spec
-	// (a new supervisor, image or resources); the others wait for a later pass. Zero is
-	// DefaultMaxRecreatesPerPass; negative is no cap.
+	// MaxRecreatesPerPass caps the sandboxes deleted to recreate them with a changed spec (a new
+	// supervisor, image or resources); the others wait for a later pass. It is a token bucket: this
+	// many at once, refilled at this many per ResyncInterval (the rate of one pass per interval).
+	// Zero is DefaultMaxRecreatesPerPass; negative is no cap.
 	MaxRecreatesPerPass int
+	// WorkTimeout bounds one agent's sandbox work item (the creating, starting, stopping,
+	// recreating and recording of one sandbox). A stuck item ends after it and holds only its own
+	// agent until then. Zero is DefaultWorkTimeout.
+	WorkTimeout time.Duration
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -239,8 +243,11 @@ type Reconciler struct {
 	// gwMu guards gwMismatch, the last result of the gateway ID check (gatewayid.go).
 	gwMu       sync.Mutex
 	gwMismatch bool
-	// recreates counts this pass's spec-change recreates against MaxRecreatesPerPass.
-	recreates atomic.Int32
+	// bucketMu guards the recreate token bucket (takeRecreate).
+	bucketMu     sync.Mutex
+	bucketTokens float64
+	bucketAt     time.Time
+	recreating   map[agentKey]bool // agents holding a token for a recreate not yet started
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
@@ -271,6 +278,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.MaxRecreatesPerPass == 0 {
 		cfg.MaxRecreatesPerPass = DefaultMaxRecreatesPerPass
+	}
+	if cfg.WorkTimeout <= 0 {
+		cfg.WorkTimeout = DefaultWorkTimeout
 	}
 	if cfg.KeepWarmPerOrg == 0 {
 		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
@@ -372,6 +382,41 @@ type work struct {
 	tools []gateway.ToolGrant
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
+
+	// submitted is set by the pass when the item went to the work queue (pass goroutine only).
+	submitted bool
+	// wantsRecreate is set when the item asked for a recreate slot; an item that ends without it
+	// releases the agent's hold (runJob).
+	wantsRecreate bool
+	// rej holds the gateway's rejection message for this agent's org, which is recorded after the
+	// agent's own work item, by whichever side comes last. A pointer, so a copy of the work (a
+	// temporary variation of it) shares it.
+	rej *rejectionNote
+}
+
+// rejectionNote is the shared state of w.rej; mu guards it.
+type rejectionNote struct {
+	mu   sync.Mutex
+	done bool
+	msg  string
+}
+
+// markDone says the agent's work item for this pass has ended or will not run, and returns the
+// rejection message set by then, which the caller records.
+func (w *work) markDone() string {
+	w.rej.mu.Lock()
+	defer w.rej.mu.Unlock()
+	w.rej.done = true
+	return w.rej.msg
+}
+
+// setRejection stores the rejection message. It returns true when the work item is already done:
+// the caller records the message itself. Otherwise the item records it when it ends.
+func (w *work) setRejection(msg string) bool {
+	w.rej.mu.Lock()
+	defer w.rej.mu.Unlock()
+	w.rej.msg = msg
+	return w.rej.done
 }
 
 // names are the agent's object names: the recorded ones, and the GitHub ones derived from the
@@ -392,23 +437,44 @@ func (w *work) logAttrs() []any {
 // It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
 // runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
-	err := r.reconcilePass(ctx)
+	q := r.newWorkQueue(ctx)
+	defer q.Stop()
+	b, err := r.reconcilePass(ctx, q)
+	// The loop leaves the sandbox work to the queue; a caller of ReconcileAll wants it done.
+	err = errors.Join(append([]error{err}, b.wait()...)...)
+	r.observeSandboxes(ctx)
 	r.observeUnmarked(ctx)
 	return err
 }
 
 // reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
-func (r *Reconciler) reconcilePass(ctx context.Context) error {
+// A pass loads the state, runs the gateway step (plan, Apply, recordServed) and hands each agent's
+// sandbox work to q; it does not wait for that work. The returned batch holds the work of this pass.
+func (r *Reconciler) reconcilePass(ctx context.Context, q *workQueue) (*jobs, error) {
 	start := time.Now()
-	err := r.reconcileAll(ctx)
-	r.m.PassDuration.Observe(time.Since(start).Seconds())
+	b := &jobs{}
+	r.log.Info("reconcile pass started")
+	err := r.reconcileAll(ctx, q, b)
+	took := time.Since(start)
+	r.m.PassDuration.Observe(took.Seconds())
 	result := "ok"
 	if err != nil {
 		result = "error"
 	}
 	r.m.Passes.WithLabelValues(result).Inc()
-	r.observeSandboxes(ctx)
-	return err
+	r.log.Info("reconcile pass ended", "duration", took.Round(time.Millisecond), "jobs", b.count(), "result", result)
+	// The jobs end later. Then the recorded states are current: count them, and say how long the
+	// slowest job took, so a slow backend call is in the log.
+	safego.Go(ctx, r.log, "reconcile-jobs-report", func(ctx context.Context) {
+		b.wg.Wait()
+		octx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		r.observeSandboxes(octx)
+		name, d := b.slowest()
+		r.log.Info("reconcile jobs finished", "since_pass_start", time.Since(start).Round(time.Millisecond),
+			"jobs", b.count(), "slowest", name, "slowest_took", d.Round(time.Millisecond))
+	})
+	return b, err
 }
 
 // observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
@@ -485,8 +551,7 @@ func (r *Reconciler) observeUnmarked(ctx context.Context) {
 	r.m.UnmarkedStale.Set(0)
 }
 
-func (r *Reconciler) reconcileAll(ctx context.Context) error {
-	r.recreates.Store(0)
+func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) error {
 	r.refreshSupervisor(ctx)
 	r.checkGatewayID(ctx)
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
@@ -584,6 +649,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	if limitFor == nil {
 		limitFor = ledger.AgentLimit
 	}
+	live := make(map[agentKey]bool, len(items))
+	for _, w := range items {
+		live[agentKey{w.org.ID, w.agent.ID}] = true
+	}
+	r.releaseRecreatesExcept(live, q.Busy)
 	agents := make([]gatewayplan.Agent, len(items))
 	for i, w := range items {
 		agents[i] = gatewayplan.Agent{
@@ -663,15 +733,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.m.PassErrors.WithLabelValues(kind).Inc()
 		errs = append(errs, pr.Err)
 	}
-	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
-	// An agent whose key the gateway already serves does not depend on the Apply below, which may
-	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,
-	// concurrently with it. An agent with a new key waits for the Apply, as before.
-	early := workOf(items, plan.Early)
-	// One semaphore for the whole pass, so the early and the late jobs together stay within
-	// SandboxJobs.
-	sem := make(chan struct{}, r.cfg.SandboxJobs)
-	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
+	// Sandbox work is a per-agent work queue, outside the sequential pass (plan item LT1, practice B4,
+	// issue 573). An agent whose key the gateway already serves does not depend on the Apply below,
+	// which may wait for agentgateway's hot reload for about a minute: its sandbox work is queued now,
+	// concurrently with it. An agent with a new key is queued after the Apply, as before. The pass
+	// never waits for the queue: a slow call for one agent holds only that agent.
+	r.submit(q, b, workOf(items, plan.Early), workspaces)
 
 	var res gatewayplan.ApplyResult
 	rejectedReason := ""
@@ -739,31 +806,62 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.recordMessage(ctx, w, errors.New(msg))
 		heldBack++
 	}
-	rejections := res.Rejections
-	errs = append(errs, r.startJobs(ctx, workOf(items, outcome.Run), workspaces, sem).wait()...)
-	errs = append(errs, earlyJobs.wait()...)
-	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
-	// Several rejections of one org are joined into one message, not overwritten.
+	r.submit(q, b, workOf(items, outcome.Run), workspaces)
+	// Each rejected object is reported on its org's agents, after their own work item has recorded its
+	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
-	for _, x := range rejections {
+	for _, x := range res.Rejections {
 		byOrg[x.Org] = append(byOrg[x.Org], fmt.Sprintf("the gateway rejected %s %s: %s", x.Kind, x.Name, x.Reason))
 	}
 	for _, w := range items {
-		if msgs := byOrg[w.org.Slug]; len(msgs) > 0 {
+		if !w.submitted {
+			w.markDone()
+		}
+		if msgs := byOrg[w.org.Slug]; len(msgs) > 0 && w.setRejection(strings.Join(msgs, "; ")) {
 			r.recordMessage(ctx, w, errors.New(strings.Join(msgs, "; ")))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// jobs is a set of per-sandbox jobs started by startJobs.
+// agentKey identifies an agent in the work queue.
+type agentKey struct{ org, agent pgtype.UUID }
+
+// sandboxJob is one agent's sandbox work of one pass.
+type sandboxJob struct {
+	w          *work
+	workspaces map[string]string
+	batch      *jobs
+}
+
+// workQueue is the per-agent queue of sandbox jobs (workqueue.go).
+type workQueue = keyedQueue[agentKey, *sandboxJob]
+
+// newWorkQueue returns the queue the leader's passes feed. Its workers stop with ctx or with Stop,
+// and SandboxJobs bounds how many agents are worked on at once.
+func (r *Reconciler) newWorkQueue(ctx context.Context) *workQueue {
+	return newKeyedQueue(ctx, r.cfg.SandboxJobs, r.runJob, func(j *sandboxJob) {
+		// Replaced by a newer item of the same agent, or left when the leader ended: it never runs.
+		j.w.markDone()
+		j.batch.wg.Done()
+	})
+}
+
+// DefaultWorkTimeout bounds one agent's sandbox work item.
+const DefaultWorkTimeout = 5 * time.Minute
+
+// jobs is the set of sandbox jobs one pass handed to the queue.
 type jobs struct {
 	wg   sync.WaitGroup
 	mu   sync.Mutex
 	errs []error
+	n    int
+	// slowestName and slowestTook are the longest job that ended.
+	slowestName string
+	slowestTook time.Duration
 }
 
-// wait blocks until every job has ended and returns their errors.
+// wait blocks until every job has ended (or was dropped) and returns their errors.
 func (j *jobs) wait() []error {
 	j.wg.Wait()
 	j.mu.Lock()
@@ -771,45 +869,73 @@ func (j *jobs) wait() []error {
 	return j.errs
 }
 
-// startJobs starts one job per agent, holding a slot of sem (sized SandboxJobs, shared by every call of a pass), and returns at once. A job
-// is everything the reconciler does for one agent's sandbox: creating, starting, stopping,
-// recreating and recording it. A slow start (an image pull, a stuck OpenShell call) holds up
-// only its own agent, not the rest of the pass and not the gateway update.
-func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string, sem chan struct{}) *jobs {
-	j := &jobs{}
-	j.wg.Add(1)
-	safego.Go(ctx, r.log, "reconcile-pass", func(context.Context) {
-		defer j.wg.Done()
-		for _, w := range ws {
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			j.wg.Add(1)
-			go func() {
-				defer j.wg.Done()
-				defer func() { <-sem }()
-				var err error
-				if safego.Do(r.log, "reconcile-agent", func() { err = r.reconcileAgent(ctx, w, workspaces) }) {
-					err = errors.New("internal error: reconciling the agent panicked")
-				}
-				if err != nil {
-					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
-					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
-					if errors.Is(err, execution.ErrForeign) {
-						r.recordForeign(ctx, w, err)
-					} else {
-						r.recordMessage(ctx, w, err)
-					}
-					j.mu.Lock()
-					j.errs = append(j.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
-					j.mu.Unlock()
-				}
-			}()
+func (j *jobs) count() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.n
+}
+
+func (j *jobs) slowest() (string, time.Duration) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.slowestName, j.slowestTook
+}
+
+// submit queues one job per agent. A job is everything the reconciler does for one agent's sandbox:
+// creating, starting, stopping, recreating and recording it. Queued behind another job of the same
+// agent it replaces any older queued one; it never runs in parallel with it.
+func (r *Reconciler) submit(q *workQueue, b *jobs, ws []*work, workspaces map[string]string) {
+	for _, w := range ws {
+		w.submitted = true
+		b.wg.Add(1)
+		b.mu.Lock()
+		b.n++
+		b.mu.Unlock()
+		q.Add(agentKey{w.org.ID, w.agent.ID}, &sandboxJob{w: w, workspaces: workspaces, batch: b})
+	}
+}
+
+// runJob is the queue's worker function: one agent's sandbox work, with its own timeout.
+func (r *Reconciler) runJob(ctx context.Context, _ agentKey, j *sandboxJob) {
+	defer j.batch.wg.Done()
+	w := j.w
+	start := time.Now()
+	jctx, cancel := context.WithTimeout(ctx, r.cfg.WorkTimeout)
+	defer cancel()
+	// An item that waited behind a running one of the same agent starts from the row as that one left
+	// it, not from the row its pass loaded.
+	if sb, gerr := r.q.GetAgentSandbox(jctx, store.GetAgentSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID}); gerr == nil {
+		w.sb = sb
+	}
+	var err error
+	if safego.Do(r.log, "reconcile-agent", func() { err = r.reconcileAgent(jctx, w, j.workspaces) }) {
+		err = errors.New("internal error: reconciling the agent panicked")
+	}
+	if err != nil {
+		// Recorded under the queue's context: the job's own may have run out.
+		r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
+		r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
+		if errors.Is(err, execution.ErrForeign) {
+			r.recordForeign(ctx, w, err)
+		} else {
+			r.recordMessage(ctx, w, err)
 		}
-	})
-	return j
+	}
+	if msg := w.markDone(); msg != "" {
+		r.recordMessage(ctx, w, errors.New(msg))
+	}
+	if !w.wantsRecreate {
+		r.recreateReleased(agentKey{w.org.ID, w.agent.ID})
+	}
+	took := time.Since(start)
+	j.batch.mu.Lock()
+	if err != nil {
+		j.batch.errs = append(j.batch.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+	}
+	if took > j.batch.slowestTook {
+		j.batch.slowestName, j.batch.slowestTook = execution.UUIDString(w.agent.ID.Bytes), took
+	}
+	j.batch.mu.Unlock()
 }
 
 // workOf returns the items at the given indexes.
@@ -889,7 +1015,7 @@ func (l planLookups) ServedKeyFile(ctx context.Context, org, provider pgtype.UUI
 // prepare loads or creates the agent's row and, for an active agent, its key. It returns nil
 // for agents with nothing rendered and nothing to render.
 func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileRow, a store.Agent, workspaces map[string]string) (*work, error) {
-	w := &work{org: org, agent: a}
+	w := &work{org: org, agent: a, rej: &rejectionNote{}}
 	sb, err := r.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org.ID, AgentID: a.ID})
 	switch {
 	case err == nil:
@@ -1182,7 +1308,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			// error on this path would never be counted.
 			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
 			if !lrReady {
-				if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+				if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the LimitRange was applied after the create"); err != nil {
 					return err
 				}
 				if ensureErr != nil {
@@ -1216,7 +1342,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			}
 			return r.record(ctx, w, sb, hash, note)
 		}
-		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+		if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the sandbox is stuck"); err != nil {
 			return err
 		}
 		r.m.SandboxRepairs.Inc()
@@ -1247,11 +1373,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
-		if !r.takeRecreate() {
-			// The cap keeps an OpenShell upgrade from recreating the whole fleet in one pass. It is
-			// taken before the home gate, which requests checkpoints and wakes stopped sandboxes: a
-			// sandbox whose gate is still waiting keeps its slot, so at most the cap starts per pass.
-			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot of this pass")
+		w.wantsRecreate = true
+		if !r.takeRecreate(agentKey{w.org.ID, w.agent.ID}) {
+			// The cap keeps an OpenShell upgrade from recreating the whole fleet at once. It is taken
+			// before the home gate, which requests checkpoints and wakes stopped sandboxes: a sandbox
+			// whose gate is still waiting keeps its slot, so at most the cap are in the gate at a time.
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot")
 		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
@@ -1259,9 +1386,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			}
 			return r.record(ctx, w, sb, hash, note)
 		}
-		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+		if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the spec changed"); err != nil {
 			return err
 		}
+		r.recreateStarted(agentKey{w.org.ID, w.agent.ID})
 		r.log.Info("deleting sandbox to recreate it with a changed spec", w.logAttrs()...)
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating with a changed spec")
@@ -1295,6 +1423,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// deleteSandbox requests the deletion of a sandbox. The OpenShell DeleteSandbox RPC can still block
+// until the pods end; the per-agent queue makes that cost one agent and one worker slot, not the
+// pass. The next pass observes the end (GetSandbox reports PhaseDeleting until it is gone). It logs before the call and
+// after it, with the call's duration and OpenShell's outcome, so a slow backend call shows in the log
+// with the agent it held (issue 573).
+func (r *Reconciler) deleteSandbox(ctx context.Context, w *work, ws, name, why string) error {
+	r.log.Info("requesting the deletion of a sandbox", append(w.logAttrs(), "name", name, "reason", why)...)
+	start := time.Now()
+	outcome, err := r.backend.DeleteSandbox(ctx, ws, name)
+	r.log.Info("sandbox deletion requested", append(w.logAttrs(), "name", name, "outcome", string(outcome),
+		"took", time.Since(start).Round(time.Millisecond), "err", err)...)
+	return err
 }
 
 // unmarked reports a sandbox without the install label while the backend owns what it makes: it
@@ -1350,7 +1492,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		}
 		return r.record(ctx, w, sb, hash, note)
 	}
-	if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
+	if err := r.deleteSandbox(ctx, w, ws, name, "the sandbox failed"); err != nil {
 		return err
 	}
 	r.m.SandboxRepairs.Inc()
@@ -1520,7 +1662,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		final = store.SandboxStateRetained
 	default:
 		if sb.Phase != execution.PhaseDeleting {
-			if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
+			if err := r.deleteSandbox(ctx, w, ws, name, "the agent is archived"); err != nil {
 				return err
 			}
 			r.log.Info("deleting sandbox of an archived agent", w.logAttrs()...)
@@ -1706,8 +1848,12 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 	if w.sb.SandboxName == "" {
 		return
 	}
-	// The message is for operators; the reason of the latest condition stays as observed.
-	_ = r.recordRow(ctx, w, w.sb.State, w.sb.Phase, err.Error(), w.sb.Reason, w.sb.SpecHash, "")
+	// The message is for operators. Only the message column changes: the state, phase and reason
+	// stay as the agent's own work item recorded them, even when this call comes from a pass that
+	// ran while that item was still working (issue 573).
+	_, _ = r.q.SetAgentSandboxMessage(ctx, store.SetAgentSandboxMessageParams{
+		OrgID: w.org.ID, AgentID: w.agent.ID, Message: err.Error(),
+	})
 }
 
 func b2f(b bool) float64 {

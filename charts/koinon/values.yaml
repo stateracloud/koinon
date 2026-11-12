@@ -136,8 +136,9 @@ reconciler:
   keepWarmPerOrg: 2
   # A changed sandbox spec (a new OpenShell supervisor image, harness image or resources) recreates
   # each sandbox through the usual path: held runs finish, the home gate passes, a checkpoint is taken
-  # first. This caps the recreates per reconcile pass, so an OpenShell upgrade does not recreate the
-  # whole fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
+  # first. This is a token bucket: that many sandboxes may be recreated at once, and the allowance
+  # comes back at this many per resync interval, so an OpenShell upgrade does not recreate the whole
+  # fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
   # supervisor image is read from the OpenShell gateway ConfigMap named by preflight.openshell.
   maxRecreatesPerPass: 4
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
