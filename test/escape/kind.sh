@@ -243,17 +243,24 @@ if (( need_gitea )); then
   # OpenShell 0.1.7's supervisor verifies the upstream certificate against webpki roots plus the extra
   # CA bundle the gateway hands it. The chart takes that bundle from an operator-owned ConfigMap with a
   # ca.crt key in the gateway namespace (supervisor.network.additionalCaConfigMapName, chart README
-  # "Additional destination CAs"). The gateway reads it at startup, so the helm upgrade (--wait) rolls it; the
-  # supervisor image stays the stock one. The chart ref is the one test/e2e/kind/up.sh installs.
+  # "Additional destination CAs"). The gateway reads it at startup and the chart does not checksum the
+  # ConfigMap, so the name carries a digest of the CA: every run makes a new CA, a new name changes the helm
+  # value, and the upgrade (--wait) rolls the gateway. The supervisor image stays the stock one.
+  # The chart ref is the one test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")
   echo "== additional destination CA (throwaway CA) for the supervisor"
-  "${K[@]}" -n openshell create configmap escape-destination-ca \
+  ca_sum=$(openssl x509 -in "$pki/ca.crt" -noout -fingerprint -sha256 | tr -d ':' | sed 's/.*=//' | tr 'A-F' 'a-f' | cut -c1-12)
+  ca_cm="escape-destination-ca-$ca_sum"
+  "${K[@]}" -n openshell create configmap "$ca_cm" \
     --from-file=ca.crt="$pki/ca.crt" --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
   helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
     --version "$os_version" --namespace openshell --reuse-values \
-    --set supervisor.network.additionalCaConfigMapName=escape-destination-ca \
+    --set supervisor.network.additionalCaConfigMapName="$ca_cm" \
     --wait --timeout 5m
+  # Older CA ConfigMaps from earlier runs are no longer referenced.
+  "${K[@]}" -n openshell get configmap -o name | grep '^configmap/escape-destination-ca-' |
+    grep -v "/$ca_cm\$" | xargs -r "${K[@]}" -n openshell delete >/dev/null || true
   export KOINON_ESCAPE_GITEA_URL="https://$gitea_host/gitea"
 fi
 
