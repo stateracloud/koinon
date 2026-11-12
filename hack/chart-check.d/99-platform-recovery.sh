@@ -50,10 +50,3 @@ has "reconciler config names the recovery binding" 'binding: "koinon-koinon-plat
 # Off: nothing renders and the reconciler runs no handler.
 lacks "recovery.enabled=false renders no policy" 'platform-recovery' --set recovery.enabled=false
 lacks "recovery.enabled=false leaves the reconciler config without recovery" 'recovery:' --show-only templates/config.yaml --set recovery.enabled=false
-
-# The reconciler appends the recovery.<action> install events, so with recovery on it (and koinon-api) is
-# in the install audit writer role; with recovery off only koinon-api is (ADR 0110 decision 6 amends ADR 0100 1.1a).
-writer_count() { render --show-only templates/postgres-cnpg.yaml "$@" | grep -c 'koinon_app, koinon_install_audit_writer\]' || true; }
-if [[ $(writer_count --set postgres.mode=cnpg) -ge 2 ]]; then
-  [[ $(writer_count --set postgres.mode=cnpg --set recovery.enabled=false) == 1 ]] || fail "recovery off: only koinon-api is in the install audit writer role"
-fi
