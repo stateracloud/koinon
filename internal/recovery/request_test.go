@@ -199,14 +199,14 @@ var _ = Describe("the PlatformAdminRecovery controller", func() {
 	failClosed := admissionv1.Fail
 	good := func() (*admissionv1.ValidatingAdmissionPolicy, *admissionv1.ValidatingAdmissionPolicyBinding) {
 		return &admissionv1.ValidatingAdmissionPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: policy}, Spec: admissionv1.ValidatingAdmissionPolicySpec{FailurePolicy: &failClosed},
-			}, &admissionv1.ValidatingAdmissionPolicyBinding{
-				ObjectMeta: metav1.ObjectMeta{Name: policy, CreationTimestamp: metav1.NewTime(created.Add(-time.Hour))},
-				Spec: admissionv1.ValidatingAdmissionPolicyBindingSpec{
-					PolicyName: policy, ValidationActions: []admissionv1.ValidationAction{admissionv1.Deny},
-					MatchResources: &admissionv1.MatchResources{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}}},
-				},
-			}
+			ObjectMeta: metav1.ObjectMeta{Name: policy}, Spec: admissionv1.ValidatingAdmissionPolicySpec{FailurePolicy: &failClosed},
+		}, &admissionv1.ValidatingAdmissionPolicyBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: policy, CreationTimestamp: metav1.NewTime(created.Add(-time.Hour))},
+			Spec: admissionv1.ValidatingAdmissionPolicyBindingSpec{
+				PolicyName: policy, ValidationActions: []admissionv1.ValidationAction{admissionv1.Deny},
+				MatchResources: &admissionv1.MatchResources{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}}},
+			},
+		}
 	}
 	build := func(p *admissionv1.ValidatingAdmissionPolicy, b *admissionv1.ValidatingAdmissionPolicyBinding, objs ...runtime.Object) {
 		var kobjs []runtime.Object
@@ -219,8 +219,10 @@ var _ = Describe("the PlatformAdminRecovery controller", func() {
 		kube = kubefake.NewSimpleClientset(kobjs...)
 		dyn = dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 			map[schema.GroupVersionResource]string{recovery.GVR: "PlatformAdminRecoveryList"}, objs...)
-		c = &recovery.Controller{Dynamic: dyn, Kube: kube, Namespace: ns, Policy: policy, Binding: policy, Handler: &recovery.Handler{},
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return created.Add(time.Minute) }}
+		c = &recovery.Controller{
+			Dynamic: dyn, Kube: kube, Namespace: ns, Policy: policy, Binding: policy, Handler: &recovery.Handler{},
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return created.Add(time.Minute) },
+		}
 	}
 	status := func(name string) map[string]any {
 		GinkgoHelper()
