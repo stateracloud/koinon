@@ -916,7 +916,9 @@ jobs:
       - run: hack/hooks/read-hooks_test.sh
       - run: hack/agent-state-test.sh
       - run: hack/release-gate-test.sh
+      - run: hack/release-harness-test.sh
       - run: hack/route-guard-test.sh
+      - run: hack/contributor-gate-test.sh
       - run: hack/dep-age-check-test.sh
       - run: hack/buf-breaking-against-test.sh
       - run: hack/ci-changes-test.sh

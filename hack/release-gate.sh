@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): runs in the upstream release workflow; it only reads, so it also runs from a fork.
+#
 # The release gate (plan item REL1): refuses a release unless the tag is a SemVer release tag, the
 # tagged commit is on main, and the required CI checks concluded success on that commit. It does
 # not run any tests. The release workflow runs it as its own job (`gate`), so it can later be
@@ -39,11 +41,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
 #                        batched e2e was skipped; the real subject is the `quickstart` rule below,
 #                        which demands success on the very commit.
+#   contributor gate     runs on pull_request and merge_group only (contributor-gate.yml, #848); listed
+#                        before it is required, so turning it on needs no edit here.
 # This is a list, not "any context with no run on the commit", so a new push-triggered required
 # check that is missing or red on the commit fails the gate instead of being excused by a PR run.
 # A context not listed here must succeed on the tagged commit itself. When a workflow gains or
 # loses a push trigger, move its context between the two cases.
-pr_only=(dco claim "e2e result")
+pr_only=(dco claim "e2e result" "contributor gate")
 # Contexts that must succeed on the tagged commit AND on the merged pull request's head: `quick
 # checks` runs on main too, but its dependency age steps run on pull requests only (old issue 594; they were
 # the PR-only job `dependency age`), so main's green says nothing about them.

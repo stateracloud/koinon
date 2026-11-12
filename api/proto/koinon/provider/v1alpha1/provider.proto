@@ -103,6 +103,28 @@ message Provider {
   // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
   // not called, probed or offered to runs. Unset otherwise.
   koinon.outward.v1alpha1.AdminDisabled admin_disabled = 19;
+  // serving says whether the gateway serves the provider (issue #17): saved, serving or failed.
+  // Unset (SERVING_STATE_UNSPECIFIED) for a provider that is disabled, removed or held off, which
+  // is not served by design.
+  ServingState serving_state = 20;
+  // serving_reason is why the gateway does not serve a failed provider: "no key", "gateway rejected
+  // config", "upstream unreachable" or "unknown". Empty unless serving_state is FAILED.
+  string serving_reason = 21;
+  // serving_detail is what the gateway or the reconciler said, for an admin. Empty when none. Never a key.
+  string serving_detail = 22;
+}
+
+// ServingState is whether agentgateway serves a provider's models. It is derived from the models the
+// reconciler recorded as served and from the last gateway apply's failure; the API never calls the gateway.
+enum ServingState {
+  SERVING_STATE_UNSPECIFIED = 0;
+  // SERVING_STATE_SAVED: saved, not served yet. The reconciler has not applied it, or the provider's
+  // key is still reaching the gateway pod (about 3 minutes). Not a failure.
+  SERVING_STATE_SAVED = 1;
+  // SERVING_STATE_SERVING: the gateway serves every enabled model of the provider.
+  SERVING_STATE_SERVING = 2;
+  // SERVING_STATE_FAILED: the gateway does not serve it and the reason is known.
+  SERVING_STATE_FAILED = 3;
 }
 
 // EchoCheck is the result of an echo check (CheckProviderEcho).

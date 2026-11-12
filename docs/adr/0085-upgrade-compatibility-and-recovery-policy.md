@@ -275,7 +275,7 @@ section says what the recommended option would have bought.
 
 Implementation-level unknowns, to settle in the sub-issues:
 
-- Resolved (old issue 412, decision 11): all four registered workflows are idempotent from step 0. Each is a
+- Resolved (old issue 412, decision 11): all four registered workflows (five since issue #25) are idempotent from step 0. Each is a
   single step whose effect carries its own key, so a carried-over run finds the first run's record:
   - `koinon.trigger-fire` (`create-task`): `CreateTriggeredTask` under dedupe source `trigger`, key
     `TriggerFireKey(trigger, due)`.
@@ -286,6 +286,9 @@ Implementation-level unknowns, to settle in the sub-issues:
   - `koinon.notify` (`deliver:<kind>`): the wake handler is a state update plus a reconciler notify;
     the question handlers insert notifications under a per-user dedupe key and re-check the
     question's state first.
+  - `koinon.code-host-poll-event` (`deliver`, issue #25, `WorkflowVersion` 2): dedupe source
+    `poll`, key the connection, the resource and the item's ID at the provider; the delivery runs in
+    the dedupe transaction.
   The rule for a new workflow is on `durable.WorkflowVersion`. `durable.CarryOver` runs at launch
   and every minute (an older pod that still runs during a rolling upgrade can enqueue after the
   first sweep); the fork ID is `<original>~v<version>`, so concurrent sweeps make one fork. The

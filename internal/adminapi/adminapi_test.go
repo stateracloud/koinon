@@ -143,6 +143,8 @@ type providerJSON struct {
 	HasCostKey           bool     `json:"hasCostKey"`
 	CostScope            string   `json:"costScope"`
 	Formats              []string `json:"formats"`
+	ServingState         string   `json:"servingState"`
+	ServingReason        string   `json:"servingReason"`
 }
 
 type modelJSON struct {
@@ -494,6 +496,9 @@ var _ = Describe("the admin API", func() {
 			m := decode[modelJSON](body)
 			Expect(m.Format).To(Equal("anthropic"))
 			Expect(m.FormatOverridden).To(BeFalse())
+			p = decode[providerJSON](mustBody(e.call(ctx, e.token, "GET", "/providers/"+p.ID, nil)))
+			Expect(p.ServingState).To(Equal("saved"), "a model the gateway has not served yet: saved, not failed")
+			Expect(p.ServingReason).To(BeEmpty())
 
 			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{"providerId": p.ID, "name": "other", "format": "openai"})
 			Expect(code).To(Equal(400), string(body))

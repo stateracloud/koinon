@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork.
+#
 # List the unresolved review threads of a pull request (#187). The main ruleset requires every review
 # thread resolved (required_review_thread_resolution), and advisory bots (DeepSource, CodeRabbit) leave
 # inline comments, so a PR can sit BLOCKED with every required check green. hack/pr-wait.sh --checks and
@@ -20,6 +22,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 [ $# -eq 1 ] || { echo "usage: hack/pr-threads.sh <PR>" >&2; exit 64; }

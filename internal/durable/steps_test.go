@@ -153,17 +153,17 @@ func TestWorkflowSteps(t *testing.T) {
 	}
 }
 
-// TestFourWorkflowsRegistered pins the workflows that ADR 0085 verified idempotent from step 0. A
+// TestWorkflowsRegistered pins the workflows that ADR 0085 verified idempotent from step 0. A
 // new workflow joins the list only after the same check, and the rule is in durable.WorkflowVersion.
-func TestFourWorkflowsRegistered(t *testing.T) {
+func TestWorkflowsRegistered(t *testing.T) {
 	found := scanWorkflows(t)
-	for _, name := range []string{"koinon.notify", "koinon.trigger-fire", "koinon.trigger-run-now", "koinon.direct-message"} {
+	for _, name := range []string{"koinon.notify", "koinon.trigger-fire", "koinon.trigger-run-now", "koinon.direct-message", "koinon.code-host-poll-event"} {
 		if len(found[name]) == 0 {
 			t.Errorf("workflow %s is not registered or has no steps", name)
 		}
 	}
-	if len(found) != 4 {
-		t.Errorf("%d workflows are registered, want the 4 verified idempotent from step 0 (ADR 0085): %v", len(found), found)
+	if len(found) != 5 {
+		t.Errorf("%d workflows are registered, want the 5 verified idempotent from step 0 (ADR 0085): %v", len(found), found)
 	}
 }
 

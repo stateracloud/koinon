@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The first-time contributor gate (#848): a pull request whose author has no merged contribution yet fails
+# this check until a maintainer vouches (the `vouched` label, or a line in .github/vouched.txt). Maintainers,
+# members, collaborators and past contributors always pass. hack/contributor-gate.sh decides; how to turn the
+# gate on, and what else that takes: docs/maintainers/contributor-gate.md.
+#
+# OFF by default. The switch is the job-level `if:` below (rule W6 of docs/dev/ci-rules.md: the decision to skip
+# lives in this code-owner protected file, not in a script). While it reads `false && ...` the job is skipped on
+# every event: no runner starts and nothing is checked. GitHub still lists a skipped `contributor gate` check on
+# each pull request; it blocks nothing. hack/contributor-gate-test.sh accepts only the two documented forms of
+# that line.
+#
+# No pull_request_target (rule W3, #463): the job runs with a read-only token and no secret or Environment, and
+# checks out the base branch, never the pull request's code, so the script and the vouch list are main's. The
+# workflow file is the pull request's own, as on every `pull_request` and `merge_group` run, so a pull request
+# that edits it could turn its own check green: the guard is the code-owner review of .github/ (as for claims.yml).
+# It posts nothing and closes nothing; a red check is the whole effect.
+#
+# Pull request: the base branch tip (base.ref, not base.sha, which is the base recorded at the last push), so a
+# vouch merged to main counts at the next run. Merge queue: the queue's base, and the queued pull request read
+# from the queue ref, re-judged (labels can change while it waits; a required check that a queue build skips
+# tests nothing, hack/ci-merge-group-test.sh). It judges the one pull request the queue ref names, which is the
+# whole build at merge queue group size 1 (ADR 0094); raising the group size needs this step to judge every
+# pull request in the group first.
+name: contributor-gate
+
+on:
+  pull_request:
+    # synchronize: a required check must report on every head. labeled/unlabeled: the `vouched` label.
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+# A quick labeled/unlabeled pair must not leave the older verdict on the head: a newer pull request event
+# cancels the older run. Queue builds are never cancelled (their own group per run).
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('contributor-gate-pr-{0}', github.event.pull_request.number) || format('contributor-gate-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    name: contributor gate
+    # The switch. Off: `false && (...)`. On: `true && (...)`; nothing else on this line changes.
+    if: false && (github.event_name == 'merge_group' || github.event_name == 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # check-pr: the queued pull request's author, association and labels
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+      - if: github.event_name == 'pull_request'
+        name: Is the author vouched for?
+        env:
+          GATE_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GATE_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          GATE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: hack/contributor-gate.sh check
+      - if: github.event_name == 'merge_group'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      # The queue ref is gh-readonly-queue/<base>/pr-<N>-<base sha> (as in claims.yml).
+      - if: github.event_name == 'merge_group'
+        name: Is the queued pull request's author vouched for?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          n=${GITHUB_REF#refs/heads/gh-readonly-queue/*/pr-}
+          n=${n%%-*}
+          if [[ ! $n =~ ^[0-9]+$ ]]; then echo "::error::cannot read the pull request number from $GITHUB_REF"; exit 1; fi
+          hack/contributor-gate.sh check-pr "$n"
