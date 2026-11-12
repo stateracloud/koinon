@@ -17,8 +17,8 @@ import (
 // types; the maintained rules follow it. Updating them is a reviewed bump with the generated-sample tests.
 //
 // A rule is applied the way gitleaks applies it: its keywords are a cheap pre-filter, its regular
-// expression finds candidates, the secret group is cut out, a rule's entropy floor and its own and
-// the global allowlists drop false positives. Go's regexp is linear, so no rule backtracks.
+// expression finds candidates, the secret group is cut out, a rule's entropy floor (except for the
+// fixed vendor shapes of gitleaksNoFloor) and its own and the global allowlists drop false positives. Go's regexp is linear, so no rule backtracks.
 //
 // What stays ours is what gitleaks does not model for a trace: exact matching of the org's own
 // secrets in every encoding, JSON-aware cleaning, header and credential key names, PEM and JWT,
@@ -31,6 +31,84 @@ var gitleaksExcluded = map[string]string{
 	// know the exemptions a trace needs (git SHAs, trace IDs, digests, prose); this rule would
 	// redact them.
 	"generic-api-key": "structural credential-key rules and the exemptions are ours",
+}
+
+// gitleaksNoFloor lists the rules of the pinned set that are applied without their entropy floor.
+// Each one matches a literal vendor prefix followed by a body of one fixed length, so a match is
+// that vendor's key format and not prose or a hash. gitleaks uses the floor to skip placeholders
+// in source code; in a trace a real key whose characters happen to repeat (about 2 in 10,000
+// AWS key IDs fall under the floor of 3) is still a key, and redacting a placeholder costs little.
+// The rules' own allowlists still apply.
+//
+// TestNoFloorRulesAreFixedVendorShapes checks the list against each gitleaks bump: it fails when a
+// listed rule is renamed, dropped, loses its floor or stops being a fixed shape, and when a new
+// fixed-shape rule with a floor is not listed.
+var gitleaksNoFloor = map[string]struct{}{
+	"adobe-client-secret":                 {},
+	"alibaba-access-key-id":               {},
+	"artifactory-api-key":                 {},
+	"aws-access-token":                    {},
+	"clickhouse-cloud-api-secret-key":     {},
+	"clojars-api-token":                   {},
+	"cloudflare-origin-ca-key":            {},
+	"digitalocean-access-token":           {},
+	"digitalocean-pat":                    {},
+	"doppler-api-token":                   {},
+	"duffel-api-token":                    {},
+	"dynatrace-api-token":                 {},
+	"easypost-api-token":                  {},
+	"easypost-test-api-token":             {},
+	"flutterwave-encryption-key":          {},
+	"flutterwave-public-key":              {},
+	"flutterwave-secret-key":              {},
+	"gcp-api-key":                         {},
+	"github-app-token":                    {},
+	"github-fine-grained-pat":             {},
+	"github-oauth":                        {},
+	"github-pat":                          {},
+	"github-refresh-token":                {},
+	"gitlab-deploy-token":                 {},
+	"gitlab-feature-flag-client-token":    {},
+	"gitlab-feed-token":                   {},
+	"gitlab-incoming-mail-token":          {},
+	"gitlab-kubernetes-agent-token":       {},
+	"gitlab-oauth-app-secret":             {},
+	"gitlab-pat":                          {},
+	"gitlab-ptt":                          {},
+	"gitlab-rrt":                          {},
+	"gitlab-runner-authentication-token":  {},
+	"gitlab-scim-token":                   {},
+	"gitlab-session-cookie":               {},
+	"grafana-service-account-token":       {},
+	"heroku-api-key-v2":                   {},
+	"huggingface-access-token":            {},
+	"huggingface-organization-api-token":  {},
+	"infracost-api-token":                 {},
+	"intra42-client-secret":               {},
+	"linear-api-key":                      {},
+	"notion-api-token":                    {},
+	"npm-access-token":                    {},
+	"octopus-deploy-api-key":              {},
+	"openshift-user-token":                {},
+	"perplexity-api-key":                  {},
+	"postman-api-token":                   {},
+	"prefect-api-token":                   {},
+	"pulumi-api-token":                    {},
+	"readme-api-token":                    {},
+	"rubygems-api-token":                  {},
+	"scalingo-api-token":                  {},
+	"sendgrid-api-token":                  {},
+	"sendinblue-api-token":                {},
+	"sentry-user-token":                   {},
+	"settlemint-application-access-token": {},
+	"settlemint-personal-access-token":    {},
+	"settlemint-service-access-token":     {},
+	"shippo-api-token":                    {},
+	"shopify-access-token":                {},
+	"shopify-custom-access-token":         {},
+	"shopify-private-app-access-token":    {},
+	"shopify-shared-secret":               {},
+	"slack-config-refresh-token":          {},
 }
 
 // gapKeyRE covers the shapes that matter to Koinon and that the pinned gitleaks set does not have
@@ -118,6 +196,9 @@ func compileGitleaks() *glSet {
 			continue
 		}
 		cr := glRule{id: r.ID, re: re, group: r.SecretGroup, entropy: r.Entropy}
+		if _, ok := gitleaksNoFloor[r.ID]; ok {
+			cr.entropy = 0
+		}
 		for _, a := range r.Allowlists {
 			ca, ok := compileAllow(a)
 			if !ok {

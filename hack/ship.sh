@@ -4,6 +4,10 @@
 # Ships the current feature branch: commit (signed off, checked identity), blob check, merge
 # origin/main, gitleaks, push, pull request, board, ready, auto-merge. One line per step.
 #
+# Maintainer script (hack/README.md): the board and the CodeRabbit request need the upstream project's
+# rights. From a fork the commit, checks, push and pull request work; when the scripts act on the fork
+# (a clone without an `upstream` remote, or KOINON_REPO=<fork>) the board step is skipped (no board).
+#
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
 #                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
 #
@@ -25,9 +29,10 @@
 # hack/git-identities.allowed (hack/git-identity-check.sh commit, before anything is committed). Environment:
 #   KOINON_COMMIT_FOOTER        text appended to the commit message (attribution lines)
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
+#   KOINON_REPO, KOINON_BOARD, KOINON_BOARD_OWNER  the repository and project board (hack/repo-lib.sh)
 #
 # Steps: commit ok <sha> | blobs ok | merged origin/main | gitleaks ok (N commits) | pushed <branch> |
-#        PR #N <url> | board ok | ready | auto-merge on
+#        PR #N <url> | board ok|none | ready | auto-merge on
 # Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 4 merge conflict.
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 
@@ -35,6 +40,9 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo # KOINON_REPO picks the repository for every gh call below
 
 msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
@@ -52,7 +60,7 @@ while [[ $# -gt 0 ]]; do
 	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
-	-h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,32p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "ship: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -69,6 +77,9 @@ say() { echo "$*"; }
 cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
 [[ $branch != main && $branch != master ]] || fail "refusing to ship from $branch; use a feature branch"
+# The board and the upstream come from the checkout (hack/repo-lib.sh); a bad value fails here, before the push.
+board=$(koinon_board) || fail "cannot work out the project board (hack/repo-lib.sh)"
+up=$(koinon_upstream) || fail "cannot read the upstream repository (hack/repo-lib.sh)"
 # A branch is <type>/<N>-<slug> (the claim and the PR hang off N), or <type>/<slug> with --no-issue for
 # work without an issue. A stray name, such as the one a broken test helper once checked out in
 # a real worktree (old issue 485), is refused before anything is pushed.
@@ -231,7 +242,7 @@ pr_url=""
 if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
-		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head (stateracloud/koinon only)"
+		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head ($up only)"
 		[[ $auto == 1 ]] && say "dry-run: would enable auto-merge"
 	else
 		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
@@ -247,7 +258,9 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 		fi
 		[[ -n $pr_url ]] || fail "no open pull request for $branch (pass --pr-title and --pr-body)"
 		say "PR #${pr_url##*/} $pr_url"
-		if gh project item-add 1 --owner stateracloud --url "$pr_url" >/dev/null 2>&1; then
+		if [[ -z $board ]]; then
+			say "board none"
+		elif gh project item-add "${board#* }" --owner "${board%% *}" --url "$pr_url" >/dev/null 2>&1; then
 			say "board ok"
 		else
 			echo "ship: warning: could not add $pr_url to the board" >&2
@@ -258,7 +271,7 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			say "ready"
 		fi
 		# CodeRabbit (#184) reviews manually here: ask once per head, after the push. Advisory: a failure only warns.
-		if [[ $ready == 1 && $pr_url == */stateracloud/koinon/pull/* ]]; then
+		if [[ $ready == 1 && ${pr_url,,} == */"${up,,}"/pull/* ]]; then
 			# A head this run pushed is new: ask without the date check (GitHub moves the PR head after the push, and a
 			# request on the old head says nothing about this one). Otherwise a request dated after the head commit counts.
 			if [[ $cr_fresh == 1 ]]; then

@@ -463,6 +463,12 @@ that file and nowhere else.
   locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
   the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`
   (the gate), `hack/ci-changes-test.sh` and `hack/paths-test.sh` (the path rule).
+- **Fuzzing (`fuzz`, #684).** Advisory (`hack/ci-required.txt`), not part of the `go` gate. A change of a
+  package whose input is untrusted text (`internal/leakguard`, `internal/mcpsanitize`, `internal/tracing/scrub`;
+  path rule `job fuzz`) or of `hack/go-fuzz.sh` runs every fuzz target of those packages for 20 s each
+  (`FUZZTIME`). The targets are found by name, so a new `FuzzX` in one of them joins without a CI change. A
+  failing input is uploaded as `fuzz-inputs`; commit it under the package's `testdata/fuzz/` with the fix,
+  so it runs as a seed in every `go-test` run. The preflight gate `fuzz` runs the same script.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
@@ -654,6 +660,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `contributor-gate.yml` | `pull_request`, `merge_group` (the `contributor gate` job, off by default, #848) | `GITHUB_TOKEN` only; `contents: read` at top level, the job adds `pull-requests: read` (the queued pull request, `check-pr`); no secret, no Environment | ok: checks out the base branch's tip (`pull_request.base.ref`) or `merge_group.base_sha` and runs the base's `hack/contributor-gate.sh`; the PR's code never runs. The workflow file is the PR head's, so the guard is the code-owner review of `.github/`, as for `claims.yml` |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `scorecard.yml`, `govulncheck.yml`, `web-isolated.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml`, `web-isolated.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 

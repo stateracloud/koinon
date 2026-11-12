@@ -50,3 +50,6 @@ func Counting(s *Scrubber, n *int) *Scrubber {
 	c.work = func(l int) { *n += l }
 	return &c
 }
+
+// GitleaksNoFloor is the set of gitleaks rules the scrubber applies without their entropy floor.
+func GitleaksNoFloor() map[string]struct{} { return gitleaksNoFloor }

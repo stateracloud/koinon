@@ -8,8 +8,10 @@ never Kyverno). Rules key on the requesting identity, which a pod's creator cann
   starts both by removing their openshell.ai/bootstrap scheduling gate. The gateway may change a
   pod's spec only by removing scheduling gates: containers, init containers, tolerations, node
   selector, affinity and deadline must stay as they were (the other spec fields are immutable);
-- only the OpenShell gateway (and the controller) writes Sandbox objects, and only the gateway
-  writes Secrets;
+- only the OpenShell gateway (and the controller) writes Sandbox objects, only the controller writes
+  the Agent Sandbox extension kinds (SandboxTemplate, SandboxClaim, SandboxWarmPool), and only the
+  gateway writes Secrets;
+- pods/resize is a spec change like any other: only the controller resizes a sandbox pod;
 - everyone else is denied, cluster admins included: debug through OpenShell exec and logs;
 - CONNECT is denied to every identity, with no exemption: pods/exec, pods/attach, pods/portforward,
   pods/proxy and services/proxy would run a process (or reach a port) outside the OpenShell
@@ -20,7 +22,8 @@ never Kyverno). Rules key on the requesting identity, which a pod's creator cann
   exemption but the runbook https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/ (a cluster admin suspends the CONNECT
   binding, which shows in the audit log and as GitOps drift).
 Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPath or privileged
-containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
+containers, no added capabilities, host ports or seccomp profile other than RuntimeDefault, no
+io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
 sandbox workload pods run on an allowed runtime class, set automountServiceAccountToken=false and
 project no ServiceAccount token (ADR 0006); supervisor pods run only the pinned supervisor image
 (sandboxPolicy.supervisorImages), set automountServiceAccountToken=false as well, and project
@@ -54,8 +57,14 @@ spec:
       - apiGroups: [""]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [pods, pods/ephemeralcontainers]
+        # pods/resize (in-place resize, Kubernetes 1.33+) changes container resources outside a
+        # spec UPDATE of the pod itself; it gets the same identity test, so the ADR 0083 bounds the
+        # controller applies cannot be lifted by another identity (issue 673).
+        resources: [pods, pods/ephemeralcontainers, pods/resize]
   variables:
+    # Every container and init container (ephemeral containers are refused outright below).
+    - name: allContainers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson $p.identities.pods) | quote }}
     - name: supervisor
@@ -151,6 +160,26 @@ spec:
         object.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) &&
         (!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))
       message: privileged containers are not allowed
+    # Pod fields of issue 673, for both boundary roles: OpenShell 0.1.7 renders every container of
+    # the workload and the supervisor pod with capabilities drop [ALL] and no add, the pod with
+    # seccompProfile RuntimeDefault, and no host ports (driver-kubernetes driver.rs
+    # apply_supervisor_sandbox_runtime_boundary, sandbox_runtime.rs supervisor_pod). An added
+    # capability or an Unconfined or Localhost profile would widen what the agent's process may do
+    # under Kata guest seccomp (spike 8.12); a hostPort opens a node port to the pod around the
+    # NetworkPolicies. A profile that is not set is left to the pod (OpenShell sets it on the pod).
+    - expression: >-
+        variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) ||
+          !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)
+      message: sandbox pods must not add Linux capabilities (securityContext.capabilities.add)
+    - expression: >-
+        (!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) ||
+          object.spec.securityContext.seccompProfile.type == 'RuntimeDefault') &&
+        variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.seccompProfile) ||
+          c.securityContext.seccompProfile.type == 'RuntimeDefault')
+      message: sandbox pods must use the RuntimeDefault seccomp profile (no Unconfined or Localhost profile on the pod or a container)
+    - expression: >-
+        variables.allContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))
+      message: hostPort is not allowed in sandbox pods
     - expression: >-
         !has(object.metadata.labels) || !('openshell.ai/boundary-role' in object.metadata.labels) ||
         object.metadata.labels['openshell.ai/boundary-role'] != 'workload' ||
@@ -242,6 +271,14 @@ spec:
         apiVersions: ["*"]
         operations: [CREATE, UPDATE]
         resources: [sandboxes]
+      # The Agent Sandbox extension kinds (Agent Sandbox v1.0.7, issue 673): a SandboxClaim or a
+      # SandboxWarmPool makes the controller create Sandboxes, and so pods, from a SandboxTemplate,
+      # around the OpenShell gateway. OpenShell 0.1.7 writes none of them, so only the Agent Sandbox
+      # controller (sandboxPolicy.identities.pods) may change their spec.
+      - apiGroups: [extensions.agents.x-k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [sandboxtemplates, sandboxclaims, sandboxwarmpools]
       - apiGroups: [""]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
@@ -249,8 +286,10 @@ spec:
   variables:
     - name: isSecret
       expression: "request.resource.resource == 'secrets'"
+    - name: isExtension
+      expression: "request.resource.group == 'extensions.agents.x-k8s.io'"
     - name: trusted
-      expression: {{ printf "request.userInfo.username in (variables.isSecret ? %s : %s)" (toJson $p.identities.secrets) (toJson $p.identities.sandboxes) | quote }}
+      expression: {{ printf "request.userInfo.username in (variables.isSecret ? %s : variables.isExtension ? %s : %s)" (toJson $p.identities.secrets) (toJson $p.identities.pods) (toJson $p.identities.sandboxes) | quote }}
     # Metadata-only updates (labels, finalizers, owner references) stay open to system controllers.
     - name: contentUnchanged
       expression: >-
@@ -258,8 +297,10 @@ spec:
           ? (has(object.data) == has(oldObject.data) && (!has(object.data) || object.data == oldObject.data))
           : (has(object.spec) == has(oldObject.spec) && (!has(object.spec) || object.spec == oldObject.spec)))
   validations:
-    - expression: "variables.trusted || variables.contentUnchanged"
+    - expression: "variables.isExtension || variables.trusted || variables.contentUnchanged"
       messageExpression: "'only the OpenShell gateway may write ' + request.resource.resource + ' in sandbox namespaces, not ' + request.userInfo.username"
+    - expression: "!variables.isExtension || variables.trusted || variables.contentUnchanged"
+      messageExpression: "'only the Agent Sandbox controller may write ' + request.resource.resource + ' in sandbox namespaces, not ' + request.userInfo.username"
     # Claim templates (issue 475; ADR 0045): the pods policy accepts the claim "<template>-<sandbox>", so
     # a template name must not contain '-' (OpenShell 0.1.7 uses only "workspace") and a template must
     # not bind its claim to a chosen PersistentVolume. Applies to every identity, trusted ones included.

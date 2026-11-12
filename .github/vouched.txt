@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The vouch list of the first-time contributor gate (hack/contributor-gate.sh,
+# docs/maintainers/contributor-gate.md): GitHub logins that may open a pull request before they have a
+# merged contribution. One login a line, any case; `#` starts a comment. Say who vouched and why.
+# Maintainers, members, collaborators and past contributors pass without a line here.
+#
+# The gate reads this file from the pull request's BASE commit, so a line takes effect once it is on main.
+
+# Dependency updates (.github/dependabot.yml); the bot has no merged-contributor association.
+dependabot[bot]

@@ -95,6 +95,14 @@ job vuln ^hack/govulncheck\.sh$
 job vuln ^\.github/workflows/govulncheck\.yml$
 job vuln ^hack/versions\.env$
 
+# --- fuzz: go-fuzz, the time-boxed fuzz targets of the untrusted-text parsers (#684) ------------------------
+# hack/go-fuzz.sh fuzzes the packages below for a fixed time per target; their seeds run in go-test anyway.
+# A change of those packages or of the script runs it; a change to ci.yml, the Makefile, go.mod, go.sum or
+# these rules runs it through `everything`. Keep the list in step with `packages` of hack/go-fuzz.sh. The
+# preflight gate `fuzz` uses the same rules.
+job fuzz ^internal/(leakguard|mcpsanitize|tracing/scrub)/
+job fuzz ^hack/go-fuzz\.sh$
+
 # --- shell: lint-shell (#572) --------------------------------------------------------------------------
 # shellcheck over `git ls-files '*.sh'` (any directory), and actionlint and zizmor over .github/ (workflows,
 # the composite actions they read, their config). The tool versions and checksums are in hack/versions.env,
@@ -179,6 +187,7 @@ lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission
 lane tidy - preflight
 lane vuln - preflight
+lane fuzz - preflight
 lane shell - preflight
 lane scripts - preflight
 
@@ -257,6 +266,7 @@ script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
 script-check - hack/secrets-skip-test.sh
 script-check - hack/route-guard-test.sh
+script-check - hack/contributor-gate-test.sh
 script-check - hack/ci-cache-test.sh
 script-check - hack/ci-rules-check-test.sh
 script-check - hack/ci-rules-check.sh

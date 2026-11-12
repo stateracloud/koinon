@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package mcpsanitize normalises the free text a third-party MCP server publishes about its tools
-// (a tool's description and the description strings of its input schema) before anything stores it
+// (a tool's description and every string of its input schema) before anything stores it
 // or shows it to a model. Those strings reach the model verbatim, so they are untrusted input
 // (research TP22, issue #52): a server can hide instructions in them with control characters,
 // ANSI escapes, Unicode tag characters, bidi overrides, zero-width characters or tags that imitate
@@ -15,7 +15,9 @@
 //  3. Tags that imitate a harness or chat-role block (<system>, <system-reminder>, <koinon-*>,
 //     <untrusted_context>, <tool_result> and the like, opening or closing) have their angle
 //     bracket escaped, so the text stays readable to an admin but no longer parses as a block.
-//  4. The text is cut to a length cap, counted in characters (runes), ending in an ellipsis.
+//  4. Prose (a tool's description, a description or title in its schema) is cut to a length cap,
+//     counted in characters (runes), ending in an ellipsis. Other schema strings (names, enum
+//     values, defaults, patterns) get steps 1 to 3 and keep their length.
 //
 // The caps follow the research: about 1,024 characters for a tool and 256 for a parameter. Descriptions
 // that need more are rare, and a longer description costs every run's context.
@@ -25,6 +27,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -134,11 +137,14 @@ func stripped(orig, cleaned string) bool {
 // Description sanitises a tool's description.
 func Description(s string) (string, Report) { return Text(s, MaxToolDescription) }
 
-// Schema sanitises the "description" and "title" strings anywhere in a JSON input schema, with the
-// per-parameter cap, and returns the schema re-encoded. Instance values (default, const, enum,
-// examples) are data the tool receives or compares against, not text for the model, and are left
-// as published; numbers keep their exact text. A schema that is not valid JSON is returned
-// unchanged with an empty report: the caller already replaces those.
+// Schema sanitises every string of a JSON input schema, member names included, and returns the
+// schema re-encoded. The model reads all of it: a server can hide text in an enum value, a default,
+// a property name or a keyword nobody defined as well as in a description. Each string gets the
+// whole policy; "description" and "title" also get the per-parameter cap, and other strings keep
+// their length, since a cut enum value or pattern would change what the tool accepts. A clean
+// string is unchanged, so an ordinary enum, default or name still matches what the tool expects.
+// Numbers keep their exact text. A schema that is not valid JSON is returned unchanged with an empty
+// report: the caller already replaces those.
 func Schema(raw json.RawMessage) (json.RawMessage, Report) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -147,7 +153,7 @@ func Schema(raw json.RawMessage) (json.RawMessage, Report) {
 		return raw, Report{}
 	}
 	var rep Report
-	v = walk(v, &rep)
+	v = walk(v, schemaMode, &rep)
 	if !rep.Cleaned && !rep.Capped {
 		return raw, rep
 	}
@@ -160,55 +166,108 @@ func Schema(raw json.RawMessage) (json.RawMessage, Report) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), rep
 }
 
-// instanceKeys hold instance values, which are never rewritten.
-var instanceKeys = map[string]bool{"default": true, "const": true, "enum": true, "examples": true, "example": true}
+// capped are the keywords whose string is prose for the model, cut to MaxParamDescription. Under a
+// map of names to schemas ("properties" and the like) the same names are parameters, not keywords,
+// and a parameter named "description" is a schema like any other.
+var capped = map[string]bool{"description": true, "title": true}
 
-// namedSchemas map a name chosen by the server (a parameter, a definition) to a schema, so their keys
-// are names, not keywords: a parameter called "default" or "description" is still a schema to walk.
+// namedSchemas map a name chosen by the server (a parameter, a definition) to a schema.
 var namedSchemas = map[string]bool{
 	"properties": true, "patternProperties": true, "$defs": true, "definitions": true, "dependentSchemas": true,
 }
 
-// walk visits a schema. It has no depth limit of its own: encoding/json already refuses nesting
-// deeper than it can decode, and a limit here would let a description hide below it.
-func walk(v any, rep *Report) any {
+// instanceKeys hold instance values: data the tool receives or compares against. Their strings are
+// cleaned like any other but never cut, and their keys are data, not keywords.
+var instanceKeys = map[string]bool{"default": true, "const": true, "enum": true, "examples": true, "example": true}
+
+// mode is how walk reads the keys of an object.
+type mode uint8
+
+const (
+	schemaMode mode = iota // keys are keywords
+	namesMode              // keys are names chosen by the server, each mapped to a schema
+	dataMode               // an instance value: keys and strings are data
+)
+
+// walk visits a value of the schema. It has no depth limit of its own: encoding/json already
+// refuses nesting deeper than it can decode, and a limit here would let a string hide below it.
+func walk(v any, m mode, rep *Report) any {
 	switch t := v.(type) {
+	case string:
+		return cleanString(t, rep)
 	case map[string]any:
-		for k, e := range t {
+		out := make(map[string]any, len(t))
+		for _, k := range cleanKeys(t, rep) {
+			e := t[k.orig]
 			switch s, isString := e.(string); {
-			case instanceKeys[k]:
-			case isString && (k == "description" || k == "title"):
+			case m == dataMode:
+				out[k.clean] = walk(e, dataMode, rep)
+			case isString && (m == namesMode || capped[k.clean]):
+				// prose: a description or title, or a string where a parameter's schema belongs
 				clean, r := Text(s, MaxParamDescription)
-				t[k] = clean
 				rep.merge(r)
-			case namedSchemas[k]:
-				t[k] = walkNamed(e, rep)
+				out[k.clean] = clean
+			case m == schemaMode && instanceKeys[k.clean]:
+				out[k.clean] = walk(e, dataMode, rep)
+			case m == schemaMode && namedSchemas[k.clean]:
+				out[k.clean] = walk(e, namesMode, rep)
 			default:
-				t[k] = walk(e, rep)
+				out[k.clean] = walk(e, schemaMode, rep)
 			}
 		}
+		return out
 	case []any:
+		if m != dataMode {
+			m = schemaMode // an array of schemas (allOf, prefixItems)
+		}
 		for i, e := range t {
-			t[i] = walk(e, rep)
+			t[i] = walk(e, m, rep)
 		}
 	}
 	return v
 }
 
-// walkNamed visits a map of name to schema.
-func walkNamed(v any, rep *Report) any {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return walk(v, rep)
+// maxStringLen is the cap Text gets for a string that is not cut: none.
+const maxStringLen = int(^uint(0) >> 1)
+
+type key struct{ orig, clean string }
+
+// cleanKeys returns the keys of m with their cleaned form, in a fixed order. When two keys clean to
+// the same name, the one that was already clean is kept (else the first in byte order), so the
+// result does not depend on map order; dropping the other counts as cleaning.
+func cleanKeys(m map[string]any, rep *Report) []key {
+	keys := make([]key, 0, len(m))
+	for k := range m {
+		keys = append(keys, key{orig: k, clean: cleanString(k, rep)})
 	}
-	for k, e := range m {
-		if s, ok := e.(string); ok { // not a schema, but the model reads it all the same
-			clean, r := Text(s, MaxParamDescription)
-			m[k] = clean
-			rep.merge(r)
+	slices.SortFunc(keys, func(a, b key) int {
+		if c := strings.Compare(a.clean, b.clean); c != 0 {
+			return c
+		}
+		// the key that needed no cleaning first, then byte order
+		if (a.orig == a.clean) != (b.orig == b.clean) {
+			if a.orig == a.clean {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.orig, b.orig)
+	})
+	out := make([]key, 0, len(keys))
+	for _, k := range keys {
+		if len(out) > 0 && out[len(out)-1].clean == k.clean {
+			rep.Cleaned = true
 			continue
 		}
-		m[k] = walk(e, rep)
+		out = append(out, k)
 	}
-	return m
+	return out
+}
+
+// cleanString applies the policy to a string that is not cut. The report's length stays that of
+// the longest description: only Cleaned is taken.
+func cleanString(s string, rep *Report) string {
+	clean, r := Text(s, maxStringLen)
+	rep.Cleaned = rep.Cleaned || r.Cleaned
+	return clean
 }

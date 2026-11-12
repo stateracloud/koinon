@@ -141,6 +141,8 @@ type Querier interface {
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
+	// koinon-reconciler, after an apply that took effect: the org's failures are over.
+	ClearGatewayProviderFailures(ctx context.Context, orgID pgtype.UUID) error
 	// Clears the org's default model when no model of that name is left (it was deleted); the old value
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
@@ -278,7 +280,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	// pending -> approved | denied by a human. No row: already decided.
+	// pending -> approved | denied by a human. No row: already decided, or expires_at has passed
+	// (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
 	DecideOpenRouterLimitProposal(ctx context.Context, arg DecideOpenRouterLimitProposalParams) error
 	// Accepts or dismisses an open proposal. No row: it was already decided.
@@ -1013,6 +1016,9 @@ type Querier interface {
 	// A provider's reconciled days from @since, newest first.
 	ListProviderCostReconciliations(ctx context.Context, arg ListProviderCostReconciliationsParams) ([]ProviderCostReconciliation, error)
 	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
+	// The serving facts of the org's providers: enabled models, how many the gateway serves, and the
+	// recorded failure, if any.
+	ListProviderServing(ctx context.Context, orgID pgtype.UUID) ([]ListProviderServingRow, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The active recipients of these questions, with names, for the API.
 	ListQuestionRecipients(ctx context.Context, arg ListQuestionRecipientsParams) ([]ListQuestionRecipientsRow, error)
@@ -1393,7 +1399,8 @@ type Querier interface {
 	// The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of
 	// one org. Only rows that change are written.
 	SetAgentsKeepWarmGranted(ctx context.Context, arg SetAgentsKeepWarmGrantedParams) error
-	// The first of two approvals: remembered, the request stays pending.
+	// The first of two approvals: remembered, the request stays pending. Refused, like a decision,
+	// once expires_at has passed.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
@@ -1408,6 +1415,18 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
+	// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
+	// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.
+	SetGatewayProviderFailure(ctx context.Context, arg SetGatewayProviderFailureParams) error
+	// koinon-reconciler, after an apply that failed or was rejected: every enabled provider of the org
+	// that has an enabled model the gateway does not serve gets the reason. Providers that are fully
+	// served keep serving with the previous config and get none.
+	SetGatewayProviderFailures(ctx context.Context, arg SetGatewayProviderFailuresParams) error
+	// koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
+	// is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.
+	// Runs after ClearGatewayProviderFailures; a failure the apply itself recorded stays.
+	SetGatewayUnpricedFailures(ctx context.Context, arg SetGatewayUnpricedFailuresParams) error
 	// Sets the marker unless it is set: the first setting stays (the row is never updated).
 	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	// The worker of epoch has read feed_read finished tool calls from the harness and recorded the first
@@ -1568,6 +1587,10 @@ type Querier interface {
 	UpsertCodeHostConnectionReading(ctx context.Context, arg UpsertCodeHostConnectionReadingParams) error
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
+	// koinon-reconciler, after an apply that failed whole or was rejected: a provider the pass left out of
+	// the render keeps its own reason and detail (a blocked URL says so), not the org-wide one. Replaces an
+	// older row, since no Clear runs in this path.
+	UpsertGatewayProviderFailure(ctx context.Context, arg UpsertGatewayProviderFailureParams) error
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error)
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.

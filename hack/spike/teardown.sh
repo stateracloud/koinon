@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): removes the maintainers' spike infrastructure; nothing in it applies to a fork.
+#
 # Remove everything the OpenShell spike created (docs/spikes/openshell.md). Prints the plan
 # by default; pass --yes to execute. Run only when procoduck says the spike is over.
 #

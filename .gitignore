@@ -53,4 +53,5 @@ CLAUDE.local.md
 **/.claude/settings.local.json.*
 **/.claude/agent-memory-local/
 **/.claude/scheduled_tasks.json
+**/.claude/scheduled_tasks.lock
 **/.claude/worktrees/

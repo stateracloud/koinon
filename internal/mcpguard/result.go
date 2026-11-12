@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/sinkclass"
@@ -142,13 +143,57 @@ func (g *Guard) record(ctx context.Context, c caller, legs Legs, result json.Raw
 	}
 	var texts []string
 	if legs.PrivateData && len(result) > 0 {
-		texts = Strings(result)
+		texts = resultTexts(result)
 	}
 	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
 	if _, err := g.state.Record(ctx, sess, legs, pol.threshold(), texts); err != nil {
 		return nil, err
 	}
 	return &sess, nil
+}
+
+// maxResultDecodes is how many times a JSON document inside a result's string is decoded, as the
+// trace scrubber unpacks one (scrub.maxEmbeddedDepth).
+const maxResultDecodes = 3
+
+// resultTexts returns what is fingerprinted of a result: every string of it (Strings) and, for each
+// string that is itself a JSON document (a tool's text content often is), the strings of that
+// document, to maxResultDecodes levels. The document may write the private text with escapes
+// (\u0041, \n) that the agent later sends decoded; the string as written is kept too. The decoded
+// strings are no longer than the string they come from, so the work is bounded by the result's
+// size times the levels.
+func resultTexts(result json.RawMessage) []string {
+	out := Strings(result)
+	level := out
+	for range maxResultDecodes {
+		var next []string
+		for _, s := range level {
+			if !jsonDocument(s) {
+				continue
+			}
+			inner := Strings([]byte(s))
+			if len(inner) == 1 && inner[0] == s {
+				continue // not split (too deep, too large): already fingerprinted as written
+			}
+			next = append(next, inner...)
+		}
+		if len(next) == 0 {
+			break
+		}
+		out = append(out, next...)
+		level = next
+	}
+	return out
+}
+
+// jsonDocument reports whether s is a JSON object, array or string (a bare number or word is
+// fingerprinted as written already).
+func jsonDocument(s string) bool {
+	t := strings.TrimSpace(s)
+	if t == "" || (t[0] != '{' && t[0] != '[' && t[0] != '"') {
+		return false
+	}
+	return json.Valid([]byte(t))
 }
 
 // RecordApproved records the result of a call a person approved and Koinon's executor ran for the

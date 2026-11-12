@@ -70,6 +70,10 @@ type sandboxUnavailable struct {
 	// cap is the org's sandbox wait cap the wait applied, read once; every text about the failure
 	// uses it, so they all agree with the run's failure reason.
 	cap time.Duration
+	// causeSeen is how long after the start of the wait the sandbox row first named cause, when
+	// causeWasSeen.
+	causeSeen    time.Duration
+	causeWasSeen bool
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -1145,7 +1149,8 @@ func (r *runner) conclude(ctx context.Context, e ending, turn runoutcome.Turn) {
 	case errors.As(err, &f) && f.sandbox != nil:
 		su := f.sandbox
 		if ferr := r.own.SandboxUnavailable(ctx, turn, runoutcome.Unavailable{
-			Reason: f.reason, Cause: su.cause, Detail: su.detail, Waited: su.waited, Cap: su.cap, Class: classSandboxUnavailable,
+			Reason: f.reason, Cause: su.cause, Detail: su.detail, Waited: su.waited, Cap: su.cap,
+			CauseSeen: su.causeSeen, CauseWasSeen: su.causeWasSeen, Class: classSandboxUnavailable,
 		}); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}

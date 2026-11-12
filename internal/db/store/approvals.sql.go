@@ -292,7 +292,7 @@ SET status = $1::approval_status,
     decided_by = $2::uuid,
     decided_at = now(),
     decision_note = $3
-WHERE org_id = $4 AND id = $5 AND status = 'pending'
+WHERE org_id = $4 AND id = $5 AND status = 'pending' AND expires_at > now()
   AND $1::approval_status IN ('approved', 'denied')
 RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system, scope_id
 `
@@ -305,7 +305,8 @@ type DecideApprovalRequestParams struct {
 	ID           pgtype.UUID
 }
 
-// pending -> approved | denied by a human. No row: already decided.
+// pending -> approved | denied by a human. No row: already decided, or expires_at has passed
+// (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 func (q *Queries) DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, decideApprovalRequest,
 		arg.Status,
@@ -1067,6 +1068,7 @@ const setApprovalFirstApprover = `-- name: SetApprovalFirstApprover :one
 UPDATE approval_requests
 SET first_approver = $1::uuid
 WHERE org_id = $2 AND id = $3 AND status = 'pending' AND first_approver IS NULL AND approvals_required = 2
+  AND expires_at > now()
 RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system, scope_id
 `
 
@@ -1076,7 +1078,8 @@ type SetApprovalFirstApproverParams struct {
 	ID       pgtype.UUID
 }
 
-// The first of two approvals: remembered, the request stays pending.
+// The first of two approvals: remembered, the request stays pending. Refused, like a decision,
+// once expires_at has passed.
 func (q *Queries) SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, setApprovalFirstApprover, arg.Approver, arg.OrgID, arg.ID)
 	var i ApprovalRequest

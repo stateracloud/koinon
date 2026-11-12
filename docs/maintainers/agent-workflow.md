@@ -10,6 +10,8 @@ here moved out of AGENTS.md in issue 842; they are unchanged.
 
 ## Commands
 
+- The maintainer scripts and the repository, board and worktree settings they read (`KOINON_REPO`,
+  `KOINON_BOARD`, `KOINON_WT_ROOT`; a fork cloned alone needs none): [hack/README.md](../../hack/README.md).
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline).
 - Maintainer agent hooks (`hack/hooks/`) are opt-in with `KOINON_MAINTAINER_HOOKS=1`:
   [hooks.md](hooks.md).
