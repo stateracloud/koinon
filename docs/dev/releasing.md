@@ -234,14 +234,14 @@ Every command must succeed. A `denied` or `unauthorized` error means that packag
 
 ## Stand-ins for owner-only steps
 
-One person (the project lead, procoduck) holds each of these today. A second maintainer
-(ovirandunu, `MAINTAINERS.md`) can do the ones that need only repository write access; the others need an
+One person (the project lead) holds each of these today. Any other maintainer (`MAINTAINERS.md`) can do
+the ones that need only repository write access; the others need an
 org owner, and the stand-in is a written procedure. Until a second org owner exists, the org-owner
 steps wait for the project lead. Adding one is the fix and is tracked in #853. The stale "private until v0.3" records are tracked in #854.
 
 | Step | Needs | Stand-in or procedure |
 | --- | --- | --- |
-| Cut an rc | repository admin (ruleset `release tags: admins create`) | ovirandunu holds the repository admin role (checked 2026-11-12), so the stand-in works today: "Cut a release candidate". A maintainer without the admin role cannot push the tag and waits for an admin. Final `vX.Y.Z` tags stay with the project lead |
+| Cut an rc | repository admin (ruleset `release tags: admins create`) | Any maintainer with the repository admin role is the stand-in: "Cut a release candidate". A maintainer without the admin role cannot push the tag and waits for an admin. Final `vX.Y.Z` tags stay with the project lead |
 | Publish the draft release | repository write | Any maintainer, after reading the notes |
 | Package visibility | org owner | Org owner only: "Make the packages public" |
 | `RELEASE_SIGNING` variable | repository admin | Repository admin only; steps above |

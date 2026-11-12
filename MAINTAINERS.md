@@ -18,7 +18,7 @@ Each step that only one person can do today has a stand-in or a written procedur
 through GitHub private vulnerability reporting ([SECURITY.md](SECURITY.md)); conduct reports follow
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Both reach every maintainer, not one login, on one condition: private vulnerability reports go only
 to repository admins and security managers, so every maintainer must hold the repository admin or
-security-manager role. ovirandunu holds the admin role (checked 2026-11-12). Check this before you add
+security-manager role. Check this before you add
 a maintainer row; a maintainer without the role does not see these reports. A report about a maintainer must
 not use the advisory route: every admin and security manager sees an advisory, including the maintainer it
 is about. The reporter sends a private message on GitHub to another maintainer (by handle) instead; only
