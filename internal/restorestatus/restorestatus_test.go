@@ -105,10 +105,10 @@ var _ = Describe("Build", func() {
 			_, err := pool.Exec(ctx, stmt)
 			Expect(err).NotTo(HaveOccurred())
 		}
-		org, _, _ := pgtest.NewOrg(ctx, pool)
+		org, _, slug := pgtest.NewOrg(ctx, pool)
 		_, err := pool.Exec(ctx, `INSERT INTO install_binding (mark, held_since) VALUES (NULL, now())`)
 		Expect(err).NotTo(HaveOccurred())
-		gone := installbinding.Removal{Kind: "model-provider", Org: "default", Secret: "source-provider"}
+		gone := installbinding.Removal{Kind: "model-provider", Org: slug, Secret: "source-provider"}
 		plan := func(context.Context) ([]installbinding.Removal, error) { return []installbinding.Removal{gone}, nil }
 
 		r, err := restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: plan})
