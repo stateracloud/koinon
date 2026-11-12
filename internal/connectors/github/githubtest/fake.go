@@ -68,6 +68,7 @@ type Fake struct {
 	requests  []Request
 	tokens    map[string]tokenInfo
 	repos     map[string]*Repo
+	polls     map[string]*pollFeed
 }
 
 // tokenInfo is what a minted token may do.
@@ -158,6 +159,7 @@ func NewUnstarted() *Fake {
 	mux.HandleFunc("GET /app/installations/{id}", f.installation)
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", f.accessToken)
 	f.routeRepos(mux)
+	f.routePolls(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})
