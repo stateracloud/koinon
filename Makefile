@@ -89,6 +89,12 @@ adr-lint: ## Check ADR numbers and the README index; offline tests of hack/claim
 	hack/migrate-renumber-test.sh
 	hack/hooks/agent-spawn-check_test.sh
 	hack/hooks/read-hooks_test.sh
+	hack/hooks/sleep-chain-check_test.sh
+	hack/hooks/codegraph-prompt-check_test.sh
+	hack/hooks/context-cap-check_test.sh
+	hack/hooks/grilling-question-check_test.sh
+	hack/hooks/prose-question-stop-check_test.sh
+	hack/hooks/question-checklist-check_test.sh
 	hack/notes-expiry-test.sh
 
 .PHONY: migrate-lint
