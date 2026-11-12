@@ -84,8 +84,11 @@ var _ = Describe("TrustedProxies", func() {
 	It("reads only the configured header", func() {
 		// default X-Forwarded-For: a client-written Forwarded is ignored
 		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", xff, "203.0.113.7", "Forwarded", "for=6.6.6.6")).To(Equal("203.0.113.7"))
-		Expect(via([]string{"10.0.0.0/8"}, "10.0.0.1:1", "Forwarded", "for=6.6.6.6")).To(Equal("6.6.6.6"))
 		t, _ := ratelimit.ParseTrustedProxies([]string{"10.0.0.0/8"})
+		only := httptest.NewRequest(http.MethodGet, "/", nil)
+		only.RemoteAddr = "10.0.0.1:1"
+		only.Header.Set("Forwarded", "for=6.6.6.6")
+		Expect(t.Resolve(only)).To(Equal("10.0.0.1")) // default mode: a trusted peer's Forwarded alone is ignored
 		Expect(t.UseHeader("forwarded")).To(Succeed())
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.RemoteAddr = "10.0.0.1:1"
