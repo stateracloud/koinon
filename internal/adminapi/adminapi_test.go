@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -359,6 +360,19 @@ var _ = Describe("the admin API", func() {
 			_, admin := mint(ctx, e, e.token, "admin", map[string]any{})
 			code, body := e.call(ctx, admin.Secret, "DELETE", "/tokens/"+decode[[]struct{ ID string }](mustList(ctx, e))[0].ID, nil)
 			Expect(code).To(Equal(400), string(body))
+		})
+
+		It("never refuses a valid token for tokenless or bad-token floods from its address", func(ctx SpecContext) {
+			for range 200 {
+				_, _ = e.call(ctx, "", "GET", "/providers", nil)
+			}
+			code, _ := e.call(ctx, "koinon_abcdefgh_wrong", "GET", "/providers", nil)
+			Expect(code).To(Equal(429), "a failing request of the flooding address is slowed down")
+			for i := range 200 {
+				_, _ = e.call(ctx, fmt.Sprintf("koinon_flood%03d_wrong", i), "GET", "/providers", nil)
+			}
+			code, _ = e.call(ctx, e.token, "GET", "/providers", nil)
+			Expect(code).To(Equal(200), "a valid token is never refused for its neighbours' failures")
 		})
 
 		It("slows down a client that keeps sending bad tokens", func(ctx SpecContext) {

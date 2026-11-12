@@ -211,19 +211,47 @@ var _ = Describe("Limiter", func() {
 		}
 	})
 
-	It("refuses nobody when many addresses fill the table, and keeps the soonest-ending state last", func() {
+	It("keeps the doubling of a key whose block ended when fresh keys flood the table later", func() {
+		blockKey(key, t0)
+		t1 := t0.Add(5 * time.Second) // the block ended; its quiet window is open
+		for i := range 200000 {
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t1)
+		}
+		Expect(l.Len()).To(BeNumerically("<=", 110000))
+		l.Fail(key, t1)
+		Expect(l.Blocked(key, t1)).To(Equal(2*ratelimit.BaseBackoff), "the sixth failure doubles the block")
+	})
+
+	It("refuses nobody when the table is full of live entries, and tracks sources again once they expire", func() {
 		blockKey(key, t0)
 		want := l.Blocked(key, t0)
 		for i := range 70000 { // two entries each: past the bound
-			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0.Add(time.Duration(i)*time.Microsecond))
+			l.Fail(ratelimit.Key(ipv4(i), "user:x"), t0)
 		}
 		fresh := "198.51.100.1"
 		for _, part := range []string{"", "user:admin", "abcdefgh"} {
 			Expect(l.Blocked(ratelimit.Key(fresh, part), t0)).To(BeZero(), part)
 		}
-		Expect(l.Blocked(key, t0)).To(Equal(want), "a key with a long block outlives the entries that end sooner")
-		blockKey(ratelimit.Key(fresh, "user:admin"), t0)
-		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), t0)).To(BeNumerically(">", 0))
+		Expect(l.Blocked(key, t0)).To(Equal(want), "state that exists is kept")
+		later := t0.Add(2 * ratelimit.FailWindow)
+		blockKey(ratelimit.Key(fresh, "user:admin"), later)
+		Expect(l.Blocked(ratelimit.Key(fresh, "user:admin"), later)).To(BeNumerically(">", 0))
+	})
+
+	It("checks the own level of a key alone with BlockedKey", func() {
+		for n := range ratelimit.AddressFreeFails {
+			l.Fail(ratelimit.Key("192.0.2.2", "user:"+strconv.Itoa(n)), t0)
+		}
+		other := ratelimit.Key("192.0.2.2", "abcdefgh")
+		Expect(l.Blocked(other, t0)).To(BeNumerically(">", 0))
+		Expect(l.BlockedKey(other, t0)).To(BeZero())
+	})
+
+	It("caps the block of a key at the given longest wait", func() {
+		for range 40 {
+			l.FailCapped(key, 3, time.Minute, t0)
+		}
+		Expect(l.Blocked(key, t0)).To(Equal(time.Minute))
 	})
 
 	It("keeps the credential name out of the key", func() {

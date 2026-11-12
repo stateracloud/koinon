@@ -155,6 +155,16 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(login(ctx, "198.51.100.9", "admin", fakeLimitPassword).Code).To(Equal(http.StatusOK))
 	})
 
+	It("slows down guesses at one account that come from many addresses, for a bounded time", func(ctx SpecContext) {
+		for i := range accountFreeFails {
+			Expect(login(ctx, fmt.Sprintf("203.0.113.%d", i+1), "victim", "koinon_test_wrong").Code).To(Equal(http.StatusUnauthorized), "failure %d", i+1)
+		}
+		rec := login(ctx, "198.51.100.77", "victim", "koinon_test_wrong")
+		Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
+		Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
+		Expect(login(ctx, "198.51.100.77", "someone-else", "koinon_test_wrong").Code).To(Equal(http.StatusUnauthorized), "other accounts are not slowed down")
+	})
+
 	It("forgets the failures of a username after a good login", func(ctx SpecContext) {
 		for range ratelimit.FreeFails - 1 {
 			Expect(login(ctx, "192.0.2.14", "admin", "koinon_test_wrong").Code).To(Equal(http.StatusUnauthorized))

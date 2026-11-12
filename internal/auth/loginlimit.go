@@ -4,10 +4,13 @@ package auth
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth/ratelimit"
@@ -26,16 +29,60 @@ const ActionLoginFailed = "auth.login_failed"
 const maxAuditedUsername = 128
 
 // loginKeys are the limiter slots of one login attempt: the client address with the username, checked
-// before the password hash runs (with the address and group levels the limiter adds to it), and the
+// before the password hash runs (with the address and group levels the limiter adds to it); the
 // address's shared slot, which is decided after it (as the admin API's shared slot is), so a neighbour
-// behind the same ingress who keeps failing does not lock out a user who knows their password.
+// behind the same ingress who keeps failing does not lock out a user who knows their password; and
+// the account, over all addresses.
 type loginKeys struct {
-	addr, user, shared string
+	addr, user, shared, account string
 }
+
+// The account level counts failures against one username from every address, so guesses spread over
+// many addresses are still slowed down (OWASP: the counter belongs to the account, not only to the
+// source). It is a trade-off between guessing and denial of service: an attacker who fails 100 times a
+// minute against a name makes that name wait, so the budget is high and the wait is capped at
+// accountMaxBackoff, which slows a distributed guesser to about 100 guesses per window plus one per
+// wait, and delays the owner for at most that long per block, never for MaxBackoff.
+const (
+	accountFreeFails  = 100
+	accountMaxBackoff = time.Minute
+)
 
 func newLoginKeys(r *http.Request, username string) loginKeys {
 	addr := ratelimit.ClientAddr(r)
-	return loginKeys{addr: addr, user: ratelimit.Key(addr, "user:"+auditedUsername(username)), shared: ratelimit.Key(addr, "")}
+	name := auditedUsername(username)
+	return loginKeys{
+		addr: addr, user: ratelimit.Key(addr, "user:"+name), shared: ratelimit.Key(addr, ""),
+		account: ratelimit.Key("account", strings.ToLower(name)),
+	}
+}
+
+// loginWait is how long a login must wait before the password hash: the longest wait over the
+// username at its address, the address, its group and the account.
+func (s *Service) loginWait(k loginKeys, now time.Time) time.Duration {
+	return max(s.limiter.Blocked(k.user, now), s.limiter.BlockedKey(k.account, now))
+}
+
+// loginEvents counts the outcomes of the password login limiter. The labels are fixed (ADR 0023):
+// never a user, an address or an org.
+var loginEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "koinon_login_limiter_total",
+	Help: "Password login failures recorded and requests refused by the limiter.",
+}, []string{"event"})
+
+const (
+	loginEventFailed  = "failed"
+	loginEventRefused = "refused"
+)
+
+// RegisterMetrics registers koinon_login_limiter_total on reg (nil: none) with every series at zero.
+func RegisterMetrics(reg prometheus.Registerer) {
+	for _, e := range []string{loginEventFailed, loginEventRefused} {
+		loginEvents.WithLabelValues(e)
+	}
+	if reg != nil {
+		reg.MustRegister(loginEvents)
+	}
 }
 
 // auditedUsername is the username as a key and an audit event keep it: valid UTF-8 without NUL (which
@@ -59,18 +106,28 @@ func writeLoginLimited(w http.ResponseWriter, wait time.Duration) {
 // address is already over the limit; then the failure is only counted, and the next event written
 // for these keys carries the count. It reports whether the client is over the limit.
 func (s *Service) loginFailed(ctx context.Context, k loginKeys, username string, now time.Time) (limited bool, wait time.Duration) {
+	loginEvents.WithLabelValues(loginEventFailed).Inc()
 	wait = s.limiter.Blocked(k.shared, now)
 	s.limiter.Fail(k.user, now)
 	s.limiter.FailAfter(k.shared, ratelimit.FreeFails, now)
+	s.limiter.FailCapped(k.account, accountFreeFails, accountMaxBackoff, now)
 	if wait > 0 {
-		s.limiter.Refuse(k.shared)
+		s.limiter.Refuse(k.user)
+		loginEvents.WithLabelValues(loginEventRefused).Inc()
 		return true, wait
 	}
-	refused := s.limiter.TakeRefused(k.user) + s.limiter.TakeRefused(k.shared)
+	s.auditLoginFailure(ctx, k, username, s.limiter.TakeRefused(k.user)+s.limiter.TakeRefused(k.shared), nil)
+	return false, 0
+}
+
+// auditLoginFailure writes the install-chain event of a failed login, with the failures counted but
+// not written since the last event (refused). The extra fields are added to the event.
+func (s *Service) auditLoginFailure(ctx context.Context, k loginKeys, username string, refused int, extra map[string]any) {
 	after := map[string]any{"username": auditedUsername(username), "client_address": k.addr}
 	if refused > 0 {
 		after["refused_while_limited"] = refused
 	}
+	maps.Copy(after, extra)
 	// The client may have gone; the failure is recorded all the same.
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -83,5 +140,4 @@ func (s *Service) loginFailed(ctx context.Context, k loginKeys, username string,
 	}); err != nil {
 		s.log.Error("could not audit a failed password login", "err", err)
 	}
-	return false, 0
 }

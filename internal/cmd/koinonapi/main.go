@@ -780,6 +780,7 @@ func serve(ctx context.Context, cfg config) error {
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	auth.RegisterMetrics(reg)
 	// koinon-api checks its own login against the install audit writer role, at startup and every
 	// installWriteRetry: only it knows the login it connects as (the migrate Job may be another
 	// identity). A missing grant is logged with the GRANT to run and shows as

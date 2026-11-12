@@ -15,10 +15,14 @@
 // passes the address or group budget. The /64 neighbours of an IPv6 client share the group budget. A
 // success resets the key only. X-Forwarded-For is not trusted.
 //
-// The state lives in memory, per replica, in one table of at most maxEntries entries. When it is full
-// the entry closest to its natural end is dropped: the one whose block and quiet window end first, so
-// stale entries go before live ones and a flood of fresh keys drops the oldest state, never a
-// long backoff ahead of a short one. No request is refused because the table is full.
+// The state lives in memory, in one table of at most maxEntries entries, and it is per replica: with N
+// replicas of koinon-api a client has N times the budget (shared state is a follow-up). Only an entry
+// past its expiry (its block and its quiet window have ended) is dropped to make room. When the table
+// is full of live entries a new source is not tracked, and its failures are not counted, until
+// entries expire; no request is refused because the table is full, and a flood of fresh keys cannot
+// reset a backoff. The limiter checks, then the caller hashes or looks up, then records: requests
+// that run at the same time can all pass the check before the first failure is recorded, so a burst
+// can overshoot a budget by about the number of concurrent checks.
 //
 // Lockout risk behind an ingress: every client then shares the ingress's address, because the peer
 // address is the ingress's and the forwarded address is not read. One client can therefore lock all
@@ -202,13 +206,22 @@ func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	addr, group := levels(key)
-	var wait time.Duration
-	for _, k := range []string{key, addr, group} {
-		if a, ok := l.keys[k]; ok && now.Before(a.blocked) {
-			wait = max(wait, a.blocked.Sub(now))
-		}
+	return max(l.wait(key, now), l.wait(addr, now), l.wait(group, now))
+}
+
+// BlockedKey is Blocked for the key's own level only, for a caller that must not refuse a client
+// because of its neighbours (a valid admin token).
+func (l *Limiter) BlockedKey(key string, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.wait(key, now)
+}
+
+func (l *Limiter) wait(k string, now time.Time) time.Duration {
+	if a, ok := l.keys[k]; ok && now.Before(a.blocked) {
+		return a.blocked.Sub(now)
 	}
-	return wait
+	return 0
 }
 
 // Fail records a failure of key, and of its address and group; the key is blocked after FreeFails
@@ -217,26 +230,33 @@ func (l *Limiter) Fail(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	addr, group := levels(key)
-	l.makeRoom(key, addr, group)
-	l.record(key, FreeFails, now)
-	l.record(addr, AddressFreeFails, now)
+	l.makeRoom(now, key, addr, group)
+	// The group and the address come first: when the table has room for some of the entries only, the
+	// key's own is the one left untracked.
 	if group != "" {
-		l.record(group, GroupFreeFails, now)
+		l.record(group, GroupFreeFails, MaxBackoff, now)
 	}
+	l.record(addr, AddressFreeFails, MaxBackoff, now)
+	l.record(key, FreeFails, MaxBackoff, now)
 }
 
 // FailAfter records a failure of key alone, which is blocked after freeFails failures within
 // FailWindow.
 func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.makeRoom(key)
-	l.record(key, freeFails, now)
+	l.FailCapped(key, freeFails, MaxBackoff, now)
 }
 
-// makeRoom drops the entries closest to their end until the keys of a call that are not yet in the
-// table fit. The call's own entries are never the ones dropped.
-func (l *Limiter) makeRoom(keys ...string) {
+// FailCapped is FailAfter with a longest block of maxBackoff.
+func (l *Limiter) FailCapped(key string, freeFails int, maxBackoff time.Duration, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.makeRoom(now, key)
+	l.record(key, freeFails, maxBackoff, now)
+}
+
+// makeRoom drops entries past their expiry until the keys of a call that are not yet in the table
+// fit, or none is left. The call's own entries are not dropped.
+func (l *Limiter) makeRoom(now time.Time, keys ...string) {
 	need := 0
 	for _, k := range keys {
 		if k != "" && l.keys[k] == nil {
@@ -244,7 +264,7 @@ func (l *Limiter) makeRoom(keys ...string) {
 		}
 	}
 	var kept []*entry
-	for len(l.keys)+need > maxEntries && len(l.h) > 0 {
+	for len(l.keys)+need > maxEntries && len(l.h) > 0 && !now.Before(l.h[0].expiry()) {
 		old := heap.Pop(&l.h).(*entry)
 		if slices.Contains(keys, old.key) {
 			kept = append(kept, old)
@@ -257,10 +277,14 @@ func (l *Limiter) makeRoom(keys ...string) {
 	}
 }
 
-// record counts one failure on the entry k, creating it, and blocks it once it is past freeFails.
-func (l *Limiter) record(k string, freeFails int, now time.Time) {
+// record counts one failure on the entry k, creating it if the table has room, and blocks it once it
+// is past freeFails, for at most maxBackoff.
+func (l *Limiter) record(k string, freeFails int, maxBackoff time.Duration, now time.Time) {
 	a := l.keys[k]
 	if a == nil {
+		if len(l.keys) >= maxEntries {
+			return
+		}
 		a = &entry{key: k, first: now}
 		l.keys[k] = a
 		heap.Push(&l.h, a)
@@ -272,7 +296,7 @@ func (l *Limiter) record(k string, freeFails int, now time.Time) {
 	a.fails++
 	if over := a.fails - freeFails; over >= 0 {
 		d := BaseBackoff << min(over, 20)
-		a.blocked = now.Add(min(d, MaxBackoff))
+		a.blocked = now.Add(min(d, maxBackoff))
 	}
 	heap.Fix(&l.h, a.idx)
 }

@@ -97,8 +97,9 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// before the password hash runs and before any database read; the refusal is counted, not audited
 	// one by one (loginlimit.go).
 	keys := newLoginKeys(r, req.Username)
-	if wait := s.limiter.Blocked(keys.user, s.cfg.Now()); wait > 0 {
+	if wait := s.loginWait(keys, s.cfg.Now()); wait > 0 {
 		s.limiter.Refuse(keys.user)
+		loginEvents.WithLabelValues(loginEventRefused).Inc()
 		writeLoginLimited(w, wait)
 		return
 	}
@@ -121,6 +122,10 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("password login rejected", "client_address", keys.addr)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
 		return
+	}
+	// Failures counted but never written (the client stopped failing, or logged in) are written now.
+	if refused := s.limiter.TakeRefused(keys.user) + s.limiter.TakeRefused(keys.shared); refused > 0 {
+		s.auditLoginFailure(r.Context(), keys, req.Username, refused, map[string]any{"then_succeeded": true})
 	}
 	s.limiter.Succeed(keys.user)
 

@@ -185,14 +185,16 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		// A client that keeps sending bad tokens is slowed down, per IP and token prefix (bad tokens
 		// whose prefix names no token share one slot per IP). A key that is already blocked is
 		// refused before the token lookup, so a blocked guess costs no database read and writes no
-		// audit event. The shared slot is decided after the lookup: a valid token is never refused
-		// for it, so a noisy neighbour behind the same ingress cannot lock admins out.
+		// audit event. Only that key's own level is checked up front. The shared slot, and the address
+		// and group levels every failure also counts on, are decided after the lookup, for a failing
+		// request only: a valid token is never refused for them, so a noisy neighbour behind the same
+		// ingress cannot lock admins out.
 		rawPrefix := ""
 		if rest, ok := strings.CutPrefix(raw, tokens.Prefix); ok && len(rest) >= 8 {
 			rawPrefix = rest[:8]
 		}
 		now := time.Now()
-		if wait := s.limiter.Blocked(limiterKey(ip, rawPrefix), now); wait > 0 {
+		if wait := s.limiter.BlockedKey(limiterKey(ip, rawPrefix), now); wait > 0 {
 			writeTooMany(w, wait)
 			return
 		}
