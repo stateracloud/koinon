@@ -9,10 +9,10 @@ WHERE org_id = @org_id;
 -- name: UpsertOrgSettings :one
 INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds,
                           max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,
-                          sandbox_wait_cap_seconds)
+                          sandbox_wait_cap_seconds, sandbox_creations_per_minute)
 VALUES (@org_id, sqlc.narg(idle_timeout_seconds), sqlc.narg(park_warm_seconds), sqlc.narg(queue_wait_seconds),
         sqlc.narg(max_concurrent_runs), sqlc.narg(trigger_concurrency), sqlc.narg(trigger_rate_per_minute),
-        sqlc.narg(sandbox_wait_cap_seconds))
+        sqlc.narg(sandbox_wait_cap_seconds), sqlc.narg(sandbox_creations_per_minute))
 ON CONFLICT (org_id) DO UPDATE
 SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     park_warm_seconds = EXCLUDED.park_warm_seconds,
@@ -20,19 +20,23 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     max_concurrent_runs = EXCLUDED.max_concurrent_runs,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
-    sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
+    sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds,
+    sandbox_creations_per_minute = EXCLUDED.sandbox_creations_per_minute
 RETURNING *;
 
 -- name: SetOrgRunLimits :exec
--- The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
--- platform default. It touches only these three columns, so the latency overrides and the other
+-- The org's run concurrency, trigger queue and sandbox creation limits (DB2, ADR 0066, issues #462
+-- and #27); NULL is the platform default. It touches only these four columns, so the latency overrides and the other
 -- settings stay.
-INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute)
-VALUES (@org_id, sqlc.narg(max_concurrent_runs), sqlc.narg(trigger_concurrency), sqlc.narg(trigger_rate_per_minute))
+INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,
+                          sandbox_creations_per_minute)
+VALUES (@org_id, sqlc.narg(max_concurrent_runs), sqlc.narg(trigger_concurrency), sqlc.narg(trigger_rate_per_minute),
+        sqlc.narg(sandbox_creations_per_minute))
 ON CONFLICT (org_id) DO UPDATE
 SET max_concurrent_runs = EXCLUDED.max_concurrent_runs,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
-    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute;
+    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
+    sandbox_creations_per_minute = EXCLUDED.sandbox_creations_per_minute;
 
 -- name: SetOrgLeakMatchThreshold :exec
 -- The leak guard's match threshold in characters (ADR 0084 decision 3); NULL is the platform
@@ -78,3 +82,29 @@ INSERT INTO org_settings (org_id) VALUES (@org_id) ON CONFLICT (org_id) DO NOTHI
 -- name: LockOrgSettings :one
 -- Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 SELECT org_id FROM org_settings WHERE org_id = @org_id FOR UPDATE;
+
+-- name: LockOrgSandboxCreations :exec
+-- Serializes the reconciler workers that reserve a creation for one org, for the transaction.
+SELECT pg_advisory_xact_lock(hashtextextended('sandbox_creations:' || (@org_id::uuid)::text, 0));
+
+-- name: CountOrgSandboxCreations :one
+-- Creations of the org in the last minute.
+SELECT count(*)::int FROM sandbox_creations
+WHERE org_id = @org_id AND created_at > clock_timestamp() - interval '1 minute';
+
+-- name: SandboxCreationSlotFreesIn :one
+-- Seconds until the oldest creation still inside the minute leaves it, so a slot frees.
+SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - clock_timestamp()), 0)::float8 FROM sandbox_creations
+WHERE org_id = @org_id AND created_at > clock_timestamp() - interval '1 minute';
+
+-- name: RecordSandboxCreation :one
+INSERT INTO sandbox_creations (org_id, agent_id, kind) VALUES (@org_id, @agent_id, @kind)
+RETURNING id;
+
+-- name: ReleaseSandboxCreation :exec
+-- Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+-- the org's healthy ones.
+DELETE FROM sandbox_creations WHERE org_id = @org_id AND id = @id;
+
+-- name: PruneOrgSandboxCreations :exec
+DELETE FROM sandbox_creations WHERE org_id = @org_id AND created_at < now() - interval '1 hour';
