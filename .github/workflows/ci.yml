@@ -298,6 +298,8 @@ jobs:
       - run: mkdir -p reports/go && go tool ginkgo -race -p --keep-going --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
+          # As hack/go-test.sh: kopia's instant test key derivation instead of scrypt, which costs ~1 s a repository open under -race (#576).
+          GOFLAGS: -tags=testing
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -907,9 +909,9 @@ jobs:
         run: |
           go mod download
           go build ./...
-          go test -count=1 -run '^$' ./...
+          GOFLAGS=-tags=testing go test -count=1 -run '^$' ./...
           go tool ginkgo version
-          go test -race -count=1 -run '^$' ./internal/reconciler/ ./internal/ledger/ ./internal/agentd/ ./internal/durable/
+          GOFLAGS=-tags=testing go test -race -count=1 -run '^$' ./internal/reconciler/ ./internal/ledger/ ./internal/agentd/ ./internal/durable/
       - if: steps.go.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

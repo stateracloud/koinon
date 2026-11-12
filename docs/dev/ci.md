@@ -403,7 +403,7 @@ with scrypt (N=65536) on every open, and a Backup, Restore or Verify opens the r
 times (connect, open; a new repository also initialises and sets its policy). Scrypt is a tight loop
 over memory, which the race detector slows about 8x: 2 s for a one-byte Verify, 20 s for a seed, on a
 laptop; more on a runner. A longer window would have hidden that. Test binaries build with the `testing`
-tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
+tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`, the `go-race-parallel` job and the `warm-caches` test compile): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
 makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
 went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
 `make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
