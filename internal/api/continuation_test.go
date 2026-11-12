@@ -11,10 +11,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -219,6 +222,53 @@ var _ = Describe("continuation runs", func() {
 		_, err = sweep(ctx, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(task(ctx, run).ContinuationCount).To(BeZero())
+	})
+	It("blocks a task again at its next time cap after a person's message resumed it", func(ctx SpecContext) {
+		t, _ := member.createTicket(ctx, org, agentI, "blocked then resumed")
+		run := ad.mustClaim(ctx, org)
+		for range 3 {
+			timeCap(ctx, run)
+			run = ad.mustClaim(ctx, org)
+		}
+		timeCap(ctx, run)
+		Expect(task(ctx, run).State).To(Equal(store.TaskStateInputRequired))
+
+		_, err := member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{OrgId: org, TicketId: t.GetId(), Text: "keep going"})
+		Expect(err).NotTo(HaveOccurred())
+		run = ad.mustClaim(ctx, org)
+		timeCap(ctx, run)
+
+		Expect(queued(ctx, run)).To(BeFalse())
+		var n int
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM task_events WHERE task_id = $1 AND kind = 'status.changed'
+			AND payload ->> 'reason' = $2`, run.TaskID, scheduler.ReasonContinuationLimit).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(2))
+		Expect(statusChanged(ctx, run)).To(HaveKeyWithValue("from", "input_required"))
+	})
+
+	It("validates and audits the budget service's continuation setters", func(ctx SpecContext) {
+		svc := budget.New(e.pool)
+		actor := audit.System("koinon-test:spec")
+		four := 4
+		Expect(svc.SetAgentContinuationLimits(ctx, orgID(), uuid(agentI), actor, runlimits.ContinuationOverride{MaxContinuations: &four, TaskSpend: money.FromCents(500)})).To(Succeed())
+		got, err := runlimits.GetContinuationOverride(ctx, q, orgID(), uuid(agentI))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(*got.MaxContinuations).To(Equal(4))
+		Expect(got.TaskSpend).To(Equal(money.FromCents(500)))
+
+		tooMany := budget.MaxContinuationsLimit + 1
+		Expect(svc.SetAgentContinuationLimits(ctx, orgID(), uuid(agentI), actor, runlimits.ContinuationOverride{MaxContinuations: &tooMany})).To(BeAssignableToTypeOf(&budget.InvalidError{}))
+		Expect(svc.SetAgentContinuationLimits(ctx, orgID(), uuid(agentI), actor, runlimits.ContinuationOverride{TaskSpend: -1})).To(BeAssignableToTypeOf(&budget.InvalidError{}))
+		Expect(svc.SetOrgContinuationTaskSpend(ctx, orgID(), actor, -1)).To(BeAssignableToTypeOf(&budget.InvalidError{}))
+
+		Expect(svc.SetOrgContinuationTaskSpend(ctx, orgID(), actor, money.FromCents(700))).To(Succeed())
+		s, err := orgsettings.Get(ctx, q, orgID(), orgsettings.Defaults())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(s.ContinuationTaskSpend).To(Equal(money.FromCents(700)))
+		Expect(svc.SetOrgContinuationTaskSpend(ctx, orgID(), actor, 0)).To(Succeed())
+		s, err = orgsettings.Get(ctx, q, orgID(), orgsettings.Defaults())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(s.ContinuationTaskSpend).To(Equal(orgsettings.DefaultContinuationTaskSpend))
 	})
 })
 

@@ -130,11 +130,12 @@ func queueContinuation(ctx context.Context, q *store.Queries, task store.Task, o
 }
 
 // blockTask moves the task to input_required, blocked on its owner, with the reason on its
-// timeline. A task a person moved elsewhere in the meantime stays where it is.
+// timeline. A task a person moved elsewhere in the meantime (to an end state) stays where it is. One that is
+// input_required already (a person's message queued the run that just hit its cap) is blocked again.
 func blockTask(ctx context.Context, q *store.Queries, task store.Task, reason string, detail map[string]any) error {
 	t, err := q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
 		OrgID: task.OrgID, ID: task.ID, ToState: store.TaskStateInputRequired,
-		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
+		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking), string(store.TaskStateInputRequired)},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -142,7 +143,7 @@ func blockTask(ctx context.Context, q *store.Queries, task store.Task, reason st
 	if err != nil {
 		return err
 	}
-	p := map[string]any{"to": string(t.State), "reason": reason}
+	p := map[string]any{"from": string(task.State), "to": string(t.State), "reason": reason}
 	for k, v := range detail {
 		p[k] = v
 	}

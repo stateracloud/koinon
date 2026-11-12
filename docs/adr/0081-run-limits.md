@@ -242,12 +242,14 @@ wrap-up note of [0066](0066-triggers-and-scheduling.md) asked for.
    `continuation_agent_unavailable` (the agent was archived or is unhealthy) and the counts and
    amounts in the payload. A person's message resumes it as any input-required task. The count is per
    task and is not reset by the message: a task that used its 3 continuations is blocked again at its
-   next time cap.
-5. **Schema.** Additive (`00087`): `tasks.continuation_count`, `org_settings.continuation_task_spend_usd`,
+   next time cap. The step runs in a savepoint of the cancel's transaction: if it fails (for example
+   an agent version that no longer parses), the failure is logged and the run stays canceled, so a
+   task's configuration problem never keeps a run past its time limit or stops the sweep.
+5. **Schema.** Additive (`00088`): `tasks.continuation_count`, `org_settings.continuation_task_spend_usd`,
    `agent_run_limits.max_continuations` and `task_spend_usd`. The per-agent override rows are written by
    `budget.Service.SetAgentContinuationLimits`, the org default by
    `budget.Service.SetOrgContinuationTaskSpend`; neither touches the other overrides of its row. They
-   have no API method yet (a proto change, tracked in a follow-up issue).
+   have no API method yet (a proto change, tracked in issue 923).
 
 What a cheaper option would cost later: counting continuations on the run (a chain through
 `continued_from`) would have needed a recursive read at every cap, and a cap checked only per run

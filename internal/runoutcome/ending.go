@@ -28,6 +28,11 @@ const defaultParkTTL = 7 * 24 * time.Hour
 // begin runs fn in a transaction under the Owner's mutex with the next source seq, which the
 // closing run event of the transaction carries.
 func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, b audit.Batch, src int64) error) error {
+	return o.beginTx(ctx, func(_ pgx.Tx, q *store.Queries, b audit.Batch, src int64) error { return fn(q, b, src) })
+}
+
+// beginTx is begin for a step that also needs the transaction (to open a savepoint).
+func (o *Owner) beginTx(ctx context.Context, fn func(tx pgx.Tx, q *store.Queries, b audit.Batch, src int64) error) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	// What the agent was saying when the run ends is cut off: the reply the verb posts reads it.
@@ -40,7 +45,7 @@ func (o *Owner) begin(ctx context.Context, fn func(q *store.Queries, b audit.Bat
 	}
 	src := o.nextSrc()
 	_, err := audit.InPgTx(ctx, o.cfg.DB, func(tx pgx.Tx, b audit.Batch) error {
-		return fn(o.q.WithTx(tx), b, src)
+		return fn(tx, o.q.WithTx(tx), b, src)
 	})
 	return err
 }
@@ -305,17 +310,14 @@ func (o *Owner) end(ctx context.Context, turn Turn, outcome store.RunState, reas
 // endThen is end with a step that runs in the closing transaction, after the run and its task
 // events are written: what follows a run that hit its time limit (Config.AfterTimeLimit).
 func (o *Owner) endThen(ctx context.Context, turn Turn, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any, after RunStep) error {
-	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
+	err := o.beginTx(ctx, func(tx pgx.Tx, q *store.Queries, b audit.Batch, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
 		if err := o.finishIn(ctx, q, src, outcome, reason, class, extra); err != nil {
 			return err
 		}
-		if after != nil {
-			return after(ctx, q, o.run)
-		}
-		return nil
+		return runAfter(ctx, tx, o.run, after)
 	})
 	if err != nil {
 		return o.failed(ctx, turn, "finish the run", err)

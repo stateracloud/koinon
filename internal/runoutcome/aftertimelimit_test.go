@@ -35,12 +35,12 @@ var _ = Describe("AfterTimeLimit", func() {
 		Expect(task.ContinuationCount).To(Equal(int32(1)))
 	})
 
-	It("rolls the cancel back when the step fails, so no task is left without a next step", func(ctx SpecContext) {
+	It("keeps the cancel when the step fails: a task's configuration problem must not keep its run past the cap", func(ctx SpecContext) {
 		w := newWorld(ctx, true)
 		boom := errors.New("boom")
 		own := ownerWith(w, func(context.Context, *store.Queries, store.Run) error { return boom })
-		Expect(own.CancelAtTimeLimit(ctx, w.openTurn(ctx), "wall-clock cap of 30m0s reached")).NotTo(Succeed())
-		Expect(w.current(ctx).State).To(Equal(store.RunStateRunning))
+		Expect(own.CancelAtTimeLimit(ctx, w.openTurn(ctx), "wall-clock cap of 30m0s reached")).To(Succeed())
+		Expect(w.current(ctx).State).To(Equal(store.RunStateCanceled))
 	})
 
 	It("is not called for any other end of a run", func(ctx SpecContext) {

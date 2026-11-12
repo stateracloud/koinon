@@ -748,7 +748,7 @@ func (s *Service) SetAgentContinuationLimits(ctx context.Context, org, agent pgt
 	case o.MaxContinuations != nil && (*o.MaxContinuations < 0 || *o.MaxContinuations > MaxContinuationsLimit):
 		return &InvalidError{Msg: fmt.Sprintf("the number of continuation runs must be between 0 and %d", MaxContinuationsLimit)}
 	case o.TaskSpend < 0 || o.TaskSpend > money.MaxLimit:
-		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be greater than 0 and at most %s USD", money.MaxLimit)}
+		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be between 0 (the default) and %s USD", money.MaxLimit)}
 	}
 	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent}); errors.Is(err, pgx.ErrNoRows) {
@@ -782,7 +782,7 @@ func (s *Service) SetAgentContinuationLimits(ctx context.Context, org, agent pgt
 // is the platform default.
 func (s *Service) SetOrgContinuationTaskSpend(ctx context.Context, org pgtype.UUID, actor audit.Actor, v money.USD) error {
 	if v < 0 || v > money.MaxLimit {
-		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be greater than 0 and at most %s USD", money.MaxLimit)}
+		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be between 0 (the default) and %s USD", money.MaxLimit)}
 	}
 	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
 		before, err := orgsettings.Get(ctx, q, org, orgsettings.Defaults())

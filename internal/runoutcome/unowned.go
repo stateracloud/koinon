@@ -178,6 +178,26 @@ func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID, after Ru
 	return out, nil
 }
 
+// runAfter runs the step that follows a time-limit cancel in a savepoint of db. A step that fails
+// is rolled back and logged, and the cancel stands: a configuration problem of one task must not
+// keep its run past its time limit, nor stop the sweep for the orgs after it. An error opening the
+// savepoint is returned, as the transaction is then unusable.
+func runAfter(ctx context.Context, db TxDB, run store.Run, step RunStep) error {
+	if step == nil {
+		return nil
+	}
+	sp, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := step(ctx, store.New(sp), run); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.Warn("what follows a run's time limit failed; the run stays canceled", "run", run.ID.String(), "err", err)
+		return nil
+	}
+	return sp.Commit(ctx)
+}
+
 type summaryOf struct{ text, source string }
 
 // readIn runs a read in a savepoint of db (or a transaction of its own, for a pool), so that a
