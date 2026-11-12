@@ -80,8 +80,11 @@ type config struct {
 	homeRetention                         string
 	checkpoints                           bool
 	// restoreHold starts the process without converging anything (issue #462).
-	restoreHold   bool
-	harnessImages map[string]string
+	restoreHold bool
+	// recoveryPolicy and recoveryBinding name this release's ValidatingAdmissionPolicy and binding for
+	// PlatformAdminRecovery requests (issue #512, ADR 0110 decision 6); both empty turns the handler off.
+	recoveryPolicy, recoveryBinding string
+	harnessImages                   map[string]string
 
 	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
 	sandboxResources sandboxres.Policy

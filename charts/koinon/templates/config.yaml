@@ -52,6 +52,11 @@ data:
       gatewayConfig:
         namespace: {{ .Values.preflight.openshell.namespace | quote }}
         configMap: {{ .Values.preflight.openshell.configMap | quote }}
+    {{- if .Values.recovery.enabled }}
+    recovery:
+      policy: {{ include "koinon.recoveryPolicyName" . | quote }}
+      binding: {{ include "koinon.recoveryPolicyName" . | quote }}
+    {{- end }}
     sandboxObserver:
       enabled: {{ .Values.sandboxObserver.enabled }}
       {{- if .Values.sandboxObserver.enabled }}

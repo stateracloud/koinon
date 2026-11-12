@@ -1,0 +1,151 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Platform admin recovery without kubectl exec (issue #512, ADR 0110 decision 6). A PlatformAdminRecovery
+object (the CRD is in crds/) asks the reconciler to mint an admin token or reset a password; the
+reconciler seals the result to the age key in the object, so only the requester can read it.
+
+1. Who may ask: Kubernetes RBAC. The Role below is bound to nobody; recovery.subjects names who gets it.
+   Nothing in the Koinon database grants the right.
+2. Who the requester is: a native ValidatingAdmissionPolicy (never Kyverno) refuses a CREATE whose
+   spec.requester or spec.requesterGroups is not the identity the API server authenticated, and every
+   UPDATE of spec. The reconciler reads the policy and its binding before each request and refuses it
+   when either is missing or changed (internal/recovery CheckPolicy), because a policy fails open.
+3. What the reconciler may do: read and delete the objects, write their status, and get this release's
+   policy and binding (named objects only, a ClusterRole because the policy is cluster-scoped). It gets
+   no Secret, Role or RoleBinding for this.
+*/ -}}
+{{- if .Values.recovery.enabled }}
+{{- $policy := include "koinon.recoveryPolicyName" . }}
+{{- $ns := .Release.Namespace }}
+{{- $reconciler := include "koinon.componentName" (list . "reconciler") }}
+{{- $role := printf "%s-platform-recovery" (include "koinon.fullname" .) | trunc 63 | trimSuffix "-" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $role }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [recovery.koinon.dev]
+    resources: [platformadminrecoveries]
+    verbs: [create, get, list, watch]
+{{- with .Values.recovery.subjects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $role }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $role }}
+subjects:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $reconciler }}-recovery
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+rules:
+  - apiGroups: [recovery.koinon.dev]
+    resources: [platformadminrecoveries]
+    verbs: [get, list, delete]
+  - apiGroups: [recovery.koinon.dev]
+    resources: [platformadminrecoveries/status]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $reconciler }}-recovery
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $reconciler }}-recovery
+subjects:
+  - kind: ServiceAccount
+    name: {{ $reconciler }}
+    namespace: {{ $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+rules:
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingadmissionpolicies]
+    resourceNames: [{{ $policy }}]
+    verbs: [get]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingadmissionpolicybindings]
+    resourceNames: [{{ $policy }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $policy }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $reconciler }}
+    namespace: {{ $ns }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [recovery.koinon.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [platformadminrecoveries]
+  validations:
+    - expression: "request.operation != 'CREATE' || object.spec.requester == request.userInfo.username"
+      message: spec.requester must be the Kubernetes user who creates the request
+    - expression: "request.operation != 'CREATE' || (has(object.spec.requesterGroups) && object.spec.requesterGroups == request.userInfo.groups)"
+      message: spec.requesterGroups must be the creator's Kubernetes groups, exactly
+    - expression: "request.operation != 'UPDATE' || object.spec == oldObject.spec"
+      message: the spec of a PlatformAdminRecovery is never changed after it is created
+    - expression: "object.spec.nonce.matches('^[A-Za-z0-9_-]{16,64}$')"
+      message: spec.nonce must be 16 to 64 characters of [A-Za-z0-9_-]
+    - expression: "!has(object.spec.ttl) || duration(object.spec.ttl) <= duration('1h')"
+      message: spec.ttl must be at most 1h
+    - expression: "!has(object.spec.tokenTTL) || duration(object.spec.tokenTTL) <= duration('24h')"
+      message: spec.tokenTTL must be at most 24h
+    - expression: "has(object.spec.recipientPublicKey)"
+      message: spec.recipientPublicKey (an age X25519 recipient) is required, because the result is sealed to it
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $policy }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+{{- end }}

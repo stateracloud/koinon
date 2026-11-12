@@ -364,6 +364,24 @@ one-shot request object.
   route. Per-token `RebindToken` stays on the platform admin API (decision 3) for a platform admin who can already
   sign in.
 
+**Built so far (issue #512).** The request object works end to end for `mint-admin-token` and `reset-password`:
+the CRD in the chart's `crds/`, the release-scoped VAP and binding, the requester Role (bound to
+`recovery.subjects`), the `recovery_requests` table (`00086`), the `internal/recovery` handler and the reconciler's
+poll loop (`internal/recovery/controller.go`; polling, not a watch, so it needs no informer and no `watch` verb). The
+result is sealed with age to `spec.recipientPublicKey` and written to `status.sealedResult`. Not built yet, each its own
+change: `adopt-restore` (#516), the temporary platform admin for an install with no platform admin left (a
+`mint-admin-token` request then refuses with "not a platform admin"), and the `spec.temporaryFor` field. Also not built
+yet: the `koinon_recovery_crd_ready` metric, the `KoinonRecoveryCRDNotReady` alert and the CRD-version annotation (a
+missing CRD is silent today), and a `recovery.refused` audit event (a refusal is logged and written to the object's
+status only).
+
+Amendment to ADR 0100 decision 1.1a: with `recovery.enabled` the `koinon_reconciler` login is also a member of
+`koinon_install_audit_writer`, because the reconciler appends the `recovery.<action>` install events and the API may be
+down. It appends only those; the reconciler skips its "login can write the install audit chain" start-up warning in
+that case. With `recovery.enabled=false` only koinon-api is a member, as before. `mint-admin-token` does not end the
+user's existing sessions (only `reset-password` does); an operator who suspects a compromised account resets the
+password.
+
 Alternatives: a CLI in the api pod (#512 as filed; needs exec, which distroless images and cluster policy may
 forbid);
 a Helm value plus a Job (`--set recovery.resetPassword=…`; the value lands in the release history and in Git, and it

@@ -139,6 +139,10 @@ type Querier interface {
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
 	// Takes an org's pending backfill; a concurrent replica waits on the row and then finds it taken.
 	ClaimOrgDefaultModelBackfill(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Platform admin recovery requests (issue #512, ADR 0110 decision 6).
+	ClaimRecoveryNonce(ctx context.Context, arg ClaimRecoveryNonceParams) (int64, error)
 	// One run restores at a time; a claim older than @lease_seconds is taken over. No row: nothing
 	// to restore, or another run is restoring.
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
@@ -418,6 +422,8 @@ type Querier interface {
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
+	// The local login of the oldest bootstrap platform admin: the default user of a recovery request.
+	FirstBootstrapAdminUsername(ctx context.Context) (string, error)
 	GetAPIToken(ctx context.Context, arg GetAPITokenParams) (ApiToken, error)
 	// Authentication: the org is not known before the token is. Looked up by the unique prefix
 	// and then compared by hash in constant time.
@@ -588,6 +594,7 @@ type Querier interface {
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
+	GetRecoveryRequest(ctx context.Context, nonce string) (RecoveryRequest, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
@@ -1505,6 +1512,7 @@ type Querier interface {
 	// was starts cost_reconcile_since; a replaced key keeps it; a removed key clears it.
 	SetProviderCostKey(ctx context.Context, arg SetProviderCostKeyParams) (Provider, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
+	SetRecoveryResult(ctx context.Context, arg SetRecoveryResultParams) error
 	// Records, before the prompt is sent, the task timeline seq through which
 	// the task's messages are in it.
 	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
