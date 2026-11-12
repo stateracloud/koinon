@@ -507,6 +507,8 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
 		warm := 0
+		// granted holds the agents decided in this pass: true when granted, false when refused. An
+		// agent without an entry (prepare failed, or nothing to do) keeps its stored value.
 		granted := map[pgtype.UUID]bool{}
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
@@ -515,12 +517,15 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return err
 			}
-			if err != nil {
-				r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
-				errs = append(errs, err)
-				continue
-			}
-			if w == nil {
+			if err != nil || w == nil {
+				if err != nil {
+					r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
+					errs = append(errs, err)
+				}
+				if a.KeepWarm && a.KeepWarmGranted && a.Status == store.AgentStatusActive {
+					// Its slot stays held, so a passing error does not hand it to the next agent.
+					warm++
+				}
 				continue
 			}
 			if a.KeepWarm && a.Status == store.AgentStatusActive && warm < r.cfg.KeepWarmPerOrg {
@@ -528,6 +533,8 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 				w.keepWarm = true
 				granted[a.ID] = true
 				warm++
+			} else {
+				granted[a.ID] = false
 			}
 			items = append(items, w)
 		}
@@ -1559,10 +1566,13 @@ type profileClaimer interface {
 func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, agents []store.Agent, granted map[pgtype.UUID]bool) error {
 	var grant, revoke []pgtype.UUID
 	for _, a := range agents {
+		g, decided := granted[a.ID]
 		switch {
-		case granted[a.ID] && !a.KeepWarmGranted:
+		case !decided:
+			// No decision in this pass: the stored value stays.
+		case g && !a.KeepWarmGranted:
 			grant = append(grant, a.ID)
-		case !granted[a.ID] && a.KeepWarmGranted:
+		case !g && a.KeepWarmGranted:
 			revoke = append(revoke, a.ID)
 		}
 	}
