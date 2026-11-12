@@ -89,7 +89,7 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 	if keep <= 0 {
 		keep = DefaultKeep
 	}
-	if _, err := q.PruneGatewayStateRevisions(ctx, int32(keep)); err != nil { //nolint:gosec // keep is a small count
+	if _, err := q.PruneGatewayStateRevisions(ctx, int32(keep)); err != nil {
 		return Published{}, fmt.Errorf("staterev: retention: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

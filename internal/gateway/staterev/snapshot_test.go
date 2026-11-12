@@ -52,10 +52,14 @@ func richState() gateway.State {
 			{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}},
 		}},
 		{Org: "acme", Name: "p1", Type: "anthropic", BaseURL: "http://a/v1", APIKeyFile: "/keys/acme-p1", AnthropicWorkspaceID: "wrkspc_01AbC", Models: []gateway.Model{
-			{Name: "b", Format: modelformat.Anthropic, Guard: true,
+			{
+				Name: "b", Format: modelformat.Anthropic, Guard: true,
 				Thinking: thinking.Capability{Thinks: thinking.Optional, Betas: []string{"y", "x"}, Display: thinking.DisplaySummarized},
-				Price: &gateway.Price{Input: "3", Output: "15", CacheRead: "0.3", CacheWrite: "3.75", Reasoning: "15",
-					Tiers: []gateway.PriceTier{{ContextOver: 200000, Input: "6", Output: "22.5"}}}},
+				Price: &gateway.Price{
+					Input: "3", Output: "15", CacheRead: "0.3", CacheWrite: "3.75", Reasoning: "15",
+					Tiers: []gateway.PriceTier{{ContextOver: 200000, Input: "6", Output: "22.5"}},
+				},
+			},
 			{Name: "a", Format: modelformat.OpenAI},
 		}},
 	}
@@ -192,8 +196,10 @@ var _ = Describe("secret material", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var s gateway.State
 		s.AddKey(issued.Key)
-		s.Providers = []gateway.Provider{{Org: "acme", Name: "p", Type: "openai", BaseURL: "http://p/v1", APIKeyFile: pkFile,
-			Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}}}}
+		s.Providers = []gateway.Provider{{
+			Org: "acme", Name: "p", Type: "openai", BaseURL: "http://p/v1", APIKeyFile: pkFile,
+			Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}},
+		}}
 		s.MCP = []gateway.MCPTarget{{Name: "wiki", URL: "http://wiki/mcp", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: cFile}}
 
 		u := staterev.Snapshot(s)
