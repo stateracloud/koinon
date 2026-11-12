@@ -54,7 +54,7 @@
         "affinity": {"$ref": "#/definitions/map"}
       }
     },
-    "flavor": {
+    "harness": {
       "type": "object",
       "additionalProperties": false,
       "required": ["image"],
@@ -500,16 +500,16 @@
         "scratchSize": {"type": "string"}
       }
     },
-    "flavors": {
-      "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
+    "harnesses": {
+      "description": "Harness images (ADR 0035, ADR 0112). Agents of a harness without an image are reported as reconcile errors.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "opencode": {"$ref": "#/definitions/flavor"}
+        "opencode": {"$ref": "#/definitions/harness"}
       }
     },
-    "flavorPrepull": {
-      "description": "Pre-pull the flavor images on the Kata nodes (plan item LT1).",
+    "harnessPrepull": {
+      "description": "Pre-pull the harness images on the Kata nodes (plan item LT1).",
       "type": "object",
       "additionalProperties": false,
       "properties": {

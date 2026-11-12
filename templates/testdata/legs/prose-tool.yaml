@@ -9,7 +9,7 @@ metadata:
   displayName: Prose tool
   description: Reads pages with the fetch tool.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
   model:

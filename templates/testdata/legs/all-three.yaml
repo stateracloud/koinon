@@ -11,7 +11,7 @@ metadata:
   displayName: All three legs
   description: Reads a repository and the web.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
   model:

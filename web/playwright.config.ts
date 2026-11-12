@@ -13,7 +13,8 @@ const preview = !!process.env.KOINON_PW_PREVIEW
 export default defineConfig({
   testDir: './e2e',
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No automatic retry (ADR 0111, rule T1): a failed spec fails the run.
+  retries: 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? 'github' : 'list',
   use: { baseURL: `http://localhost:${port}`, trace: 'retain-on-failure' },
