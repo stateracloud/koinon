@@ -104,6 +104,9 @@ func TestGuideSourceEnvAddsTheSourceAndRefusesARealNamespace(t *testing.T) {
 	if _, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon", "koinon"); err == nil {
 		t.Fatal("a source outside the drill prefix must be refused")
 	}
+	if _, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-src-a1b2c3"); err == nil {
+		t.Fatal("a source in the target's namespace must be refused")
+	}
 	if _, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-src-a1b2c3", "prod"); err == nil {
 		t.Fatal("a source release without koinon in its name must be refused")
 	}

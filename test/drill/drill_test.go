@@ -1001,7 +1001,10 @@ stringData:
 		block("stop", false)
 		block("hold", false)
 		block("pipe-db", true)
-		// The source api exports the keys; scale it up only for that block.
+		// The source api exports the keys; scale it up only for that block, and down again even if a block fails.
+		DeferCleanup(func(ctx SpecContext) {
+			_, _ = kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=0")
+		})
 		_, err := kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=1")
 		must(err, "start the source api for the key export")
 		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "rollout", "status", "deployment/"+src.name("api"), "--timeout=5m")
@@ -1009,12 +1012,14 @@ stringData:
 		block("pipe-keys", true)
 		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=0")
 		must(err, "stop the source api again")
-		for _, b := range []string{"start", "compare-keys", "verify-keys", "release"} {
+		for _, b := range []string{"start", "compare-keys", "verify-keys"} {
 			block(b, false)
 		}
+		// Compared while held: after the release the schedule fires a catch-up and the recovered queue adds runs.
 		Expect(sql(ctx, &dst, "SELECT install_id FROM install_identity")).To(Equal(want["install"]), "the install ID after the pipe restore")
 		Expect(sql(ctx, &dst, "SELECT count(*) FROM tasks")).To(Equal(want["tasks"]), "the tasks after the pipe restore")
 		Expect(sql(ctx, &dst, "SELECT count(*) FROM runs")).To(Equal(want["runs"]), "the runs after the pipe restore")
+		block("release", false)
 	}, 30*time.Minute)
 })
 

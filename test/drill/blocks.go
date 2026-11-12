@@ -34,6 +34,9 @@ func GuideSourceEnv(ns, release, srcNS, srcRelease string) ([]string, error) {
 	if err := CheckNamespace(srcNS); err != nil {
 		return nil, err
 	}
+	if srcNS == ns {
+		return nil, fmt.Errorf("the source namespace %q is the target's: the pipe would wipe it before reading it", srcNS)
+	}
 	if !strings.Contains(srcRelease, "koinon") {
 		return nil, fmt.Errorf("source release %q must contain \"koinon\"", srcRelease)
 	}

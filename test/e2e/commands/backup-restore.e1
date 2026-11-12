@@ -9,7 +9,7 @@
 # The chart names its objects <release>-api, <release>-pg, <release>-kek and so on when the release name contains
 # "koinon" and there is no fullnameOverride and no secrets.kek.existingSecret (helm install prints the real names).
 # Variables of the two pipe blocks (pipe-db, pipe-keys): SRC_NS and SRC_REL are the live source install, NS and REL
-# the target (SRC_NS and SRC_REL default to NS and REL). Their commands stream the source into the target, so they
+# the target (both are required: a source that is the target would be wiped before it is read). Their commands stream the source into the target, so they
 # need both installs at once: test/drill runs them, in the order stop, hold, pipe-db, pipe-keys, start, compare-keys,
 # verify-keys, release (backup-restore.sh restores in place from files and cannot).
 # Not here and not checked by any test: a CloudNativePG backup restore. The chart configures no CNPG backup yet
@@ -77,20 +77,24 @@ fi
 # e1=pipe-db
 NS=${NS:-koinon}
 REL=${REL:-koinon}
-SRC_NS=${SRC_NS:-$NS}
-SRC_REL=${SRC_REL:-$REL}
+SRC_NS=${SRC_NS:?set SRC_NS to the source install's namespace}
+SRC_REL=${SRC_REL:?set SRC_REL to the source install's release}
 # Run it after stop and hold. The source keeps running; its database is read, never changed.
+test "$SRC_NS/$SRC_REL" != "$NS/$REL" || { echo "the source is the target: it would be wiped before it is read" >&2; false; }
 SRC_PRIMARY=$(kubectl -n "$SRC_NS" get pod -l cnpg.io/cluster=$SRC_REL-pg,cnpg.io/instanceRole=primary -o name)
 PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
+test -n "$SRC_PRIMARY" && test -n "$PRIMARY"
 kubectl -n "$NS" exec "$PRIMARY" -c postgres -- psql --dbname=koinon -v ON_ERROR_STOP=1 \
   -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public AUTHORIZATION pg_database_owner' -c 'GRANT USAGE ON SCHEMA public TO PUBLIC'
 kubectl -n "$SRC_NS" exec "$SRC_PRIMARY" -c postgres -- pg_dump --format=custom --dbname=koinon | kubectl -n "$NS" exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error
 # e1=pipe-keys
 NS=${NS:-koinon}
 REL=${REL:-koinon}
-SRC_NS=${SRC_NS:-$NS}
-SRC_REL=${SRC_REL:-$REL}
+SRC_NS=${SRC_NS:?set SRC_NS to the source install's namespace}
+SRC_REL=${SRC_REL:?set SRC_REL to the source install's release}
 # Needs one koinon-api pod of the source. The target's koinon-api runs only for the import, as in restore-keys.
+# Without a KEK Secret on the target, apply creates the Secret under the source's name: use the same release name then.
+kubectl -n "$SRC_NS" exec deploy/"$SRC_REL"-api -- koinon-api keys status > /dev/null
 if kubectl -n "$NS" get secret/"$REL"-kek > /dev/null 2>&1; then
   kubectl -n "$NS" scale deployment/"$REL"-api --replicas=1
   kubectl -n "$NS" rollout status deployment/"$REL"-api --timeout=5m
