@@ -22,6 +22,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -88,7 +89,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	changes := "R acme/widgets " + baseSHA + "\nF M 100644 6 2 1 0 a.txt\nhello\n\nF D 000000 0 0 4 0 old.txt\nE\n"
 
 	It("marks the sandbox unhealthy after 60 s (here 400 ms), records /proc's state and wchan, and saves the work for an approval", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		e.stuckAfterTurn(dProc)
 		e.files.savework = func(dir string) (string, int) {
 			Expect(dir).To(Equal("/sandbox/work"))
@@ -164,7 +165,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	})
 
 	It("does nothing when the process ends before the time is up", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		e.stuckAfterTurn("")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", fastStuck(receiverURL()))
@@ -179,7 +180,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	})
 
 	It("watches the process for the whole time before it decides", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		e.stuckAfterTurn(dProc)
 		start := time.Now()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -197,7 +198,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 
 	DescribeTable("says in the timeline that the uncommitted work was lost, and why",
 		func(ctx SpecContext, save func(*files), mutate func(*agentd.Config), why string) {
-			e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+			e := newEnvWith(ctx, harness.OpenCode, bound)
 			e.stuckAfterTurn(dProc)
 			save(e.files)
 			t := e.task(ctx, "hello")
@@ -247,7 +248,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	)
 
 	It("says nothing was lost when the workspace is clean", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		e.stuckAfterTurn(dProc)
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
@@ -262,7 +263,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	})
 
 	It("stops recreating after three in 24 hours: the agent is unhealthy, owners are told, new runs fail", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		t := e.task(ctx, "hello")
 		first := e.enqueue(ctx, t)
 		other := e.task(ctx, "waiting")
@@ -309,7 +310,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	})
 
 	It("recreates before the next run when the process is found by the sweep that precedes the harness", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		sweeps := 0
 		e.files.sweep = func() (string, int) {
 			sweeps++
@@ -341,7 +342,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	})
 
 	It("lets a parked run resume in the new sandbox through the reset path", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
+		e := newEnvWith(ctx, harness.OpenCode, bound)
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))

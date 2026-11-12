@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -46,7 +47,7 @@ var _ = Describe("the sandbox wait cap", func() {
 	}
 
 	It("fails a run whose sandbox never becomes ready within the cap, names the cause and marks the agent unhealthy", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandboxWith(ctx, store.SandboxStateStarting, "ImagePullBackOff", `Back-off pulling image "registry.example.test/x:1"`)
 		admin := addAdmin(ctx, e)
 		t := e.task(ctx, "hello")
@@ -98,7 +99,7 @@ var _ = Describe("the sandbox wait cap", func() {
 	})
 
 	It("uses the org's sandbox wait cap, which comes before the queue wait", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStarting, "")
 		capd := 10 * time.Minute
 		Expect(orgsettings.Set(ctx, q, e.org, orgsettings.Override{SandboxWaitCap: &capd})).To(Succeed())
@@ -115,7 +116,7 @@ var _ = Describe("the sandbox wait cap", func() {
 	})
 
 	It("starts a fresh wait after the agent is resumed", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStarting, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
@@ -142,14 +143,14 @@ var _ = Describe("the sandbox wait cap", func() {
 	})
 
 	It("does not count time queued behind a sibling that had the sandbox", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		sibling := e.enqueue(ctx, e.task(ctx, "sibling"))
 		waiting := e.enqueue(ctx, e.task(ctx, "waiting"))
 		// The waiting run was queued behind the sibling with a wait that started long ago.
 		_, err := db.Exec(ctx, `UPDATE runs SET sandbox_wait_started_at = now() - interval '2 hours' WHERE org_id = $1 AND id = $2`, e.org, waiting.ID)
 		Expect(err).NotTo(HaveOccurred())
 		// The sandbox stops being ready once the sibling has used it, before the next claim.
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.onPrompt = func(ctx context.Context, _ string) (string, bool) {
 				defer GinkgoRecover()
 				e.recordSandbox(ctx, store.SandboxStateStarting, "")
@@ -175,7 +176,7 @@ var _ = Describe("the sandbox wait cap", func() {
 	})
 
 	It("clears the start of a taken-over running run once the sandbox is ready", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "dead-owner", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())
@@ -190,7 +191,7 @@ var _ = Describe("the sandbox wait cap", func() {
 	})
 
 	It("gives a claim one nudge before the cap", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStarting, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		_, err := db.Exec(ctx, `UPDATE runs SET sandbox_wait_started_at = now() - interval '2 hours' WHERE org_id = $1 AND id = $2`, e.org, r.ID)

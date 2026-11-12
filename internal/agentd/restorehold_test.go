@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -16,7 +17,7 @@ import (
 // lease has expired; when the hold is released (a pool that runs) the same runs are driven.
 var _ = Describe("Restore-hold", func() {
 	It("claims no queued run and takes over no expired lease until the hold is released", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		queued := e.enqueue(ctx, e.task(ctx, "restored backlog"))
 
 		stopHeld := e.heldPool("agentd-held")

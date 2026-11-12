@@ -72,6 +72,20 @@ grep -q 'uses: ./.github/actions/agentgateway-test-image' <<<"$race" || { echo "
 grep -q 'packages: read' <<<"$race" || { echo "FAIL: go-race cannot read the GHCR agentgateway copy (packages: read)"; exit 1; }
 echo "ok: go-race covers reconciler, ledger, agentd and durable"
 
+# #576: the testing tag joins the tags GOFLAGS already has (Go keeps only the last -tags), once.
+check_goflags() {
+	local got
+	got=$(GOFLAGS="$1" hack/go-test.sh --goflags)
+	[[ $got == "$2" ]] || { echo "FAIL: GOFLAGS='$1' became '$got', want '$2'"; exit 1; }
+}
+check_goflags "" "-tags=testing"
+check_goflags "-race" "-race -tags=testing"
+check_goflags "-tags=foo" "-tags=testing,foo"
+check_goflags "-tags=testing" "-tags=testing"
+check_goflags "-mod=mod --tags=a,b -race" "-mod=mod -race -tags=testing,a,b"
+check_goflags "'-tags=a'" "-tags=testing,a"
+echo "ok: go-test.sh merges the testing tag into GOFLAGS"
+
 # One EXIT trap removes every fixture dir and file this script makes. Each path is registered in
 # fixtures right after its mktemp, so an early exit (set -u or a failed check) still removes it.
 fixtures=()

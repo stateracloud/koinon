@@ -392,16 +392,30 @@ together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`,
 checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
 short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
 fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
-a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+a deadline longer than a repository connect. That was 25 s on the runner with scrypt, so the deadline was
+scaled to 50 s and the spec idled for all of it; with the `testing` tag (below) a connect takes a few
+hundred ms under `-race`, and the deadline is a fixed 10 s.
 The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
 processes, and fewer processes would make the job slower for the same risk.
+
+Why a kopia repository was slow under `-race` (#576): kopia derives the repository key from the password
+with scrypt (N=65536) on every open, and a Backup, Restore or Verify opens the repository two or more
+times (connect, open; a new repository also initialises and sets its policy). Scrypt is a tight loop
+over memory, which the race detector slows about 8x: 2 s for a one-byte Verify, 20 s for a seed, on a
+laptop; more on a runner. A longer window would have hidden that. Test binaries build with the `testing`
+tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
+makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
+went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
+`make build-go` refuses it in `GO_TAGS`, and no release build uses it. A bare `go test` or `ginkgo`
+without the tag still passes, only slower (set `GOFLAGS=-tags=testing` yourself for a quick loop).
+Binaries that tests build themselves (the chart smoke images) do not get the tag: they drop it from `GOFLAGS`.
 
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors` (not on a pull request, #572), plus
+`generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
 `go.mod`, `go.sum`, the lint config). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
@@ -516,7 +530,7 @@ build (the `merge_group` `ci` run on the tagged commit's tree), never from the P
 ## Cache ownership (#147)
 
 A pull request can read its own caches and the default branch's, never another pull request's, so a
-cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`) run on
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-opencode-plugins`) run on
 every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
 push whose tree the merge queue already tested, which used to leave main without fresh
 entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
@@ -528,6 +542,7 @@ work that fills it, then saves:
 | Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
+| pnpm store (`flavors/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
 | golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
 
 Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
@@ -643,7 +658,8 @@ pull request workflows is a setting, not a file; it is tracked as
 
 `hack/ci-required.txt` is the list the `main` ruleset mirrors. `flavors` is required but runs only in the merge
 queue and on pushes to main (#572, #128): on a pull request its job-level `if:` skips it, which reports success,
-so the name exists on every build. `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` (CI job
+so the name exists on every build. `flavor-publish` is advisory and push-only. `flavor-repro` (`flavor-repro.yml`, #176) is advisory too: it runs on
+a push to main, nightly and on dispatch, so it is not a `ci.yml` job and has no line in the list. `hack/ci-required-test.sh` (CI job
 `scripts`) fails when a `ci.yml` job is neither required nor advisory;
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
 list in the same PR, and a required job must report on every pull request and push (a job-level

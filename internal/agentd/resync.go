@@ -75,10 +75,10 @@ const (
 // replaced it; that one records the outcome.
 var errResyncClaimLost = errors.New("the resync was claimed again or requested anew")
 
-// resyncTick works through the due resyncs of every org, one agent at a time (a resync only lists
+// resyncTick works through the due resyncs of the orgs that have resyncs, one agent at a time (a resync only lists
 // the bucket, so it needs no backup slot), and sets the resync gauge.
 func (p *Pool) resyncTick(ctx context.Context) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	orgs, err := p.q.ListOrgIDsWithResyncWork(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("checkpoint resync: listing orgs failed", "err", err)

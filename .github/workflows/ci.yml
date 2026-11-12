@@ -74,6 +74,7 @@ jobs:
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
+      opencodeplugin: ${{ steps.paths.outputs.opencodeplugin }}
       tidy: ${{ steps.paths.outputs.tidy }}
       shell: ${{ steps.paths.outputs.shell }}
       scripts: ${{ steps.paths.outputs.scripts }}
@@ -1001,6 +1002,65 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: web
 
+  warm-caches-opencode-plugins:
+    name: warm-caches-opencode-plugins
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: flavors/opencode/plugins/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: flavors/opencode/plugins
+
+  # Koinon's own OpenCode plugins (koinon.core, ADR 0093 decision 4): a CI-only pnpm dev project
+  # under flavors/opencode/plugins/ type-checks the plugin TypeScript against the pinned OpenCode
+  # release's own types and runs its unit tests. Nothing it installs enters the image (only
+  # index.ts is COPYed, flavors/opencode/Dockerfile); the `flavors` job below, which builds that
+  # image and runs test/flavors, is the proof the plugin loads at runtime. Steps mirror web-lint's
+  # pnpm setup (same action pins).
+  opencode-plugin:
+    needs: changes
+    if: needs.changes.outputs.opencodeplugin == 'true'
+    name: opencode plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: flavors/opencode/plugins
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: flavors/opencode/plugins/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - name: types pin matches the image's OpenCode pin (ADR 0093 decisions 4 and 5)
+        run: |
+          types=$(node -p "require('./package.json').devDependencies['@opencode/plugin']")
+          image=$(sed -nE 's#.*/cli-linux-(x64|arm64)-([0-9][0-9.]*)\.tgz.*#\2#p' ../Dockerfile | sort -u | paste -sd ' ' -)
+          if [ "$image" != "$types" ]; then
+            echo "::error file=flavors/opencode/plugins/package.json::@opencode/plugin is $types; flavors/opencode/Dockerfile pins OpenCode $image"
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run test
+
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
@@ -1099,7 +1159,10 @@ jobs:
           [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
           # The new cache goes to its own directory (buildx must not read and write one), then
           # replaces the restored one for the save step below.
-          docker buildx build --push --build-context common=flavors/common "${secret[@]}" \
+          # The commit time pins the timestamps, as in the release (hack/release-flavor.sh, #176).
+          docker buildx build --output type=registry,rewrite-timestamp=true \
+            --build-arg "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" \
+            --build-context common=flavors/common "${secret[@]}" \
             --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
             --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
             --tag "$image" flavors/opencode

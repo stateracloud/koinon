@@ -28,7 +28,7 @@
 # --model-format is the model's wire format (ADR 0069), openai (chat completions) by default.
 # It picks the provider entry of opencode.jsonc: koinon for openai, koinon-anthropic for anthropic
 # (Messages). koinon-agentd selects the same entry for the session's model, from the flavor
-# table in internal/flavor.
+# table in internal/harness.
 #
 # --thinking is the thinking form koinon-agentd decided for the run from the model's catalog row
 # and the agent's setting (internal/thinking, ADR 0069 amendments 2026-10-29 and 2026-10-31). OpenCode
@@ -86,7 +86,7 @@ koinon_parse_args "$@"
 shift "$koinon_shift"
 
 # The provider entry for the model's format: one row per format. This case and ModelEntries in
-# internal/flavor/flavor.go are the two places to add a row; test/flavors checks that they agree.
+# internal/harness/harness.go are the two places to add a row; test/flavors checks that they agree.
 case $model_format in
   openai) entry=koinon ;;
   anthropic) entry=koinon-anthropic ;;

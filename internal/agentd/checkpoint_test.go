@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -264,7 +265,7 @@ var _ = Describe("home checkpoints", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		// More than the supervisor's 4 MiB exec stdin cap, and incompressible.
 		raw := make([]byte, 5<<20+123)
 		_, _ = rand.Read(raw)
@@ -457,7 +458,10 @@ var _ = Describe("home checkpoints", func() {
 			c.Store = lateStore{HomeStore: writer}
 			// The deadline must outlast the real work (connecting to the repository, the backup), and
 			// lateStore holds the result until the deadline: so the spec lasts as long as Timeout.
-			c.Timeout = racescale.D(10 * time.Second)
+			// Not racescaled: with the testing tag (hack/go-test.sh) a repository open takes a few
+			// hundred ms even under -race, 20x less than this, and a scaled 50 s idle was most of
+			// the spec's time (#576).
+			c.Timeout = 10 * time.Second
 			c.Attempts = 1
 		}))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.CheckpointStatusComplete))

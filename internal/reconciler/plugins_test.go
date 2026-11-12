@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/policycheck"
@@ -39,8 +40,8 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 				Prices:  prices.NewResolver(pricing.Embedded()),
 				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-				Flavors: map[store.AgentFlavor]reconciler.Flavor{
-					store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+				Harnesses: map[string]reconciler.Harness{
+					harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},
 				Logger: slog.New(slog.DiscardHandler),
 			})
@@ -49,13 +50,13 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 
 	// reconcile activates an OpenCode agent with the harness settings, runs a pass and
 	// returns a function that decides requests under its sandbox's latest policy.
-	reconcile := func(ctx context.Context, harness templates.Harness) func(bin, method, target string) bool {
+	reconcile := func(ctx context.Context, settings templates.Harness) func(bin, method, target string) bool {
 		GinkgoHelper()
 		org, user := newOrg(ctx)
-		raw, err := agentconfig.Config{Instructions: "help", Harness: harness}.Marshal()
+		raw, err := agentconfig.Config{Instructions: "help", Harness: settings}.Marshal()
 		Expect(err).NotTo(HaveOccurred())
 		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-			OrgID: org, DisplayName: "Plugin agent", Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+			OrgID: org, DisplayName: "Plugin agent", Harness: harness.OpenCode, CreatedBy: user,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
@@ -114,7 +115,7 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 
 	It("attaches no credential to the registry", func() {
 		rule, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.Harness{PluginInstalls: true}},
-			store.AgentFlavorOpencode, reconciler.Flavor{Image: image, Binaries: []string{opencode}})
+			harness.OpenCode, reconciler.Harness{Image: image, Binaries: []string{opencode}})
 		Expect(ok).To(BeTrue())
 		Expect(rule.Binaries).To(Equal([]string{opencode}))
 		Expect(rule.Endpoints).To(HaveExactElements(SatisfyAll(
@@ -123,9 +124,9 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 		)))
 	})
 
-	It("renders nothing for a flavor without the option, which has no plugin installs", func() {
+	It("renders nothing for a harness without the option, which has no plugin installs", func() {
 		_, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.Harness{PluginInstalls: true}},
-			store.AgentFlavor("other"), reconciler.Flavor{Image: image, Binaries: []string{"/opt/other/bin/other"}})
+			string("other"), reconciler.Harness{Image: image, Binaries: []string{"/opt/other/bin/other"}})
 		Expect(ok).To(BeFalse())
 	})
 })

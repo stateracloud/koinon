@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
 )
@@ -56,7 +57,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	}
 
 	It("starts the harness without a word when every allowed server is healthy", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "healthy", 0, "")
 		allow(ctx, e, "wiki", "unknown", 0, "")
 		allow(ctx, e, "old", "unhealthy", 5, ", disabled_reason")
@@ -67,7 +68,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	})
 
 	It("records the miss, retries once, and starts the harness when the server is back", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "healthy", 2, "") // failing probes, below the threshold
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MCPRetryDelay = time.Second })
@@ -87,7 +88,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	})
 
 	It("fails the run, naming the server, on a second miss", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "unhealthy", 3, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MCPRetryDelay = retry })
@@ -104,7 +105,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	})
 
 	It("marks the run's root span with the servers that were missing", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "healthy", 1, "")
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -122,7 +123,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	})
 
 	It("gives a run that fails on the second miss no root span, only the attempt-2 event", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "unhealthy", 3, "")
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -133,7 +134,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 	})
 
 	It("puts the missing-server attributes on the first turn's root span only", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		allow(ctx, e, "tracker", "healthy", 1, "")
 		rcv := newReceiver()
 		t := e.task(ctx, markWait)
@@ -175,7 +176,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		}
 
 		It("starts the harness when the gateway lists the server's tools", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "") // the health record is fine
 			liveTools.set([]string{slug(ctx, e) + "-tracker_create_issue"}, nil)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -186,7 +187,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("catches a server that dropped between two probes: the record is healthy, the gateway lists nothing", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "")
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)
@@ -204,7 +205,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("fails the run on a second miss when the agent's key lacks the grant, and says no key is in it", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "")
 			// The gateway lists another server's tool for this agent, not the tracker's.
 			liveTools.set([]string{slug(ctx, e) + "-wiki_read"}, nil)
@@ -220,7 +221,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("expects an ask-tier tool under the ask target", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "")
 			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'ask' WHERE org_id = $1`, e.org)
 			Expect(err).NotTo(HaveOccurred())
@@ -232,7 +233,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("counts a server as missing when only its ask tools are listed, since the ask target is koinon-api's proxy", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "") // one auto tool: create_issue
 			tool(ctx, e, "tracker", "close_issue", "ask")
 			liveTools.set([]string{slug(ctx, e) + "-tracker-ask_close_issue"}, nil)
@@ -244,7 +245,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("does not expect tools of a server with none to offer", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "unknown", 0, "")
 			_, err := db.Exec(ctx, `UPDATE mcp_tools SET tier = 'never' WHERE org_id = $1`, e.org)
 			Expect(err).NotTo(HaveOccurred())
@@ -255,7 +256,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("relies on the health record when the live check cannot be made", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 0, "")
 			liveTools.set(nil, errors.New("koinon-api answered 502"))
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -265,7 +266,7 @@ var _ = Describe("Checking the agent's MCP servers before the harness starts", f
 		})
 
 		It("reports a server once when the health record and the live check both miss it", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			allow(ctx, e, "tracker", "healthy", 2, "")
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withLive)

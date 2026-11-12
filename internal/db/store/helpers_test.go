@@ -56,7 +56,7 @@ func newOrg(ctx context.Context) (org, user pgtype.UUID) {
 // newAgent creates a draft agent in org with one version and activates it.
 func newAgent(ctx context.Context, org, user pgtype.UUID) (store.Agent, store.AgentVersion) {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-		OrgID: org, DisplayName: uniq("agent"), Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+		OrgID: org, DisplayName: uniq("agent"), Harness: "opencode", CreatedBy: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{

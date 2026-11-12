@@ -7,20 +7,20 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 var _ = DescribeTable("HarnessArgs",
-	func(f store.AgentFlavor, config string, want []string) {
+	func(f string, config string, want []string) {
 		Expect(agentd.HarnessArgs(f, []byte(config))).To(Equal(want))
 	},
-	Entry("plugin installs on: OpenCode loads plugins", store.AgentFlavorOpencode,
+	Entry("plugin installs on: OpenCode loads plugins", harness.OpenCode,
 		`{"harness":{"pluginInstalls":true}}`, []string{"--plugin-installs", "--no-web-tools"}),
-	Entry("plugin installs off", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":false}}`, []string{"--no-web-tools"}),
-	Entry("no harness settings: no web egress, so no built-in web tools", store.AgentFlavorOpencode, `{"model":"m"}`, []string{"--no-web-tools"}),
-	Entry("an unreadable config", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":"yes"}}`, []string{"--no-web-tools"}),
-	Entry("a config agentconfig.Parse cannot read", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":true},"model":{"name":"m"}}`, []string{"--no-web-tools"}),
-	Entry("a flavor without the option: the switch is OpenCode's", store.AgentFlavor("other"), `{"harness":{"pluginInstalls":true}}`, nil),
+	Entry("plugin installs off", harness.OpenCode, `{"harness":{"pluginInstalls":false}}`, []string{"--no-web-tools"}),
+	Entry("no harness settings: no web egress, so no built-in web tools", harness.OpenCode, `{"model":"m"}`, []string{"--no-web-tools"}),
+	Entry("an unreadable config", harness.OpenCode, `{"harness":{"pluginInstalls":"yes"}}`, []string{"--no-web-tools"}),
+	Entry("a config agentconfig.Parse cannot read", harness.OpenCode, `{"harness":{"pluginInstalls":true},"model":{"name":"m"}}`, []string{"--no-web-tools"}),
+	Entry("a harness without the option: the switch is OpenCode's", string("other"), `{"harness":{"pluginInstalls":true}}`, nil),
 )
 
 var _ = DescribeTable("VersionModel",

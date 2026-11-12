@@ -10,14 +10,14 @@ import { RepoPicker } from '@/components/repo-picker'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
-import { Flavor, type Grant, type Template } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { type Grant, type Template } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { runLimitsLabel } from '@/lib/cost'
 import { grantNeedsTargets, validateRepositories } from '@/lib/agents'
 import type { CodeHostInfo } from '@/lib/connector'
-import { flavorLabel, presetLabel } from '@/lib/labels'
+import { harnessLabel, presetLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
-export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[]; ephemeral?: boolean }
+export type NewAgent = { templateId: string; displayName: string; harness: string; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[]; ephemeral?: boolean }
 
 export type AgentWizardProps = {
   templates: readonly Template[]
@@ -43,7 +43,7 @@ export type AgentWizardProps = {
 
 type Binding = { connectionId: string; repositories: string[] }
 
-const steps = ['Template', 'Flavor', 'Access', 'Review'] as const
+const steps = ['Template', 'Harness', 'Access', 'Review'] as const
 
 function bounds(g: Grant) {
   return { min: g.targetsMin, max: g.targetsMax }
@@ -58,21 +58,21 @@ function boundsText(g: Grant): string {
 
 /**
  * AgentWizard creates a draft agent from a template (ADR 0020): template,
- * flavor, the GitHub grant (connection and repositories within the
+ * harness, the GitHub grant (connection and repositories within the
  * template's bounds), then a summary of what the draft will propose.
  */
 export function AgentWizard({ templates, connections, targetPatterns, codeHosts, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
   const [step, setStep] = useState(0)
   const [templateId, setTemplateId] = useState(templates.length === 1 ? templates[0].id : '')
   const template = templates.find((t) => t.id === templateId)
-  const [flavor, setFlavor] = useState<Flavor>(Flavor.UNSPECIFIED)
+  const [harness, setHarness] = useState('')
   const [name, setName] = useState('')
   const [bindings, setBindings] = useState<Record<number, Binding>>({})
   const [showErrors, setShowErrors] = useState(false)
   // Unset follows the template; the toggle overrides it for this agent.
   const [ephemeralChoice, setEphemeralChoice] = useState<boolean | undefined>(undefined)
 
-  const chosenFlavor = template && template.allowedFlavors.includes(flavor) ? flavor : (template?.defaultFlavor ?? Flavor.UNSPECIFIED)
+  const chosenHarness = template && template.allowedHarnesses.includes(harness) ? harness : (template?.defaultHarness ?? '')
   const ephemeral = ephemeralChoice ?? template?.ephemeral ?? false
   const targetGrants = (template?.grants ?? []).map((g, i) => ({ g, i })).filter(({ g }) => grantNeedsTargets(g))
 
@@ -99,7 +99,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
 
   const stepValid = [
     !!template,
-    !!template && chosenFlavor !== Flavor.UNSPECIFIED,
+    !!template && chosenHarness !== '',
     targetGrants.every(({ g, i }) => grantErrors(i, g).length === 0),
     !!name.trim(),
   ]
@@ -124,7 +124,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
     onCreate({
       templateId: template.id,
       displayName: name.trim(),
-      flavor: chosenFlavor,
+      harness: chosenHarness,
       ephemeral: ephemeral === (template.ephemeral ?? false) ? undefined : ephemeral,
       grants: targetGrants.map(({ g, i }) => {
         const b = binding(i, g)
@@ -161,13 +161,13 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
 
       {step === 1 && template && (
         <fieldset className="grid gap-2">
-          <legend className="mb-2 font-semibold">Choose a flavor</legend>
+          <legend className="mb-2 font-semibold">Choose a harness</legend>
           <p className="text-muted-foreground text-sm">The harness the agent runs on in its sandbox.</p>
-          {template.allowedFlavors.map((f) => (
+          {template.allowedHarnesses.map((f) => (
             <label key={f} className="flex items-center gap-2 text-sm">
-              <input type="radio" name="flavor" checked={f === chosenFlavor} onChange={() => setFlavor(f)} />
-              {flavorLabel(f)}
-              {f === template.defaultFlavor && <span className="text-muted-foreground text-xs">(recommended)</span>}
+              <input type="radio" name="harness" checked={f === chosenHarness} onChange={() => setHarness(f)} />
+              {harnessLabel(f)}
+              {f === template.defaultHarness && <span className="text-muted-foreground text-xs">(recommended)</span>}
             </label>
           ))}
         </fieldset>
@@ -215,8 +215,8 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
               <dd>
                 {template.displayName} v{template.version}
               </dd>
-              <dt className="text-muted-foreground">Flavor</dt>
-              <dd>{flavorLabel(chosenFlavor)}</dd>
+              <dt className="text-muted-foreground">Harness</dt>
+              <dd>{harnessLabel(chosenHarness)}</dd>
               <dt className="text-muted-foreground">Model</dt>
               <dd>{template.model || 'default'}</dd>
               <dt className="text-muted-foreground">Sandbox</dt>
@@ -265,7 +265,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
       )}
       {showErrors && step < 2 && !stepValid[step] && (
         <p className="text-destructive text-sm" role="alert">
-          {step === 0 ? 'Choose a template.' : 'Choose a flavor.'}
+          {step === 0 ? 'Choose a template.' : 'Choose a harness.'}
         </p>
       )}
       <div className="flex gap-2">

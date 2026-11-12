@@ -16,7 +16,7 @@ the remaining workarounds are in ADR 0052 (amendment 2026-10-28). The bundled ru
 
 | Item (ADR 0035) | OpenCode flavor |
 | --- | --- |
-| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--thinking none|default|adaptive-summarized|disabled|effort-none] [--session-id RUN_ID] [--no-web-tools] [--model-tries N] [--model-retry-backoff-ms MS] [--model-max-retry-after-ms MS]`, run as UID 10001 in a session working directory under `/sandbox`. agentd always adds the three retry switches, Koinon's retry policy (see [Model retries](#model-retries)). agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/flavor` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. It always adds `--thinking` (the thinking form Koinon decided for the run, see [Thinking](#thinking-koinon-decides-not-the-model-id-adr-0069-amendments-2026-10-29-and-2026-10-31)). For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). agentd adds `--no-web-tools` for every agent without web egress (all of them today, ADR 0080): the built-in `webfetch` is then not offered to the model (see the table of switched-off features below). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
+| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--thinking none|default|adaptive-summarized|disabled|effort-none] [--session-id RUN_ID] [--no-web-tools] [--model-tries N] [--model-retry-backoff-ms MS] [--model-max-retry-after-ms MS]`, run as UID 10001 in a session working directory under `/sandbox`. agentd always adds the three retry switches, Koinon's retry policy (see [Model retries](#model-retries)). agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/harness` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. It always adds `--thinking` (the thinking form Koinon decided for the run, see [Thinking](#thinking-koinon-decides-not-the-model-id-adr-0069-amendments-2026-10-29-and-2026-10-31)). For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). agentd adds `--no-web-tools` for every agent without web egress (all of them today, ADR 0080): the built-in `webfetch` is then not offered to the model (see the table of switched-off features below). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, named by the `instructions` key of the read-only config, written by koinon-agentd before every harness start from the run's agent version, and checked before every prompt. The entry script refuses to start (exit 64) when it is missing, empty or a symbolic link |
 | Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `<entry>/<model>`: `koinon/<model>` or `koinon-anthropic/<model>`) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
@@ -61,7 +61,7 @@ OpenCode fetches those). OpenCode 2.2.0 resolves the entry, reads the file and p
 system prompt as `Instructions from: <path>`
 (`packages/core/src/config/plugin/instruction.ts:98-118` `match`, `:120-138` `configuredSource`,
 `packages/schema/src/config.ts:94`). 2.0.24 ignored the key, which is why the flavor used to link
-`/etc/koinon/opencode/AGENTS.md` to the file; the link, `InstructionLink` in `internal/flavor` and
+`/etc/koinon/opencode/AGENTS.md` to the file; the link, `InstructionLink` in `internal/harness` and
 its restore check in agentd are not needed for OpenCode any more (agentd keeps the generic
 mechanism for a flavor that needs one).
 
@@ -205,7 +205,7 @@ always adds `interleaved-thinking-2025-05-14`. The regex matches `claude-haiku-5
 refused every request (`thinking.adaptive.block_binding: Extra inputs are not permitted`).
 
 Koinon states the choice, so neither the ID nor a provider default decides. koinon-agentd passes
-`--thinking` (`internal/flavor` `ThinkingArg`) with the form from the model's row in
+`--thinking` (`internal/harness` `ThinkingArg`) with the form from the model's row in
 `internal/thinking` and the agent's setting. Thinking on and off are both sent explicitly (old issue 316):
 provider defaults differ per route (direct Anthropic defaults Claude 5.x to `display: omitted`, which
 bills the thinking and returns empty thinking blocks; OpenRouter summarizes). The entry script turns
@@ -283,7 +283,7 @@ endpoints.
 
 Exactly one layer retries a failed model request, with Koinon's policy (ADR 0056 amendment
 2026-10-31, point 3; old issue 341). For this flavor that layer is OpenCode: the flavor table sets
-`RetriesModelRequests` (`internal/flavor`), so koinon-agentd does not repeat the turn, and it
+`RetriesModelRequests` (`internal/harness`), so koinon-agentd does not repeat the turn, and it
 launches the entry script with the policy from its own config (`ModelRetries`, `RetryBackoff`,
 `MaxRetryAfter` in `internal/agentd`):
 
@@ -330,6 +330,65 @@ What the plugin does not reach: OpenCode's one-shot requests (the session title)
 path (`retryOneShot`, at most 4 tries and only when the provider clearly did not run the request: a
 429, a 503 or 529, an unreachable host), and an agent plugin loaded with `--plugin-installs` runs in
 the same process and could register its own `session.retry` hook; the request cap still bounds both.
+
+## koinon.core
+
+`koinon.core` is Koinon's one owned OpenCode plugin (ADR 0093), the first entry of the read-only
+config's `plugins` list, before `koinon.retry`
+([`plugins/koinon-core/index.ts`](plugins/koinon-core/index.ts), installed as
+`/usr/local/lib/koinon/opencode/plugins/koinon-core`). A new customisation of OpenCode's behaviour
+goes into this plugin as a module, not as a new ad-hoc plugin. This first slice only registers the
+load report command below; the permission, title, request-label and shell-environment modules of
+ADR 0093 decisions 3.2-3.5 are later PRs. It is advisory only (ADR 0093 decision 2): every boundary
+(egress, credentials, isolation, tool approvals, budgets and request caps) stays in OpenShell and
+agentgateway, not in this plugin.
+
+**Loading.** A configured plugin entry must be a directory; OpenCode's `Host.resolve`
+(`packages/plugin/src/host.ts`) tries `<dir>/server`, then `<dir>/index`, through Bun's own module
+resolution. `index.ts` is therefore the only root module the directory may hold: a later module
+goes in a subdirectory, never a second file at the root (a `server.*`, `tui.*`, `rpc.*` or
+`gui-experimental.*` name, or a `package.json` with `name` and `exports`, changes what loads
+instead). The module uses only `import type` from `@opencode/plugin`, which TypeScript erases at
+compile time, so it is `export default { id, setup } satisfies Plugin.Plugin` with no run-time npm
+dependency and nothing installed in the sandbox: OpenCode's bundled Bun loads the plain `.ts` file.
+
+**Setup failure.** `setup` runs inside OpenCode's own `Effect.promise`
+(`packages/plugin/src/promise/adapter.ts`); a throw (a bad option, or a hook this pin lacks) is
+caught per plugin (`packages/core/src/plugin.ts`), closes that plugin's scope — releasing
+everything it registered — logs `failed to load plugin`, and lets every other plugin keep running.
+A duplicate plugin ID does not stop loading either: the supervisor
+(`packages/core/src/plugin/supervisor.ts`) keeps the first of a duplicate ID and fails only the
+later one, before any `setup` runs, in built-in-then-configured-document order. `koinon.core` is
+listed first and Koinon's config directories hold no other plugin, so an impostor (a user plugin
+reusing a Koinon ID, loaded only with `harness.pluginInstalls`, see [Plugins](#plugins) below)
+always loses.
+
+**Load report.** `setup` registers an ACP command, `koinon-core-ready-v1` (the contract version is
+in the name: agentd keeps only command names from ACP, never descriptions), last, after every
+other module's hooks are registered and awaited. A plugin command reaches ACP's
+`available_commands_update`, sent per session after the `session/new` (or `load`/`resume`/`fork`)
+response and re-sent whenever the command list changes (`packages/cli/src/acp/sessions.ts`,
+`catalog.ts`); this is the same channel and the same kind of wait agentd already uses for
+`koinon:github_koinon-ready` (ADR 0052 decision 4). A missing report therefore means `koinon.core`
+(or a module inside it) failed to load, and agentd's own wait for it (ADR 0093 decision 3.1,
+Delivery step 4) is not part of this PR: today only `test/flavors` checks for the command.
+
+**ADR 0093 corrections**, found reading OpenCode `v2.2.6`
+(`dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06`) for this slice; each gets a dated amendment in the ADR:
+
+1. The shell environment hook (decision 3.5) is `ctx.shell.hook("create.before", ...)`, not
+   `shell.env`: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/plugin/src/promise/shell.ts#L3-L17
+2. A duplicate plugin ID does not stop loading (decisions 4 and the Context section said it did):
+   the later duplicate fails and the first stays, which is why `koinon.core` being listed first is
+   enough: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/plugin/supervisor.ts#L94-L113
+3. The request-purpose hook (decision 3.4) is `model.request` (`kind`, `headers`), not a state kept
+   from the compaction hook; the kind comes ready-made as one of four values, `generate` included:
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/session/model-request.ts#L337-L362
+4. The permission hook (decision 3.2) can loosen a configured `ask` to `allow` (not only tighten
+   `allow` to `ask`); the ADR's module must write only `ask`, never rely on the hook being
+   one-directional: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/permission.ts#L176-L215
+5. The types package pin (decision 4) is `@opencode/plugin@2.2.6`, matching the image's OpenCode,
+   not `2.2.5`.
 
 ## Plugins
 

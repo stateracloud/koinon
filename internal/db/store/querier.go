@@ -896,18 +896,41 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by org. The run
 	// claim loop of koinon-agentd uses ListOrgIDsWithRunWork instead.
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The live orgs where the checkpoint tick has work: an open request (to claim, take over or fail,
+	// home_checkpoints_open) or a ready sandbox whose agent has had no checkpoint requested for
+	// @interval_seconds (the hourly request; agent_sandboxes_checkpointable). The tick runs every
+	// checkpoint poll, so its cost follows the orgs with work, not every org that ever existed
+	// (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). The sandbox half has the same
+	// agent filters as RequestHourlyHomeCheckpoints (active, not ephemeral), so an org whose agents
+	// cannot be checkpointed is not returned on every poll. A superset is fine: the hourly request,
+	// the fail queries and the claim re-check every condition.
+	ListOrgIDsWithCheckpointWork(ctx context.Context, intervalSeconds int32) ([]pgtype.UUID, error)
 	// The live orgs with a probe to claim (due, unanswered, not expired) or a row to delete (expired
 	// for longer than @grace_seconds). agentd polls this every checkpoint poll, so its cost follows the
 	// orgs with probes, not every org that ever existed (as ListOrgIDsWithRunWork, koinon issue 378).
 	// Both halves use an index (home_repository_probes_due, home_repository_probes_expiry). A superset
 	// is fine: the claim and the delete re-check every condition.
 	ListOrgIDsWithProbeWork(ctx context.Context, graceSeconds int32) ([]pgtype.UUID, error)
+	// The live orgs with a repository past its deletion deadline (epoch 0 or later), for the sweeper.
+	// Indexes home_repositories_delete_due and home_repository_epochs_delete_due (koinon issue 576).
+	// A superset is fine: ListDueHomeRepositories re-checks every guard.
+	ListOrgIDsWithRepositoryDeleteWork(ctx context.Context) ([]pgtype.UUID, error)
+	// The live orgs with a resync the resync gauge counts: pending (due or not) or given up on. Index
+	// home_checkpoint_resyncs_open (koinon issue 576). A superset is fine: the claim and the count
+	// re-check every condition.
+	ListOrgIDsWithResyncWork(ctx context.Context) ([]pgtype.UUID, error)
 	// The live orgs where a worker could claim or take over a run right now: a run that is claimable
 	// (ready_at set, ClaimNextRun) or whose owner's lease expired (TakeOverExpiredRun). agentd polls
 	// this every few tens of milliseconds, so its cost follows the orgs with work, not every org that
 	// ever existed (koinon issue 378). Both halves use partial indexes (runs_claimable, runs_leases).
 	// A superset is fine: the claim queries re-check every condition.
 	ListOrgIDsWithRunWork(ctx context.Context) ([]pgtype.UUID, error)
+	// The live orgs with a seed the seed gauge counts: pending (due or not) or given up on. The tick
+	// claims the due ones and sets the gauge from CountHomeRepositorySeeds of each listed org, so an
+	// org whose only seed is given up on stays listed (the gauge's failed count). Index
+	// home_repository_epochs_seed_open (koinon issue 576). A superset is fine: the claim and the count
+	// re-check every condition.
+	ListOrgIDsWithSeedWork(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
 	// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the

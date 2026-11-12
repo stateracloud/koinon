@@ -91,7 +91,7 @@ example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
 example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
 example "a web source file" "web" 1 web/src/app.ts
 example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
-example "the rules themselves" "chart chartsmoke escape flavors generate go scripts shell tidy web" 1 hack/paths.rules
+example "the rules themselves" "chart chartsmoke escape flavors generate go opencodeplugin scripts shell tidy web" 1 hack/paths.rules
 example "documentation" "" 1 docs/design.md
 example "the CI documentation, read by ci-cache-test" "scripts" 1 docs/dev/ci.md
 
