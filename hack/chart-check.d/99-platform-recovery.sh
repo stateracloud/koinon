@@ -5,13 +5,13 @@
 # kubectl exec (issue #512, ADR 0110 decision 6). Sourced in order by hack/chart-check.sh.
 
 pr=templates/platform-recovery.yaml
-crd=charts/koinon/crds/platformadminrecoveries.yaml
+crd="$CHART/crds/platformadminrecoveries.yaml"
 
 # The CRD ships in crds/ (never templated), with a status subresource and the closed action enum.
-[[ -f "$CHART/crds/platformadminrecoveries.yaml" ]] || fail "the PlatformAdminRecovery CRD is in crds/"
-hit 'subresources:' "$CHART/crds/platformadminrecoveries.yaml" && hit 'status: {}' "$CHART/crds/platformadminrecoveries.yaml" || fail "the CRD has a status subresource"
-hit 'enum: \[mint-admin-token, reset-password\]' "$CHART/crds/platformadminrecoveries.yaml" || fail "the CRD action is a closed enum"
-hit "pattern: '\^\[A-Za-z0-9_-\]{16,64}\$'" "$CHART/crds/platformadminrecoveries.yaml" || fail "the CRD checks the nonce"
+[[ -f "$crd" ]] || fail "the PlatformAdminRecovery CRD is in crds/"
+if ! { hit 'subresources:' "$crd" && hit 'status: {}' "$crd"; }; then fail "the CRD has a status subresource"; fi
+hit 'enum: \[mint-admin-token, reset-password\]' "$crd" || fail "the CRD action is a closed enum"
+hit "pattern: '\^\[A-Za-z0-9_-\]{16,64}\$'" "$crd" || fail "the CRD checks the nonce"
 
 # A native ValidatingAdmissionPolicy (never Kyverno), failing closed, bound to the release namespace with Deny.
 has "recovery policy is a native VAP" 'kind: ValidatingAdmissionPolicy$' --show-only "$pr"
@@ -31,7 +31,7 @@ has "recovery policy name is release-scoped in another namespace" 'name: other-n
 # The requester Role exists and is bound to nobody by default.
 has "recovery requester Role" 'kind: Role$' --show-only "$pr"
 has "recovery requester may create the object" 'verbs: \[create, get, list, watch\]' --show-only "$pr"
-rb_count() { render --show-only "$pr" "$@" | grep -c -E -- '^  name: koinon-platform-recovery$' || true; }
+rb_count() { render --show-only "$pr" | grep -c -E -- '^  name: koinon-platform-recovery$' || true; }
 [[ $(rb_count) == 1 ]] || fail "the recovery Role is bound to nobody by default, got $(rb_count) mentions of its name"
 rs=(--set 'recovery.subjects[0].kind=User' --set 'recovery.subjects[0].name=alice' --set 'recovery.subjects[0].apiGroup=rbac.authorization.k8s.io')
 has "recovery.subjects binds the Role" 'name: alice$' --show-only "$pr" "${rs[@]}"
@@ -50,3 +50,10 @@ has "reconciler config names the recovery binding" 'binding: "koinon-koinon-plat
 # Off: nothing renders and the reconciler runs no handler.
 lacks "recovery.enabled=false renders no policy" 'platform-recovery' --set recovery.enabled=false
 lacks "recovery.enabled=false leaves the reconciler config without recovery" 'recovery:' --show-only templates/config.yaml --set recovery.enabled=false
+
+# The reconciler appends the recovery.<action> install events, so with recovery on it (and koinon-api) is
+# in the install audit writer role; with recovery off only koinon-api is (ADR 0110 decision 6 amends ADR 0100 1.1a).
+writer_count() { render --show-only templates/postgres-cnpg.yaml "$@" | grep -c 'koinon_app, koinon_install_audit_writer\]' || true; }
+if [[ $(writer_count --set postgres.mode=cnpg) -ge 2 ]]; then
+  [[ $(writer_count --set postgres.mode=cnpg --set recovery.enabled=false) == 1 ]] || fail "recovery off: only koinon-api is in the install audit writer role"
+fi
