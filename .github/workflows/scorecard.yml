@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# OpenSSF Scorecard: weekly and on every push to main. Publishes the result (publish_results) so the
+# OpenSSF Scorecard: weekly (and on dispatch), not on every push to main (#572: the score changes with
+# the repository's settings, not with each commit). Publishes the result (publish_results) so the
 # badge and api.securityscorecards.dev have one, and uploads the SARIF to code scanning. Advisory:
 # it is not a required check and never gates a pull request. Action pins follow ADR 0079 (releases at
 # least 3 days old); the shape follows fluxcd/flux2's ossf.yaml.
@@ -9,8 +10,6 @@ name: scorecard
 on:
   schedule:
     - cron: "23 4 * * 1"
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions: read-all

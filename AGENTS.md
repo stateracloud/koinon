@@ -41,14 +41,16 @@ Instructions for coding agents working on Koinon.
   "draft: not run") and its green is not merge evidence; get WIP feedback from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
-  main plus the PR is the only e2e proof (ADR 0105); the PR's own run is advisory. The `e2e` label forces
-  it. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
+  main plus the PR is the only e2e proof (ADR 0105). A pull request runs it only with the `e2e` label
+  (advisory; #572). `flavors` is required but runs in the queue and on main, not on pull requests. `hack/e2e-remote.sh` (lab or `--local`) is dev feedback, not merge evidence: [testing layers](docs/dev/ci.md#testing-layers).
 - When main's kind e2e goes red, fix forward within 2 hours or revert the merge (`hack/e2e-bisect.sh`
   opens an `e2e-regression` issue). RC and release tags are cut only from a commit whose `quickstart`
   job succeeded (`hack/release-gate.sh` checks it).
 - A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a
   required job must report on every PR, push and merge_group build (no workflow-level `paths:`).
   ([required checks](docs/dev/ci.md#required-status-checks))
+- Adding or changing a CI check: read `docs/dev/ci-rules.md` first (rules R1-R8, limits L1-L6 of ADR 0111). Its first
+  section says when it does not apply. `hack/ci-rules-check.sh` checks the rules a script can decide.
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.

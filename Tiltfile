@@ -54,12 +54,11 @@ NS = 'koinon'
 KIND = mode == 'kind'
 os_cfg = local_cfg.get('openshell', {})
 platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', quiet=True)).strip() if KIND else local_cfg.get('platform', 'linux/amd64'))
-registry = 'kind.local' if KIND else local_cfg.get('registry', '')
+registry = 'localhost:5001' if KIND else local_cfg.get('registry', '')
 if not KIND and not os_cfg.get('address'):
     fail('%s needs `openshell.address` (the OpenShell gateway, e.g. openshell.openshell.svc:8080)' % LOCAL_FILE)
 if not KIND and not registry:
     fail('%s needs `registry` (the registry and path Tilt pushes images to, e.g. registry.example.com/koinon)' % LOCAL_FILE)
-kind_cluster = ctx[len('kind-'):]
 os_ns = cfg.get('openshell-namespace', os_cfg.get('namespace', 'openshell'))
 os_tls = cfg.get('openshell-tls-secret', os_cfg.get('clientTLSSecret', 'openshell-client-tls'))
 sandbox_policy = KIND or cfg.get('sandbox-policy', local_cfg.get('sandboxPolicy', False))
@@ -72,8 +71,9 @@ for f in flavors:
 # ---- images ---------------------------------------------------------------------------------
 
 # ko builds a distroless image per binary. The unique tag is what Tilt injects into the pod specs;
-# `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko loads the
-# image into the node itself (KIND_CLUSTER_NAME); on a remote cluster it pushes to your registry.
+# `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko pushes to the
+# local registry that `make dev-kind-up` starts (localhost:5001, test/e2e/kind/registry.sh); on a remote
+# cluster it pushes to your registry.
 def ko_image(name):
     # The chart's images are <image.registry>/api, /reconciler and /agentd (#167); the binary is cmd/koinon-<name>.
     repo = registry + '/' + name
@@ -81,7 +81,7 @@ def ko_image(name):
     custom_build(
         repo,
         'TAG=tilt-$(date +%s) && ' +
-        'KO_DOCKER_REPO="' + repo + '" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'KO_DOCKER_REPO="' + repo + '" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG,dev" ./cmd/koinon-' + name +
         ' >/dev/null && echo "' + repo + ':$TAG" > "$TILT_KO_REF"',
         deps=['cmd', 'internal', 'go.mod', 'go.sum'],
@@ -103,7 +103,7 @@ for f in flavors:
     # that has not reloaded the Tiltfile yet is still built and tagged consistently.
     flavor_tags[f] = str(local('hack/flavor-tag.sh ' + f, quiet=True)).strip()
     ref = '%s/flavors/%s:$T' % (registry, f)
-    publish = ('kind load docker-image --name %s %s' % (kind_cluster, ref)) if KIND else ('docker push %s' % ref)
+    publish = 'docker push %s' % ref
     local_resource(
         'flavor-' + f,
         'T=$(hack/flavor-tag.sh %s) && make flavor-%s FLAVOR_TAG=$T FLAVOR_PLATFORMS=%s && docker tag koinon/flavor-%s:$T %s && %s' %
@@ -113,32 +113,32 @@ for f in flavors:
     )
 
 if KIND:
-    # kind has no registry: the fakes' images are loaded like the Koinon ones.
+    # The fakes' images are pushed to the local registry like the Koinon ones.
     custom_build(
-        'kind.local/koinon-fakemodel',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakemodel" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakemodel',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakemodel" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakemodel >/dev/null && ' +
-        'echo "kind.local/koinon-fakemodel:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakemodel:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakemodel', 'internal', 'test/fakemodel', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakemodel'},
         outputs_image_ref_to='.tilt-ko-koinon-fakemodel',
         skips_local_docker=True,
     )
     custom_build(
-        'kind.local/koinon-fakegithub',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakegithub" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakegithub',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakegithub" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakegithub >/dev/null && ' +
-        'echo "kind.local/koinon-fakegithub:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakegithub:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakegithub', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakegithub'},
         outputs_image_ref_to='.tilt-ko-koinon-fakegithub',
         skips_local_docker=True,
     )
     custom_build(
-        'kind.local/koinon-fakemcp',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakemcp" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakemcp',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakemcp" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakemcp >/dev/null && ' +
-        'echo "kind.local/koinon-fakemcp:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakemcp:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakemcp', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakemcp'},
         outputs_image_ref_to='.tilt-ko-koinon-fakemcp',
@@ -186,9 +186,11 @@ if not sandbox_policy:
     # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
     # the OpenShell sandbox namespaces the cluster already has.
     sets.append('sandboxPolicy.enabled=false')
-    # The sandbox observer's RoleBinding policy (ADR 0078) needs the sandbox policy: the chart refuses to
-    # render one without the other.
+    # The observer, NetworkPolicy writer and LimitRange writer all need the sandbox policy: the chart
+    # refuses to render any of them without it (ADR 0078, spike 8.15, #76).
     sets.append('sandboxObserver.enabled=false')
+    sets.append('sandboxNetworkPolicy.enabled=false')
+    sets.append('sandboxLimitRange.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
         sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))

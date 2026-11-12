@@ -90,9 +90,14 @@ type ExportAnchorLine struct {
 }
 
 // ExportAnchorSet is the anchors of a verified install export, to check an org export against.
+// Build it with [ExportResult.AnchorSet], so OrgID is the filter the anchors were collected with.
 type ExportAnchorSet struct {
 	InstallID string
-	Anchors   []ExportAnchor
+	// OrgID is the org whose heads alone the anchors keep (ExportVerifyOptions.AnchorOrgID), empty
+	// when they keep every org's. VerifyExport refuses an org export of another org: its heads were
+	// dropped, so checking it would pass with no anchor checked.
+	OrgID   string
+	Anchors []ExportAnchor
 }
 
 // ExportEvent is one event line. Every field the hash covers is here exactly as hashed.
@@ -316,6 +321,11 @@ type ExportVerifyOptions struct {
 	// CollectAnchors, on an install export, keeps each verified anchor_heads line on
 	// ExportResult.StreamAnchors (for --anchors). Off by default so verify memory stays bounded.
 	CollectAnchors bool
+	// AnchorOrgID, with CollectAnchors, keeps on each collected anchor only the head of this org
+	// (the org export the anchors are for): checkOrgAnchors reads no other, so memory stays
+	// bounded by the anchor count, not anchors times orgs. Empty keeps every head. The heads are
+	// still all checked against heads_root before they are dropped.
+	AnchorOrgID string
 }
 
 // ExportResult is the verdict on an export file.
@@ -338,10 +348,18 @@ type ExportResult struct {
 	// StreamAnchors are the verified anchor_heads lines of an install export when CollectAnchors
 	// was set. Used to pin an org export (--anchors). Empty otherwise so memory stays bounded.
 	StreamAnchors []ExportAnchor
+	// AnchorOrgID is the ExportVerifyOptions.AnchorOrgID StreamAnchors were collected with.
+	AnchorOrgID string
 }
 
 // OK reports whether the file holds.
 func (r ExportResult) OK() bool { return r.Break == nil }
+
+// AnchorSet is the anchors r collected (CollectAnchors), to check an org export against with
+// ExportVerifyOptions.Anchors. It carries the org the heads were kept for.
+func (r ExportResult) AnchorSet() *ExportAnchorSet {
+	return &ExportAnchorSet{InstallID: r.Header.InstallID, OrgID: r.AnchorOrgID, Anchors: r.StreamAnchors}
+}
 
 // ErrExportFormat is returned for a file that is not an export the verifier can read.
 var ErrExportFormat = errors.New("audit export: not a koinon.audit.export.v2 file")
@@ -377,12 +395,18 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 		if opt.Anchors != nil {
 			return res, errors.New("audit export: --anchors is for an org export; this one is the install chain")
 		}
+		if opt.CollectAnchors {
+			res.AnchorOrgID = opt.AnchorOrgID
+		}
 	case ChainOrg:
 		if h.OrgID == "" {
 			return res, fmt.Errorf("%w: an org export has no org_id", ErrExportFormat)
 		}
 		if a := opt.Anchors; a != nil && a.InstallID != h.InstallID {
 			return res, errors.New("audit export: the anchors are of another install")
+		}
+		if a := opt.Anchors; a != nil && a.OrgID != "" && a.OrgID != h.OrgID {
+			return res, fmt.Errorf("audit export: the anchors keep the heads of org %s only; this export is of org %s", a.OrgID, h.OrgID)
 		}
 		if opt.CollectAnchors {
 			return res, errors.New("audit export: CollectAnchors is for an install export")
@@ -466,7 +490,7 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 			}
 			l := exportLink(tag, scope, ev)
 			if l.bad == "" && tag == installHashTag && ev.Action == ActionAnchor {
-				if msg := readAndCheckAnchorLine(dec, h.InstallID, ev, opt.CollectAnchors, &res); msg != "" {
+				if msg := readAndCheckAnchorLine(dec, h.InstallID, ev, opt, &res); msg != "" {
 					l.bad = msg
 				}
 			}
@@ -508,18 +532,28 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 }
 
 // readAndCheckAnchorLine reads the anchor_heads line after an audit.anchor event and checks it
-// against the event. On success it counts the anchor on res and, when collect is set, appends it to
-// StreamAnchors. The returned string is a break reason, or empty when the line holds.
-func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent, collect bool, res *ExportResult) string {
-	var al ExportAnchorLine
-	err := dec.Decode(&al)
-	switch {
-	case errors.Is(err, io.EOF):
+// against the event. On success it counts the anchor on res and, when opt.CollectAnchors is set,
+// appends it to StreamAnchors (with the heads of opt.AnchorOrgID only, when that is set). The line
+// is parsed like an event line: a key twice in it is refused. The returned string is a break
+// reason, or empty when the line holds.
+func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent, opt ExportVerifyOptions, res *ExportResult) string {
+	var raw json.RawMessage
+	err := dec.Decode(&raw)
+	if errors.Is(err, io.EOF) {
 		return fmt.Sprintf("the anchor event %s has no following anchor_heads line: its anchored heads were removed from the file", ev.ID)
+	}
+	var al ExportAnchorLine
+	if err == nil {
+		err = json.Unmarshal(raw, &al)
+	}
+	switch {
 	case err != nil:
 		return fmt.Sprintf("the line after the anchor event %s is not an anchor_heads line: %v", ev.ID, err)
 	case al.Line != ExportAnchorLineKind:
 		return fmt.Sprintf("the line after the anchor event %s is not an anchor_heads line", ev.ID)
+	}
+	if k, dup := duplicateKey(raw); dup {
+		return fmt.Sprintf("the anchor_heads line after the anchor event %s has the key %q twice", ev.ID, k)
 	}
 	want, err := parseAnchorSummary(ev.SummaryText)
 	if err != nil {
@@ -545,9 +579,18 @@ func readAndCheckAnchorLine(dec *json.Decoder, installID string, ev ExportEvent,
 		return "the anchored heads do not match the heads_root the anchor event commits to: a head was forged or removed"
 	}
 	res.Anchors++
-	if collect {
+	if opt.CollectAnchors {
+		kept := al.Heads
+		if opt.AnchorOrgID != "" {
+			kept = nil // a fresh slice: al.Heads (every org) is released with the line
+			for _, h := range al.Heads {
+				if h.OrgID == opt.AnchorOrgID {
+					kept = append(kept, h)
+				}
+			}
+		}
 		res.StreamAnchors = append(res.StreamAnchors, ExportAnchor{
-			ChainSeq: al.ChainSeq, EventID: al.EventID, OrgCount: al.OrgCount, HeadsRoot: al.HeadsRoot, Heads: al.Heads,
+			ChainSeq: al.ChainSeq, EventID: al.EventID, OrgCount: al.OrgCount, HeadsRoot: al.HeadsRoot, Heads: kept,
 		})
 	}
 	return ""

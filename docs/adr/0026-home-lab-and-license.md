@@ -1,7 +1,9 @@
 # 0026. Home lab for real isolation testing; Apache-2.0 with DCO
 
-- Status: Accepted; amended 2026-11-02 (below)
+- Status: Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: testing, isolation, ci
 - Decision: [design.md#26](../design.md)
 
 ## Context
@@ -78,5 +80,5 @@ configuration and the document that described the setup are no longer tracked. T
 is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
 says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
 still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
-on a commit. Private infrastructure detail was removed in the same change (maintainer decision
+on a commit. _(Changed by [0105](0105-merge-queue-route.md): `e2e-lab` is information only and no longer counts toward a merge; the queue's `quickstart` is the only e2e proof.)_ Private infrastructure detail was removed in the same change (maintainer decision
 2026-11-07). The domain lint that guarded this left the repository too.

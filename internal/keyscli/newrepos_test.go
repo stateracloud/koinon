@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -103,9 +104,10 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }}
+		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		q = store.New(pool)
 		pw = checkpoint.Passwords{Q: q, Keys: ring(ctx), Begin: pool.Begin}
+		freeStorage()
 	})
 
 	It("wants exactly one of --all and --agent, valid agent IDs that have a repository, and a database", func(ctx SpecContext) {
@@ -293,6 +295,139 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
 		Expect(latest(ctx, org, a).RepositoryEpoch).To(Equal(int32(5)))
 		Expect(latest(ctx, org, a).SeedFromEpoch).To(Equal(pgtype.Int4{Int32: 4, Valid: true}))
+	})
+
+	Describe("the storage probe (#285)", func() {
+		// rows counts what a refused rotation must not have written.
+		type written struct{ epochs, seeds, audited, probes int }
+		count := func(ctx SpecContext) written {
+			GinkgoHelper()
+			var w written
+			Expect(pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM home_repository_epochs),
+				(SELECT count(*) FROM home_repository_epochs WHERE seed_from_epoch IS NOT NULL),
+				(SELECT count(*) FROM audit_events WHERE action = $1),
+				(SELECT count(*) FROM home_repository_probes)`, keyscli.NewRepositoriesAction).Scan(&w.epochs, &w.seeds, &w.audited, &w.probes)).To(Succeed())
+			return w
+		}
+
+		It("asks about the epoch it would start, at the recorded floor when that is higher, and starts it when the prefix is free", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			_, err := pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 3 WHERE org_id = $1 AND agent_id = $2`, org, a)
+			Expect(err).NotTo(HaveOccurred())
+			var mu sync.Mutex
+			var probed []int32
+			answerWith(func(p store.HomeRepositoryProbe) (string, string) {
+				mu.Lock()
+				defer mu.Unlock()
+				probed = append(probed, p.RepositoryEpoch)
+				return "free", ""
+			})
+			compromise(ctx)
+			tool.Yes = true
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(Succeed())
+			mu.Lock()
+			Expect(probed).To(Equal([]int32{3}))
+			mu.Unlock()
+			Expect(latest(ctx, org, a).RepositoryEpoch).To(Equal(int32(3)))
+			Expect(count(ctx).probes).To(BeZero(), "the command deletes the probe it read")
+		})
+
+		It("refuses a prefix that holds a repository, before anything is written", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			b := withRepository(ctx, org)
+			answerWith(func(p store.HomeRepositoryProbe) (string, string) {
+				if p.AgentID == a {
+					return "taken", "the prefix of repository epoch 1 already holds objects"
+				}
+				return "free", ""
+			})
+			compromise(ctx)
+			tool.Yes = true
+			before := count(ctx)
+			err := tool.NewRepositories(ctx, false, []string{a.String(), b.String()})
+			Expect(err).To(MatchError(And(
+				ContainSubstring("refusing to start a new repository, nothing was changed"),
+				ContainSubstring("agent "+a.String()), ContainSubstring("already holds a repository the database does not record"))))
+			Expect(count(ctx)).To(Equal(before), "no epoch, no seed request, no audit event, not even for the agent whose prefix is free")
+			Expect(out.String()).NotTo(ContainSubstring("Started a new home repository"))
+		})
+
+		It("refuses when the check errors, and writes nothing", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) {
+				return "error", "koinon-agentd could not list the checkpoint bucket (see its log)"
+			})
+			compromise(ctx)
+			tool.Yes = true
+			before := count(ctx)
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(MatchError(And(
+				ContainSubstring("nothing was changed"), ContainSubstring("could not check the storage prefix of repository epoch 1"),
+				ContainSubstring("could not list the checkpoint bucket"))))
+			Expect(count(ctx)).To(Equal(before))
+		})
+
+		It("refuses when koinon-agentd does not answer in time, and writes nothing", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			answerWith(nil)
+			compromise(ctx)
+			tool.Yes = true
+			tool.ProbeTimeout = time.Second
+			before := count(ctx)
+			started := time.Now()
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(MatchError(And(
+				ContainSubstring("nothing was changed"), ContainSubstring("did not check the storage within 1s"))))
+			Expect(time.Since(started)).To(BeNumerically("<", 4*time.Second))
+			Expect(count(ctx)).To(Equal(before), "the probe row is deleted too")
+		})
+
+		It("refuses when the epoch changed between the probe and the transaction", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			answerWith(func(p store.HomeRepositoryProbe) (string, string) {
+				// koinon-agentd raised the floor meanwhile: the epoch probed is not the one that would start.
+				_, _ = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 5 WHERE org_id = $1 AND agent_id = $2`, org, a)
+				return "free", ""
+			})
+			compromise(ctx)
+			tool.Yes = true
+			before := count(ctx)
+			Expect(tool.NewRepositories(ctx, false, []string{a.String()})).To(MatchError(ContainSubstring("changed while the storage was checked")))
+			Expect(count(ctx)).To(Equal(before))
+		})
+
+		It("is not asked for an agent without a repository", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			newAgent(ctx, org)
+			answerWith(nil)
+			Expect(tool.NewRepositories(ctx, true, nil)).To(Succeed())
+			Expect(count(ctx).probes).To(BeZero())
+		})
+
+		It("skips a target whose repository was deleted after the targets were read, and probes the rest", func(ctx SpecContext) {
+			org, _, _ := pgtest.NewOrg(ctx, pool)
+			a := withRepository(ctx, org)
+			gone := withRepository(ctx, org)
+			_, err := pool.Exec(ctx, `DELETE FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, org, gone)
+			Expect(err).NotTo(HaveOccurred())
+			var mu sync.Mutex
+			var asked []pgtype.UUID
+			answerWith(func(p store.HomeRepositoryProbe) (string, string) {
+				mu.Lock()
+				defer mu.Unlock()
+				asked = append(asked, p.AgentID)
+				return "free", ""
+			})
+			got, err := tool.ProbeEpochs(ctx, [][2]pgtype.UUID{{org, gone}, {org, a}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(map[[2]pgtype.UUID]int32{{org, a}: 1}), "nothing in the map for the deleted one")
+			mu.Lock()
+			Expect(asked).To(Equal([]pgtype.UUID{a}), "no probe requested for it")
+			mu.Unlock()
+		})
 	})
 
 	Describe("without a terminal", func() {

@@ -1,0 +1,4 @@
+# expect: infra yes
+write /tmp/blob: no space left on device
+--- FAIL: TestRestore (1.00s)
+FAIL	example.invalid/koinon/internal/backup	1.2s

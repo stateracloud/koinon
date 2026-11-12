@@ -44,11 +44,11 @@ jobs:
   # commit's tree passed in the merge queue. A job skipped by its `if:` reports success,
   # so required checks still pass when it does not apply.
   #
-  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, web, generate,
-  # chart, chartsmoke, escape and flavors jobs) in two cases, so the others are skipped: a draft pull request (`go` and `web` then report success with
+  # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, tidy, web, generate,
+  # chart, chartsmoke, escape, flavors, shell and scripts outputs) in two cases, so those jobs are skipped: a draft pull request (`go` and `web` then report success with
   # "draft: not run"; marking it ready runs everything on the same head), and a push to main whose
-  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run; `scripts` and
-  # `lint-shell` run except on that push to main (old issue 594). Read the script's header before changing this.
+  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run.
+  # `tidy` (go-tidy, go-lint), `shell` (lint-shell) and `scripts` are path-gated too (#572). Read the script's header before changing this.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -74,10 +74,14 @@ jobs:
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       escape: ${{ steps.paths.outputs.escape }}
       flavors: ${{ steps.paths.outputs.flavors }}
+      tidy: ${{ steps.paths.outputs.tidy }}
+      shell: ${{ steps.paths.outputs.shell }}
+      scripts: ${{ steps.paths.outputs.scripts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # hack/ci-changes.sh asks `go list` for the packages the flavors suite builds.
       - id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -139,30 +143,23 @@ jobs:
   # The Go checks run as parallel jobs (old issue 217). They share one module and build cache
   # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every
   # push to main, so a pull request starts from main's entry (docs/dev/ci.md#cache-ownership). A job that
-  # builds little can therefore never fill the entry first and leave go-test and go-race with nothing
-  # compiled. go-race adds -race objects the cache does not hold. `go vet` is not a job of its own:
+  # builds little can therefore never fill the entry first and leave go-test and the go-race jobs with nothing
+  # compiled. The go-race jobs need -race objects, which warm-caches builds too. `go vet` is not a job of its own:
   # golangci-lint's `standard` set runs govet. Each job is its own check. `go` below aggregates them
   # and keeps the required check name stable: branch protection names `go`, not the parts.
   go-tidy:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.tidy == 'true'
     name: go-tidy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - name: go.mod and go.sum are tidy
         run: |
           go mod tidy
@@ -170,24 +167,17 @@ jobs:
 
   go-lint:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.tidy == 'true'
     name: go-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
@@ -199,29 +189,35 @@ jobs:
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
     name: go-test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     # packages: read pulls the private GHCR copy of the agentgateway test image (#238, docs/dev/ci.md).
     permissions:
       contents: read
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache: false
+          persist-credentials: false
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
+      - id: go
+        uses: ./.github/actions/setup-go-cache
       # The chart contract test (test/chartsmoke) renders the chart; same pin as the chart jobs.
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Test results of the cacheable packages (issue 43), saved by warm-caches on every push to main
+      # under a per-commit key; the newest entry for this Go version is restored by prefix.
+      - if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-none
           restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+            go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
       # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
       # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
@@ -233,6 +229,8 @@ jobs:
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: hack/go-test.sh
         env:
+          # Pull requests reuse the results of packages with no Docker, database or cluster input (hack/go-test-cacheable.sh); main and the merge queue run everything with -count=1 (issue 43).
+          KOINON_GO_TEST_CACHE: ${{ github.event_name == 'pull_request' && '1' || '' }}
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (old issue 507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
@@ -243,51 +241,67 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  go-race:
+  # The race detector (docs/dev/ci.md#the-race-detector) runs the concurrent packages as two parallel jobs
+  # (issue 572): the reconciler and the ledger share fixed state and run one process (go-race-serial);
+  # agentd and durable are parallel suites (see hack/go-test.sh) and run with -p, as in go-test
+  # (go-race-parallel). Run one after the other in a single job they took 179 s and 550 s. Each is a Ginkgo
+  # suite, so ginkgo writes one testcase per spec to the report. The reconciler runs per-sandbox jobs
+  # concurrently (LT1); agentd, ledger and durable hold shared state behind locks and channels.
+  # hack/go-test-test.sh keeps the package lists whole; the `go` gate needs both jobs.
+  go-race-serial:
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    name: go-race
+    name: go-race-serial
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     # packages: read pulls the agentgateway test image the ledger suite starts (as in go-test).
     permissions:
       contents: read
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - name: agentgateway test image
         uses: ./.github/actions/agentgateway-test-image
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      # The concurrent packages run under the race detector (docs/dev/ci.md#the-race-detector): the
-      # reconciler runs per-sandbox jobs concurrently (LT1), agentd, ledger and durable hold shared
-      # state behind locks and channels. Each is a Ginkgo suite, so ginkgo writes one testcase per
-      # spec to the report. The reconciler and the ledger share fixed state and run one process; agentd and durable
-      # are parallel suites (see hack/go-test.sh) and run with -p, as in go-test. hack/go-test-test.sh keeps the lists whole.
       - run: mkdir -p reports/go && go tool ginkgo -race --keep-going --procs=1 --junit-report=go-race-serial.xml --output-dir=reports/go ./internal/reconciler/ ./internal/ledger/
-        env:
-          KOINON_REQUIRE: docker
-      - if: ${{ !cancelled() }}
-        run: go tool ginkgo -race -p --keep-going --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
         env:
           KOINON_REQUIRE: docker
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: go-race-reports
+          name: go-race-serial-reports
+          path: reports/go/*.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  go-race-parallel:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: go-race-parallel
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
+      - id: go
+        uses: ./.github/actions/setup-go-cache
+      - run: mkdir -p reports/go && go tool ginkgo -race -p --keep-going --junit-report=go-race-parallel.xml --output-dir=reports/go ./internal/agentd/ ./internal/durable/
+        env:
+          KOINON_REQUIRE: docker
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-race-parallel-reports
           path: reports/go/*.xml
           if-no-files-found: warn
           retention-days: 30
@@ -297,15 +311,19 @@ jobs:
   # failure, so a skipped job cannot pass the gate. hack/ci-go-gate-test.sh keeps this list whole.
   go:
     name: go
-    needs: [changes, go-tidy, go-lint, go-test, go-race]
+    needs: [changes, go-tidy, go-lint, go-test, go-race-serial, go-race-parallel]
     # Not on a push to main whose heavy jobs were switched off (old issue 595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
           GO: ${{ needs.changes.outputs.go }}
+          TIDY: ${{ needs.changes.outputs.tidy }}
+          TIDY_RESULT: ${{ needs.go-tidy.result }}
+          LINT_RESULT: ${{ needs.go-lint.result }}
           SKIP: ${{ needs.changes.outputs.skip }}
           REASON: ${{ needs.changes.outputs.reason }}
           EVENT: ${{ github.event_name }}
@@ -323,15 +341,24 @@ jobs:
             exit 0
           fi
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
-          # go-test skipped because an external run proved it (old issue 610): that one skip counts as success. Any other
-          # skipped part stays a failure, and so does a go-test skip with no green lab status.
+          # A skip counts as success only when its reason is known: go-test skipped because an external run proved it
+          # (old issue 610), go-tidy or go-lint skipped because no Go file, go.mod, go.sum or lint config changed (#572,
+          # the `tidy` output). Any other skipped part stays a failure, and so does a skip with no such reason.
+          excused=0
           if [[ $GO_TEST == skipped && $LAB == true ]]; then
             echo "go-test passed in an external run: $LAB_REASON"
-            RESULTS=${RESULTS/skipped/success}
+            excused=$((excused + 1))
           fi
+          if [[ $TIDY != true ]]; then
+            [[ $TIDY_RESULT != skipped ]] || excused=$((excused + 1))
+            [[ $LINT_RESULT != skipped ]] || excused=$((excused + 1))
+          fi
+          skipped=0
           for r in $RESULTS; do
+            [[ $r != skipped ]] || { skipped=$((skipped + 1)); continue; }
             [[ $r == success ]] || { echo "::error::a Go job finished $r (results: $RESULTS)"; exit 1; }
           done
+          ((skipped <= excused)) || { echo "::error::a Go job was skipped without a reason (results: $RESULTS)"; exit 1; }
 
   # The short checks in one job (old issue 594). Every job pays a fixed start-up cost (runner, checkout,
   # toolchain) and each of these did about 10 s of work, so five jobs (proto, migrations, adr-lint,
@@ -359,6 +386,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: load tool versions
         run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
@@ -396,6 +424,17 @@ jobs:
       - name: adr-lint
         if: ${{ !cancelled() }}
         run: hack/adr-lint.sh
+      # Area and tags on every ADR, research note and spike (hack/doc-meta-lint.sh, ADR 0115).
+      - name: doc metadata (tests)
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint-test.sh
+      - name: doc metadata
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint.sh
+      # Scans every tracked file, Markdown included, so it cannot sit in the path-gated `scripts` job (#572).
+      - name: old-issue references
+        if: ${{ !cancelled() }}
+        run: hack/old-issue-refs-lint.sh
       # Offline unit tests of hack/claim.sh. The live tests need a scratch repository and never run
       # here: CI must not mutate GitHub.
       - name: claim-tests
@@ -460,11 +499,14 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     name: web-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -482,11 +524,14 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     name: web-test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -500,18 +545,28 @@ jobs:
 
   # Playwright builds the app once and serves the build with `vite preview` (KOINON_PW_PREVIEW, see
   # web/playwright.config.ts), on 2 workers. The API is faked in the browser; E1 covers the real path.
-  # The browser download is cached by @playwright/test version; system libraries are installed on
-  # every run (cheap), the browser binary only on a cache miss.
+  # The job runs in the official Playwright image, by digest: the browser and its system libraries
+  # are in the image, so no run installs OS packages from a live apt mirror or downloads a browser
+  # (#569; run 43041438017 failed on `playwright install --with-deps` when security.ubuntu.com did not
+  # resolve). The image tag must carry the exact @playwright/test version of web/package.json
+  # (hack/ci-playwright-image-test.sh checks it); a Playwright bump changes both in one change.
+  # --ipc=host and --init are what the Playwright CI docs ask of a Chromium container.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     name: web-e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      options: --init --ipc=host
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -521,17 +576,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-      - if: steps.pwcache.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
       - run: pnpm exec vite build
       - run: pnpm test:e2e
         env:
@@ -547,6 +591,7 @@ jobs:
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
@@ -574,22 +619,14 @@ jobs:
     if: needs.changes.outputs.generate == 'true'
     name: generated code
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -616,22 +653,14 @@ jobs:
     if: needs.changes.outputs.chart == 'true'
     name: chart
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
@@ -650,20 +679,11 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
@@ -682,43 +702,44 @@ jobs:
     if: needs.changes.outputs.escape == 'true'
     name: escape (admission)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
+      # The envtest API server binaries, as in chart smoke (same key: warm-caches saves it).
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
       - run: make test-admission
 
   # shellcheck over every tracked shell script (the set hack/preflight.sh's shell gate uses)
   # and actionlint over the workflows (actionlint also runs shellcheck on the
-  # `run:` blocks). Its own job, not a step of `scripts`: it needs no Go toolchain and is cheap, and it
-  # keeps the lint result separate from the script tests. Both tools are release binaries checked
-  # against a pinned SHA-256, versions at least 3 days old when pinned (ADR 0079; shellcheck 0.11.0 is
-  # from 2025-08-04, actionlint 1.7.12 from 2026-03-30). Bump them together with hack/preflight.sh's use.
-  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594): the pull request head passed it.
+  # `run:` blocks), then zizmor over the same files for security (#579). Its own job, not a step of `scripts`:
+  # it needs no Go toolchain and is cheap, and it keeps the lint result separate from the script tests. The
+  # tools are release binaries checked against a pinned SHA-256, versions at least 3 days old when pinned
+  # (ADR 0079; shellcheck 0.11.0 is from 2025-08-04, actionlint 1.7.12 from 2026-03-30, zizmor 1.32.0 from
+  # 2026-11-02). Bump them together with hack/preflight.sh's use.
   lint-shell:
     name: lint-shell
     needs: changes
-    # !cancelled() and no outputs-based gate on the way in: when `changes` itself fails, this still
-    # runs (empty output is not 'true'), so a red `changes` cannot turn this check into a skip.
-    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
+    # Path-gated (#572: the `shell` output of the path rules) and off on a draft and on a push to main whose heavy
+    # jobs are off (`apply` switches the output). `!= 'false'`, not `== 'true'`: when `changes` itself fails, this
+    # still runs (empty output is not 'false'), so a red `changes` cannot turn this check into a skip.
+    if: ${{ !cancelled() && needs.changes.outputs.shell != 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: ./.github/actions/fetch-pinned
@@ -733,42 +754,46 @@ jobs:
           url: https://github.com/rhysd/actionlint/releases/download/v${{ env.ACTIONLINT_VERSION }}/actionlint_${{ env.ACTIONLINT_VERSION }}_linux_amd64.tar.gz
           sha256: ${{ env.ACTIONLINT_SHA256_AMD64 }}
           dest: ${{ runner.temp }}/pinned/actionlint.tar.gz
-      - name: install shellcheck and actionlint
+      - uses: ./.github/actions/fetch-pinned
+        with:
+          name: zizmor
+          url: https://github.com/zizmorcore/zizmor/releases/download/v${{ env.ZIZMOR_VERSION }}/zizmor-x86_64-unknown-linux-gnu.tar.gz
+          sha256: ${{ env.ZIZMOR_SHA256_AMD64 }}
+          dest: ${{ runner.temp }}/pinned/zizmor.tar.gz
+      - name: install shellcheck, actionlint and zizmor
         run: |
           bin="$RUNNER_TEMP/lintbin"
           mkdir -p "$bin"
           tar xJf "$RUNNER_TEMP/pinned/shellcheck.tar.xz" --strip-components=1 -C "$bin" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           tar xzf "$RUNNER_TEMP/pinned/actionlint.tar.gz" -C "$bin" actionlint
+          tar xzf "$RUNNER_TEMP/pinned/zizmor.tar.gz" -C "$bin" zizmor
           echo "$bin" >>"$GITHUB_PATH"
       - name: shellcheck
         run: git ls-files -z '*.sh' | xargs -0 shellcheck
       - name: actionlint
         run: actionlint
+      # Workflow security lint (W rules of docs/dev/ci-rules.md): default persona, offline (no token, the same
+      # result on every run), config in .github/zizmor.yml. Exits 0 only when no finding is left.
+      - name: zizmor
+        run: zizmor --offline --no-progress .github
 
   # Tests of the e2e tooling scripts: the decision rule (needs the Go toolchain for `go list`) and
   # the remote runner (needs flock, so Linux).
-  # Skipped like `go` on a push to main whose heavy jobs are off (old issue 594); see lint-shell.
+  # Path-gated and skipped like lint-shell.
   scripts:
     name: scripts
     needs: changes
-    if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
+    # Path-gated like lint-shell (#572: the `scripts` output of the path rules).
+    if: ${{ !cancelled() && needs.changes.outputs.scripts != 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       - run: hack/needs-e2e-test.sh
       - run: hack/e2e-commands-check.sh
       - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
@@ -777,6 +802,7 @@ jobs:
           hack/flavor-tag-test.sh
       - run: hack/koinon-fetch-test.sh
       - run: hack/fetch-pinned-test.sh
+      - run: hack/e2e-parts-test.sh
       - run: hack/pinned-download-lint.sh
       - run: hack/apt-retries-test.sh --self-test
       - run: hack/apt-retries-test.sh
@@ -786,6 +812,7 @@ jobs:
       - run: hack/pr-wait-test.sh
       - run: hack/pr-merge-test.sh
       - run: hack/ci-fail-test.sh
+      - run: hack/ci-timing-test.sh
       - run: hack/ci-go-gate-test.sh
       - run: hack/ci-web-gate-test.sh
       - run: hack/ci-required-test.sh
@@ -801,7 +828,6 @@ jobs:
       - run: hack/runner-lint-test.sh
       - run: hack/runner-lint.sh
       - run: hack/old-issue-refs-lint-test.sh
-      - run: hack/old-issue-refs-lint.sh
       - run: hack/audit-batch-lint-test.sh
       - run: hack/audit-batch-lint.sh
       - run: hack/bash5-lint-test.sh
@@ -813,6 +839,8 @@ jobs:
       - run: hack/golangci-lint-test.sh
       - run: hack/preflight-stop-test.sh
       - run: hack/e2e-decide-test.sh
+      - run: hack/kind-registry-test.sh
+      - run: hack/drill-issue-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh
@@ -827,8 +855,12 @@ jobs:
       - run: hack/ci-supersede-test.sh
       - run: hack/ci-concurrency-test.sh
       - run: hack/ci-merge-group-test.sh
+      - run: hack/secrets-skip-test.sh
       - run: hack/ci-cache-test.sh
+      - run: hack/ci-playwright-image-test.sh
       - run: hack/chart-check-test.sh
+      - run: hack/ci-rules-check-test.sh
+      - run: hack/ci-rules-check.sh
 
   # Main owns every CI cache (docs/dev/ci.md#cache-ownership, old issue 147). A pull request can read
   # its own and main's caches only, and `go-test` and the other jobs now restore without saving, so
@@ -842,39 +874,81 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: write # prunes older go-testres- cache entries
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
+      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
+      - name: Stamp file mtimes from content
+        run: hack/ci-stamp-mtime.sh
+      # The weekly go-ci key (.github/actions/setup-go-cache): looked up only, work and save on a miss.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: ./.github/actions/setup-go-cache
         with:
-          go-version-file: go.mod
-          cache: false
-      - id: gocache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
           lookup-only: true
-      # Modules, then every package and every test binary (the objects go-test, go-race, go-lint and
-      # the chart jobs compile), without running a test.
-      - if: steps.gocache.outputs.cache-hit != 'true'
+      # Modules, then every package and every test binary (the objects go-test, go-lint and the chart
+      # jobs compile), without running a test, then the same for the -race packages (the objects the
+      # go-race jobs compile: the race detector changes every object they link) and the ginkgo tool.
+      - if: steps.go.outputs.cache-hit != 'true'
         run: |
           go mod download
           go build ./...
           go test -count=1 -run '^$' ./...
-      - if: steps.gocache.outputs.cache-hit != 'true'
+          go tool ginkgo version
+          go test -race -count=1 -run '^$' ./internal/reconciler/ ./internal/ledger/ ./internal/agentd/ ./internal/durable/
+      - if: steps.go.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          key: ${{ steps.go.outputs.key }}
+      # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
+      # (same script, same flags: they are part of Go's test cache key), without -count=1. Their own
+      # cache entry, saved on every push to main under a per-commit key; pull requests restore it by the
+      # `go-testres-` prefix. Separate from go-ci so a failing test never costs the build cache. Go
+      # caches only passing packages, so a failure only loses hits.
+      - id: testres
+        continue-on-error: true
+        env:
+          KOINON_GO_TEST_CACHE: '1'
+        run: |
+          pkgs=$(hack/go-test-cacheable.sh)
+          [ -n "$pkgs" ] || { echo "no cacheable packages listed" >&2; exit 1; }
+          # shellcheck disable=SC2086 # pkgs is a word list
+          hack/go-test.sh $pkgs
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+      # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
+      # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
+      # Only entries created before this run's entry go: pushes to main do not cancel each other. createdAt
+      # follows the save order, not the commit order, so a prune keeps the entries saved at or after its own;
+      # the worst case is a lost cache hit, never a stale pass. Fractional seconds are cut
+      # before the string compare (RFC 3339 drops trailing zeros, so they do not sort).
+      - name: Prune older test-result caches
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_KEY: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+        run: |
+          MINE=$(gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEEP_KEY" --limit 100 --json key,createdAt --jq '.[] | select(.key == env.KEEP_KEY) | .createdAt | sub("\\.[0-9]+"; "")')
+          [ -n "$MINE" ] || { echo "no $KEEP_KEY entry; nothing pruned"; exit 0; }
+          export MINE
+          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,createdAt --jq '.[] | select((.createdAt | sub("\\.[0-9]+"; "")) < env.MINE) | .id' |
+            while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY"; done
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
-      # go.mod, so it must be refreshed on every push to main, not only when go-ci missed. The action
-      # skips the save on an exact hit and downloads modules itself when go-ci was only looked up.
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      # go.mod. The go-ci key carries the same 7-day interval (setup-go-cache), so a go-ci miss is also the
+      # first push of a new interval: run the full lint (it fills the new lint cache) only then, and not
+      # on a hit, where the lint cache of this interval exists already (issue 572). Pull requests that
+      # miss it fall back to an older entry through the action's own restore keys.
+      - if: steps.go.outputs.cache-hit != 'true'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
       # The envtest API server binaries; the key is the Makefile's ENVTEST_K8S_VERSION.
@@ -895,8 +969,7 @@ jobs:
   # pnpm stores, one job per lockfile (no matrix: hack/ci-required-test.sh cannot name matrix checks), each
   # with the cache-dependency-path the consuming jobs use: setup-node hashes the listed files into its
   # key, so a combined list would never match a consumer. setup-node saves the store after a job that
-  # missed it, so installing is all a job does. `warm-caches-web` also warms the Playwright browser, by
-  # @playwright/test version (the key web-e2e restores). Never skipped by `changes`.
+  # missed it, so installing is all a job does. Never skipped by `changes`.
   warm-caches-web:
     name: warm-caches-web
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -904,6 +977,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -914,32 +989,16 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
-      # The Playwright browser, by @playwright/test version (the key web-e2e restores).
-      - id: pw
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >>"$GITHUB_OUTPUT"
-        working-directory: web
-      - id: pwcache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-          lookup-only: true
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install chromium
-        working-directory: web
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
 
   # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
   # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
-  # a fake key; it never reaches a real or paid model. The only advisory job on pull requests (hack/ci-required.txt); flavor-publish below is push-only.
+  # a fake key; it never reaches a real or paid model. Required, but it runs in the merge queue and on main only, not on pull requests (#572, #128); flavor-publish below is push-only.
   flavors:
     needs: changes
-    if: needs.changes.outputs.flavors == 'true'
+    # Not on a pull request (#572, #128): the merge queue and main run it, and the queue run is the required one.
+    # A job-level skip reports success, so the required name still reports on a pull request.
+    if: github.event_name != 'pull_request' && needs.changes.outputs.flavors == 'true'
     name: flavors
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -951,20 +1010,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      # The one Go cache (go-ci), saved by warm-caches on main; restore only here.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-ci-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+        uses: ./.github/actions/setup-go-cache
       # The docker-container driver is needed for the local layer cache below; --load still puts
       # the images in the runner's Docker store, where the suite looks for them.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -1008,6 +1058,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: flavorcache

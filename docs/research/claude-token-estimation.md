@@ -1,5 +1,10 @@
 # Estimating Claude token counts offline
 
+- Status: Complete
+- Date: 2026-10-24
+- Area: models-spend
+- Tags: spend-ledger, models
+
 Research date: 2026-10-24. Primary sources only: source at a pinned commit, plus official docs.
 Each claim is tagged **[established]** (read directly in the cited source) or **[inference]** (my
 conclusion from the sources). Source numbers like [S3] point to the Sources section at the end.

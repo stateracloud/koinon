@@ -64,7 +64,7 @@ Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose, oapi-codegen
 tools in `go.mod` and run through `go tool`. `setup-envtest` for the admission tests is fetched by
 `make test-admission`.
 
-Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint,
+Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint, zizmor,
 goreleaser, cosign, kubeconform and golangci-lint, with the sha256 of each release asset the e2e image
 or a workflow downloads (Go stays in `go.mod`). Scripts source the file and workflows load it into the
 job environment; the copies that cannot (the `hack/e2e-toolchain/Dockerfile` ARGs, the `version:` input
@@ -99,7 +99,7 @@ including how to point Tilt at a remote cluster of your own.
   `buf breaking`, generated code up to date, migration lint, DCO, and the gitleaks secret scan.
   The full list of required checks is `hack/ci-required.txt` (it also covers the docs build, the
   chart smoke test, the dependency age check and the script tests); a check that does not apply to
-  your change reports success. `flavors` is the only advisory job on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` keeps
+  your change reports success. `flavors` is required but runs only in the merge queue and on main (on a pull request its job is skipped, which reports success); `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` keeps
   the list and `ci.yml` in step.
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
@@ -116,7 +116,9 @@ including how to point Tilt at a remote cluster of your own.
   names the holder and what to do. There is no updater bot: merge `main` into
   your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
   `origin/main` and wait for green first.
-- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
+- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it. An ADR that
+  amends another is named in that one's header, and it puts a one-line marker at each decision it changes
+  (ADR 0046 decision 4); the lint checks the links both ways, review checks the markers.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
   published.

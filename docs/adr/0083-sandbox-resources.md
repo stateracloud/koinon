@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-31
+- Area: runtime-sandbox
+- Tags: sandbox, kubernetes, isolation
 - Relates to: [0045](0045-openshell-hardening-defaults.md), [0075](0075-isolation-tiers.md), [0020](0020-agent-builder-and-templates.md), [0027](0027-repo-and-versioning.md)
 - Issue: old issue 314 (decision by procoduck, 2026-10-31); this ADR covers the first slice
 
@@ -60,12 +62,53 @@ that cannot be reclaimed.
 - Negative: the spec hash changes, so after the upgrade each existing sandbox is recreated once; its
   home is restored from the checkpoint, as for any recreate. Changing a default, a bound or
   `memoryRequestEqualsLimit` later recreates the sandboxes it changes.
-- Negative: the supervisor pod stays BestEffort. OpenShell 0.1.5 cannot size it (upstream
-  NVIDIA/OpenShell #3930 and #3415), so its use is unaccounted for until upstream does.
 - Negative: with `memoryRequestEqualsLimit`, the default reserves 2Gi of node memory per sandbox.
 - Follow-ups, each its own issue: a per-agent override within the platform bounds (API, data model
-  and UI), a LimitRange for the supervisor's namespace, and per-org capacity admission.
+  and UI), and per-org capacity admission.
+
+### Amendment (2026-11-11)
+
+- A reconciler-owned LimitRange in each OpenShell workspace namespace (#76) supplies default
+  requests (50m/64Mi) and limits (250m/256Mi) for type Container (which also covers init
+  containers), so the supervisor and init containers are no longer BestEffort. OpenShell still
+  cannot size them itself (upstream NVIDIA/OpenShell #3930 and #3415). Chart: `sandboxLimitRange`;
+  RBAC is fenced by a ValidatingAdmissionPolicy to this gateway's workspace namespaces and the
+  fixed shape.
+- A LimitRange sizes pods only at admission: only pods admitted after the LimitRange exists get
+  the defaults. OpenShell creates the workspace namespace with the first sandbox, so a missing
+  namespace does not hold CreateSandbox; Ensure runs again right after create. Other Ensure failures
+  (for example Forbidden) are logged and counted (`koinon_reconciler_sandbox_limit_range_errors_total`)
+  and hold that org's sandbox work. When CreateSandbox ran before the LimitRange existed, the
+  reconciler deletes that sandbox once so the next pass admits supervisors sized.
+- Kata's pod overhead (`podFixed` on the RuntimeClass) is outside these Container defaults. A
+  Pod-type LimitRange max would have to include that overhead; this amendment does not add one.
+- Turning `sandboxLimitRange.enabled` off stops the chart from rendering the ClusterRole, binding
+  and VAP, and the reconciler applies nothing new. Existing LimitRanges stay until removed:
+  `kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`.
+
+### Amendment (2026-11-11): per-agent override (#75)
+
+- An org admin or owner can override the four values for one agent (`SetAgentSandboxResources`,
+  `GetAgentSandboxResources`; the agent page, "Sandbox size"). The override is a setting of the agent,
+  not a new version, stored in four nullable columns of `agents` (migration `00074`, expand-only).
+- **Precedence:** the agent's override, else the template's value, else the platform default, per
+  value; then the clamp of decision 4. The reconciler clamps again on every pass because the bounds
+  can change after the write; a stale out-of-bounds override is logged once and runs clamped.
+- **The API refuses** a value outside the bounds, a malformed quantity, and a request above its limit
+  (taking the template and the default into account), with `INVALID_ARGUMENT` and a message that
+  names the bounds ("memory.limit 16Gi is above the maximum: the platform allows 512Mi to 8Gi").
+  Setting a memory request that the install raises to the limit (`memoryRequestEqualsLimit`) is
+  allowed; the state reports the effective value and the flag.
+- **Audited** as `agent.sandbox_resources.set` with the old and the new override in one transaction;
+  a repeat of the stored value writes nothing.
+- **The API needs the bounds.** `koinon-api` reads the `sandboxResources` section of `config.yaml`
+  (the chart now mounts the file into the API Deployment and rolls it on a change); every other
+  setting of the API stays a flag or environment variable. One parser (`sandboxres.FromConfig`)
+  serves both binaries.
+- A change recreates the sandbox at the next pass (the size is in the spec hash).
+- Not done here: the REST admin API (`internal/adminapi`) does not expose it yet.
 
 ## Links
 
 - Old issue 314
+- #76

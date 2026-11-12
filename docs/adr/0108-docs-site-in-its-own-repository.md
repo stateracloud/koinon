@@ -1,7 +1,9 @@
 # 0108. The docs site lives in its own repository; this repository owns the tested commands
 
-- Status: Accepted (maintainer decisions of 2026-11-10, issue #491)
+- Status: Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127)
 - Date: 2026-11-10
+- Area: engineering-process
+- Tags: docs, e2e
 - Supersedes in part: [0037](0037-tooling.md) (the docs-site decision: Starlight in `docs/site/`; Starlight itself stays)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decision 18, backup and restore), [0105](0105-merge-queue-route.md)
   (the merge queue's `quickstart` is the e2e proof)
@@ -54,6 +56,7 @@ without making this repository wait for it.
    `koinon-docs`.
 9. **Reference pages** (generated) come from the release job here via a bot pull request in `koinon-docs`;
    later work, tracked on #505.
+   _(Changed 2026-11-11, see the amendment below (issue #127): the generated reference is committed here under `docs/reference/proto/` and `koinon-docs` reads it at a release tag; no bot pull request.)_
 
 ## Alternatives considered
 
@@ -83,3 +86,11 @@ without making this repository wait for it.
   `https://koinon.stateracloud.com/docs/operate/sandbox-break-glass/`, `docs/ops/secret-keys.md` is
   `https://koinon.stateracloud.com/docs/operate/secret-keys/` and the prices page is
   `https://koinon.stateracloud.com/docs/operate/default-prices/`.
+
+## Amendment 2026-11-11: the generated reference is committed here (issue #127)
+
+Decision 9 names a bot pull request from the release job. That is not how the proto reference reaches
+`koinon-docs`. This repository commits the generated reference under `docs/reference/proto/`
+(`proto-api.json` and `proto-api.md`, written by `make generate`; CI's no-diff check keeps it current), and
+`koinon-docs` reads it at a release tag (`stateracloud/koinon-docs#6`). No bot pull request is needed. The
+generator is `cmd/protoc-gen-koinon-doc`, owned here; the JSON layout is in `docs/reference/README.md`.

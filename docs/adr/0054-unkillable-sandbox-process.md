@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard
 - Date: 2026-10-23
+- Area: runtime-sandbox
+- Tags: sandbox, agent-home, approvals, runs
 - Amends: [0051](0051-session-home-generations.md) (adds a reason for recreating a sandbox)
 
 ## Context

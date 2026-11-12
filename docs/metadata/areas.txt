@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Areas: every ADR, research note, spike and docs-site page names exactly one (ADR 0115).
+# Format: <area> <TAB or spaces> <what belongs in it>. Add an area only with an ADR amendment.
+tenancy-identity      orgs, users, agent identity, sign-in, OIDC, workload identity, sharing between orgs
+runtime-sandbox       sandboxes, OpenShell, isolation tiers, harnesses, flavors, agent homes, checkpoints, resources
+models-spend          model providers, model routing, prices, budgets, the spend ledger, prompt caching
+connectors-tools      connectors, MCP servers, code hosts, work trackers, skills, tool access
+work-model            tasks, inbox, chat, triggers, approvals, runs and their state, the concierge
+security-audit        leak guard, audit chain, secret keys, credential policy, admission, hardening
+install-operations    chart, install, upgrade, backup and restore, databases, migrations, registries, metrics
+frontend-ux           the web UI, screens, the CLI, interaction design
+engineering-process   CI, tests, releases, work claims, ADR conventions, tooling, docs, governance, the repository
+product-scope         roadmap, scope decisions, naming, demos, licence

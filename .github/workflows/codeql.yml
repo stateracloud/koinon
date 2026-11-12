@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CodeQL code scanning, advanced setup (#572). It replaces GitHub's default setup, which analysed every push to
+# main and every pull request and kept a CodeQL database per commit in the Actions cache (about half of the
+# 10 GB cache limit). Here:
+#   - a pull request is scanned only when it changes Go or web code (a workflow-level `paths` filter is fine:
+#     this check is advisory and never required, hack/ci-required.txt), and not as a draft;
+#   - `main` is scanned once a week, and on a dispatch;
+#   - no `push` and no `merge_group` trigger, and nothing here saves a database or TRAP files to the cache.
+# Same languages and query suite as the default setup had (`gh api repos/{owner}/{repo}/code-scanning/default-setup`
+# on 2026-11-11: actions, go, javascript-typescript, python; suite `default`; the `javascript` and `typescript`
+# entries it lists are aliases of javascript-typescript).
+#
+# SWITCH-OVER (the maintainer, in this order; the two setups cannot both upload for one language):
+#   1. Merge the pull request that adds this file.
+#   2. Settings > Advanced Security > Code scanning > CodeQL analysis > "Switch to advanced" (default setup off).
+#      Until step 2 the default setup rejects this workflow's uploads, so run step 2 right after step 1.
+#   3. Run this workflow once by hand (Actions > codeql > Run workflow) and check the Security tab.
+# Action pins follow ADR 0079 (releases at least 3 days old); the shape follows GitHub's own advanced-setup
+# template (github/codeql-action docs, "Customizing your advanced setup for code scanning").
+name: codeql
+
+on:
+  pull_request:
+    branches: [main]
+    # ready_for_review is not a default type: without it a draft marked ready with no new push is never scanned.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - web/**
+      - .github/workflows/codeql.yml
+  schedule:
+    - cron: "41 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    # Not a draft. Not a fork's or Dependabot's pull request: their token cannot write security events, so the
+    # upload would fail; the weekly run scans their code once it is on main.
+    if: >-
+      github.event_name != 'pull_request'
+      || (!github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+      actions: read # the workflow run, for the upload's metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # The default query suite, as before. No cache of any kind: the Go modules are downloaded by the
+          # build, and TRAP files of a pull request's changed files rarely repeat.
+          dependency-caching: false
+          trap-caching: false
+
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+          upload-database: false

@@ -3,7 +3,10 @@
 package koinonapi
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -183,11 +186,26 @@ func anchorAudit(ctx context.Context, db audit.Beginner, out io.Writer) error {
 // is checked against. It returns audit.ErrBroken when the file does not hold.
 func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
+	var r io.Reader = os.Stdin
+	if path != "-" {
+		f, err := os.Open(path) //nolint:gosec // the operator names the file to check
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		r = f
+	}
+	var anchorOrg string
+	if anchors != "" {
+		// The anchors are kept for this file's org only (an install export holds the heads of every
+		// org for every anchor): read the header line first, then hand it back to the verifier.
+		anchorOrg, r = peekExportOrg(r)
+	}
 	if anchors != "" {
 		// Verify without CollectAnchors first: that option is install-only inside VerifyExport, so
 		// an org file would fail with an internal option name before we can say --anchors needs
 		// an install export (#406 Bugbot).
-		inst, err := checkExportFile(anchors, false)
+		inst, err := checkExportFile(anchors, false, "")
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -198,7 +216,7 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if inst.Header.Chain != audit.ChainInstall {
 			return fmt.Errorf("--anchors %s is an org export; give an install export", anchors)
 		}
-		inst, err = checkExportFile(anchors, true)
+		inst, err = checkExportFile(anchors, true, anchorOrg)
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -209,13 +227,13 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if len(inst.StreamAnchors) == 0 {
 			_, _ = fmt.Fprintf(out, "note    --anchors %s holds no anchors: nothing to check the file against\n", anchors)
 		}
-		opt.Anchors = &audit.ExportAnchorSet{InstallID: inst.Header.InstallID, Anchors: inst.StreamAnchors}
+		opt.Anchors = inst.AnchorSet()
 	}
 	if after != "" {
 		if after == "-" {
 			return errors.New("--after must be a file path, not stdin")
 		}
-		prev, err := checkExportFile(after, false)
+		prev, err := checkExportFile(after, false, "")
 		if err != nil {
 			return fmt.Errorf("--after %s: %w", after, err)
 		}
@@ -229,15 +247,6 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 			// continues is only as far checked as the --after file's own start.
 			_, _ = fmt.Fprintf(out, "note    --after %s starts at chain_seq %d: its first prev_hash is not checked (give the earlier export with its own --after)\n", after, prev.Header.FromSeq)
 		}
-	}
-	var r io.Reader = os.Stdin
-	if path != "-" {
-		f, err := os.Open(path) //nolint:gosec // the operator names the file to check
-		if err != nil {
-			return err
-		}
-		defer func() { _ = f.Close() }()
-		r = f
 	}
 	res, err := audit.VerifyExport(r, opt)
 	if err != nil {
@@ -257,15 +266,25 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 // show that the file agrees with itself, and anyone can write a file that does.
 const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it"
 
+// peekExportOrg reads the header line of an export and returns its org_id (empty when the line is
+// not a header: the verifier then reports it) with a reader that still yields the whole stream.
+func peekExportOrg(r io.Reader) (string, io.Reader) {
+	br := bufio.NewReader(r)
+	line, _ := br.ReadBytes('\n') // a read error resurfaces when the verifier reads on
+	var h audit.ExportHeader
+	_ = json.Unmarshal(line, &h)
+	return h.OrgID, io.MultiReader(bytes.NewReader(line), br)
+}
+
 // checkExportFile verifies one export file alone. collectAnchors keeps stream anchors on the result
-// (for --anchors on an install export).
-func checkExportFile(path string, collectAnchors bool) (audit.ExportResult, error) {
+// (for --anchors on an install export), only the heads of anchorOrg when it is set.
+func checkExportFile(path string, collectAnchors bool, anchorOrg string) (audit.ExportResult, error) {
 	f, err := os.Open(path) //nolint:gosec // the operator names the file to check
 	if err != nil {
 		return audit.ExportResult{}, err
 	}
 	defer func() { _ = f.Close() }()
-	return audit.VerifyExport(f, audit.ExportVerifyOptions{CollectAnchors: collectAnchors})
+	return audit.VerifyExport(f, audit.ExportVerifyOptions{CollectAnchors: collectAnchors, AnchorOrgID: anchorOrg})
 }
 
 // verifyAudit verifies the install chain and every org's chain, or one org's with orgID, or the
@@ -330,6 +349,9 @@ type installRetry struct {
 	Goroutine, What string
 	// AnyError retries on every error, not only on a refused install write (the key-set check).
 	AnyError bool
+	// Log receives the lines of this write and its retry; nil means slog.Default(). It is read once, when the
+	// retry starts, so the background goroutine never touches the process-wide default afterwards.
+	Log *slog.Logger
 }
 
 // retryInstallWrite is the one startup rule for a write that records an install audit event (ADR 0100):
@@ -347,14 +369,18 @@ func retryInstallWrite(bg context.Context, stop func(), r installRetry, interval
 		return first
 	}
 	state := installWriteState(first)
+	log := r.Log
+	if log == nil {
+		log = slog.Default()
+	}
 	if denied {
-		slog.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
+		log.Error("the "+r.What+" is not recorded yet: the database refuses koinon-api's install audit event; retrying until the "+
 			"install audit writer role is granted (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", r.What, "err", first)
 	} else {
-		slog.Error("not recorded; retrying", "what", r.What, "err", first)
+		log.Error("not recorded; retrying", "what", r.What, "err", first)
 	}
-	safego.GoOrStop(bg, slog.Default(), r.Goroutine, stop, func(ctx context.Context) {
-		installWriteLoop(ctx, r.What, state, interval, write)
+	safego.GoOrStop(bg, log, r.Goroutine, stop, func(ctx context.Context) {
+		installWriteLoop(ctx, log, r.What, state, interval, write)
 	})
 	return nil
 }
@@ -381,7 +407,7 @@ func installWriteState(err error) string {
 // change of state, not on every attempt: last is the state already logged for the first failure (the
 // caller logged it), a retry that fails in the same state stays quiet, a refusal turning into another
 // failure (or back) is a line of its own, and so is the write landing.
-func installWriteLoop(ctx context.Context, what, last string, interval time.Duration, write func(context.Context) error) {
+func installWriteLoop(ctx context.Context, log *slog.Logger, what, last string, interval time.Duration, write func(context.Context) error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -390,7 +416,7 @@ func installWriteLoop(ctx context.Context, what, last string, interval time.Dura
 		}
 		err := write(ctx)
 		if err == nil {
-			slog.Info("recorded after a retry", "what", what)
+			log.Info("recorded after a retry", "what", what)
 			return
 		}
 		if ctx.Err() != nil {
@@ -402,10 +428,10 @@ func installWriteLoop(ctx context.Context, what, last string, interval time.Dura
 		}
 		last = state
 		if state == "denied" {
-			slog.Error("still not recorded: the database refuses koinon-api's install audit event; "+
+			log.Error("still not recorded: the database refuses koinon-api's install audit event; "+
 				"grant the install audit writer role (koinon-api migrate --grants-only, the chart's post-upgrade hook)", "what", what, "err", err)
 			continue
 		}
-		slog.Error("still not recorded; retrying", "what", what, "err", err)
+		log.Error("still not recorded; retrying", "what", what, "err", err)
 	}
 }

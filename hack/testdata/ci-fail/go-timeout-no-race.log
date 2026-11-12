@@ -1,0 +1,6 @@
+# expect: timeout no
+panic: test timed out after 10m0s
+	running tests:
+		TestSeedLarge (9m59s)
+--- FAIL: TestSeedLarge (600.00s)
+FAIL	example.invalid/koinon/internal/seed	600.1s

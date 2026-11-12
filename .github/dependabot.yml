@@ -39,21 +39,17 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # One entry and one group for the three Dockerfile directories: one pull request a week, not three
+  # (issue 572).
   - package-ecosystem: docker
-    directory: /flavors/opencode
+    directories:
+      - /flavors/opencode
+      - /test/fixtures/rt1/motherduck
+      - /test/fixtures/rt1/prometheus
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
     commit-message: {prefix: "chore(deps)"}
     cooldown: {default-days: 3}
-  - package-ecosystem: docker
-    directory: /test/fixtures/rt1/motherduck
-    schedule: {interval: weekly, day: monday}
-    open-pull-requests-limit: 5
-    commit-message: {prefix: "chore(deps)"}
-    cooldown: {default-days: 3}
-  - package-ecosystem: docker
-    directory: /test/fixtures/rt1/prometheus
-    schedule: {interval: weekly, day: monday}
-    open-pull-requests-limit: 5
-    commit-message: {prefix: "chore(deps)"}
-    cooldown: {default-days: 3}
+    groups:
+      docker:
+        patterns: ["*"]

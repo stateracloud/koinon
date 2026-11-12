@@ -35,15 +35,32 @@ jobs_for() {
 	printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
 }
 
-# expect <expected jobs> <path>...: the paths together must turn on exactly these jobs.
+# The path-gate jobs of #572 (tidy: go-tidy and go-lint, shell: lint-shell, scripts) have their own table in
+# section 1b; `expect` leaves them out of the comparison so the heavy-job table stays about the heavy jobs.
+gate_jobs='tidy|shell|scripts'
+
+# expect <expected jobs> <path>...: the paths together must turn on exactly these jobs (the path-gate jobs aside).
 expect() {
 	local want got
 	want=$(tr ' ' '\n' <<<"$1" | sed '/^$/d' | sort | tr '\n' ' ')
 	shift
 	total=$((total + 1))
-	got=$(jobs_for "$@")
+	got=$(jobs_for "$@" | tr ' ' '\n' | grep -vxE "$gate_jobs" | tr '\n' ' ' || true)
 	if [[ $got != "$want" ]]; then
 		echo "FAIL: $* -> [${got% }] want [${want% }]"
+		fails=$((fails + 1))
+	fi
+}
+
+# expect_gates <expected path-gate jobs> <path>...: of tidy, shell and scripts, exactly these turn on.
+expect_gates() {
+	local want got
+	want=$(tr ' ' '\n' <<<"$1" | sed '/^$/d' | sort | tr '\n' ' ')
+	shift
+	total=$((total + 1))
+	got=$(jobs_for "$@" | tr ' ' '\n' | grep -xE "$gate_jobs" | tr '\n' ' ' || true)
+	if [[ $got != "$want" ]]; then
+		echo "FAIL: $* -> gates [${got% }] want [${want% }]"
 		fails=$((fails + 1))
 	fi
 }
@@ -106,6 +123,8 @@ expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "generate" hack/generate.sh         # make generate delegates here (#349)
+expect "generate go" cmd/protoc-gen-koinon-doc/doc.go
+expect "generate" docs/reference/proto/proto-api.md   # buf.gen.docs.yaml output
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
 
@@ -154,8 +173,65 @@ expect "$all" hack/ci-changes.sh
 expect "$all" hack/ci-skip-heavy.sh
 expect "$all" hack/paths.rules
 expect "$all" hack/paths-lib.sh
+# CI_CHANGES_IGNORE_PLUMBING=1 (hack/pr-merge.sh --admin) drops the CI-plumbing rule but keeps the build inputs.
+expect_ignoring() { # <want flavors value> <paths...>
+	local want=$1 got
+	shift
+	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^flavors=//p')
+	total=$((total + 1))
+	if [[ $got != "$want" ]]; then
+		echo "FAIL: ignoring plumbing, flavors for [$*]: want $want, got $got"
+		fails=$((fails + 1))
+	fi
+}
+for f in .github/workflows/ci.yml hack/ci-changes.sh hack/ci-skip-heavy.sh hack/paths.rules hack/paths-lib.sh; do
+	expect_ignoring false "$f"
+done
+expect_ignoring false .github/workflows/ci.yml .github/CODEOWNERS
+expect_ignoring true Makefile
+expect_ignoring true go.mod
+expect_ignoring true go.sum
+expect_ignoring true .github/workflows/ci.yml flavors/base/Dockerfile
+expect_ignoring true .github/workflows/ci.yml internal/execution/run.go
+expect_ignoring true # an empty change list still fails closed
 # Several paths together: the union.
 expect "go chart chartsmoke escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
+
+# --- 1b. The path gates of #572: go-tidy and go-lint (tidy), lint-shell (shell) and scripts. -------------------
+# tidy: Go files, go.mod/go.sum and the lint config. shell: shell scripts, .github/, the tool pins.
+# scripts: fail closed; only Markdown, docs/ (except docs/adr and docs/dev/ci.md, which checks read) and web/src
+# cannot affect it (hack/paths.rules says why).
+expect_gates "" README.md
+expect_gates "" docs/design.md
+expect_gates "" docs/dev/other.md
+expect_gates "" web/src/app.ts
+expect_gates "" web/src/gen/koinon/x_pb.ts
+expect_gates "scripts" docs/adr/0001-x.md
+expect_gates "scripts" docs/dev/ci.md
+expect_gates "scripts" AGENTS.md
+expect_gates "scripts" CONTRIBUTING.md
+expect_gates "scripts" web/package.json
+expect_gates "scripts" web/pnpm-lock.yaml
+expect_gates "scripts" charts/koinon/values.yaml
+expect_gates "scripts" test/e2e/commands/quickstart.e1
+expect_gates "scripts" flavors/opencode/Dockerfile
+expect_gates "scripts" some-new-top-level-file
+expect_gates "tidy scripts" internal/zzz-new/x.go
+expect_gates "tidy scripts" web/webui.go
+expect_gates "tidy scripts" .golangci.yml
+expect_gates "shell scripts" hack/ship.sh
+expect_gates "shell scripts" hack/ci-changes-test.sh
+expect_gates "shell scripts" .github/workflows/e2e-kind.yml
+expect_gates "shell scripts" .github/actions/fetch-pinned/action.yml
+expect_gates "shell scripts" hack/versions.env
+expect_gates "shell scripts" internal/agentd/savework.sh
+expect_gates "tidy scripts" hack/pgserver/main.go
+expect_gates "tidy shell scripts" go.mod
+expect_gates "tidy shell scripts" go.sum
+expect_gates "tidy shell scripts" Makefile
+expect_gates "tidy shell scripts" .github/workflows/ci.yml
+expect_gates "tidy shell scripts" hack/paths.rules
+expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
 
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
 # Read the script's output fully before grepping: chartsmoke is not the last job, so `grep -q` in

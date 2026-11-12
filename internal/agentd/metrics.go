@@ -5,6 +5,7 @@ package agentd
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
@@ -32,6 +33,9 @@ type Metrics struct {
 	SandboxWaitCap *prometheus.CounterVec
 	// WrapUpNotices counts runs whose agent was told a run limit is near, by the limit (ADR 0081).
 	WrapUpNotices *prometheus.CounterVec
+	// LoopDetections counts what agentd did about a stuck agent, by action (nudge, stop) and pattern
+	// (loopguard.Patterns). Fixed labels only (ADR 0023).
+	LoopDetections *prometheus.CounterVec
 	// TimeLimitStops counts runs this replica stopped at their time limit.
 	TimeLimitStops prometheus.Counter
 	// TraceSpansDropped counts run spans that were not exported, by reason (queue_full,
@@ -80,6 +84,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		WrapUpNotices: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_agentd_wrap_up_notices_total", Help: "Runs whose agent was told a run limit is near, by the limit.",
 		}, []string{"limit"}),
+		LoopDetections: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_agentd_loop_detections_total", Help: "Stuck-agent detections acted on, by action (nudge: the agent was told; stop: the run was failed with class loop) and pattern.",
+		}, []string{"action", "pattern"}),
 		TimeLimitStops: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_agentd_time_limit_stops_total", Help: "Runs this replica stopped at their time limit (the api's sweep is the backstop and is not counted).",
 		}),
@@ -122,6 +129,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, k := range runlimits.Kinds {
 		m.WrapUpNotices.WithLabelValues(string(k))
 	}
+	for _, a := range []string{loopNudge, loopStop} {
+		for _, p := range loopguard.Patterns {
+			m.LoopDetections.WithLabelValues(a, string(p))
+		}
+	}
 	for _, c := range execution.WaitCauses {
 		m.SandboxWaitCap.WithLabelValues(string(c))
 	}
@@ -147,7 +159,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.TaintReports, m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued,
-			m.SandboxWaitCap, m.WrapUpNotices, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
+			m.SandboxWaitCap, m.WrapUpNotices, m.LoopDetections, m.TimeLimitStops, m.TraceSpansDropped, m.TraceSpansExported,
 			m.RunEventWriteFailures, m.SweepRefused, m.HomeRepositorySeeds, m.HomeCheckpointResyncs, m.HomeCheckpointResyncChanges)
 	}
 	return m

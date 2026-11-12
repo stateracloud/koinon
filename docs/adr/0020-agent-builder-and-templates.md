@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: approvals, identity, ui
 - Decision: [design.md#20](../design.md)
 
 ## Context

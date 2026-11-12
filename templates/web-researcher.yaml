@@ -7,7 +7,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: web-researcher
-  version: 0.1.0
+  version: 0.1.1
   displayName: Web researcher
   description: >-
     Researches a question on the public web over several runs and answers with a cited Markdown
@@ -25,6 +25,9 @@ spec:
     memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
+  # The tools the instructions call or describe ("the search and fetch tools"); the legs test reads
+  # this list (ADR 0084 decision 9).
+  tools: [ask_user, web_url_read, searxng_web_search]
   grants: []
   limits:
     run:

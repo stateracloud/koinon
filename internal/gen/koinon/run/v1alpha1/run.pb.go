@@ -167,6 +167,9 @@ const (
 	FailureClass_FAILURE_CLASS_FATAL FailureClass = 6
 	// The sandbox never became ready within the org's cap; never retried.
 	FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE FailureClass = 7
+	// The agent kept repeating itself after one nudge (the same action, the same error, messages
+	// without a tool call, or two actions taking turns); never retried.
+	FailureClass_FAILURE_CLASS_LOOP FailureClass = 8
 )
 
 // Enum value maps for FailureClass.
@@ -180,6 +183,7 @@ var (
 		5: "FAILURE_CLASS_POLICY",
 		6: "FAILURE_CLASS_FATAL",
 		7: "FAILURE_CLASS_SANDBOX_UNAVAILABLE",
+		8: "FAILURE_CLASS_LOOP",
 	}
 	FailureClass_value = map[string]int32{
 		"FAILURE_CLASS_UNSPECIFIED":         0,
@@ -190,6 +194,7 @@ var (
 		"FAILURE_CLASS_POLICY":              5,
 		"FAILURE_CLASS_FATAL":               6,
 		"FAILURE_CLASS_SANDBOX_UNAVAILABLE": 7,
+		"FAILURE_CLASS_LOOP":                8,
 	}
 )
 
@@ -1263,7 +1268,7 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x14PARK_REASON_APPROVAL\x10\x01\x12\x16\n" +
 	"\x12PARK_REASON_BUDGET\x10\x02\x12\x13\n" +
 	"\x0fPARK_REASON_A2A\x10\x03\x12\x1e\n" +
-	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\xff\x01\n" +
+	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\x97\x02\n" +
 	"\fFailureClass\x12\x1d\n" +
 	"\x19FAILURE_CLASS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FAILURE_CLASS_TRANSIENT\x10\x01\x12\x1b\n" +
@@ -1272,7 +1277,8 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x14FAILURE_CLASS_BUDGET\x10\x04\x12\x18\n" +
 	"\x14FAILURE_CLASS_POLICY\x10\x05\x12\x17\n" +
 	"\x13FAILURE_CLASS_FATAL\x10\x06\x12%\n" +
-	"!FAILURE_CLASS_SANDBOX_UNAVAILABLE\x10\a2\xa0\x02\n" +
+	"!FAILURE_CLASS_SANDBOX_UNAVAILABLE\x10\a\x12\x16\n" +
+	"\x12FAILURE_CLASS_LOOP\x10\b2\xa0\x02\n" +
 	"\n" +
 	"RunService\x12V\n" +
 	"\x06GetRun\x12\".koinon.run.v1alpha1.GetRunRequest\x1a#.koinon.run.v1alpha1.GetRunResponse\"\x03\x90\x02\x01\x12Z\n" +

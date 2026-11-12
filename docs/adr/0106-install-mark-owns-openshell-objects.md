@@ -2,8 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Area: runtime-sandbox
+- Tags: openshell, install, backup-restore
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0051](0051-session-home-generations.md), [0045](0045-openshell-hardening-defaults.md), [0046](0046-adr-conventions.md)
-- Issues: #461, #275 (the restore drill)
+- Issues: #461, #275 (the restore drill), #511 (the unmarked list)
 
 ## Context
 
@@ -78,14 +80,93 @@ name. Velero's restore marks restored objects the same way.
   replaces the old install applies the mark backup before its first start; a drill copy does not.
 - Legacy objects stay open to a second install until the live install has recreated them, which takes
   several passes (held runs, the cap, attached providers). A restored copy may run on the same gateway only
-  when every sandbox, provider and provider profile of the live install carries the mark: the gauge
-  `koinon_openshell_unmarked_objects` is 0 for every kind and `koinon_openshell_unmarked_objects_stale` is 0.
-  A retained (archived) sandbox is counted and is claimed only when it is recreated, so the operator unarchives
-  its agent on the live install first, or deletes the sandbox when its home volume is not needed.
+  when every sandbox, provider and provider profile of the live install without a known owner carries the
+  mark: the gauge `koinon_openshell_unmarked_objects` is 0 for every kind and
+  `koinon_openshell_unmarked_objects_stale` is 0. 0 means no object without a known owner is left; that is
+  reached only when the install has no orphans (`org-not-in-db`, `not-reconciler-made`). `waits-for-agent`
+  objects (amendment for issue 511: a retained (archived) sandbox and the stopped sandbox of a draft agent,
+  with the providers it attaches) are listed and counted apart, in
+  `koinon_openshell_unmarked_objects_waiting_for_agent{kind}`, and do not block: a restored copy of the same
+  database sees the same agent in the same status and does not claim the object either. They are claimed only
+  when the agent changes status. The exception is an agent that was active in the backup and has since
+  returned to draft or been archived on the live install: its objects are hidden as `waits-for-agent` on the
+  live install, so the gate passes, but the copy sees the agent active and an unmarked sandbox, and
+  `reconcileActive` there recreates it with the copy's mark, which deletes the live home volume. (The reverse,
+  an agent activated or unarchived since the backup, is safe: its objects are counted and block the gate.) So
+  the drill takes its backup only after the gate reads 0 (both gauges as above), and no agent leaves active
+  on the live install between the backup and the end of the drill; if one does, the operator does not
+  release the copy's hold and takes the backup again once the gate reads 0. The restore hold (ADR 0107) does not
+  close this by itself: a held reconciler converges no sandbox, so nothing happens while the copy is held,
+  but a drill copy released on the same gateway runs `reconcileActive` like any install. The drill does not
+  activate or unarchive agents on the copy, and an operator who wants the second gauge at 0 too unarchives
+  the archived agent on the live install, activates or archives the draft agent, or deletes the sandbox when
+  its home volume is not needed.
 - A foreign-owned agent cannot run on that gateway. A drill that needs running sandboxes needs its own gateway.
 - Exec, upload and stop check the sandbox first, which costs one extra `GetSandbox` RPC per call.
 - Provider deletion of an attached provider is assumed to fail on real OpenShell; the fake gateway refuses it
   too. If OpenShell allows it, the claim order stays correct and the assumption only costs a clearer error.
+
+## Amendment (issue 511): draft and archived agents, and the unmarked list
+
+On the lab install the gauge stayed flat at profile=28, provider=62, sandbox=1 and nothing said what the
+objects were. Decision 5's claim ran only for active agents, so three groups were never claimed:
+
+- **Draft agents.** `reconcileDraft` now claims the agent's gateway-key provider and flavor profile. The
+  provider is ensured with the key the agent kept (a draft agent keeps its key for a quick re-activation;
+  if the key Secret no longer matches the recorded key nothing is touched and no key is issued), which
+  imports the flavor profile with the mark; without the key the org pass below marks the profile. The provider record itself is recreated with the mark only
+  when no sandbox attaches it (the stopped sandbox of a draft agent keeps it attached, and decision 5's
+  rule about attached providers holds); that record is claimed when the agent is active again. With no
+  sandbox the agent's GitHub provider and profile are dropped, because `reconcileActive` makes them again,
+  marked, before it creates a sandbox.
+- **Flavor profiles no active agent uses are marked, not deleted.** `koinon-agentgateway-<flavor>` belongs to
+  the workspace and the flavor, not to the agent: every agent of that flavor in the org shares it, and
+  OpenShell refuses to delete a profile a provider uses. An archived agent also leaves the reconcile list
+  once its cleanup ends, and agents archived before the mark was on are already gone from it, so the claim
+  is made per org, not per archived agent: in the org pass (`claimFlavorProfiles`) every configured flavor
+  that no active agent of the org keeps current has its existing profile marked. Active agents re-import
+  the profile with the mark on every pass. A draft agent does not count as keeping it: its claim imports
+  the profile only while its key Secret matches, and a draft agent without a sandbox row is not reconciled
+  at all. The profile needs no key, so the org pass marks it either way. A profile found marked or missing
+  is remembered per workspace and not asked for again until an active agent of the flavor imports it, so
+  an idle org costs no gateway call per flavor and pass. A failed claim counts as a `sandbox` pass error,
+  the kind of the provider record and profile an agent's sandbox converges. The mark is the whole claim:
+  archiving keeps the org's data and must not remove what a sibling agent or an un-archive needs. A profile
+  that does not exist is not created, and an org without a recorded workspace is skipped. A retained sandbox
+  of an archived agent is still claimed only when it is recreated (see the consequences above).
+- **Workspaces of orgs that are not in this database, objects the reconciler did not make.** Nothing
+  claims these, by design: they are not this install's to change. They are reported instead.
+
+`koinon-reconciler unmarked list [--json]` lists the unmarked objects, one per line: workspace, kind, name
+and reason. The gauges count this list, by kind: `koinon_openshell_unmarked_objects` every line except
+`waits-for-agent`, `koinon_openshell_unmarked_objects_waiting_for_agent` the `waits-for-agent` lines (a fixed
+second series, not a reason label; both read the same list in the same pass and share the stale gauge). It
+only reads. An object that carries another install's mark is never listed. The reasons are fixed:
+
+| Reason | Meaning |
+|--------|---------|
+| `pending-claim` | An active agent's object, or the profile of a configured flavor no agent of the org has. Its next reconcile claims it. |
+| `draft-agent` | A draft agent's object, or a flavor profile only draft and archived agents use, that the reconciler claims on its next pass (a provider with no sandbox, the profile). If it is still listed after a pass, the agent's key Secret no longer matches its recorded key (the database cannot show that) and nothing is touched: activate or archive the agent. |
+| `archived-agent` | An archived agent's object, or a flavor profile only archived agents use. The org pass marks the profile; the agent's own provider and sandbox are deleted by its cleanup. |
+| `waits-for-agent` | The reconciler cannot claim it while the agent stays in its status: a draft agent's stopped sandbox and the providers that sandbox attaches (claimed when the agent is activated, removed when it is archived), and an archived agent's retained sandbox (claimed when the agent is unarchived). |
+| `org-not-in-db` | In a workspace no org of this database owns (an org that is deleted counts). Nothing of this install claims it. On a gateway shared with another install, the line can belong to that install, which has not claimed its objects yet (its workspace carries no mark yet): do not delete it, check with that install first. |
+| `not-reconciler-made` | Not made by the reconciler, or this database has no record of it. Nothing claims it. |
+
+An operator reads the first gauge as before. A kind above 0 with only `pending-claim`, `draft-agent` and
+`archived-agent` lines is still being claimed (it clears within a few passes), unless a `draft-agent` line stays
+after a pass (the key Secret case above). Three kinds of line do not clear by themselves and need the
+operator: `waits-for-agent` (activate or archive the draft agent; unarchive the archived agent, or delete its
+retained sandbox by hand once its home is no longer wanted), `org-not-in-db` (delete the object on the
+gateway by hand if it is a leftover of an earlier install or an e2e run; first check it is not another
+install's on a shared gateway) and `not-reconciler-made` (delete or leave). `waits-for-agent` lines are in
+the second gauge only, so the first reaches 0 on an install with no orphans, whatever its draft and archived
+agents hold. The command runs in the reconciler pod
+(`kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list`) and needs the settings the
+Deployment already gives it: the database URL, the OpenShell address and TLS directory, and the install
+mark. Removing the orphans (`--delete-orphans`) and a gauge labeled by reason (ADR 0023 would fix the label
+values above) are not built; the operator deletes an orphan on the gateway by hand until they are. The
+provider claim (delete by name, then create) has no precondition, because OpenShell's delete request has no
+version field; that window is the one decision 5 already documents.
 
 ## Links
 

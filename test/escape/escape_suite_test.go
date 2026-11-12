@@ -36,6 +36,9 @@
 //	                            comma-separated host:port lists of the API server and platform
 //	                            service targets; no default, the specs skip likewise without them.
 //	                            test/escape/kind.sh reads the Service IPs from the cluster it targets
+//	KOINON_ESCAPE_REGISTRIES    comma-separated host:port list of the kind local registry and its
+//	                            caches (test/e2e/kind/registry.sh); test/escape/kind.sh reads them
+//	                            from Docker; the case skips without it
 //	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA
 //	                            comma-separated host:port lists that replace the default
 //	                            targets of the egress and metadata cases

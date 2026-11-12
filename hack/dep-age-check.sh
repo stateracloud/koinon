@@ -174,15 +174,6 @@ check_url() {
 #   3. the registry's publish time, when the registry exposes one
 # A reference that cannot be dated fails; it is never skipped (except reserved test domains).
 
-# image_registry_host <host>: docker.io and index.docker.io are Docker Hub; the registry API is on
-# registry-1.docker.io (#537). Bare names with no host already use that host.
-image_registry_host() {
-	case "${1%%:*}" in
-	docker.io | index.docker.io) printf '%s\n' registry-1.docker.io ;;
-	*) printf '%s\n' "$1" ;;
-	esac
-}
-
 # oci_annotation_created <json>: org.opencontainers.image.created on a manifest, index, or
 # descriptor; one ISO time per line, oldest to newest does not matter (caller picks newest).
 oci_annotation_created() {
@@ -239,24 +230,29 @@ consider_created() {
 	if [[ -z $newest || $created > $newest ]]; then newest=$created; fi
 }
 
-check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
-	local ref=$1 name tag='' digest='' host repo first rest idx created newest='' m cfg d src=''
-	ref=${ref#oci://}
-	name=${ref%%@*}
-	[[ $ref == *@* ]] && digest=${ref#*@}
-	if [[ ${name##*/} == *:* ]]; then tag=${name##*:}; name=${name%:*}; fi
+# image_location <name without tag or digest> -> "<registry API host> <repository>". Docker Hub names,
+# with or without a docker.io or index.docker.io prefix, go to registry-1.docker.io: docker.io itself
+# serves no registry API (it redirects to a web page).
+image_location() {
+	local name=$1 first host repo
 	first=${name%%/*}
 	if [[ $name == */* && ($first == *.* || $first == *:* || $first == localhost) ]]; then
 		host=$first; repo=${name#*/}
 	else
-		host=registry-1.docker.io; repo=$name
+		host=docker.io; repo=$name
 	fi
-	host=$(image_registry_host "$host")
-	# Official Hub images live under library/: bare `alpine` and `docker.io/alpine` both become
-	# registry-1.docker.io/library/alpine. User/org paths already contain a slash.
-	if [[ $host == registry-1.docker.io && $repo != */* ]]; then
-		repo="library/$repo"
+	if [[ $host == docker.io || $host == index.docker.io ]]; then
+		host=registry-1.docker.io; [[ $repo == */* ]] || repo="library/$repo"
 	fi
+	echo "$host $repo"
+}
+check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
+	local ref=$1 name tag='' digest='' host repo rest idx created newest='' m cfg d src=''
+	ref=${ref#oci://}
+	name=${ref%%@*}
+	[[ $ref == *@* ]] && digest=${ref#*@}
+	if [[ ${name##*/} == *:* ]]; then tag=${name##*:}; name=${name%:*}; fi
+	read -r host repo < <(image_location "$name")
 	# Reserved names (RFC 2606, RFC 6761) are test fixtures, never something a build pulls.
 	case "${host%%:*}" in
 	example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | \
@@ -266,7 +262,7 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 		;;
 	esac
 	rest=${digest:-${tag:-latest}}
-	if ! idx=$(image_manifest "$host" "$repo" "$rest"); then
+	if ! idx=$(image_manifest "$host" "$repo" "$rest") || ! jq -e . >/dev/null 2>&1 <<<"$idx"; then
 		report "image $ref" unknown "$host: manifest not readable anonymously"
 		return 0
 	fi
@@ -472,6 +468,7 @@ tool_repo() {
 	GITLEAKS) echo "gitleaks/gitleaks" ;;
 	SHELLCHECK) echo "koalaman/shellcheck" ;;
 	ACTIONLINT) echo "rhysd/actionlint" ;;
+	ZIZMOR) echo "zizmorcore/zizmor" ;;
 	GORELEASER) echo "goreleaser/goreleaser" ;;
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;

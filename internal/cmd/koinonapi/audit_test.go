@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -184,12 +186,15 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 	It("audit anchor writes an anchor, and verify --anchors pins an org export to an install export", func(ctx SpecContext) {
 		pool := pgtest.Start(ctx)
 		org, _, _ := pgtest.NewOrg(ctx, pool)
-		for range 3 {
-			_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
-				b.Org(audit.Event{Org: org, Actor: audit.System("koinon-test:spec"), Action: "test.cli", TargetKind: "test", TargetID: "t"})
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
+		other, _, _ := pgtest.NewOrg(ctx, pool)
+		for _, o := range []pgtype.UUID{org, other} {
+			for range 3 {
+				_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+					b.Org(audit.Event{Org: o, Actor: audit.System("koinon-test:spec"), Action: "test.cli", TargetKind: "test", TargetID: "t"})
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			}
 		}
 		run := func(args ...string) (string, error) {
 			var out bytes.Buffer
@@ -200,18 +205,18 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 			err := cmd.ExecuteContext(ctx)
 			return out.String(), err
 		}
-		export := func(name string, scope audit.ExportScope) string {
+		export := func(q *store.Queries, name string, scope audit.ExportScope) string {
 			path := filepath.Join(GinkgoT().TempDir(), name)
 			f, err := os.Create(path)
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = f.Close() }()
-			Expect(audit.Export(ctx, store.New(pool), f, scope, 1)).To(Succeed())
+			Expect(audit.Export(ctx, q, f, scope, 1)).To(Succeed())
 			return path
 		}
 
 		out, err := run("anchor", "--database-url", pool.Config().ConnString())
 		Expect(err).NotTo(HaveOccurred(), out)
-		Expect(out).To(ContainSubstring("anchored 1 org chains at install chain_seq"))
+		Expect(out).To(ContainSubstring("anchored 2 org chains at install chain_seq"))
 
 		out, err = run("verify", "--database-url", pool.Config().ConnString())
 		Expect(err).NotTo(HaveOccurred(), out)
@@ -220,19 +225,41 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		out, err = run("verify", "--org", org.String(), "--database-url", pool.Config().ConnString())
 		Expect(err).NotTo(HaveOccurred(), out)
 
-		inst := export("install.jsonl", audit.ExportScope{Install: true})
-		orgFile := export("org.jsonl", audit.ExportScope{Org: org})
-		out, err = run("verify", "--file", orgFile, "--anchors", inst)
-		Expect(err).NotTo(HaveOccurred(), out)
-		Expect(out).NotTo(ContainSubstring("proves internal consistency only"), "--anchors pins the file")
+		q := store.New(pool)
+		inst := export(q, "install.jsonl", audit.ExportScope{Install: true})
+		for _, o := range []pgtype.UUID{org, other} {
+			orgFile := export(q, "org-"+o.String()+".jsonl", audit.ExportScope{Org: o})
+			out, err = run("verify", "--file", orgFile, "--anchors", inst)
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(out).To(ContainSubstring("1 anchors hold in this chain"), "the anchor keeps this org's head, whichever org the file is of")
+			Expect(out).NotTo(ContainSubstring("proves internal consistency only"), "--anchors pins the file")
+		}
+		orgFile := export(q, "org.jsonl", audit.ExportScope{Org: org})
 
-		By("an org file that is not the anchored chain fails")
-		raw, err := os.ReadFile(orgFile)
+		By("an org chain rewritten behind the anchor, self-consistent, fails on the anchor")
+		tx, err := pool.Begin(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		bad := filepath.Join(GinkgoT().TempDir(), "bad.jsonl")
-		Expect(os.WriteFile(bad, bytes.Replace(raw, []byte("test.cli"), []byte("test.xxx"), 3), 0o600)).To(Succeed())
-		_, err = run("verify", "--file", bad, "--anchors", inst)
+		DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
+		_, err = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`)
+		Expect(err).NotTo(HaveOccurred())
+		var prev []byte
+		Expect(tx.QueryRow(ctx, `SELECT hash FROM audit_events WHERE org_id = $1 AND chain_seq = 1`, org).Scan(&prev)).To(Succeed())
+		for seq := int64(2); seq <= 3; seq++ {
+			// audit-lint:allow a tamper test: rewrites an org chain past the triggers so the anchor has a break to find
+			_, err = tx.Exec(ctx, `UPDATE audit_events SET actor_id = 'koinon-test:mallory', prev_hash = $3 WHERE org_id = $1 AND chain_seq = $2`, org, seq, prev)
+			Expect(err).NotTo(HaveOccurred())
+			// audit-lint:allow a tamper test: recomputes the rewritten row's hash
+			Expect(tx.QueryRow(ctx, `UPDATE audit_events SET hash = audit_event_hash(audit_events) WHERE org_id = $1 AND chain_seq = $2 RETURNING hash`, org, seq).Scan(&prev)).To(Succeed())
+		}
+		// audit-lint:allow a tamper test: moves the head to the rewritten chain
+		_, err = tx.Exec(ctx, `UPDATE audit_chain_heads SET hash = $2 WHERE org_id = $1`, org, prev)
+		Expect(err).NotTo(HaveOccurred())
+		bad := export(store.New(tx), "bad.jsonl", audit.ExportScope{Org: org})
+		out, err = run("verify", "--file", bad)
+		Expect(err).NotTo(HaveOccurred(), "the rewritten file agrees with itself: %s", out)
+		out, err = run("verify", "--file", bad, "--anchors", inst)
 		Expect(err).To(MatchError(audit.ErrBroken))
+		Expect(out).To(ContainSubstring("rewritten behind the anchor"))
 
 		By("--anchors needs --file, and an install export")
 		_, err = run("verify", "--anchors", inst)
@@ -260,6 +287,20 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 	})
 })
 
+// probeRetry is an installRetry whose lines go to its own buffer, not the global slog default, so a retry
+// goroutine that outlives its spec cannot write into another spec's logs. A spec that starts the retry waits
+// for the "recorded after a retry" line (see retryEnded): on the success path the goroutine logs it as its last act.
+func probeRetry(anyError bool) (installRetry, *lockedBuffer) {
+	var logs lockedBuffer
+	return installRetry{Goroutine: "probe", What: "probe", AnyError: anyError, Log: slog.New(slog.NewTextHandler(&logs, nil))}, &logs
+}
+
+// retryEnded waits until the retry goroutine has logged that the write landed, which is the last thing it does.
+func retryEnded(logs *lockedBuffer) {
+	GinkgoHelper()
+	Eventually(logs.String).Should(ContainSubstring("recorded after a retry"))
+}
+
 // lockedBuffer is a bytes.Buffer that the retry goroutine and the spec can use together.
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -283,7 +324,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 	It("retries a refused write until it is recorded, and stops with the server", func(ctx SpecContext) {
 		calls := 0
-		installWriteLoop(ctx, "probe", "", time.Millisecond, func(context.Context) error {
+		installWriteLoop(ctx, slog.Default(), "probe", "", time.Millisecond, func(context.Context) error {
 			calls++
 			if calls < 3 {
 				return denied
@@ -294,7 +335,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 
 		stopped, cancel := context.WithCancel(ctx)
 		cancel()
-		installWriteLoop(stopped, "probe", "", time.Hour, func(context.Context) error {
+		installWriteLoop(stopped, slog.Default(), "probe", "", time.Hour, func(context.Context) error {
 			Fail("no write after the server stopped")
 			return nil
 		})
@@ -306,34 +347,32 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		landed := make(chan struct{})
 		write := func(context.Context) error { close(landed); return nil }
 
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, nil, write)).To(Succeed(), "nothing to retry")
+		r, logs := probeRetry(false)
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, nil, write)).To(Succeed(), "nothing to retry")
 
 		other := errors.New("not a refusal")
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, other, write)).To(MatchError(other))
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, other, write)).To(MatchError(other))
 		Consistently(landed, "50ms").ShouldNot(BeClosed(), "another error does not start a retry")
 
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, write)).To(Succeed())
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, denied, write)).To(Succeed())
 		Eventually(landed).Should(BeClosed())
+		retryEnded(logs)
 	})
 
 	It("logs a refused write once for the same state: the first denial, then the landing", func(ctx SpecContext) {
-		var logs lockedBuffer
-		prev := slog.Default()
-		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-		defer slog.SetDefault(prev)
-
+		r, logs := probeRetry(false)
 		bg, cancel := context.WithCancel(ctx)
 		defer cancel()
 		calls := 0
 		// The sequence is denied (the run that has just happened), denied (the first retry), then success.
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe"}, time.Millisecond, denied, func(context.Context) error {
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond, denied, func(context.Context) error {
 			calls++
 			if calls < 2 {
 				return denied
 			}
 			return nil
 		})).To(Succeed())
-		Eventually(logs.String).Should(ContainSubstring("recorded after a retry"))
+		retryEnded(logs)
 
 		lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
 		Expect(lines).To(HaveLen(2), "one line for the first denial, one for the landing: %v", lines)
@@ -346,9 +385,11 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		bg, cancel := context.WithCancel(ctx)
 		defer cancel()
 		landed := make(chan struct{})
-		Expect(retryInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond,
+		r, logs := probeRetry(true)
+		Expect(retryInstallWrite(bg, cancel, r, time.Millisecond,
 			errors.New("a hiccup"), func(context.Context) error { close(landed); return nil })).To(Succeed())
 		Eventually(landed).Should(BeClosed())
+		retryEnded(logs)
 	})
 
 	It("does not let a hung first attempt hold the start, and still retries in the background", func(ctx SpecContext) {
@@ -357,8 +398,9 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		calls := 0
 		landed := make(chan struct{})
 		returned := make(chan error, 1)
+		r, logs := probeRetry(true)
 		go func() {
-			returned <- startInstallWrite(bg, cancel, installRetry{Goroutine: "probe", What: "probe", AnyError: true}, time.Millisecond, 50*time.Millisecond,
+			returned <- startInstallWrite(bg, cancel, r, time.Millisecond, 50*time.Millisecond,
 				func(c context.Context) error {
 					calls++
 					if calls == 1 {
@@ -371,6 +413,7 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		}()
 		Eventually(returned, "2s").Should(Receive(BeNil()), "control returns within about the first-attempt timeout")
 		Eventually(landed).Should(BeClosed(), "the background retry still runs")
+		retryEnded(logs)
 	})
 
 	It("waits in the grant-only migrate for the role, and gives up with the wait", func(ctx SpecContext) {
@@ -431,4 +474,21 @@ var _ = Describe("startup install audit writes before the writer role is granted
 		exec(`CREATE ROLE koinon_install_audit_writer NOLOGIN`)
 		Expect(migrate(ctx, dsn, time.Minute, required)).To(Succeed())
 	}, SpecTimeout(3*time.Minute))
+})
+
+var _ = Describe("peekExportOrg", func() {
+	It("returns the header's org and a reader that still yields the whole stream", func() {
+		const stream = `{"format":"x","chain":"org","org_id":"00000000-0000-4000-8000-0000000000bb"}` + "\nrest\n"
+		org, r := peekExportOrg(strings.NewReader(stream))
+		Expect(org).To(Equal("00000000-0000-4000-8000-0000000000bb"))
+		b, err := io.ReadAll(r)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).To(Equal(stream))
+	})
+	It("returns no org for a line that is not a header, and loses nothing", func() {
+		org, r := peekExportOrg(strings.NewReader("not json"))
+		Expect(org).To(BeEmpty())
+		b, _ := io.ReadAll(r)
+		Expect(string(b)).To(Equal("not json"))
+	})
 })

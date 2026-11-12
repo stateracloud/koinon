@@ -17,7 +17,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Only the pure helpers: the script itself needs git and the network for a full check.
 eval "$(sed -n \
-	'/^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p; /^image_registry_host() {/,/^}/p; /^oci_annotation_created() {/,/^}/p' \
+	'/^image_location() {/,/^}/p; /^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^dockerfile_specs=/p; /^oci_annotation_created() {/,/^}/p' \
 	"$repo/hack/dep-age-check.sh")"
 
 fail=0
@@ -66,17 +66,6 @@ for want_file in hack/e2e-toolchain/Dockerfile hack/e2e-toolchain/web.Dockerfile
 	if grep -qxF "$want_file" <<<"$selected"; then echo "ok   dockerfile specs select $want_file"; else echo "FAIL dockerfile specs miss $want_file"; fail=1; fi
 done
 
-# #537: docker.io/ resolves to registry-1.docker.io (the Hub registry API host).
-host() { # host <name> <input> <want>
-	local got
-	got=$(image_registry_host "$2")
-	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
-}
-host "docker.io host" docker.io registry-1.docker.io
-host "index.docker.io host" index.docker.io registry-1.docker.io
-host "registry-1.docker.io unchanged" registry-1.docker.io registry-1.docker.io
-host "ghcr.io unchanged" ghcr.io ghcr.io
-
 # #537: OCI chart artifacts date from org.opencontainers.image.created; nothing dated fails closed.
 ann() { # ann <name> <json> <want first line or empty>
 	local got
@@ -124,7 +113,7 @@ image_blob() { printf '%s' '{"name":"chart","version":"0.0.0"}'; }
 image_registry_published() { return 1; }
 EOF
 	sed -n \
-		'/^image_registry_host() {/,/^}/p; /^oci_annotation_created() {/,/^}/p; /^consider_created() {/,/^}/p; /^check_image() {/,/^}/p' \
+		'/^image_location() {/,/^}/p; /^oci_annotation_created() {/,/^}/p; /^consider_created() {/,/^}/p; /^check_image() {/,/^}/p' \
 		"$repo/hack/dep-age-check.sh" >>"$frag"
 	{
 		printf 'check_image %q\n' "$ref"
@@ -153,22 +142,32 @@ else
 	fail=1
 fi
 
-# #537: docker.io/<official> and bare <official> both resolve to library/<name> on the Hub API host.
-hub_manifest='{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","annotations":{"org.opencontainers.image.created":"2026-01-01T00:00:00Z"},"config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:dead","size":1},"layers":[]}'
-hub_path() { # hub_path <name> <ref> <want host=… repo=…>
-	local out
-	out=$(run_check_image "$hub_manifest" "$2") || true
-	if grep -qF "$3" <<<"$out" && grep -q '^OK ' <<<"$out"; then
-		echo "ok   $1"
-	else
-		echo "FAIL $1: want '$3' in: $out"
-		fail=1
-	fi
+# An oci:// chart reference is read like an image reference, and docker.io names reach the Hub API.
+out=$(run_check_image '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","annotations":{"org.opencontainers.image.created":"2026-01-01T00:00:00Z"},"config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:dead","size":1},"layers":[]}' "oci://docker.io/alpine@$fake_digest") || true
+if grep -q '^OK ' <<<"$out" && grep -qF 'host=registry-1.docker.io repo=library/alpine' <<<"$out"; then
+	echo "ok   oci:// prefix is stripped and docker.io/alpine resolves through image_location"
+else
+	echo "FAIL oci:// prefix: $out"
+	fail=1
+fi
+
+# image_location: Docker Hub names reach registry-1.docker.io whatever their prefix (docker.io serves a web page).
+loc() { # loc <name> <expected "host repo">
+	local got
+	got=$(image_location "$1")
+	if [[ $got == "$2" ]]; then echo "ok   image_location $1"; else echo "FAIL image_location $1: got '$got', want '$2'"; fail=1; fi
 }
-hub_path "bare alpine → library/alpine" "alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
-hub_path "docker.io/alpine → library/alpine" "docker.io/alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
-hub_path "docker.io/library/alpine unchanged path" "docker.io/library/alpine@$fake_digest" "host=registry-1.docker.io repo=library/alpine"
-hub_path "docker.io/myorg/app keeps org path" "docker.io/myorg/app@$fake_digest" "host=registry-1.docker.io repo=myorg/app"
+loc registry "registry-1.docker.io library/registry"
+loc docker.io/library/registry "registry-1.docker.io library/registry"
+loc docker.io/registry "registry-1.docker.io library/registry"
+loc index.docker.io/bitnami/redis "registry-1.docker.io bitnami/redis"
+loc bitnami/redis "registry-1.docker.io bitnami/redis"
+loc ghcr.io/o/r "ghcr.io o/r"
+loc localhost:5001/x "localhost:5001 x"
+loc docker.io/alpine "registry-1.docker.io library/alpine"
+loc index.docker.io/alpine "registry-1.docker.io library/alpine"
+loc alpine "registry-1.docker.io library/alpine"
+loc docker.io/myorg/app "registry-1.docker.io myorg/app"
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"

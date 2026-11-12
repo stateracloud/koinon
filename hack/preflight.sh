@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy deps generate proto migrate adr chart web shell actionlint runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -100,14 +100,14 @@ existing() { # <regexp>: changed files matching the regexp that still exist
 	while IFS= read -r f; do [[ -e $f ]] && echo "$f"; done < <(grep -E -- "$1" <<<"$FILES" || true)
 }
 
-# triggering <gate>: the changed files that turn the gate on. generate, chart and web are CI
+# triggering <gate>: the changed files that turn the gate on. generate, chart, web, tidy and scripts are CI
 # jobs: the job's rule (hack/paths.rules) decides, so preflight and CI cannot disagree.
 triggering() {
 	local f
 	while IFS= read -r f; do
 		[[ -n $f ]] || continue
 		case $1 in
-		generate | chart | web) paths_job_triggers "$1" "$f" && echo "$f" ;;
+		generate | chart | web | tidy | scripts) paths_job_triggers "$1" "$f" && echo "$f" ;;
 		*) paths_match gate "$1" "$f" && echo "$f" ;;
 		esac
 	done <<<"$FILES"
@@ -135,6 +135,7 @@ reason() {
 	web) echo "web/ changed" ;;
 	shell | bash5) echo "$n shell scripts changed" ;;
 	actionlint) echo "workflows or the actionlint config changed" ;;
+	zizmor) echo "workflows, composite actions or the zizmor config changed" ;;
 	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
 	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
@@ -270,7 +271,7 @@ g_generate() {
 }
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
-g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
+g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh && hack/doc-meta-lint-test.sh >/dev/null && hack/doc-meta-lint.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {
@@ -282,6 +283,9 @@ g_shell() {
 }
 g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
 	actionlint
+}
+g_zizmor() { # workflow security lint, offline and default persona as in CI (.github/zizmor.yml)
+	zizmor --offline --no-progress .github
 }
 g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
 	hack/runner-lint-test.sh
@@ -341,13 +345,29 @@ echo $$ >"$pidfile"
 trap 'rm -f "$pidfile"' EXIT
 failed="" incomplete="" ran=0
 
+# web_deps: web/node_modules, which `make generate` (buf runs web/node_modules/.bin/protoc-gen-es) and
+# the web gate both need. A worktree made before hack/wt.sh installed them, or one whose install failed,
+# gets one offline attempt from the pnpm store (no network). Still missing: the caller reports a skip,
+# which lane-gates turns into notrun, never fail (#541).
+web_deps() {
+	[[ -e web/node_modules/.bin/protoc-gen-es ]] && return 0
+	command -v pnpm >/dev/null 2>&1 || return 1
+	[[ -f web/pnpm-lock.yaml ]] && pnpm --dir web install --offline --frozen-lockfile >/dev/null 2>&1
+	[[ -e web/node_modules/.bin/protoc-gen-es ]]
+}
+
 run_gate() { # <gate>
 	local g=$1 log=$logdir/$1.log start rc
 	case $g in
-	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; } ;;
+	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; }
+		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
+	generate) web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
 	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
+	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; CI pins $ZIZMOR_VERSION: brew install zizmor, or the release binary, see hack/versions.env)"; return; }
+		have=$(zizmor --version 2>/dev/null | awk '{print $2}')
+		[[ $have == "$ZIZMOR_VERSION" ]] || echo "zizmor warn: CI pins $ZIZMOR_VERSION (hack/versions.env), this is ${have:-unknown}; findings can differ" ;;
 	esac
 	ran=$((ran + 1))
 	start=$SECONDS

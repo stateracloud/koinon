@@ -148,6 +148,10 @@ type Tool struct {
 	// AuditOptional makes Add carry on, and return ErrNotAudited after the change, when the chain
 	// cannot be read for the "before" state (the key-admin Job).
 	AuditOptional bool
+	// ProbeTimeout is how long keys new-repositories and keys forget wait for koinon-agentd to check
+	// the storage prefix of a new repository epoch (default DefaultProbeTimeout); ProbePoll how often
+	// they look for the answer (default one second).
+	ProbeTimeout, ProbePoll time.Duration
 }
 
 // auditor is the Auditor the commands write with, or nil.

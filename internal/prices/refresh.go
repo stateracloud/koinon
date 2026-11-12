@@ -18,6 +18,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -101,6 +102,10 @@ type RefreshConfig struct {
 	Bounds  pricefetch.Bounds
 	Metrics *Metrics
 	Log     *slog.Logger
+	// Catalog, when set, stores the model metadata of an OpenRouter fetch (ADR 0070 amendment of
+	// 2026-11-11): weekly, from the same list the price fetch reads, so it adds no request to the
+	// list, and only the endpoints route of the models in use. Nil stores nothing.
+	Catalog *orcatalog.Store
 	// Now is the clock (tests); nil means time.Now.
 	Now func() time.Time
 }
@@ -115,6 +120,7 @@ type Refresher struct {
 	metrics  *Metrics
 	log      *slog.Logger
 	now      func() time.Time
+	catalog  *orcatalog.Store
 }
 
 // NewRefresher returns a Refresher over svc. A bound looser than the default is an error.
@@ -126,7 +132,7 @@ func NewRefresher(svc *Service, cfg RefreshConfig) (*Refresher, error) {
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
-	r := &Refresher{svc: svc, adapters: map[string]pricefetch.Adapter{}, bounds: b, metrics: cfg.Metrics, log: cfg.Log, now: cfg.Now}
+	r := &Refresher{svc: svc, adapters: map[string]pricefetch.Adapter{}, bounds: b, metrics: cfg.Metrics, log: cfg.Log, now: cfg.Now, catalog: cfg.Catalog}
 	if r.log == nil {
 		r.log = slog.Default()
 	}
@@ -324,6 +330,7 @@ func (r *Refresher) fetchOne(ctx context.Context, a pricefetch.Adapter, trigger 
 		return 0, err
 	}
 	r.metrics.fetched(a.Name(), FetchOK)
+	r.storeCatalog(ctx, a, snap, trigger)
 	return n, nil
 }
 

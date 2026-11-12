@@ -4,8 +4,51 @@
 # run of any agent that takes the org default model ends. The restore drill counts the requests this
 # server gets (none while the restored install is held) and reads the Authorization header of the
 # ones after the release (the provider key decrypted on the target).
+#
+# Phase 2 (the `archive` check) adds a marker that a run writes into the agent's home and a later run
+# reads back. A task whose message holds "drill-archive-write" makes the agent write
+# /sandbox/work/drill-marker.txt (the agent's working directory, inside the checkpointed home) with its
+# shell tool; a task whose message holds "drill-archive-read" makes it print "drill-marker-found" when
+# the file is there and "drill-marker-missing" when it is not. The command's text never holds
+# "drill-marker-found", so the drill finds that word in a run's events only when the file was read.
+# Selection takes the first turn whose `when` holds, so the tool-result turns come first and the
+# plain answer last.
 model: drill
 turns:
+  - when:
+      userContains: "drill-archive-write"
+      toolResult: bash
+    text: "marker written"
+    usage:
+      inputTokens: 120
+      outputTokens: 4
+  - when:
+      userContains: "drill-archive-write"
+    toolCalls:
+      - name: bash
+        arguments:
+          command: "mkdir -p /sandbox/work && echo drill-marker-token > /sandbox/work/drill-marker.txt"
+          description: "write the drill marker"
+    usage:
+      inputTokens: 110
+      outputTokens: 30
+  - when:
+      userContains: "drill-archive-read"
+      toolResult: bash
+    text: "marker read"
+    usage:
+      inputTokens: 130
+      outputTokens: 4
+  - when:
+      userContains: "drill-archive-read"
+    toolCalls:
+      - name: bash
+        arguments:
+          command: "echo drill-marker-$(test -f /sandbox/work/drill-marker.txt && echo found || echo missing)"
+          description: "read the drill marker"
+    usage:
+      inputTokens: 110
+      outputTokens: 30
   - text: "drill ok"
     usage:
       inputTokens: 100

@@ -10,10 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // NewRootCommand is koinon-api's command tree (ADR 0088). Every command declares its own flags and
@@ -27,17 +29,20 @@ func NewRootCommand() *cobra.Command {
 		Long: "koinon-api serves the Koinon API and web UI (serve, also what runs without a subcommand), " +
 			"applies the database migrations (migrate), checks the install prerequisites (preflight), " +
 			"creates generated Secrets (ensure-secrets), wraps new KEKs with a KMS (key-admin) and offers the operator " +
-			"tools (keys, audit, org-limits).\n\n" +
+			"tools (keys, audit, org-limits, prices, model-metadata).\n\n" +
 			"Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper case with " +
 			"dashes as underscores (--database-url is KOINON_DATABASE_URL). Secrets are read from files, never from flags.",
 	}
-	cli.Bind(root, cli.NewViper())
+	v := cli.NewViper()
+	// The config file (KOINON_CONFIG, the chart's config.yaml) is optional here: only the sections that are
+	// not flags are read from it (sandboxResources); every flag still takes its value from the environment.
+	cli.ConfigFile(root, v)
 	// The API pod's environment is also the one of "kubectl exec ... koinon-api keys status", which
 	// reads KOINON_KEK_ACTIVE_PERIOD (--kek-active-period of the keys commands); serve ignores it.
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES", "KOINON_KEK_ACTIVE_PERIOD")
 	cli.DefaultTo(root, "serve")
-	root.AddCommand(newServeCommand(), newMigrateCommand(), newPreflightCommand(), newEnsureSecretsCommand(),
-		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand(), newOrgLimitsCommand())
+	root.AddCommand(newServeCommand(v), newMigrateCommand(), newPreflightCommand(), newEnsureSecretsCommand(),
+		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand(), newModelMetadataCommand(), newOrgLimitsCommand())
 	return root
 }
 
@@ -57,7 +62,7 @@ func (c *config) waitFlag(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 }
 
-func newServeCommand() *cobra.Command {
+func newServeCommand(v *viper.Viper) *cobra.Command {
 	var c config
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -90,6 +95,11 @@ func newServeCommand() *cobra.Command {
 			if c.oidcRedirectURL == "" && c.publicURL != "" {
 				c.oidcRedirectURL = strings.TrimRight(c.publicURL, "/") + "/auth/oidc/callback"
 			}
+			policy, err := sandboxres.FromConfig(func(key string, out any) error { return v.UnmarshalKey(key, out) })
+			if err != nil {
+				return err
+			}
+			c.sandboxResources = policy
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {

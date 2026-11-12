@@ -2,6 +2,8 @@
 
 - Status: Superseded by [0059](0059-v01-opencode-only.md)
 - Date: 2026-10-23
+- Area: runtime-sandbox
+- Tags: harness, flavors, dependencies
 
 ## Context
 

@@ -46,6 +46,11 @@ type homeTarget struct{ org, agent pgtype.UUID }
 // with the agent's newest restorable checkpoint, and the sweeper deletes the old repository as soon
 // as the new one holds that home (its deadline is now): history older than the seed is dropped.
 //
+// Before it writes anything it asks koinon-agentd, which holds the bucket's credentials where this
+// command holds the KEKs (ADR 0032), whether the prefix of each new epoch already holds a
+// repository (#285); a taken prefix, an error or no answer in time refuses the command (the
+// recorded floor, home_repositories.next_epoch_at_least, stays the second guard, #262).
+//
 // Each agent changes in one transaction with its audit event ([NewRepositoriesAction], actor cli).
 // The command does not wait for the seeds (koinon_agentd_home_repository_seeds). It does not rotate
 // the bucket's S3 credentials: the operator does that at the S3 provider (the secret keys page of the docs site, project.SecretKeysDocURL).
@@ -79,11 +84,17 @@ func (t *Tool) NewRepositories(ctx context.Context, all bool, agents []string) e
 	if err != nil {
 		return err
 	}
+	// koinon-agentd, which holds the bucket's credentials, checks that no prefix a new epoch would
+	// start holds a repository (#285). Nothing is written before every answer is free.
+	probed, err := t.probeEpochs(ctx, targets)
+	if err != nil {
+		return err
+	}
 	var res NewRepositoriesResult
 	orgs := map[pgtype.UUID]bool{}
 	var errs []error
 	for _, h := range targets {
-		ok, err := t.newRepository(ctx, ring, h)
+		ok, err := t.newRepository(ctx, ring, h, probed)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("agent %s (org %s): %w", h.agent.String(), h.org.String(), err))
 			continue
@@ -171,13 +182,16 @@ func (t *Tool) confirmNewRepositories(ctx context.Context, n int) error {
 
 // newRepository starts the agent's next repository epoch, asks for its seed and audits both, in
 // one transaction. False: the agent has no home repository any more.
-func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h homeTarget) (bool, error) {
+func (t *Tool) newRepository(ctx context.Context, ring *secretstore.Keyring, h homeTarget, probed map[probeKey]int32) (bool, error) {
 	ok := false
 	_, err := audit.InTx(ctx, t.Pool, func(q *store.Queries, b audit.Batch) error {
 		pw := checkpoint.Passwords{Q: q, Keys: ring}
 		// A deadline of now: the sweeper's guard keeps the old repository until the seed is there.
 		r, started, err := pw.NewEpochIn(ctx, q, h.org, h.agent, checkpoint.ReasonKeyCompromised, 0)
 		if err != nil || !started {
+			return err
+		}
+		if err := checkEpoch(probed, h.org, h.agent, r.Epoch); err != nil {
 			return err
 		}
 		// An older retired repository (kept by a retention, as keys forget leaves one) may be under

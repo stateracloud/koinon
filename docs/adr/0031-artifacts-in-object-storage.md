@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: work-model
+- Tags: object-storage, tasks, mcp
 - Decision: [design.md#31](../design.md)
 
 ## Context
