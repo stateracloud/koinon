@@ -38,7 +38,15 @@ wait_all
 echo "wait_all returned" >&2
 DRIVER
 
-alive() { kill -0 "$1" 2>/dev/null; }
+# A zombie counts as dead: the killed stub is reparented to PID 1, and where PID 1 is not an init
+# (some containers) nobody reaps it, so kill -0 still succeeds on it. ps -o stat= is portable (macOS).
+alive() {
+  local st
+  kill -0 "$1" 2>/dev/null || return 1
+  st=$(ps -o stat= -p "$1" 2>/dev/null) || return 1
+  st=${st//[[:space:]]/}
+  [[ -n "$st" && "$st" != Z* ]]
+}
 
 rc=0
 bash "$tmp/driver.sh" 2>"$tmp/err" || rc=$?
