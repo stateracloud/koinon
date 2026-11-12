@@ -21,67 +21,6 @@ import (
 // flags. Every other key of the file sets a flag (see commands.go, configKeys), at the key
 // internal/cli.ConfigKey names.
 
-// fileSandboxResources is the chart's sandbox.resources (ADR 0083). Values left out keep
-// sandboxres.DefaultPolicy's.
-type fileSandboxResources struct {
-	Default struct {
-		CPU    quantitiesConfig `mapstructure:"cpu"`
-		Memory quantitiesConfig `mapstructure:"memory"`
-	} `mapstructure:"default"`
-	Bounds struct {
-		CPU struct {
-			Request rangeConfig `mapstructure:"request"`
-			Limit   rangeConfig `mapstructure:"limit"`
-		} `mapstructure:"cpu"`
-		Memory struct {
-			Request rangeConfig `mapstructure:"request"`
-			Limit   rangeConfig `mapstructure:"limit"`
-		} `mapstructure:"memory"`
-	} `mapstructure:"bounds"`
-	MemoryRequestEqualsLimit *bool `mapstructure:"memoryRequestEqualsLimit"`
-}
-
-type quantitiesConfig struct {
-	Request string `mapstructure:"request"`
-	Limit   string `mapstructure:"limit"`
-}
-
-type rangeConfig struct {
-	Min string `mapstructure:"min"`
-	Max string `mapstructure:"max"`
-}
-
-// policy lays the file's sandbox resources over sandboxres.DefaultPolicy: a value the file leaves
-// empty keeps the default.
-func (sr fileSandboxResources) policy() sandboxres.Policy {
-	p := sandboxres.DefaultPolicy()
-	set := func(dst *string, v string) {
-		if v != "" {
-			*dst = v
-		}
-	}
-	set(&p.Default.CPU.Request, sr.Default.CPU.Request)
-	set(&p.Default.CPU.Limit, sr.Default.CPU.Limit)
-	set(&p.Default.Memory.Request, sr.Default.Memory.Request)
-	set(&p.Default.Memory.Limit, sr.Default.Memory.Limit)
-	for _, r := range []struct {
-		dst *sandboxres.Range
-		src rangeConfig
-	}{
-		{&p.Bounds.CPURequest, sr.Bounds.CPU.Request},
-		{&p.Bounds.CPULimit, sr.Bounds.CPU.Limit},
-		{&p.Bounds.MemoryRequest, sr.Bounds.Memory.Request},
-		{&p.Bounds.MemoryLimit, sr.Bounds.Memory.Limit},
-	} {
-		set(&r.dst.Min, r.src.Min)
-		set(&r.dst.Max, r.src.Max)
-	}
-	if sr.MemoryRequestEqualsLimit != nil {
-		p.MemoryRequestEqualsLimit = *sr.MemoryRequestEqualsLimit
-	}
-	return p
-}
-
 // config is the reconciler's effective configuration, filled by internal/cli from the flags, the
 // KOINON_* environment variables and the config file, in that order.
 type config struct {

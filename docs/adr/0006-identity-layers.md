@@ -2,8 +2,11 @@
 
 - Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: identity, credentials, secrets, openshell
+- Amended by: [0048](0048-openshell-spike-results.md) (resolves the spike verification), [0097](0097-koinon-owned-gateway.md) (its open trust-domain question, answered in decision 11)
 - Decision: [design.md#6](../design.md)
-- Verification: Pending: OpenShell spike (old issue 3)
+- Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 
 ## Context
 
@@ -28,7 +31,7 @@ answers 403.
 - Each agent has its own Kubernetes ServiceAccount, used as its stable workload identity.
 - The sandbox gets **no usable token**. The ServiceAccount token is not mounted (Agent Sandbox
   templates default `automountServiceAccountToken` to false), and nothing else is mounted that
-  could authenticate directly.
+  could authenticate directly. _(Narrowed: the supervisor pod holds one bounded gateway token and the agent cannot reach it; see the amendment of 2026-11-09 below.)_
 - Federated credentials (AWS, Entra, Azure DevOps, Vault) are minted **outside** the sandbox and
   held as OpenShell provider records, which are injected only for allowed endpoints.
 - Names follow SPIFFE style now (for example `spiffe://<trust-domain>/org/<org>/agent/<agent>`),
@@ -154,6 +157,7 @@ sequenceDiagram
   only a token with audience `openshell-gateway` (an empty audience means the API server, so it is
   denied) and an `expirationSeconds` of at most `sandboxPolicy.supervisorTokenMaxSeconds` (default
   3600). Workload pods are unchanged: no token at all.
+- **The agent cannot read it.** The agent process runs in the workload pod, the token volume exists only in the separate supervisor pod (label `openshell.ai/boundary-role: supervisor`), and the sandbox admission policy denies every projected ServiceAccount token on a workload pod, so no token file is mounted where the agent runs.
 - **The ServiceAccount name is not pinned.** The gateway sets and creates that ServiceAccount itself,
   and its TokenReview checks the name; it is an operator setting of the gateway. The audience pin
   already makes the token useless against the API server.

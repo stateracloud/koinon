@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-10-28
+- Area: models-spend
+- Tags: models, triggers, budgets
+- Amended by: [0086](0086-stored-org-default-model.md) (the org default in the model precedence)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md), [0068](0068-prompt-caching-always-on.md), [0069](0069-native-model-formats.md)
 
 ## Context

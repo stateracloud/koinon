@@ -1539,27 +1539,32 @@ func (ns NullTraceContentLevel) Value() (driver.Value, error) {
 }
 
 type Agent struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	DisplayName     string
-	Status          AgentStatus
-	Flavor          AgentFlavor
-	TemplateID      pgtype.UUID
-	ActiveVersionID pgtype.UUID
-	LatestVersion   int32
-	Epoch           int64
-	CreatedBy       pgtype.UUID
-	ActivatedBy     pgtype.UUID
-	ActivatedAt     pgtype.Timestamptz
-	ArchivedAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
-	UnhealthyAt     pgtype.Timestamptz
-	UnhealthyReason pgtype.Text
-	ResumedAt       pgtype.Timestamptz
-	Model           pgtype.Text
-	Thinking        pgtype.Text
-	KeepWarm        bool
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	DisplayName          string
+	Status               AgentStatus
+	Flavor               AgentFlavor
+	TemplateID           pgtype.UUID
+	ActiveVersionID      pgtype.UUID
+	LatestVersion        int32
+	Epoch                int64
+	CreatedBy            pgtype.UUID
+	ActivatedBy          pgtype.UUID
+	ActivatedAt          pgtype.Timestamptz
+	ArchivedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	UnhealthyAt          pgtype.Timestamptz
+	UnhealthyReason      pgtype.Text
+	ResumedAt            pgtype.Timestamptz
+	Model                pgtype.Text
+	Thinking             pgtype.Text
+	KeepWarm             bool
+	SandboxCpuRequest    pgtype.Text
+	SandboxCpuLimit      pgtype.Text
+	SandboxMemoryRequest pgtype.Text
+	SandboxMemoryLimit   pgtype.Text
+	KeepWarmGranted      bool
 }
 
 type AgentBudget struct {

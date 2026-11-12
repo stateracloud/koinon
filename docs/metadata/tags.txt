@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tags: every ADR, research note, spike and docs-site page names one to six (ADR 0115).
+# Format: <tag> <TAB or spaces> <what it marks>. Lower-case kebab-case. Add a tag in the pull request
+# that first needs it; prefer an existing tag, and never add a synonym of one.
+adr-process         how ADRs and decisions are written and kept
+agent-home          the agent's home volume, generations, checkpoints
+agentgateway        agentgateway: model, MCP and egress routes
+api                 the Koinon API, admin API, protobuf
+approvals           approvals, risk tiers, ask tier, scoped approvals
+audit               audit log, audit chain, audit export
+auth                sign-in, sessions, tokens, OIDC for humans
+backup-restore      backups, restore, restore drills, held copies
+budgets             budgets and spend stops
+chat                chat as an object, conversations
+ci                  GitHub Actions, required checks, the merge queue
+claims              work claims, the ready queue
+cli                 the koinon command-line tool
+connectors          the connector model and its setup
+credentials         credential classes, provider keys, forge credentials
+database            Postgres, database modes, schema
+dependencies        dependency policy, cooldown, pinning
+docs                documentation, the docs site
+e2e                 end-to-end tests, kind, the quickstart test
+egress              outbound network rules, egress hosts
+encryption          KEKs, DEKs, envelope encryption, key rotation
+eventing            events, queues, notifications between components
+flavors             agent flavors (OpenCode, Hermes, ...)
+github              GitHub, GHES, the GitHub App
+gitea               Gitea and other self-hosted forges
+governance          maintainership, contribution rules, DCO, code of conduct
+harness             agent harness, harness definitions, agent runtime processes
+helm-chart          the Helm chart, values, rendering
+identity            human and agent identity, workload identity
+install             installation, prerequisites, the installer
+isolation           isolation tiers, namespaces, runtime classes, Kata
+kubernetes          Kubernetes objects, RBAC, admission
+leak-guard          the leak guard and its judge
+mcp                 MCP servers, MCP sign-in, discovery
+memory              agent memory, files, persona
+metrics             Prometheus metrics, dashboards, health
+migrations          database migrations
+models              model providers, formats, metadata, defaults
+multi-tenancy       orgs, tenancy, cross-org sharing
+object-storage      artifacts and blobs in object storage
+openshell           OpenShell gateway, sandboxes, hardening
+pricing             prices, the price catalogue
+prompt-caching      prompt caching
+registry            image registries, pull secrets, mirrors
+release             versioning, release candidates, release gates
+roadmap             roadmap, milestones, scope
+runs                runs, run state, run limits, outcomes, resume
+sandbox             sandbox pods, sandbox resources, break-glass
+secrets             secret keys, secret storage, secrets outside sandboxes
+security            threat model, hardening, escapes
+skills              the skill library, agent packages
+spend-ledger        the spend ledger, usage ingestion, cost
+tasks               tasks, inbox, the work model
+testing             test strategy, unit and integration tests
+tooling             developer tooling, scripts, toolchain
+tracing             run traces, the trace router, OpenTelemetry
+triggers            triggers, scheduling
+ui                  the web UI, screens, design system
+upgrade             upgrades, compatibility, recovery
+work-tracker        issue trackers as connectors (GitHub Issues, Linear, ...)

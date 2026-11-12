@@ -2,8 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-11-10
-- Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, amended here by reference),
-  [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
+- Area: install-operations
+- Tags: backup-restore, testing, e2e
+- Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, by reference)
+- Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
   [0105](0105-merge-queue-route.md) (the only merge evidence is the queue; the drill is not a merge check)
 - Issues: closes #514 (phase 1); refs #275, #516 (held copy has no outward effects), #515 (archive and dead-executor, phase 2), #512 (lab sign-in)
 

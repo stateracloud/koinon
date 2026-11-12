@@ -2,13 +2,17 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Area: product-scope
+- Tags: roadmap, github, approvals, install, agentgateway
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models, budgets,
   connection secrets; the Helm model values are dropped),
   [0058](0058-gateway-modes.md) (gateway modes), [0051](0051-session-home-generations.md), and on 2026-10-26 by
   [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
   [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation),
   and on 2026-10-28 by [0076](0076-database-modes.md) (database modes) and
-  [0077](0077-pinned-openshell-and-installer.md) (pinned prerequisites and the installer)
+  [0077](0077-pinned-openshell-and-installer.md) (pinned prerequisites and the installer), and on
+  2026-10-29 by [0081](0081-run-limits.md) (the per-run caps; the token cap of this ADR is replaced), and by
+  [0097](0097-koinon-owned-gateway.md) (Kubernetes-mode support ends with step 3)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
@@ -57,6 +61,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
   Key Vault sync them into Kubernetes with the External Secrets Operator. Secrets entered in the UI
   (setup-guide secure inputs, ADR [0021](0021-connector-setup-guides.md)) are written by Koinon as
   Kubernetes Secrets. This amends ADR 0007, which kept connection secrets in Vault/OpenBao.
+  _(Changed by [0056](0056-model-providers-pricing-and-budgets-per-org.md): provider keys and connection secrets are envelope-encrypted in Postgres; Kubernetes Secrets still hold the KEKs and the gateway's provider keys, see the amendment of 2026-10-23 (plan item PV1) below. There is still no hard dependency on a secret store.)_
 - **Models:** one OpenAI-compatible upstream (base URL, key Secret, model list). Docs cover
   OpenRouter with the routing guard (ADR 0048) and Ollama. CI uses the fake model server.
 - **agentgateway, two modes behind one `ModelGateway` interface:**
@@ -136,6 +141,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 - Board columns: To do, In progress, Waiting on you, Done.
 - Run caps: 30 minutes wall-clock and a token cap per run, set in the template. The DeepSeek re-run
   of spike step 7 showed an agent without its tools probing for 1 m 43 s before giving up.
+  _(Changed by [0081](0081-run-limits.md): the token cap is replaced by the run limits that ADR defines.)_
 - Ledger ingestion: agentgateway's OTLP access-log export to `koinon-api`.
 - First flavor for the walking skeleton: OpenCode (advertises MCP capabilities and session resume).
 - Flavor images are built with `docker buildx` in CI; Go images with ko.
@@ -176,7 +182,7 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 - **Budgets:** the template's `spendUSD` is only a default; admins set the org monthly cap and the
   per-agent daily limits ([0056](0056-model-providers-pricing-and-budgets-per-org.md)).
 - **Gateway modes:** a third, *shared* mode joins standalone and kubernetes in v0.2
-  ([0058](0058-gateway-modes.md)).
+  ([0058](0058-gateway-modes.md)). _(Changed by [0097](0097-koinon-owned-gateway.md): shared mode is not built, and Kubernetes mode is frozen and ends with step 3.)_
 
 ## Amendment (2026-10-23, plan item PV1)
 
@@ -353,5 +359,10 @@ from templates costs nothing until work arrives.
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
   and the home volume at activation without starting the pod is not built: tracked in #101. A per-org rate limit on
   sandbox starts is tracked in #27.
-- **Not built yet:** the API and UI for the setting, with the org-admin authz check (the data and
-  the reconciler side are in): tracked in #100.
+- **API and UI (#100).** `AgentService.SetAgentKeepWarm` sets or withdraws the request; admins and
+  owners only, audited (`agent.keep_warm.set`), refused on an archived agent. `Agent.keep_warm` is the
+  request and `Agent.keep_warm_granted` the outcome. Only the reconciler knows the cap, so each pass
+  records its decision in `agents.keep_warm_granted` (migration 00077) and the API and the agent page
+  read it; a new request reads "not granted" until the next pass. The agent page has a "Keep warm"
+  control that says whether the cap granted it. The admin REST API (`/admin/v1`) has no keep-warm
+  endpoint yet.

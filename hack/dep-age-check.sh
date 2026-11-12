@@ -168,8 +168,21 @@ check_url() {
 	fi
 }
 
-# Container registries. The Bearer challenge is answered anonymously; the age is the `created`
-# time of the newest linux image config reachable from the reference (the build, not the push).
+# Container registries. The Bearer challenge is answered anonymously. Dating order (#537, ADR 0079):
+#   1. org.opencontainers.image.created on the manifest (or index / descriptor annotations)
+#   2. the image config's `created` field (normal container images)
+#   3. the registry's publish time, when the registry exposes one
+# A reference that cannot be dated fails; it is never skipped (except reserved test domains).
+
+# oci_annotation_created <json>: org.opencontainers.image.created on a manifest, index, or
+# descriptor; one ISO time per line, oldest to newest does not matter (caller picks newest).
+oci_annotation_created() {
+	jq -r '
+		(.annotations["org.opencontainers.image.created"] // empty),
+		(.manifests[]? | .annotations["org.opencontainers.image.created"] // empty)
+	' <<<"$1" 2>/dev/null | grep -E . || true
+}
+
 image_manifest() { # image_manifest <host> <repo> <ref> -> JSON on stdout
 	local host=$1 repo=$2 ref=$3 url hdr token realm service scope accept
 	accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
@@ -192,6 +205,31 @@ image_blob() { # image_blob <host> <repo> <digest>
 	token=$(fetch "$realm?service=$service&scope=repository:$repo:pull" | jq -r '.token // .access_token')
 	fetch -H "Authorization: Bearer $token" "$url"
 }
+
+# image_registry_published <host> <repo> <tag|digest>: a publish time the registry itself exposes.
+# Docker Hub's tag API has last_updated; a HEAD Last-Modified on the manifest is used when present.
+# The HTTP Date response header is not a publish time and is ignored.
+image_registry_published() {
+	local host=$1 repo=$2 ref=$3 t lm
+	if [[ $host == registry-1.docker.io && $ref != sha256:* ]]; then
+		t=$(fetch "https://hub.docker.com/v2/repositories/${repo}/tags/${ref}" 2>/dev/null | jq -r '.last_updated // empty' 2>/dev/null) || t=
+		[[ -n $t && $t != null ]] && { printf '%s\n' "$t"; return 0; }
+	fi
+	lm=$(curl --silent --max-time 30 -I -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
+		"https://$host/v2/$repo/manifests/$ref" 2>/dev/null | tr -d '\r' | grep -i '^last-modified:' | sed 's/^[Ll]ast-[Mm]odified:[[:space:]]*//' || true)
+	[[ -z $lm ]] && return 1
+	# RFC 7231 HTTP-date → ISO 8601 UTC for age_days.
+	t=$(date -u -d "$lm" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || t=
+	[[ -n $t ]] && printf '%s\n' "$t"
+}
+
+# consider_created <iso>: keep the newest ISO time in $newest (caller-declared).
+consider_created() {
+	local created=$1
+	[[ -z $created || $created == null ]] && return 0
+	if [[ -z $newest || $created > $newest ]]; then newest=$created; fi
+}
+
 # image_location <name without tag or digest> -> "<registry API host> <repository>". Docker Hub names,
 # with or without a docker.io or index.docker.io prefix, go to registry-1.docker.io: docker.io itself
 # serves no registry API (it redirects to a web page).
@@ -209,7 +247,8 @@ image_location() {
 	echo "$host $repo"
 }
 check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
-	local ref=$1 name tag='' digest='' host repo rest idx created newest='' m cfg d
+	local ref=$1 name tag='' digest='' host repo rest idx created newest='' m cfg d src=''
+	ref=${ref#oci://}
 	name=${ref%%@*}
 	[[ $ref == *@* ]] && digest=${ref#*@}
 	if [[ ${name##*/} == *:* ]]; then tag=${name##*:}; name=${name%:*}; fi
@@ -225,29 +264,58 @@ check_image() { # check_image <name[:tag]@sha256:digest | name:tag>
 	rest=${digest:-${tag:-latest}}
 	if ! idx=$(image_manifest "$host" "$repo" "$rest") || ! jq -e . >/dev/null 2>&1 <<<"$idx"; then
 		report "image $ref" unknown "$host: manifest not readable anonymously"
-		return
+		return 0
 	fi
+	if ! jq -e . >/dev/null 2>&1 <<<"$idx"; then
+		report "image $ref" unknown "$host: manifest is not JSON"
+		return 0
+	fi
+	# 1. OCI created annotation on the index / manifest (Helm chart artifacts, etc.).
+	while read -r created; do
+		[[ -z $created ]] && continue
+		consider_created "$created"
+		src=annotation
+	done < <(oci_annotation_created "$idx")
 	local configs=()
-	if jq -e '.manifests' >/dev/null <<<"$idx"; then
+	if jq -e '.manifests' >/dev/null 2>&1 <<<"$idx"; then
 		# Skip attestation manifests (platform "unknown").
 		while read -r d; do
 			[[ -z $d ]] && continue
 			m=$(image_manifest "$host" "$repo" "$d") || continue
-			configs+=("$(jq -r '.config.digest' <<<"$m")")
-		done < <(jq -r '.manifests[] | select(.platform.os == "linux") | .digest' <<<"$idx")
+			jq -e . >/dev/null 2>&1 <<<"$m" || continue
+			while read -r created; do
+				[[ -z $created ]] && continue
+				consider_created "$created"
+				src=annotation
+			done < <(oci_annotation_created "$m")
+			cfg=$(jq -r '.config.digest // empty' <<<"$m" 2>/dev/null) || cfg=
+			[[ -n $cfg && $cfg != null ]] && configs+=("$cfg")
+		done < <(jq -r '.manifests[]? | select(.platform.os == "linux") | .digest // empty' <<<"$idx" 2>/dev/null)
 	else
-		configs+=("$(jq -r '.config.digest' <<<"$idx")")
+		cfg=$(jq -r '.config.digest // empty' <<<"$idx" 2>/dev/null) || cfg=
+		[[ -n $cfg && $cfg != null ]] && configs+=("$cfg")
 	fi
-	for cfg in "${configs[@]}"; do
-		created=$(image_blob "$host" "$repo" "$cfg" | jq -r '.created // empty') || continue
-		[[ -z $created ]] && continue
-		if [[ -z $newest || $created > $newest ]]; then newest=$created; fi
-	done
+	# 2. Image config `created` (normal container images; Helm configs have none).
 	if [[ -z $newest ]]; then
-		report "image $ref" unknown "$host: no created time in the image config"
-	else
-		report "image ${ref:0:70}" "$(age_days "$newest")" "$host created $newest"
+		for cfg in "${configs[@]}"; do
+			[[ -z $cfg ]] && continue
+			created=$(image_blob "$host" "$repo" "$cfg" 2>/dev/null | jq -r '.created // empty' 2>/dev/null) || created=
+			[[ -z $created ]] && continue
+			consider_created "$created"
+			src=config
+		done
 	fi
+	# 3. Registry publish time when the registry exposes one.
+	if [[ -z $newest ]]; then
+		created=$(image_registry_published "$host" "$repo" "$rest" 2>/dev/null) || created=
+		[[ -n $created ]] && { consider_created "$created"; src=registry; }
+	fi
+	if [[ -z $newest ]]; then
+		report "image $ref" unknown "$host: no created annotation, image config time or registry publish time"
+	else
+		report "image ${ref:0:70}" "$(age_days "$newest")" "$host ${src} $newest"
+	fi
+	return 0
 }
 
 # Helm chart dependencies: OCI repositories are read like images, HTTP repositories from index.yaml.
@@ -400,6 +468,7 @@ tool_repo() {
 	GITLEAKS) echo "gitleaks/gitleaks" ;;
 	SHELLCHECK) echo "koalaman/shellcheck" ;;
 	ACTIONLINT) echo "rhysd/actionlint" ;;
+	ZIZMOR) echo "zizmorcore/zizmor" ;;
 	GORELEASER) echo "goreleaser/goreleaser" ;;
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;

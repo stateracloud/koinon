@@ -576,7 +576,7 @@ settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call w
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
-Pinned tools and manifests from GitHub releases (shellcheck, actionlint, gitleaks, kind, ko, the
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, gitleaks, kind, ko, the
 gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
 `hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
 the sha256 check, and a file already there with the right sha256 is not fetched again (#431;
@@ -730,6 +730,16 @@ category, retry and regex, where the first row that matches the job log wins and
 shows as `unknown`, add a row and a recorded log sample under `hack/testdata/ci-fail/` (line 1 is
 `# expect: <category> <retry>`); `hack/ci-fail-test.sh` checks every sample and the table shape.
 `retry=yes` means a plain re-run is a fair first step, not that it is safe to hide the failure.
+
+## Merge-time measurement
+
+`hack/ci-timing.sh [--n 20] [--since ISO] [--until ISO] [--json]` measures the target of #572: the median
+time from the last push of a pull request to merged over the last N merged code pull requests, the
+merge-queue time, the median duration of each CI job (pull request `ci` and merge queue) and the runner
+minutes per merged pull request. Read-only (`gh` and `jq`). Last push is the head commit's earliest check
+suite (the push time to within seconds); a queue merge is one whose last queue removal has reason `merged`,
+all other merges are reported apart as admin merges. The definitions
+are in the script header; `hack/ci-timing-test.sh` runs it offline on `hack/testdata/ci-timing/`.
 
 ## Merging
 

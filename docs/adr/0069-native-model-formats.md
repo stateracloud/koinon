@@ -2,6 +2,8 @@
 
 - Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (old issue 242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendments of 2026-10-29 and 2026-10-31.
 - Date: 2026-10-28
+- Area: models-spend
+- Tags: models, agentgateway, harness, prompt-caching
 - Relates to: [#22](https://github.com/stateracloud/koinon/issues/22), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0058](0058-gateway-modes.md), [0068](0068-prompt-caching-always-on.md)
 
 ## Context

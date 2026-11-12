@@ -3,7 +3,11 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
+- Area: work-model
+- Tags: runs, database, tasks, triggers
 - Decision: [design.md#30](../design.md)
+
+> Note (2026-11-11): `agentd` runs in the control plane, not in the sandbox ([0049](0049-v01-scope-decisions.md); see the amendment in [0016](0016-harness-and-deployment.md)). Read "the `agentd` instance in the sandbox" below as the `agentd` instance that owns the agent's run. The alarms table and the `AgentStateStore` interface were replaced; the amendments below say how.
 
 ## Context
 
@@ -40,9 +44,9 @@ alarms. A full workflow engine is not needed for a fixed process this short.
   - The epoch is also stamped on home checkpoints ([0032](0032-agent-home-checkpoints.md)).
 - **Alarms table.** An `alarms` table holds `(agent_id, run_id, fire_at, kind, payload, epoch)`.
   Workers claim due alarms with `SELECT … FOR UPDATE SKIP LOCKED` and act only if the epoch still
-  matches.
+  matches. _(Replaced: there is no alarms table, timeouts are columns; see the amendment of 2026-10-26 below.)_
 - **`AgentStateStore` interface.** All access goes through this interface, so a different backend
-  (Restate, celld) can replace Postgres later without touching callers.
+  (Restate, celld) can replace Postgres later without touching callers. _(Replaced: there is no `AgentStateStore` interface; see the amendments of 2026-10-26 below.)_
 - **Watch list.** Restate is re-evaluated when step-level workflows arrive; celld stays on the
   watch list.
 

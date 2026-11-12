@@ -1326,6 +1326,7 @@ type Querier interface {
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 	// decides how many of the requests the reconciler grants. Not a new version.
+	// Clearing the request clears the grant with it; a new request starts not granted until the next pass.
 	SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
@@ -1338,8 +1339,14 @@ type Querier interface {
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
 	// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
+	// An agent's sandbox resource override (NULL: follow the version's template values, then the platform
+	// default; ADR 0083). The API checks the platform bounds. Not a new version.
+	SetAgentSandboxResources(ctx context.Context, arg SetAgentSandboxResourcesParams) (Agent, error)
 	// An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
 	SetAgentThinking(ctx context.Context, arg SetAgentThinkingParams) (Agent, error)
+	// The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of
+	// one org. Only rows that change are written.
+	SetAgentsKeepWarmGranted(ctx context.Context, arg SetAgentsKeepWarmGrantedParams) error
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error

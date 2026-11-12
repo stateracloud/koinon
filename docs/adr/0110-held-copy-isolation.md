@@ -3,6 +3,8 @@
 - Status: Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0,
   the guards of decision 4 and decision 7 are the design they rest on.
 - Date: 2026-11-10
+- Area: install-operations
+- Tags: backup-restore, identity, auth, openshell, mcp
 - Amends: [0107](0107-restore-hold-mode.md) (what a held install writes; how a release works)
 - Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark),
   [0085](0085-upgrade-compatibility-and-recovery-policy.md) (Context 6, decision 15), [0100](0100-install-audit-chain.md)

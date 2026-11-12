@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: multi-tenancy, identity, budgets
 - Decision: [design.md#19](../design.md)
 
 ## Context
@@ -50,7 +52,7 @@ flowchart LR
   with fast revocation _(inferred)_.
 - Negative: team agents see traffic from many small callers; per-caller rate limits matter
   _(inferred)_.
-- Follow-ups: implemented with A2A in v0.3 and multi-tenancy in v0.4 (ADR [0024](0024-roadmap.md)).
+- Follow-ups: implemented with A2A in v0.3 and multi-tenancy in v0.4 (ADR [0024](0024-roadmap.md)). _(Changed: `ask_agent` ships in v0.2, see [0011](0011-agent-to-agent.md) and [0065](0065-work-model-tasks-inbox.md).)_
 
 ## Open questions
 

@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: memory, agent-home
 - Decision: [design.md#33](../design.md)
 
 ## Context

@@ -1,7 +1,9 @@
 # 0025. Deterministic, free CI with a continuous sandbox escape suite
 
-- Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md)
+- Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: testing, ci, e2e, security
 - Decision: [design.md#25](../design.md)
 - Verification: escape suite design depends on the OpenShell spike (old issue 3)
 
@@ -32,7 +34,10 @@ same test also exercises usage parsing and the spend ledger (ADR
 | Security | sandbox escape suite against OpenShell sandboxes on every PR |
 | Quality | capped nightly evals against real models, with a hard budget |
 
+_(Changed 2026-11-11, see the amendment of 2026-11-11 below: the Security and Quality rows no longer hold as written.)_
+
 - CI never holds paid model keys; only the nightly eval job does, with a capped budget.
+  _(Replaced 2026-11-11, see the amendment of 2026-11-11 below: no CI job holds a paid model key, and there is no nightly eval job.)_
 - The fake model server is registered as an agentgateway backend in e2e, so the model path in CI
   matches production.
 - The escape suite asserts: no direct egress, no cloud metadata, no service account token, no
@@ -168,3 +173,17 @@ on a commit.
 
 The `e2e-lab` commit status no longer counts toward a merge. The merge queue's hosted `quickstart` is the one e2e
 proof; the lab stays for the dev loop and real-model runs. The optional lab lane above keeps its other uses.
+
+## Amendment (2026-11-11, issue #603): real-model evals and the escape suite
+
+Maintainer decision (procoduck, 2026-11-11). It replaces the Security and Quality rows of the table
+and the paid-key bullet under Decision.
+
+- Real-model evals are local runs or runs on your own cluster, on your own budget
+  ([docs/dev/real-model-tests.md](../dev/real-model-tests.md)). They are not a CI job.
+- CI never holds paid model keys and never calls paid models. There is no nightly eval job.
+- The escape suite's admission-policy cases run in CI (`escape (admission)`, `make test-admission`) on
+  pull requests that change their paths. Its OpenShell cases need a gateway, so they run on kind:
+  `make dev-kind-up`, then `make test-escape-kind`, and in the kind e2e against the chart install.
+- The open question on the eval budget and the eval set for nightly runs is closed: there are no
+  nightly runs.
