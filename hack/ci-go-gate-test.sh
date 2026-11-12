@@ -70,6 +70,11 @@ GATE_ENV=(VULN=true VULN_RESULT=failure)
 gate "a reachable vulnerability (go-vuln failed) fails the go gate" 1 success false success success success success success failure
 GATE_ENV=(VULN=true VULN_RESULT=success)
 gate "go-vuln ran and passed" 0 success false success success success success success success
+# Only govulncheck's own files changed: go=false, vuln=true. A failed go-vuln must still fail the gate.
+GATE_ENV=(GO=false VULN=true VULN_RESULT=failure)
+gate "go=false does not hide a failed go-vuln" 1 skipped false success skipped skipped skipped skipped skipped failure
+GATE_ENV=(GO=false VULN=true VULN_RESULT=success)
+gate "go=false with go-vuln passed is a pass" 0 skipped false success skipped skipped skipped skipped skipped success
 GATE_ENV=()
 grep -qF "if: needs.changes.outputs.vuln == 'true'" <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run on the vuln output only"; exit 1; }
 grep -qF 'run: hack/govulncheck.sh' <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run hack/govulncheck.sh (the pinned version, no retry)"; exit 1; }

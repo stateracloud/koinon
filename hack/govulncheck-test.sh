@@ -36,7 +36,7 @@ run() { # <name> <expected rc> <expected stderr text> [VAR=value...]: runs the s
 	local name=$1 want=$2 text=$3 rc=0
 	shift 3
 	: >"$FAKE_LOG"
-	env "$@" "$root/hack/govulncheck.sh" >"$tmp/out" 2>"$tmp/err" || rc=$?
+	env -u GITHUB_ACTIONS -u GOTOOLCHAIN -u GOVULNCHECK_VERSION "$@" "$root/hack/govulncheck.sh" >"$tmp/out" 2>"$tmp/err" || rc=$?
 	[[ $rc -eq $want ]] || fail "$name: exit $rc, want $want ($(cat "$tmp/err"))"
 	if [[ -n $text ]]; then grep -qF -- "$text" "$tmp/out" "$tmp/err" || fail "$name: no '$text' in the output"; fi
 	echo "ok: $name"

@@ -447,7 +447,7 @@ that file and nowhere else.
 - **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`),
   the check itself (`hack/govulncheck.sh`, `govulncheck.yml`, `hack/versions.env`) or an `everything` path
   (`ci.yml`, the Makefile, the setup-go-cache action, `hack/paths.rules`, `hack/paths-lib.sh`) runs
-  `hack/govulncheck.sh`, and so does a push to main; any other pull request skips the job. The nested modules
+  `hack/govulncheck.sh`, and so does a push to main, except one whose heavy jobs are switched off because a queue run already tested the same tree (`hack/ci-skip-heavy.sh`; then `go-vuln` is skipped with the rest); any other pull request skips the job. The nested modules
   under `hack/spike/` are not scanned. The rule does not see new reachability from a code change (a `.go` change
   that starts to call a vulnerable symbol of a module already required, or of the standard library) nor a new advisory:
   the nightly run catches those, up to one day later. It is a part of the

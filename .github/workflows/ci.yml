@@ -367,6 +367,8 @@ jobs:
             echo "### go: draft: not run" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # go-vuln also runs when only its own inputs changed (hack/govulncheck.sh, versions.env: go=false, vuln=true), so a failure counts before the no-Go exit.
+          [[ $VULN_RESULT == success || $VULN_RESULT == skipped ]] || { echo "::error::go-vuln finished $VULN_RESULT"; exit 1; }
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           # A skip counts as success only when its reason is known: go-test skipped because an external run proved it
           # (old issue 610), go-tidy or go-lint skipped because no Go file, go.mod, go.sum or lint config changed (#572,
