@@ -61,8 +61,10 @@ func (p RunLimitsPatch) Validate() error {
 }
 
 func runLimitsOf(s Settings) RunLimits {
-	return RunLimits{MaxConcurrentRuns: s.MaxConcurrentRuns, TriggerConcurrency: s.TriggerConcurrency, TriggerRatePerMinute: s.TriggerRatePerMinute,
-		SandboxCreationsPerMinute: s.SandboxCreationsPerMinute}
+	return RunLimits{
+		MaxConcurrentRuns: s.MaxConcurrentRuns, TriggerConcurrency: s.TriggerConcurrency, TriggerRatePerMinute: s.TriggerRatePerMinute,
+		SandboxCreationsPerMinute: s.SandboxCreationsPerMinute,
+	}
 }
 
 // RunLimits returns the org's effective run limits.

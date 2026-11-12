@@ -1312,8 +1312,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
-	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
-		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute})
+	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{
+		IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
+		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute,
+	})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
 	}
