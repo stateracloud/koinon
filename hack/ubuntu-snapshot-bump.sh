@@ -235,7 +235,7 @@ append_index() {
 # load_snapshot SNAP: verifies every InRelease and Packages index of the snapshot and leaves one
 # decompressed file per architecture, $work/idx.SNAP.ARCH (all suites and components concatenated).
 load_snapshot() {
-	local snap=$1 suite arch comp
+	local snap=$1 suite arch comp rsuite rcode
 	fsnap=$snap
 	for suite in "${suites[@]}"; do
 		fetch "dists/$suite/InRelease" "$work/InRelease.$snap.$suite" || { echo "ubuntu-snapshot-bump: cannot fetch dists/$suite/InRelease at $snap" >&2; return 1; }
@@ -246,6 +246,12 @@ load_snapshot() {
 			rm -f "$work/Release.$snap.$suite"
 			gpgv --keyring "$keyring" --status-fd 3 --output "$work/Release.$snap.$suite" "$work/InRelease.$snap.$suite" >"$work/gpgv.out" 2>&1 3>"$work/gpgv.status" || { cat "$work/gpgv.out" >&2; echo "ubuntu-snapshot-bump: InRelease of $suite does not verify" >&2; return 1; }
 			signed_by_pinned "$work/gpgv.status" || { echo "ubuntu-snapshot-bump: InRelease of $suite is not signed by a pinned Ubuntu archive key (${signers[*]})" >&2; return 1; }
+			# A correctly signed InRelease of another suite (or release) must not stand in for this one.
+			# Ubuntu: Suite is the suite name; Codename is the release (noble for noble-security).
+			rsuite=$(sed -n 's/^Suite: *//p' "$work/Release.$snap.$suite" | head -n1)
+			rcode=$(sed -n 's/^Codename: *//p' "$work/Release.$snap.$suite" | head -n1)
+			[[ $rsuite == "$suite" ]] || { echo "ubuntu-snapshot-bump: InRelease of $suite says Suite '$rsuite', not '$suite'; refusing a signed file of another suite" >&2; return 1; }
+			[[ -z $rcode || $rcode == "${suite%%-*}" ]] || { echo "ubuntu-snapshot-bump: InRelease of $suite says Codename '$rcode', not '${suite%%-*}'; refusing a signed file of another release" >&2; return 1; }
 		else
 			# --no-gpg (fixtures only): nothing is verified, the file is read as it is.
 			cp "$work/InRelease.$snap.$suite" "$work/Release.$snap.$suite"

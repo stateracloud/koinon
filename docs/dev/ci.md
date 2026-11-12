@@ -693,9 +693,10 @@ reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchr
    this repository), close and reopen the pull request: a person's `reopened` event is a default
    type of every required workflow and runs them normally.
 3. Mark it ready for review: `ready_for_review` re-runs `ci` in full (a draft reports a vacuous
-   green, above) and `e2e-kind`. `dco` and `claim` do not listen to it; they keep the result of step 1 or 2.
-4. The change touches `harnesses/`, so the e2e needs the Merging rule's evidence (the lab cannot build
-   harness images: dispatch `e2e-kind.yml` on the branch).
+   green, above). On a pull request `e2e-kind` runs only with the `e2e` label and is advisory (#572). `dco` and `claim` do not listen to it; they keep the result of step 1 or 2.
+4. The change touches `harnesses/`. The proof is the required merge-queue jobs: `flavors`
+   (`hack/paths.rules` matches `harnesses/`) and `quickstart` (ADR 0105). A dispatched `e2e-kind.yml`
+   run is not merge evidence.
 
 Every weekly run force-updates the branch and so needs step 1 or 2 again. `ci.yml` has no
 `workflow_dispatch` on purpose: the dispatch route would run no `pull_request` checks and its

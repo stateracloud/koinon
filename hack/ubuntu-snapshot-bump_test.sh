@@ -325,6 +325,12 @@ if command -v gpg >/dev/null && command -v gpgv >/dev/null; then
 		run --check --base-url "$tmp/repo-signed" --keyring "$tmp/test-keyring.gpg" --signer "$fpr" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
 		eq "a tampered InRelease fails" "$rc" 1
 		has "and says which" "$out" "InRelease of noble-security does not verify"
+		# A correctly signed InRelease of another suite in the place of this one is refused.
+		cp -r "$tmp/repo-signed" "$tmp/repo-wrongsuite"
+		cp "$tmp/repo-signed/$SNAP/dists/noble/InRelease" "$tmp/repo-wrongsuite/$SNAP/dists/noble-updates/InRelease"
+		run --check --base-url "$tmp/repo-wrongsuite" --keyring "$tmp/test-keyring.gpg" --signer "$fpr" --today $TODAY --dockerfile "$tmp/s/Dockerfile" --readme "$tmp/s/README.md"
+		eq "a signed InRelease of another suite fails" "$rc" 1
+		has "and says which suite" "$out" "InRelease of noble-updates says Suite 'noble', not 'noble-updates'"
 	else
 		echo "SKIP: gpg could not create a test key; signature cases not run"
 	fi

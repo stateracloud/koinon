@@ -185,10 +185,10 @@ jobs:
             echo
             echo "GitHub starts no checks for a pull request that \`GITHUB_TOKEN\` opened or updated until a person acts. A maintainer who has reviewed the table above does one of these:"
             echo
-            echo "1. Click **Approve workflows to run** on this pull request (the Checks box, or the Actions tab). This starts \`ci\`, \`dco\`, \`claim\`, \`secrets\` and \`e2e-kind\` for the current head."
+            echo "1. Click **Approve workflows to run** on this pull request (the Checks box, or the Actions tab). This starts \`ci\`, \`dco\`, \`claim\` and \`secrets\` for the current head (\`e2e-kind\` runs on a pull request only with the \`e2e\` label and is advisory)."
             echo "2. If no approval button is offered, close and reopen this pull request. A person's \`reopened\` event runs all of them."
             echo
-            echo "Then mark it **ready for review** (this re-runs \`ci\` and \`e2e-kind\` in full; while it is a draft \`ci\` reports a vacuous green) and, because the change touches \`harnesses/\`, run the harness e2e as AGENTS.md \"Merging\" describes. Each weekly run force-updates this branch, which needs the same step again. Do not push to \`$BOT_BRANCH\`: the next run replaces it."
+            echo "Then mark it **ready for review** (this re-runs \`ci\` in full; while it is a draft \`ci\` reports a vacuous green) and, because the change touches \`harnesses/\`, the proof is the required merge-queue jobs \`flavors\` and \`quickstart\` (ADR 0105); a dispatched e2e run is not merge evidence. Each weekly run force-updates this branch, which needs the same step again. Do not push to \`$BOT_BRANCH\`: the next run replaces it."
             echo
             echo "Run: $RUN_URL. Refs #33."
           } >"$BUMP_DIR/body.md"
