@@ -1088,6 +1088,9 @@ type Querier interface {
 	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the stores of several replicas for the rest of the transaction.
 	LockOpenRouterCatalog(ctx context.Context) error
+	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
+	// cannot be added to two connections at once. Held until the transaction ends.
+	LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0

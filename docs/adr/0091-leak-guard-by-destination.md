@@ -448,6 +448,36 @@ same ends, however heavy the call: shorter ends under load would let a padded ca
 key order unseen (an encoding of 30 bytes a character needs more than 128 bytes each side). The
 heaviest benign shape takes about 19 MB of the 32 MiB work budget; a call over it fails closed.
 
+## Amendment (2026-11-12, #240): extra MCP hosts of one connection
+
+Decision 3 links an MCP server to a code-host connection when the server's URL names a host known
+to act on that connection's host: its web and API hosts, and the connector's own MCP hosts on the
+default host. A companion MCP server on its own host (a self-hosted `gitea-mcp`) had no way in. An
+org admin can now add hosts to one connection (`AddConnectionMCPHost`, `RemoveConnectionMCPHost`).
+The list stays inside the same rule:
+
+- **Exact match only.** A host is a plain, lower-case ASCII DNS name, compared by name. No port (one
+  host name is one operator), no scheme or path, no wildcard (a wildcard trusts every subdomain,
+  also one taken over or run by another team; ADR 0075 decision 13 refuses patterns in every host
+  list), and no IP address in any form (`127.1`, `0x7f.1` and `2130706433` are refused with a name
+  that ends in a number). The https rule and TLS verification bind a name to an operator; an IP does
+  not carry that. `xn--` labels are refused: the name is shown to the admin in Unicode but compared
+  as punycode, and a refusal cannot be mistaken for a look-alike of another operator's name.
+- **One host, one connection.** A host of an embedded connector type, or the web or API host or an
+  extra host of another connection of the org, is refused, so calls to one code host never count as
+  inside the list of another (the #117 reason). Adds in one org are serialised so that two adds
+  cannot both pass. At most 20 hosts per connection. Org admins and owners only; every change is
+  audited with the actor and the list before and after.
+- **Unlink on remove.** Our check runs when a link is written, not on every request: the classifier
+  reads the stored link. A removed host would leave its links trusted, which is fail-open. A removal
+  therefore unlinks, in the same transaction, every server the connection no longer serves, each
+  audited as `mcp_server.data_class.reset` with the reason `connection_mcp_host_removed`; the
+  response lists them and a dry run shows them before the admin confirms. Adding the host again does
+  not restore a link.
+- **Two lists for a private host.** The list says who may act through the connection. Whether the
+  platform may reach a private address stays with `egress.allowedInternalHosts`; the refusal of a
+  host that looks private names both.
+
 ## Upstream verification
 
 No upstream behaviour changes. The guard still runs behind agentgateway v1.6.0 ExtMcp

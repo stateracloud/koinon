@@ -10,7 +10,7 @@ import { ConnectionSchema, ConnectionService, ConnectionStatus, GitHubConnection
 import { githubConnectorType } from '@/test-fixtures'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { role?: OrgRole; hosts?: string[]; removed?: boolean } = {}) {
+function setup(opts: { role?: OrgRole; hosts?: string[]; removed?: boolean; linked?: { name: string; url: string }[] } = {}) {
   let hosts = opts.hosts ?? []
   const added: string[] = []
   const removed: string[] = []
@@ -28,6 +28,7 @@ function setup(opts: { role?: OrgRole; hosts?: string[]; removed?: boolean } = {
         return { connection: conn() }
       },
       removeConnectionMCPHost: (req) => {
+        if (req.dryRun) return { connection: conn(), unlinkedServers: (opts.linked ?? []).map((m, i) => ({ id: `s-${i}`, ...m })) }
         removed.push(req.host)
         hosts = hosts.filter((h) => h !== req.host)
         return { connection: conn() }
@@ -59,9 +60,10 @@ describe('A connection’s extra MCP hosts', () => {
   })
 
   it('asks before an admin removes a host, then removes it', async () => {
-    const { removed } = setup({ hosts: ['gitea-mcp'] })
+    const { removed } = setup({ hosts: ['gitea-mcp'], linked: [{ name: 'tracker', url: 'https://gitea-mcp/mcp' }] })
     await userEvent.click(await screen.findByRole('button', { name: 'Remove MCP host gitea-mcp' }))
-    expect(screen.getByText(/lose the link/)).toBeInTheDocument()
+    expect(await screen.findByText(/lose the link.*tracker \(https:\/\/gitea-mcp\/mcp\)/)).toBeInTheDocument()
+    expect(removed).toEqual([])
     await userEvent.click(screen.getByRole('button', { name: 'Remove host' }))
     await waitFor(() => expect(removed).toEqual(['gitea-mcp']))
     await waitFor(() => expect(screen.queryByText('gitea-mcp')).not.toBeInTheDocument())

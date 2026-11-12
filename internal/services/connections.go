@@ -576,7 +576,7 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 
 // AddConnectionMCPHost implements ConnectionService.
 func (s *Server) AddConnectionMCPHost(ctx context.Context, req *connectionv1alpha1.AddConnectionMCPHostRequest) (*connectionv1alpha1.AddConnectionMCPHostResponse, error) {
-	row, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), true)
+	row, _, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -585,33 +585,82 @@ func (s *Server) AddConnectionMCPHost(ctx context.Context, req *connectionv1alph
 
 // RemoveConnectionMCPHost implements ConnectionService.
 func (s *Server) RemoveConnectionMCPHost(ctx context.Context, req *connectionv1alpha1.RemoveConnectionMCPHostRequest) (*connectionv1alpha1.RemoveConnectionMCPHostResponse, error) {
-	row, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), false)
+	row, unlinked, err := s.changeMCPHosts(ctx, req.GetOrgId(), req.GetConnectionId(), req.GetHost(), false, req.GetDryRun())
 	if err != nil {
 		return nil, err
 	}
-	return &connectionv1alpha1.RemoveConnectionMCPHostResponse{Connection: s.connectionProto(row)}, nil
+	res := &connectionv1alpha1.RemoveConnectionMCPHostResponse{Connection: s.connectionProto(row)}
+	for _, m := range unlinked {
+		res.UnlinkedServers = append(res.UnlinkedServers, &connectionv1alpha1.UnlinkedMCPServer{Id: m.ID.String(), Name: m.Name, Url: m.Url})
+	}
+	return res, nil
+}
+
+// claimedMCPHost says why host cannot be an extra MCP host of connection self: it is a host of an
+// embedded connector type, or the web or API host or an extra host of another connection of the org
+// (#240). One host name is one operator, so it serves one code host; the caller holds the org's MCP host
+// lock, so two adds cannot both pass. Empty means free.
+func claimedMCPHost(ctx context.Context, q *store.Queries, org pgtype.UUID, self pgtype.UUID, host string) (string, error) {
+	if name, ok := connectors.ReservedMCPHost(host); ok {
+		return fmt.Sprintf("%s is a host of the %s connector", host, name), nil
+	}
+	rows, err := q.ListConnections(ctx, org)
+	if err != nil {
+		return "", err
+	}
+	for _, other := range rows {
+		if other.ID == self || other.RemovedAt.Valid {
+			continue
+		}
+		t, ok := connectors.Get(other.Connector)
+		if !ok || t.Spec.Capabilities == nil {
+			continue
+		}
+		site, err := codehost.SiteOf(other.Config)
+		if err != nil {
+			return "", fmt.Errorf("the connection %q has no readable host: %w", other.DisplayName, err)
+		}
+		loc, err := site.Location(t)
+		if err != nil {
+			return "", fmt.Errorf("the connection %q has no readable host: %w", other.DisplayName, err)
+		}
+		if slices.Contains(t.MCPHosts(loc, other.McpHosts), host) {
+			return fmt.Sprintf("%s is already a host of the connection %q", host, other.DisplayName), nil
+		}
+	}
+	return "", nil
 }
 
 // changeMCPHosts adds or removes one host of a connection's extra MCP hosts (#240), for an admin. The
 // change and its audit row are one transaction. A removal also unlinks the MCP servers the connection
-// no longer serves, each audited. Adding a present host or removing an absent one writes nothing.
-func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host string, add bool) (store.Connection, error) {
+// no longer serves, each audited, and returns them; with dryRun it writes nothing and returns the
+// servers it would unlink. Adding a present host or removing an absent one writes nothing.
+func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host string, add, dryRun bool) (store.Connection, []store.McpServer, error) {
 	c, err := authorize(ctx, orgID, store.OrgRoleAdmin)
 	if err != nil {
-		return store.Connection{}, err
+		return store.Connection{}, nil, err
 	}
 	id, err := parseID("connection_id", connectionID)
 	if err != nil {
-		return store.Connection{}, err
+		return store.Connection{}, nil, err
 	}
 	host, err = connectors.ParseMCPHost(host)
 	if err != nil {
-		return store.Connection{}, connect.NewError(connect.CodeInvalidArgument, "host: "+err.Error())
+		return store.Connection{}, nil, connect.NewError(connect.CodeInvalidArgument, "host: "+err.Error())
 	}
 	rctx := requestCtx(ctx)
-	var out store.Connection
+	var (
+		out      store.Connection
+		unlinked []store.McpServer
+	)
+	// The lock order is the org's MCP host lock, the connection, then its linked MCP servers (see
+	// DeleteConnection).
 	err = s.inAuditTx(rctx, func(q *store.Queries, b audit.Batch) error {
-		// Lock order: the connection, then its linked MCP servers (see DeleteConnection).
+		if add {
+			if err := q.LockOrgMCPHosts(rctx, c.org); err != nil {
+				return err
+			}
+		}
 		row, err := q.GetConnectionForUpdate(rctx, store.GetConnectionForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
@@ -633,11 +682,25 @@ func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host s
 			if len(hosts) >= connectors.MaxExtraMCPHosts {
 				return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("a connection has at most %d extra MCP hosts; remove one first", connectors.MaxExtraMCPHosts))
 			}
+			why, err := claimedMCPHost(rctx, q, c.org, id, host)
+			if err != nil {
+				return err
+			}
+			if why != "" {
+				return connect.NewError(connect.CodeInvalidArgument, "host: "+why+"; one host name is one operator and serves one code host")
+			}
 			hosts = append(hosts, host)
 			slices.Sort(hosts)
 			action = "connection.mcp_host.add"
 		} else {
 			hosts = slices.DeleteFunc(hosts, func(h string) bool { return h == host })
+		}
+		if dryRun {
+			// Nothing is written: the servers the connection would stop serving.
+			preview := row
+			preview.McpHosts = hosts
+			unlinked, err = mcpservers.MismatchedServers(rctx, q, preview)
+			return err
 		}
 		updated, err := q.SetConnectionMCPHosts(rctx, store.SetConnectionMCPHostsParams{OrgID: c.org, ID: id, McpHosts: hosts})
 		if err != nil {
@@ -652,12 +715,13 @@ func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host s
 		if add {
 			return nil
 		}
-		return mcpservers.UnlinkMismatchedServers(rctx, q, b, c.auditActor(), updated, "connection_mcp_host_removed")
+		unlinked, err = mcpservers.UnlinkMismatchedServers(rctx, q, b, c.auditActor(), updated, "connection_mcp_host_removed")
+		return err
 	})
 	if err != nil {
-		return store.Connection{}, s.dbError(err, "connection")
+		return store.Connection{}, nil, s.dbError(err, "connection")
 	}
-	return out, nil
+	return out, unlinked, nil
 }
 
 // nonNil is hosts for an audit payload: an empty list is [], not null.

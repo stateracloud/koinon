@@ -184,8 +184,10 @@ type ConnectionServiceClient interface {
 	AddConnectionMCPHost(context.Context, *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error)
 	// RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
 	// linked to the connection that it no longer serves loses the link (and its code-host tool class),
-	// each audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited
-	// (connection.mcp_host.remove). Admins and owners.
+	// each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+	// lists them. With dry_run nothing is written: the response lists the servers a removal would
+	// unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+	// added again does not restore a link. Admins and owners.
 	RemoveConnectionMCPHost(context.Context, *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
@@ -241,8 +243,10 @@ type ConnectionServiceHandler interface {
 	AddConnectionMCPHost(context.Context, *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error)
 	// RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
 	// linked to the connection that it no longer serves loses the link (and its code-host tool class),
-	// each audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited
-	// (connection.mcp_host.remove). Admins and owners.
+	// each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+	// lists them. With dry_run nothing is written: the response lists the servers a removal would
+	// unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+	// added again does not restore a link. Admins and owners.
 	RemoveConnectionMCPHost(context.Context, *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon

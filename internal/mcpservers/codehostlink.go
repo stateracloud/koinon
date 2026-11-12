@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,26 +75,34 @@ func servesMCP(conn store.Connection, serverURL string) error {
 	return t.ServesMCP(loc, conn.McpHosts, serverURL)
 }
 
+// MismatchedServers lists the servers of conn's org linked to conn that conn, as it is, does not
+// serve: the servers UnlinkMismatchedServers would unlink. It writes nothing. The rows are locked
+// (FOR UPDATE) until the transaction ends.
+func MismatchedServers(ctx context.Context, q *store.Queries, conn store.Connection) ([]store.McpServer, error) {
+	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(linked, func(cur store.McpServer) bool { return servesMCP(conn, cur.Url) == nil }), nil
+}
+
 // UnlinkMismatchedServers clears the code-host link of every server of org linked to conn that conn,
 // as it is now, does not serve: called in the transaction that changed the connection's hosts (a
 // declared connection's baseUrl, or an admin's extra MCP host removed, #240), after the change. Each
 // unlink is audited as mcp_server.data_class.reset with the given reason (connection_host_changed,
-// connection_mcp_host_removed); the servers' kind and legs stay.
-func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection, reason string) error {
-	linked, err := q.ListMCPServersLinkedToConnectionForUpdate(ctx, store.ListMCPServersLinkedToConnectionForUpdateParams{OrgID: conn.OrgID, ConnectionID: conn.ID})
+// connection_mcp_host_removed); the servers' kind and legs stay. It returns the servers it unlinked.
+func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batch, actor audit.Actor, conn store.Connection, reason string) ([]store.McpServer, error) {
+	mismatched, err := MismatchedServers(ctx, q, conn)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, cur := range linked {
-		if servesMCP(conn, cur.Url) == nil {
-			continue
-		}
+	for _, cur := range mismatched {
 		out, err := q.SetMCPServerDataClass(ctx, store.SetMCPServerDataClassParams{
 			OrgID: cur.OrgID, ID: cur.ID, Kind: cur.Kind,
 			ExposesUntrustedInput: cur.ExposesUntrustedInput, ExposesPrivateData: cur.ExposesPrivateData,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		before, after := declarationOf(cur), declarationOf(out)
 		b.Org(audit.Event{
@@ -105,5 +114,5 @@ func UnlinkMismatchedServers(ctx context.Context, q *store.Queries, b audit.Batc
 			},
 		})
 	}
-	return nil
+	return mismatched, nil
 }

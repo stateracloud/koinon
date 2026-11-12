@@ -378,7 +378,8 @@ var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() 
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
-					return mcpservers.UnlinkMismatchedServers(ctx, q, b, audit.Secret("forge"), row, "connection_host_changed")
+					_, err := mcpservers.UnlinkMismatchedServers(ctx, q, b, audit.Secret("forge"), row, "connection_host_changed")
+					return err
 				})
 				Expect(err).NotTo(HaveOccurred())
 				got, err := svc.Get(ctx, org, moved.ID)

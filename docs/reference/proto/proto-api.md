@@ -1412,7 +1412,7 @@ secret store (ADR 0021, 0056); no response ever contains them.
 | ListConnections | `koinon.connection.v1alpha1.ListConnectionsRequest` | `koinon.connection.v1alpha1.ListConnectionsResponse` | - | ListConnections returns the org's connections, oldest first. Viewers and above. |
 | ListConnectorTypes | `koinon.connection.v1alpha1.ListConnectorTypesRequest` | `koinon.connection.v1alpha1.ListConnectorTypesResponse` | - | ListConnectorTypes returns the connector types this install ships, with their scopes and setup guides. Any signed-in user. |
 | ListInstallationRepos | `koinon.connection.v1alpha1.ListInstallationReposRequest` | `koinon.connection.v1alpha1.ListInstallationReposResponse` | - | ListInstallationRepos lists the repositories a GitHub connection's App installation can access, for choosing what to bind an agent to. Koinon asks GitHub with a metadata-read installation token; nothing is written. Admins and owners. |
-| RemoveConnectionMCPHost | `koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest` | `koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse` | - | RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server linked to the connection that it no longer serves loses the link (and its code-host tool class), each audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). Admins and owners. |
+| RemoveConnectionMCPHost | `koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest` | `koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse` | - | RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server linked to the connection that it no longer serves loses the link (and its code-host tool class), each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response lists them. With dry_run nothing is written: the response lists the servers a removal would unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host added again does not restore a link. Admins and owners. |
 | SetConnectionSecret | `koinon.connection.v1alpha1.SetConnectionSecretRequest` | `koinon.connection.v1alpha1.SetConnectionSecretResponse` | - | SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector is required; the other settings stay. It clears the lost mark and the last test result. A declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION). Audited without the secret. Admins and owners. |
 | TestConnection | `koinon.connection.v1alpha1.TestConnectionRequest` | `koinon.connection.v1alpha1.TestConnectionResponse` | - | TestConnection runs the setup guide's checks against the provider and records the result. Nothing is written to the provider. Admins and owners. |
 
@@ -1685,14 +1685,17 @@ ListInstallationReposResponse is one page, in GitHub's order.
 | org_id | 1 | `string` | singular |  |  |
 | connection_id | 2 | `string` | singular |  |  |
 | host | 3 | `string` | singular |  |  |
+| dry_run | 4 | `bool` | singular |  | dry_run reports the servers the removal would unlink and writes nothing. |
 
 ### Message RemoveConnectionMCPHostResponse
 
-RemoveConnectionMCPHostResponse holds the connection with its new list.
+RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)
+and the MCP servers the removal unlinked (with dry_run: would unlink).
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
+| unlinked_servers | 2 | `koinon.connection.v1alpha1.UnlinkedMCPServer` | repeated |  |  |
 
 ### Message Scope
 
@@ -1744,6 +1747,16 @@ TestConnectionResponse holds the checks in setup-guide order.
 | --- | --- | --- | --- | --- | --- |
 | connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 | results | 2 | `koinon.connection.v1alpha1.CheckResult` | repeated |  |  |
+
+### Message UnlinkedMCPServer
+
+UnlinkedMCPServer is an MCP server that lost its link to a connection.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+| url | 3 | `string` | singular |  |  |
 
 ### Enum ConnectionStatus
 

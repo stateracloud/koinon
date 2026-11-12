@@ -70,7 +70,32 @@ var _ = Describe("the MCP hosts that act on a connection's host (#117)", func() 
 		Entry("a label with a leading hyphen", "-a.example.com", "", "not a host name"),
 		Entry("an underscore", "a_b.example.com", "", "not a plain host name"),
 		Entry("a label over 63 characters", strings.Repeat("a", 64)+".example.com", "", "not a host name"),
+		Entry("a short IPv4 form", "127.1", "", "IP address"),
+		Entry("a dotted hex IPv4", "0x7f.1", "", "reads as an IP address"),
+		Entry("a hex last label", "mcp.0x7f000001", "", "reads as an IP address"),
+		Entry("a decimal IPv4", "2130706433", "", "IP address"),
+		Entry("a name ending in a number", "mcp.example.123", "", "reads as an IP address"),
+		Entry("a non-ASCII name", "mcp.exämple.com", "", "not a plain host name"),
+		Entry("a punycode label", "xn--exmple-cua.example.com", "", "xn--"),
+		Entry("a label that only starts with digits", "1mcp.example.com", "1mcp.example.com", ""),
 	)
+
+	DescribeTable("ReservedMCPHost",
+		func(host string, reserved bool) {
+			_, ok := connectors.ReservedMCPHost(host)
+			Expect(ok).To(Equal(reserved))
+		},
+		Entry("the GitHub web host", "github.com", true),
+		Entry("the GitHub API host", "API.github.com.", true),
+		Entry("GitHub's MCP host", "api.githubcopilot.com", true),
+		Entry("a company host", "gitea-mcp.corp.example", false),
+	)
+
+	It("names the egress list when it refuses a private-looking host", func() {
+		t, loc := giteaType(), locate(giteaType(), "https://git.example.com")
+		Expect(t.ServesMCP(loc, nil, "https://gitea-mcp.corp.internal/mcp")).To(MatchError(ContainSubstring("egress.allowedInternalHosts")))
+		Expect(t.ServesMCP(loc, nil, "https://mcp.example.org/mcp")).NotTo(MatchError(ContainSubstring("egress.allowedInternalHosts")))
+	})
 
 	DescribeTable("ServesMCP",
 		func(t func() *connectors.Type, baseURL, serverURL, refusal string) {

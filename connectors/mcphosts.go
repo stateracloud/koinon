@@ -75,8 +75,50 @@ func (t *Type) ServesMCP(loc Location, extra []string, serverURL string) error {
 	if c := t.Spec.Capabilities; c != nil && c.DisplayName != "" {
 		name = c.DisplayName
 	}
-	return fmt.Errorf("an MCP server at %s does not act on the %s connection at %s; link it to the connection of its own code host (this connection accepts MCP servers at %s)",
+	msg := fmt.Sprintf("an MCP server at %s does not act on the %s connection at %s; link it to the connection of its own code host (this connection accepts MCP servers at %s)",
 		host, name, loc.BaseURL(), strings.Join(allowed, ", "))
+	if privateLooking(host) {
+		// Two lists decide for a private server: this one (who may act through the connection) and the
+		// platform's egress list (whether the platform may reach it at all).
+		msg += "; to add the host to this connection, use the connection's MCP hosts. A private host also needs to be on the platform egress list (egress.allowedInternalHosts) before the platform can reach it"
+	}
+	return errors.New(msg)
+}
+
+// privateLooking says whether a host name looks internal: a single label, or a suffix that is not a
+// public DNS name. A name cannot show that its address is private; this only decides whether the
+// refusal also names the egress list.
+func privateLooking(host string) bool {
+	if !strings.Contains(host, ".") {
+		return true
+	}
+	for _, suffix := range []string{".local", ".internal", ".lan", ".home", ".corp", ".intranet", ".localdomain", ".svc", ".cluster.local"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// ReservedMCPHost returns the display name of the embedded connector type whose default web host, API
+// host or MCP host is host, and true. Such a host is never an admin's extra MCP host: it would let
+// calls to that code host count as inside the list of another connection (#117). The connector
+// types are the embedded ones; a connection's own host is checked by the caller.
+func ReservedMCPHost(host string) (string, bool) {
+	host = normalHost(host)
+	types, err := All()
+	if err != nil {
+		return "embedded connector types", true // fail closed
+	}
+	for _, t := range types {
+		if t.Spec.Site != nil && t.Spec.Site.SelfHosted {
+			continue
+		}
+		if slices.Contains(t.MCPHosts(t.DefaultLocation(), nil), host) {
+			return t.Metadata.DisplayName, true
+		}
+	}
+	return "", false
 }
 
 // ParseMCPHost validates a host name an admin adds to a connection's MCP hosts (#240) and returns it
@@ -94,7 +136,18 @@ func ParseMCPHost(s string) (string, error) {
 	if net.ParseIP(h) != nil || strings.Trim(h, "0123456789.") == "" {
 		return "", fmt.Errorf("%q is an IP address; name the MCP server by its DNS host name", s)
 	}
-	for _, label := range strings.Split(h, ".") {
+	labels := strings.Split(h, ".")
+	// hostnameRE accepts 127.1, 0x7f.1 and 2130706433, which a URL parser reads as IP addresses (WHATWG).
+	// No public top-level label is all digits or a 0x number, so refuse a name that ends in one.
+	if last := labels[len(labels)-1]; isNumberLabel(last) {
+		return "", fmt.Errorf("%q ends in a number, so it reads as an IP address; name the MCP server by its DNS host name", s)
+	}
+	for _, label := range labels {
+		// An internationalised name is shown to the admin in Unicode but compared as punycode; refuse
+		// the xn-- form, so no entry can hide a look-alike of another operator's name.
+		if strings.HasPrefix(label, "xn--") {
+			return "", fmt.Errorf("%q has an internationalised (xn--) label, which is not accepted", s)
+		}
 		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return "", fmt.Errorf("%q is not a host name", s)
 		}
@@ -105,6 +158,17 @@ func ParseMCPHost(s string) (string, error) {
 		}
 	}
 	return h, nil
+}
+
+// isNumberLabel is true for a label of only digits, or a 0x hexadecimal number.
+func isNumberLabel(l string) bool {
+	if l == "" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(l, "0x"); ok {
+		return strings.Trim(rest, "0123456789abcdef") == ""
+	}
+	return strings.Trim(l, "0123456789") == ""
 }
 
 // normalHost is a host name as ServesMCP compares it: lower-case, without a trailing dot.

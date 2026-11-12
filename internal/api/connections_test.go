@@ -17,6 +17,8 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
+	guuid "github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -560,6 +562,28 @@ var _ = Describe("ConnectionService", func() {
 			Expect(err).NotTo(HaveOccurred(), "a present host is still a no-op at the limit")
 		})
 
+		It("refuses a host of another connector, or one that another connection has", func(ctx SpecContext) {
+			for _, host := range []string{"github.com", "api.githubcopilot.com", "API.github.com."} {
+				_, err := add(owner, host)
+				Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), host)
+			}
+			var orgID pgtype.UUID
+			Expect(orgID.Scan(org)).To(Succeed())
+			other, err := store.New(e.pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+				OrgID: orgID, ID: pgtype.UUID{Bytes: guuid.New(), Valid: true}, Connector: "gitea", DisplayName: "forge",
+				Config: []byte(`{"baseUrl":"https://git.corp.example"}`), Source: store.ConfigSourceUi,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "git.corp.example")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "the web host of another connection")
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['shared-mcp'] WHERE org_id = $1 AND id = $2`, org, other.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "shared-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a host already listed on another connection")
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+			Expect(audited(ctx, "connection.mcp_host.add")).To(BeZero())
+		})
+
 		It("refuses to change the hosts of a removed connection, and writes nothing", func(ctx SpecContext) {
 			_, err := add(owner, "gitea-mcp")
 			Expect(err).NotTo(HaveOccurred())
@@ -580,8 +604,19 @@ var _ = Describe("ConnectionService", func() {
 				($1, 'extra', 'https://gitea-mcp.corp.example/mcp', $2), ($1, 'declared', 'https://api.githubcopilot.com/mcp/', $2)`, org, id)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = remove(owner, "gitea-mcp.corp.example")
+			By("a dry run lists the servers and writes nothing")
+			dry, err := owner.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: "gitea-mcp.corp.example", DryRun: true})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(dry.GetUnlinkedServers()).To(HaveLen(1))
+			Expect(dry.GetUnlinkedServers()[0].GetName()).To(Equal("extra"))
+			Expect(dry.GetConnection().GetMcpHosts()).To(Equal([]string{"gitea-mcp.corp.example"}))
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'extra' AND code_host_connection_id IS NOT NULL`, org)).To(Equal(1))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(BeZero())
+
+			res, err := owner.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: "gitea-mcp.corp.example"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetUnlinkedServers()).To(HaveLen(1))
+			Expect(res.GetUnlinkedServers()[0].GetUrl()).To(Equal("https://gitea-mcp.corp.example/mcp"))
 			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'extra' AND code_host_connection_id IS NULL`, org)).To(Equal(1))
 			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'declared' AND code_host_connection_id IS NOT NULL`, org)).To(Equal(1))
 			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_server.data_class.reset' AND summary->'after'->>'reason' = 'connection_mcp_host_removed'`, org)).To(Equal(1))

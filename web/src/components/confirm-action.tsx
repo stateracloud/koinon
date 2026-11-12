@@ -12,6 +12,10 @@ export type ConfirmActionProps = {
   /** What the action does, said before the person confirms. */
   consequence: string
   confirmLabel: string
+  /** Called when the question opens, for example to look up what the action would do. */
+  onOpen?: () => void
+  /** Keeps the confirm button off, for example while the consequence is still being looked up. */
+  confirmDisabled?: boolean
   onConfirm: () => Promise<unknown>
   /** Called with the server's message, and the error itself for its details, when the action is refused. */
   onError?: (message: string, err: ConnectError) => void
@@ -21,7 +25,7 @@ export type ConfirmActionProps = {
  * ConfirmAction asks once, in place, before a destructive action. The consequence is read out when the
  * question opens (role=alertdialog is avoided: nothing is trapped, the page stays usable).
  */
-export function ConfirmAction({ label, subject, consequence, confirmLabel, onConfirm, onError }: ConfirmActionProps) {
+export function ConfirmAction({ label, subject, consequence, confirmLabel, onOpen, confirmDisabled, onConfirm, onError }: ConfirmActionProps) {
   const [asking, setAsking] = useState(false)
   const [pending, setPending] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -40,7 +44,10 @@ export function ConfirmAction({ label, subject, consequence, confirmLabel, onCon
 
   if (!asking) {
     return (
-      <Button ref={trigger} variant="outline" size="sm" onClick={() => setAsking(true)} aria-label={`${label} ${subject}`}>
+      <Button ref={trigger} variant="outline" size="sm" onClick={() => {
+          setAsking(true)
+          onOpen?.()
+        }} aria-label={`${label} ${subject}`}>
         {label}
       </Button>
     )
@@ -62,7 +69,7 @@ export function ConfirmAction({ label, subject, consequence, confirmLabel, onCon
   return (
     <div role="group" aria-label={`Confirm: ${label} ${subject}`} className="flex flex-wrap items-center gap-2 text-sm">
       <span role="status">{consequence}</span>
-      <Button ref={confirmButton} variant="destructive" size="sm" disabled={pending} onClick={() => void confirm()}>
+      <Button ref={confirmButton} variant="destructive" size="sm" disabled={pending || confirmDisabled} onClick={() => void confirm()}>
         {confirmLabel}
       </Button>
       <Button variant="outline" size="sm" disabled={pending} onClick={() => {

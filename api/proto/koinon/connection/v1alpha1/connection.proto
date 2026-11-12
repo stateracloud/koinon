@@ -67,8 +67,10 @@ service ConnectionService {
 
   // RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
   // linked to the connection that it no longer serves loses the link (and its code-host tool class),
-  // each audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited
-  // (connection.mcp_host.remove). Admins and owners.
+  // each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+  // lists them. With dry_run nothing is written: the response lists the servers a removal would
+  // unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+  // added again does not restore a link. Admins and owners.
   rpc RemoveConnectionMCPHost(RemoveConnectionMCPHostRequest) returns (RemoveConnectionMCPHostResponse);
 
   // ListInstallationRepos lists the repositories a GitHub connection's App
@@ -332,11 +334,22 @@ message RemoveConnectionMCPHostRequest {
   string org_id = 1;
   string connection_id = 2;
   string host = 3;
+  // dry_run reports the servers the removal would unlink and writes nothing.
+  bool dry_run = 4;
 }
 
-// RemoveConnectionMCPHostResponse holds the connection with its new list.
+// UnlinkedMCPServer is an MCP server that lost its link to a connection.
+message UnlinkedMCPServer {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+}
+
+// RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)
+// and the MCP servers the removal unlinked (with dry_run: would unlink).
 message RemoveConnectionMCPHostResponse {
   Connection connection = 1;
+  repeated UnlinkedMCPServer unlinked_servers = 2;
 }
 
 // BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because

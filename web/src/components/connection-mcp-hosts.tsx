@@ -8,7 +8,7 @@ import { ConfirmAction } from '@/components/confirm-action'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { ConnectionService, type UnlinkedMCPServer } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 
 /**
  * ConnectionMcpHosts lists the extra MCP hosts of a code-host connection (#240): host names besides
@@ -53,12 +53,9 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
             <li key={h} className="flex flex-wrap items-center gap-2">
               <code className="text-xs">{h}</code>
               {canEdit && (
-                <ConfirmAction
-                  label="Remove"
-                  subject={`MCP host ${h}`}
-                  consequence={`Remove ${h}? MCP servers at ${h} linked to this connection lose the link and their code-host tool class.`}
-                  confirmLabel="Remove host"
-                  onConfirm={() => remove.mutateAsync({ orgId, connectionId, host: h })}
+                <RemoveHost
+                  host={h}
+                  preview={(dryRun) => remove.mutateAsync({ orgId, connectionId, host: h, dryRun })}
                   onError={(message) => setError(`Could not remove the host: ${message}`)}
                 />
               )}
@@ -83,5 +80,40 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
         </p>
       )}
     </section>
+  )
+}
+
+/**
+ * RemoveHost asks before a host is removed, and says which MCP servers the removal unlinks: the server
+ * answers a dry run with that list, so the admin sees it before confirming. A host added again does not
+ * restore a link.
+ */
+function RemoveHost({ host, preview, onError }: { host: string; preview: (dryRun: boolean) => Promise<{ unlinkedServers: UnlinkedMCPServer[] }>; onError: (message: string) => void }) {
+  const [servers, setServers] = useState<UnlinkedMCPServer[]>()
+  const [failed, setFailed] = useState(false)
+  let consequence = `Checking which MCP servers removing ${host} unlinks…`
+  if (failed) consequence = `Could not check which MCP servers removing ${host} unlinks. Servers linked through it lose the link and their code-host tool class.`
+  else if (servers && servers.length === 0) consequence = `Remove ${host}? No MCP server is linked through it.`
+  else if (servers) {
+    consequence = `Remove ${host}? These MCP servers lose the link and their code-host tool class, and adding the host again does not restore it: ${servers.map((s) => `${s.name} (${s.url})`).join(', ')}.`
+  }
+  return (
+    <ConfirmAction
+      label="Remove"
+      subject={`MCP host ${host}`}
+      consequence={consequence}
+      confirmLabel="Remove host"
+      confirmDisabled={servers === undefined && !failed}
+      onOpen={() => {
+        setServers(undefined)
+        setFailed(false)
+        preview(true).then(
+          (res) => setServers(res.unlinkedServers),
+          () => setFailed(true),
+        )
+      }}
+      onConfirm={() => preview(false)}
+      onError={onError}
+    />
   )
 }

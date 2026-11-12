@@ -498,6 +498,17 @@ func (q *Queries) ListOrgsWithCodeHostConnections(ctx context.Context, connector
 	return items, nil
 }
 
+const lockOrgMCPHosts = `-- name: LockOrgMCPHosts :exec
+SELECT pg_advisory_xact_lock(hashtextextended('connection_mcp_hosts:' || ($1::uuid)::text, 0))
+`
+
+// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
+// cannot be added to two connections at once. Held until the transaction ends.
+func (q *Queries) LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockOrgMCPHosts, orgID)
+	return err
+}
+
 const markConnectionRemoved = `-- name: MarkConnectionRemoved :exec
 UPDATE connections
 SET removed_at = now()

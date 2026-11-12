@@ -5885,7 +5885,7 @@
             },
             {
               "name": "RemoveConnectionMCPHost",
-              "description": "RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server\nlinked to the connection that it no longer serves loses the link (and its code-host tool class),\neach audited as mcp_server.data_class.reset. Removing an absent host changes nothing. Audited\n(connection.mcp_host.remove). Admins and owners.",
+              "description": "RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server\nlinked to the connection that it no longer serves loses the link (and its code-host tool class),\neach audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response\nlists them. With dry_run nothing is written: the response lists the servers a removal would\nunlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host\nadded again does not restore a link. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest",
               "responseType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
               "clientStreaming": false,
@@ -6971,6 +6971,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "dry_run",
+              "number": 4,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "dry_run reports the servers the removal would unlink and writes nothing."
             }
           ]
         },
@@ -6978,7 +6987,7 @@
           "name": "RemoveConnectionMCPHostResponse",
           "fullName": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
           "file": "koinon/connection/v1alpha1/connection.proto",
-          "description": "RemoveConnectionMCPHostResponse holds the connection with its new list.",
+          "description": "RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)\nand the MCP servers the removal unlinked (with dry_run: would unlink).",
           "deprecated": false,
           "fields": [
             {
@@ -6986,6 +6995,15 @@
               "number": 1,
               "type": "koinon.connection.v1alpha1.Connection",
               "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "unlinked_servers",
+              "number": 2,
+              "type": "koinon.connection.v1alpha1.UnlinkedMCPServer",
+              "label": "repeated",
               "oneof": "",
               "deprecated": false,
               "description": ""
@@ -7166,6 +7184,42 @@
               "number": 2,
               "type": "koinon.connection.v1alpha1.CheckResult",
               "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "UnlinkedMCPServer",
+          "fullName": "koinon.connection.v1alpha1.UnlinkedMCPServer",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "UnlinkedMCPServer is an MCP server that lost its link to a connection.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
               "oneof": "",
               "deprecated": false,
               "description": ""
