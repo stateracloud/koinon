@@ -733,7 +733,8 @@ func ToolRules(tools map[AgentRef][]ToolGrant) []string {
 }
 
 // Validate checks s for values that would be unsafe or ambiguous in gateway
-// config. Drivers call it before rendering.
+// config. Drivers call it before rendering. The joined error lists the faults in a fixed order:
+// keys, then the model half (limits, providers, models), then the MCP half (targets, tools).
 func (s State) Validate() error {
 	errs := validateKeys(s.Keys)
 	errs = append(errs, s.ModelState.validate()...)

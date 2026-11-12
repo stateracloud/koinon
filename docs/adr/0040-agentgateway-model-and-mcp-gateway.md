@@ -133,7 +133,7 @@ separately from models.
 ## Amendment (2026-11-12): MCPGateway arrives in ADR 0097 step 2
 
 [0097](0097-koinon-owned-gateway.md) decision 2.1 introduces the `MCPGateway` interface in step 2, the point the
-2026-10-26 amendment waited for: Koinon's own gateway serves the MCP path apart from models.
+2026-10-26 amendment waited for: Koinon's own gateway is driven for the MCP path apart from models.
 `ApplyMCP(ctx, MCPConfig)` is its own method, not a second `Apply`, so a driver that serves both
 paths can be applied and acknowledged for each path apart. The agentgateway drivers keep
 `ModelGateway.Apply` for both halves. The text above stays as written.
