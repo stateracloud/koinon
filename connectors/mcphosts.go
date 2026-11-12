@@ -136,6 +136,9 @@ func ParseMCPHost(s string) (string, error) {
 	if net.ParseIP(h) != nil || strings.Trim(h, "0123456789.") == "" {
 		return "", fmt.Errorf("%q is an IP address; name the MCP server by its DNS host name", s)
 	}
+	if h == "localhost" || h == "localhost.localdomain" || strings.HasSuffix(h, ".localhost") {
+		return "", fmt.Errorf("%q is a loopback name (RFC 6761); name the MCP server by its DNS host name", s)
+	}
 	labels := strings.Split(h, ".")
 	// hostnameRE accepts 127.1, 0x7f.1 and 2130706433, which a URL parser reads as IP addresses (WHATWG).
 	// No public top-level label is all digits or a 0x number, so refuse a name that ends in one.

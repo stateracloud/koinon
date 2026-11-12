@@ -76,6 +76,9 @@ var _ = Describe("the MCP hosts that act on a connection's host (#117)", func() 
 		Entry("a decimal IPv4", "2130706433", "", "IP address"),
 		Entry("a name ending in a number", "mcp.example.123", "", "reads as an IP address"),
 		Entry("a non-ASCII name", "mcp.exämple.com", "", "not a plain host name"),
+		Entry("localhost", "localhost", "", "loopback"),
+		Entry("localhost.localdomain", "Localhost.Localdomain.", "", "loopback"),
+		Entry("a .localhost name", "mcp.localhost", "", "loopback"),
 		Entry("a punycode label", "xn--exmple-cua.example.com", "", "xn--"),
 		Entry("a label that only starts with digits", "1mcp.example.com", "1mcp.example.com", ""),
 	)

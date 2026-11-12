@@ -609,7 +609,8 @@ func claimedMCPHost(ctx context.Context, q *store.Queries, org pgtype.UUID, self
 		return "", err
 	}
 	for _, other := range rows {
-		if other.ID == self || other.RemovedAt.Valid {
+		// A removed declared connection keeps its hosts and returns with its Secret: it still claims them.
+		if other.ID == self {
 			continue
 		}
 		t, ok := connectors.Get(other.Connector)
