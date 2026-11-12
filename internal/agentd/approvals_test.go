@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -205,7 +206,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
 		Expect(prompts[1]).To(ContainSubstring("create_pull_request (approval id=" + id))
-		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
+		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + strconv.Quote(url)))
 		Expect(loads).To(Equal([]string{"ses_1"}), "the resumed run loads the task's session")
 
 		By("get_approval_status says the same")
@@ -236,7 +237,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
-		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: touch only the docs"))
+		Expect(prompts[1]).To(ContainSubstring(`denied by the approver, who wrote: "touch only the docs"`))
 		Expect(chunks(events(ctx, r))).To(ContainElement(ContainSubstring("status=denied")))
 		Expect(g.gh.Mints()).To(BeZero(), "nothing reached GitHub")
 		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
@@ -292,7 +293,7 @@ var _ = Describe("Parking on approvals", func() {
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
-		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: no"))
+		Expect(prompts[1]).To(ContainSubstring(`denied by the approver, who wrote: "no"`))
 		Expect(g.taskStatus(ctx, t)()).NotTo(Equal(store.TaskStateInputRequired))
 	})
 })

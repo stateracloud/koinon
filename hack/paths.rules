@@ -215,6 +215,7 @@ script-check - hack/commit-subject-check.sh @BASE@ HEAD
 script-check - hack/git-identity-check-test.sh
 script-check - hack/git-identity-check.sh range @BASE@ HEAD
 script-check - hack/koinon-fetch-test.sh
+script-check - hack/release-harness-test.sh
 script-check - hack/fetch-pinned-test.sh
 script-check - hack/e2e-parts-test.sh
 script-check - hack/apt-retries-test.sh --self-test
@@ -250,6 +251,7 @@ script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
 script-check - hack/secrets-skip-test.sh
 script-check - hack/route-guard-test.sh
+script-check - hack/contributor-gate-test.sh
 script-check - hack/ci-cache-test.sh
 script-check - hack/ci-rules-check-test.sh
 script-check - hack/ci-rules-check.sh

@@ -404,6 +404,16 @@ func toProvider(p catalog.Provider) Provider {
 	}
 	out.CostKeyLostAt = p.CostKeyLostAt
 	out.Formats = append([]ModelFormat{}, p.Formats...)
+	if p.Serving.State != "" {
+		state := ProviderServingState(p.Serving.State)
+		out.ServingState = &state
+	}
+	if p.Serving.Reason != "" {
+		out.ServingReason = &p.Serving.Reason
+	}
+	if p.Serving.Detail != "" {
+		out.ServingDetail = &p.Serving.Detail
+	}
 	return out
 }
 

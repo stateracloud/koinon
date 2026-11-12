@@ -280,6 +280,40 @@ lists to the agent right now.
   signed request triggers it, the listener is reachable by koinon-agentd only, and what comes back is
   names.
 
+## Amendment 2026-11-12: every schema string is sanitised, and the published text is hashed (#684)
+
+This changes two points of the 2026-10-30 amendment.
+
+1. **Every string of an input schema is sanitised**, not only `description` and `title`. The model reads the
+   whole schema, so an instance value (`enum`, `const`, `default`, `examples`), a `pattern`, an unknown
+   keyword's value and a property name are as much untrusted text as a description. Each gets the removals
+   and the tag escape of the 2026-10-30 amendment. Only prose is cut: `description` and `title` keep their
+   256-character cap, while other strings keep their length, because a value cut short is a different value.
+   Property names (the keys of `properties`, `patternProperties`, `$defs`, `definitions` and
+   `dependentSchemas`, and the strings of `required`) are cleaned the same way. Two names that clean to the
+   same name keep the one that was already clean. Numbers and booleans are left as published.
+
+   The cost: a tool whose server compares against a value that had an invisible character in it receives
+   the cleaned value. No legitimate value needs a zero-width, bidi-control or tag character to be told
+   apart from its neighbours, so this is accepted.
+
+2. **The content hash covers the published text as well as the stored one.** Before this change, a server
+   could change only what sanitising removes or cuts (an invisible character, the text past a cap) and the
+   tool kept its hash, so it was not flagged. An auto tool is served raw by agentgateway (the limit above),
+   so that change reached the model unreviewed. `mcpservers.ToolContentHash` now works as follows:
+   - A tool whose published text is the stored text keeps `ContentHash(description, schema)`. A clean tool
+     therefore does not change hash on upgrade.
+   - Any other tool hashes the stored text together with the published description and schema (canonical
+     JSON).
+   Any change of the published bytes flags the tool, and an auto tool moves to ask as for any other change.
+
+   Upgrade: on the first sync after this change, a tool whose published text was sanitised gets the new
+   hash, and is flagged for review once. This includes a tool whose schema had a string that is now
+   cleaned. It fails closed, as the 2026-10-30 upgrade did.
+
+The leak guard (ADR 0091) is unaffected, except in one respect: a tool result's string that is itself a
+JSON document is now decoded before its text is fingerprinted, up to three levels deep (#684).
+
 ## Upstream verification
 
 Checked 2026-10-23 against agentgateway v1.6.0 and the MCP Registry; see the research report. The

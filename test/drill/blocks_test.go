@@ -43,6 +43,16 @@ func TestSubstituteRefusesAnUnknownNameOfTheGuideInstall(t *testing.T) {
 	}
 }
 
+func TestSubstituteRewritesSecretsAndRefusesTheSpacedForm(t *testing.T) {
+	out, err := drill.Substitute("kubectl -n koinon get secret/koinon-kek\n", "koinon-drill-src-a1b2c3", "koinon-drill-src-a1b2c3")
+	if err != nil || !strings.Contains(out, "secret/koinon-drill-src-a1b2c3-kek") {
+		t.Fatalf("secret/koinon-kek must be rewritten: %q, %v", out, err)
+	}
+	if _, err := drill.Substitute("kubectl -n koinon get secret koinon-kek\n", "koinon-drill-src-a1b2c3", "koinon-drill-src-a1b2c3"); err == nil {
+		t.Fatal("the spaced form `secret koinon-kek` must be refused")
+	}
+}
+
 func TestSubstituteRefusesANamespaceOutsideThePrefix(t *testing.T) {
 	if _, err := drill.Substitute("kubectl -n koinon get pods\n", "koinon", "koinon-x"); err == nil {
 		t.Fatal("the guide's own namespace must be refused")

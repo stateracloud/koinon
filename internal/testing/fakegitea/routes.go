@@ -40,6 +40,7 @@ func (f *Fake) routes() http.Handler {
 	mux.HandleFunc(rw+"/issues", f.scoped(f.createIssue))
 	mux.HandleFunc(rr+"/pulls/{index}", f.scoped(f.getPull))
 	mux.HandleFunc(rr+"/pulls/{base}/{head...}", f.scoped(f.getPullByBaseHead))
+	mux.HandleFunc(rr+"/issues/comments", f.scoped(f.listRepoComments))
 	mux.HandleFunc(rr+"/issues/{index}/comments", f.scoped(f.listComments))
 	mux.HandleFunc(rw+"/issues/{index}/comments", f.scoped(f.createComment))
 	mux.HandleFunc(api+"/", func(w http.ResponseWriter, r *http.Request) {

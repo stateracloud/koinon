@@ -370,6 +370,40 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).To(BeEmpty())
 		})
 
+		It("shows saved, serving and failed with a reason on the provider (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "openrouter", "sk-served", "status-model")
+			cleanup(ctx, org, p.ID)
+			status := func() catalog.Serving {
+				GinkgoHelper()
+				got, err := svc.GetProvider(ctx, org, p.ID)
+				Expect(err).NotTo(HaveOccurred())
+				return got.Serving
+			}
+			Expect(status().State).To(Equal(catalog.ServingSaved), "nothing is applied yet")
+
+			By("a gateway that cannot be reached fails it with that reason")
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingFailed, Reason: catalog.ReasonUnreachable, Detail: status().Detail}))
+
+			By("a refused config fails it with the gateway's reason")
+			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "bad budget"}
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingFailed, Reason: catalog.ReasonGatewayRejects, Detail: "bad budget"}))
+
+			By("an applied state serves it and clears the failure")
+			mg.fail = nil
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingServing}))
+
+			By("a later failure does not fail a provider that is fully served")
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status().State).To(Equal(catalog.ServingServing))
+			mg.fail = nil
+		})
+
 		It("records a model without a price as not served", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			p := addProvider(ctx, org, user, "up", "", "priced")
@@ -380,6 +414,76 @@ var _ = Describe("Provider delivery", func() {
 			Expect(r.ReconcileAll(ctx)).To(Succeed())
 			Expect(servedRows(ctx, org)).To(HaveKey("priced"))
 			Expect(servedRows(ctx, org)).NotTo(HaveKey("unpriced-model"))
+		})
+
+		It("fails a provider the pass leaves out (a blocked URL, an unopenable key) instead of leaving it saved (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			orgB, userB := newOrg(ctx)
+			blocked := addProvider(ctx, org, user, "up", "sk-a", "m1")
+			sealed := addProvider(ctx, orgB, userB, "up", "sk-b", "m2")
+			good := addProvider(ctx, orgB, userB, "up2", "sk-c", "m3")
+			cleanup(ctx, org, blocked.ID)
+			cleanup(ctx, orgB, sealed.ID, good.ID)
+			_, err := pool.Exec(ctx, `UPDATE providers SET url = 'http://169.254.169.254/v1' WHERE org_id = $1 AND id = $2`, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET api_key = (SELECT api_key FROM providers WHERE org_id = $1 AND id = $2) WHERE org_id = $1 AND id = $3`, orgB, good.ID, sealed.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("not served")))
+			for org, id := range map[pgtype.UUID]string{org: blocked.ID, orgB: sealed.ID} {
+				got, err := svc.GetProvider(ctx, org, id)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.Serving.State).To(Equal(catalog.ServingFailed), "left out of the render: failed, not saved: "+id)
+				Expect(got.Serving.Reason).To(Equal(catalog.ReasonUnknown))
+				Expect(got.Serving.Detail).NotTo(BeEmpty())
+				Expect(got.Serving.Detail).NotTo(ContainSubstring("sk-"))
+			}
+			got, err := svc.GetProvider(ctx, orgB, good.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingServing))
+		})
+
+		It("keeps a left-out provider's own detail when the whole apply fails (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			blocked := addProvider(ctx, org, user, "up", "sk-a", "m1")
+			cleanup(ctx, org, blocked.ID)
+			_, err := pool.Exec(ctx, `UPDATE providers SET url = 'http://169.254.169.254/v1' WHERE org_id = $1 AND id = $2`, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			mg.mu.Lock()
+			mg.fail = errors.New("gateway unreachable")
+			mg.mu.Unlock()
+			DeferCleanup(func() { mg.mu.Lock(); mg.fail = nil; mg.mu.Unlock() })
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			got, err := svc.GetProvider(ctx, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingFailed))
+			Expect(got.Serving.Detail).To(ContainSubstring("the base URL is not allowed"))
+		})
+
+		It("fails a provider whose model has no price, with a reason, instead of leaving it saved (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "up", "", "priced")
+			cleanup(ctx, org, p.ID)
+			_, err := svc.CreateModel(ctx, org, audit.User(user), user, catalog.ModelInput{ProviderID: p.ID, Name: "unpriced-model"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			got, err := svc.GetProvider(ctx, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingFailed))
+			Expect(got.Serving.Reason).To(Equal(catalog.ReasonUnknown))
+			Expect(got.Serving.Detail).To(ContainSubstring("unpriced-model"))
+		})
+
+		It("gives a provider with no enabled model no serving state (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "up", "", "m")
+			cleanup(ctx, org, p.ID)
+			_, err := pool.Exec(ctx, `UPDATE models SET disabled_reason = 'test' WHERE org_id = $1 AND provider_id = $2`, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			got, err := svc.GetProvider(ctx, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingNone))
 		})
 
 		It("keeps the rows when the gateway did not apply the state", func(ctx SpecContext) {

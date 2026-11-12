@@ -11,6 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearGatewayProviderFailures = `-- name: ClearGatewayProviderFailures :exec
+DELETE FROM gateway_provider_failures WHERE org_id = $1
+`
+
+// koinon-reconciler, after an apply that took effect: the org's failures are over.
+func (q *Queries) ClearGatewayProviderFailures(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearGatewayProviderFailures, orgID)
+	return err
+}
+
 const createModel = `-- name: CreateModel :one
 INSERT INTO models (org_id, id, provider_id, name, guard, format, format_overridden, source, managed_by_secret, disabled_reason, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
@@ -495,6 +505,59 @@ func (q *Queries) ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID)
 	return items, nil
 }
 
+const listProviderServing = `-- name: ListProviderServing :many
+SELECT p.id AS provider_id,
+       count(m.id) FILTER (WHERE m.disabled_reason IS NULL)::int AS models,
+       count(s.model_id) FILTER (WHERE m.disabled_reason IS NULL)::int AS served,
+       coalesce(f.reason, '')::text AS failure_reason,
+       coalesce(f.detail, '')::text AS failure_detail,
+       extract(epoch from now() - greatest(p.updated_at, coalesce(max(m.updated_at), p.updated_at)))::float8 AS saved_age_seconds
+FROM providers p
+LEFT JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
+LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+LEFT JOIN gateway_provider_failures f ON f.org_id = p.org_id AND f.provider_id = p.id
+WHERE p.org_id = $1
+GROUP BY p.id, p.updated_at, f.reason, f.detail
+`
+
+type ListProviderServingRow struct {
+	ProviderID      pgtype.UUID
+	Models          int32
+	Served          int32
+	FailureReason   string
+	FailureDetail   string
+	SavedAgeSeconds float64
+}
+
+// The serving facts of the org's providers: enabled models, how many the gateway serves, and the
+// recorded failure, if any.
+func (q *Queries) ListProviderServing(ctx context.Context, orgID pgtype.UUID) ([]ListProviderServingRow, error) {
+	rows, err := q.db.Query(ctx, listProviderServing, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProviderServingRow
+	for rows.Next() {
+		var i ListProviderServingRow
+		if err := rows.Scan(
+			&i.ProviderID,
+			&i.Models,
+			&i.Served,
+			&i.FailureReason,
+			&i.FailureDetail,
+			&i.SavedAgeSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProviders = `-- name: ListProviders :many
 SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id, credential_lost_at, cost_api_key, cost_scope, cost_api_key_lost_at, cost_reconcile_since, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM providers
 WHERE org_id = $1
@@ -741,6 +804,90 @@ func (q *Queries) SetDerivedModelFormat(ctx context.Context, arg SetDerivedModel
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setGatewayProviderFailure = `-- name: SetGatewayProviderFailure :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+VALUES ($1, $2, $3::text, $4::text)
+ON CONFLICT (org_id, provider_id) DO NOTHING
+`
+
+type SetGatewayProviderFailureParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+}
+
+// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
+// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
+// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.
+func (q *Queries) SetGatewayProviderFailure(ctx context.Context, arg SetGatewayProviderFailureParams) error {
+	_, err := q.db.Exec(ctx, setGatewayProviderFailure,
+		arg.OrgID,
+		arg.ProviderID,
+		arg.Reason,
+		arg.Detail,
+	)
+	return err
+}
+
+const setGatewayProviderFailures = `-- name: SetGatewayProviderFailures :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+SELECT p.org_id, p.id, $1::text, $2::text
+FROM providers p
+WHERE p.org_id = $3 AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
+  AND NOT (p.id = ANY(coalesce($4::uuid[], '{}')))
+  AND EXISTS (
+    SELECT 1 FROM models m
+    LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+    WHERE m.org_id = p.org_id AND m.provider_id = p.id AND m.disabled_reason IS NULL AND s.model_id IS NULL)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
+WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
+   OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail
+`
+
+type SetGatewayProviderFailuresParams struct {
+	Reason  string
+	Detail  string
+	OrgID   pgtype.UUID
+	SkipIds []pgtype.UUID
+}
+
+// koinon-reconciler, after an apply that failed or was rejected: every enabled provider of the org
+// that has an enabled model the gateway does not serve gets the reason. Providers that are fully
+// served keep serving with the previous config and get none.
+func (q *Queries) SetGatewayProviderFailures(ctx context.Context, arg SetGatewayProviderFailuresParams) error {
+	_, err := q.db.Exec(ctx, setGatewayProviderFailures,
+		arg.Reason,
+		arg.Detail,
+		arg.OrgID,
+		arg.SkipIds,
+	)
+	return err
+}
+
+const setGatewayUnpricedFailures = `-- name: SetGatewayUnpricedFailures :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+SELECT m.org_id, m.provider_id, 'unknown', left('no price: ' || string_agg(m.name, ', ' ORDER BY m.name), 500)
+FROM models m
+WHERE m.org_id = $1 AND m.id = ANY($2::uuid[]) AND m.disabled_reason IS NULL
+GROUP BY m.org_id, m.provider_id
+ON CONFLICT (org_id, provider_id) DO NOTHING
+`
+
+type SetGatewayUnpricedFailuresParams struct {
+	OrgID    pgtype.UUID
+	ModelIds []pgtype.UUID
+}
+
+// koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
+// is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.
+// Runs after ClearGatewayProviderFailures; a failure the apply itself recorded stays.
+func (q *Queries) SetGatewayUnpricedFailures(ctx context.Context, arg SetGatewayUnpricedFailuresParams) error {
+	_, err := q.db.Exec(ctx, setGatewayUnpricedFailures, arg.OrgID, arg.ModelIds)
+	return err
 }
 
 const setModelDisabled = `-- name: SetModelDisabled :exec
@@ -1007,6 +1154,35 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.AdminDisabledUnderNote,
 	)
 	return i, err
+}
+
+const upsertGatewayProviderFailure = `-- name: UpsertGatewayProviderFailure :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+VALUES ($1, $2, $3::text, $4::text)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
+WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
+   OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail
+`
+
+type UpsertGatewayProviderFailureParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+}
+
+// koinon-reconciler, after an apply that failed whole or was rejected: a provider the pass left out of
+// the render keeps its own reason and detail (a blocked URL says so), not the org-wide one. Replaces an
+// older row, since no Clear runs in this path.
+func (q *Queries) UpsertGatewayProviderFailure(ctx context.Context, arg UpsertGatewayProviderFailureParams) error {
+	_, err := q.db.Exec(ctx, upsertGatewayProviderFailure,
+		arg.OrgID,
+		arg.ProviderID,
+		arg.Reason,
+		arg.Detail,
+	)
+	return err
 }
 
 const upsertProviderEchoCheck = `-- name: UpsertProviderEchoCheck :one

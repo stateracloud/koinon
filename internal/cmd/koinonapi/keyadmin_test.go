@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
 
+	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -50,6 +51,29 @@ var _ = Describe("the key-admin command", func() {
 
 		used, err := kekIDUsedYet(ctx, pool, "kek-20251201-eeee")
 		Expect(err).To(MatchError(ContainSubstring("rerun this command once the migrations have finished")))
+		Expect(used).To(BeFalse())
+	})
+
+	// The probe every KEK add path runs: envelopes, then the audit chain. A retired ID has no envelope.
+	It("refuses an ID the audit chain recorded, and accepts a new one", func(ctx SpecContext) {
+		dsn := pgtest.Run(ctx)
+		pgtest.Migrate(ctx, dsn)
+		pool, err := pgxpool.New(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(pool.Close)
+
+		used, err := kekIDUsedYet(ctx, pool, "kek-20261023-ab12")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(used).To(BeFalse())
+
+		auditor := &keyscli.Auditor{Pool: pool, Authoritative: true}
+		Expect(auditor.Record(ctx, keyscli.Event{Command: "retire", Action: keyscli.ActionRetire, TargetKind: "kek", TargetID: "kek-20261023-ab12"})).To(Succeed())
+		used, err = kekIDUsedYet(ctx, pool, "kek-20261023-ab12")
+		Expect(err).To(MatchError(keyscli.ErrIDRetired))
+		Expect(used).To(BeTrue())
+
+		used, err = kekIDUsedYet(ctx, pool, "kek-20261023-cd34")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(used).To(BeFalse())
 	})
 })

@@ -394,12 +394,29 @@
       "additionalProperties": false,
       "properties": {
         "migrateLegacyConnections": {"type": "boolean"},
+        "reconcilerFence": {
+          "description": "The admission policy that limits the reconciler's Secret writes to Secrets it owns (issue #604); separate from kek.guard.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
         "kek": {
           "description": "Key-encryption keys for stored provider keys and connection secrets (ADR 0056).",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "existingSecret": {"type": "string"},
+            "guard": {
+              "description": "Admission policy that guards the KEK Secret (issue #604).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "extraWriters": {"type": "array", "items": {"type": "string", "minLength": 1}}
+              }
+            },
             "activePeriod": {"type": "string", "pattern": "^[0-9]+(h|m|s)$"},
             "kms": {
               "description": "Wrapping the KEKs with a KMS (ADR 0085 decision 12); local by default.",

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): runs in the upstream CI (opens an issue with the workflow's token).
+#
 # The nightly restore drill (the `drill` job of e2e-kind.yml, ADR 0109) was red. Record it in ONE issue:
 # when an open `drill-red` issue exists, comment on it; otherwise open one. The drill is advisory
 # (continue-on-error, never a merge check), so without this a red night is visible only in the Actions tab (#572).
