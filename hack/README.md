@@ -34,7 +34,7 @@ names what needs the upstream project's rights and what still works from a fork.
 
 ## Which repository and board
 
-No script names the org. `hack/repo-lib.sh` is the one shell source of truth, as `internal/project`
+No maintainer script names the org. `hack/repo-lib.sh` is the one shell source of truth, as `internal/project`
 is for Go:
 
 | Variable | Default |

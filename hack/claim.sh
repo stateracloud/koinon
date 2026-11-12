@@ -150,7 +150,7 @@ conflict_adr_text() { # PATH NNNN HUMAN
 # shellcheck disable=SC2016
 JQ_PR_CLOSERS='[.[].data.repository.pullRequests.nodes[]
   | {number, author: (.author.login // ""),
-     issues: ([(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]
+     issues: ([(.closingIssuesReferences.nodes // [])[] | select((.repository.nameWithOwner | ascii_downcase) == ($repo | ascii_downcase)) | .number]
               + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[: ]+#([0-9]+)\\b") | .[0] | tonumber]
               | unique)}]'
 
@@ -161,7 +161,7 @@ JQ_PR_CLOSERS='[.[].data.repository.pullRequests.nodes[]
 # shellcheck disable=SC2016
 JQ_NEXT='def rank: ({"P0":0,"P1":1,"P2":2,"P3":3}[.] // 9);
   [.[].data.organization.projectV2.items.nodes[]
-  | select(.content.number != null and .content.state == "OPEN" and .content.repository.nameWithOwner == $repo)
+  | select(.content.number != null and .content.state == "OPEN" and (.content.repository.nameWithOwner | ascii_downcase) == ($repo | ascii_downcase))
   | select(.status.name // "" | IN("Ready", "In Progress", "In Review"))
   | select([.content.labels.nodes[].name] | index("agent-ok"))
   | select($ms == "" or .content.milestone.title == $ms)
@@ -310,7 +310,7 @@ pr_meta() {
       author{login} body state merged closingIssuesReferences(first:100){nodes{number repository{nameWithOwner}}}}}}') || return 1
   jq -ce --arg repo "$REPO" '.data.repository.pullRequest | select(. != null)
     | {author: (.author.login // ""), body: (.body // ""), state: (.state // ""), merged: (.merged // false),
-       closers: [(.closingIssuesReferences.nodes // [])[] | select(.repository.nameWithOwner == $repo) | .number]}' <<<"$out"
+       closers: [(.closingIssuesReferences.nodes // [])[] | select((.repository.nameWithOwner | ascii_downcase) == ($repo | ascii_downcase)) | .number]}' <<<"$out"
 }
 
 # pr_added_adr_files P -> the docs/adr/NNNN-*.md files pull request P adds (added, renamed or copied).
