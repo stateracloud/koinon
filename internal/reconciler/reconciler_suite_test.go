@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -333,3 +334,6 @@ var testPolicy = catalog.URLPolicy{
 		return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
 	},
 }
+
+// deleteErr is the error of a DeleteSandbox call, for the specs that check only that.
+func deleteErr(_ execution.DeleteOutcome, err error) error { return err }

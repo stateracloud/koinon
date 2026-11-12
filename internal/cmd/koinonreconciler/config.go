@@ -72,7 +72,7 @@ type config struct {
 	parkWarm       time.Duration
 	sandboxJobs    int
 	keepWarmPerOrg int
-	// maxRecreates is the cap on spec-change recreates per pass; openshellConfigNS and
+	// maxRecreates is the cap on spec-change recreates (a token bucket: this many at once, this many per resync interval); openshellConfigNS and
 	// openshellConfigMap locate the gateway ConfigMap that names the supervisor image.
 	maxRecreates                          int
 	openshellConfigNS, openshellConfigMap string

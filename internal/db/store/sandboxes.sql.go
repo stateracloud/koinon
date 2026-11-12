@@ -741,6 +741,58 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 	return i, err
 }
 
+const setAgentSandboxMessage = `-- name: SetAgentSandboxMessage :one
+UPDATE agent_sandboxes
+SET message = $1
+WHERE org_id = $2 AND agent_id = $3
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+`
+
+type SetAgentSandboxMessageParams struct {
+	Message string
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Stores an operator message and nothing else. A note written from outside the agent's work item
+// (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+// what the agent's own item recorded in the meantime.
+func (q *Queries) SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandboxMessageParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxMessage, arg.Message, arg.OrgID, arg.AgentID)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+		&i.Reason,
+		&i.HomeDirtiedAt,
+	)
+	return i, err
+}
+
 const setAgentSandboxName = `-- name: SetAgentSandboxName :one
 UPDATE agent_sandboxes
 SET sandbox_name = $1,

@@ -395,7 +395,8 @@ var _ = Describe("home checkpoints", func() {
 		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted, row deleting/Archived")
 		_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
+		_, derr := e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)
+		Expect(derr).To(Succeed())
 		home.set(nil) // OpenShell deleted the volume with the sandbox
 		_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 			OrgID: e.org, AgentID: e.agent.ID, State: store.SandboxStateDeleting, Phase: "Archived",

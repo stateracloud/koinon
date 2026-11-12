@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -261,6 +262,8 @@ func validateTypeURL(typ, rawURL string) error {
 		return invalid("url must not have a query or fragment")
 	case len(rawURL) > 2048:
 		return invalid("url is longer than 2048 characters")
+	case strings.Contains(rawURL, "$"):
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	return nil
 }

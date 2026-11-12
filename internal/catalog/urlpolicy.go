@@ -247,8 +247,14 @@ func (p URLPolicy) Check(ctx context.Context, rawURL string) error {
 }
 
 // CheckStrict is Check for rendering: a name that cannot be resolved is refused too, so a failing
-// resolver cannot be used to get past the policy.
+// resolver cannot be used to get past the policy. A URL with '$' is refused as well: the gateway's
+// config loader would read $NAME in it as an environment variable, and gateway.State.Validate
+// refuses the whole state for it, so a row saved before the validators refused '$' is reported and
+// left out here instead of stopping every org's config (#668).
 func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
+	if strings.Contains(rawURL, "$") {
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
+	}
 	return p.check(ctx, rawURL, true)
 }
 

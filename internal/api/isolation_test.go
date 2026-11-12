@@ -829,11 +829,11 @@ var isolationExempt = map[string]string{
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
 		"every org; takes no IDs",
 	gatewayv1alpha1connect.GatewayStateServiceStreamStateProcedure: "the install-wide gateway State stream (ADR 0097); " +
-		"only a gateway copy calls it, and its request names the copy, not an org. No handler is registered yet; the slice " +
-		"that serves it must authenticate the gateway and revisit this entry",
+		"served by internal/gateway/stateserver on the internal listener, not on this API: only a holder of the gateway's " +
+		"bearer token reaches it (TestStateServer refuses everyone else), and its request names the copy, not an org",
 	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure: "records a gateway copy's confirmation of an " +
-		"install-wide revision (ADR 0097); the request names the copy, not an org. No handler is registered yet; the slice " +
-		"that serves it must authenticate the gateway and revisit this entry",
+		"install-wide revision (ADR 0097); served by internal/gateway/stateserver behind the gateway's bearer token, " +
+		"not on this API; the request names the copy, not an org",
 }
 
 var _ = Describe("org isolation", func() {

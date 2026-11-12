@@ -302,3 +302,12 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   wrote for `koinon/*` must now match `koinon/**`, because the branch is two levels below `koinon/`. The
   agent's display name is visible in the branch name to everyone who can read the repository, as the
   requesting and approving people already are in the commit trailers.
+
+- Amendment 2026-11-12 (#657, egress at dial time): a connection's base URL is checked again
+  when the client dials, not only when it is saved. The GitHub clients derived by `Client.For`
+  for a connection's base URL and the Gitea host dial through `catalog.URLPolicy.DialContext`
+  (the address the name resolves to now must pass `egress.allowedInternalHosts`), with no proxy
+  and no redirects followed (`http.ErrUseLastResponse`, as in `internal/tracing/export`). The
+  platform's own `github.apiUrl` / `--github-api-url` is exempt: it is operator configuration,
+  not admin input, and may name a private GHE or the e2e fake. The push writer
+  (`internal/codehost/gitpush`) is not covered yet; see #860.
