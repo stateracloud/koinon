@@ -118,22 +118,39 @@ func (s SettleResult) Allowed(r Removal) bool {
 // walk (declarative PlanRemovals), so a partial plan would silently drop the gate for the missing rows. A disabled
 // Binding settles nothing: every removal is allowed.
 func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (SettleResult, error) {
+	return b.SettleWith(ctx, func(context.Context) ([]Removal, error) { return plan, nil }, accept)
+}
+
+// SettleWith is Settle with the plan computed inside the transaction, after the row lock on
+// install_binding is taken. A plan computed before the lock could be stale when it is applied: another
+// replica may have released, or an item may have appeared, between the plan and the settle, and a held
+// copy would then act outward on an item the list does not cover. Under the lock no release can run
+// between the plan and the settle. plan is called once, with the transaction's context; a nil plan is
+// an empty one.
+func (b *Binding) SettleWith(ctx context.Context, planFn func(context.Context) ([]Removal, error), accept bool) (SettleResult, error) {
 	var res SettleResult
 	if !b.Enabled() {
 		return res, nil
 	}
 	actor := audit.System("koinon-api:restore-release")
-	inPlan := map[Removal]bool{}
-	for _, r := range plan {
-		inPlan[r] = true
-	}
 	_, err := audit.InPgTx(ctx, b.pool, func(tx pgx.Tx, ab audit.Batch) error {
+		res = SettleResult{}
 		row, found, err := readRow(ctx, tx, true)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return nil
+		}
+		var plan []Removal
+		if planFn != nil {
+			if plan, err = planFn(ctx); err != nil {
+				return err
+			}
+		}
+		inPlan := map[Removal]bool{}
+		for _, r := range plan {
+			inPlan[r] = true
 		}
 		state := StateWaitingOrAccepted(accept)
 		if Pending(b.mark, row, found) {
@@ -148,7 +165,8 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 			}
 			for _, r := range sortedRemovals(plan) {
 				if _, err := tx.Exec(ctx,
-					`INSERT INTO restore_accepted_removals (kind, org_slug, secret_name, release_id, state) VALUES ($1, $2, $3, $4, $5)`,
+					`INSERT INTO restore_accepted_removals (org_id, kind, secret_name, release_id, state)
+					 SELECT id, $1, $3, $4, $5 FROM orgs WHERE slug = $2`,
 					r.Kind, r.Org, r.Secret, releaseID, state); err != nil {
 					return err
 				}
@@ -168,7 +186,7 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 			})
 		} else {
 			// Forget items whose Secret is back or whose removal is done.
-			rows, err := tx.Query(ctx, `SELECT kind, org_slug, secret_name FROM restore_accepted_removals`)
+			rows, err := tx.Query(ctx, `SELECT r.kind, o.slug, r.secret_name FROM restore_accepted_removals r JOIN orgs o ON o.id = r.org_id`)
 			if err != nil {
 				return err
 			}
@@ -188,12 +206,12 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 				return err
 			}
 			for _, r := range gone {
-				if _, err := tx.Exec(ctx, `DELETE FROM restore_accepted_removals WHERE kind = $1 AND org_slug = $2 AND secret_name = $3`, r.Kind, r.Org, r.Secret); err != nil {
+				if _, err := tx.Exec(ctx, `DELETE FROM restore_accepted_removals r USING orgs o WHERE o.id = r.org_id AND r.kind = $1 AND o.slug = $2 AND r.secret_name = $3`, r.Kind, r.Org, r.Secret); err != nil {
 					return err
 				}
 			}
 			if accept {
-				rows, err := tx.Query(ctx, `UPDATE restore_accepted_removals SET state = 'accepted' WHERE state = 'waiting' RETURNING kind, org_slug, secret_name`)
+				rows, err := tx.Query(ctx, `UPDATE restore_accepted_removals r SET state = 'accepted' FROM orgs o WHERE o.id = r.org_id AND r.state = 'waiting' RETURNING r.kind, o.slug, r.secret_name`)
 				if err != nil {
 					return err
 				}
@@ -219,7 +237,7 @@ func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (Sett
 				}
 			}
 		}
-		rows, err := tx.Query(ctx, `SELECT kind, org_slug, secret_name, state FROM restore_accepted_removals`)
+		rows, err := tx.Query(ctx, `SELECT r.kind, o.slug, r.secret_name, r.state FROM restore_accepted_removals r JOIN orgs o ON o.id = r.org_id`)
 		if err != nil {
 			return err
 		}
@@ -287,7 +305,7 @@ func ListRemovals(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 },
 ) (waiting, accepted []Removal, err error) {
-	rows, err := q.Query(ctx, `SELECT kind, org_slug, secret_name, state FROM restore_accepted_removals ORDER BY 1, 2, 3`)
+	rows, err := q.Query(ctx, `SELECT r.kind, o.slug, r.secret_name, r.state FROM restore_accepted_removals r JOIN orgs o ON o.id = r.org_id ORDER BY 1, 2, 3`)
 	if err != nil {
 		return nil, nil, err
 	}

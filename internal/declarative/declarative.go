@@ -353,14 +353,17 @@ func (i *Importer) removeGated(ctx context.Context, q *store.Queries, seen map[p
 	if !i.Release.Enabled() {
 		return i.removeAbsent(ctx, q, seen, func(installbinding.Removal) bool { return true })
 	}
+	// The plan is computed inside Settle's transaction, under the row lock (SettleWith), so a release by
+	// another replica cannot fall between the plan and the settle.
 	var plan []installbinding.Removal
-	if err := i.removeAbsent(ctx, q, seen, func(r installbinding.Removal) bool {
-		plan = append(plan, r)
-		return false
-	}); err != nil {
-		return err
-	}
-	st, err := i.Release.Settle(ctx, plan, i.AcceptRemovals)
+	st, err := i.Release.SettleWith(ctx, func(c context.Context) ([]installbinding.Removal, error) {
+		plan = nil
+		err := i.removeAbsent(c, q, seen, func(r installbinding.Removal) bool {
+			plan = append(plan, r)
+			return false
+		})
+		return plan, err
+	}, i.AcceptRemovals)
 	if err != nil {
 		return err
 	}

@@ -44,15 +44,17 @@ func newReleaseAtStart(b *installbinding.Binding, pool *pgxpool.Pool, kube kuber
 
 // once runs one attempt. A success opens the session gate.
 func (r *releaseAtStart) once(ctx context.Context) error {
+	// The plan is computed inside Settle's transaction, under the row lock, so it cannot go stale
+	// between the plan and the release.
 	var plan []installbinding.Removal
-	if r.plan != nil {
-		p, err := r.plan(ctx)
-		if err != nil {
-			return err
+	st, err := r.binding.SettleWith(ctx, func(c context.Context) ([]installbinding.Removal, error) {
+		if r.plan == nil {
+			return nil, nil
 		}
+		p, err := r.plan(c)
 		plan = p
-	}
-	st, err := r.binding.Settle(ctx, plan, r.accept)
+		return p, err
+	}, r.accept)
 	if err != nil {
 		return err
 	}

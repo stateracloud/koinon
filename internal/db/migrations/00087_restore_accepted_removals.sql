@@ -9,11 +9,13 @@
 -- +goose Up
 
 CREATE TABLE restore_accepted_removals (
+    org_id      uuid        NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
+    id          uuid        NOT NULL DEFAULT uuidv7(),
     kind        text        NOT NULL CHECK (kind IN ('model-provider', 'mcp-server', 'connection')),
-    org_slug    text        NOT NULL,
     secret_name text        NOT NULL,
     release_id  uuid        NOT NULL,
     state       text        NOT NULL CHECK (state IN ('waiting', 'accepted')),
     created_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (kind, org_slug, secret_name)
+    PRIMARY KEY (org_id, id),
+    UNIQUE (org_id, kind, secret_name)
 );

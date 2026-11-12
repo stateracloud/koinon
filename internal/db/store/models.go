@@ -2446,8 +2446,9 @@ type QuestionRecipient struct {
 }
 
 type RestoreAcceptedRemoval struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
 	Kind       string
-	OrgSlug    string
 	SecretName string
 	ReleaseID  pgtype.UUID
 	State      string

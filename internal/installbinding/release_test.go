@@ -3,6 +3,8 @@
 package installbinding_test
 
 import (
+	"context"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -17,6 +19,8 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 	conn := installbinding.Removal{Kind: "connection", Org: "default", Secret: "src-conn"}
 
 	BeforeEach(func(ctx SpecContext) {
+		_, _, slug := pgtest.NewOrg(ctx, pool)
+		prov.Org, conn.Org = slug, slug
 		for _, stmt := range []string{`DELETE FROM install_binding`, `DELETE FROM sessions`, `DELETE FROM restore_accepted_removals`} {
 			_, err := pool.Exec(ctx, stmt)
 			Expect(err).NotTo(HaveOccurred())
@@ -122,5 +126,52 @@ var _ = Describe("the release step (ADR 0110 decision 1)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Released).To(BeFalse())
 		Expect(res.Allowed(prov)).To(BeTrue(), "an install that was not restored removes what its deleted Secret declared")
+	})
+
+	It("computes the plan after another replica's release commits, never before the lock", func(ctx SpecContext) {
+		for _, stmt := range []string{`DELETE FROM install_binding`, `DELETE FROM sessions`, `DELETE FROM restore_accepted_removals`} {
+			_, err := pool.Exec(ctx, stmt)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err := newBinding("hash-copy", true).Claim(ctx, installbinding.Targets{})
+		Expect(err).NotTo(HaveOccurred())
+
+		prov := installbinding.Removal{Kind: "model-provider", Org: "default", Secret: "src-provider"}
+		var before int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&before)).To(Succeed())
+		inA, releaseA := make(chan struct{}), make(chan struct{})
+		doneA := make(chan error, 1)
+		a := newBinding("hash-copy", false)
+		go func() {
+			defer GinkgoRecover()
+			_, err := a.SettleWith(ctx, func(context.Context) ([]installbinding.Removal, error) {
+				close(inA)
+				<-releaseA // the plan is slow: A holds the row lock meanwhile
+				return nil, nil
+			}, false)
+			doneA <- err
+		}()
+		Eventually(inA).Should(BeClosed())
+
+		releasedWhenPlanned := make(chan bool, 1)
+		doneB := make(chan error, 1)
+		b := newBinding("hash-copy", false)
+		go func() {
+			defer GinkgoRecover()
+			_, err := b.SettleWith(ctx, func(c context.Context) ([]installbinding.Removal, error) {
+				var n int
+				if err := pool.QueryRow(c, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&n); err != nil {
+					return nil, err
+				}
+				releasedWhenPlanned <- n == before+1
+				return []installbinding.Removal{prov}, nil
+			}, false)
+			doneB <- err
+		}()
+		Consistently(releasedWhenPlanned, "500ms").ShouldNot(Receive(), "B plans only once it holds the row lock")
+		close(releaseA)
+		Eventually(doneA).Should(Receive(BeNil()))
+		Eventually(doneB).Should(Receive(BeNil()))
+		Expect(<-releasedWhenPlanned).To(BeTrue(), "B's plan was computed after A's release was visible")
 	})
 })
