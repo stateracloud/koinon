@@ -247,7 +247,7 @@ if [[ ${#cand[@]} -gt 0 ]]; then
 		-e /retry -e retries -e retry -e flaky-waiver: -- "${cand[@]}" 2>/dev/null || true)
 fi
 # Patterns (ERE). Quotes around a key and a space before the colon are allowed.
-re_flake_cli='--flake-attempts[=[:space:]]+([2-9]|[1-9][0-9]|\$)'
+re_flake_cli='(^|[^-[:alnum:]])-{1,2}(ginkgo\.)?flake-attempts[=[:space:]]+([2-9]|[1-9][0-9]|\$)'
 re_flake_off='FlakeAttempts\([[:space:]]*[01][[:space:]]*\)'
 re_flake_set='FlakeAttempts[[:space:]]*[:=][[:space:]]*([2-9]|[1-9][0-9])'
 re_action='nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action'
@@ -276,7 +276,13 @@ while IFS= read -r line; do
 	case $kind in
 	go) [[ $trimmed == //* ]] && continue; code=${text%%[[:space:]]//*} ;;
 	js) [[ $trimmed == //* || $trimmed == \** || $trimmed == /\** ]] && continue; code=${text%%[[:space:]]//*} ;;
-	shell) [[ $trimmed == '#'* ]] && continue; code=${text%%[[:space:]]\#*} ;;
+	shell)
+		[[ $trimmed == '#'* ]] && continue
+		# cut a trailing ` #` comment, unless the cut-off part holds a quote (the `#` may be inside a string)
+		code=${text%%[[:space:]]\#*}
+		cut=${text#"$code"}
+		[[ $cut == *[\"\']* ]] && code=$text
+		;;
 	json) code=$text ;;
 	esac
 	isbad=0

@@ -261,6 +261,18 @@ case_ "T2: git mode sees an expired waiver in an untracked file" 1 'rule=T2 verd
 	'git -C "$r" init -q; git -C "$r" add -A; mkdir -p "$r/internal/x"; printf "// flaky-waiver: #123 until 2000-01-01\n" >"$r/internal/x/x_test.go"'
 case_ "T1: git mode ignores a git-ignored file" 0 'rule=T1 verdict=pass' \
 	'git -C "$r" init -q; printf "build/\n" >"$r/.gitignore"; git -C "$r" add -A; mkdir -p "$r/build"; printf "gotestsum --rerun-fails=2\n" >"$r/build/x.sh"'
+case_ "T1: ginkgo -flake-attempts 2 in a Makefile fails" 1 'rule=T1 verdict=fail' \
+	'printf "test:\n\tginkgo -flake-attempts 2 ./...\n" >"$r/Makefile"'
+case_ "T1: ginkgo -flake-attempts=3 in a workflow fails" 1 'rule=T1 verdict=fail' \
+	'printf "      - run: ginkgo -flake-attempts=3 ./...\n" >>"$r/.github/workflows/ci.yml"'
+case_ "T1: go test -ginkgo.flake-attempts=3 fails" 1 'rule=T1 verdict=fail' \
+	'printf "go test ./... -ginkgo.flake-attempts=3\n" >"$r/hack/go-test.sh"'
+case_ "T1: go test --ginkgo.flake-attempts 2 fails" 1 'rule=T1 verdict=fail' \
+	'printf "go test ./... --ginkgo.flake-attempts 2\n" >"$r/hack/go-test.sh"'
+case_ "T1: --flake-attempts=1 passes" 0 'rule=T1 verdict=pass' \
+	'printf "go tool ginkgo --flake-attempts=1 ./...\n" >"$r/hack/go-test.sh"'
+case_ "T1: a # inside a quoted string does not hide a retry" 1 'rule=T1 verdict=fail' \
+	'printf "      - run: echo \"step #1\" && npx playwright test --retries 2\n" >>"$r/.github/workflows/ci.yml"'
 case_ "T1: the word in docs is ignored" 0 'rule=T1 verdict=pass' \
 	'mkdir -p "$r/docs"; printf "no flake-attempts please\n" >"$r/docs/x.md"'
 
