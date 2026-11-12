@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
+- Area: models-spend
+- Tags: models, pricing, budgets, encryption, credentials, api
 - Amended by: [0097](0097-koinon-owned-gateway.md) (decision 5 in step 3: the gateway's own cost and catalog fall away)
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)

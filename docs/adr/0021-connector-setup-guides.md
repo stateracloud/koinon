@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: connectors-tools
+- Tags: connectors, credentials, secrets
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (where the secure inputs
   land: an encrypted column in Postgres, no longer a Kubernetes Secret per connection)
 - Decision: [design.md#21](../design.md)

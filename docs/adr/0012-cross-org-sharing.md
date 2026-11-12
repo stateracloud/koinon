@@ -2,6 +2,8 @@
 
 - Status: Accepted; who pays amended by [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: multi-tenancy, approvals, budgets
 - Decision: [design.md#12](../design.md)
 
 ## Context

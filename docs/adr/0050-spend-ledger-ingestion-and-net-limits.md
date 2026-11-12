@@ -2,6 +2,8 @@
 
 - Status: Accepted (2026-10-26, accepted after implementation); amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md) and 2026-10-23 (below)
 - Date: 2026-10-22
+- Area: models-spend
+- Tags: spend-ledger, budgets, agentgateway, pricing
 - Amended by: [0081](0081-run-limits.md) (decision 5, the token cap, is replaced), [0097](0097-koinon-owned-gateway.md) (the ledger reads a usage record, not access-log fields)
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (answers its open questions on the
   transport and on unpriced models, for v0.1)

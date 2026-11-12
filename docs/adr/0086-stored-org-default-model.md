@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-01
+- Area: models-spend
+- Tags: models, pricing, multi-tenancy
 - Amends: [0072](0072-agent-model-run-now-echo-check.md) (the org default in the model precedence)
 - Relates to: [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 - Issue: old issue 256

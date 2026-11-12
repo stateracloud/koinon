@@ -103,7 +103,7 @@ except scripts \.md$
 except scripts ^docs/
 except scripts ^web/src/
 keep scripts ^(AGENTS|CONTRIBUTING)\.md$
-keep scripts ^docs/(adr/|dev/ci\.md$)
+keep scripts ^docs/(adr/|metadata/|dev/ci\.md$)
 keep scripts \.go$
 
 # --- web ------------------------------------------------------------------------------------------
@@ -163,7 +163,7 @@ gate go \.go$
 gate deps (^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$
 gate proto \.proto$
 gate migrate ^internal/db/migrations/
-gate adr ^(docs/adr/|hack/adr-)
+gate adr ^(docs/(adr|research|spikes|metadata)/|hack/(adr-|doc-meta-))
 gate shell \.sh$
 gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
 gate zizmor ^\.github/(workflows/[^/]*\.ya?ml|actions/.*\.ya?ml|zizmor\.ya?ml|dependabot\.ya?ml)$
@@ -216,6 +216,7 @@ script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
+script-check - hack/buf-breaking-against-test.sh
 script-check - hack/lane-gates-test.sh
 script-check - hack/generate-test.sh
 script-check - hack/ci-supersede-test.sh
@@ -264,6 +265,8 @@ script-skip - hack/bash5-lint-test.sh
 script-skip - hack/bash5-lint.sh
 script-skip - hack/adr-lint-test.sh
 script-skip - hack/adr-lint.sh
+script-skip - hack/doc-meta-lint-test.sh
+script-skip - hack/doc-meta-lint.sh
 
 # --- the kind e2e (hack/needs-e2e.sh) ------------------------------------------------------------------
 # Needed for changes whose behaviour only a full install observes: startup, flags and environment,

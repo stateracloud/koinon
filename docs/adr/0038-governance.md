@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: governance, adr-process
 - Decision: [design.md#38](../design.md)
 
 ## Context

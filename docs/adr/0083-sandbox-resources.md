@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-31
+- Area: runtime-sandbox
+- Tags: sandbox, kubernetes, isolation
 - Relates to: [0045](0045-openshell-hardening-defaults.md), [0075](0075-isolation-tiers.md), [0020](0020-agent-builder-and-templates.md), [0027](0027-repo-and-versioning.md)
 - Issue: old issue 314 (decision by procoduck, 2026-10-31); this ADR covers the first slice
 

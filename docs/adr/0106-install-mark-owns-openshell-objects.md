@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Area: runtime-sandbox
+- Tags: openshell, install, backup-restore
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0051](0051-session-home-generations.md), [0045](0045-openshell-hardening-defaults.md), [0046](0046-adr-conventions.md)
 - Issues: #461, #275 (the restore drill), #511 (the unmarked list)
 

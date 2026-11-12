@@ -3,6 +3,8 @@
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core
   release. Decision 5 names no qualifying auth type yet (Verification)
 - Date: 2026-11-11
+- Area: models-spend
+- Tags: credentials, models, budgets, spend-ledger, agentgateway
 - Amends: [0013](0013-model-access.md) (decision 4, GitHub Copilot), [0044](0044-in-sandbox-credential-exception.md)
   (how its amendment of 2026-11-11 applies to subscription logins),
   [0015](0015-agent-environment-and-browser.md) (the allowlisted in-sandbox login example)

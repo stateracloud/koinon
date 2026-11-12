@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 4, 5, 6, 8, 9 and 10 amended 2026-11-11 (never embedded)
 - Date: 2026-10-28
+- Area: models-spend
+- Tags: models, pricing
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
   [0068](0068-prompt-caching-always-on.md), [0069](0069-native-model-formats.md)
@@ -540,3 +542,50 @@ The amendment above leaves these points open; this is what the code does.
    supported parameters, endpoints) are effective as soon as they are stored.
 5. **No new flag.** The chart passes no new flag or value: the existing `--prices-refresh` mode is the
    switch, as the amendment says.
+
+## Amendment (2026-11-11): the compaction point is set per model from the catalog, 170k otherwise
+
+Maintainer decisions of 2026-11-07 and 2026-11-11, recorded for issue #97. This amendment makes the
+"later decision" of the Context section and of decisions 6 and 11 above. Decision 11's sentence "It
+does not set a compaction threshold" stays true of the metadata snapshot; the threshold is set by
+agentd, from the price catalog, as follows.
+
+1. **Which value.** agentd gives the harness one number per run: the token count of the prompt at
+   which the harness compacts the conversation.
+   - A model whose price has context tiers gets the boundary of its first tier
+     (`pricing.Price.Tiers[0].ContextOver`), so the conversation is summarised before a request would
+     be billed at the dearer tier. Haiku 5.5 bills a prompt over 100k tokens at five times the rate
+     (`pricing/default.yaml`), and OpenCode's 170k would otherwise let every turn from 100k to 170k
+     cost 5x.
+   - A model with no tiers, no price or no catalog row gets **170000**, OpenCode's own default.
+   - The value is never above 170000. A first tier above it (272k for `gpt-6-astra`) does not raise
+     the point, because Koinon still holds no context window for the model (Context section): a
+     point above the window would let a request fail instead of compact. When `modelmeta` lands, the
+     point becomes the lowest of 170000, the first tier and the model's input limit; that is the
+     "lower of the input limit and the first `context_over` tier" of decision 6.
+2. **Where it is computed.** `internal/agentd` (`compactionTokens`), next to the price lookup that
+   already decides the cache mode (`modelFacts`). The value is a launch switch, `--compaction-tokens`
+   (`flavor.Descriptor.CompactionArg`), never an environment variable of the sandbox, and it is not a
+   secret. Metric labels do not carry it (ADR 0023).
+3. **How OpenCode takes it (read from the v2.2.0 source; the image ships v2.2.6).** OpenCode compacts when its estimate of the prompt reaches
+   `window - compaction.buffer`, with `window = limit.input || limit.context`
+   (`packages/core/src/session/compaction.ts`, `calculateCeiling`). With an unknown window (limit 0,
+   which is the case for every `koinon/<model>`) the ceiling is infinite, so OpenCode did **not**
+   compact automatically before this change, whatever the Context section assumed. The entry script
+   therefore renders, in `OPENCODE_CONFIG_CONTENT`, a window of `point + 30000` as the model's
+   `limit.input` and `compaction.buffer: 30000`. The ceiling is then exactly the point. The summary
+   request may be as large as the window less `RESERVE_MIN` (16000; `summaryRoom` in v2.2.6), so
+   30000 leaves it 14000 tokens above the point to send the conversation unchanged, which reuses the
+   prompt cache; these are OpenCode's own figures for a 200000-token window (ceiling 170000, room
+   184000), and a point of 170000 renders them exactly. A reserve of 16000, the first form of this
+   amendment, left no room: the conversation never went out unchanged, and a short one with a large
+   system prompt could not be summarized at all. The flavor spec "koinon-opencode compaction point"
+   (`test/flavors/opencode_test.go`) starts the real v2.2.6 harness with `--compaction-tokens` in
+   both model formats, and with a point of 40000 and a fake model that answers the summary
+   template checks that the conversation compacts and the session keeps working.
+4. **Caching (ADR 0068).** Nothing changes: prompt caching stays on with no off switch. Compaction
+   rewrites the prompt once and the next turn writes the cache again; a lower point means more
+   rewrites for a tiered model and fewer billed tokens at the dear tier.
+5. **Not decided here.** A per-org or per-agent override of the point, and measuring the dollar
+   effect (the research modelled about $0.18 per run with caching and $0.06 with caching plus
+   compaction by tier). Both are separate issues.

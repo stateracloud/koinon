@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI-only dev project for Koinon's own OpenCode plugins (ADR 0093 decision 4): type-checks and
+# tests the plugin TypeScript against the pinned OpenCode release's types. Nothing here is
+# installed in the image; flavors/opencode/Dockerfile copies only index.ts. Settings mirror
+# web/pnpm-workspace.yaml (ADR 0079 dependency cooldown), plus autoInstallPeers: false because
+# @opencode/plugin declares optional peers (Electron, Vite, solid-js and others) that must stay
+# uninstalled.
+minimumReleaseAge: 4320
+minimumReleaseAgeStrict: true
+trustPolicy: no-downgrade
+minimumReleaseAgeExcludePrune: true
+minimumReleaseAgeExclude: []
+autoInstallPeers: false
+bootConfig:
+  minimumReleaseAge: 4320
+  minimumReleaseAgeStrict: true
+  trustPolicy: no-downgrade

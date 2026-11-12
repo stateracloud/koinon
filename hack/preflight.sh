@@ -254,7 +254,9 @@ g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
 	buf lint
-	buf breaking --against ".git#branch=${base#origin/}"
+	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
+	against=$(hack/buf-breaking-against.sh "$base")
+	buf breaking --against ".git#ref=$against"
 }
 
 tree_state() { git status --porcelain; git diff | cksum; }
@@ -271,7 +273,7 @@ g_generate() {
 }
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
-g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
+g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh && hack/doc-meta-lint-test.sh >/dev/null && hack/doc-meta-lint.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {

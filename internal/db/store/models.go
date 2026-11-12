@@ -1564,6 +1564,7 @@ type Agent struct {
 	SandboxCpuLimit      pgtype.Text
 	SandboxMemoryRequest pgtype.Text
 	SandboxMemoryLimit   pgtype.Text
+	KeepWarmGranted      bool
 }
 
 type AgentBudget struct {

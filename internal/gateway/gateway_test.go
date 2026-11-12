@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -230,5 +231,95 @@ var _ = Describe("AgentFromHeader", func() {
 	It("refuses one value that is not an agent", func() {
 		_, err := gateway.AgentFromHeader(http.Header{gateway.AgentHeader: {"acme/a/b"}})
 		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("State halves (ADR 0097 decision 2.1)", func() {
+	hash := "sha256:" + strings.Repeat("a", 64)
+	key := gateway.Key{ID: "k1", Agent: agent, Hash: hash}
+	target := gateway.MCPTarget{Name: "tools", URL: "http://tools.invalid/mcp"}
+	provider := gateway.Provider{Org: "acme", Name: "p", Type: "openai", BaseURL: "http://p.invalid"}
+
+	It("keeps each setter on its own half and leaves the other unchanged", func() {
+		var s gateway.State
+		s.MCP = []gateway.MCPTarget{target}
+		s.Providers = []gateway.Provider{provider}
+		mcpBefore := s.MCPState
+		s.SetLimit(agent, &gateway.Limit{})
+		s.RestrictModels(agent, "m")
+		Expect(s.MCPState).To(Equal(mcpBefore))
+		Expect(s.ModelState.Limits).To(HaveKey(agent))
+		Expect(s.ModelState.Models).To(HaveKey(agent))
+
+		modelBefore := s.ModelState
+		s.GrantTools(agent, gateway.ToolGrant{Target: "tools", Tools: []string{"x"}})
+		Expect(s.ModelState).To(Equal(modelBefore))
+		Expect(s.MCPState.Tools).To(HaveKey(agent))
+	})
+
+	It("gives each path a view with the same keys and only its half", func() {
+		s := gateway.State{Keys: []gateway.Key{key}}
+		s.Providers = []gateway.Provider{provider}
+		s.MCP = []gateway.MCPTarget{target}
+		mc, tc := s.ModelConfig(), s.MCPConfig()
+		Expect(mc.Keys).To(Equal(s.Keys))
+		Expect(tc.Keys).To(Equal(s.Keys))
+		Expect(mc.Providers).To(Equal(s.Providers))
+		Expect(tc.MCP).To(Equal(s.MCP))
+	})
+
+	It("reports in each half's Validate only that half's faults", func() {
+		s := gateway.State{Keys: []gateway.Key{key}}
+		s.Providers = []gateway.Provider{{Org: "acme", Name: "p", Type: "openai"}}
+		s.MCP = []gateway.MCPTarget{{Name: "bad name", URL: ""}}
+		Expect(s.Validate()).To(MatchError(And(
+			ContainSubstring("base URL is required"), ContainSubstring("invalid name or empty URL"))))
+
+		err := s.ModelConfig().Validate()
+		Expect(err).To(MatchError(ContainSubstring("base URL is required")))
+		Expect(err).NotTo(MatchError(ContainSubstring("invalid name or empty URL")))
+
+		err = s.MCPConfig().Validate()
+		Expect(err).To(MatchError(ContainSubstring("invalid name or empty URL")))
+		Expect(err).NotTo(MatchError(ContainSubstring("base URL is required")))
+	})
+
+	It("lists State.Validate faults as keys, limits, providers, models, MCP targets, tools", func() {
+		s := gateway.State{Keys: []gateway.Key{{ID: "k1", Agent: agent, Hash: "nope"}}}
+		s.SetLimit(agent, &gateway.Limit{})
+		s.Providers = []gateway.Provider{{Org: "acme", Name: "p", Type: "openai"}}
+		s.RestrictModels(agent, "bad name!")
+		s.MCP = []gateway.MCPTarget{{Name: "bad name", URL: ""}}
+		s.GrantTools(agent, gateway.ToolGrant{Target: "nowhere", Tools: []string{"x"}})
+		err := s.Validate()
+		Expect(err).To(HaveOccurred())
+		msg := err.Error()
+		var at []int
+		for _, part := range []string{
+			"hash must be", "limit for", "base URL is required", "models for",
+			"invalid name or empty URL", "unknown mcp target",
+		} {
+			i := strings.Index(msg, part)
+			Expect(i).To(BeNumerically(">=", 0), part)
+			at = append(at, i)
+		}
+		Expect(slices.IsSorted(at)).To(BeTrue(), "fault order in %q", msg)
+	})
+
+	It("reports a key fault through both views", func() {
+		s := gateway.State{Keys: []gateway.Key{{ID: "k1", Agent: agent, Hash: "nope"}}}
+		Expect(s.ModelConfig().Validate()).To(MatchError(ContainSubstring("hash must be")))
+		Expect(s.MCPConfig().Validate()).To(MatchError(ContainSubstring("hash must be")))
+	})
+
+	It("validates both halves through State.Validate", func() {
+		s := gateway.State{
+			Keys:     []gateway.Key{key},
+			MCPState: gateway.MCPState{MCP: []gateway.MCPTarget{{Name: "bad name", URL: ""}}},
+		}
+		s.Providers = []gateway.Provider{{Org: "acme", Name: "p", Type: "openai"}}
+		err := s.Validate()
+		Expect(err).To(MatchError(ContainSubstring("base URL is required")))
+		Expect(err).To(MatchError(ContainSubstring("invalid name or empty URL")))
 	})
 })

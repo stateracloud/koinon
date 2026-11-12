@@ -2,6 +2,8 @@
 
 - Status: Accepted in full (maintainer decision 2026-11-11, #603; every decision of this ADR, decision 2 included)
 - Date: 2026-11-03
+- Area: runtime-sandbox
+- Tags: harness, flavors, spend-ledger
 - Relates to: [0052](0052-opencode-v2-flavor.md) (the OpenCode flavor, its config and readiness), [0059](0059-v01-opencode-only.md) (one harness in v0.1), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (the `koinon.retry` plugin, amendment 2026-10-31), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (the ledger counts the title request), [0074](0074-run-traces-trace-router.md) (run traces, tool names), [0023](0023-observability-and-audit.md) (fixed metric labels), [0045](0045-openshell-hardening-defaults.md) (OpenShell defaults), [0079](0079-dependency-cooldown.md) (pin age), [0084](0084-leak-guard.md) and [0091](0091-leak-guard-by-destination.md) (the guards outside the sandbox), [0051](0051-session-home-generations.md) (the home outlives a run)
 - Issue: #122; the Go harness this contract feeds is #48
 
@@ -311,6 +313,49 @@ module; the re-ask (3.2) last. The `flavors` CI job becomes required (procoduck,
 - 2026-11-03: release notes of 2.2.1 to 2.2.5 read; source not diffed (the first slice diffs the hook types, decision 5).
 - Nothing here changes OpenShell or agentgateway behaviour except the gateway reading and removing
   one request header.
+- 2026-11-11: OpenCode 2.2.6 source (commit `dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06`) read for the
+  first slice's checks (Delivery steps 1-3; research report, workflow session): the plugin shape,
+  loading rule, duplicate-ID handling, and the shell, permission and request-label hook types, each
+  re-read at source. See the amendment below for the five corrections it found.
+
+## Amendment (2026-11-11, #122): five corrections from reading OpenCode 2.2.6 source
+
+The "To check in the first slice" research (2026-11-03, against the 2.2.0 source) got five
+decisions wrong once OpenCode 2.2.6 itself was read for this PR. None of them changes decision 2
+(advisory only) or the first slice's scope; they correct what the plugin module writes.
+
+1. **Decision 3.5, the shell environment hook.** The hook is `ctx.shell.hook("create.before", e =>
+   ...)`, with `e.env: Record<string, string | undefined>`, not `shell.env`. Remove a variable by
+   setting it `undefined` in that map, not with `delete` (the spawner's `extendEnv` behaviour for a
+   `delete`d key is unverified; `undefined` removes it either way).
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/plugin/src/promise/shell.ts#L3-L17
+2. **Decision 4 and the Context section ("reuse a Koinon plugin ID, which stops plugin loading
+   altogether").** Wrong, and wrong since OpenCode 2.2.0 too: a duplicate plugin ID does not stop
+   loading. The supervisor orders built-ins, then configured packages in document order, keeps the
+   first of a duplicate ID, and fails only the later one, before any `setup` runs. `koinon.core`
+   being listed first (decision 4) is therefore both necessary and sufficient against an ID clash;
+   no further defence is needed in v0.1.
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/plugin/supervisor.ts#L94-L113
+3. **Decision 3.4, request purpose.** Use the `model.request` hook's own `kind` (readonly) and
+   `headers` (mutable), not a label kept across hooks from the compaction one ("a compaction hook
+   marks the next request"). `kind` is one of four ready-made values per call site: `primary`,
+   `compaction`, `title`, `generate`. `generate` is outside the ADR's fixed label set (`primary`,
+   `compaction`, `title`, `other`, `none`); send it through unchanged and let the gateway's mapping
+   turn it into `other`.
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/session/model-request.ts#L337-L362
+4. **Decision 3.2, the permission hook.** "the hook cannot loosen either [a configured allow or
+   deny]" is true only for allow and deny; the hook *can* loosen a configured `ask` to `allow`. The
+   module must therefore write only `ask`, never assume the hook is one-directional.
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/permission.ts#L176-L215
+5. **Decision 4, the types package pin.** `@opencode/plugin@2.2.6`, matching the image's pinned
+   OpenCode release (the ADR's `2.2.5` text was the re-pin plan's pin at the time of writing, since
+   superseded by the 2026-11-10 re-pin to 2.2.6 noted in decision 5).
+
+Also confirmed, not a correction: plugin commands do reach agentd over ACP's
+`available_commands_update` (so decision 3.1's load report needs no status-file fallback); the
+title and compaction `result` hooks exist and skip the request as decision 3.3 assumes; keyed
+session instructions (the next slice) moved under `ExperimentalSessionApi` between 2.2.0 and
+2.2.6, so decision 5's rule for experimental hooks now applies to them.
 
 ## Links
 

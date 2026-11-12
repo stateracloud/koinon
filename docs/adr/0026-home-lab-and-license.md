@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: testing, isolation, ci
 - Decision: [design.md#26](../design.md)
 
 ## Context

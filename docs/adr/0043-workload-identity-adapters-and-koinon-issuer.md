@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0063](0063-forge-credential-classes.md), [0073](0073-agent-passport.md)
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: identity, credentials
 - Amends: ADR 0006 (identity layers); replaces the "Pod Identity" wording in `docs/design.md`
   ("Execution layer details")
 
