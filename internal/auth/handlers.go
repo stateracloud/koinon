@@ -8,6 +8,8 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -183,6 +185,11 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 		defer func() { <-s.verifySlots }()
 	default:
 		return store.LocalCredential{}, false, errBusy
+	}
+	// A username Postgres text cannot hold (invalid UTF-8, NUL) names nobody; the lookup would fail.
+	if !utf8.ValidString(username) || strings.ContainsRune(username, 0) {
+		_, _ = VerifyPasswordContext(ctx, dummyHash(), password)
+		return store.LocalCredential{}, false, nil
 	}
 	cred, err := s.q.GetLocalCredentialByUsername(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {
