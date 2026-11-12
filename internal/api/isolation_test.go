@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1/gatewayv1alpha1connect"
 	leakguardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
@@ -827,6 +828,12 @@ var isolationExempt = map[string]string{
 		"takes no IDs",
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
 		"every org; takes no IDs",
+	gatewayv1alpha1connect.GatewayStateServiceStreamStateProcedure: "the install-wide gateway State stream (ADR 0097); " +
+		"only a gateway copy calls it, and its request names the copy, not an org. No handler is registered yet; the slice " +
+		"that serves it must authenticate the gateway and revisit this entry",
+	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure: "records a gateway copy's confirmation of an " +
+		"install-wide revision (ADR 0097); the request names the copy, not an org. No handler is registered yet; the slice " +
+		"that serves it must authenticate the gateway and revisit this entry",
 }
 
 var _ = Describe("org isolation", func() {

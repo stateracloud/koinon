@@ -105,6 +105,29 @@ var _ = Describe("State", func() {
 		Expect(same.Keys).To(Equal(out.Keys))
 	})
 
+	// ADR 0097 is silent on this; the maintainer decides (#279 slice 2). A key is shared by both halves
+	// (State.Keys), so dropping an agent's key for a bad model limit also takes the agent off the MCP
+	// path: fail closed, the same as before the split, when one key served both. The agent's tool
+	// grants stay in the MCP half but name no key, so nothing can reach them.
+	It("takes the agent off the MCP path too when its model limit is invalid (keys are shared by the halves)", func() {
+		var s gateway.State
+		bad, _ := gateway.NewKey(agent)
+		good, _ := gateway.NewKey(gateway.AgentRef{Org: "acme", Name: "other"})
+		s.AddKey(bad.Key)
+		s.AddKey(good.Key)
+		s.MCP = []gateway.MCPTarget{{Name: "wiki", URL: "http://wiki/mcp"}}
+		s.GrantTools(agent, gateway.ToolGrant{Target: "wiki", All: true})
+		s.GrantTools(good.Agent, gateway.ToolGrant{Target: "wiki", All: true})
+		s.SetLimit(agent, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0000000001"), Window: time.Hour})
+
+		out, rej := s.WithoutInvalidLimits()
+		Expect(rej).To(HaveLen(1))
+		Expect(out.MCPConfig().Keys).To(Equal([]gateway.Key{good.Key}), "the MCP half is not handed the dropped key")
+		Expect(out.ModelConfig().Keys).To(Equal(out.MCPConfig().Keys), "both halves see the same keys")
+		Expect(out.Tools).To(HaveKey(agent), "the grants are untouched; without a key nothing reaches them")
+		Expect(out.Validate()).To(Succeed())
+	})
+
 	It("rejects grants for unknown targets and duplicate keys", func() {
 		var s gateway.State
 		k, _ := gateway.NewKey(agent)
