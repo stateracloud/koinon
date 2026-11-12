@@ -144,8 +144,9 @@ func CancelForAgent(ctx context.Context, q *store.Queries, org, agentID pgtype.U
 // CancelOverTimeLimit cancels every owned run of the org past its wall-clock cap, with the note of
 // runreply.TimeLimitNote: the same note the run's owner writes when it stops the run at its time
 // limit itself (Owner.CancelAtTimeLimit). A failure to read the summary leaves it out; the cancel
-// does not wait on it.
-func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID) ([]store.Run, error) {
+// does not wait on it. after, when not nil, runs for each canceled run in the same transaction
+// (see Config.AfterTimeLimit).
+func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID, after RunStep) ([]store.Run, error) {
 	q := store.New(db)
 	runs, err := q.CancelRunsOverWallClock(ctx, store.CancelRunsOverWallClockParams{
 		OrgID: org, OutcomeReason: "wall-clock cap exceeded",
@@ -166,6 +167,11 @@ func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID) ([]store
 		r, err := recordCanceled(ctx, q, r, Cancellation{Reason: ReasonWallClockCap, Message: msg, Actor: System, Extra: note})
 		if err != nil {
 			return nil, err
+		}
+		if after != nil {
+			if err := after(ctx, q, r); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, r)
 	}

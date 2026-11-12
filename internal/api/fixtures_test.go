@@ -360,6 +360,20 @@ func ticketKinds(res *ticketv1alpha1.GetTicketResponse) []string {
 	return kinds
 }
 
+// lastEventOfKind is the ticket's latest event of the kind; a run that hit its time cap is followed
+// by its continuation run's events (issue #99).
+func lastEventOfKind(res *ticketv1alpha1.GetTicketResponse, kind string) *ticketv1alpha1.TicketEvent {
+	GinkgoHelper()
+	evs := res.GetEvents()
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i].GetKind() == kind {
+			return evs[i]
+		}
+	}
+	Fail("no " + kind + " event on the ticket")
+	return nil
+}
+
 func sweep(ctx context.Context, e *env) (int, error) { return scheduler.SweepWallClock(ctx, e.pool) }
 
 func recordTokens(ctx context.Context, e *env, r store.Run, tokens int64) (store.Run, error) {

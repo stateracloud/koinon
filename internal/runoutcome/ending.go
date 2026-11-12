@@ -295,15 +295,27 @@ func (o *Owner) CancelAtTimeLimit(ctx context.Context, turn Turn, reason string)
 	if err != nil {
 		o.cfg.Log.Warn("reading the agent's last reply for the time-limit note failed", "err", err)
 	}
-	return o.Cancel(ctx, turn, reason, "", note)
+	return o.endThen(ctx, turn, store.RunStateCanceled, reason, "", note, o.cfg.AfterTimeLimit)
 }
 
 func (o *Owner) end(ctx context.Context, turn Turn, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
+	return o.endThen(ctx, turn, outcome, reason, class, extra, nil)
+}
+
+// endThen is end with a step that runs in the closing transaction, after the run and its task
+// events are written: what follows a run that hit its time limit (Config.AfterTimeLimit).
+func (o *Owner) endThen(ctx context.Context, turn Turn, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any, after RunStep) error {
 	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
-		return o.finishIn(ctx, q, src, outcome, reason, class, extra)
+		if err := o.finishIn(ctx, q, src, outcome, reason, class, extra); err != nil {
+			return err
+		}
+		if after != nil {
+			return after(ctx, q, o.run)
+		}
+		return nil
 	})
 	if err != nil {
 		return o.failed(ctx, turn, "finish the run", err)

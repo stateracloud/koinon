@@ -118,7 +118,7 @@ var _ = Describe("CancelUnowned", func() {
 				if cp == bySweep {
 					cancelErr = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 						var err error
-						swept, err = runoutcome.CancelOverTimeLimit(ctx, tx, w.org)
+						swept, err = runoutcome.CancelOverTimeLimit(ctx, tx, w.org, nil)
 						return err
 					})
 					return
@@ -267,7 +267,7 @@ var _ = Describe("the time limit", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var runs []store.Run
 		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			runs, err = runoutcome.CancelOverTimeLimit(ctx, tx, swept.org)
+			runs, err = runoutcome.CancelOverTimeLimit(ctx, tx, swept.org, nil)
 			return err
 		})).To(Succeed())
 		Expect(runs).To(HaveLen(1))

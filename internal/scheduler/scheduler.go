@@ -245,7 +245,7 @@ func SweepWallClock(ctx context.Context, db DB) (int, error) {
 	n := 0
 	for _, org := range orgs {
 		err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			runs, err := runoutcome.CancelOverTimeLimit(ctx, tx, org)
+			runs, err := runoutcome.CancelOverTimeLimit(ctx, tx, org, ContinueAfterTimeLimit)
 			n += len(runs)
 			return err
 		})

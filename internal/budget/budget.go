@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/runlimits"
 )
 
@@ -713,6 +714,9 @@ func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID,
 			return err
 		}
 		if o.IsZero() {
+			if err := q.ClearAgentRunLimits(ctx, store.ClearAgentRunLimitsParams{OrgID: org, AgentID: agent}); err != nil {
+				return err
+			}
 			if _, err := q.DeleteAgentRunLimits(ctx, store.DeleteAgentRunLimitsParams{OrgID: org, AgentID: agent}); err != nil {
 				return err
 			}
@@ -730,6 +734,78 @@ func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID,
 		})
 		return nil
 	})
+}
+
+// MaxContinuationsLimit is the most continuation runs a task can be given.
+const MaxContinuationsLimit = 10
+
+// SetAgentContinuationLimits replaces the agent's continuation overrides (issue #99): a nil
+// MaxContinuations follows the template (0 switches continuation off) and a zero TaskSpend follows
+// the org's default. The run-limit overrides stay. It applies from the next time a run hits its time
+// limit.
+func (s *Service) SetAgentContinuationLimits(ctx context.Context, org, agent pgtype.UUID, actor audit.Actor, o runlimits.ContinuationOverride) error {
+	switch {
+	case o.MaxContinuations != nil && (*o.MaxContinuations < 0 || *o.MaxContinuations > MaxContinuationsLimit):
+		return &InvalidError{Msg: fmt.Sprintf("the number of continuation runs must be between 0 and %d", MaxContinuationsLimit)}
+	case o.TaskSpend < 0 || o.TaskSpend > money.MaxLimit:
+		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be greater than 0 and at most %s USD", money.MaxLimit)}
+	}
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+		if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent}); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		before, err := runlimits.GetContinuationOverride(ctx, q, org, agent)
+		if err != nil {
+			return err
+		}
+		arg := store.SetAgentContinuationLimitsParams{
+			OrgID: org, AgentID: agent, UpdatedBy: actor.String(),
+			TaskSpendUsd: pgtype.Text{String: o.TaskSpend.Numeric(), Valid: o.TaskSpend > 0},
+		}
+		if o.MaxContinuations != nil {
+			arg.MaxContinuations = pgtype.Int4{Int32: int32(*o.MaxContinuations), Valid: true} //nolint:gosec // bounded above
+		}
+		if err := q.SetAgentContinuationLimits(ctx, arg); err != nil {
+			return err
+		}
+		b.Org(audit.Event{
+			Org: org, Actor: actor, Action: "budget.agent_continuation_limits.set", TargetKind: "agent", TargetID: agent.String(),
+			Before: continuationSummary(before), After: continuationSummary(o),
+		})
+		return nil
+	})
+}
+
+// SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs; zero
+// is the platform default.
+func (s *Service) SetOrgContinuationTaskSpend(ctx context.Context, org pgtype.UUID, actor audit.Actor, v money.USD) error {
+	if v < 0 || v > money.MaxLimit {
+		return &InvalidError{Msg: fmt.Sprintf("the task spend cap must be greater than 0 and at most %s USD", money.MaxLimit)}
+	}
+	return s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+		before, err := orgsettings.Get(ctx, q, org, orgsettings.Defaults())
+		if err != nil {
+			return err
+		}
+		if err := orgsettings.SetContinuationTaskSpend(ctx, q, org, v); err != nil {
+			return err
+		}
+		b.Org(audit.Event{
+			Org: org, Actor: actor, Action: "budget.org_continuation_task_spend.set", TargetKind: "org", TargetID: org.String(),
+			Before: map[string]any{"taskSpendUSD": before.ContinuationTaskSpend.String()}, After: map[string]any{"taskSpendUSD": v.String()},
+		})
+		return nil
+	})
+}
+
+func continuationSummary(o runlimits.ContinuationOverride) map[string]any {
+	m := map[string]any{"taskSpendUSD": o.TaskSpend.String()}
+	if o.MaxContinuations != nil {
+		m["maxContinuations"] = *o.MaxContinuations
+	}
+	return m
 }
 
 func overrideSummary(o runlimits.Override) map[string]any {

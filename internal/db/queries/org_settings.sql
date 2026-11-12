@@ -78,3 +78,10 @@ INSERT INTO org_settings (org_id) VALUES (@org_id) ON CONFLICT (org_id) DO NOTHI
 -- name: LockOrgSettings :one
 -- Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 SELECT org_id FROM org_settings WHERE org_id = @org_id FOR UPDATE;
+
+-- name: SetOrgContinuationTaskSpend :exec
+-- The org's default per-task USD cap for continuation runs (issue #99); NULL is the platform
+-- default. It touches only this column, so the other settings stay.
+INSERT INTO org_settings (org_id, continuation_task_spend_usd)
+VALUES (@org_id, (sqlc.narg(continuation_task_spend_usd)::text)::numeric)
+ON CONFLICT (org_id) DO UPDATE SET continuation_task_spend_usd = EXCLUDED.continuation_task_spend_usd;
