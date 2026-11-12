@@ -16,6 +16,12 @@ never enter the agent's sandbox.
 
 Pronounced **KOY-non**, after the leagues of independent Greek city-states.
 
+> [!WARNING]
+> **Koinon is pre-alpha.** It is liable to change in major ways at any release, including its API,
+> database schema and Helm values. There is no schema or upgrade promise before v0.3 (ADR 0085,
+> ADR 0099): an update may need a reinstall. Do not use it for production or for data you cannot lose.
+> Released images are public and signed; see [Releasing](docs/dev/releasing.md#verify-with-no-login).
+
 **Status: pre-release (v0.1 release candidates, currently rc.9).** The quickstart works on kind;
 expect rough edges and changes between candidates. The design lives in
 [`docs/design.md`](docs/design.md) and the decisions in [`docs/adr/`](docs/adr/).
