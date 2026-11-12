@@ -1265,6 +1265,10 @@ var _ = Describe("Reconciler", func() {
 		}
 		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
 		Expect(err).NotTo(HaveOccurred())
+		// The ingest below the limit sends no NOTIFY (ledger/ingest.go: only a reserve change or an
+		// enforce crossing does), so no pass can run between the two requests. If a later change adds
+		// a wake, this check fails instead of the measured window silently changing.
+		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(1), "no pass runs below the limit")
 		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
 
 		By("the request that reaches the limit")
