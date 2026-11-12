@@ -97,7 +97,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Kind of check | Example here | Pull request | Merge queue | Push to main | Nightly | Release | Lab | Time limit | Blocks merge |
 |---|---|---|---|---|---|---|---|---|---|
 | Static and lint | `quick checks`, `lint-shell`, `scripts`, `go-lint`, `web-lint` | yes | yes | yes, unless the queue tested the tree | - | - | - | minutes | yes |
-| Unit | `go-test` (no container) | yes | yes | as above | - | - | - | minutes | yes (`go`) |
+| Unit | `go-test` (no container), `opencode plugin` (tsc, node --test) | yes | yes | as above | - | - | - | minutes | yes (`go`) |
 | Postgres integration | `go-test`, testcontainers | yes | yes | as above | - | - | - | minutes | yes (`go`) |
 | Envtest admission | `escape (admission)` | yes | yes | as above | - | - | - | minutes | yes |
 | Chart render and smoke | `chart`, `chart smoke` | yes | yes | as above | - | - | - | up to 35 min job limit | yes |

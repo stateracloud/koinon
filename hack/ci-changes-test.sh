@@ -149,7 +149,7 @@ expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml 
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors" flavors/opencode/Dockerfile
+expect "go flavors opencodeplugin" flavors/opencode/Dockerfile
 expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh

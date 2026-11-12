@@ -971,6 +971,14 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+      - name: types pin matches the image's OpenCode pin (ADR 0093 decisions 4 and 5)
+        run: |
+          types=$(node -p "require('./package.json').devDependencies['@opencode/plugin']")
+          image=$(sed -nE 's#.*/cli-linux-(x64|arm64)-([0-9][0-9.]*)\.tgz.*#\2#p' ../Dockerfile | sort -u)
+          if [ "$image" != "$types" ]; then
+            echo "::error file=flavors/opencode/plugins/package.json::@opencode/plugin is $types; flavors/opencode/Dockerfile pins OpenCode $(echo $image)"
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run test

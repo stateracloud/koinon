@@ -401,7 +401,7 @@ processes, and fewer processes would make the job slower for the same risk.
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors` (not on a pull request, #572), plus
+`generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
 `go.mod`, `go.sum`, the lint config). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
