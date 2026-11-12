@@ -285,7 +285,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	// pending -> approved | denied by a human. No row: already decided.
+	// pending -> approved | denied by a human. No row: already decided, or expires_at has passed
+	// (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
 	DecideOpenRouterLimitProposal(ctx context.Context, arg DecideOpenRouterLimitProposalParams) error
 	// Accepts or dismisses an open proposal. No row: it was already decided.
@@ -1406,7 +1407,8 @@ type Querier interface {
 	// The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of
 	// one org. Only rows that change are written.
 	SetAgentsKeepWarmGranted(ctx context.Context, arg SetAgentsKeepWarmGrantedParams) error
-	// The first of two approvals: remembered, the request stays pending.
+	// The first of two approvals: remembered, the request stays pending. Refused, like a decision,
+	// once expires_at has passed.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays

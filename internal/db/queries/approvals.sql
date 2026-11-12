@@ -58,13 +58,14 @@ WHERE org_id = @org_id AND status = 'pending'
 ORDER BY created_at, id;
 
 -- name: DecideApprovalRequest :one
--- pending -> approved | denied by a human. No row: already decided.
+-- pending -> approved | denied by a human. No row: already decided, or expires_at has passed
+-- (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 UPDATE approval_requests
 SET status = @status::approval_status,
     decided_by = @decided_by::uuid,
     decided_at = now(),
     decision_note = sqlc.narg(decision_note)
-WHERE org_id = @org_id AND id = @id AND status = 'pending'
+WHERE org_id = @org_id AND id = @id AND status = 'pending' AND expires_at > now()
   AND @status::approval_status IN ('approved', 'denied')
 RETURNING *;
 
@@ -137,10 +138,12 @@ WHERE org_id = @org_id AND id = ANY(@ids::uuid[]) AND delivered_at IS NULL
   AND status IN ('executed', 'failed', 'denied', 'expired', 'canceled');
 
 -- name: SetApprovalFirstApprover :one
--- The first of two approvals: remembered, the request stays pending.
+-- The first of two approvals: remembered, the request stays pending. Refused, like a decision,
+-- once expires_at has passed.
 UPDATE approval_requests
 SET first_approver = @approver::uuid
 WHERE org_id = @org_id AND id = @id AND status = 'pending' AND first_approver IS NULL AND approvals_required = 2
+  AND expires_at > now()
 RETURNING *;
 
 -- name: RaiseApprovalsRequired :one

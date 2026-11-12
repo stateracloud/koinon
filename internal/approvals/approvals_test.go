@@ -497,6 +497,37 @@ var _ = Describe("Service", func() {
 		By("an expired request cannot be approved")
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).To(MatchError(approvals.ErrNotPending))
+		Expect(err).To(MatchError(approvals.ErrExpired))
+		Expect(f.gh.Mints()).To(BeZero())
+	})
+
+	It("refuses a decision once expires_at has passed, before the sweeper marked the request, and names the expiry (issue #659)", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.park(ctx)
+		var at time.Time
+		Expect(pool.QueryRow(ctx, `UPDATE approval_requests SET expires_at = now() - interval '1 minute' WHERE id = $1 RETURNING expires_at`,
+			mustID(req.ID)).Scan(&at)).To(Succeed())
+
+		_, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "too late")
+		Expect(err).To(MatchError(approvals.ErrExpired))
+		Expect(err).To(MatchError(approvals.ErrNotPending), "callers that check ErrNotPending still see it")
+		Expect(err.Error()).To(ContainSubstring("expired at " + at.UTC().Format(time.RFC3339)))
+		_, err = f.svc.Deny(ctx, f.org, mustID(req.ID), f.admin, "too late")
+		Expect(err).To(MatchError(approvals.ErrExpired))
+
+		By("nothing was decided, audited or executed")
+		row := f.get(ctx, req.ID)
+		Expect(row.Status).To(Equal(store.ApprovalStatusPending))
+		Expect(row.DecidedBy.Valid).To(BeFalse())
+		Expect(f.decisions(ctx)).To(BeEmpty())
+		Expect(kinds(f.taskEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
+
+		By("the executor leaves it untouched: only an approved request is claimed")
+		got, err := f.svc.Execute(ctx, f.org, mustID(req.ID))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Status).To(Equal(store.ApprovalStatusPending))
+		Expect(got.Executions).To(BeZero())
 		Expect(f.gh.Mints()).To(BeZero())
 	})
 
