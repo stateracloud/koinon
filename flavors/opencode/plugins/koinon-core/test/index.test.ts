@@ -83,11 +83,14 @@ test("validateOptions: undefined and {} are accepted", () => {
   assert.deepEqual(validateOptions({}), {})
 })
 
-test("validateOptions: null, an array and a non-object throw", () => {
+test("validateOptions: null, an array, a non-object and a non-plain object throw", () => {
   assert.throws(() => validateOptions(null), /koinon\.core: options must be an object/)
   assert.throws(() => validateOptions([]), /koinon\.core: options must be an object/)
   assert.throws(() => validateOptions(42), /koinon\.core: options must be an object/)
   assert.throws(() => validateOptions("x"), /koinon\.core: options must be an object/)
+  assert.throws(() => validateOptions(new Map()), /koinon\.core: options must be a plain object/)
+  assert.throws(() => validateOptions(new Date(0)), /koinon\.core: options must be a plain object/)
+  assert.deepEqual(validateOptions(Object.create(null)), {})
 })
 
 test("validateOptions: an unknown key throws, naming it", () => {

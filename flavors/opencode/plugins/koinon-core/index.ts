@@ -36,7 +36,7 @@ export const READY_COMMAND = "koinon-core-ready-v1"
 export const PLUGIN_ID = "koinon.core"
 
 /** validateOptions rejects anything koinon.core does not expect: an unknown key, or `options` that
- * is not a plain object. This slice declares no option, so any key is unknown and any non-object
+ * is not a plain object (a Map or a Date included). This slice declares no option, so any key is unknown and any non-object
  * throws. A later module adds its keys here, typed, so a future misspelled option fails the start
  * instead of being silently ignored (ADR 0093 decision 2, "Recommendations" 5). Thrown messages are
  * prefixed "koinon.core: " to match `koinon.retry`'s convention
@@ -45,6 +45,12 @@ export function validateOptions(options: unknown): Readonly<Record<string, never
   if (options === undefined) return {}
   if (options === null || typeof options !== "object" || Array.isArray(options)) {
     throw new Error(`koinon.core: options must be an object, got ${JSON.stringify(options)}`)
+  }
+  // Only a plain object (JSON config parses to one): a Map or a Date has no own enumerable keys,
+  // so the key check below would wave it through.
+  const proto: unknown = Object.getPrototypeOf(options)
+  if (proto !== Object.prototype && proto !== null) {
+    throw new Error(`koinon.core: options must be a plain object, got ${Object.prototype.toString.call(options)}`)
   }
   const keys = Object.keys(options)
   if (keys.length > 0) {
