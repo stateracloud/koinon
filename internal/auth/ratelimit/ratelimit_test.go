@@ -120,6 +120,33 @@ var _ = Describe("Limiter", func() {
 		Expect(l.TakeRefused("first")).To(BeZero())
 	})
 
+	It("keeps a blocked key blocked while fresh keys flood the limiter", func() {
+		failN(ratelimit.FreeFails+3, t0)
+		want := l.Blocked(key, t0)
+		Expect(want).To(BeNumerically(">", ratelimit.BaseBackoff))
+		for i := range 25000 {
+			l.Fail(ratelimit.Key("192.0.2.2", "user:"+strconv.Itoa(i)), t0)
+		}
+		Expect(l.Blocked(key, t0)).To(Equal(want))
+		failN(1, t0)
+		Expect(l.Blocked(key, t0)).To(Equal(2 * want))
+	})
+
+	It("refuses a new key when the blocked set is full, and recovers when blocks end", func() {
+		for i := range 10000 {
+			k := ratelimit.Key("192.0.2.3", "user:"+strconv.Itoa(i))
+			for range ratelimit.FreeFails {
+				l.Fail(k, t0)
+			}
+		}
+		fresh := ratelimit.Key("192.0.2.4", "user:new")
+		Expect(l.Blocked(fresh, t0)).To(BeNumerically(">", 0))
+		l.Fail(fresh, t0)
+		Expect(l.Len()).To(Equal(10000), "an untracked key is not added")
+		Expect(l.Blocked(key, t0)).To(BeNumerically(">", 0), "and so are all keys that were never seen")
+		Expect(l.Blocked(fresh, t0.Add(ratelimit.BaseBackoff+time.Millisecond))).To(BeZero())
+	})
+
 	It("keeps the credential name out of the key", func() {
 		Expect(ratelimit.Key("192.0.2.1", "user:admin")).NotTo(ContainSubstring("admin"))
 	})

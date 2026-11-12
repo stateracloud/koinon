@@ -198,19 +198,20 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		Expect(events(ctx)).To(BeEmpty(), "a busy check is not a failed login")
 	})
 
-	It("leaves ChangePassword outside the login limiter", func(ctx SpecContext) {
-		failUntilBlocked(ctx, "192.0.2.31", "admin")
+	It("limits ChangePassword's current-password guesses per user, without a login event", func(ctx SpecContext) {
 		cred, err := store.New(pool).GetLocalCredentialByUsername(ctx, "admin")
 		Expect(err).NotTo(HaveOccurred())
 		p := &Principal{UserID: cred.UserID, AuthMethod: store.AuthMethodPassword}
-		_, err = rpcHandler{s: svc}.ChangePassword(WithPrincipal(ctx, p), &authv1alpha1.ChangePasswordRequest{
-			CurrentPassword: fakeLimitPassword, NewPassword: "koinon_test_not-a-real-password-next",
-		})
-		Expect(err).NotTo(HaveOccurred())
-		_, err = rpcHandler{s: svc}.ChangePassword(WithPrincipal(ctx, p), &authv1alpha1.ChangePasswordRequest{
-			CurrentPassword: "koinon_test_wrong", NewPassword: "koinon_test_not-a-real-password-other",
-		})
-		Expect(connect.CodeOf(err)).To(Equal(connect.CodePermissionDenied), "a wrong current password is checked, not rate-limited")
-		Expect(events(ctx)).To(HaveLen(ratelimit.FreeFails), "ChangePassword writes no login event")
+		change := func(current string) error {
+			_, err := rpcHandler{s: svc}.ChangePassword(WithPrincipal(ctx, p), &authv1alpha1.ChangePasswordRequest{
+				CurrentPassword: current, NewPassword: "koinon_test_not-a-real-password-other",
+			})
+			return err
+		}
+		for range ratelimit.FreeFails {
+			Expect(connect.CodeOf(change("koinon_test_wrong"))).To(Equal(connect.CodePermissionDenied))
+		}
+		Expect(connect.CodeOf(change(fakeLimitPassword))).To(Equal(connect.CodeResourceExhausted), "refused before the hash, even for the right password")
+		Expect(events(ctx)).To(BeEmpty(), "ChangePassword writes no login event")
 	})
 })

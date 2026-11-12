@@ -9,19 +9,24 @@
 // MaxBackoff. A key that was refused starts afresh only after a quiet FailWindow that follows the end
 // of its block, so a client that waits out each block keeps doubling it. A success resets the key.
 //
-// The state lives in memory, per replica, in at most maxTracked keys (the least recently used key is
-// dropped first). The address is the connection's peer, an IPv6 one masked to its /64;
-// X-Forwarded-For is not trusted.
+// The state lives in memory, per replica. At most maxTracked keys that are not blocked are kept (the
+// least recently used is dropped first), and at most maxBlocked blocked ones. A blocked key is never
+// dropped to make room, so flooding the limiter with fresh keys does not reset a backoff. When the
+// blocked set is full, a key the limiter does not track is refused (fail closed) until a block ends.
+// The address is the connection's peer, an IPv6 one masked to its /64; X-Forwarded-For is not trusted.
 //
-// Lockout risk behind an ingress: every client then shares the ingress's address, so one noisy client
-// slows its neighbours down, and anyone who knows a username or a token prefix can lock that
-// credential for the others by failing against it (set a NetworkPolicy or an ingress rule for finer
-// control). The keys hold a hash of the credential name, not the name. The audit event of a failed
+// Lockout risk behind an ingress: every client then shares the ingress's address, because the peer
+// address is the ingress's and the forwarded address is not read. One client can therefore lock all
+// password logins out, for everyone, by failing against the address's budget, and anyone who knows a
+// username or a token prefix can lock that credential for the others by failing against it. The fix is
+// a trusted-proxy setting that reads the forwarded address only from a configured proxy; it is tracked
+// in issue 859. Until it ships, a NetworkPolicy or an ingress rule gives finer control. The keys hold a hash of the credential name, not the name. The audit event of a failed
 // password login stores the attempted username as typed (cut to a bounded length), so a user who types
 // a password into the username field leaves it in the audit log.
 package ratelimit
 
 import (
+	"container/heap"
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
@@ -40,15 +45,25 @@ const (
 	BaseBackoff = time.Second
 	MaxBackoff  = 15 * time.Minute
 
-	// maxTracked is the hard bound on the keys kept; past it the least recently used key is dropped.
+	// maxTracked is the bound on the keys kept that are not blocked; past it the least recently used
+	// key is dropped. maxBlocked bounds the blocked keys, which are never dropped.
 	maxTracked = 10000
+	maxBlocked = 10000
+
+	// saturatedWait is the wait asked of a key the limiter cannot track because the blocked set is full.
+	saturatedWait = 10 * time.Second
 )
 
 // Limiter counts failures per key. The zero value is not usable; call New.
+//
+// Keys that are blocked live in a heap ordered by the end of their block, apart from the keys that are
+// not blocked (a recency list). Only the recency list evicts, so a flood of fresh keys cannot reset the
+// backoff of a blocked one. A block that has ended moves its key back to the recency list.
 type Limiter struct {
-	mu   sync.Mutex
-	keys map[string]*list.Element // value: *attempts
-	lru  *list.List               // front: most recently used
+	mu      sync.Mutex
+	keys    map[string]*attempts
+	lru     *list.List // unblocked keys; front: most recently used
+	blocked blockHeap  // blocked keys, earliest block end first
 }
 
 type attempts struct {
@@ -59,10 +74,36 @@ type attempts struct {
 	// refused counts the requests refused while the key was over the limit, and failures that were
 	// not recorded one by one, since the caller last took the count (TakeRefused).
 	refused int
+	elem    *list.Element // in lru, or nil
+	hidx    int           // index in the blocked heap, or -1
+}
+
+type blockHeap []*attempts
+
+func (h blockHeap) Len() int           { return len(h) }
+func (h blockHeap) Less(i, j int) bool { return h[i].blocked.Before(h[j].blocked) }
+func (h blockHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].hidx, h[j].hidx = i, j
+}
+
+func (h *blockHeap) Push(x any) {
+	a := x.(*attempts)
+	a.hidx = len(*h)
+	*h = append(*h, a)
+}
+
+func (h *blockHeap) Pop() any {
+	old := *h
+	a := old[len(old)-1]
+	old[len(old)-1] = nil
+	*h = old[:len(old)-1]
+	a.hidx = -1
+	return a
 }
 
 // New returns an empty Limiter.
-func New() *Limiter { return &Limiter{keys: map[string]*list.Element{}, lru: list.New()} }
+func New() *Limiter { return &Limiter{keys: map[string]*attempts{}, lru: list.New()} }
 
 // Len is the number of keys tracked.
 func (l *Limiter) Len() int {
@@ -70,6 +111,18 @@ func (l *Limiter) Len() int {
 	defer l.mu.Unlock()
 	return len(l.keys)
 }
+
+// expire moves the keys whose block has ended from the blocked heap to the recency list.
+func (l *Limiter) expire(now time.Time) {
+	for len(l.blocked) > 0 && !now.Before(l.blocked[0].blocked) {
+		a := heap.Pop(&l.blocked).(*attempts)
+		a.elem = l.lru.PushFront(a)
+	}
+}
+
+// saturated reports whether the blocked set is full: a key it does not track cannot be told apart
+// from a blocked one, so it is refused (fail closed) until a block ends.
+func (l *Limiter) saturated() bool { return len(l.blocked) >= maxBlocked }
 
 // Key is the slot of a client address and the credential it names (a token prefix, a username);
 // part "" is the address's shared slot. The part is client-chosen, so the key holds a truncated
@@ -84,7 +137,8 @@ func Key(addr, part string) string {
 
 // ClientAddr is the request's peer address without the port. An IPv6 address is masked to its /64,
 // the smallest block a client commonly holds, so rotating the host part does not escape a key; an
-// IPv4 address stays whole. X-Forwarded-For is not read.
+// IPv4 address stays whole. The /64 mask also groups in-cluster IPv6 clients (dual-stack pods on one
+// node often share a /64) into one address for the admin API. X-Forwarded-For is not read.
 func ClientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -107,14 +161,21 @@ func RetryAfter(d time.Duration) string {
 	return strconv.Itoa(int((d + time.Second - 1) / time.Second))
 }
 
-// Blocked returns how long key must wait, or zero.
+// Blocked returns how long key must wait, or zero. While the blocked set is full it also refuses a key
+// that is not tracked.
 func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e, ok := l.keys[key]; ok {
-		if a := e.Value.(*attempts); now.Before(a.blocked) {
-			return a.blocked.Sub(now)
+	l.expire(now)
+	a, ok := l.keys[key]
+	if !ok {
+		if l.saturated() {
+			return saturatedWait
 		}
+		return 0
+	}
+	if now.Before(a.blocked) {
+		return a.blocked.Sub(now)
 	}
 	return 0
 }
@@ -126,31 +187,40 @@ func (l *Limiter) Fail(key string, now time.Time) { l.FailAfter(key, FreeFails, 
 func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	var a *attempts
-	if e, ok := l.keys[key]; ok {
-		l.lru.MoveToFront(e)
-		a = e.Value.(*attempts)
-	}
-	if a == nil || now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
-		// The refusals not yet taken stay counted when the failures start afresh.
-		fresh := &attempts{key: key, first: now}
-		if a != nil {
-			fresh.refused = a.refused
-			*a = *fresh
-		} else {
-			if len(l.keys) >= maxTracked {
-				oldest := l.lru.Back()
-				l.lru.Remove(oldest)
-				delete(l.keys, oldest.Value.(*attempts).key)
-			}
-			a = fresh
-			l.keys[key] = l.lru.PushFront(a)
+	l.expire(now)
+	a := l.keys[key]
+	if a == nil {
+		if l.saturated() {
+			return // refused by Blocked until a block ends; nothing to track
 		}
+		if l.lru.Len() >= maxTracked {
+			oldest := l.lru.Back()
+			l.lru.Remove(oldest)
+			delete(l.keys, oldest.Value.(*attempts).key)
+		}
+		a = &attempts{key: key, first: now, hidx: -1}
+		a.elem = l.lru.PushFront(a)
+		l.keys[key] = a
+	} else if a.elem != nil {
+		l.lru.MoveToFront(a.elem)
+	}
+	if now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
+		// The refusals not yet taken stay counted when the failures start afresh.
+		a.fails, a.first, a.blocked = 0, now, time.Time{}
 	}
 	a.fails++
 	if over := a.fails - freeFails; over >= 0 {
 		d := BaseBackoff << min(over, 20)
 		a.blocked = now.Add(min(d, MaxBackoff))
+	}
+	switch {
+	case !now.Before(a.blocked):
+	case a.hidx >= 0:
+		heap.Fix(&l.blocked, a.hidx)
+	case !l.saturated():
+		l.lru.Remove(a.elem)
+		a.elem = nil
+		heap.Push(&l.blocked, a)
 	}
 }
 
@@ -167,8 +237,8 @@ func (a *attempts) quietSince() time.Time {
 func (l *Limiter) Refuse(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e, ok := l.keys[key]; ok {
-		e.Value.(*attempts).refused++
+	if a, ok := l.keys[key]; ok {
+		a.refused++
 	}
 }
 
@@ -176,11 +246,10 @@ func (l *Limiter) Refuse(key string) {
 func (l *Limiter) TakeRefused(key string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	e, ok := l.keys[key]
+	a, ok := l.keys[key]
 	if !ok {
 		return 0
 	}
-	a := e.Value.(*attempts)
 	n := a.refused
 	a.refused = 0
 	return n
@@ -190,8 +259,12 @@ func (l *Limiter) TakeRefused(key string) int {
 func (l *Limiter) Succeed(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e, ok := l.keys[key]; ok {
-		l.lru.Remove(e)
+	if a, ok := l.keys[key]; ok {
+		if a.elem != nil {
+			l.lru.Remove(a.elem)
+		} else {
+			heap.Remove(&l.blocked, a.hidx)
+		}
 		delete(l.keys, key)
 	}
 }
