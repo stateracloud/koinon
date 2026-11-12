@@ -33,6 +33,12 @@ on:
 permissions:
   contents: read
 
+# A quick labeled/unlabeled pair must not leave the older verdict on the head: a newer pull request event
+# cancels the older run. Queue builds are never cancelled (their own group per run).
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('contributor-gate-pr-{0}', github.event.pull_request.number) || format('contributor-gate-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gate:
     name: contributor gate

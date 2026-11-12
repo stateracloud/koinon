@@ -19,7 +19,9 @@ passes when any of these holds:
 | The login is a line of `.github/vouched.txt` | the base branch tip |
 | The pull request has the `vouched` label | the event; in the queue, the pull request read with `gh api` (only triage rights or more can set a label) |
 
-Anything else fails, an empty or unknown association included. Both maintainers and every past contributor
+Anything else fails, an empty or unknown association included. GitHub reports a private organization
+membership as `NONE` or `FIRST_TIME_CONTRIBUTOR` to this job, so a member who keeps it private and has no
+merged commit yet needs a vouch (or a public membership). Both maintainers and every past contributor
 pass on the first rule, so the gate never touches their pull requests. The failure message tells the author
 how a vouch happens.
 
@@ -61,12 +63,18 @@ Do these in one sitting; each needs a maintainer.
    - add `contributor gate   .github/workflows/contributor-gate.yml` to the header of
      `hack/ci-required.txt` and `external contributor gate` to its list (in the same pull request as
      step 3). `hack/ci-required-test.sh` and `hack/ci-merge-group-test.sh` check the workflow, and
-     `hack/contributor-gate-test.sh` already runs exactly this configuration in a scratch copy;
+     `hack/contributor-gate-test.sh` already runs exactly this configuration in a scratch copy. Add
+     `contributor-gate` to the list of workflows that produce a required context in `docs/dev/ci.md`
+     ("Required status checks"). `hack/release-gate.sh` already reads `contributor gate` from the merged
+     pull request (it has no push run), so release tags keep working;
    - after it merges, add `contributor gate` to the required status checks of the `main` ruleset and check
      with `hack/ci-required-test.sh --ruleset`. A ruleset change needs the owner's yes (`docs/dev/ci-rules.md`,
      "Stop and ask").
 5. Add a line to the "Pull requests" section of `CONTRIBUTING.md`: a first pull request needs a maintainer's
    vouch, and how to ask for one.
+
+Pull requests opened before the switch carry a skipped `contributor gate` check, which the ruleset counts as
+passing; they are judged at their next push or label event, and in any case by the merge queue build.
 
 GitHub's own setting "Require approval for workflows from outside collaborators" (Settings, Actions) still
 applies: a first-time contributor's workflows wait until a maintainer approves the run. Approving the run is

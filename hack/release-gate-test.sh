@@ -200,6 +200,17 @@ run_on "$pr_head" claim failure "2026-01-01T12:00:00Z"
 set_ruleset go dco claim "e2e result"
 check "a claim run that failed before the merge fails" "$(gate_rc)" 1
 
+# contributor gate (#848) has no push trigger: once required, its pull request run decides
+new_case
+run_on "$pr_head" "contributor gate" success
+set_ruleset go dco "e2e result" "contributor gate"
+check "a required contributor gate is read from the PR head" "$(gate_rc)" 0
+
+new_case
+run_on "$pr_head" "contributor gate" failure
+set_ruleset go dco "e2e result" "contributor gate"
+check "a red contributor gate on the PR head fails" "$(gate_rc)" 1
+
 new_case
 run_on "$sha" "quick checks" success
 set_ruleset go dco "quick checks" "e2e result"
