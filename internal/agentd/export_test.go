@@ -18,6 +18,11 @@ type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
 
+// CompactionTokens and DefaultCompactionTokens expose the compaction point to the external test package.
+var CompactionTokens = compactionTokens
+
+const DefaultCompactionTokens = defaultCompactionTokens
+
 // RetryPolicy is the model-retry policy a retrying harness is launched with.
 type RetryPolicy = retryPolicy
 
