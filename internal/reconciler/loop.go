@@ -44,10 +44,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if led {
-			failures = 0
-		}
-		failures++
+		failures = nextFailures(failures, led)
 		delay := retryDelay(failures, rand.Float64()) //nolint:gosec // jitter, not a secret
 		r.log.Warn("reconcile loop restarting", "err", err, "retry_in", delay)
 		select {
@@ -75,6 +72,16 @@ func retryDelay(failures int, jitter float64) time.Duration {
 	return d + time.Duration(jitter*float64(d))
 }
 
+// nextFailures is the consecutive-failure count after a lead ended in an error. A lead that
+// reached the leading state ran passes, so its failure counts as the first; a lead that failed
+// before that (acquire, lock, LISTEN) adds to the count, so a repeating setup error backs off.
+func nextFailures(failures int, led bool) int {
+	if led {
+		return 1
+	}
+	return failures + 1
+}
+
 // lead takes the leader lock and LISTENs on one dedicated connection, so that losing the
 // connection releases the lock and stops the loop together. A replica that is not the leader
 // blocks in pg_advisory_lock until the holder's session ends, so a rollout hands over at once
@@ -84,7 +91,8 @@ func retryDelay(failures int, jitter float64) time.Duration {
 // While leading, one goroutine reads the connection (notifications; pgx connections are not safe
 // for concurrent use). If the connection fails it cancels the lead context, which cancels a pass
 // that is running: Postgres has released the lock by then and the next leader may start at once,
-// so the old pass must not go on. led reports whether the lock was taken.
+// so the old pass must not go on. led reports whether the replica reached the leading state (it
+// ran passes), which resets the retry backoff.
 func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
@@ -98,7 +106,7 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 		return false, fmt.Errorf("take leader lock: %w", err)
 	}
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
-		return true, fmt.Errorf("listen: %w", err)
+		return false, fmt.Errorf("listen: %w", err)
 	}
 	r.log.Info("reconciler is leading", "waited", time.Since(start).Round(time.Millisecond),
 		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout)

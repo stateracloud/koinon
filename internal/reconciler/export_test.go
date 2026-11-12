@@ -6,6 +6,7 @@ package reconciler
 var (
 	LockBlocking = lockBlocking
 	RetryDelay   = retryDelay
+	NextFailures = nextFailures
 )
 
 const (

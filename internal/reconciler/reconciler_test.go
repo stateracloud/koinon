@@ -1593,6 +1593,18 @@ var _ = Describe("Reconciler", func() {
 			Expect(reconciler.RetryDelay(50, 0)).To(Equal(reconciler.RetryCap))
 			Expect(reconciler.RetryCap).To(BeNumerically("<", 30*time.Second))
 		})
+
+		It("backs off further on a repeating setup failure such as LISTEN, and resets only after leading", func() {
+			failures, prev := 0, time.Duration(0)
+			for range 4 {
+				failures = reconciler.NextFailures(failures, false) // LISTEN failed: not led
+				d := reconciler.RetryDelay(failures, 0)
+				Expect(d).To(BeNumerically(">", prev))
+				prev = d
+			}
+			Expect(prev).To(Equal(8 * reconciler.RetryBase))
+			Expect(reconciler.NextFailures(failures, true)).To(Equal(1), "a lead that ran passes starts over")
+		})
 	})
 })
 
