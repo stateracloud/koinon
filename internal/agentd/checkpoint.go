@@ -181,7 +181,8 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 
 func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup) {
 	c := p.cfg.Checkpoints
-	orgs, err := p.q.ListOrgIDs(ctx)
+	// Only the orgs with an open request or a sandbox due an hourly one (koinon issue 576).
+	orgs, err := p.q.ListOrgIDsWithCheckpointWork(ctx, int32(c.Interval.Seconds()))
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("checkpoints: listing orgs failed", "err", err)
@@ -238,7 +239,7 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 // marks them deleted (ADR 0085 decision 13); their checkpoints are no longer listed for a restore.
 // Several replicas may sweep the same repository: deleting is idempotent, and the mark is set once.
 func (p *Pool) sweepRepositories(ctx context.Context) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	orgs, err := p.q.ListOrgIDsWithRepositoryDeleteWork(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("repository sweep: listing orgs failed", "err", err)

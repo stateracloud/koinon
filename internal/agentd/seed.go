@@ -45,7 +45,7 @@ const (
 // seedTick claims the seeds that are due, each in a backup slot (a seed stages a home on the
 // scratch disk as a backup does) and one of the seeds' own slots, and sets the seed gauge.
 func (p *Pool) seedTick(ctx context.Context, slots, seeds chan struct{}, wg *sync.WaitGroup) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	orgs, err := p.q.ListOrgIDsWithSeedWork(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("repository seeds: listing orgs failed", "err", err)

@@ -41,3 +41,6 @@ tilt_modules/
 **/junit.xml
 **/report.json
 __pycache__/
+
+# hack/go-test-test.sh makes a failing-test fixture inside the module while it runs.
+/internal/zzfailfixture.*/
