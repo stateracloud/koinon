@@ -8,6 +8,10 @@ each bound to this release's namespace only (namespaceSelector on kubernetes.io/
    it, so the Secret must not be deleted or replaced quietly. The policy refuses DELETE of it, and
    UPDATE by any identity except the koinon-api service account, the key-admin one (only when the key-admin Job renders, that is with a KMS) (and
    secrets.kek.guard.extraWriters, for a GitOps identity that manages secrets.kek.existingSecret).
+   CREATE is not guarded, on purpose (accepted in the ADR 0056 amendment): the Secret does not exist
+   before koinon-api (or keys import) creates it, so a first start must be able to create it, and a
+   policy cannot tell that creator from anyone else without blocking the first start. A Secret created
+   by someone else before that is caught later: the fingerprints recorded in Postgres do not match.
    A DELETE is allowed while the namespace is being deleted, so the namespace does not hang in
    Terminating. To delete the Secret on purpose (for example to start over on an install with no
    stored secrets), set secrets.kek.guard.enabled=false, helm upgrade, delete it, set it back.

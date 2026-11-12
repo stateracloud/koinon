@@ -368,14 +368,17 @@ secrets:
     # A Secret you manage, with one file per key-encryption key named by its ID (base64 of 32 random
     # bytes) plus a file "active" holding the active ID. Empty: koinon-api creates the Secret
     # "koinon-kek" on its first start and never overwrites it (the chart renders no key material, so
-    # helm template, Argo CD and Flux cannot replace it). Back it up: without it, stored provider keys
+    # helm template, Argo CD and Flux cannot replace it). With existingSecret, whoever updates it (GitOps
+    # or a plain kubectl apply) must be listed in guard.extraWriters below. Back it up: without it, stored provider keys
     # and connection secrets cannot be read.
     existingSecret: ""
     # A native ValidatingAdmissionPolicy (issue #604) refuses DELETE of the KEK Secret, and UPDATE by
     # any identity except the koinon-api and key-admin service accounts, so a deleted or replaced
     # Secret cannot become a new key quietly. extraWriters are further user names (for example
     # "system:serviceaccount:argocd:argocd-application-controller") that may update it: needed when
-    # a GitOps tool applies a Secret you named in existingSecret. The policy that
+    # a GitOps tool applies a Secret you named in existingSecret. A plain `kubectl apply` or
+    # `helm`-less update of that Secret by your own user is an UPDATE too: add that user name here as
+    # well, or the policy refuses it. The policy that
     # limits the reconciler to Secrets labelled koinon.dev/managed-by=koinon-reconciler is
     # secrets.reconcilerFence.enabled, a separate switch. To delete the Secret on purpose, set
     # enabled=false, upgrade, delete it, then set it back.

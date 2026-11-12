@@ -474,7 +474,7 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(mineKey.Keys).NotTo(Equal(orig.Keys))
 		})
 		importer := func(in string, yes bool) *keyscli.Tool {
-			return &keyscli.Tool{Store: target, Out: &bytes.Buffer{}, In: strings.NewReader(in), Yes: yes, Now: func() time.Time { return now }}
+			return &keyscli.Tool{Store: target, Out: &bytes.Buffer{}, In: strings.NewReader(in), Yes: yes, NoDatabase: true, Now: func() time.Time { return now }}
 		}
 
 		It("merges: the install's own keys stay, the manifest's are added, the manifest's active key becomes active", func(ctx SpecContext) {
@@ -503,7 +503,7 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("creates the Secret when there is none", func(ctx SpecContext) {
 			empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
-			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true}).Import(ctx)).To(Succeed())
+			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, NoDatabase: true}).Import(ctx)).To(Succeed())
 			got, err := empty.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.Keys).To(Equal(orig.Keys))
@@ -549,6 +549,31 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(buf.String()).To(ContainSubstring("cannot say which KEKs were retired"))
 		})
 
+		It("refuses without a database unless --no-database, and changes nothing", func(ctx SpecContext) {
+			t := importer(backup, true)
+			t.NoDatabase = false
+			Expect(t.Import(ctx)).To(MatchError(And(ContainSubstring("--database-url"), ContainSubstring("--no-database"))))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("writes only the key set when it creates the Secret: extra keys of the manifest do not pass through", func(ctx SpecContext) {
+			var sec corev1.Secret
+			Expect(yaml.Unmarshal([]byte(backup), &sec)).To(Succeed())
+			sec.Data["..extra-file"] = []byte("koinon_test_not-a-real-extra")
+			raw, err := yaml.Marshal(sec)
+			Expect(err).NotTo(HaveOccurred())
+			cs := fake.NewClientset()
+			empty := keyscli.KubeStore{Client: cs, Namespace: "n", Name: "koinon-kek"}
+			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(string(raw)), Yes: true, NoDatabase: true}).Import(ctx)).To(Succeed())
+			got, err := cs.CoreV1().Secrets("n").Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Data).NotTo(HaveKey("..extra-file"))
+			Expect(got.Data).To(HaveKey(orig.Active))
+		})
+
 		Describe("a KEK that keys retire removed", func() {
 			retiredAs := func(ids ...string) func(context.Context, string) (bool, error) {
 				return func(_ context.Context, id string) (bool, error) { return slices.Contains(ids, id), nil }
@@ -577,7 +602,7 @@ var _ = Describe("koinon-api keys", func() {
 
 			It("is refused on the create path when it is the manifest's active KEK, even with the flag", func(ctx SpecContext) {
 				empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
-				t := &keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, AllowRetired: true, Retired: retiredAs(orig.Active)}
+				t := &keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, NoDatabase: true, AllowRetired: true, Retired: retiredAs(orig.Active)}
 				Expect(t.Import(ctx)).To(MatchError(ContainSubstring("was retired")))
 				_, err := empty.Load(ctx)
 				Expect(err).To(HaveOccurred())
@@ -789,6 +814,35 @@ var _ = Describe("koinon-api keys", func() {
 			kms.Down.Store(true)
 			_, err = store.Load(ctx)
 			Expect(err).To(MatchError(secretstore.ErrUnreachable))
+		})
+
+		It("does not import a backup whose active KEK is local into a KMS install, as activate does not (create and merge)", func(ctx SpecContext) {
+			use(service)
+			out.Reset()
+			Expect(tool.Export(ctx)).To(Succeed())
+			backup := out.String()
+			importAs := func(store keyscli.KubeStore) error {
+				return (&keyscli.Tool{Store: store, Pool: pool, Wrappers: service, Retired: func(context.Context, string) (bool, error) { return false, nil }, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, Now: func() time.Time { return now }}).Import(ctx)
+			}
+
+			created := fake.NewClientset()
+			store := keyscli.KubeStore{Client: created, Namespace: ns, Name: "koinon-kek", Wrappers: service}
+			Expect(importAs(store)).To(MatchError(ContainSubstring("is a local key and the KMS")))
+			list, _ := created.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+			Expect(list.Items).To(BeEmpty())
+
+			merged := fake.NewClientset()
+			mstore := keyscli.KubeStore{Client: merged, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			_, err := mstore.Ensure(ctx, now, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mstore.Wrappers = service
+			before, err := mstore.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(importAs(mstore)).To(MatchError(ContainSubstring("is a local key and the KMS")))
+			after, err := mstore.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Keys).To(Equal(before.Keys))
+			Expect(after.Active).To(Equal(before.Active))
 		})
 
 		It("exports a wrapped KEK still wrapped", func(ctx SpecContext) {

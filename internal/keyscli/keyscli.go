@@ -153,6 +153,9 @@ type Tool struct {
 	Retired func(ctx context.Context, id string) (bool, error)
 	// AllowRetired lets Import add KEKs that keys retire removed (--allow-retired), inactive.
 	AllowRetired bool
+	// NoDatabase lets Import run without a database (--no-database): the retired-KEK check is then
+	// skipped, with a warning. Without it, Import with no database refuses (fail closed).
+	NoDatabase bool
 	// Audit records the key events in the install audit chain (ADR 0100 decision 3). Nil means one
 	// on Pool, with the CLI actor; with no Pool nothing is recorded.
 	Audit *Auditor
@@ -822,7 +825,10 @@ func (t *Tool) Import(ctx context.Context) error {
 		return err
 	}
 	if !checked {
-		_, _ = fmt.Fprintln(t.Out, "Warning: no database is configured (--database-url), so the audit chain cannot say which KEKs were retired: a KEK that keys retire removed would come back. Check the manifest's KEK IDs yourself.")
+		if !t.NoDatabase {
+			return errors.New("keys import needs --database-url: without the audit chain it cannot say which KEKs keys retire removed, and an old backup would bring them back; nothing was imported (pass --no-database to skip the check)")
+		}
+		_, _ = fmt.Fprintln(t.Out, "Warning: no database is configured (--database-url) and --no-database is set, so the audit chain cannot say which KEKs were retired: a KEK that keys retire removed would come back. Check the manifest's KEK IDs yourself.")
 	}
 	if len(retired) > 0 {
 		if !t.AllowRetired {
@@ -831,12 +837,28 @@ func (t *Tool) Import(ctx context.Context) error {
 		_, _ = fmt.Fprintf(t.Out, "Warning: adding retired KEK(s) %s, inactive (--allow-retired); a retired KEK never becomes active here.\n", strings.Join(retired, ", "))
 	}
 	isRetired := func(id string) bool { return slices.Contains(retired, id) }
+	// The manifest's active KEK becomes active, so Activate's rule holds for it too.
+	if !isRetired(in.Active) {
+		if err := t.refuseLocalUnderKMS(in.Active, in.Stored[in.Active]); err != nil {
+			return fmt.Errorf("%w; nothing was imported", err)
+		}
+	}
 
 	if missing {
 		if isRetired(in.Active) {
 			return fmt.Errorf("the manifest's active KEK %s was retired and there is no KEK Secret to keep another one active: nothing was imported", in.Active)
 		}
-		if err := imp.Import(ctx, data, ann); err != nil {
+		// Write what was opened, not the raw manifest, so keys the key set does not define do not pass through.
+		clean, err := encodeKeySet(ctx, t.Wrappers, in)
+		defer func() {
+			for _, v := range clean {
+				clear(v)
+			}
+		}()
+		if err != nil {
+			return err
+		}
+		if err := imp.Import(ctx, clean, ann); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintf(t.Out, "Created the KEK Secret with %d KEK(s); the active one is %s. Check it: koinon-api keys verify\n", len(in.Keys), in.Active)
@@ -945,12 +967,7 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 		if len(retired) > 0 {
 			return fmt.Errorf("KEK %s was retired (keys retire); a retired KEK never becomes active", id)
 		}
-		// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
-		// set the configured primary to local first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
-		if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && ks.Stored[id].Backend == secretstore.BackendLocal {
-			return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
-		}
-		return nil
+		return t.refuseLocalUnderKMS(id, ks.Stored[id])
 	}
 	if id == "" || t.asks() {
 		// The picker and the confirmation wait for a person, so they run before the lock, on a key set
@@ -988,6 +1005,16 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	t.recordActivation(ctx, ks)
 	_, _ = fmt.Fprintf(t.Out, "KEK %s is active. Wait for the pods to pick it up (about a minute), then run: koinon-api keys rewrap\n", id)
 	return t.recordChange(ctx, c, ActionActivate, "kek", id)
+}
+
+// refuseLocalUnderKMS is the rule that an install that opted in to a KMS never activates a local KEK
+// (procoduck, 2026-11-03), for Activate and Import. To roll back, set the configured primary to local
+// first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
+func (t *Tool) refuseLocalUnderKMS(id string, stored secretstore.StoredKEK) error {
+	if p := t.Wrappers.Primary(); p.Backend() != secretstore.BackendLocal && stored.Backend == secretstore.BackendLocal {
+		return fmt.Errorf("KEK %s is a local key and the KMS %s is configured; activate a KEK wrapped by the KMS (ask the key-admin Job to add one), or switch the configured wrapping to local first to roll back", id, p.Backend())
+	}
+	return nil
 }
 
 // asks reports whether confirm will ask a person.

@@ -864,7 +864,6 @@ var _ = Describe("koinon-api keys forget", func() {
 				return sec.Data
 			}
 			refused := ContainSubstring("KEK ID " + forgotten + " was used before; IDs are never reused: pick a new ID")
-			before := snapshot()
 			Expect(tool.Add(ctx, forgotten)).To(MatchError(refused))
 			Expect(job(false).Run(ctx)).To(MatchError(refused))
 			Expect(job(true).Run(ctx)).To(MatchError(refused))
@@ -875,7 +874,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			delete(sec.Data, lostKEK)
 			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			before = snapshot()
+			before := snapshot()
 			Expect(job(true).Run(ctx)).To(MatchError(refused))
 			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
 			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")

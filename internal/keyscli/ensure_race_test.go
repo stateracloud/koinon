@@ -92,8 +92,10 @@ var _ = Describe("DrawID", func() {
 
 	It("creates no Secret when the probe fails", func(ctx SpecContext) {
 		kube := fake.NewClientset()
-		store := keyscli.KubeStore{Client: kube, Namespace: "koinon", Name: "koinon-kek",
-			UsedID: func(context.Context, string) (bool, error) { return false, errors.New("database down") }}
+		store := keyscli.KubeStore{
+			Client: kube, Namespace: "koinon", Name: "koinon-kek",
+			UsedID: func(context.Context, string) (bool, error) { return false, errors.New("database down") },
+		}
 		created, err := store.Ensure(ctx, time.Now(), nil)
 		Expect(err).To(MatchError(ContainSubstring("database down")))
 		Expect(created).To(BeFalse())

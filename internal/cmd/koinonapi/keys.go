@@ -30,6 +30,8 @@ type keysOptions struct {
 	yes                                                 bool
 	// allowRetired lets import add KEKs that keys retire removed, inactive.
 	allowRetired bool
+	// noDatabase lets import run without --database-url, skipping the retired-KEK check.
+	noDatabase bool
 	// recordStarted writes the .started audit event of rewrap and reencrypt.
 	recordStarted bool
 	// in is what import reads.
@@ -100,6 +102,7 @@ func newKeysCommand() *cobra.Command {
 	}
 	withAllowRetired := func(c *cobra.Command) *cobra.Command {
 		c.Flags().BoolVar(&o.allowRetired, "allow-retired", false, "add KEKs that keys retire removed (an old backup holds them), inactive; they never become active. Retired means a keys.retire event is in the audit chain: a retire whose event was lost, or a database restored from before the retire, is not seen")
+		c.Flags().BoolVar(&o.noDatabase, "no-database", false, "run import without --database-url: the retired-KEK check is skipped, with a warning (import refuses without a database otherwise)")
 		return c
 	}
 	// The per-row loop of rewrap and reencrypt is not atomic, so it may also record its start (ADR 0100
@@ -171,7 +174,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{AllowRetired: o.allowRetired, Store: store, Out: out, In: o.in, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
+	tool := &keyscli.Tool{AllowRetired: o.allowRetired, NoDatabase: o.noDatabase, Store: store, Out: out, In: o.in, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
 	// With the database, every command that changes the key set also records it in the install audit chain
 	// (actor cli, "keys <command>").
