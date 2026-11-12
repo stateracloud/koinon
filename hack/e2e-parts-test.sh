@@ -43,11 +43,13 @@ DRIVER
 # (field 3, after the last ")") on Linux, which busybox and sandboxed hosts allow; ps -o stat= -p only where
 # /proc/PID does not exist (macOS). If the state cannot be read, kill -0 stands: a live process is never
 # reported dead (fail safe).
+procdir=/proc
 alive() {
   local st line
   kill -0 "$1" 2>/dev/null || return 1
-  if [[ -d /proc/$1 ]]; then
-    line=$(cat "/proc/$1/stat" 2>/dev/null) || return 1 # gone between the two checks
+  if [[ -d $procdir/$1 ]]; then
+    # Unreadable (hidepid, another user) but still there: kill -0 stands. Gone: dead.
+    line=$(cat "$procdir/$1/stat" 2>/dev/null) || { [[ -d $procdir/$1 ]] && return 0; return 1; }
     line=${line##*) }
     st=${line%% *}
   else
@@ -68,6 +70,8 @@ for _ in $(seq 1 50); do alive "$zp" || break; sleep 0.1; done
 # Where no state source works (sandboxed macOS ps), alive() fails safe and cannot see a zombie.
 if [[ -d /proc/self ]] || ps -o stat= -p "$$" >/dev/null 2>&1; then
   if alive "$zp"; then fail "alive: a zombie is reported alive"; fi
+else
+  echo "e2e-parts-test: zombie check skipped: no process state source" >&2
 fi
 kill "$zpar" 2>/dev/null || true
 kill "$lp"
@@ -79,6 +83,9 @@ chmod +x "$tmp/psbin/ps"
 sleep 30 &
 lp=$!
 (PATH="$tmp/psbin:$PATH" alive "$lp") || fail "alive: unusable ps makes a live process dead"
+# A /proc entry whose stat cannot be read (a directory without the file): alive, not dead.
+mkdir -p "$tmp/fakeproc/$lp"
+(procdir=$tmp/fakeproc; alive "$lp") || fail "alive: an unreadable /proc stat makes a live process dead"
 kill "$lp"
 wait "$lp" 2>/dev/null || true
 

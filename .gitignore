@@ -44,3 +44,6 @@ __pycache__/
 
 # hack/go-test-test.sh makes a failing-test fixture inside the module while it runs.
 /internal/zzfailfixture.*/
+
+# Per-user Claude Code state
+.claude/scheduled_tasks.lock
