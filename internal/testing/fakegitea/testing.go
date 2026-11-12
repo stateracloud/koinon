@@ -36,6 +36,20 @@ func (f *Fake) AddIssue(repoName, title string) int64 {
 	return i.index
 }
 
+// AddComment adds a comment by the default login to issue or pull request index and returns its
+// ID. It panics if the repository does not exist.
+func (f *Fake) AddComment(repoName string, index int64, body string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rp, err := f.lookup(f.Owner, repoName)
+	if err != nil {
+		panic(err)
+	}
+	rp.nextCID++
+	rp.comments = append(rp.comments, &comment{id: rp.nextCID, index: index, user: DefaultLogin, body: body, created: f.now()})
+	return rp.nextCID
+}
+
 // RepoDir is the bare repository's directory, for tests that inspect it with git.
 func (f *Fake) RepoDir(name string) string {
 	f.mu.Lock()
@@ -70,7 +84,8 @@ type Snapshot struct {
 	Branches      map[string]string // branch -> commit SHA
 	Pulls         []PullState
 	Comments      []CommentState
-	// Calls counts write calls by endpoint, e.g. "POST pulls".
+	// Calls counts write calls by endpoint, e.g. "POST pulls", and the repository-wide comment
+	// list's reads as "GET repo comments".
 	Calls map[string]int
 }
 

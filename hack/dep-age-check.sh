@@ -477,6 +477,7 @@ tool_repo() {
 	GOVULNCHECK) echo "golang/vuln" ;;
 	GOFUMPT) echo "mvdan/gofumpt" ;;
 	CRANE) echo "google/go-containerregistry" ;;
+	BUILDX) echo "docker/buildx" ;;
 	esac
 }
 while IFS=$'\t' read -r file line; do

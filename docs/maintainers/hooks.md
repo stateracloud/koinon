@@ -72,7 +72,7 @@ The value must be exactly `1`. Any other value, or no variable, leaves the hooks
 
 - `relay-guard.sh` (PreToolUse on SendMessage and AskUserQuestion): it refuses relaying the owner's
   approval to a named private lab session. It only makes sense with that private setup, and the
-  lab stays out of git (ADR 0108 and the lab rule in `AGENTS.md`).
+  lab's details stay out of git.
 
 A maintainer who still registers the owner-local copies of `agent-spawn-check.sh`, `sleep-chain.sh`,
 `context-cap.sh`, `grilling-question-tool.sh`, `prose-question-stop.sh`, `question-checklist.sh` or

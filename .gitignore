@@ -44,3 +44,13 @@ __pycache__/
 
 # hack/go-test-test.sh makes a failing-test fixture inside the module while it runs.
 /internal/zzfailfixture.*/
+
+# Per-user Claude Code files (#847). The shared project config (.claude/settings.json and what it
+# registers) stays tracked; these hold one person's local settings, memory, scheduled tasks and
+# worktrees, at any depth (a session started in web/ writes web/.claude/).
+CLAUDE.local.md
+**/.claude/settings.local.json
+**/.claude/settings.local.json.*
+**/.claude/agent-memory-local/
+**/.claude/scheduled_tasks.json
+**/.claude/worktrees/
