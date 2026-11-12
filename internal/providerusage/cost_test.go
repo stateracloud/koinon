@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,21 +19,31 @@ const adminKey = "koinon_test_not-a-real-token"
 
 var costDay = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
 
+// recordedAnthropicCost is the shape of a 200 from analytics/cost (every group dimension present and
+// null unless grouped, amounts as six-place cent strings), with fake workspace IDs.
+func recordedAnthropicCost(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/anthropic-analytics-cost.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestAnthropicCostSumsTheWorkspacesDayInCents(t *testing.T) {
-	var gotKey, gotVersion string
+	var gotKey, gotVersion, gotBeta, gotAuth string
 	var queries []string
 	client, seen := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) {
-		gotKey, gotVersion = r.Header.Get("X-Api-Key"), r.Header.Get("Anthropic-Version")
+		gotKey, gotVersion, gotBeta, gotAuth = r.Header.Get("X-Api-Key"), r.Header.Get("Anthropic-Version"), r.Header.Get("Anthropic-Beta"), r.Header.Get("Authorization")
 		queries = append(queries, r.URL.RawQuery)
 		if r.URL.Query().Get("page") == "" {
-			// amount is in cents; another workspace and the default one are not this key's.
-			_, _ = w.Write([]byte(`{"data":[{"starting_at":"2026-11-05T00:00:00Z","ending_at":"2026-11-06T00:00:00Z","results":[
-				{"currency":"USD","amount":"123.5","workspace_id":"wrkspc_koinon"},
-				{"currency":"USD","amount":"999","workspace_id":"wrkspc_other"},
-				{"currency":"USD","amount":"7","workspace_id":null}]}],"has_more":true,"next_page":"page_2"}`))
+			// The recorded page, made the first of two; amount is in cents, another workspace is not this key's.
+			_, _ = w.Write([]byte(strings.Replace(recordedAnthropicCost(t), `"has_more": false,
+  "next_page": null`, `"has_more": true, "next_page": "page_2"`, 1)))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":[{"starting_at":"2026-11-05T00:00:00Z","results":[{"currency":"USD","amount":"0.5","workspace_id":"wrkspc_koinon"}]}],"has_more":false,"next_page":null}`))
+		_, _ = w.Write([]byte(`{"data":[{"starting_at":"2026-11-05T00:00:00Z","ending_at":"2026-11-06T00:00:00Z","group":{"workspace_id":"wrkspc_koinon"},
+			"cost":{"amount":"0.500000","currency":"USD","list_amount":"0.5","requests":1}}],"has_more":false,"next_page":null,"data_refreshed_at":"2026-11-06T09:30:00Z"}`))
 	})
 	src, ok := providerusage.DefaultCosts(client).For("anthropic", "https://api.anthropic.com")
 	if !ok {
@@ -45,18 +56,31 @@ func TestAnthropicCostSumsTheWorkspacesDayInCents(t *testing.T) {
 	if got != money.MustParse("1.24") {
 		t.Fatalf("cost %s, want 1.24 (124 cents over two pages)", got)
 	}
-	if gotKey != adminKey || gotVersion == "" {
-		t.Fatalf("headers: key %q version %q", gotKey, gotVersion)
+	if gotKey != adminKey || gotVersion != "2026-10-21" || gotBeta != "analytics-usage-cost-2026-08-24" || gotAuth != "" {
+		t.Fatalf("headers: key %q version %q beta %q authorization %q (the Admin key is x-api-key, never Bearer)", gotKey, gotVersion, gotBeta, gotAuth)
 	}
 	if len(*seen) != 2 || (*seen)[0][:len(providerusage.AnthropicCostURL)] != providerusage.AnthropicCostURL {
 		t.Fatalf("asked %v, not the pinned endpoint twice", *seen)
 	}
-	if want := "bucket_width=1d&ending_at=2026-11-06T00%3A00%3A00Z&group_by%5B%5D=workspace_id&limit=1&starting_at=2026-11-05T00%3A00%3A00Z"; queries[0] != want {
+	if want := "ending_at=2026-11-06T00%3A00%3A00Z&group_by%5B%5D=workspace_id&limit=1000&starting_at=2026-11-05T00%3A00%3A00Z&time_bucket_width=1d&workspace_ids%5B%5D=wrkspc_koinon"; queries[0] != want {
 		t.Fatalf("query %q, want %q", queries[0], want)
 	}
-	def, err := src.DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "default"}, costDay)
-	if err != nil || def != money.MustParse("0.07") {
-		t.Fatalf("default workspace: %s %v", def, err)
+}
+
+func TestAnthropicCostReadsOneAPIKeysDay(t *testing.T) {
+	client, seen := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_koinon","api_key_id":"apikey_koinon"},"cost":{"amount":"250.000000","currency":"USD"}},
+			{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_koinon","api_key_id":"apikey_other"},"cost":{"amount":"900.000000","currency":"USD"}},
+			{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_koinon","api_key_id":null},"cost":{"amount":"800.000000","currency":"USD"}}],
+			"has_more":false,"next_page":null,"data_refreshed_at":"2026-11-06T00:00:00Z"}`))
+	})
+	got, err := (providerusage.AnthropicCost{Client: client}).DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "apikey_koinon"}, costDay)
+	if err != nil || got != money.MustParse("2.5") {
+		t.Fatalf("cost %s %v", got, err)
+	}
+	if want := "api_key_ids%5B%5D=apikey_koinon&ending_at=2026-11-06T00%3A00%3A00Z&group_by%5B%5D=api_key_id&limit=1000&starting_at=2026-11-05T00%3A00%3A00Z&time_bucket_width=1d"; rawQueries(seen)[0] != want {
+		t.Fatalf("query %q, want %q", rawQueries(seen)[0], want)
 	}
 }
 
@@ -124,7 +148,7 @@ func TestOpenAICostReadsOneAPIKeysDay(t *testing.T) {
 func TestCostSourcesReadOnlyTheDaysBucket(t *testing.T) {
 	anthropic := func(body string) (money.USD, error) {
 		client, _ := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
-		return (providerusage.AnthropicCost{Client: client}).DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "default"}, costDay)
+		return (providerusage.AnthropicCost{Client: client}).DayCost(context.Background(), providerusage.CostProvider{AdminKey: adminKey, Scope: "wrkspc_a"}, costDay)
 	}
 	openai := func(body string) (money.USD, error) {
 		client, _ := fakeOpenRouter(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
@@ -136,11 +160,13 @@ func TestCostSourcesReadOnlyTheDaysBucket(t *testing.T) {
 		body string
 		want string // "" is an error
 	}{
-		{"anthropic: the day before only", anthropic, `{"data":[{"starting_at":"2026-11-04T00:00:00Z","results":[{"currency":"USD","amount":"500"}]}],"has_more":false}`, ""},
-		{"anthropic: no bucket", anthropic, `{"data":[],"has_more":false}`, ""},
-		{"anthropic: the day and the day after", anthropic, `{"data":[{"starting_at":"2026-11-05T00:00:00Z","results":[{"currency":"USD","amount":"100"}]},
-			{"starting_at":"2026-11-06T00:00:00Z","results":[{"currency":"USD","amount":"900"}]}],"has_more":false}`, "1"},
-		{"anthropic: the day, nothing used", anthropic, `{"data":[{"starting_at":"2026-11-05T00:00:00Z","results":[]}],"has_more":false}`, "0"},
+		{"anthropic: the day before only", anthropic, `{"data":[{"starting_at":"2026-11-04T00:00:00Z","group":{"workspace_id":"wrkspc_a"},"cost":{"amount":"500","currency":"USD"}}],"has_more":false,"data_refreshed_at":"2026-11-06T00:00:00Z"}`, "0"},
+		{"anthropic: the day and the day after", anthropic, `{"data":[{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_a"},"cost":{"amount":"100","currency":"USD"}},
+			{"starting_at":"2026-11-06T00:00:00Z","group":{"workspace_id":"wrkspc_a"},"cost":{"amount":"900","currency":"USD"}}],"has_more":false,"data_refreshed_at":"2026-11-07T00:00:00Z"}`, "1"},
+		{"anthropic: no row, data complete", anthropic, `{"data":[],"has_more":false,"data_refreshed_at":"2026-11-06T00:00:00Z"}`, "0"},
+		{"anthropic: no data yet", anthropic, `{"data":[],"has_more":false,"data_refreshed_at":null}`, ""},
+		{"anthropic: refreshed before the day ended", anthropic, `{"data":[{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_a"},"cost":{"amount":"100","currency":"USD"}}],"has_more":false,"data_refreshed_at":"2026-11-05T20:00:00Z"}`, ""},
+		{"anthropic: not USD", anthropic, `{"data":[{"starting_at":"2026-11-05T00:00:00Z","group":{"workspace_id":"wrkspc_a"},"cost":{"amount":"100","currency":"EUR"}}],"has_more":false,"data_refreshed_at":"2026-11-06T00:00:00Z"}`, ""},
 		{"openai: the day before only", openai, `{"data":[{"start_time":1793750400,"results":[{"amount":{"value":5,"currency":"usd"},"project_id":"proj_a"}]}],"has_more":false}`, ""},
 		{"openai: no bucket", openai, `{"data":[],"has_more":false}`, ""},
 		{"openai: the day, nothing used", openai, `{"data":[{"start_time":1793836800,"results":[]}],"has_more":false}`, "0"},
@@ -174,7 +200,8 @@ func TestCostSourcesServeOnlyTheProvidersOwnAPI(t *testing.T) {
 		}
 	}
 	a, o := providerusage.AnthropicCost{}, providerusage.OpenAICost{}
-	if !a.ValidScope("default") || !a.ValidScope("wrkspc_01abc") || a.ValidScope("proj_x") || a.ValidScope("") {
+	if a.ValidScope("default") || !a.ValidScope("wrkspc_01abc") || !a.ValidScope("apikey_01Rj2N8SVvo6BePZj99NhmiT") ||
+		a.ValidScope("proj_x") || a.ValidScope("apikey_") || a.ValidScope("apikey_../x") || a.ValidScope("") {
 		t.Error("anthropic scopes")
 	}
 	if !o.ValidScope("proj_abc123") || !o.ValidScope("key_abc123") || o.ValidScope("default") || o.ValidScope("proj_../x") ||
@@ -194,7 +221,7 @@ func TestCostSourcesRefuseRedirectsAndReportLimits(t *testing.T) {
 	})
 	follows := *client
 	follows.CheckRedirect = nil
-	p := providerusage.CostProvider{AdminKey: adminKey, Scope: "default"}
+	p := providerusage.CostProvider{AdminKey: adminKey, Scope: "wrkspc_a"}
 	if _, err := (providerusage.AnthropicCost{Client: &follows}).DayCost(context.Background(), p, costDay); err == nil {
 		t.Fatal("a redirect is an error")
 	}

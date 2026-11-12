@@ -416,8 +416,8 @@ var _ = Describe("Service", func() {
 			first := since()
 			Expect(first).NotTo(BeNil(), "the reconciliation reads the days after the key was stored")
 
-			By("the default workspace, alone")
-			def := "default"
+			By("one API key, alone")
+			def := "apikey_01Ab"
 			got, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{CostScope: &def})
 			Expect(err).NotTo(HaveOccurred())
 			Expect([]any{got.HasCostKey, got.CostScope}).To(Equal([]any{true, def}))

@@ -705,7 +705,7 @@ dearer provider. The maintainers decided (2026-10-31, on the issue) that the bil
    cost API key (an Anthropic Admin key or an OpenAI admin key), sealed like the inference key in
    `providers.cost_api_key` (its own AAD binding, rewrapped and forgotten with the other envelope
    columns; `cost_api_key_lost_at` marks a forgotten one), and a `cost_scope`: the Anthropic
-   workspace (`wrkspc_…`, or `default`) that holds the provider's inference key, or for OpenAI the
+   workspace (`wrkspc_…`; amendment 2026-11-12 adds one API key, `apikey_…`) that holds the provider's inference key, or for OpenAI the
    project (`proj_…`) that holds it or the key's own ID (`key_…`). Anthropic's cost report is by
    workspace, not by key, so there the workspace must hold this key alone for the figures to
    compare; OpenAI's costs API filters and groups by API key (`api_key_ids`, `group_by=api_key_id`),
@@ -732,9 +732,9 @@ The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the
 (platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve) and OpenAI's costs API
 (the `openai-openapi` description). Two points stay open:
 
-- Anthropic marks `/v1/organizations/cost_report` [Legacy]; its successor is
-  `/v1/organizations/analytics/cost`. The legacy endpoint remains supported; moving is a follow-up.
-- The cost report's generated example sends `Authorization: Bearer`; the Admin API page says an
+- Anthropic marked `/v1/organizations/cost_report` [Legacy]; the move to
+  `/v1/organizations/analytics/cost` is made (amendment 2026-11-12, issue #243).
+- The legacy cost report's generated example sent `Authorization: Bearer`; the Admin API page says an
   Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
   the Admin API page says; the first real-key run confirms it.
 
@@ -877,3 +877,30 @@ browser e2e slept 240 s. `Provider` now carries `serving_state` (`saved`, `servi
    later; the API maps unrecorded reasons to `unknown`).
 6. **The admin REST API** (`/providers`) carries the same `servingState`, `servingReason` and
    `servingDetail`.
+
+## Amendment (2026-11-12, issue #243): Anthropic cost reconciliation reads analytics/cost
+
+Decision 6 reads Anthropic's cost from `GET /v1/organizations/analytics/cost` (the Usage and Cost
+Analytics API, beta) in place of the legacy `/v1/organizations/cost_report`. The shapes were read from
+platform.claude.com on 2026-11-12 and recorded as a fixture
+(`internal/providerusage/testdata/anthropic-analytics-cost.json`); no paid call was made.
+
+- **Auth and headers.** The Admin key stays in `x-api-key` (Bearer is for OAuth tokens only). Every
+  request also sends `anthropic-version: 2026-10-21` and `anthropic-beta: analytics-usage-cost-2026-08-24`.
+- **Query.** `time_bucket_width=1d`, `starting_at`/`ending_at` of the one UTC day, `limit=1000`, filtered
+  by the scope (`workspace_ids[]` or `api_key_ids[]`) and grouped by the same dimension. Rows carry
+  `starting_at`, `group` and `cost`; pages follow `has_more`/`next_page`.
+- **Amounts.** `cost.amount` (after discounts, before credits; not `list_amount`) is a decimal string of
+  fractional cents with six places; the cents-to-USD conversion is unchanged and a currency other than
+  USD is an error.
+- **Per-key scope.** The new endpoint groups by `api_key_id`, so an Anthropic scope may be one API key
+  (`apikey_…`) as well as a workspace (`wrkspc_…`); a key scope compares exactly one key, as OpenAI's
+  `key_…` does. The workspace no longer has to hold the provider's key alone when a key scope is used.
+- **The `default` scope is gone.** The default workspace now has its own `wrkspc_` ID, and the endpoint
+  has no null workspace for it. A provider whose stored scope is `default` fails the scope check and
+  records `error` until its scope is set to the workspace's ID (no upgrade promise before v0.3).
+- **A missing day is still never $0.** The endpoint has no row for a combination with no cost and no
+  empty buckets, so "no bucket" cannot signal "not yet there". A day is complete only when
+  `data_refreshed_at` (identical on all pages) is at or after the day's end; a null or earlier value is
+  an `error`. Then no row for the scope is $0. The endpoint says data refreshes within 4 hours and
+  can take 24; the existing three-day re-read and the 1-hour retry of a failed read cover that.

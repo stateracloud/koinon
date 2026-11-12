@@ -172,8 +172,8 @@ type Provider struct {
 	// amendment 2026-11-06). anthropic and openai providers at their own API URL only.
 	HasCostKey bool `protobuf:"varint,16,opt,name=has_cost_key,json=hasCostKey,proto3" json:"has_cost_key,omitempty"`
 	// cost_scope is the part of the provider's account whose cost is this provider key's: the
-	// Anthropic workspace ID ("default" for the default workspace), or the OpenAI project ID or API
-	// key ID (key_..., the key's ID, never the key).
+	// Anthropic workspace ID (wrkspc_...) or API key ID (apikey_...), or the OpenAI project ID or API
+	// key ID (key_...); a key's ID, never the key.
 	CostScope string `protobuf:"bytes,17,opt,name=cost_scope,json=costScope,proto3" json:"cost_scope,omitempty"`
 	// cost_key_lost_at is set when the cost API key was lost with the key that encrypted it; it must
 	// be entered again. Unset otherwise.

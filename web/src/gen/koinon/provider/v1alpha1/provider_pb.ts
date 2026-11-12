@@ -131,8 +131,8 @@ export type Provider = Message<"koinon.provider.v1alpha1.Provider"> & {
 
   /**
    * cost_scope is the part of the provider's account whose cost is this provider key's: the
-   * Anthropic workspace ID ("default" for the default workspace), or the OpenAI project ID or API
-   * key ID (key_..., the key's ID, never the key).
+   * Anthropic workspace ID (wrkspc_...) or API key ID (apikey_...), or the OpenAI project ID or API
+   * key ID (key_...); a key's ID, never the key.
    *
    * @generated from field: string cost_scope = 17;
    */

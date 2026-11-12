@@ -65,7 +65,7 @@ func ValidateCostKey(typ, rawURL string, hasKey bool, scope string) error {
 	if !src.ValidScope(scope) {
 		switch typ {
 		case "anthropic":
-			return invalid("the cost scope of an anthropic provider is its workspace ID (wrkspc_...) or \"default\"")
+			return invalid("the cost scope of an anthropic provider is its workspace ID (wrkspc_...) or its API key's ID (apikey_...)")
 		default:
 			return invalid("the cost scope of an openai provider is its project ID (proj_...) or its API key's ID (key_...)")
 		}
