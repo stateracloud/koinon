@@ -248,25 +248,25 @@ while IFS= read -r line; do
 	[[ $trimmed == //* || $trimmed == \** || $trimmed == '#'* ]] && continue
 	code=${text%%[[:space:]]//*}
 	base=${file##*/}
-	bad=0
+	isbad=0
 	case $base in
 	*.go | *.sh | *.yml | *.yaml | *.mk | Makefile | package.json)
-		[[ $code =~ flake-attempts|[Ff]lakeAttempts|--rerun-fails ]] && bad=1
-		[[ $code =~ --retries[=\ ][[:space:]]*[1-9] ]] && [[ $base != *.go ]] && bad=1
+		[[ $code =~ flake-attempts|[Ff]lakeAttempts|--rerun-fails ]] && isbad=1
+		[[ $code =~ --retries[=\ ][[:space:]]*[1-9] ]] && [[ $base != *.go ]] && isbad=1
 		if [[ $base == *.yml || $base == *.yaml ]]; then
-			[[ $code =~ nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action ]] && bad=1
+			[[ $code =~ nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action ]] && isbad=1
 		fi
 		;;
 	esac
 	if [[ $file == web/* || $base == playwright*.config.* ]]; then
-		case $base in *.ts | *.tsx | *.mts | *.js | *.mjs) [[ $code =~ retries:[[:space:]]*[^0[:space:]] ]] && bad=1 ;; esac
+		case $base in *.ts | *.tsx | *.mts | *.js | *.mjs) [[ $code =~ retries:[[:space:]]*[^0[:space:]] ]] && isbad=1 ;; esac
 	fi
 	case $base in
 	vite.config.* | vitest.config.* | vitest.workspace.* | vite.*.config.* | vitest.*.config.*)
-		[[ $code =~ (^|[^a-zA-Z])retry:[[:space:]]*[^0[:space:]] ]] && bad=1
+		[[ $code =~ (^|[^a-zA-Z])retry:[[:space:]]*[^0[:space:]] ]] && isbad=1
 		;;
 	esac
-	[[ $bad == 1 ]] && hits+="$file:$ln: $text"$'\n'
+	[[ $isbad == 1 ]] && hits+="$file:$ln: $text"$'\n'
 done <<<"$raw"
 if [[ -n $hits ]]; then
 	verdict T1 fail "automatic test retry (rule T1; file:line): $(tr '\n' ' ' <<<"$hits" | cut -c1-400)"
