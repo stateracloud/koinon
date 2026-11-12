@@ -42,6 +42,7 @@
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=repo-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo # KOINON_REPO picks the repository for every gh call below
 
 msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }

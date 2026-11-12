@@ -82,6 +82,10 @@ done
 	chk "upstream remote before origin" "$(cd "$g" && koinon_repo)" acme/koinon
 	git -C "$g" config remote.origin.gh-resolved base
 	chk "gh repo set-default wins" "$(cd "$g" && koinon_repo)" someone/koinon
+	git -C "$g" config remote.origin.gh-resolved other/koinon
+	chk "gh repo set-default to another repository" "$(cd "$g" && koinon_repo)" other/koinon
+	chk "KOINON_REPO sets GH_REPO" "$(KOINON_REPO=someone/koinon GH_REPO=x/y; koinon_use_repo; echo "$GH_REPO")" someone/koinon
+	chk "no KOINON_REPO keeps GH_REPO" "$(GH_REPO=x/y; koinon_use_repo; echo "$GH_REPO")" x/y
 	if (KOINON_BOARD=x koinon_board 2>/dev/null); then bad "repo-lib: a bad KOINON_BOARD is refused"; else ok "repo-lib: a bad KOINON_BOARD is refused"; fi
 	exit "$fail"
 ) || fail=1

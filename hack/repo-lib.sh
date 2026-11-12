@@ -16,6 +16,8 @@
 #                     KOINON_BOARD is the number, or `none`; its default is 1 on the upstream repository and
 #                     none elsewhere (a fork has no board). KOINON_BOARD_OWNER defaults to koinon_repo's owner.
 #   koinon_is_upstream  exit 0 when koinon_repo is koinon_upstream.
+#   koinon_use_repo   exports GH_REPO=$KOINON_REPO when KOINON_REPO is set, so the script's plain `gh pr`
+#                     and `gh api` calls act on the same repository; without KOINON_REPO it changes nothing.
 #
 # Every function prints to stdout and needs only git and the shell; none of them calls GitHub.
 
@@ -49,16 +51,28 @@ koinon_repo() {
 	local r=${KOINON_REPO:-${GH_REPO:-}}
 	local remote
 	if [[ -z $r ]]; then
-		for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream github origin; do
-			[[ -n $remote ]] || continue
-			r=$(koinon_github_slug "$(git remote get-url "$remote" 2>/dev/null || true)")
-			[[ -z $r ]] || break
-		done
+		# `gh repo set-default` stores `base` on the chosen remote, or the chosen owner/name when that is
+		# not the remote's own repository.
+		local resolved
+		resolved=$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 != "" {print $2; exit}')
+		if [[ $resolved == */* ]]; then
+			r=$resolved
+		else
+			for remote in "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | awk '$2 == "base" {sub(/^remote\./, "", $1); sub(/\.gh-resolved$/, "", $1); print $1; exit}')" upstream github origin; do
+				[[ -n $remote ]] || continue
+				r=$(koinon_github_slug "$(git remote get-url "$remote" 2>/dev/null || true)")
+				[[ -z $r ]] || break
+			done
+		fi
 	fi
 	[[ -n $r ]] || r=$(koinon_upstream) || return 1
 	r=${r#https://github.com/}
 	r=${r#github.com/}
 	printf '%s\n' "$r"
+}
+
+koinon_use_repo() {
+	[[ -z ${KOINON_REPO:-} ]] || export GH_REPO=$KOINON_REPO
 }
 
 koinon_is_upstream() {

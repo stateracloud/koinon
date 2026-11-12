@@ -47,4 +47,4 @@ is for Go:
 
 A fork cloned alone acts on the fork with no settings: claims and pull requests go to the fork, and
 the board step is skipped. With an `upstream` remote the scripts act on the upstream, as `gh` does; set `KOINON_REPO=<you>/koinon`
-to act on the fork instead.
+to act on the fork instead: the scripts then pass it to every `gh` call as `GH_REPO`.

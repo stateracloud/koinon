@@ -11,7 +11,7 @@ here moved out of AGENTS.md in issue 842; they are unchanged.
 ## Commands
 
 - The maintainer scripts and the repository, board and worktree settings they read (`KOINON_REPO`,
-  `KOINON_BOARD`, `KOINON_WT_ROOT`; a fork needs none): [hack/README.md](../../hack/README.md).
+  `KOINON_BOARD`, `KOINON_WT_ROOT`; a fork cloned alone needs none): [hack/README.md](../../hack/README.md).
 - Claims: `hack/claim.sh help`; `hack/claim_test.sh` (offline).
 - Ship a branch with `hack/ship.sh` (sign-off, blob and gitleaks checks, merge of `origin/main`,
   push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`

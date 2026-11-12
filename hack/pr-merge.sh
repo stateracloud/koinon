@@ -58,6 +58,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 here=$(cd "$(dirname "$0")" && pwd)
