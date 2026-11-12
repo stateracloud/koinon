@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Area: product-scope
+- Tags: roadmap, github, approvals, install, agentgateway
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models, budgets,
   connection secrets; the Helm model values are dropped),
   [0058](0058-gateway-modes.md) (gateway modes), [0051](0051-session-home-generations.md), and on 2026-10-26 by

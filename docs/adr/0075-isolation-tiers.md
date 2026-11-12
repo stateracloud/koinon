@@ -2,6 +2,8 @@
 
 - Status: Accepted (pending qualification on Bottlerocket)
 - Date: 2026-10-28
+- Area: runtime-sandbox
+- Tags: isolation, openshell, sandbox, kubernetes
 - Amends: [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md) (decision 2)
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0006](0006-identity-layers.md), [0023](0023-observability-and-audit.md), [0025](0025-testing-strategy.md), [0042](0042-ask-tier-park-and-execute.md), [0076](0076-database-modes.md), [0077](0077-pinned-openshell-and-installer.md)
 - Pending verification: the Bottlerocket qualification run (decision 12)

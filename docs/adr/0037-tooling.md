@@ -2,6 +2,8 @@
 
 - Status: Accepted; the migration run (on startup or by a subcommand) amended by [0060](0060-migrations-as-a-job.md); the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: tooling, migrations, database, docs
 - Decision: [design.md#37](../design.md)
 
 ## Context

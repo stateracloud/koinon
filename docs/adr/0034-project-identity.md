@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-26 (below)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: api, release
 - Decision: [design.md#34](../design.md)
 
 ## Context

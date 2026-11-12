@@ -2,6 +2,8 @@
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release
 - Date: 2026-11-11
+- Area: runtime-sandbox
+- Tags: egress, dependencies, registry, openshell
 - Amends: [0015](0015-agent-environment-and-browser.md) (self-installs no longer go through a pull-through
   cache that Koinon runs), [0079](0079-dependency-cooldown.md) (an advisory minimum age for what agents
   install), [0080](0080-tool-set-matches-egress-and-escape-hosts.md) (the tool set follows four access

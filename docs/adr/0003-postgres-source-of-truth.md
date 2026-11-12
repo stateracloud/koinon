@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-26 (below)
 - Date: 2026-10-21
+- Area: install-operations
+- Tags: database, eventing, kubernetes
 - Decision: [design.md#3](../design.md)
 
 ## Context

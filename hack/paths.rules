@@ -80,8 +80,8 @@ job tidy ^go\.(mod|sum)$
 job tidy ^\.golangci\.ya?ml$
 
 # --- shell: lint-shell (#572) --------------------------------------------------------------------------
-# shellcheck over `git ls-files '*.sh'` (any directory) and actionlint over .github/ (workflows, the
-# composite actions it reads, its config). The tool versions and checksums are in hack/versions.env,
+# shellcheck over `git ls-files '*.sh'` (any directory), and actionlint and zizmor over .github/ (workflows,
+# the composite actions they read, their config). The tool versions and checksums are in hack/versions.env,
 # read through hack/versions-env.sh.
 job shell \.sh$
 job shell ^\.github/
@@ -103,7 +103,7 @@ except scripts \.md$
 except scripts ^docs/
 except scripts ^web/src/
 keep scripts ^(AGENTS|CONTRIBUTING)\.md$
-keep scripts ^docs/(adr/|dev/ci\.md$)
+keep scripts ^docs/(adr/|metadata/|dev/ci\.md$)
 keep scripts \.go$
 
 # --- web ------------------------------------------------------------------------------------------
@@ -170,9 +170,10 @@ gate go \.go$
 gate deps (^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$
 gate proto \.proto$
 gate migrate ^internal/db/migrations/
-gate adr ^(docs/adr/|hack/adr-)
+gate adr ^(docs/(adr|research|spikes|metadata)/|hack/(adr-|doc-meta-))
 gate shell \.sh$
 gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
+gate zizmor ^\.github/(workflows/[^/]*\.ya?ml|actions/.*\.ya?ml|zizmor\.ya?ml|dependabot\.ya?ml)$
 gate runnerlint ^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$
 gate pinned \.sh$
 gate pinned ^\.github/workflows/[^/]*\.yml$
@@ -188,7 +189,7 @@ gate audit ^hack/audit-batch-lint
 gate versions ^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/workflows/[^/]*\.yml$|hack/chart-check\.sh$|hack/[^/]*\.sh$|test/e2e/.*\.sh$)
 # --- script checks: what `preflight` runs of the `quick checks`, `lint-shell` and `scripts` jobs -------
 # Checks that take seconds (measured 2026-11-09 on a Mac: at most 15 s each). The gates adr,
-# migrate, mktemp, pinned, bash5, audit, versions, shell and actionlint run their own.
+# migrate, mktemp, pinned, bash5, audit, versions, shell, actionlint and zizmor run their own.
 script-check - hack/migrate-lint-test.sh
 script-check - hack/migrate-renumber-test.sh
 script-check - hack/commit-subject-check-test.sh
@@ -270,6 +271,8 @@ script-skip - hack/bash5-lint-test.sh
 script-skip - hack/bash5-lint.sh
 script-skip - hack/adr-lint-test.sh
 script-skip - hack/adr-lint.sh
+script-skip - hack/doc-meta-lint-test.sh
+script-skip - hack/doc-meta-lint.sh
 
 # --- the kind e2e (hack/needs-e2e.sh) ------------------------------------------------------------------
 # Needed for changes whose behaviour only a full install observes: startup, flags and environment,

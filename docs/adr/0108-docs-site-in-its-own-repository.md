@@ -2,6 +2,8 @@
 
 - Status: Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127)
 - Date: 2026-11-10
+- Area: engineering-process
+- Tags: docs, e2e
 - Supersedes in part: [0037](0037-tooling.md) (the docs-site decision: Starlight in `docs/site/`; Starlight itself stays)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decision 18, backup and restore), [0105](0105-merge-queue-route.md)
   (the merge queue's `quickstart` is the e2e proof)

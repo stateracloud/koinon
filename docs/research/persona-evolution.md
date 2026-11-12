@@ -1,5 +1,10 @@
 # Persona evolution for persistent agents: what the research says
 
+- Status: Complete
+- Date: 2026-10-22
+- Area: runtime-sandbox
+- Tags: memory, agent-home, security
+
 **Date:** 2026-10-22
 **Status:** research note, input to v0.2 ("persistent coworkers", issue #91)
 

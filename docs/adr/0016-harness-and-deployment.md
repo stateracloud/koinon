@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: harness, openshell, kubernetes
 - Decision: [design.md#16](../design.md)
 - Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 

@@ -1,5 +1,10 @@
 # Merge queue instead of the strict up-to-date rule
 
+- Status: Complete
+- Date: 2026-11-02
+- Area: engineering-process
+- Tags: ci, claims
+
 Research date: 2026-11-02, for #597. Research only: no workflow or ruleset changes. Sources:
 
 - the `main` ruleset, read through the API on 2026-11-02 (`gh api repos/stateracloud/koinon/rulesets/25718673`);

@@ -93,10 +93,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # merge bases, and the last green commit on main
+          persist-credentials: false
 
       # The rule asks `go list` which packages the binaries build. A pull request reads only its labels (#572).
       - if: github.event_name != 'pull_request'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
 
@@ -160,6 +162,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }} # empty: the event's own ref
+          persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
@@ -195,6 +198,7 @@ jobs:
 
       - name: Node and pnpm (web suite)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         if: inputs.suite == 'web'
         with:
           node-version: 24
@@ -415,7 +419,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
       - run: hack/e2e-bisect.sh
@@ -448,6 +454,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}
+          persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"

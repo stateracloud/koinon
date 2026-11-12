@@ -105,6 +105,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Web e2e (mocked) | `web-e2e` | yes | yes | as above | - | - | - | minutes | yes (`web`) |
 | Kind e2e quickstart | `quickstart`, gate `e2e result` | label `e2e` only | yes, when relevant | batched | yes | tag needs a green one | optional | about 15 min | yes, in the queue |
 | Flavors image build | `flavors` | - | yes | publish | - | - | - | up to 60 min job limit | yes in the queue |
+| Workflow security lint | `zizmor` (step of `lint-shell`, ADR 0111) | yes | yes | yes | - | - | - | seconds | yes |
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
 | CodeQL | `codeql` workflow | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
 | govulncheck | `govulncheck.yml` | with #579 part 2, if `go.mod` or `go.sum` changed | - | - | yes | - | - | minutes | decided in part 2 |
@@ -234,8 +235,9 @@ Check: `hack/runner-lint.sh` (the first two); review (`workflow_run`; no workflo
 Source: GitHub security hardening; Scorecard check Dangerous-Workflow. Scope: general pattern. In force: now.
 
 **W4. MUST** pass untrusted values (titles, branch names, bodies) to `run:` only through an `env:` variable.
-Check: `zizmor`, with #579 part 2. Until then review. Source: GitHub security hardening (script injection).
-Scope: general pattern. In force: with #579 part 2.
+Check: `zizmor` (audit `template-injection`, a step of `lint-shell`, config `.github/zizmor.yml`; the same lint
+also finds `persist-credentials` left on, wide `permissions:`, unpinned actions and a poisonable cache). Source:
+GitHub security hardening (script injection). Scope: general pattern. In force: now.
 
 **W5. MUST** keep every secret out of a job that runs pull request code from a fork. Today no workflow reads
 a secret besides `GITHUB_TOKEN`.
