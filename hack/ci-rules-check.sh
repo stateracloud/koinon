@@ -15,8 +15,10 @@
 #       `paths:` or `paths-ignore:` filter under `on:`. The job-level `if:` form is fine.
 #   Q6  a workflow that defines a required check never cancels runs of a queue or main build: a literal
 #       `cancel-in-progress: true` fails; an expression must name `pull_request`.
-#   T1  no automatic test retry: no ginkgo flake attempts, no retry action. Playwright `retries` above 0
-#       is only reported until part 2 of #579 removes it.
+#   T1  no automatic test retry: no ginkgo flake attempts above 1, no retry action, no gotestsum `--rerun-fails`,
+#       no Playwright `retries` above 0 (in playwright*.config.* and in test files), no Playwright `--retries N` and no
+#       Vitest `--retry N` on a command line, no Vitest `retry` above 0 (config or test file). A text scan: known limits
+#       are listed under rule T1 in docs/dev/ci-rules.md.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
 #   T7  every job of ci.yml sets `timeout-minutes`. hack/runner-lint.sh is the check and this line says so;
 #       while it has no timeout rule, this script counts the jobs and reports.
@@ -218,34 +220,110 @@ else
 fi
 
 # --- T1 -------------------------------------------------------------------------------------------
-# Scan the files that run tests; docs are excluded (they explain the rule), and so are this script and its test.
-scan() { # PATTERN [grep options...]: matching lines of the scanned files
-	local pat=$1
-	shift
-	grep -r -I -n -E "$@" --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=docs --exclude-dir=testdata \
-		--exclude=ci-rules-check.sh --exclude=ci-rules-check-test.sh "$pat" "$root" 2>/dev/null || true
-}
-hits=$(scan 'flake-attempts|[Ff]lakeAttempts' --include='*.go' --include='*.sh' --include='*.yml' --include='*.yaml' --include='Makefile' --include='*.mk')
-hits+=$'\n'$(scan 'nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action' --include='*.yml' --include='*.yaml')
-if [[ -n ${hits//[[:space:]]/} ]]; then
-	verdict T1 fail "automatic test retry: $(tr '\n' ' ' <<<"$hits" | cut -c1-300)"
+# One file list (tracked and untracked files that git does not ignore, else find), one grep over it, then a
+# classification of the matched lines only. Docs are excluded (they explain the rule), and so are this script and its test.
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ $(git -C "$root" rev-parse --show-toplevel) == "$(cd "$root" && pwd -P)" ]]; then
+	mapfile -t all_files < <(git -C "$root" ls-files -z --cached --others --exclude-standard | tr '\0' '\n' | grep -vE '(^|/)(node_modules|docs|testdata)/' || true)
 else
-	pw=()
-	for f in "$root"/web/playwright*.ts; do
-		[[ -f $f ]] || continue
-		while IFS= read -r line; do
-			val=${line#*retries:}
-			val=${val%%,*}
-			val=${val#"${val%%[![:space:]]*}"}
-			[[ $val == 0 ]] || pw+=("$(basename "$f") retries: $val")
-		done < <(grep -E '^[[:space:]]*retries:' "$f" || true)
-	done
-	if [[ ${#pw[@]} -eq 0 ]]; then
-		verdict T1 pass "no automatic test retry"
-	else
-		verdict T1 report "Playwright retry still on, removed by part 2 of #579: ${pw[*]}"
-	fi
+	mapfile -t all_files < <(cd "$root" && find . \( -name .git -o -name node_modules -o -name docs -o -name testdata \) -prune -o -type f -print | sed 's|^\./||')
 fi
+cand=()
+for f in "${all_files[@]}"; do
+	base=${f##*/}
+	case $base in
+	ci-rules-check.sh | ci-rules-check-test.sh) ;;
+	*.go | *.sh | *.yml | *.yaml | *.mk | Makefile | Tiltfile | Dockerfile* | package.json | *.ts | *.tsx | *.mts | *.cts | *.js | *.mjs | *.cjs) cand+=("$f") ;;
+	*.*) ;;
+	*) # no extension: a script when the first line is a shell shebang
+		first=''
+		[[ -f $root/$f ]] && IFS= read -r first <"$root/$f" 2>/dev/null || true
+		[[ $first =~ ^#!.*(sh|bash) ]] && cand+=("$f")
+		;;
+	esac
+done
+raw=''
+if [[ ${#cand[@]} -gt 0 ]]; then
+	raw=$(cd "$root" && command grep -n -I -H -F -e flake-attempts -e FlakeAttempts -e rerun-fails -e retry-action -e wretry \
+		-e /retry -e retries -e retry -e flaky-waiver: -- "${cand[@]}" 2>/dev/null || true)
+fi
+# Patterns (ERE). Quotes around a key and a space before the colon are allowed.
+re_flake_cli='(^|[^-[:alnum:]])-{1,2}(ginkgo\.)?flake-attempts[=[:space:]]+([2-9]|[1-9][0-9]|\$)'
+re_flake_off='FlakeAttempts\([[:space:]]*[01][[:space:]]*\)'
+re_flake_set='FlakeAttempts[[:space:]]*[:=][[:space:]]*([2-9]|[1-9][0-9])'
+re_action='nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action'
+re_retries_cli='--retries[=[:space:]]+([1-9]|\$\{\{)'
+re_retry_cli='--retry[=[:space:]]+([1-9]|\$\{\{)'
+re_retries_key="retries[\"']?[[:space:]]*:[[:space:]]*[^0[:space:]]"
+re_retry_key="(^|[^a-zA-Z])retry[\"']?[[:space:]]*:[[:space:]]*[^0[:space:]]"
+re_retry_off="retry[\"']?[[:space:]]*:[[:space:]]*(false|0)([^a-zA-Z0-9]|$)"
+re_retry_num="(^|[^a-zA-Z])retry[\"']?[[:space:]]*:[[:space:]]*[1-9]"
+hits=''
+while IFS= read -r line; do
+	[[ -n $line ]] || continue
+	file=${line%%:*}
+	rest=${line#*:}
+	ln=${rest%%:*}
+	text=${rest#*:}
+	base=${file##*/}
+	trimmed=${text#"${text%%[![:space:]]*}"}
+	# kind: go, js (ts and js), json (package.json), shell (scripts, workflows, Makefile, Tiltfile, Dockerfile)
+	case $base in
+	*.go) kind=go ;;
+	*.ts | *.tsx | *.mts | *.cts | *.js | *.mjs | *.cjs) kind=js ;;
+	package.json) kind=json ;;
+	*) kind=shell ;;
+	esac
+	case $kind in
+	go) [[ $trimmed == //* ]] && continue; code=${text%%[[:space:]]//*} ;;
+	js) [[ $trimmed == //* || $trimmed == \** || $trimmed == /\** ]] && continue; code=${text%%[[:space:]]//*} ;;
+	shell)
+		[[ $trimmed == '#'* ]] && continue
+		# cut a trailing ` #` comment, unless the cut-off part holds a quote (the `#` may be inside a string)
+		code=${text%%[[:space:]]\#*}
+		cut=${text#"$code"}
+		[[ $cut == *[\"\']* ]] && code=$text
+		;;
+	json) code=$text ;;
+	esac
+	isbad=0
+	if [[ $kind != js ]]; then
+		[[ $code =~ $re_flake_cli ]] && isbad=1
+	fi
+	case $kind in
+	go)
+		if [[ $code == *FlakeAttempts\(* ]] && ! [[ $code =~ $re_flake_off ]]; then isbad=1; fi
+		[[ $code =~ $re_flake_set ]] && isbad=1
+		;;
+	shell | json)
+		[[ $code == *--rerun-fails* ]] && isbad=1
+		[[ $code == *playwright* && $code =~ $re_retries_cli ]] && isbad=1
+		[[ $code == *vitest* && $code =~ $re_retry_cli ]] && isbad=1
+		[[ $kind == shell && $code =~ $re_action ]] && isbad=1
+		;;
+	js)
+		case $base in
+		playwright*.config.*) [[ $code =~ $re_retries_key ]] && isbad=1 ;;
+		vite.config.* | vitest.config.* | vitest.workspace.* | vite.*.config.* | vitest.*.config.*)
+			[[ $code =~ $re_retry_key && ! $code =~ $re_retry_off ]] && isbad=1
+			;;
+		esac
+		if [[ $file == */e2e/* || $file == e2e/* || $base == *.spec.* || $base == *.test.* ]]; then
+			[[ $code =~ $re_retries_key ]] && isbad=1
+			[[ $code =~ $re_retry_num ]] && isbad=1
+		fi
+		;;
+	esac
+	[[ $isbad == 1 ]] && hits+="$file:$ln: $text"$'\n'
+done <<<"$raw"
+if [[ -n $hits ]]; then
+	verdict T1 fail "automatic test retry (rule T1; file:line): $(tr '\n' ' ' <<<"$hits" | cut -c1-400)"
+else
+	verdict T1 pass "no automatic test retry"
+fi
+
+scan() { # PATTERN: lines of the T1 grep output for the files T2 reads, as "root/file:line:text"
+	grep -E -- "$1" <<<"$raw" | grep -E '^[^:]+\.(go|ts|tsx|sh|yml|yaml):' | sed "s|^|$root/|" || true
+}
 
 # --- T2 -------------------------------------------------------------------------------------------
 bad=()
@@ -260,7 +338,7 @@ while IFS= read -r line; do
 	else
 		bad+=("$where: malformed waiver (want: flaky-waiver: #<issue> until <YYYY-MM-DD>)")
 	fi
-done < <(scan 'flaky-waiver:' --include='*.go' --include='*.ts' --include='*.tsx' --include='*.sh' --include='*.yml' --include='*.yaml')
+done < <(scan 'flaky-waiver:')
 if [[ ${#bad[@]} -eq 0 ]]; then
 	verdict T2 pass "$n flaky-test waivers, none past its date"
 else
