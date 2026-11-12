@@ -99,7 +99,7 @@ func newKeysCommand() *cobra.Command {
 		return c
 	}
 	withAllowRetired := func(c *cobra.Command) *cobra.Command {
-		c.Flags().BoolVar(&o.allowRetired, "allow-retired", false, "add KEKs that keys retire removed (an old backup holds them), inactive; they never become active")
+		c.Flags().BoolVar(&o.allowRetired, "allow-retired", false, "add KEKs that keys retire removed (an old backup holds them), inactive; they never become active. Retired means a keys.retire event is in the audit chain: a retire whose event was lost, or a database restored from before the retire, is not seen")
 		return c
 	}
 	// The per-row loop of rewrap and reencrypt is not atomic, so it may also record its start (ADR 0100

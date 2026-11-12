@@ -354,6 +354,8 @@ var _ = Describe("key events in the install audit chain", func() {
 			got := newKeySet(ctx)
 			Expect(got.Keys).To(HaveKey(first))
 			Expect(got.Active).To(Equal("kek-20261023-bbbb"), "a retired KEK never becomes active")
+			Expect(tool.Activate(ctx, first)).To(MatchError(ContainSubstring("retired")))
+			Expect(newKeySet(ctx).Active).To(Equal("kek-20261023-bbbb"))
 		})
 
 		It("does not write an event for a command that refused", func(ctx SpecContext) {

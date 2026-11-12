@@ -762,7 +762,10 @@ Maintainer decision (procoduck, 2026-11-11).
   the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
   retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
   removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
-  KEK never becomes the active one, with or without the flag. Without `--database-url` there is no chain
+  KEK never becomes the active one, with or without the flag (`keys activate` refuses it too). The rule
+  trusts the explicit `keys.retire` event, which has two costs: a retire whose audit event was lost
+  (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event
+  either (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` there is no chain
   to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
   change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
   a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,

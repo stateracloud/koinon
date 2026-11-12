@@ -613,7 +613,7 @@ const ActionImport = "keys.import"
 // operator removed that KEK on purpose (a compromised one, say), and an old backup must not bring it back.
 func RetiredID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	var found bool
-	err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM install_audit_events WHERE action = $1 AND target_id = $2)`, ActionRetire, id).Scan(&found)
+	err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM install_audit_events WHERE action = $1 AND target_kind = 'kek' AND target_id = $2)`, ActionRetire, id).Scan(&found)
 	return found, err
 }
 
@@ -683,11 +683,12 @@ func (t *Tool) Import(ctx context.Context) error {
 			clear(v)
 		}
 	}()
+	// Export never writes StringData; accepting it would leave key text in Go strings that cannot be cleared.
+	if len(sec.StringData) > 0 {
+		return errors.New("the manifest has stringData; keys export writes data only, so nothing was imported")
+	}
 	for k, v := range sec.Data {
 		data[k] = v
-	}
-	for k, v := range sec.StringData {
-		data[k] = []byte(v)
 	}
 	in, err := openKeySet(ctx, t.Wrappers, data)
 	defer clearKeySet(in)
@@ -778,7 +779,7 @@ func (t *Tool) Import(ctx context.Context) error {
 			_, _ = fmt.Fprintf(t.Out, "The active KEK changes: %s -> %s\n", from, ks.Active)
 		}
 	} else {
-		_, _ = fmt.Fprintf(t.Out, "The manifest's active KEK %s was retired, so the active KEK stays %s.\n", in.Active, ks.Active)
+		_, _ = fmt.Fprintf(t.Out, "The manifest's active KEK %s was retired, so the active KEK stays %s.\nValues sealed under the retired KEK still need it until you run keys rewrap; run keys verify.\n", in.Active, ks.Active)
 	}
 	if err := t.Store.Save(ctx, ks); err != nil {
 		return err
@@ -844,6 +845,13 @@ func (t *Tool) Activate(ctx context.Context, id string) error {
 	refuse := func(ks KeySet, id string) error {
 		if _, ok := ks.Keys[id]; !ok {
 			return fmt.Errorf("KEK %s is not in the key set", id)
+		}
+		retired, _, err := t.retiredIn(ctx, []string{id})
+		if err != nil {
+			return err
+		}
+		if len(retired) > 0 {
+			return fmt.Errorf("KEK %s was retired (keys retire); a retired KEK never becomes active", id)
 		}
 		// An install that opted in to a KMS never activates a local KEK (procoduck, 2026-11-03). To roll back,
 		// set the configured primary to local first (the secret keys page of the docs site, project.SecretKeysDocURL), then activate.
@@ -937,7 +945,13 @@ func (t *Tool) pickInactive(ctx context.Context, ks KeySet) (string, error) {
 	var choices []cli.Choice
 	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
 		if id != ks.Active {
-			choices = append(choices, cli.Choice{Label: t.describeKEK(id, usage), Value: id})
+			ch := cli.Choice{Label: t.describeKEK(id, usage), Value: id}
+			if retired, _, err := t.retiredIn(ctx, []string{id}); err != nil {
+				return "", err
+			} else if len(retired) > 0 {
+				ch.Disabled = "retired"
+			}
+			choices = append(choices, ch)
 		}
 	}
 	if len(choices) == 0 {

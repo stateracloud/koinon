@@ -860,6 +860,8 @@ var _ = Describe("koinon-api keys", func() {
 		It("says a KMS key is unreachable, and warns about a local active KEK only when a KMS is configured", func(ctx SpecContext) {
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
+			// The shared audit chain holds an earlier spec's keys.retire for this ID; this spec is about the KMS.
+			tool.Retired = func(context.Context, string) (bool, error) { return false, nil }
 
 			kms := &secretstoretest.FakeKMS{}
 			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
