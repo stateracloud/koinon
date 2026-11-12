@@ -27,9 +27,9 @@ import (
 // agentgateway's file loader runs shellexpand's environment expansion over the whole config file
 // before it parses it (#668). gateway.State.Validate refuses '$' in the org-supplied strings, so no
 // State reaches the loader with one; this spec puts '$' in each of them past Validate (Render a
-// State with a placeholder in each field, put the '$' text in place of the placeholder) and runs
-// the file through the escape Render applies, then checks against the pinned image that each
-// upstream receives the text exactly as written. Each value carries the forms the expansion reads:
+// State with a placeholder in each field, put the '$' text, escaped as Render escapes, in place of
+// the placeholder), then checks against the pinned image that each upstream receives the text
+// exactly as written. Each value carries the forms the expansion reads:
 // $NAME of a set and of an unset variable, ${NAME}, ${NAME:-default}, a positional $1, an escape
 // $$, and a trailing '$'. The prefix is a quoted YAML string and carries " #", which would start a
 // comment outside the quotes.
@@ -106,14 +106,16 @@ var _ = Describe("agentgateway v1.7.0 and '$' in org strings (standalone only, #
 
 		file, rev, err := standalone.Render(state, r.driver.Options)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(bytes.Contains(file, []byte("$"))).To(BeFalse(), "the rendered file has no '$' of its own, so only the substituted values are escaped")
+		// Each placeholder is replaced by its raw value as Render would escape it.
+		escaped := func(raw string) []byte { return standalone.EscapeLoader([]byte(raw)) }
 		for ph, raw := range map[string]string{phLLM: rawLLM, phMCP: rawMCP, phHeader: rawHeader, phPrefix: rawPrefix} {
 			Expect(bytes.Count(file, []byte(ph))).To(BeNumerically(">=", 1), "the placeholder %q is in the rendered file", ph)
-			file = bytes.ReplaceAll(file, []byte(ph), []byte(raw))
+			file = bytes.ReplaceAll(file, []byte(ph), escaped(raw))
 		}
 		// The header name also appears lower-cased, where the client's own copy is dropped.
-		file = bytes.ReplaceAll(file, []byte(strings.ToLower(phHeader)), []byte(strings.ToLower(rawHeader)))
+		file = bytes.ReplaceAll(file, []byte(strings.ToLower(phHeader)), escaped(strings.ToLower(rawHeader)))
 		Expect(bytes.Contains(bytes.ToLower(file), []byte("zzdollar"))).To(BeFalse(), "every placeholder was replaced")
-		file = standalone.EscapeLoader(file)
 		AddReportEntry("delivered config", string(file))
 
 		w := standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond, Reload: containerReloadLog{logs: r.Logs}}
