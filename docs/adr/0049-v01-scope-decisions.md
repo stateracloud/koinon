@@ -359,5 +359,10 @@ from templates costs nothing until work arrives.
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
   and the home volume at activation without starting the pod is not built: tracked in #101. A per-org rate limit on
   sandbox starts is tracked in #27.
-- **Not built yet:** the API and UI for the setting, with the org-admin authz check (the data and
-  the reconciler side are in): tracked in #100.
+- **API and UI (#100).** `AgentService.SetAgentKeepWarm` sets or withdraws the request; admins and
+  owners only, audited (`agent.keep_warm.set`), refused on an archived agent. `Agent.keep_warm` is the
+  request and `Agent.keep_warm_granted` the outcome. Only the reconciler knows the cap, so each pass
+  records its decision in `agents.keep_warm_granted` (migration 00077) and the API and the agent page
+  read it; a new request reads "not granted" until the next pass. The agent page has a "Keep warm"
+  control that says whether the cap granted it. The admin REST API (`/admin/v1`) has no keep-warm
+  endpoint yet.

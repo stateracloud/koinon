@@ -51,6 +51,10 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		UnhealthyReason:  a.UnhealthyReason.String,
 		ModelSetting:     a.Model.String,
 		SandboxResources: sandboxResourcesProto(agentresources.OverrideOf(a)),
+		KeepWarm:         a.KeepWarm,
+		// The reconciler records its decision; it grants only active agents, so a stale true on an
+		// archived or draft agent is not shown.
+		KeepWarmGranted: a.KeepWarm && a.KeepWarmGranted && a.Status == store.AgentStatusActive,
 	}
 	if archived != nil {
 		out.SandboxArchivedAt = tsProto(archived[a.ID])
@@ -703,4 +707,46 @@ func (s *Server) SetAgentSandboxResources(ctx context.Context, req *agentv1alpha
 		return nil, s.agentResourcesError(err)
 	}
 	return &agentv1alpha1.SetAgentSandboxResourcesResponse{State: sandboxResourcesStateProto(v)}, nil
+}
+
+// SetAgentKeepWarm implements AgentService. Admins and owners: keeping a sandbox up costs the
+// org's resources, and the operator's cap is shared by the org's admins (ADR 0049 amendment
+// 2026-11-01).
+func (s *Server) SetAgentKeepWarm(ctx context.Context, req *agentv1alpha1.SetAgentKeepWarmRequest) (*agentv1alpha1.SetAgentKeepWarmResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	var out *agentv1alpha1.Agent
+	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
+		cur, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		if cur.Status == store.AgentStatusArchived {
+			return connect.NewError(connect.CodeFailedPrecondition, "the agent is archived")
+		}
+		a := cur
+		if cur.KeepWarm != req.GetKeepWarm() {
+			a, err = q.SetAgentKeepWarm(ctx, store.SetAgentKeepWarmParams{OrgID: c.org, ID: id, KeepWarm: req.GetKeepWarm()})
+			if err != nil {
+				return err
+			}
+			b.Org(audit.Event{
+				Org: c.org, Actor: c.auditActor(), Action: "agent.keep_warm.set", TargetKind: "agent", TargetID: id.String(),
+				Before: map[string]any{"keepWarm": cur.KeepWarm},
+				After:  map[string]any{"keepWarm": a.KeepWarm},
+			})
+		}
+		out, err = s.agentView(ctx, q, a, nil, nil)
+		return err
+	})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	return &agentv1alpha1.SetAgentKeepWarmResponse{Agent: out}, nil
 }
