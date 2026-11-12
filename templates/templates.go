@@ -29,8 +29,7 @@ import (
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -52,23 +51,22 @@ var embedded embed.FS
 //go:embed schema/template.schema.json
 var schemaJSON []byte
 
-// Flavor is a harness an agent runs on (ADR 0035).
-type Flavor string
+// HarnessName names a harness an agent runs on (ADR 0112).
+type HarnessName string
 
-// Flavors shipped in v0.1.
+// The built-in harnesses.
 const (
-	FlavorOpenCode Flavor = "opencode"
+	HarnessOpenCode HarnessName = "opencode"
 )
 
-// AllFlavors lists every flavor. The schema's $defs.flavor enum and the
-// agent_flavor type in the migrations hold the same list; a test keeps the
-// three in step.
-var AllFlavors = allFlavors()
+// AllHarnesses lists every built-in harness. The schema's $defs.flavor enum holds the same list; a
+// test keeps the two in step.
+var AllHarnesses = allHarnesses()
 
-func allFlavors() []Flavor {
-	var out []Flavor
-	for _, n := range flavor.Names() {
-		out = append(out, Flavor(n))
+func allHarnesses() []HarnessName {
+	var out []HarnessName
+	for _, n := range harness.Names() {
+		out = append(out, HarnessName(n))
 	}
 	return out
 }
@@ -107,8 +105,8 @@ type Metadata struct {
 
 // Spec is what an agent draft starts from.
 type Spec struct {
-	Flavors Flavors `json:"flavors"`
-	Harness Harness `json:"harness,omitzero"`
+	Harnesses Harnesses `json:"flavors"`
+	Harness   Harness   `json:"harness,omitzero"`
 	// Ephemeral makes agents created from the template ephemeral: each task gets a fresh sandbox
 	// without a persistent home, deleted when the task ends (ADR 0065 decision 13c). Off by default.
 	Ephemeral    bool   `json:"ephemeral,omitempty"`
@@ -204,7 +202,7 @@ func (q QuestionTimers) Validate() error {
 	return nil
 }
 
-// Harness holds harness settings beyond the flavor choice. The zero value turns every
+// Harness holds harness settings beyond the harness choice. The zero value turns every
 // setting off.
 type Harness struct {
 	// PluginInstalls lets an OpenCode agent install plugins: its sandbox may read the npm
@@ -213,10 +211,10 @@ type Harness struct {
 	PluginInstalls bool `json:"pluginInstalls,omitempty"`
 }
 
-// Flavors lists the allowed harnesses and the default choice.
-type Flavors struct {
-	Allowed []Flavor `json:"allowed"`
-	Default Flavor   `json:"default"`
+// Harnesses lists the allowed harnesses and the default choice.
+type Harnesses struct {
+	Allowed []HarnessName `json:"allowed"`
+	Default HarnessName   `json:"default"`
 }
 
 // Model is a logical model name, resolved against the install's model list
@@ -412,19 +410,19 @@ func (t *Template) check() error {
 	if t.APIVersion != APIVersion || t.Kind != Kind {
 		return fmt.Errorf("apiVersion/kind must be %s/%s", APIVersion, Kind)
 	}
-	if !slices.Contains(t.Spec.Flavors.Allowed, t.Spec.Flavors.Default) {
-		return fmt.Errorf("default flavor %q is not in the allowed flavors", t.Spec.Flavors.Default)
+	if !slices.Contains(t.Spec.Harnesses.Allowed, t.Spec.Harnesses.Default) {
+		return fmt.Errorf("default harness %q is not in the allowed harnesses", t.Spec.Harnesses.Default)
 	}
-	if t.Spec.Harness.PluginInstalls && !slices.ContainsFunc(t.Spec.Flavors.Allowed, func(f Flavor) bool {
-		return flavor.SupportsPluginInstalls(store.AgentFlavor(f))
+	if t.Spec.Harness.PluginInstalls && !slices.ContainsFunc(t.Spec.Harnesses.Allowed, func(f HarnessName) bool {
+		return harness.SupportsPluginInstalls(string(f))
 	}) {
 		var names []string
-		for _, d := range flavor.All() {
+		for _, d := range harness.All() {
 			if d.PluginInstalls {
-				names = append(names, string(d.Name))
+				names = append(names, d.Name)
 			}
 		}
-		return fmt.Errorf("harness.pluginInstalls applies to the %s flavor only, which is not allowed", strings.Join(names, "/"))
+		return fmt.Errorf("harness.pluginInstalls applies to the %s harness only, which is not allowed", strings.Join(names, "/"))
 	}
 	if d := t.Spec.Limits.Run.MaxDuration.Duration; d > MaxRunDuration {
 		return fmt.Errorf("limits.run.maxDuration %s exceeds %s", d, MaxRunDuration)

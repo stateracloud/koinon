@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -105,7 +106,7 @@ var _ = Describe("the ask-tier proxy", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		org, user, slug = pgtest.NewOrg(ctx, pool)
-		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "helper", Harness: harness.OpenCode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: a.ID, Config: []byte(`{"instructions":"x"}`), CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())

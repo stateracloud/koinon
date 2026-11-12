@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
@@ -61,7 +62,7 @@ func newGitHubEnv(ctx context.Context) *ghEnv {
 	DeferCleanup(g.gh.Server.Close)
 	ring := secretstoretest.Keyring()
 	g.ring = ring
-	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+	g.env = newEnvWith(ctx, harness.OpenCode, func(e *env) string {
 		connID := uuid.New()
 		id := pgtype.UUID{Bytes: connID, Valid: true}
 		env, err := connections.SealFields(ring, e.org, id, map[string][]byte{connections.GitHubPrivateKeyField: g.gh.PEM})

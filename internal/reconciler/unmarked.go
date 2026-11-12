@@ -33,16 +33,16 @@ const (
 	// carries no mark yet): do not delete it then, check with that install first (it lists the
 	// object under one of its own reasons).
 	ReasonOrgNotInDB = "org-not-in-db"
-	// ReasonDraftAgent: the object belongs to a draft agent, or is the flavor profile that only draft
+	// ReasonDraftAgent: the object belongs to a draft agent, or is the harness profile that only draft
 	// (and archived) agents of the org use, and the reconciler claims it on its next pass: the
-	// provider of a draft agent with no sandbox (reconcileDraft), the flavor profile (the org pass,
-	// claimFlavorProfiles). If it is still listed after a pass, the agent's key Secret no longer
+	// provider of a draft agent with no sandbox (reconcileDraft), the harness profile (the org pass,
+	// claimHarnessProfiles). If it is still listed after a pass, the agent's key Secret no longer
 	// matches its recorded key (the database cannot show that), so nothing is touched: activate or
 	// archive the agent. A draft agent's existing sandbox, the providers it attaches and its GitHub profile are
 	// [ReasonWaitsForAgent] instead.
 	ReasonDraftAgent = "draft-agent"
-	// ReasonArchivedAgent: the object belongs to an archived agent, or is the flavor profile that only
-	// archived agents of the org use. The org pass claims such a profile (claimFlavorProfiles), whenever
+	// ReasonArchivedAgent: the object belongs to an archived agent, or is the harness profile that only
+	// archived agents of the org use. The org pass claims such a profile (claimHarnessProfiles), whenever
 	// the archived agent was cleaned up. An archived agent's retained sandbox is
 	// [ReasonWaitsForAgent] instead.
 	ReasonArchivedAgent = "archived-agent"
@@ -59,7 +59,7 @@ const (
 	ReasonNotReconcilerMade = "not-reconciler-made"
 	// ReasonPendingClaim: the object belongs to an active agent; its next reconcile claims it
 	// (a sandbox is recreated, a provider recreated once no sandbox attaches it, a profile imported).
-	// The profile of a configured flavor no agent of the org has is pending too: the org pass marks it.
+	// The profile of a configured harness no agent of the org has is pending too: the org pass marks it.
 	ReasonPendingClaim = "pending-claim"
 )
 
@@ -82,11 +82,11 @@ type unmarkedLister interface {
 }
 
 // ListUnmarked lists the unmarked objects with their reasons. The gateway side is the backend's
-// (read-only), the database side the orgs and agents of q. flavors are the configured flavors (the
-// reconciler's [Config.Flavors]): the org pass claims the profile of a rendered one even when the org
+// (read-only), the database side the orgs and agents of q. harnesses are the configured harnesses (the
+// reconciler's [Config.Harnesses]): the org pass claims the profile of a rendered one even when the org
 // has no agent of it. It fails when the backend cannot list (no install mark, a failed list), so it
 // never answers with a partial list.
-func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backend, flavors map[store.AgentFlavor]Flavor) ([]UnmarkedObject, error) {
+func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backend, harnesses map[string]Harness) ([]UnmarkedObject, error) {
 	l, ok := backend.(unmarkedLister)
 	if !ok {
 		return nil, errors.New("reconciler: the backend cannot list unmarked objects")
@@ -103,8 +103,8 @@ func ListUnmarked(ctx context.Context, q *store.Queries, backend execution.Backe
 	if err != nil {
 		return nil, fmt.Errorf("reconciler: list agents: %w", err)
 	}
-	rendered := map[store.AgentFlavor]bool{}
-	for name, f := range flavors {
+	rendered := map[string]bool{}
+	for name, f := range harnesses {
 		rendered[name] = f.rendered()
 	}
 	return classifyUnmarked(objs, orgs, agents, rendered), nil
@@ -119,21 +119,21 @@ type orgView struct {
 	sandboxState map[string]store.NullSandboxState
 	// agents maps an agent ID to its status, for the task sandboxes, which carry the agent label.
 	agents map[string]store.AgentStatus
-	// flavors maps a flavor to the statuses of the org's agents of that flavor.
-	flavors map[store.AgentFlavor]map[store.AgentStatus]bool
+	// harnesses maps a harness to the statuses of the org's agents of that harness.
+	harnesses map[string]map[store.AgentStatus]bool
 }
 
 // classifyUnmarked gives every unmarked object its reason. The order of the checks is the order of
 // the reasons' certainty: a workspace nobody owns is an orphan whatever is in it; inside an org's
 // workspace an object the reconciler did not make comes next; the rest follows the agent.
-// rendered names the flavors the reconciler renders a profile for.
-func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorkspacesForUnmarkedRow, agents []store.ListAgentsForUnmarkedRow, rendered map[store.AgentFlavor]bool) []UnmarkedObject {
+// rendered names the harnesses the reconciler renders a profile for.
+func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorkspacesForUnmarkedRow, agents []store.ListAgentsForUnmarkedRow, rendered map[string]bool) []UnmarkedObject {
 	byWorkspace := map[string]*orgView{} // workspace -> org
 	byOrg := map[pgtype.UUID]*orgView{}
 	for _, o := range orgs {
 		v := &orgView{
 			names: map[string]store.AgentStatus{}, sandboxState: map[string]store.NullSandboxState{}, agents: map[string]store.AgentStatus{},
-			flavors: map[store.AgentFlavor]map[store.AgentStatus]bool{},
+			harnesses: map[string]map[store.AgentStatus]bool{},
 		}
 		byOrg[o.OrgID] = v
 		// The recorded workspace, and the name a first reconcile would give it.
@@ -167,10 +167,10 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 			}
 		}
 		v.agents[execution.UUIDString(a.ID.Bytes)] = a.Status
-		if v.flavors[a.Flavor] == nil {
-			v.flavors[a.Flavor] = map[store.AgentStatus]bool{}
+		if v.harnesses[a.Harness] == nil {
+			v.harnesses[a.Harness] = map[store.AgentStatus]bool{}
 		}
-		v.flavors[a.Flavor][a.Status] = true
+		v.harnesses[a.Harness][a.Status] = true
 	}
 
 	out := make([]UnmarkedObject, 0, len(objs))
@@ -183,13 +183,13 @@ func classifyUnmarked(objs []execution.UnmarkedObject, orgs []store.ListOrgWorks
 	return out
 }
 
-func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[store.AgentFlavor]bool) string {
+func reasonOf(o execution.UnmarkedObject, v *orgView, rendered map[string]bool) string {
 	if v == nil {
 		return ReasonOrgNotInDB
 	}
 	if o.Kind == "profile" {
-		if flavor, ok := strings.CutPrefix(o.Name, profilePrefix); ok {
-			return flavorReason(v.flavors[store.AgentFlavor(flavor)], rendered[store.AgentFlavor(flavor)])
+		if harness, ok := strings.CutPrefix(o.Name, profilePrefix); ok {
+			return harnessReason(v.harnesses[harness], rendered[harness])
 		}
 		if st, ok := v.names[o.Name]; ok {
 			return agentObjectReason(st, v.sandboxState[o.Name], o.Kind)
@@ -237,12 +237,12 @@ func statusReason(st store.AgentStatus) string {
 	}
 }
 
-// flavorReason is the reason of a flavor profile, which every agent of the flavor in the workspace
+// harnessReason is the reason of a harness profile, which every agent of the harness in the workspace
 // shares: any active agent re-imports it on its next pass, so it is pending; otherwise the draft
-// agents' reason comes first, then the archived agents'. With no agent of the flavor in the org, the
-// profile of a rendered flavor is pending too (the org pass marks it on its next run), and that of a
-// flavor this install does not render was not left by its reconciler.
-func flavorReason(statuses map[store.AgentStatus]bool, rendered bool) string {
+// agents' reason comes first, then the archived agents'. With no agent of the harness in the org, the
+// profile of a rendered harness is pending too (the org pass marks it on its next run), and that of a
+// harness this install does not render was not left by its reconciler.
+func harnessReason(statuses map[store.AgentStatus]bool, rendered bool) string {
 	switch {
 	case statuses[store.AgentStatusActive]:
 		return ReasonPendingClaim

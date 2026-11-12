@@ -33,7 +33,7 @@ var _ = Describe("Run content retention", func() {
 		GinkgoHelper()
 		var agent, version, user, task, run pgtype.UUID
 		Expect(pool.QueryRow(ctx, `SELECT id FROM users LIMIT 1`).Scan(&user)).To(Succeed())
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'helper', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'helper', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		Expect(pool.QueryRow(ctx, `INSERT INTO agent_versions (org_id, agent_id, version, config) VALUES ($1, $2, 1, '{}') RETURNING id`, org, agent).Scan(&version)).To(Succeed())
 		_, err := pool.Exec(ctx, `UPDATE agents SET status = 'active', active_version_id = $2, activated_at = now() WHERE id = $1`, agent, version)
 		Expect(err).NotTo(HaveOccurred())

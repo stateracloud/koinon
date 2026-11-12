@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -55,7 +56,7 @@ var _ = Describe("The agent's model setting", func() {
 	}
 
 	It("runs the agent's model rather than the version's", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, model, true)
 		serveModel(ctx, e, "fake/agent-pick", true)
 		setModel(ctx, e, "fake/agent-pick")
@@ -68,7 +69,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("takes the wire format from the agent's model, not the version's", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, model, true) // the version names a chat-completions model
 		serveModelAs(ctx, e, "claude-agent-pick", true, "anthropic", modelformat.Anthropic)
 		setModel(ctx, e, "claude-agent-pick")
@@ -81,7 +82,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("uses chat completions when the agent picks an openai-format model and the version names a Messages one", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModelAs(ctx, e, model, true, "anthropic", modelformat.Anthropic) // the version's model
 		serveModel(ctx, e, "fake/agent-pick", true)
 		setModel(ctx, e, "fake/agent-pick")
@@ -95,7 +96,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("runs the version's model when the agent has no setting", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, model, true)
 		serveModel(ctx, e, "fake/agent-pick", true)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -105,7 +106,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("takes the org default when neither the agent nor the version names a model", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, func(*env) string { return `{"model":"default","instructions":"x"}` })
+		e := newEnvWith(ctx, harness.OpenCode, func(*env) string { return `{"model":"default","instructions":"x"}` })
 		serveModel(ctx, e, "fake/z-second", true)
 		serveModel(ctx, e, "fake/a-first", true)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -116,7 +117,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("fails fast when the agent's model is not served in the org, and does not fall back to the version's", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, model, true) // the version's model is fine
 		setModel(ctx, e, "fake/gone")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -128,7 +129,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("fails fast when the agent's model has no price", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, "fake/free-ride", false)
 		setModel(ctx, e, "fake/free-ride")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -140,7 +141,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("runs again once the setting is cleared", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, model, true)
 		setModel(ctx, e, "fake/gone")
 		first := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -153,7 +154,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("gives the same reason when the model is removed after the start check and the gateway answers 404", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, "fake/agent-pick", true)
 		setModel(ctx, e, "fake/agent-pick")
 		e.harness.modelFault = func(ctx context.Context, _ string) error {
@@ -168,7 +169,7 @@ var _ = Describe("The agent's model setting", func() {
 	})
 
 	It("leaves a 404 alone when the model still checks out", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		serveModel(ctx, e, "fake/agent-pick", true)
 		setModel(ctx, e, "fake/agent-pick")
 		e.harness.modelFault = func(context.Context, string) error {
@@ -220,14 +221,14 @@ var _ = Describe("The agent's model setting", func() {
 		}
 
 		It("is on by default for a model the catalog says can think", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			serveClaude(ctx, e, "claude-haiku-5-5")
 			setModel(ctx, e, "claude-haiku-5-5")
 			Expect(thinkingArg(ctx, e)).To(Equal("adaptive-summarized"))
 		})
 
 		It("is off when the agent turns it off, and on again when it turns it on over its version's off", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			serveClaude(ctx, e, "claude-haiku-5-5")
 			setModel(ctx, e, "claude-haiku-5-5")
 			setThinking(ctx, e, "off")
@@ -235,7 +236,7 @@ var _ = Describe("The agent's model setting", func() {
 		})
 
 		It("runs a stored off with thinking on for a model that always thinks (old issue 316)", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			serveClaude(ctx, e, "claude-opus-5-5")
 			setModel(ctx, e, "claude-opus-5-5")
 			setThinking(ctx, e, "off")
@@ -243,7 +244,7 @@ var _ = Describe("The agent's model setting", func() {
 		})
 
 		It("follows the version's value until the agent sets its own", func(ctx SpecContext) {
-			e := newEnvWith(ctx, store.AgentFlavorOpencode, func(*env) string {
+			e := newEnvWith(ctx, harness.OpenCode, func(*env) string {
 				return `{"model":"claude-haiku-5-5","thinking":"off","instructions":"x"}`
 			})
 			serveClaude(ctx, e, "claude-haiku-5-5")
@@ -257,14 +258,14 @@ var _ = Describe("The agent's model setting", func() {
 		})
 
 		It("is none for a model the catalog says cannot think, whatever the setting", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			serveModel(ctx, e, model, true)
 			setThinking(ctx, e, "on")
 			Expect(thinkingArg(ctx, e)).To(Equal("none"))
 		})
 
 		It("is none on chat completions even for a Claude-shaped name", func(ctx SpecContext) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			serveModelAs(ctx, e, "claude-haiku-5-5", true, "anthropic", modelformat.OpenAI)
 			setModel(ctx, e, "claude-haiku-5-5")
 			Expect(thinkingArg(ctx, e)).To(Equal("none"))

@@ -21,6 +21,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
@@ -55,8 +56,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	const markPaths, markLong = "PATHS", "LONG"
 
 	It("names tools only from the first message and only from known names, so no path leaks at level none", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				if !strings.Contains(text, markPaths) {
@@ -92,8 +93,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 
 	DescribeTable("lists the ask_agent target as content, and sends it only above none", func(ctx SpecContext, level string) {
 		{
-			e := newEnv(ctx, store.AgentFlavorOpencode)
-			e.harness.set(func(h *harness) {
+			e := newEnv(ctx, harness.OpenCode)
+			e.harness.set(func(h *fakeHarness) {
 				h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 					defer GinkgoRecover()
 					Expect(say(sdk.StartToolCall("c1", "koinon_ask_agent", sdk.WithStartRawInput(map[string]any{"agent": "triage"})))).To(Succeed())
@@ -123,7 +124,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	)
 
 	It("ends a turn with the reason turn() saw, and marks failed turns as errors: retry", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		srv, err := fakemodel.New(fakemodel.Script{Model: "faulty", Faults: fakemodel.Faults{Unavailable: 1}, Turns: []fakemodel.Turn{{Text: "ok"}}})
 		Expect(err).NotTo(HaveOccurred())
 		ts := httptest.NewServer(srv)
@@ -131,7 +132,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		e.harness.modelFault = modelCaller(ts.URL)
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		// agentd's own retry layer, the one for a flavor whose harness does not retry.
+		// agentd's own retry layer, the one for a harness whose harness does not retry.
 		e.pool("agentd-retry", tracingOn(rcv, fakeDecider{traced: true, level: "none"}), agentd.OwnRetryLayer, func(c *agentd.Config) { c.RetryBackoff = 10 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(endReasons(turnRows(ctx, e, r))).To(Equal([]string{"failed", "end_turn"}))
@@ -149,7 +150,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("ends a refused turn as refused", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markRefuse+" write the notes"))
 		e.pool("agentd-refuse", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
@@ -158,7 +159,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("ends a turn interrupted for the wrap-up notice as wrap_up, then the cap as canceled", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		t := e.task(ctx, markWait)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 4})
@@ -175,7 +176,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("ends the turn as canceled when the control plane cancels the run", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-cancel", tracingOn(rcv, fakeDecider{traced: true, level: "none"}))
@@ -189,8 +190,8 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("keeps the messages array when content is cut to the pre-cap", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				if !strings.Contains(text, markLong) {
@@ -218,13 +219,13 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("exports 256 tool spans of 64 KiB content in several batches under the receiver's request cap, gzipped", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		blob := func() string {
 			b := make([]byte, 40<<10)
 			_, _ = rand.Read(b) // incompressible, so the wire size is real
 			return base64.StdEncoding.EncodeToString(b)
 		}
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				if !strings.Contains(text, markLong) {
@@ -251,7 +252,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("counts spans the receiver rejected in a partial success", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		rcv.reject = 1
 		reg := agentd.NewMetrics(nil)
@@ -265,7 +266,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("ends a turn row the previous owner left open as interrupted, before it starts its own", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		_, err := q.InsertRunTurn(ctx, store.InsertRunTurnParams{OrgID: e.org, RunID: r.ID, TraceID: []byte("0123456789abcdef")})
@@ -276,7 +277,7 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 	})
 
 	It("adds no turn for a worker that is not the run's owner", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-owner")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))

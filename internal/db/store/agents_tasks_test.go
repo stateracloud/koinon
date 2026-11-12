@@ -55,7 +55,7 @@ var _ = Describe("agents", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{
-			OrgID: org, DisplayName: "Repo helper", Flavor: store.AgentFlavorOpencode, TemplateID: tpl.ID, CreatedBy: user,
+			OrgID: org, DisplayName: "Repo helper", Harness: "opencode", TemplateID: tpl.ID, CreatedBy: user,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.Status).To(Equal(store.AgentStatusDraft))
@@ -97,7 +97,7 @@ var _ = Describe("agents", func() {
 	It("rejects activating another agent's version", func(ctx SpecContext) {
 		org, user := newOrg(ctx)
 		_, otherVersion := newAgent(ctx, org, user)
-		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "x", Flavor: store.AgentFlavorOpencode})
+		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "x", Harness: "opencode"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: otherVersion.ID})
 		Expect(err).To(MatchError(ContainSubstring("agents_org_id_id_active_version_id_fkey")))

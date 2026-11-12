@@ -58,7 +58,7 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 	newAgent := func(ctx SpecContext, org pgtype.UUID) pgtype.UUID {
 		GinkgoHelper()
 		var a pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
 		return a
 	}
 	// withRepository makes an agent with a home repository (epoch 0) under the active KEK.

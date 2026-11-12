@@ -38,6 +38,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -131,8 +132,8 @@ var _ = Describe("Reconciler", func() {
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
 			ProviderKeyDir: "/secrets/providers",
 			URLPolicy:      testPolicy,
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			RuntimeClassName: "kata",
 			Logger:           slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
@@ -147,14 +148,14 @@ var _ = Describe("Reconciler", func() {
 		addProvider(ctx, org, user, "upstream", "", "fake")
 	})
 
-	DescribeTable("lets only the flavor's network-calling binaries use the agentgateway credential",
-		func(ctx SpecContext, flavor store.AgentFlavor, binaries []string) {
-			Expect(reconciler.DefaultBinaries[flavor]).To(Equal(binaries))
-			cfg.Flavors = map[store.AgentFlavor]reconciler.Flavor{
-				flavor: {Image: image, Binaries: reconciler.DefaultBinaries[flavor]},
+	DescribeTable("lets only the harness's network-calling binaries use the agentgateway credential",
+		func(ctx SpecContext, harness string, binaries []string) {
+			Expect(reconciler.DefaultBinaries[harness]).To(Equal(binaries))
+			cfg.Harnesses = map[string]reconciler.Harness{
+				harness: {Image: image, Binaries: reconciler.DefaultBinaries[harness]},
 			}
 			agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-				OrgID: org, DisplayName: "Flavor binaries", Flavor: flavor, CreatedBy: user,
+				OrgID: org, DisplayName: "Harness binaries", Harness: harness, CreatedBy: user,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
@@ -170,7 +171,7 @@ var _ = Describe("Reconciler", func() {
 
 			row := sandboxRow(ctx, agent.ID)
 			Expect(row.State).To(Equal(store.SandboxStateReady))
-			profile := osg.Profile(row.Workspace, "koinon-agentgateway-"+string(flavor))
+			profile := osg.Profile(row.Workspace, "koinon-agentgateway-"+harness)
 			Expect(profile).NotTo(BeNil())
 			var paths []string
 			for _, b := range profile.GetBinaries() {
@@ -178,7 +179,7 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(paths).To(Equal(binaries))
 		},
-		Entry("OpenCode: its single binary", store.AgentFlavorOpencode, []string{"/usr/local/bin/opencode"}),
+		Entry("OpenCode: its single binary", harness.OpenCode, []string{"/usr/local/bin/opencode"}),
 	)
 
 	Describe("an active agent", func() {
@@ -347,8 +348,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("recreates the sandbox when its image changes, but not during a run", func(ctx SpecContext) {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
-				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{
+				Image: image + "-2", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
 			}
 			r = newReconciler()
 
@@ -423,8 +424,8 @@ var _ = Describe("Reconciler", func() {
 			pass(ctx, r)
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
 
-			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
-				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{
+				Image: image + "-2", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
 			}
 			r = newReconciler()
 			pass(ctx, r) // deletes
@@ -476,8 +477,8 @@ var _ = Describe("Reconciler", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
-				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{
+				Image: image + "-2", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
 			}
 			r = newReconciler()
 			pass(ctx, r)

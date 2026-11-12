@@ -16,7 +16,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/acp"
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -25,7 +24,7 @@ import (
 // it is expected to do where harnesses legitimately differ.
 type flavor struct {
 	name        string
-	storeFlavor store.AgentFlavor
+	storeFlavor string
 	// dockerfile is the build context, relative to the repository root.
 	dockerfile string
 	// writeFile is the harness's own tool call that writes a file, as the model would emit it.

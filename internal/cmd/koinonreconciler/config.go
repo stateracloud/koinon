@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/codehost/providers"
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -81,8 +80,8 @@ type config struct {
 	homeRetention                         string
 	checkpoints                           bool
 	// restoreHold starts the process without converging anything (issue #462).
-	restoreHold  bool
-	flavorImages map[string]string
+	restoreHold   bool
+	harnessImages map[string]string
 
 	// sandboxResources is the platform's sandbox sizing, from the config file's sandboxResources.
 	sandboxResources sandboxres.Policy
@@ -137,15 +136,15 @@ func (c *config) toolServers() map[string]string {
 	return out
 }
 
-// flavors combines the configured images with each flavor's binaries.
-func (c *config) flavors() map[store.AgentFlavor]reconciler.Flavor { return flavorsOf(c.flavorImages) }
+// harnesses combines the configured images with each harness's binaries.
+func (c *config) harnesses() map[string]reconciler.Harness { return harnessesOf(c.harnessImages) }
 
-// flavorsOf combines flavor images with each flavor's binaries.
-func flavorsOf(images map[string]string) map[store.AgentFlavor]reconciler.Flavor {
-	out := map[store.AgentFlavor]reconciler.Flavor{}
+// harnessesOf combines harness images with each harness's binaries.
+func harnessesOf(images map[string]string) map[string]reconciler.Harness {
+	out := map[string]reconciler.Harness{}
 	for name, img := range images {
-		f := store.AgentFlavor(name)
-		out[f] = reconciler.Flavor{Image: img, Binaries: reconciler.DefaultBinaries[f]}
+		f := name
+		out[f] = reconciler.Harness{Image: img, Binaries: reconciler.DefaultBinaries[f]}
 	}
 	return out
 }

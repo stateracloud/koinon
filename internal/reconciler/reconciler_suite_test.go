@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -130,7 +131,7 @@ func coolDown(ctx context.Context, org pgtype.UUID, agents ...pgtype.UUID) {
 func newOnDemandAgent(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
 		OrgID: org, DisplayName: "Repo helper with a long display name that is no sandbox name",
-		Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+		Harness: harness.OpenCode, CreatedBy: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{

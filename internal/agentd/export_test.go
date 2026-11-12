@@ -9,14 +9,20 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
-// Endpoints and LaunchCommand expose the flavor launch commands to the external test package.
+// Endpoints and LaunchCommand expose the harness launch commands to the external test package.
 type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
+
+// CompactionTokens and DefaultCompactionTokens expose the compaction point to the external test package.
+var CompactionTokens = compactionTokens
+
+const DefaultCompactionTokens = defaultCompactionTokens
 
 // RetryPolicy is the model-retry policy a retrying harness is launched with.
 type RetryPolicy = retryPolicy
@@ -26,7 +32,7 @@ func DefaultRetryPolicy() RetryPolicy {
 	return retryPolicyOf(Config{ModelRetries: DefaultModelRetries, RetryBackoff: DefaultRetryBackoff, MaxRetryAfter: DefaultMaxRetryAfter})
 }
 
-// OwnRetryLayer makes the pool repeat failed turns itself even for a flavor whose harness retries
+// OwnRetryLayer makes the pool repeat failed turns itself even for a harness whose harness retries
 // model requests, so specs can exercise agentd's own retry layer with the fake harness, which
 // does not retry.
 func OwnRetryLayer(c *Config) { c.ownRetryLayer = true }
@@ -93,12 +99,12 @@ func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
 // InstructionsFile exposes the instruction file's content for a version's instructions to the
 // golden tests.
 func InstructionsFile(instructions, cwd string, repos ...Repository) string {
-	return string(instructionsFile(store.AgentFlavorOpencode, instructions, cwd, repos, false))
+	return string(instructionsFile(harness.OpenCode, instructions, cwd, repos, false))
 }
 
 // InstructionsFileWithWeb is InstructionsFile for an agent with web egress.
 func InstructionsFileWithWeb(instructions, cwd string, repos ...Repository) string {
-	return string(instructionsFile(store.AgentFlavorOpencode, instructions, cwd, repos, true))
+	return string(instructionsFile(harness.OpenCode, instructions, cwd, repos, true))
 }
 
 // Repository is a granted repository as the instruction file lists it.
@@ -118,7 +124,7 @@ func NewTaintCalls() func(update []byte) (mcpguard.Legs, []string, bool) {
 	return NewTaintCallsFor("")
 }
 
-// NewTaintCallsFor is NewTaintCalls for a flavor whose MCP tool calls have the title prefix.
+// NewTaintCallsFor is NewTaintCalls for a harness whose MCP tool calls have the title prefix.
 func NewTaintCallsFor(mcpPrefix string) func(update []byte) (mcpguard.Legs, []string, bool) {
 	t := &taintCalls{}
 	t.setMCPPrefix(mcpPrefix)
@@ -142,9 +148,12 @@ var WaitProcess = waitProcess
 
 var LineTooLongReason = lineTooLongReason
 
-// WorkingWithData exposes the "Working with large data" section for a flavor's tools, which
-// need not belong to a shipped flavor.
+// WorkingWithData exposes the "Working with large data" section for a harness's tools, which
+// need not belong to a shipped harness.
 func WorkingWithData(tools ...string) string { return workingWithDataFor(tools, false) }
 
 // WorkingWithDataSaved is WorkingWithData for a harness that saves a cut tool result to a file.
 func WorkingWithDataSaved(tools ...string) string { return workingWithDataFor(tools, true) }
+
+// ToolName is the name a tool call is traced under.
+var ToolName = toolName

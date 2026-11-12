@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus, type ActivateAgentRequest, type CreateAgentFromTemplateRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
-import { Flavor, GrantSchema, Preset, TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { GrantSchema, Preset, TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { validateRepositories } from '@/lib/agents'
 import { githubConnection, githubConnectorType, repoHelperTemplate } from '@/test-fixtures'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
@@ -43,7 +43,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole } 
         agent = create(AgentSchema, {
           ...agent,
           displayName: req.displayName,
-          flavor: req.flavor,
+          harness: req.harness,
           templateSlug: 'repo-helper',
           proposedGrants: req.grants.map((g) =>
             create(GrantSchema, { connector: g.connector, connectionId: g.connectionId, repositories: g.repositories, scopes: ['repo.read'], preset: Preset.STANDARD }),
@@ -67,7 +67,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole } 
 async function toAccessStep() {
   await userEvent.click(await screen.findByRole('button', { name: 'Next' })) // template (preselected)
   await userEvent.click(screen.getByRole('radio', { name: /OpenCode/ }))
-  await userEvent.click(screen.getByRole('button', { name: 'Next' })) // flavor
+  await userEvent.click(screen.getByRole('button', { name: 'Next' })) // harness
 }
 
 describe('AgentWizard', () => {
@@ -101,7 +101,7 @@ describe('AgentWizard', () => {
       orgId,
       templateId: 'tpl-1',
       displayName: 'Widgets helper',
-      flavor: Flavor.OPENCODE,
+      harness: 'opencode',
       grants: [{ connector: 'github', connectionId: 'c-1', repositories: ['acme/widgets'] }],
     })
 

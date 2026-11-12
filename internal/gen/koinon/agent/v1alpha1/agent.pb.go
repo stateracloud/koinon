@@ -147,7 +147,10 @@ type Agent struct {
 	OrgId       string                 `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	DisplayName string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Status      AgentStatus            `protobuf:"varint,4,opt,name=status,proto3,enum=koinon.agent.v1alpha1.AgentStatus" json:"status,omitempty"`
-	Flavor      v1alpha1.Flavor        `protobuf:"varint,5,opt,name=flavor,proto3,enum=koinon.template.v1alpha1.Flavor" json:"flavor,omitempty"`
+	// Deprecated: use harness. Unspecified when the harness has no Flavor value.
+	//
+	// Deprecated: Marked as deprecated in koinon/agent/v1alpha1/agent.proto.
+	Flavor v1alpha1.Flavor `protobuf:"varint,5,opt,name=flavor,proto3,enum=koinon.template.v1alpha1.Flavor" json:"flavor,omitempty"`
 	// The template content the agent was created from, if any.
 	TemplateId   string `protobuf:"bytes,6,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"`
 	TemplateSlug string `protobuf:"bytes,7,opt,name=template_slug,json=templateSlug,proto3" json:"template_slug,omitempty"`
@@ -192,8 +195,11 @@ type Agent struct {
 	// (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
 	// request reads false until the reconciler's next pass.
 	KeepWarmGranted bool `protobuf:"varint,27,opt,name=keep_warm_granted,json=keepWarmGranted,proto3" json:"keep_warm_granted,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
+	// agent is created.
+	Harness       string `protobuf:"bytes,28,opt,name=harness,proto3" json:"harness,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -254,6 +260,7 @@ func (x *Agent) GetStatus() AgentStatus {
 	return AgentStatus_AGENT_STATUS_UNSPECIFIED
 }
 
+// Deprecated: Marked as deprecated in koinon/agent/v1alpha1/agent.proto.
 func (x *Agent) GetFlavor() v1alpha1.Flavor {
 	if x != nil {
 		return x.Flavor
@@ -415,6 +422,13 @@ func (x *Agent) GetKeepWarmGranted() bool {
 	return false
 }
 
+func (x *Agent) GetHarness() string {
+	if x != nil {
+		return x.Harness
+	}
+	return ""
+}
+
 // CreateAgentFromTemplateRequest names the template and the user's choices.
 type CreateAgentFromTemplateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -422,7 +436,9 @@ type CreateAgentFromTemplateRequest struct {
 	// A Template.id from ListTemplates.
 	TemplateId  string `protobuf:"bytes,2,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"`
 	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	// One of the template's allowed flavors; unspecified picks its default.
+	// Deprecated: use harness. Read only when harness is empty.
+	//
+	// Deprecated: Marked as deprecated in koinon/agent/v1alpha1/agent.proto.
 	Flavor v1alpha1.Flavor `protobuf:"varint,4,opt,name=flavor,proto3,enum=koinon.template.v1alpha1.Flavor" json:"flavor,omitempty"`
 	// Where the template's grants apply: one entry per grant on a connector
 	// type with targets. A grant whose template sets targets min above zero
@@ -430,7 +446,9 @@ type CreateAgentFromTemplateRequest struct {
 	// the grant.
 	Grants []*GrantBinding `protobuf:"bytes,5,rep,name=grants,proto3" json:"grants,omitempty"`
 	// Overrides the template's ephemeral setting; unset keeps it.
-	Ephemeral     *bool `protobuf:"varint,6,opt,name=ephemeral,proto3,oneof" json:"ephemeral,omitempty"`
+	Ephemeral *bool `protobuf:"varint,6,opt,name=ephemeral,proto3,oneof" json:"ephemeral,omitempty"`
+	// One of the template's allowed harnesses, by name; empty picks its default (ADR 0112).
+	Harness       string `protobuf:"bytes,7,opt,name=harness,proto3" json:"harness,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -486,6 +504,7 @@ func (x *CreateAgentFromTemplateRequest) GetDisplayName() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in koinon/agent/v1alpha1/agent.proto.
 func (x *CreateAgentFromTemplateRequest) GetFlavor() v1alpha1.Flavor {
 	if x != nil {
 		return x.Flavor
@@ -505,6 +524,13 @@ func (x *CreateAgentFromTemplateRequest) GetEphemeral() bool {
 		return *x.Ephemeral
 	}
 	return false
+}
+
+func (x *CreateAgentFromTemplateRequest) GetHarness() string {
+	if x != nil {
+		return x.Harness
+	}
+	return ""
 }
 
 // GrantBinding binds a template grant to one of the org's connections and
@@ -2480,14 +2506,14 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xdc\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xfa\n" +
 	"\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
 	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x12:\n" +
-	"\x06status\x18\x04 \x01(\x0e2\".koinon.agent.v1alpha1.AgentStatusR\x06status\x128\n" +
-	"\x06flavor\x18\x05 \x01(\x0e2 .koinon.template.v1alpha1.FlavorR\x06flavor\x12\x1f\n" +
+	"\x06status\x18\x04 \x01(\x0e2\".koinon.agent.v1alpha1.AgentStatusR\x06status\x12<\n" +
+	"\x06flavor\x18\x05 \x01(\x0e2 .koinon.template.v1alpha1.FlavorB\x02\x18\x01R\x06flavor\x12\x1f\n" +
 	"\vtemplate_id\x18\x06 \x01(\tR\n" +
 	"templateId\x12#\n" +
 	"\rtemplate_slug\x18\a \x01(\tR\ftemplateSlug\x12%\n" +
@@ -2514,15 +2540,17 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\rmodel_setting\x18\x18 \x01(\tR\fmodelSetting\x12T\n" +
 	"\x11sandbox_resources\x18\x19 \x01(\v2'.koinon.agent.v1alpha1.SandboxResourcesR\x10sandboxResources\x12\x1b\n" +
 	"\tkeep_warm\x18\x1a \x01(\bR\bkeepWarm\x12*\n" +
-	"\x11keep_warm_granted\x18\x1b \x01(\bR\x0fkeepWarmGranted\"\xa3\x02\n" +
+	"\x11keep_warm_granted\x18\x1b \x01(\bR\x0fkeepWarmGranted\x12\x18\n" +
+	"\aharness\x18\x1c \x01(\tR\aharness\"\xc1\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
 	"templateId\x12!\n" +
-	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x128\n" +
-	"\x06flavor\x18\x04 \x01(\x0e2 .koinon.template.v1alpha1.FlavorR\x06flavor\x12;\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x12<\n" +
+	"\x06flavor\x18\x04 \x01(\x0e2 .koinon.template.v1alpha1.FlavorB\x02\x18\x01R\x06flavor\x12;\n" +
 	"\x06grants\x18\x05 \x03(\v2#.koinon.agent.v1alpha1.GrantBindingR\x06grants\x12!\n" +
-	"\tephemeral\x18\x06 \x01(\bH\x00R\tephemeral\x88\x01\x01B\f\n" +
+	"\tephemeral\x18\x06 \x01(\bH\x00R\tephemeral\x88\x01\x01\x12\x18\n" +
+	"\aharness\x18\a \x01(\tR\aharnessB\f\n" +
 	"\n" +
 	"_ephemeral\"u\n" +
 	"\fGrantBinding\x12\x1c\n" +
