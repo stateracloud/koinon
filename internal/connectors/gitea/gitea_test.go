@@ -250,7 +250,7 @@ var _ = Describe("the Gitea provider", func() {
 
 		It("opens a pull request, finds it by branch and comments on it", func() {
 			e := newEnv(nil)
-			w, err := gitpush.Open(ctx, e.host, e.conn, write)
+			w, err := gitpush.Open(ctx, e.host, e.conn, write, nil)
 			Expect(err).NotTo(HaveOccurred())
 			base, _, err := w.Branch(ctx, app, "main")
 			Expect(err).NotTo(HaveOccurred())

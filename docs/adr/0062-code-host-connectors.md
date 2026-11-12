@@ -310,4 +310,13 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   and no redirects followed (`http.ErrUseLastResponse`, as in `internal/tracing/export`). The
   platform's own `github.apiUrl` / `--github-api-url` is exempt: it is operator configuration,
   not admin input, and may name a private GHE or the e2e fake. The push writer
-  (`internal/codehost/gitpush`) is not covered yet; see #860.
+  (`internal/codehost/gitpush`) is covered by #860 (below).
+
+- Amendment 2026-11-12 (#860, the push writer): the fetch, the ref listing and the push of
+  `internal/codehost/gitpush` no longer use go-git's process-wide HTTP client. They use one
+  smart-HTTP transport built the same way as the code-host API clients: it connects through
+  `catalog.URLPolicy.DialContext` (passed in as `approvals.Options.DialContext`; koinon-api sets it),
+  ignores the environment proxy and refuses an HTTP redirect (go-git's `NoFollowRedirects`). The
+  fetch and the listing drive go-git's upload-pack session directly, because `Remote.Fetch` takes
+  no transport. Unlike the platform's own GitHub API URL, every push remote is a connection's
+  admin-supplied base URL, so none is exempt.

@@ -89,7 +89,7 @@ func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row
 	if err != nil {
 		return nil, err
 	}
-	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
+	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions}, s.dial)
 	if err != nil {
 		return nil, err
 	}
