@@ -18,8 +18,11 @@ d=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 cat >"$work/bin/docker" <<STUB
 #!/usr/bin/env bash
 echo "\$*" >>"$work/calls"
+key='"containerimage.digest":"$d"'
+# imagetools create writes the descriptor form, buildx build the plain digest key (buildx 0.37).
+[[ \$* == *imagetools* ]] && key='"containerimage.descriptor":{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"$d","size":1}'
 while (( \$# )); do
-	if [[ \$1 == --metadata-file ]]; then echo '{"containerimage.digest":"$d"}' >"\$2"; fi
+	if [[ \$1 == --metadata-file ]]; then echo "{\$key}" >"\$2"; fi
 	shift
 done
 STUB

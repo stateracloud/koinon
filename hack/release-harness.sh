@@ -56,7 +56,8 @@ if [[ $mode == merge ]]; then
 	meta=$(mktemp "${TMPDIR:-/tmp}/release-harness.XXXXXX")
 	trap 'rm -f "$meta"' EXIT
 	docker buildx imagetools create "${tags[@]}" --metadata-file "$meta" "${srcs[@]}" >&2
-	digest=$(jq -r '."containerimage.digest" // empty' "$meta")
+	# imagetools create writes {"containerimage.descriptor": {..., "digest": ...}}, not buildx build's key.
+	digest=$(jq -r '."containerimage.descriptor".digest // empty' "$meta")
 	[[ $digest == sha256:* ]] || { echo "no manifest digest in the imagetools metadata" >&2; exit 1; }
 	echo "ref=$repo@$digest"
 	exit 0

@@ -153,7 +153,11 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false # the job never uses git auth
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
       - name: log in to ghcr.io
         env:
           TOKEN: ${{ github.token }}
@@ -200,7 +204,11 @@ jobs:
           pattern: flavor-digest-*
           path: flavor-digests
           merge-multiple: true
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
       - name: log in to ghcr.io
         env:
           TOKEN: ${{ github.token }}
