@@ -250,6 +250,7 @@ script-check - hack/ci-concurrency-test.sh
 script-check - hack/ci-merge-group-test.sh
 script-check - hack/secrets-skip-test.sh
 script-check - hack/route-guard-test.sh
+script-check - hack/contributor-gate-test.sh
 script-check - hack/ci-cache-test.sh
 script-check - hack/ci-rules-check-test.sh
 script-check - hack/ci-rules-check.sh

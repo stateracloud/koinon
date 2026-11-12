@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The first-time contributor gate (#848): a pull request whose author has no merged contribution yet fails
+# this check until a maintainer vouches (the `vouched` label, or a line in .github/vouched.txt). Maintainers,
+# members, collaborators and past contributors always pass. hack/contributor-gate.sh decides; how to turn the
+# gate on, and what else that takes: docs/maintainers/contributor-gate.md.
+#
+# OFF by default. The switch is the job-level `if:` below (rule W6 of docs/dev/ci-rules.md: the decision to skip
+# lives in this code-owner protected file, not in a script). While it reads `false && ...` the job is skipped on
+# every event: no runner starts, nothing is checked, nothing changes for anyone. hack/contributor-gate-test.sh
+# accepts only the two documented forms of that line.
+#
+# No pull_request_target (rule W3, #463): the job runs on `pull_request` with a read-only token, no secret and no
+# Environment, and checks out the BASE commit, never the pull request's code, so the script and the vouch list
+# that judge a pull request are main's, not its own. It posts nothing and closes nothing; a red check is the
+# whole effect. The author of a pull request never changes, so a merge queue build has nothing new to decide:
+# the job is skipped there (which reports success) and the `merge_group` trigger only keeps the check reporting
+# once it is required (rules Q1, Q2).
+name: contributor-gate
+
+on:
+  pull_request:
+    # synchronize: a required check must report on every head. labeled/unlabeled: the `vouched` label.
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: contributor gate
+    # The switch. Off: `false && github.event_name == 'pull_request'`. On: `true && github.event_name == 'pull_request'`.
+    if: false && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Is the author vouched for?
+        env:
+          GATE_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GATE_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          GATE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: hack/contributor-gate.sh check
