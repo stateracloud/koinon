@@ -57,10 +57,11 @@ except go ^\.claude/
 # few scripts they call are listed in `keep`. The script tests run in the `scripts` job.
 except go ^hack/[^/]+\.sh$
 except go ^hack/hooks/
-# The failure-class table and its log samples are read only by hack/ci-fail.sh and its test, which
-# run in the `scripts` job; no Go job reads them.
+# The failure-class table and its log samples are read only by hack/ci-fail.sh and its test, and the
+# recorded records of hack/ci-timing.sh only by its test; they run in the `scripts` job, no Go job reads them.
 except go ^hack/ci-fail-classes\.tsv$
 except go ^hack/testdata/ci-fail/
+except go ^hack/testdata/ci-timing/
 except go ^hack/chart-check\.d/
 # The scripts the Go jobs run or the Go tests execute: go-test.sh and what it starts, the lint
 # wrapper, the agentgateway pin (go-test pulls the image), the compat fixture recorder
@@ -193,6 +194,7 @@ script-check - hack/apt-retries-test.sh --self-test
 script-check - hack/apt-retries-test.sh
 script-check - hack/e2e-remote-test.sh
 script-check - hack/ci-fail-test.sh
+script-check - hack/ci-timing-test.sh
 script-check - hack/ci-go-gate-test.sh
 script-check - hack/ci-web-gate-test.sh
 script-check - hack/ci-required-test.sh
