@@ -9,7 +9,7 @@
 for f in "${value_files[@]}"; do
 	r="$out/$(basename "$f" .yaml).yaml"
 	# A value set that turns the policies off (the cluster-scoped objects need admin rights) has none.
-	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | grep -q 'enabled: false' && continue; }
+	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | hit 'enabled: false' && continue; }
 	grep -Eq -- '^  name: koinon-koinon-sandbox-connect$' "$r" || fail "no CONNECT policy with $(basename "$f")"
 	[ "$(grep -c -- '^  name: koinon-koinon-sandbox-connect$' "$r")" = 2 ] || fail "CONNECT policy and binding must both render with $(basename "$f")"
 	grep -Eq -- 'operations: \[CONNECT\]' "$r" || fail "no CONNECT rule with $(basename "$f")"

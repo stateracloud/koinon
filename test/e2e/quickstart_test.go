@@ -1017,12 +1017,16 @@ var _ = Describe("the quickstart", Ordered, func() {
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
 		// 2 minutes, the value with evidence. The cap counts from the run's first claim
 		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
-		// A 30 s cap failed in CI (#572, PR 595, run 43091299950): after 30 s the new sandbox's pods were
-		// still behind OpenShell's openshell.ai/bootstrap scheduling gate, so no pull had been tried and
-		// the cause was "unknown". Only the OpenShell gateway removes that gate (in its CreateSandbox);
-		// in that run the config change above was recreating the org's other OpenCode sandbox at the
-		// same time. Why the gate stays that long is the slow-start question of #573; this step goes
-		// back to a short cap when that has a cause and a fix, not by a guess.
+		// A 30 s cap failed in CI twice (#572 run 43091299950, #573 run 43134423089): the run ended with
+		// "the sandbox was never rendered" after 30 s. Proven from the second run's logs: the new
+		// reconciler led 0.8 s after it started, but its first pass had begun before the new agent
+		// existed, and in that pass the job of the OLD agent called OpenShell DeleteSandbox (the
+		// spec-change recreate, because the harness image had just changed). That call did not return
+		// within the 30 s (the old pods were Terminating with a 30 s grace period). A pass ends only
+		// when all its jobs end (startJobs(...).wait()), so the next pass, the first that could see
+		// the new agent, started after the cap. The leader hand-over and the gateway Apply were not
+		// the gate. Exit condition: lower the cap when a slow sandbox job of one agent no longer
+		// holds back the next reconcile pass (issue 573).
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")

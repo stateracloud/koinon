@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1225,6 +1227,72 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).To(MatchError(pgx.ErrNoRows))
 	})
 
+	It("revokes the key after spend crosses the limit: ledger transaction, NOTIFY, reconcile pass (Kubernetes mode, #20)", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"0.05"}}`)
+		mg.ledgerBudgets = true
+		var slug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, org).Scan(&slug)).To(Succeed())
+
+		// The first pass issues the key; Run then makes its own passes, so the only thing that can
+		// wake it after them is the ledger's NOTIFY (the resync timer is an hour).
+		cfg.ResyncInterval = time.Hour
+		r := newReconciler()
+		pass(ctx, r)
+		row := sandboxRow(ctx, agent.ID)
+		ref := agentKeys(mg.last())[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("0.05")))
+
+		var applies atomic.Int64
+		var revokedAt atomic.Pointer[time.Time]
+		mg.onApply = func(s gateway.State) {
+			applies.Add(1)
+			if l, ok := s.Limits[ref]; ok && l.Amount <= 0 {
+				t := time.Now()
+				revokedAt.CompareAndSwap(nil, &t)
+			}
+		}
+		runCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(runCtx) }()
+		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
+		Eventually(applies.Load).WithTimeout(10*time.Second).Should(BeNumerically(">=", 1), "the leader's first pass")
+		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
+
+		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
+		entry := func(cost string) ledger.Entry {
+			return ledger.Entry{
+				RequestID: uniq("req"), KeyID: row.GatewayKeyID.String, Model: "fake/model", CostUSD: cost,
+				Agent: gateway.AgentRef{Org: slug, Name: agent.ID.String()}, InputTokens: 1, OutputTokens: 1, Time: time.Now(),
+			}
+		}
+		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		Expect(err).NotTo(HaveOccurred())
+		// The ingest below the limit sends no NOTIFY (ledger/ingest.go: only a reserve change or an
+		// enforce crossing does), so no pass can run between the two requests. If a later change adds
+		// a wake, this check fails instead of the measured window silently changing.
+		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(1), "no pass runs below the limit")
+		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
+
+		By("the request that reaches the limit")
+		start := time.Now()
+		_, err = ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		committed := time.Now()
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(revokedAt.Load).WithTimeout(10*time.Second).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
+		revoked := *revokedAt.Load()
+
+		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
+		AddReportEntry("budget overshoot window", fmt.Sprintf("ledger transaction %s + NOTIFY and reconcile pass %s = %s from the crossing request to the revoke", ledgerTx, reconcilePass, total))
+		// The measured window ends when the gateway driver receives the zero limit. Then
+		// internal/gateway/kubernetes/render.go drops the key from the ConfigMap (covered by
+		// render_test.go). The ConfigMap write and the agentgateway hot reload add to the real window.
+		// The gateway keeps serving until the revoke, so this window (times the spend rate) is the
+		// overshoot beyond the one in-flight response of ADR 0097. The bound is generous for a loaded
+		// CI host and far below the one-hour resync, which proves the NOTIFY path did the waking.
+		Expect(total).To(BeNumerically("<", 5*time.Second))
+		Expect(mg.last().Limits[ref].Amount).To(BeZero())
+	})
+
 	It("joins several rejections of one org into one message", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		var slug string
@@ -1434,6 +1502,184 @@ var _ = Describe("Reconciler", func() {
 		Eventually(func() openshellv1.SandboxPhase {
 			return osg.Sandbox(ws, names.Sandbox).GetStatus().GetPhase()
 		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+	})
+
+	Describe("the leader lock (#573)", func() {
+		const leaderKey int64 = 0x6b6f696e6f6e7263
+		// holdLock takes the reconciler's session lock on its own connection, as a running leader
+		// does, and returns the function that releases it.
+		holdLock := func(ctx context.Context) (release func()) {
+			GinkgoHelper()
+			c, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Exec(ctx, "SELECT pg_advisory_lock($1)", leaderKey)
+			Expect(err).NotTo(HaveOccurred())
+			var once sync.Once
+			release = func() {
+				once.Do(func() { _ = c.Conn().Close(context.Background()); c.Release() })
+			}
+			DeferCleanup(release)
+			return release
+		}
+		// run starts r.Run and returns a stop function that waits for Run to end.
+		run := func(r *reconciler.Reconciler) (stop func() time.Duration) {
+			runCtx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- r.Run(runCtx) }()
+			var stopped bool
+			stop = func() time.Duration {
+				if stopped {
+					return 0
+				}
+				stopped = true
+				t := time.Now()
+				cancel()
+				Eventually(done).Should(Receive(BeNil()))
+				return time.Since(t)
+			}
+			DeferCleanup(func() { stop() })
+			return stop
+		}
+		leading := func() int { return strings.Count(logs.String(), "reconciler is leading") }
+		// lockRows counts the advisory lock rows for key in this spec's database: pg_locks covers the
+		// whole server, and suites that share one server use the same key in their own databases.
+		lockRows := func(ctx context.Context, key int64, granted bool) int {
+			GinkgoHelper()
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted = $2
+				AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				AND ((classid::bigint << 32) | objid::bigint) = $1`, key, granted).Scan(&n)).To(Succeed())
+			return n
+		}
+		holders := func(ctx context.Context) int { return lockRows(ctx, leaderKey, true) }
+
+		It("takes over within about 2 s of the holder releasing the lock, with a long resync interval", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			release := holdLock(ctx)
+			run(newReconciler())
+			Eventually(logs.String).Should(ContainSubstring("waiting for the leader lock"))
+			Consistently(leading, "500ms", "50ms").Should(BeZero())
+
+			t := time.Now()
+			release()
+			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(1))
+			GinkgoWriter.Printf("leader hand-over took %s\n", time.Since(t))
+			Expect(logs.String()).To(MatchRegexp(`reconciler is leading" waited=\S+`))
+		})
+
+		It("ends a blocked wait promptly when its context is cancelled, and does not take the lock afterwards", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			release := holdLock(ctx)
+			stop := run(newReconciler())
+			Eventually(logs.String).Should(ContainSubstring("waiting for the leader lock"))
+
+			Expect(stop()).To(BeNumerically("<", 2*time.Second))
+			release()
+			// No orphaned backend takes the lock once the holder is gone.
+			Consistently(func() int { return holders(ctx) }, "1s", "100ms").Should(BeZero())
+			Expect(leading()).To(BeZero())
+		})
+
+		It("never has two leaders, and the follower leads after the leader stops", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			stopFirst := run(newReconciler())
+			Eventually(leading).Should(Equal(1))
+			run(newReconciler())
+			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
+			Consistently(func() int { return holders(ctx) }, "1s", "100ms").Should(Equal(1))
+			Expect(leading()).To(Equal(1))
+
+			stopFirst()
+			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(2))
+			Expect(holders(ctx)).To(Equal(1))
+		})
+
+		It("cancels a blocked lock wait on the server, so no backend takes the lock later", func(ctx SpecContext) {
+			key := leaderKey + seq.Add(1)
+			holder, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = holder.Exec(ctx, "SELECT pg_advisory_lock($1)", key)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = holder.Conn().Close(context.Background()); holder.Release() })
+			waiter, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = waiter.Conn().Close(context.Background()); waiter.Release() })
+
+			wctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			res := make(chan error, 1)
+			go func() { res <- reconciler.LockBlocking(wctx, waiter.Conn(), key) }()
+			Eventually(func() int { return lockRows(ctx, key, false) }).Should(Equal(1), "the waiter is queued on the server")
+
+			cancel()
+			Eventually(res).WithTimeout(2 * time.Second).Should(Receive(MatchError(context.Canceled)))
+			// The server-side wait is gone: a closed socket alone would leave the backend queued.
+			Eventually(func() int { return lockRows(ctx, key, false) }).Should(BeZero())
+			_, err = holder.Exec(ctx, "SELECT pg_advisory_unlock($1)", key)
+			Expect(err).NotTo(HaveOccurred())
+			Consistently(func() int { return lockRows(ctx, key, true) }, "500ms", "50ms").Should(BeZero())
+		})
+
+		It("cancels a running pass when the leader's connection is lost, before the follower leads", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			mg.mu.Lock()
+			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			entered := mg.entered
+			mg.mu.Unlock()
+			DeferCleanup(func() {
+				mg.mu.Lock()
+				defer mg.mu.Unlock()
+				if mg.hold != nil {
+					close(mg.hold)
+				}
+			})
+			run(newReconciler())
+			Eventually(entered).Should(BeClosed(), "the leader's pass is inside Apply")
+			// Later passes do not wait.
+			mg.mu.Lock()
+			mg.hold, mg.entered = nil, nil
+			mg.mu.Unlock()
+			run(newReconciler())
+			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
+
+			var terminated int
+			Expect(pool.QueryRow(ctx, `SELECT count(pg_terminate_backend(l.pid)) FROM pg_locks l
+				WHERE l.locktype = 'advisory' AND l.granted
+				AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				AND ((l.classid::bigint << 32) | l.objid::bigint) = $1`, leaderKey).Scan(&terminated)).To(Succeed())
+			Expect(terminated).To(Equal(1))
+
+			Eventually(mg.canceledAt).WithTimeout(2 * time.Second).ShouldNot(BeZero())
+			Eventually(leading).WithTimeout(3 * time.Second).Should(Equal(2))
+			Eventually(mg.applyTimes).Should(HaveLen(2))
+			// The order of the old pass's cancel and the new leader's first write is NOT guaranteed:
+			// the server frees the lock when the backend dies, and the old leader learns of the dead
+			// connection by its own read, so the follower can write first. That two-leader window is
+			// tracked in issue 635.
+			Expect(mg.appliedCount()).To(Equal(1), "only the new leader's pass finished")
+			Consistently(mg.appliedCount, "500ms", "50ms").Should(Equal(1))
+		})
+
+		It("retries a failed lead after a short backoff with jitter, not after the resync interval", func() {
+			Expect(reconciler.RetryDelay(1, 0)).To(Equal(reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(1, 0.999)).To(BeNumerically("<", 2*reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(2, 0)).To(Equal(2 * reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(50, 0.999)).To(BeNumerically("<", 2*reconciler.RetryCap))
+			Expect(reconciler.RetryDelay(50, 0)).To(Equal(reconciler.RetryCap))
+			Expect(reconciler.RetryCap).To(BeNumerically("<", 30*time.Second))
+		})
+
+		It("backs off further on a repeating setup failure such as LISTEN, and resets only after leading", func() {
+			failures, prev := 0, time.Duration(0)
+			for range 4 {
+				failures = reconciler.NextFailures(failures, false) // LISTEN failed: not led
+				d := reconciler.RetryDelay(failures, 0)
+				Expect(d).To(BeNumerically(">", prev))
+				prev = d
+			}
+			Expect(prev).To(Equal(8 * reconciler.RetryBase))
+			Expect(reconciler.NextFailures(failures, true)).To(Equal(1), "a lead that ran passes starts over")
+		})
 	})
 })
 

@@ -15,7 +15,7 @@ env_is KOINON_CHECKPOINTS_S3_BUCKET '"koinon-homes"' "${ckpt[@]}"
 env_is KOINON_CHECKPOINTS_INTERVAL '"1h"' "${ckpt[@]}"
 has "the reconciler is told to checkpoint" 'checkpoints: true' "${ckpt[@]}" --show-only templates/config.yaml
 has "the S3 credentials come from the Secret" 'name: "koinon-homes-s3"' "${ckpt[@]}"
-secret_key() { render --show-only templates/deployments.yaml "${ckpt[@]}" | grep -A4 -E -- "- name: $1\$" | grep -Fq -- "key: $2" || fail "$1 reads key $2 of the Secret"; }
+secret_key() { render --show-only templates/deployments.yaml "${ckpt[@]}" | grep -A4 -E -- "- name: $1\$" | hit -F -- "key: $2" || fail "$1 reads key $2 of the Secret"; }
 secret_key AWS_ACCESS_KEY_ID AWS_ACCESS_KEY_ID
 secret_key AWS_SECRET_ACCESS_KEY AWS_SECRET_ACCESS_KEY
 secret_key KOINON_CHECKPOINTS_S3_ENDPOINT endpoint
