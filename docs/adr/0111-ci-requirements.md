@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- Area: engineering-process
+- Tags: ci, testing, release
 - Relates to: [0025](0025-testing-strategy.md) (testing layers), [0047](0047-repository-scaffold.md) (GitHub-hosted runners only),
   [0079](0079-dependency-cooldown.md) (3-day age), [0085](0085-upgrade-compatibility-and-recovery-policy.md) and
   [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) (no upgrade promise before v0.3),

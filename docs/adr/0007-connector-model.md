@@ -4,6 +4,8 @@
 - Amended by: [0049](0049-v01-scope-decisions.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md),
   [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md), [0064](0064-work-tracker-connectors.md)
 - Date: 2026-10-21
+- Area: connectors-tools
+- Tags: connectors, credentials, github
 - Decision: [design.md#7](../design.md)
 
 ## Context

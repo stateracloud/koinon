@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md)
 - Date: 2026-11-09
+- Area: engineering-process
+- Tags: ci, e2e
 - Amends: [0094](0094-work-claims-on-the-public-repository.md) decision 4 (no kind e2e in the queue)
 - Relates to: [0046](0046-adr-conventions.md)
 - Issue: #444 (draft PR #451)

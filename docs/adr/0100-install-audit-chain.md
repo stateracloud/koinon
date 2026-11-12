@@ -2,6 +2,8 @@
 
 - Status: Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1)
 - Date: 2026-11-07
+- Area: security-audit
+- Tags: audit, database, migrations, helm-chart
 - Amends: [0023](0023-observability-and-audit.md) (the 2026-10-26 amendment's "no org-less events
   and no platform chain"; the lock order; the deferred superuser item and open question 1)
   and [0004](0004-human-identity.md) (where platform admin grants are audited)

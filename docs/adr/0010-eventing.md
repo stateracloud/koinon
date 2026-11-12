@@ -5,6 +5,8 @@
   truth, `LISTEN/NOTIFY` is only a hint, and the `runs` table is the queue for runs. Work arrives
   as tasks ([0065](0065-work-model-tasks-inbox.md)) through triggers ([0066](0066-triggers-and-scheduling.md)).
 - Date: 2026-10-21
+- Area: work-model
+- Tags: eventing, triggers, tasks
 - Decision: [design.md#10](../design.md)
 
 ## Context

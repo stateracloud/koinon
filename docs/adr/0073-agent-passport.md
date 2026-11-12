@@ -2,6 +2,8 @@
 
 - Status: Accepted (delivery after v0.1.0)
 - Date: 2026-10-28
+- Area: tenancy-identity
+- Tags: identity, mcp, agentgateway, audit
 - Amended by: [0097](0097-koinon-owned-gateway.md) (decision 6 delivery and the decision 12 delivery spike, in step 2)
 - Amends: [0006](0006-identity-layers.md), [0043](0043-workload-identity-adapters-and-koinon-issuer.md)
 - Relates to: [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md), [0023](0023-observability-and-audit.md), [0042](0042-ask-tier-park-and-execute.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md), [0065](0065-work-model-tasks-inbox.md), [#28](https://github.com/stateracloud/koinon/issues/28)

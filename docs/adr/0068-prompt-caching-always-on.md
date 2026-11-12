@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-28
+- Area: models-spend
+- Tags: prompt-caching, models, pricing, agentgateway
 - Relates to: [#22](https://github.com/stateracloud/koinon/issues/22), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 
 ## Context

@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0112](0112-harness-definitions.md) and [0113](0113-agent-package-access.md)
 - Date: 2026-10-29
+- Area: engineering-process
+- Tags: dependencies, ci
 - Amends: [0052](0052-opencode-v2-flavor.md) (the "two-week minimum age" mentioned in the 2026-10-28 amendment)
 - Relates to: [0049](0049-v01-scope-decisions.md), [0061](0061-image-pull-secrets-and-registry-mirrors.md), [0077](0077-pinned-openshell-and-installer.md)
 

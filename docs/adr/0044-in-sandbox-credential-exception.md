@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md)
 - Date: 2026-10-21
+- Area: security-audit
+- Tags: credentials, security, egress
 - Amends: ADR 0006 (identity layers), ADR 0013 (model access, GitHub Copilot), ADR 0015 (agent
   environment and browser)
 

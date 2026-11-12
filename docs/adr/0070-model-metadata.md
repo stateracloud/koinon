@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 4, 5, 6, 8, 9 and 10 amended 2026-11-11 (never embedded)
 - Date: 2026-10-28
+- Area: models-spend
+- Tags: models, pricing
 - Relates to: [0052](0052-opencode-v2-flavor.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md),
   [0068](0068-prompt-caching-always-on.md), [0069](0069-native-model-formats.md)

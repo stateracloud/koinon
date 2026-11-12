@@ -270,7 +270,7 @@ g_generate() {
 }
 
 g_migrate() { hack/migrate-lint.sh "$base"; }
-g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh; }
+g_adr() { hack/adr-lint-test.sh >/dev/null && hack/adr-lint.sh && hack/doc-meta-lint-test.sh >/dev/null && hack/doc-meta-lint.sh; }
 g_chart() { hack/chart-check.sh; }
 g_web() { (cd web && pnpm lint && pnpm typecheck && pnpm test); }
 g_shell() {
