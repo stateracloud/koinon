@@ -229,7 +229,7 @@ jobs:
       - id: go
         uses: ./.github/actions/setup-go-cache
       # The chart contract test (test/chartsmoke) renders the chart; same pin as the chart jobs.
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
       # Test results of the cacheable packages (issue 43), saved by warm-caches on every push to main
@@ -702,7 +702,7 @@ jobs:
       # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
         uses: ./.github/actions/setup-go-cache
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
@@ -725,7 +725,7 @@ jobs:
       # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
         uses: ./.github/actions/setup-go-cache
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
       # setup-envtest downloads the API server binaries into this directory; Go's own caches come
@@ -751,7 +751,7 @@ jobs:
       # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
         uses: ./.github/actions/setup-go-cache
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
       # The envtest API server binaries, as in chart smoke (same key: warm-caches saves it).
