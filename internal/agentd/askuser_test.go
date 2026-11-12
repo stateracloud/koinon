@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -45,7 +46,7 @@ type askEnv struct {
 }
 
 func newAskEnv(ctx context.Context) *askEnv {
-	a := &askEnv{env: newEnv(ctx, store.AgentFlavorOpencode), ids: make(chan string, 4)}
+	a := &askEnv{env: newEnv(ctx, harness.OpenCode), ids: make(chan string, 4)}
 	Expect(db.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, a.org).Scan(&a.slug)).To(Succeed())
 	a.serve()
 	a.args = map[string]any{

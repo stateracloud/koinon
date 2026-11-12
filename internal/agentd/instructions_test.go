@@ -13,14 +13,14 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 var _ = DescribeTable("InstructionLink",
-	func(f store.AgentFlavor, want string) {
+	func(f string, want string) {
 		Expect(agentd.InstructionLink(f)).To(Equal(want))
 	},
-	Entry("OpenCode: none, its config's instructions key names the file", store.AgentFlavorOpencode, ""),
+	Entry("OpenCode: none, its config's instructions key names the file", harness.OpenCode, ""),
 )
 
 // The restore script runs in the sandbox's /bin/sh; here it runs in the host's against a

@@ -37,7 +37,7 @@ The entry scripts source `common/koinon-entry-lib.sh` (installed as
 checks, the instruction-file check and the `KOINON_*` exports. Each script
 keeps what differs: its value check, PATH, the harness's variables, home clean-up and the exec.
 
-`internal/flavor` holds one descriptor per flavor (entry script, ready command, instruction
+`internal/harness` holds one descriptor per flavor (entry script, ready command, instruction
 link (empty for OpenCode), default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
 the same specs and per-flavor expectations (`make test-flavors`; `make flavor-<name>` builds
 one image). Today the suite runs against OpenCode only.

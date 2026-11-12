@@ -50,7 +50,7 @@ koinon_extra_arg() { return 1; }
 # compacts the conversation (internal/agentd compactionTokens, ADR 0070 amendment 2026-11-11); empty
 # leaves the harness's own behaviour.
 #
-# A flavor whose harness retries model requests (internal/flavor RetriesModelRequests) also takes
+# A flavor whose harness retries model requests (internal/harness RetriesModelRequests) also takes
 # Koinon's retry policy, which koinon-agentd always passes (ADR 0056 amendment 2026-10-31, point 3):
 # --model-tries (the first request included), --model-retry-backoff-ms (the first wait; it doubles
 # per retry, up to a minute) and --model-max-retry-after-ms (the longest Retry-After waited out; a

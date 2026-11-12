@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -62,8 +63,8 @@ var _ = Describe("Org MCP servers", func() {
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
 			MCPAskURL: "http://koinon-api-tools.koinon.svc:8081/mcp-ask",
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			Logger: slog.New(slog.DiscardHandler),
 		})

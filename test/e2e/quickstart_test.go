@@ -33,6 +33,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
@@ -326,8 +327,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: tmpl, DisplayName: "Repo helper",
-			Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
-			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
+			Harness: harness.OpenCode,
+			Grants:  []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		agent = created.GetAgent()
@@ -981,7 +982,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. Gateway header allowlist and key-in-header/URL refusal")
 	})
 
-	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
+	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
 	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
@@ -1006,7 +1007,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
 			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
 
-		By("pointing the flavor at an image nobody can pull, and shortening the sandbox wait cap")
+		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
 		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
 		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
@@ -1038,7 +1039,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(tmpl).NotTo(BeEmpty())
 		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Harness: harness.OpenCode,
 			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
 		})
 		Expect(err).NotTo(HaveOccurred())

@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/modelformat"
 )
@@ -56,7 +57,7 @@ func serveModel(ctx context.Context, e *env, name string, priced bool) string {
 func agentWith(ctx context.Context, e *env, config string) string {
 	GinkgoHelper()
 	q := store.New(pool)
-	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: e.user})
+	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Harness: harness.OpenCode, CreatedBy: e.user})
 	Expect(err).NotTo(HaveOccurred())
 	v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: e.org, AgentID: a.ID, Config: []byte(config), CreatedBy: e.user})
 	Expect(err).NotTo(HaveOccurred())

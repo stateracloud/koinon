@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -100,7 +101,7 @@ var _ = Describe("prices and budgets", func() {
 		Expect(st).To(Equal(http.StatusOK), string(raw))
 
 		By("the spend report puts the gateway's cost and the estimated output next to Koinon's cost")
-		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: e.user})
+		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Harness: harness.OpenCode, CreatedBy: e.user})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
 			input_tokens, output_tokens, cost_usd, gateway_cost_usd, priced, estimated, cost_flagged, occurred_at) VALUES

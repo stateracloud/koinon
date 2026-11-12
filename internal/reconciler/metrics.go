@@ -20,7 +20,7 @@ const (
 	errKindGatewayApply    = "gateway_apply"    // the gateway was unreachable or the reload did not complete
 	errKindGatewayRejected = "gateway_rejected" // the gateway rejected objects or keys while serving the rest
 	errKindGatewayConfig   = "gateway_config"   // the gateway refused the whole config and kept the previous one (standalone mode)
-	errKindSandbox         = "sandbox"          // converging an agent's sandbox, its provider record or its flavor profile failed
+	errKindSandbox         = "sandbox"          // converging an agent's sandbox, its provider record or its harness profile failed
 )
 
 // unmarkedKinds are the label values of koinon_openshell_unmarked_objects and

@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { agentStatusLabel, flavorLabel } from '@/lib/labels'
+import { agentStatusLabel, harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 /** AgentsPage lists the org's agents. */
@@ -39,7 +39,7 @@ export function AgentsPage() {
               <Link to="/agents/$agentId" params={{ agentId: a.id }} className="font-medium hover:underline">
                 {a.displayName}
               </Link>
-              <span className="text-muted-foreground text-sm">{flavorLabel(a.flavor)}</span>
+              <span className="text-muted-foreground text-sm">{harnessLabel(a.harness)}</span>
               <span className="ml-auto flex flex-wrap items-center gap-2">
                 {a.unhealthyAt && <Badge variant="destructive">Unhealthy</Badge>}
                 <Badge variant={a.status === AgentStatus.DRAFT ? 'outline' : 'secondary'}>{agentStatusLabel(a.status)}</Badge>
