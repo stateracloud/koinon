@@ -22,6 +22,7 @@ import (
 	mrand "math/rand/v2"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
@@ -39,6 +40,8 @@ const (
 	DefaultMaxBackoff   = 30 * time.Second
 	DefaultApplyTimeout = 2 * time.Minute
 	ackAttempts         = 3
+	// maxBase leaves room in stateserver.MaxCopyIDLen (253) for "-" and the 16-digit boot nonce.
+	maxBase = 236
 )
 
 // NewCopyID returns a copy id for this process incarnation: base (for example the pod UID) and a
@@ -52,8 +55,12 @@ func NewCopyID(base string) (string, error) {
 	if base == "" {
 		base = "gateway"
 	}
-	if len(base) > 240 {
-		base = base[:240]
+	if len(base) > maxBase {
+		cut := maxBase
+		for cut > 0 && !utf8.RuneStart(base[cut]) { // never split a multi-byte rune
+			cut--
+		}
+		base = base[:cut]
 	}
 	return base + "-" + hex.EncodeToString(b[:]), nil
 }
@@ -270,6 +277,15 @@ func (c *Client) half(ctx context.Context, rev int64, h gwv1.Half, apply func(co
 			return nil
 		}
 		if ctx.Err() != nil {
+			break
+		}
+		switch connect.CodeOf(err) {
+		case connect.CodeFailedPrecondition, connect.CodeInvalidArgument, connect.CodeUnauthenticated:
+			// Waiting cannot make these succeed (a pruned revision, a bad request, a bad token):
+			// end the session so Run reconnects and gets the newest revision.
+			attempt = ackAttempts
+		}
+		if attempt == ackAttempts {
 			break
 		}
 		select {

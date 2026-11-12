@@ -7,9 +7,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -36,6 +38,8 @@ type memStore struct {
 	acks []ack
 	// failAcks makes Ack fail while > 0, counting down.
 	failAcks int
+	// unknownAcks makes Ack answer ErrUnknownRevision (FailedPrecondition on the wire) while > 0.
+	unknownAcks int
 }
 
 type ack struct {
@@ -63,6 +67,10 @@ func (m *memStore) Latest(context.Context) (*gwv1.StateUpdate, error) {
 func (m *memStore) Ack(_ context.Context, copyID string, rev int64, half gwv1.Half) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.unknownAcks > 0 {
+		m.unknownAcks--
+		return stateserver.ErrUnknownRevision
+	}
 	if m.failAcks > 0 {
 		m.failAcks--
 		return errors.New("database unavailable")
@@ -293,6 +301,33 @@ var _ = Describe("the gateway State client", func() {
 		Expect(testutil.ToFloat64(m.AckFailures.WithLabelValues("model"))).To(Equal(1.0))
 	})
 
+	It("follows a lower revision after a database restore: applies both halves again and acks it", func() {
+		start(20 * time.Millisecond)
+		st.publish(5, "five")
+		run(nil)
+		Eventually(acked(5, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Eventually(acked(5, gwv1.Half_HALF_MODEL), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+
+		st.publish(3, "three") // the restored database's newest revision
+		Eventually(acked(3, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Eventually(acked(3, gwv1.Half_HALF_MODEL), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Expect(mcp.names()).To(Equal([]string{"five", "three"}))
+		Expect(model.names()).To(HaveLen(2))
+	})
+
+	It("does not retry an ack that cannot succeed: it ends the session and reconnects", func() {
+		start(20 * time.Millisecond)
+		st.publish(1, "one")
+		st.unknownAcks = 1 // FailedPrecondition once; a retry inside the loop would then succeed
+		m := stateclient.NewMetrics(nil)
+		run(m)
+		Eventually(acked(1, gwv1.Half_HALF_MODEL), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Eventually(acked(1, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		failures := testutil.ToFloat64(m.AckFailures.WithLabelValues("model")) + testutil.ToFloat64(m.AckFailures.WithLabelValues("mcp"))
+		Expect(failures).To(Equal(1.0), "one failed ack ended the session; no retry masked it")
+		Expect(mcp.names()).To(Equal([]string{"one"}), "applied once")
+	})
+
 	It("keeps retrying while the server is down", func() {
 		start(20 * time.Millisecond)
 		st.publish(1, "one")
@@ -318,5 +353,13 @@ var _ = Describe("the gateway State client", func() {
 		Expect(err).NotTo(HaveOccurred())
 		id2, _ := stateclient.NewCopyID("pod-uid")
 		Expect(id).NotTo(Equal(id2), "a boot nonce makes each incarnation's id its own")
+
+		// A base that would be cut inside a multi-byte rune is cut before it.
+		long := strings.Repeat("a", 235) + strings.Repeat("é", 10) // byte 236 is the second byte of an é
+		id, err = stateclient.NewCopyID(long)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(utf8.ValidString(id)).To(BeTrue())
+		Expect(len(id)).To(BeNumerically("<=", stateserver.MaxCopyIDLen))
+		Expect(id).To(HavePrefix(strings.Repeat("a", 235) + "-"))
 	})
 })

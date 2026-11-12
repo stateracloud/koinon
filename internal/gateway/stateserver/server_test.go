@@ -154,6 +154,25 @@ var _ = Describe("the gateway State stream", Ordered, func() {
 		}, 20*time.Second).Should(BeTrue())
 	})
 
+	It("follows a lower revision after a database restore, on the same stream", func(ctx SpecContext) {
+		publish(ctx, "one")
+		r2 := publish(ctx, "two")
+		_, c, _ := serve(stateserver.Config{PollInterval: 50 * time.Millisecond})
+		st, err := c.StreamState(ctx, &gwv1.StreamStateRequest{CopyId: "copy-1"})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(st.Close)
+		u, err := receive(ctx, st)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(u.GetRevision()).To(Equal(r2))
+
+		_, err = pool.Exec(ctx, "DELETE FROM gateway_state_revisions WHERE revision = $1", r2)
+		Expect(err).NotTo(HaveOccurred())
+		u, err = receive(ctx, st)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(u.GetRevision()).To(BeNumerically("<", r2))
+		Expect(u.GetMcp().GetTargets()[0].GetName()).To(Equal("one"))
+	})
+
 	It("sends nothing before the first revision exists, then the first one", func(ctx SpecContext) {
 		_, c, _ := serve(stateserver.Config{PollInterval: 50 * time.Millisecond})
 		st, err := c.StreamState(ctx, &gwv1.StreamStateRequest{CopyId: "copy-1"})
