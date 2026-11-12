@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/estimate"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providertype"
@@ -166,8 +167,11 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		case e.ResponseBytes >= 0:
 			// Measured: a 0 then says nothing was streamed (ADR 0056, amendment 2026-10-31, point 1).
 			x.ResponseBytes, x.ResponseKnown = e.ResponseBytes, true
-		case e.Status == 0 && !e.OutputKnown:
-			// No status: the client left before the response headers, so nothing was streamed either.
+		case e.Status == 0 && e.Stream && !e.OutputKnown:
+			// No status on a stream: the client left before the response headers, which a stream
+			// sends before its first token, so nothing was streamed either. A response not known to
+			// stream sends its headers only when the provider has generated it, so a status of 0
+			// there says nothing about the output: it is estimated as an unknown size.
 			x.ResponseKnown = true
 		}
 		if e.InputKnown {
@@ -238,7 +242,9 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			return p, err
 		}
 		streamed, basis := estimate.CutOutput(params, max(e.ResponseBytes, 0), e.ResponseBytes >= 0, bound)
-		if streamed > p.totalOut() {
+		// Only message_start's usage is a placeholder; any other logged usage is the provider's own
+		// and is not raised.
+		if streamed > p.totalOut() && e.Format == modelformat.Anthropic && e.Stream {
 			p.output = max(streamed-p.reasoning, 0)
 			p.estimated = true
 		}

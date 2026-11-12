@@ -303,8 +303,10 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 	// agentgateway logs a request whose client left before the response headers with the model
 	// and the key but no status, no usage and no cost (verified against v1.7.0). The provider may
-	// have read the prompt, so the ledger charges the input estimate, marked usage_missing; no
-	// output was streamed, so none is charged.
+	// have read the prompt, so the ledger charges the input estimate, marked usage_missing. The
+	// request did not stream: its headers come only once the provider generated the response, so
+	// the client leaving first does not show that nothing was generated. Its output is charged the
+	// bounded estimate of an unknown size (old issue 670): a quarter of the 4096 max_output.
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
 		d := newEnv(ctx, uniq("org"), "", "100.00")
 		d.model(ctx, "fake", slowModel)
@@ -347,8 +349,8 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(row.Estimated).To(BeTrue())
 		Expect(row.CostFlagged).To(BeTrue())
 		Expect(string(row.Estimate)).To(ContainSubstring(`"usage_missing": true`))
-		Expect(ledger.FormatUSD(row.CostUsd)).To(Equal("0.0012"), "charged its input, not dropped")
-		Expect(row.OutputTokens).To(BeZero(), "no status: nothing was streamed, no output, never max_tokens")
+		Expect(row.OutputTokens).To(Equal(int64(1024)), "not streamed: the bounded estimate, never zero, never max_output")
+		Expect(ledger.FormatUSD(row.CostUsd)).To(Equal("0.0524"), "its input (24 tokens) and 1024 output tokens at $50/M")
 	}, SpecTimeout(time.Minute))
 
 	// agentgateway v1.7.0 logs a cut chat-completion stream with the usage it saw, which is none

@@ -652,7 +652,23 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 		})
 
-		It("charges no output to a request the client left before the response headers (no status: nothing streamed)", func(ctx SpecContext) {
+		It("charges no output to a stream the client left before the response headers (no status: nothing streamed)", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, MaxTokens: 32000,
+				Format: modelformat.Anthropic, Stream: true, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.InputTokens).To(Equal(int64(1000)), "the provider may have read the prompt")
+			Expect(s.OutputTokens).To(BeZero(), "a stream sends its headers before its first token")
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputNothingStreamed))
+		})
+
+		It("charges the bounded estimate to a request not known to stream that the client left before the headers", func(ctx SpecContext) {
+			// A non-streamed response sends its headers only once the provider generated it, so a
+			// client that gave up first does not show that nothing was generated (and billed).
 			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			_, err := ing.Ingest(ctx, []ledger.Entry{{
@@ -661,9 +677,25 @@ var _ = Describe("An unusable stored price", func() {
 			}})
 			Expect(err).NotTo(HaveOccurred())
 			s := e.lastEntry(ctx)
-			Expect(s.InputTokens).To(Equal(int64(1000)), "the provider may have read the prompt")
-			Expect(s.OutputTokens).To(BeZero())
-			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputNothingStreamed))
+			Expect(s.InputTokens).To(Equal(int64(1000)))
+			Expect(s.OutputTokens).To(Equal(int64(estimate.UnknownOutputMax)), "not a way to leave the output uncharged")
+			Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.008392"))
+			Expect(basis(s)).To(HaveKeyWithValue("output_basis", estimate.OutputBounded))
+		})
+
+		It("does not raise logged usage that is not message_start's placeholder", func(ctx SpecContext) {
+			// A proxy error on a non-streamed response whose usage is the provider's own: charged as logged.
+			e := newEnv(ctx, uniq("org"), "", "100.00")
+			e.model(ctx, "openrouter", flash)
+			_, err := ing.Ingest(ctx, []ledger.Entry{{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, MaxTokens: 32000, Status: 200,
+				Format: modelformat.Anthropic, Error: "Upstream", InputKnown: true, InputTokens: 1000,
+				OutputKnown: true, OutputTokens: 300, ResponseBytes: -1, Time: time.Now(),
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(Equal(int64(300)))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"output_estimated": false`))
 		})
 
 		It("estimates the output of a cut stream from its measured response size", func(ctx SpecContext) {
