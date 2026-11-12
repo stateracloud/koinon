@@ -1,11 +1,15 @@
 # 0105. One route to main: the merge queue, and drafts run nothing
 
-- Status: Proposed
+- Status: Accepted (procoduck, 2026-11-09; built in PR A #479 and PR B #487; amended 2026-11-11, below)
 - Date: 2026-11-09
+- Area: engineering-process
+- Tags: ci, e2e, github, claims
 - Supersedes in part: [0102](0102-merge-queue-runs-the-kind-e2e.md) decisions 2, 3 and 6 (evidence split, the admin
   flow, the bootstrap shim); 0102 decisions 1, 4 and 5 stay
 - Amends: [0094](0094-work-claims-on-the-public-repository.md) decision 4 ("The way in is unchanged", "Admin merges
-  still merge directly", the updater retirement condition); [0025](0025-testing-strategy.md) (the lab as e2e evidence; "Amended by 0105")
+  still merge directly", the updater retirement condition); [0025](0025-testing-strategy.md) (the lab as e2e evidence; "Amended by 0105");
+  [0026](0026-home-lab-and-license.md) and [0090](0090-scripts-require-bash-5.md) (the lab statuses as merge evidence);
+  [0047](0047-repository-scaffold.md) (the pull request e2e rule); [0082](0082-work-claims-and-ready-queue.md) (decisions 8 and 9: the updater, the sensitive-path review)
 - Relates to: [0103](0103-recorded-review-verdict-check.md) (the `review` check), [0104](0104-work-claims-reduced-to-the-lock.md)
   (claims as a plain lock), [0046](0046-adr-conventions.md)
 - Lands in two pull requests: PR A (decisions 7 to 10, no change of route; merged as #479) and PR B (decisions 1
@@ -380,7 +384,7 @@ the ADR 0103 review gate on the head. Decision 6 (`--admin` for `.github/**`): `
 
 ## Amendment 2026-11-11 (#546): the `review` check is gone
 
-ADR 0103 is superseded: `review.yml`, `hack/review-gate.sh` and `hack/review-verdict.sh` are removed. Read every
+ADR 0103 is deprecated: `review.yml`, `hack/review-gate.sh` and `hack/review-verdict.sh` are removed. Read every
 `review` context and review-gate step above as historical; the `main` ruleset never requires it.
 
 ## Amendment 2026-11-11 (#572): the pull request e2e is label-only, and `flavors` is a queue check

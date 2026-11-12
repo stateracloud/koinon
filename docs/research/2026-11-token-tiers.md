@@ -1,5 +1,10 @@
 # Where agent tokens go: search and read tiers
 
+- Status: Complete
+- Date: 2026-11-02
+- Area: engineering-process
+- Tags: tooling
+
 Research date: 2026-11-02, for #526. Source: the Claude Code session transcripts of this repository
 (`~/.claude/projects/-Users-user-Developer-GitRepos-koinon/*.jsonl` and their
 `subagents/**`). Read-only analysis; no task was replayed. Characters are the length of the tool

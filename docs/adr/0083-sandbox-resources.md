@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-31
+- Area: runtime-sandbox
+- Tags: sandbox, kubernetes, isolation
 - Relates to: [0045](0045-openshell-hardening-defaults.md), [0075](0075-isolation-tiers.md), [0020](0020-agent-builder-and-templates.md), [0027](0027-repo-and-versioning.md)
 - Issue: old issue 314 (decision by procoduck, 2026-10-31); this ADR covers the first slice
 
@@ -83,6 +85,28 @@ that cannot be reclaimed.
 - Turning `sandboxLimitRange.enabled` off stops the chart from rendering the ClusterRole, binding
   and VAP, and the reconciler applies nothing new. Existing LimitRanges stay until removed:
   `kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`.
+
+### Amendment (2026-11-11): per-agent override (#75)
+
+- An org admin or owner can override the four values for one agent (`SetAgentSandboxResources`,
+  `GetAgentSandboxResources`; the agent page, "Sandbox size"). The override is a setting of the agent,
+  not a new version, stored in four nullable columns of `agents` (migration `00074`, expand-only).
+- **Precedence:** the agent's override, else the template's value, else the platform default, per
+  value; then the clamp of decision 4. The reconciler clamps again on every pass because the bounds
+  can change after the write; a stale out-of-bounds override is logged once and runs clamped.
+- **The API refuses** a value outside the bounds, a malformed quantity, and a request above its limit
+  (taking the template and the default into account), with `INVALID_ARGUMENT` and a message that
+  names the bounds ("memory.limit 16Gi is above the maximum: the platform allows 512Mi to 8Gi").
+  Setting a memory request that the install raises to the limit (`memoryRequestEqualsLimit`) is
+  allowed; the state reports the effective value and the flag.
+- **Audited** as `agent.sandbox_resources.set` with the old and the new override in one transaction;
+  a repeat of the stored value writes nothing.
+- **The API needs the bounds.** `koinon-api` reads the `sandboxResources` section of `config.yaml`
+  (the chart now mounts the file into the API Deployment and rolls it on a change); every other
+  setting of the API stays a flag or environment variable. One parser (`sandboxres.FromConfig`)
+  serves both binaries.
+- A change recreates the sandbox at the next pass (the size is in the spec hash).
+- Not done here: the REST admin API (`internal/adminapi`) does not expose it yet.
 
 ## Links
 

@@ -135,6 +135,21 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: f.agent.GetId(), Thinking: "default"})
 		},
 	},
+	agentv1alpha1connect.AgentServiceSetAgentKeepWarmProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentKeepWarm(ctx, &agentv1alpha1.SetAgentKeepWarmRequest{OrgId: org, AgentId: f.agent.GetId(), KeepWarm: false})
+		},
+	},
+	agentv1alpha1connect.AgentServiceGetAgentSandboxResourcesProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.GetAgentSandboxResources(ctx, &agentv1alpha1.GetAgentSandboxResourcesRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentSandboxResourcesProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentSandboxResources(ctx, &agentv1alpha1.SetAgentSandboxResourcesRequest{OrgId: org, AgentId: f.agent.GetId(), Resources: &agentv1alpha1.SandboxResources{MemoryLimit: "2Gi"}})
+		},
+	},
 	agentv1alpha1connect.AgentServiceRunAgentTriggerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: f.agent.GetId(), TriggerId: "daily-check"})

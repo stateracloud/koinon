@@ -2,6 +2,8 @@
 
 - Status: Accepted (2026-11-06)
 - Date: 2026-11-06
+- Area: connectors-tools
+- Tags: mcp, auth, credentials, encryption
 - Amends: [0057](0057-mcp-servers.md) (amendment 2026-10-24, items 2 and 5: the OAuth refusal and the
   injection path for servers that need a sign-in)
 - Relates to: [0005](0005-agent-identity.md) (agents act as themselves; `delegated-user`),

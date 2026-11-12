@@ -102,6 +102,20 @@ func (d Declaration) Equal(o Declaration) bool {
 		boolPtrEqual(d.ResultUntrustedInput, o.ResultUntrustedInput) && boolPtrEqual(d.ResultPrivateData, o.ResultPrivateData)
 }
 
+// ResultLegs are the legs a result of the tool sets: the tool's own declaration where it has one,
+// else its server's (ADR 0091 decision 4). The guard and the template legs test both call it, so
+// the per-leg fallback cannot drift between them.
+func (d Declaration) ResultLegs(serverUntrustedInput, serverPrivateData bool) (untrustedInput, privateData bool) {
+	untrustedInput, privateData = serverUntrustedInput, serverPrivateData
+	if d.ResultUntrustedInput != nil {
+		untrustedInput = *d.ResultUntrustedInput
+	}
+	if d.ResultPrivateData != nil {
+		privateData = *d.ResultPrivateData
+	}
+	return untrustedInput, privateData
+}
+
 func boolPtrEqual(a, b *bool) bool {
 	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }

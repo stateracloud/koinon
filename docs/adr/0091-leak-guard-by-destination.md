@@ -2,6 +2,9 @@
 
 - Status: Accepted (decisions by procoduck, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person)
 - Date: 2026-11-03
+- Area: security-audit
+- Tags: leak-guard, egress, mcp, github
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 4, in step 1: a reply the guard never saw sets both legs)
 - Amends: [0084](0084-leak-guard.md) (the main protection moves from the text check to where a call sends data; decisions 2, 3, 5, 7, 8 and 12 change)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md) (approvals), [0051](0051-session-home-generations.md) (home generations), [0057](0057-mcp-servers.md) (tool tiers), [0062](0062-code-host-connectors.md) (code-host repository list), [0080](0080-tool-set-matches-egress-and-escape-hosts.md) (no web egress from the sandbox)
 - Issue: old issue 625, part of #51; changes old issue 348, old issue 349, old issue 350, old issue 351, #70 and old issue 609

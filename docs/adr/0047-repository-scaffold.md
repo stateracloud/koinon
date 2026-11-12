@@ -1,7 +1,9 @@
 # 0047. Repository scaffold, data model foundations and CI gates
 
-- Status: Accepted; amended 2026-10-26 (below)
+- Status: Accepted; amended 2026-10-26 (below); the pull request e2e rule amended by [0105](0105-merge-queue-route.md) (amendment of 2026-11-11, #572)
 - Date: 2026-10-21
+- Area: engineering-process
+- Tags: ci, database, migrations, api, tooling
 
 ## Context
 
@@ -128,6 +130,7 @@ the cluster's platform added a registry, a secret store, CloudNativePG, an S3-co
   runners, and standard runners cost no Actions minutes. Its `decide` job runs the quickstart on a
   pull request only for the e2e's own files or the `e2e` label; `e2e result` gates every needs-e2e
   PR on a green e2e on its head (see the workflow header). The decided text above is kept as the record.
+  _(Changed by [0105](0105-merge-queue-route.md), amendment of 2026-11-11 (#572): a pull request runs the `quickstart` only with the `e2e` label, no path rule starts it, and the merge queue's `quickstart` is the only e2e proof.)_
 
 ## Alternatives considered
 

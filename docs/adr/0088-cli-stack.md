@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-01
+- Area: frontend-ux
+- Tags: cli, helm-chart, testing
 - Relates to: [0060](0060-migrations-as-a-job.md), [0076](0076-database-modes.md), [0079](0079-dependency-cooldown.md), [0085](0085-upgrade-compatibility-and-recovery-policy.md)
 
 ## Context

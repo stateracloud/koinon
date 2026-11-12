@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- Area: engineering-process
+- Tags: ci, testing, release
 - Relates to: [0025](0025-testing-strategy.md) (testing layers), [0047](0047-repository-scaffold.md) (GitHub-hosted runners only),
   [0079](0079-dependency-cooldown.md) (3-day age), [0085](0085-upgrade-compatibility-and-recovery-policy.md) and
   [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) (no upgrade promise before v0.3),
@@ -137,10 +139,10 @@ in part 2 too.
 - Negative: the guide and `docs/dev/ci.md` can disagree. The guide's first section says which wins; a
   change to a job updates both.
 - Negative: the rule script reads text, not YAML. A workflow that hides a `paths:` key in an anchor or a
-  flow-style `on:` is not seen. Part 2 adds `zizmor`, which parses the workflow.
+  flow-style `on:` is not seen. `zizmor` (added in part 2) parses the workflow.
 - Negative: T7 (a timeout on every job) was a report at first. 14 of 21 `ci.yml` jobs had none on
   2026-11-11. The CI speed work (#572, pull request 2 of 3, #589) added them, and `hack/runner-lint.sh` now fails a job without one.
-- Follow-ups: part 2 of #579 (`zizmor`, `govulncheck` on pull requests, remove the Playwright retry); the
+- Follow-ups: part 2 of #579 (`zizmor` is in; `govulncheck` on pull requests, remove the Playwright retry); the
   proofs in #580; a review of the guide when a premise in its "Valid while" section stops being true
   (paid runners, a second maintainer, a second repository's CI).
 

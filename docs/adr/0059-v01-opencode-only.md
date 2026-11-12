@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0112](0112-harness-definitions.md)
 - Date: 2026-10-26
+- Area: runtime-sandbox
+- Tags: flavors, harness, migrations, roadmap
 - Amends: [0035](0035-v01-flavors.md) (v0.1 ships one flavor instead of three)
 - Supersedes: [0053](0053-hermes-context-file-patch.md)
 

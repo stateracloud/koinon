@@ -1,5 +1,10 @@
 # MCP server registration and discovery through agentgateway: research for Koinon
 
+- Status: Complete
+- Date: 2026-10-23
+- Area: connectors-tools
+- Tags: mcp, agentgateway
+
 Date: 2026-10-23. Sources: agentgateway source at tag **v1.6.0** (commit `ea56086`), agentgateway.dev docs ("latest"), the MCP specification at modelcontextprotocol.io (current revision **2026-07-28**), and the MCP Registry repo at commit `fa509e0`.
 
 Each claim is tagged **[E]** (established: read directly in source or official docs) or **[I]** (inference: my reading of what follows from those sources). Short paths such as `types/agent.rs` are relative to `crates/agentgateway/src/` in the agentgateway repo unless they say otherwise. The full URLs are in the Sources section.
