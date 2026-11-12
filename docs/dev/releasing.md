@@ -241,7 +241,7 @@ Every command must succeed. A `denied` or `unauthorized` error means that packag
 One person (the project lead) holds each of these today. Any other maintainer (`MAINTAINERS.md`) can do
 the ones that need only repository write access; the others need an
 org owner, and the stand-in is a written procedure. Until a second org owner exists, the org-owner
-steps wait for the project lead. Adding one is the fix and is tracked in #853. The packages are public (ADR 0027, amendment of 2026-11-12, #854).
+steps wait for the project lead. Adding one is the fix and is tracked in #853. The packages are made public, signed first (ADR 0027, amendment of 2026-11-12, #854).
 
 | Step | Needs | Stand-in or procedure |
 | --- | --- | --- |
