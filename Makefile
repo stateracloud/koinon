@@ -144,6 +144,10 @@ flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/flavors/...
 
+.PHONY: test-opencode-plugin
+test-opencode-plugin: ## Type-check and unit-test Koinon's OpenCode plugins (ADR 0093; needs pnpm, no Docker)
+	cd flavors/opencode/plugins && $(PNPM) install --frozen-lockfile && $(PNPM) run typecheck && $(PNPM) run test
+
 # The commands of the quickstart and of the backup guide are plain files that test/e2e runs (ADR 0108).
 # The docs site is in stateracloud/koinon-docs.
 .PHONY: e2e-commands-check
