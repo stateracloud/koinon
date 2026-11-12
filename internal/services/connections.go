@@ -617,6 +617,9 @@ func (s *Server) changeMCPHosts(ctx context.Context, orgID, connectionID, host s
 			return err
 		}
 		out = row
+		if row.RemovedAt.Valid {
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection was removed")
+		}
 		if _, ok := connectors.Get(row.Connector); !ok {
 			return connect.NewError(connect.CodeFailedPrecondition, "this connection is not a code-host connection")
 		}

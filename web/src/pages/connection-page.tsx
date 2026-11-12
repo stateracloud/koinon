@@ -261,7 +261,7 @@ export function ConnectionPage() {
           </AlertDescription>
         </Alert>
       )}
-      {(gh || gt) && <ConnectionMcpHosts orgId={orgId} connectionId={connectionId} hosts={c.mcpHosts} canEdit={isApprover(org.role)} />}
+      {(gh || gt) && <ConnectionMcpHosts orgId={orgId} connectionId={connectionId} hosts={c.mcpHosts} canEdit={isApprover(org.role) && !c.removed} />}
       {(gh || gt) && isApprover(org.role) && (
         <InstallationRepos orgId={orgId} connectionId={connectionId} noun={gt ? 'the bot can see' : 'the installation can access'} />
       )}

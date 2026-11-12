@@ -560,6 +560,18 @@ var _ = Describe("ConnectionService", func() {
 			Expect(err).NotTo(HaveOccurred(), "a present host is still a no-op at the limit")
 		})
 
+		It("refuses to change the hosts of a removed connection, and writes nothing", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET removed_at = now() WHERE org_id = $1 AND id = $2`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "second-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			_, err = remove(owner, "gitea-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(Equal(1))
+		})
+
 		It("unlinks, audited, the servers that lose their host on removal, and keeps the others (the link check uses the list)", func(ctx SpecContext) {
 			_, err := add(owner, "gitea-mcp.corp.example")
 			Expect(err).NotTo(HaveOccurred())

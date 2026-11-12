@@ -10,11 +10,11 @@ import { ConnectionSchema, ConnectionService, ConnectionStatus, GitHubConnection
 import { githubConnectorType } from '@/test-fixtures'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { role?: OrgRole; hosts?: string[] } = {}) {
+function setup(opts: { role?: OrgRole; hosts?: string[]; removed?: boolean } = {}) {
   let hosts = opts.hosts ?? []
   const added: string[] = []
   const removed: string[] = []
-  const conn = () => create(ConnectionSchema, { id: 'c-1', orgId, connector: 'github', displayName: 'Acme GitHub', status: ConnectionStatus.OK, source: 'ui', mcpHosts: hosts, settings: { case: 'github', value: create(GitHubConnectionSchema, { appId: 12n, installationId: 34n }) } })
+  const conn = () => create(ConnectionSchema, { id: 'c-1', orgId, connector: 'github', displayName: 'Acme GitHub', status: ConnectionStatus.OK, source: 'ui', removed: opts.removed ?? false, mcpHosts: hosts, settings: { case: 'github', value: create(GitHubConnectionSchema, { appId: 12n, installationId: 34n }) } })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, {
@@ -66,6 +66,13 @@ describe('A connection’s extra MCP hosts', () => {
     await waitFor(() => expect(removed).toEqual(['gitea-mcp']))
     await waitFor(() => expect(screen.queryByText('gitea-mcp')).not.toBeInTheDocument())
     expect(screen.getByText('No extra hosts.')).toBeInTheDocument()
+  })
+
+  it('offers no add or remove on a removed connection, even to an admin', async () => {
+    setup({ hosts: ['gitea-mcp'], removed: true })
+    expect(await screen.findByText('gitea-mcp')).toBeInTheDocument()
+    expect(screen.queryByLabelText('MCP host name')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remove MCP host/ })).not.toBeInTheDocument()
   })
 
   it('shows the list to a member and offers no add or remove', async () => {
