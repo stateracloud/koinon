@@ -33,7 +33,14 @@ const (
 func Seed() int64 { return envInt(SeedVar, DefaultSeed) }
 
 // Cases is the number of cases per property.
-func Cases() int { return int(envInt(CasesVar, DefaultCases)) }
+func Cases() int {
+	if v := os.Getenv(CasesVar); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultCases
+}
 
 func envInt(name string, def int64) int64 {
 	if v := os.Getenv(name); v != "" {
