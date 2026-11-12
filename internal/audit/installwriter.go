@@ -131,6 +131,9 @@ func (c *InstallWriterCheck) Check(ctx context.Context) WriterStatus {
 // or a role with its privilege, and could append install events under any actor (the secret keys page of the docs site, project.SecretKeysDocURL).
 // It never fails the start, and waits at most 5 seconds; a database it cannot ask is ignored, the
 // component's own checks see it.
+//
+// A component that is meant to hold the role for one purpose (the reconciler with recovery on, ADR 0110
+// decision 6) does not call this.
 func WarnSharedWriterLogin(ctx context.Context, db Row, component string, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

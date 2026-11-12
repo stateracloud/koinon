@@ -2446,6 +2446,15 @@ type QuestionRecipient struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type RecoveryRequest struct {
+	Nonce        string
+	CrUid        string
+	Action       string
+	Requester    string
+	SealedResult string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Run struct {
 	OrgID                pgtype.UUID
 	ID                   pgtype.UUID

@@ -1143,3 +1143,17 @@ openshell.ai/gateway-id (old issue 475).
 {{- range ($sel.matchExpressions | default list) -}}{{- $keys = append $keys .key -}}{{- end -}}
 {{- $keys | uniq | sortAlpha | toJson -}}
 {{- end }}
+
+{{- /*
+The release-scoped name of the PlatformAdminRecovery admission policy and its binding (ADR 0110
+decision 6): <namespace>-<fullname>-platform-recovery, cut to 63 characters with a hash suffix. Two
+releases on one cluster never render the same cluster-scoped name.
+*/ -}}
+{{- define "koinon.recoveryPolicyName" -}}
+{{- $full := printf "%s-%s-platform-recovery" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- if gt (len $full) 63 -}}
+{{- printf "%s-%s" ($full | trunc 54 | trimSuffix "-") (sha256sum $full | trunc 8) -}}
+{{- else -}}
+{{- $full -}}
+{{- end -}}
+{{- end }}
