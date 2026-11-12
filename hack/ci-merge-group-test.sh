@@ -126,6 +126,9 @@ ATOMS = [
     (r"startsWith\(github\.ref,\s*'refs/tags/'\)", lambda: False),
     (r"inputs\.suite\s*==\s*'[a-z]+'", lambda: False),
     (r"inputs\.suite\s*!=\s*'[a-z]+'", lambda: True),
+    # the literal on/off switch of a job (contributor-gate.yml, docs/maintainers/contributor-gate.md)
+    (r"true\b", lambda: True),
+    (r"false\b", lambda: False),
     (r"always\(\)", lambda: True),
     (r"!cancelled\(\)", lambda: True),
     # conditional on an upstream output or result: a skip still reports, so it counts as running
