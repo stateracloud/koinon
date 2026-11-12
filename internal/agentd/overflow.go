@@ -74,8 +74,10 @@ func (r *runner) parkOnOverflow(ctx context.Context, task store.Task, vc agentco
 	ov := r.overflow
 	for _, o := range ov.over {
 		if n := len(ov.texts[o.Index]); n > maxArtifactBytes {
-			return &failure{reason: fmt.Sprintf("an input of %d bytes is over the %d bytes Koinon keeps", n, maxArtifactBytes),
-				class: store.RunFailureClassContextOverflow}
+			return &failure{
+				reason: fmt.Sprintf("an input of %d bytes is over the %d bytes Koinon keeps", n, maxArtifactBytes),
+				class:  store.RunFailureClassContextOverflow,
+			}
 		}
 	}
 	var kept []keptInput
@@ -114,8 +116,10 @@ func (r *runner) parkOnOverflow(ctx context.Context, task store.Task, vc agentco
 			}
 		}
 		if len(recipients) == 0 {
-			return &failure{reason: "an input is larger than the model's context cap and nobody in the org can be asked what to do with it",
-				class: store.RunFailureClassContextOverflow}
+			return &failure{
+				reason: "an input is larger than the model's context cap and nobody in the org can be asked what to do with it",
+				class:  store.RunFailureClassContextOverflow,
+			}
 		}
 		reminder, ttl := vc.QuestionTimers()
 		now := time.Now()
