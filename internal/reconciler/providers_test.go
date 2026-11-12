@@ -443,6 +443,23 @@ var _ = Describe("Provider delivery", func() {
 			Expect(got.Serving.State).To(Equal(catalog.ServingServing))
 		})
 
+		It("keeps a left-out provider's own detail when the whole apply fails (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			blocked := addProvider(ctx, org, user, "up", "sk-a", "m1")
+			cleanup(ctx, org, blocked.ID)
+			_, err := pool.Exec(ctx, `UPDATE providers SET url = 'http://169.254.169.254/v1' WHERE org_id = $1 AND id = $2`, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			mg.mu.Lock()
+			mg.fail = errors.New("gateway unreachable")
+			mg.mu.Unlock()
+			DeferCleanup(func() { mg.mu.Lock(); mg.fail = nil; mg.mu.Unlock() })
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			got, err := svc.GetProvider(ctx, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingFailed))
+			Expect(got.Serving.Detail).To(ContainSubstring("the base URL is not allowed"))
+		})
+
 		It("fails a provider whose model has no price, with a reason, instead of leaving it saved (issue 17)", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			p := addProvider(ctx, org, user, "up", "", "priced")

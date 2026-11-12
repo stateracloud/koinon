@@ -4,6 +4,8 @@ package catalog
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -31,6 +33,11 @@ const (
 	ReasonUnknown        = "unknown"
 )
 
+// SavedGrace is how long a provider may stay saved before it counts as failed. A new key reaches the
+// pod in about 3 minutes; a pass that stops before it records a status (a key store error, a database
+// error) would otherwise leave the provider saved for ever.
+const SavedGrace = 10 * time.Minute
+
 // Serving is whether agentgateway serves a provider, derived from the models the reconciler
 // recorded as served (gateway_served_models) and the failure it recorded for the last gateway
 // apply (gateway_provider_failures). The API never calls the gateway.
@@ -42,7 +49,7 @@ type Serving struct {
 }
 
 // servingOf decides the state of p from the recorded facts.
-func servingOf(p Provider, f store.ListProviderServingRow) Serving {
+func servingOf(p Provider, f store.ListProviderServingRow, now time.Time) Serving {
 	if p.DisabledReason != "" || p.Removed || p.AdminDisabled != nil {
 		return Serving{State: ServingNone}
 	}
@@ -64,6 +71,10 @@ func servingOf(p Provider, f store.ListProviderServingRow) Serving {
 		}
 		return Serving{State: ServingFailed, Reason: reason, Detail: f.FailureDetail}
 	}
+	if f.ChangedAt.Valid && now.Sub(f.ChangedAt.Time) > SavedGrace {
+		return Serving{State: ServingFailed, Reason: ReasonUnknown,
+			Detail: fmt.Sprintf("not served %d min after saving; see the reconciler log", int(now.Sub(f.ChangedAt.Time)/time.Minute))}
+	}
 	return Serving{State: ServingSaved}
 }
 
@@ -78,7 +89,7 @@ func (s *Service) withServing(ctx context.Context, org pgtype.UUID, list []Provi
 		facts[r.ProviderID.String()] = r
 	}
 	for i := range list {
-		list[i].Serving = servingOf(list[i], facts[list[i].ID])
+		list[i].Serving = servingOf(list[i], facts[list[i].ID], time.Now())
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
@@ -35,11 +36,22 @@ const failureDetailMax = 500
 // unserved model get a failure; a fully served provider keeps serving with the previous config.
 func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewayplan.Org, res gatewayplan.ApplyResult, applyErr error, configRejected string, served []gatewayplan.ServedModels, skipped []skippedProvider) error {
 	var errs []error
+	// set writes the skipped providers' own rows first, then the org-wide reason for the others.
 	set := func(org gatewayplan.Org, reason, detail string) {
+		skip := []pgtype.UUID{} // never nil: a NULL array would match no provider
+		for _, k := range skipped {
+			if k.orgID != org.ID {
+				continue
+			}
+			skip = append(skip, k.providerID)
+			if err := r.q.UpsertGatewayProviderFailure(ctx, store.UpsertGatewayProviderFailureParams{OrgID: k.orgID, ProviderID: k.providerID, Reason: k.reason, Detail: truncateUTF8(k.detail, failureDetailMax)}); err != nil {
+				errs = append(errs, fmt.Errorf("reconciler: record skipped provider for org %s: %w", org.Slug, err))
+			}
+		}
 		if len(detail) > failureDetailMax {
 			detail = truncateUTF8(detail, failureDetailMax)
 		}
-		if err := r.q.SetGatewayProviderFailures(ctx, store.SetGatewayProviderFailuresParams{OrgID: org.ID, Reason: reason, Detail: detail}); err != nil {
+		if err := r.q.SetGatewayProviderFailures(ctx, store.SetGatewayProviderFailuresParams{OrgID: org.ID, Reason: reason, Detail: detail, SkipIds: skip}); err != nil {
 			errs = append(errs, fmt.Errorf("reconciler: record provider failures for org %s: %w", org.Slug, err))
 		}
 	}

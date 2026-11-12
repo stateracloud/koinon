@@ -231,6 +231,7 @@ INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
 SELECT p.org_id, p.id, @reason::text, @detail::text
 FROM providers p
 WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
+  AND NOT (p.id = ANY(@skip_ids::uuid[]))
   AND EXISTS (
     SELECT 1 FROM models m
     LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
@@ -247,6 +248,17 @@ WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
 INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
 VALUES (@org_id, @provider_id, @reason::text, @detail::text)
 ON CONFLICT (org_id, provider_id) DO NOTHING;
+
+-- name: UpsertGatewayProviderFailure :exec
+-- koinon-reconciler, after an apply that failed whole or was rejected: a provider the pass left out of
+-- the render keeps its own reason and detail (a blocked URL says so), not the org-wide one. Replaces an
+-- older row, since no Clear runs in this path.
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+VALUES (@org_id, @provider_id, @reason::text, @detail::text)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
+WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
+   OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail;
 
 -- name: SetGatewayUnpricedFailures :exec
 -- koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
@@ -270,10 +282,11 @@ SELECT p.id AS provider_id,
        count(m.id) FILTER (WHERE m.disabled_reason IS NULL)::int AS models,
        count(s.model_id) FILTER (WHERE m.disabled_reason IS NULL)::int AS served,
        coalesce(f.reason, '')::text AS failure_reason,
-       coalesce(f.detail, '')::text AS failure_detail
+       coalesce(f.detail, '')::text AS failure_detail,
+       greatest(p.updated_at, coalesce(max(m.updated_at), p.updated_at))::timestamptz AS changed_at
 FROM providers p
 LEFT JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
 LEFT JOIN gateway_provider_failures f ON f.org_id = p.org_id AND f.provider_id = p.id
 WHERE p.org_id = @org_id
-GROUP BY p.id, f.reason, f.detail;
+GROUP BY p.id, p.updated_at, f.reason, f.detail;

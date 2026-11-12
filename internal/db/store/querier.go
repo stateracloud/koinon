@@ -1558,6 +1558,10 @@ type Querier interface {
 	UpsertCodeHostConnectionReading(ctx context.Context, arg UpsertCodeHostConnectionReadingParams) error
 	// One connection's repositories, from parallel arrays (owner, repo and visibility at the same index).
 	UpsertCodeHostRepos(ctx context.Context, arg UpsertCodeHostReposParams) (int64, error)
+	// koinon-reconciler, after an apply that failed whole or was rejected: a provider the pass left out of
+	// the render keeps its own reason and detail (a blocked URL says so), not the org-wide one. Replaces an
+	// older row, since no Clear runs in this path.
+	UpsertGatewayProviderFailure(ctx context.Context, arg UpsertGatewayProviderFailureParams) error
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error)
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
