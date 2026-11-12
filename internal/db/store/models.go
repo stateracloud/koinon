@@ -1745,6 +1745,14 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type GatewayProviderFailure struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type GatewayServedModel struct {
 	OrgID       pgtype.UUID
 	ModelID     pgtype.UUID

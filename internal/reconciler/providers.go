@@ -132,6 +132,15 @@ type servedProviders struct {
 	files     map[string][]byte
 	// modelIDs maps each rendered model (gateway.ModelRef) to its ID, for gateway_served_models.
 	modelIDs map[string]pgtype.UUID
+	// skipped lists providers (or models of a provider) left out of the render, with the reason, so
+	// the status the UI shows is failed and not saved forever (issue #17).
+	skipped []skippedProvider
+}
+
+// skippedProvider is a provider the pass did not render, and why.
+type skippedProvider struct {
+	orgID, providerID pgtype.UUID
+	reason, detail    string
 }
 
 // loadProviders reads every org's enabled providers and models. A provider whose key cannot
@@ -160,6 +169,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			if !ok {
 				if err := r.cfg.URLPolicy.CheckStrict(ctx, row.Url); err != nil {
 					errs = append(errs, fmt.Errorf("provider %s/%s not served: %w", org.Slug, row.ProviderName, err))
+					out.skipped = append(out.skipped, skippedProvider{org.ID, row.ProviderID, catalog.ReasonUnknown, "the base URL is not allowed: " + err.Error()})
 					skip[id] = true
 					continue
 				}
@@ -169,6 +179,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 					if err != nil {
 						// Never include the error's text from the key itself: OpenKey's errors name no key.
 						errs = append(errs, fmt.Errorf("provider %s/%s not served: its key cannot be opened: %w", org.Slug, row.ProviderName, err))
+						out.skipped = append(out.skipped, skippedProvider{org.ID, row.ProviderID, catalog.ReasonUnknown, "the API key cannot be opened"})
 						skip[id] = true
 						continue
 					}
@@ -197,6 +208,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			case unpriceable && reason == prices.ReasonUnusablePrice:
 				// One org's unusable price skips that model, reported, and stops nothing else.
 				errs = append(errs, fmt.Errorf("model %s/%s not served: %w", org.Slug, row.ModelName, err))
+				out.skipped = append(out.skipped, skippedProvider{org.ID, row.ProviderID, catalog.ReasonUnknown, "unusable price: " + row.ModelName})
 				continue
 			case !unpriceable:
 				return out, errs, fmt.Errorf("reconciler: price of model %s/%s: %w", org.Slug, row.ModelName, err)
