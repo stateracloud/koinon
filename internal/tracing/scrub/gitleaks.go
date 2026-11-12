@@ -120,7 +120,12 @@ var gitleaksNoFloor = map[string]struct{}{
 type ownedShape struct {
 	name   string
 	prefix string // literal every match starts with; the cheap pre-filter
-	re     *regexp.Regexp
+	// re is anchored at the start: it is run on the text from each occurrence of prefix whose left
+	// side passes leftOK, so a word that merely ends in the prefix (task-, risk-) costs no scan.
+	re *regexp.Regexp
+	// minEntropy, when above zero, drops a match whose Shannon entropy is not above it (a
+	// placeholder such as sk-xxxx...), as the floor of the gitleaks OpenAI rule does.
+	minEntropy float64
 	// reason is why gitleaks' rule does not do (issue #212, maintainer decision 2026-11-11).
 	reason string
 }
@@ -129,20 +134,23 @@ var ownedShapes = []ownedShape{
 	{
 		name:   "openrouter",
 		prefix: "sk-or-v1-",
-		re:     regexp.MustCompile(`sk-or-v1-[A-Za-z0-9]{8,}`),
+		re:     regexp.MustCompile(`^sk-or-v1-[A-Za-z0-9]{8,}`),
 		reason: "OpenRouter is a provider Koinon routes to and gitleaks has no rule for its key",
 	},
 	{
 		name:   "anthropic-truncated",
 		prefix: "sk-ant-",
-		re:     regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{8,}`),
+		re:     regexp.MustCompile(`^sk-ant-[A-Za-z0-9_-]{8,}`),
 		reason: "a cut-off or mistyped Anthropic key is as sensitive as a whole one, and gitleaks only knows the full 108-character shape",
 	},
 	{
 		name:   "openai-legacy",
 		prefix: "sk-",
-		re:     regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
-		reason: "the legacy OpenAI sk-<20+ alphanumerics> key still circulates, and gitleaks' OpenAI rule needs the T3BlbkFJ marker of newer keys",
+		re:     regexp.MustCompile(`^sk-[A-Za-z0-9]{20,}`),
+		// gitleaks' OpenAI rule knows the whole legacy key with its T3BlbkFJ marker and a
+		// terminator, and the newer prefixed keys.
+		reason:     "a legacy sk- key that is cut off, unterminated or without the T3BlbkFJ marker (other providers issue sk-<hex> keys) is as sensitive as a whole one",
+		minEntropy: 3,
 	},
 	{
 		name:   "google-oauth-token",
@@ -153,7 +161,7 @@ var ownedShapes = []ownedShape{
 	{
 		name:   "google-oauth-client-secret",
 		prefix: "GOCSPX-",
-		re:     regexp.MustCompile(`GOCSPX-[A-Za-z0-9_-]{20,}`),
+		re:     regexp.MustCompile(`^GOCSPX-[A-Za-z0-9_-]{20,}`),
 		reason: "Google OAuth client secret; gitleaks has no rule",
 	},
 }
@@ -162,13 +170,25 @@ var ownedShapes = []ownedShape{
 func findOwned(in string, spans []span) []span {
 	for i := range ownedShapes {
 		o := &ownedShapes[i]
-		if !strings.Contains(in, o.prefix) {
-			continue
-		}
-		for _, m := range o.re.FindAllStringIndex(in, -1) {
-			if leftOK(in, m[0]) {
-				spans = append(spans, span{m[0], m[1], KindAPIKey})
+		for from := 0; ; {
+			j := strings.Index(in[from:], o.prefix)
+			if j < 0 {
+				break
 			}
+			at := from + j
+			from = at + 1
+			if !leftOK(in, at) {
+				continue
+			}
+			m := o.re.FindStringIndex(in[at:])
+			if m == nil {
+				continue
+			}
+			if o.minEntropy > 0 && entropy(in[at:at+m[1]]) <= o.minEntropy {
+				continue
+			}
+			spans = append(spans, span{at, at + m[1], KindAPIKey})
+			from = at + m[1]
 		}
 	}
 	return spans
