@@ -357,6 +357,18 @@ its native format (ADR 0069), so the gateway forwards bodies and does no format 
 confirms each revision it serves. The kubelet tick, the 90 s key settle and agentd's reload waits do
 not apply to Koinon's gateway.
 
+Record (2026-11-12, #279 slice 2; the choices below are decided): the stream is backed by two
+install-wide tables (migration 00082), `gateway_state_revisions` (one revision sequence for the whole
+State, a full secret-free snapshot per revision with a digest) and `gateway_state_acks` (gateway copy,
+revision, half). The reconciler applies the state, then stores a revision only when the snapshot
+differs from the latest one, so the stored revision records what was applied. Each new revision sends
+`pg_notify` on `koinon_gateway_state`. Retention keeps the newest 100 revisions and drops any older
+than 30 days, never the newest; snapshots hold org names and URLs, so the age bound also limits how
+long a deleted org's data stays. An ack of a revision covers every earlier one for that half. The
+`copy_id` of an ack is unique per process incarnation (for example pod UID plus a boot nonce) and a
+copy never reuses it after a restart. S3 note: LISTEN does not work behind transaction-mode
+PgBouncer, so the stream client also polls the table as a fallback.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
