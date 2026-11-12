@@ -55,14 +55,14 @@ export const savedNotice = 'Saved. The provider shows Serving here once the gate
 export const servingPollMs = 5_000
 
 /** servingBadge words a provider's serving status (issue #17); undefined for a provider that is not served by design. */
-export function servingBadge(p: Pick<Provider, 'servingState' | 'servingReason'>): { label: string; variant: 'secondary' | 'outline' | 'destructive' } | undefined {
+export function servingBadge(p: Pick<Provider, 'servingState' | 'servingReason'>): { state: 'saved' | 'serving' | 'failed'; label: string; variant: 'secondary' | 'outline' | 'destructive' } | undefined {
   switch (p.servingState) {
     case ServingState.SAVED:
-      return { label: 'Saved, waiting for the gateway', variant: 'outline' }
+      return { state: 'saved', label: 'Saved, waiting for the gateway', variant: 'outline' }
     case ServingState.SERVING:
-      return { label: 'Serving', variant: 'secondary' }
+      return { state: 'serving', label: 'Serving', variant: 'secondary' }
     case ServingState.FAILED:
-      return { label: `Not served: ${p.servingReason || 'unknown'}`, variant: 'destructive' }
+      return { state: 'failed', label: `Not served: ${p.servingReason || 'unknown'}`, variant: 'destructive' }
     default:
       return undefined
   }

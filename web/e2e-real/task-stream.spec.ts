@@ -84,8 +84,8 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   // the reason if it says the gateway does not serve the provider.
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Providers' }).click()
   const servedProvider = page.getByRole('region', { name: 'fake' })
-  await expect(servedProvider.locator('[data-serving="SERVING_STATE_FAILED"]')).toHaveCount(0)
-  await expect(servedProvider.locator('[data-serving="SERVING_STATE_SERVING"]')).toBeVisible({ timeout: 360_000 })
+  await expect(servedProvider.locator('[data-serving="failed"]')).toHaveCount(0)
+  await expect(servedProvider.locator('[data-serving="serving"]')).toBeVisible({ timeout: 360_000 })
 
   // 3. GitHub connection to the fake GitHub App.
   const app = (await (await request.get(`${fakeGitHub}/_fake/app`)).json()) as {

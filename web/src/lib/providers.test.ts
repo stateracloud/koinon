@@ -61,8 +61,11 @@ describe('savedRecently', () => {
 describe('servingBadge', () => {
   it('words each serving state and the reason of a failure', () => {
     expect(servingBadge({ servingState: ServingState.SERVING, servingReason: '' })?.label).toBe('Serving')
+    // The browser e2e (web/e2e-real/task-stream.spec.ts) selects on these data-serving values.
+    expect(servingBadge({ servingState: ServingState.SERVING, servingReason: '' })?.state).toBe('serving')
+    expect(servingBadge({ servingState: ServingState.SAVED, servingReason: '' })?.state).toBe('saved')
     expect(servingBadge({ servingState: ServingState.SAVED, servingReason: '' })?.variant).toBe('outline')
-    expect(servingBadge({ servingState: ServingState.FAILED, servingReason: 'gateway rejected config' })).toEqual({ label: 'Not served: gateway rejected config', variant: 'destructive' })
+    expect(servingBadge({ servingState: ServingState.FAILED, servingReason: 'gateway rejected config' })).toEqual({ state: 'failed', label: 'Not served: gateway rejected config', variant: 'destructive' })
     expect(servingBadge({ servingState: ServingState.UNSPECIFIED, servingReason: '' })).toBeUndefined()
   })
   it('polls only while a provider waits for the gateway', () => {

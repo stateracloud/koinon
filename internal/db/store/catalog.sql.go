@@ -832,6 +832,28 @@ func (q *Queries) SetGatewayProviderFailures(ctx context.Context, arg SetGateway
 	return err
 }
 
+const setGatewayUnpricedFailures = `-- name: SetGatewayUnpricedFailures :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+SELECT m.org_id, m.provider_id, 'unknown', left('no price: ' || string_agg(m.name, ', ' ORDER BY m.name), 500)
+FROM models m
+WHERE m.org_id = $1 AND m.id = ANY($2::uuid[]) AND m.disabled_reason IS NULL
+GROUP BY m.org_id, m.provider_id
+ON CONFLICT (org_id, provider_id) DO NOTHING
+`
+
+type SetGatewayUnpricedFailuresParams struct {
+	OrgID    pgtype.UUID
+	ModelIds []pgtype.UUID
+}
+
+// koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
+// is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.
+// Runs after ClearGatewayProviderFailures; a failure the apply itself recorded stays.
+func (q *Queries) SetGatewayUnpricedFailures(ctx context.Context, arg SetGatewayUnpricedFailuresParams) error {
+	_, err := q.db.Exec(ctx, setGatewayUnpricedFailures, arg.OrgID, arg.ModelIds)
+	return err
+}
+
 const setModelDisabled = `-- name: SetModelDisabled :exec
 UPDATE models
 SET disabled_reason = $1

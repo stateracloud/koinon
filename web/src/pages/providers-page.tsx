@@ -15,7 +15,7 @@ import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ProviderService, ServingState, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
@@ -360,7 +360,7 @@ function ServingBadge({ provider }: { provider: Provider }) {
   const b = servingBadge(provider)
   if (!b) return <Badge variant="secondary">Active</Badge>
   return (
-    <Badge variant={b.variant} title={provider.servingDetail || undefined} data-serving={ServingState[provider.servingState]}>
+    <Badge variant={b.variant} title={provider.servingDetail || undefined} data-serving={b.state}>
       {b.label}
     </Badge>
   )

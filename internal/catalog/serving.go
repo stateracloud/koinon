@@ -49,7 +49,10 @@ func servingOf(p Provider, f store.ListProviderServingRow) Serving {
 	if p.CredentialLostAt != nil {
 		return Serving{State: ServingFailed, Reason: ReasonNoKey, Detail: "the API key was lost and must be entered again"}
 	}
-	if f.Models > 0 && f.Served >= f.Models {
+	if f.Models == 0 {
+		return Serving{State: ServingNone} // nothing to serve yet: no state, so the page does not wait
+	}
+	if f.Served >= f.Models {
 		return Serving{State: ServingServing}
 	}
 	if f.FailureReason != "" {

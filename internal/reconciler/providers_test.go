@@ -416,6 +416,32 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).NotTo(HaveKey("unpriced-model"))
 		})
 
+		It("fails a provider whose model has no price, with a reason, instead of leaving it saved (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "up", "", "priced")
+			cleanup(ctx, org, p.ID)
+			_, err := svc.CreateModel(ctx, org, audit.User(user), user, catalog.ModelInput{ProviderID: p.ID, Name: "unpriced-model"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			got, err := svc.GetProvider(ctx, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingFailed))
+			Expect(got.Serving.Reason).To(Equal(catalog.ReasonUnknown))
+			Expect(got.Serving.Detail).To(ContainSubstring("unpriced-model"))
+		})
+
+		It("gives a provider with no enabled model no serving state (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "up", "", "m")
+			cleanup(ctx, org, p.ID)
+			_, err := pool.Exec(ctx, `UPDATE models SET disabled_reason = 'test' WHERE org_id = $1 AND provider_id = $2`, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			got, err := svc.GetProvider(ctx, org, p.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingNone))
+		})
+
 		It("keeps the rows when the gateway did not apply the state", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			p := addProvider(ctx, org, user, "up", "", "m")

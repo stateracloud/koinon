@@ -24,6 +24,9 @@ const failureDetailMax = 500
 //     was unreachable or the reload did not complete (applyErr);
 //   - the gateway rejected the org's model objects one by one (a PruneOnly entry).
 //
+// A provider with an enabled model that has no price is failed as unknown ("no price: model"): the
+// gateway does not serve it by design (ADR 0041), and the page must not show it as waiting forever.
+//
 // An org whose apply took effect without a rejection has its failures cleared. Only providers with an
 // unserved model get a failure; a fully served provider keeps serving with the previous config.
 func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewayplan.Org, res gatewayplan.ApplyResult, applyErr error, configRejected string, served []gatewayplan.ServedModels) error {
@@ -59,6 +62,13 @@ func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewaypla
 		}
 		if err := r.q.ClearGatewayProviderFailures(ctx, s.Org.ID); err != nil {
 			errs = append(errs, fmt.Errorf("reconciler: clear provider failures for org %s: %w", s.Org.Slug, err))
+			continue
+		}
+		if len(s.Unpriced) == 0 {
+			continue
+		}
+		if err := r.q.SetGatewayUnpricedFailures(ctx, store.SetGatewayUnpricedFailuresParams{OrgID: s.Org.ID, ModelIds: s.Unpriced}); err != nil {
+			errs = append(errs, fmt.Errorf("reconciler: record unpriced models for org %s: %w", s.Org.Slug, err))
 		}
 	}
 	return errors.Join(errs...)

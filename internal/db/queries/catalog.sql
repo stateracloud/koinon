@@ -240,6 +240,17 @@ SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
 WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
    OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail;
 
+-- name: SetGatewayUnpricedFailures :exec
+-- koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
+-- is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.
+-- Runs after ClearGatewayProviderFailures; a failure the apply itself recorded stays.
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+SELECT m.org_id, m.provider_id, 'unknown', left('no price: ' || string_agg(m.name, ', ' ORDER BY m.name), 500)
+FROM models m
+WHERE m.org_id = @org_id AND m.id = ANY(@model_ids::uuid[]) AND m.disabled_reason IS NULL
+GROUP BY m.org_id, m.provider_id
+ON CONFLICT (org_id, provider_id) DO NOTHING;
+
 -- name: ClearGatewayProviderFailures :exec
 -- koinon-reconciler, after an apply that took effect: the org's failures are over.
 DELETE FROM gateway_provider_failures WHERE org_id = @org_id;
