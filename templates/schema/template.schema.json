@@ -3,7 +3,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://koinon.dev/schemas/templates/v1alpha1/template.schema.json",
   "title": "Koinon agent template",
-  "description": "A building block for an agent draft (ADR 0020): flavor choices, instructions, model, suggested grants and limits. Creating an agent from a template always yields a draft; an org admin or owner activates it and approves its grants.",
+  "description": "A building block for an agent draft (ADR 0020): harness choices, instructions, model, suggested grants and limits. Creating an agent from a template always yields a draft; an org admin or owner activates it and approves its grants.",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
@@ -47,10 +47,10 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flavors", "model", "instructions", "grants", "limits"],
+      "required": ["harness", "model", "instructions", "grants", "limits"],
       "properties": {
-        "flavors": {
-          "description": "Harnesses the agent may run on (ADR 0035). The default must be one of the allowed flavors.",
+        "harness": {
+          "description": "The harnesses the agent may run on (ADR 0112) and the harness settings. The default must be one of the allowed harnesses.",
           "type": "object",
           "additionalProperties": false,
           "required": ["allowed", "default"],
@@ -59,9 +59,14 @@
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/flavor" }
+              "items": { "$ref": "#/$defs/harness" }
             },
-            "default": { "$ref": "#/$defs/flavor" }
+            "default": { "$ref": "#/$defs/harness" },
+            "pluginInstalls": {
+              "description": "Let the agent install OpenCode plugins: the sandbox may read the npm registry (registry.npmjs.org, GET and HEAD only, no credentials) from the OpenCode binary, and OpenCode loads the plugins in the agent's home and its config. Off by default. Applies to the OpenCode harness only, so opencode must be an allowed harness.",
+              "type": "boolean",
+              "default": false
+            }
           }
         },
         "model": {
@@ -104,20 +109,8 @@
             "memory": { "$ref": "#/$defs/quantities" }
           }
         },
-        "harness": {
-          "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "pluginInstalls": {
-              "description": "Let the agent install OpenCode plugins: the sandbox may read the npm registry (registry.npmjs.org, GET and HEAD only, no credentials) from the OpenCode binary, and OpenCode loads the plugins in the agent's home and its config. Off by default. Applies to the OpenCode flavor only, so opencode must be an allowed flavor.",
-              "type": "boolean",
-              "default": false
-            }
-          }
-        },
         "instructions": {
-          "description": "Markdown instructions for the agent, written to the flavor's instruction file.",
+          "description": "Markdown instructions for the agent, written to the harness's instruction file.",
           "type": "string",
           "minLength": 1,
           "maxLength": 32768
@@ -245,7 +238,7 @@
         "properties": { "filter": { "required": ["cron", "timezone"] } }
       }
     },
-    "flavor": {
+    "harness": {
       "enum": ["opencode"]
     },
     "grant": {
