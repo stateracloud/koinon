@@ -383,6 +383,26 @@ var _ = Describe("Reconciler latency defaults", func() {
 			Expect(phase(a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 		})
 
+		// #101: a keep-warm agent is prepared at activation (its sandbox, so its image pull and home
+		// volume, exist before the first run); an agent that is not keep-warm prepares on its first run.
+		It("prepares only the keep-warm agent at activation, so its first run creates nothing", func(ctx SpecContext) {
+			warm, cold := onDemand(ctx), onDemand(ctx)
+			keepWarm(ctx, org, warm.ID)
+			pass(ctx)
+			Expect(created()).To(Equal(1), "activation prepares the keep-warm agent and no other")
+			Expect(phase(warm.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			queueRun(ctx, org, user, warm.ID)
+			pass(ctx)
+			Expect(created()).To(Equal(1), "the first run of the prepared agent creates no sandbox and no volume")
+			Expect(osg.Calls("StartSandbox")).To(BeZero(), "nor does it start one")
+			Expect(phase(warm.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			queueRun(ctx, org, user, cold.ID)
+			pass(ctx)
+			Expect(created()).To(Equal(2), "the agent that is not keep-warm prepares on its first run")
+		})
+
 		It("grants keep-warm to the oldest agents up to the operator's cap per org", func(ctx SpecContext) {
 			var agents []store.Agent
 			for range 4 {
