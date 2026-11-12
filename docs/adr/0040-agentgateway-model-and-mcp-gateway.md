@@ -1,6 +1,6 @@
 # 0040. agentgateway as the model gateway and MCP gateway
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below)
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 and 2026-11-12 (below)
 - Date: 2026-10-21
 - Amended by: [0097](0097-koinon-owned-gateway.md) (supersedes in part decisions 1, 2 and 6; agentgateway becomes the first driver, not the destination)
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
@@ -137,10 +137,20 @@ The maintainer decided on 2026-10-28 to stay on agentgateway behind `ModelGatewa
 Router as the documented fallback (see the alternatives table). The table says only that it "remains
 the fallback if agentgateway fails its spike". The spike is done, so the fallback needs its own
 trigger: at each release candidate and final release, check Agent Router's upstream pull request
-#2834 and its release notes against the three gaps in the table (token-window budgets only, quota
-that fails open, Envoy Gateway needed). The steps and the criteria for reconsidering are in
+theagentrouter/agent-router#2834 (https://github.com/theagentrouter/agent-router/pull/2834) and its
+release notes against the three gaps in the table (token-window budgets only, quota that fails
+open, Envoy Gateway needed). The steps and the criteria for reconsidering are in
 [docs/dev/releasing.md](../dev/releasing.md#cut-a-release-candidate). A change of gateway still needs
 a new ADR.
+
+[0097](0097-koinon-owned-gateway.md) amends decisions 1, 2 and 6: agentgateway is only the first
+driver behind Koinon's own gateway. The fallback therefore applies to the model path while
+agentgateway is the driver. Reasons from ADR 0097 for not making Agent Router the data plane, which
+the check must weigh: it charges after the response and accepts overshoot, it needs Redis for its
+limits, and it brings several components plus vendor coupling.
+
+Exit condition: the change that ships ADR 0097 step 3 (agentgateway removed) deletes the release step
+in `docs/dev/releasing.md` and closes this amendment.
 
 ## Links
 
@@ -152,6 +162,7 @@ a new ADR.
 - https://agentgateway.dev/docs/standalone/main/mcp/guardrails/about/
 - https://docs.litellm.ai/docs/proxy/multi_tenant_architecture
 - https://github.com/theagentrouter/agent-router
+- https://github.com/theagentrouter/agent-router/pull/2834
 - https://github.com/maximhq/bifrost/blob/main/docs/features/governance/budget-and-limits.mdx
 - https://portkey.ai/docs/product/ai-gateway/virtual-keys/budget-limits
 - ADR 0013, ADR 0014, ADR 0041, ADR 0042, ADR 0044

@@ -22,18 +22,24 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    cancelled checks: tag the newest commit whose checks are green.
 2. Re-check the gateway fallback, for every release, rc and final (ADR 0040, amendment 2026-11-12).
    Do it before you push the tag. Koinon stays on agentgateway behind `ModelGateway`; Agent Router
-   (formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback.
+   (formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback
+   for the model path while agentgateway is the driver (ADR 0097 amends ADR 0040: agentgateway is
+   only the first driver behind Koinon's own gateway). The change that ships ADR 0097 step 3
+   (agentgateway removed) deletes this step and closes the amendment in ADR 0040.
 
-   - Look at the upstream pull request #2834 and at the Agent Router release notes since the last
-     release. Note in the release pull request or the tracking issue whether #2834 is open, merged
-     or closed, and the version of Agent Router you looked at.
+   - Look at the upstream pull request theagentrouter/agent-router#2834
+     (https://github.com/theagentrouter/agent-router/pull/2834) and at the Agent Router release notes
+     since the last release. Note in the release pull request or the tracking issue whether it is
+     open, merged or closed, and the version of Agent Router you looked at.
    - Check the three gaps that ADR 0040 gives as reasons not to choose it: budgets are token windows
      of at most one day with no USD or never-reset budget; quota fails open by default; it needs
-     Envoy Gateway. #2834 matters because it makes metrics survive a stream that ends in the middle
+     Envoy Gateway. That pull request matters because it makes metrics survive a stream that ends in the middle
      of a response, which our spend ledger needs.
    - Reconsider the fallback only if one of these holds: agentgateway fails a requirement of ADR
      0040 or ADR 0041 that we cannot fix (USD budgets per key, unpriced models, spend after a
-     streamed response, MCP authorization), or Agent Router closes all three gaps. Then open an
+     streamed response, MCP authorization), or Agent Router closes all three gaps. Weigh also the
+     reasons in ADR 0097 for rejecting Agent Router as the data plane: it charges after the
+     response, it needs Redis, and it brings vendor coupling. Then open an
      issue and write an ADR that amends or supersedes ADR 0040. Otherwise write "no change" and go
      on.
 
