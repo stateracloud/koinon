@@ -3,6 +3,27 @@ Koinon {{ .Chart.AppVersion }} is pre-alpha.
 
 Database: {{ .Values.postgres.mode }}{{ if eq .Values.postgres.mode "cnpg" }} (CloudNativePG Cluster {{ include "koinon.pgCluster" . }}){{ end }}
 Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }} (your agentgateway, GatewayClass {{ .Values.gateway.kubernetes.gatewayClassName }}; the reconciler creates Koinon's own Gateway and routes in this namespace){{ else }} (agentgateway installed by this chart){{ end }}
+
+Object names (the backup and restore guide takes the namespace and the release as NS and REL; its commands
+are test/e2e/commands/backup-restore.e1 in the Koinon repository):
+
+  NS={{ .Release.Namespace }} REL={{ .Release.Name }}
+  Deployments: {{ include "koinon.componentName" (list . "api") }}, {{ include "koinon.componentName" (list . "reconciler") }}, {{ include "koinon.componentName" (list . "agentd") }}
+  KEK Secret:  {{ include "koinon.kekSecretName" . }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+  Database:    CloudNativePG Cluster {{ include "koinon.pgCluster" . }} (pods labelled cnpg.io/cluster={{ include "koinon.pgCluster" . }})
+{{- end }}
+{{- if ne (include "koinon.fullname" .) .Release.Name }}
+
+  The objects are named after {{ include "koinon.fullname" . }}, not the release: the guide's blocks assume they are the same.
+  Install with a release name that contains "koinon" and no fullnameOverride, or adapt the names.
+{{- end }}
+{{- if include "koinon.restoreHold" . }}
+
+HELD (restoreHold=true, ADR 0107): koinon-api, koinon-reconciler and koinon-agentd act on nothing until you
+release the hold: `helm upgrade ... --set restoreHold=false`, or the guide's release block.
+{{- end }}
+
 {{- if .Values.bootstrapAdmin.enabled }}
 
 Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time password in Secret
@@ -30,7 +51,7 @@ already under the mirror is left alone). Leave image.registry at its default whe
 
 Model prices: prices.refresh is off (enabled=false), so koinon-api makes no request to any price source and
 prices change only with an upgrade. Fetch and review newer ones with
-`kubectl -n {{ .Release.Namespace }} exec deploy/koinon-api -- koinon-api prices fetch`, or unset
+`kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "koinon.componentName" (list . "api") }} -- koinon-api prices fetch`, or unset
 prices.refresh.enabled (auto) to let small changes apply by themselves.
 {{- else }}
 
