@@ -68,6 +68,7 @@ func (k KubeStore) LoadWithoutActive(ctx context.Context) (KeySet, error) {
 
 // finishLoad adds the activation time of s to ks and names the Secret in err.
 func (k KubeStore) finishLoad(s *corev1.Secret, ks KeySet, err error) (KeySet, error) {
+	ks.ResourceVersion = s.ResourceVersion
 	if v := s.Annotations[ActivatedAnnotation]; v != "" {
 		ks.ActivatedAt, _ = time.Parse(time.RFC3339, v)
 	}
@@ -125,6 +126,11 @@ func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 		return err
 	}
 	s.Data, s.StringData = data, nil
+	// Update with the version this key set was loaded at, so a writer that changed the Secret since
+	// fails the update with a conflict instead of losing its KEK.
+	if ks.ResourceVersion != "" {
+		s.ResourceVersion = ks.ResourceVersion
+	}
 	if s.Annotations == nil {
 		s.Annotations = map[string]string{}
 	}

@@ -308,6 +308,54 @@ var _ = Describe("key events in the install audit chain", func() {
 			noKeyMaterial(ctx, es)
 		})
 
+		It("writes one keys.import event when the manifest creates the Secret", func(ctx SpecContext) {
+			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "koinon-kek", metav1.DeleteOptions{})).To(Succeed())
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-crea")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{"kek-20261001-crea": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-crea")},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			mark := auditMark(ctx)
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+
+			es := keyEventsSince(ctx, mark)
+			Expect(actions(es)).To(ContainElement(keyscli.ActionImport))
+			imp := es[len(es)-1]
+			Expect(imp.Action).To(Equal(keyscli.ActionImport))
+			Expect(imp.ActorID).To(Equal("keys import"))
+			Expect(kekIDs(section(imp, "before"))).To(BeEmpty())
+			Expect(kekIDs(section(imp, "after"))).To(Equal([]string{"kek-20261001-crea"}))
+			noKeyMaterial(ctx, es)
+		})
+
+		It("refuses a manifest KEK that the audit chain records as retired, unless --allow-retired", func(ctx SpecContext) {
+			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			now = now.Add(6 * time.Minute)
+			Expect(tool.Retire(ctx, first)).To(Succeed())
+			// An old backup still holds the retired KEK, and names it active.
+			raw := make([]byte, secretstore.KeySize)
+			copy(raw, "koinon_test_not-a-real-kek-aaaa")
+			manifest, err := json.Marshal(corev1.Secret{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				Data:     map[string][]byte{first: secretstore.EncodeKey(raw), "active": []byte(first)},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			tool.In, tool.Yes = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(MatchError(And(ContainSubstring(first), ContainSubstring("--allow-retired"))))
+			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(first))
+
+			tool.In, tool.AllowRetired = bytes.NewReader(manifest), true
+			Expect(tool.Import(ctx)).To(Succeed())
+			got := newKeySet(ctx)
+			Expect(got.Keys).To(HaveKey(first))
+			Expect(got.Active).To(Equal("kek-20261023-bbbb"), "a retired KEK never becomes active")
+		})
+
 		It("does not write an event for a command that refused", func(ctx SpecContext) {
 			mark := auditMark(ctx)
 			Expect(tool.Add(ctx, first)).To(MatchError(ContainSubstring("already exists")))

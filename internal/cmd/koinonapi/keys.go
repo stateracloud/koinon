@@ -28,6 +28,8 @@ type keysOptions struct {
 	dbURL, kekSecret, kekDir, namespace, kubeconfig, id string
 	period                                              time.Duration
 	yes                                                 bool
+	// allowRetired lets import add KEKs that keys retire removed, inactive.
+	allowRetired bool
 	// recordStarted writes the .started audit event of rewrap and reencrypt.
 	recordStarted bool
 	// in is what import reads.
@@ -96,6 +98,10 @@ func newKeysCommand() *cobra.Command {
 		c.Flags().BoolVar(&o.yes, "yes", false, "on a terminal, do not ask for confirmation")
 		return c
 	}
+	withAllowRetired := func(c *cobra.Command) *cobra.Command {
+		c.Flags().BoolVar(&o.allowRetired, "allow-retired", false, "add KEKs that keys retire removed (an old backup holds them), inactive; they never become active")
+		return c
+	}
 	// The per-row loop of rewrap and reencrypt is not atomic, so it may also record its start (ADR 0100
 	// decision 3): a run that dies half way then shows in the install audit log.
 	started := func(c *cobra.Command) *cobra.Command {
@@ -120,7 +126,7 @@ func newKeysCommand() *cobra.Command {
 		newRepos,
 		sub("verify", "Open every sealed value with the key set and report what does not open; read-only (the check after a restore)", cobra.NoArgs, true),
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore it with import)", cobra.NoArgs, false),
-		confirmed(sub("import", "Read a KEK backup (the output of export) from standard input and merge it into the KEK Secret: adds its KEKs, makes its active KEK active, removes none; needs --yes; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false)),
+		withAllowRetired(confirmed(sub("import", "Read a KEK backup (the output of export) from standard input and merge it into the KEK Secret: adds its KEKs, makes its active KEK active, removes none, refuses KEKs that keys retire removed (see --allow-retired); needs --yes; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false))),
 	)
 	return keys
 }
@@ -165,7 +171,7 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, In: o.in, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
+	tool := &keyscli.Tool{AllowRetired: o.allowRetired, Store: store, Out: out, In: o.in, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
 	// With the database, every command that changes the key set also records it in the install audit chain
 	// (actor cli, "keys <command>").

@@ -31,7 +31,9 @@ kubectl -n koinon exec "$PRIMARY" -c postgres -- psql --dbname=koinon -v ON_ERRO
 kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon.dump
 # e1=restore-keys
 # The KEK Secret is guarded: kubectl cannot replace one that exists (admission refuses it), so a Secret that
-# is there is replaced by koinon-api itself, which needs one pod; a Secret that is gone is created with apply.
+# is there (the usual case: a new install made its own first KEK) is merged with the backup by koinon-api itself,
+# which needs one pod: keys import adds the backup's KEKs, makes its active KEK active and removes none. It
+# refuses a KEK that keys retire removed (--allow-retired overrides, inactive). A Secret that is gone is created with apply.
 if kubectl -n koinon get secret/koinon-kek > /dev/null 2>&1; then
   kubectl -n koinon scale deployment/koinon-api --replicas=1
   kubectl -n koinon rollout status deployment/koinon-api --timeout=5m

@@ -101,6 +101,12 @@ for _ in $(seq 1 30); do # the API server's admission cache needs a few seconds
 done
 setguard Deny
 (( deleted )) || fail "could not delete the KEK Secret with the guard in Audit"
+# The usual restore is into a new install that made its own first KEK on its empty database, so the Secret
+# exists and the backup is merged over it (keys import). koinon-api would not make a KEK here (the database
+# holds stored secrets), so stand in for it with a fresh KEK of another ID. A create is not guarded.
+fresh_id="kek-$(date -u +%Y%m%d)-e2e0"
+"${K[@]}" -n "$NS" create secret generic koinon-kek --from-literal="$fresh_id=$(head -c 32 /dev/urandom | base64)" --from-literal=active="$fresh_id" >/dev/null \
+  || fail "could not create the fresh KEK Secret"
 
 step "restore"
 t_restore=$(date +%s)
@@ -143,7 +149,8 @@ if "${K[@]}" -n "$NS" annotate secret koinon-kek e2e-probe=1 --overwrite 2>/dev/
 fi
 "${K[@]}" -n "$NS" exec -i deploy/koinon-api -- koinon-api keys import --yes <"$work/koinon-kek-backup.yaml" ||
   fail "koinon-api keys import failed over the existing KEK Secret"
-state | tee "$work/state.after"
+# The merge keeps the fresh KEK the restore went over (an import removes none); it wraps no value.
+state | grep -v "^kek=$fresh_id " | tee "$work/state.after"
 diff -u "$work/state.before" "$work/state.after" || fail "the restored install differs from the one that was backed up"
 ks=$(keys_status)
 if grep -qiE 'warning|missing' <<<"$ks"; then

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,8 +17,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -526,6 +530,93 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(again.Keys).To(Equal(mineKey.Keys))
 			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("prints the active KEK change before it saves", func(ctx SpecContext) {
+			t := importer(backup, true)
+			buf := &bytes.Buffer{}
+			t.Out = buf
+			Expect(t.Import(ctx)).To(Succeed())
+			Expect(buf.String()).To(ContainSubstring("The active KEK changes: " + mineKey.Active + " -> " + orig.Active))
+		})
+
+		It("warns that retired KEKs cannot be checked when there is no database", func(ctx SpecContext) {
+			t := importer(backup, true)
+			buf := &bytes.Buffer{}
+			t.Out = buf
+			Expect(t.Import(ctx)).To(Succeed())
+			Expect(buf.String()).To(ContainSubstring("cannot say which KEKs were retired"))
+		})
+
+		Describe("a KEK that keys retire removed", func() {
+			retiredAs := func(ids ...string) func(context.Context, string) (bool, error) {
+				return func(_ context.Context, id string) (bool, error) { return slices.Contains(ids, id), nil }
+			}
+			It("is refused, and nothing changes", func(ctx SpecContext) {
+				t := importer(backup, true)
+				t.Retired = retiredAs(orig.Active)
+				Expect(t.Import(ctx)).To(MatchError(And(ContainSubstring(orig.Active), ContainSubstring("--allow-retired"))))
+				again, err := target.Load(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(again.Keys).To(Equal(mineKey.Keys))
+				Expect(again.Active).To(Equal(mineKey.Active))
+			})
+
+			It("is added inactive with --allow-retired and never becomes active", func(ctx SpecContext) {
+				t := importer(backup, true)
+				t.Retired, t.AllowRetired = retiredAs(orig.Active), true
+				Expect(t.Import(ctx)).To(Succeed())
+				got, err := target.Load(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				for id, key := range orig.Keys {
+					Expect(got.Keys).To(HaveKeyWithValue(id, key))
+				}
+				Expect(got.Active).To(Equal(mineKey.Active))
+			})
+
+			It("is refused on the create path when it is the manifest's active KEK, even with the flag", func(ctx SpecContext) {
+				empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
+				t := &keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, AllowRetired: true, Retired: retiredAs(orig.Active)}
+				Expect(t.Import(ctx)).To(MatchError(ContainSubstring("was retired")))
+				_, err := empty.Load(ctx)
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		It("conflicts instead of losing a KEK when the Secret changed after it was loaded", func(ctx SpecContext) {
+			cs := fake.NewClientset()
+			raw := newKey()
+			_, err := cs.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns, ResourceVersion: "1"},
+				Data:       map[string][]byte{"kek-20261001-aaaa": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-aaaa")},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			// The fake does not check versions, so it answers a stale one with a conflict, as the API server does.
+			cs.PrependReactor("update", "secrets", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				sent := a.(k8stesting.UpdateAction).GetObject().(*corev1.Secret)
+				cur, err := cs.Tracker().Get(corev1.SchemeGroupVersion.WithResource("secrets"), ns, "koinon-kek")
+				if err != nil || cur.(*corev1.Secret).ResourceVersion == sent.ResourceVersion {
+					return false, nil, nil
+				}
+				return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), "koinon-kek", errors.New("the object has been modified"))
+			})
+			store := keyscli.KubeStore{Client: cs, Namespace: ns, Name: "koinon-kek"}
+			loaded, err := store.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(loaded.ResourceVersion).To(Equal("1"))
+			// Another writer adds a KEK meanwhile.
+			s, err := cs.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			s.Data["kek-20261002-bbbb"] = secretstore.EncodeKey(newKey())
+			s.ResourceVersion = "2"
+			Expect(cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("secrets"), s, ns)).To(Succeed())
+
+			loaded.Keys["kek-20261003-cccc"] = newKey()
+			err = store.Save(ctx, loaded)
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "got %v", err)
+			got, err := cs.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Data).To(HaveKey("kek-20261002-bbbb"), "the other writer's KEK stands")
 		})
 
 		It("refuses without --yes and changes nothing", func(ctx SpecContext) {

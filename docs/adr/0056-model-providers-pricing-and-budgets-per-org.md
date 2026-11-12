@@ -759,9 +759,15 @@ Maintainer decision (procoduck, 2026-11-11).
   standard input and merges it into the Secret, as the koinon-api service account, which the
   guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
   active and never removes a key; only `keys retire` removes one, with its database check. A KEK ID that
-  the Secret holds with other key bytes is refused. It needs `--yes` (the manifest uses standard input,
+  the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
+  retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
+  removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
+  KEK never becomes the active one, with or without the flag. Without `--database-url` there is no chain
+  to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
+  change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
+  a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,
   so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
-  is configured. It writes nothing unless every KEK in the manifest opens with the install's key
+  is configured, also when it creates the Secret. It writes nothing unless every KEK in the manifest opens with the install's key
   wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
   of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
   to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,

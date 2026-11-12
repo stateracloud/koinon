@@ -5,6 +5,7 @@
 # amendment 2026-11-11). Sourced in order by hack/chart-check.sh; it uses that script's helpers.
 
 kg=templates/kek-guard.yaml
+kms=(--set secrets.kek.kms.backend=openbao --set secrets.kek.kms.openbao.address=https://bao.example:8200 --set secrets.kek.kms.openbao.key=koinon-kek)
 
 # On by default: two native ValidatingAdmissionPolicies (never Kyverno) with Deny bindings, bound to
 # the release namespace.
@@ -16,7 +17,8 @@ has "KEK guard binding denies" 'validationActions: \["Deny"\]' --show-only "$kg"
 has "KEK guard bound to the release namespace" 'kubernetes.io/metadata.name: "koinon"' --show-only "$kg"
 has "KEK guard refuses DELETE" "request.operation != 'DELETE' \|\| variables.terminating" --show-only "$kg"
 has "KEK guard lets koinon-api write" 'system:serviceaccount:koinon:koinon-api' --show-only "$kg"
-has "KEK guard lets the key-admin Job write" 'system:serviceaccount:koinon:koinon-key-admin' --show-only "$kg"
+lacks "KEK guard does not name key-admin when no key-admin Job renders" 'koinon-key-admin' --show-only "$kg"
+has "KEK guard lets the key-admin Job write when it renders (KMS)" 'system:serviceaccount:koinon:koinon-key-admin' --show-only "$kg" "${kms[@]}"
 lacks "KEK guard does not let the reconciler write the KEK" 'writers.*koinon-reconciler' --show-only "$kg"
 has "KEK guard follows existingSecret" 'resourceNames: \["mine"\]' --set secrets.kek.existingSecret=mine --show-only "$kg"
 has "KEK guard extraWriters" 'argocd-application-controller' --set 'secrets.kek.guard.extraWriters={system:serviceaccount:argocd:argocd-application-controller}' --show-only "$kg"

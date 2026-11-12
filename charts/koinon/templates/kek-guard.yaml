@@ -6,7 +6,7 @@ each bound to this release's namespace only (namespaceSelector on kubernetes.io/
 
 1. kek-guard. koinon-api creates the KEK Secret on its first start and every stored secret depends on
    it, so the Secret must not be deleted or replaced quietly. The policy refuses DELETE of it, and
-   UPDATE by any identity except the koinon-api and key-admin service accounts (and
+   UPDATE by any identity except the koinon-api service account, the key-admin one (only when the key-admin Job renders, that is with a KMS) (and
    secrets.kek.guard.extraWriters, for a GitOps identity that manages secrets.kek.existingSecret).
    A DELETE is allowed while the namespace is being deleted, so the namespace does not hang in
    Terminating. To delete the Secret on purpose (for example to start over on an install with no
@@ -28,7 +28,8 @@ must not lift the fence on the reconciler.
 {{- $api := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "api")) }}
 {{- $admin := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "key-admin")) }}
 {{- $reconciler := printf "system:serviceaccount:%s:%s" $ns (include "koinon.componentName" (list . "reconciler")) }}
-{{- $writers := concat (list $api $admin) (.Values.secrets.kek.guard.extraWriters | default list) }}
+{{- /* The key-admin Job exists only with a KMS (key-admin.yaml), so its service account is a writer only then. */ -}}
+{{- $writers := concat (list $api) (ternary (list $admin) (list) (ne (include "koinon.kms" .) "")) (.Values.secrets.kek.guard.extraWriters | default list) }}
 {{- $kekPolicy := printf "%s-kek-guard" $prefix }}
 {{- $recPolicy := printf "%s-reconciler-secrets" $prefix }}
 {{- if .Values.secrets.kek.guard.enabled }}

@@ -67,7 +67,9 @@ not yet trusted.
    `org-limits`, `checkpoints resync`), then releases. `test/e2e/backup-restore.sh` runs that order.
    The KEK Secret is guarded (ADR 0056 amendment, issue #604), so its restore is `koinon-api keys import --yes` through
    `kubectl exec` when the Secret exists, not `kubectl apply`. The import merges: it adds the backup's KEKs to the
-   install's key set, makes the backup's active KEK active and never drops a key.
+   install's key set, makes the backup's active KEK active and never drops a key. It refuses a KEK that the audit
+   chain records as retired (`keys retire`) unless `--allow-retired` is given, and then adds it inactive: a retired KEK
+   never becomes active. Without `--database-url` it warns that retired IDs cannot be checked.
 
 ## Amendment 2026-11-11: a held gateway is ready but deny-all (issue #530)
 
