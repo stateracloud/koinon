@@ -4,6 +4,7 @@ package gitpush_test
 
 import (
 	"context"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -84,7 +85,7 @@ var _ = Describe("the push writer's egress", func() {
 			// Fetch: the pack request is redirected.
 			redirect(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/git-upload-pack") })
 			_, err := writer(front.URL, dial).WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "m\n", Files: files})
-			Expect(err).To(HaveOccurred(), "fetch")
+			Expect(err).To(MatchError(ContainSubstring("redirect")), "fetch")
 			Expect(hits.Load()).To(BeZero(), "fetch followed the redirect")
 
 			// List: the ref advertisement is redirected (the fetch falls back to a listing, which fails too).
@@ -158,6 +159,20 @@ var _ = Describe("the push writer's egress", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(w.CreateBranch(ctx, repo, "koinon/ok", sha)).To(Succeed())
 		Expect(f.Snapshot("app").Branches).To(HaveKeyWithValue("koinon/ok", sha))
+	})
+
+	It("keeps the dial check on a host with a private CA", func() {
+		tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { fronted.Add(1) }))
+		DeferCleanup(tlsSrv.Close)
+		ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsSrv.Certificate().Raw})
+		w := gitpush.New(reads{tok: token}, gitpush.Options{
+			RemoteURL:   func(r codehost.Repo) string { return tlsSrv.URL + "/" + r.String() + ".git" },
+			CABundle:    ca,
+			DialContext: catalog.URLPolicy{}.DialContext(&net.Dialer{Timeout: time.Second}),
+		})
+		_, err := w.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "m\n", Files: files})
+		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
+		Expect(fronted.Load()).To(BeZero())
 	})
 
 	It("still fetches and pushes to a destination the policy allows", func() {
