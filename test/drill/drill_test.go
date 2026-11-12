@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	. "github.com/onsi/ginkgo/v2"
@@ -713,7 +714,8 @@ stringData:
 			must(err, "declare a provider")
 			time.Sleep(60 * time.Second)
 			// The source's API token is refused on the copy (ADR 0110 decision 3), so read the table, not the API.
-			declared := sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared'")
+			// Count only served rows (removed_at IS NULL and disabled_reason IS NULL): that is what GET /providers meant.
+			declared := sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared' AND removed_at IS NULL AND disabled_reason IS NULL")
 			knownGap("#516", "the importer only reports while the install is held", func() string {
 				if declared > 0 {
 					return "the importer created the declared provider while the install was held"
@@ -950,6 +952,7 @@ stringData:
 			c.SetSession(sourceSession)
 			_, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
 			Expect(err).To(HaveOccurred(), "the source's session cookie is accepted by the target (ADR 0110 decision 3)")
+			Expect(connect.CodeOf(err)).To(Equal(connect.CodeUnauthenticated), "the target must refuse the source's session cookie as unauthenticated (ADR 0110 decision 3), got: %v", err)
 		})
 	})
 
