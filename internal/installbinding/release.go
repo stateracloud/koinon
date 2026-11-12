@@ -113,7 +113,9 @@ func (s SettleResult) Allowed(r Removal) bool {
 // restore.release in the install audit chain, and clears held_since (sets released_at, released_by).
 //
 // Otherwise, with accept true, the waiting rows turn to accepted (restore.removals_accepted). Rows whose
-// item is not in plan any more (the Secret came back, or the removal was done) are deleted. A disabled
+// item is not in plan any more (the Secret came back, or the removal was done) are deleted.
+// This is correct only while plan is complete: every caller derives it from the importer's own absent-item
+// walk (declarative PlanRemovals), so a partial plan would silently drop the gate for the missing rows. A disabled
 // Binding settles nothing: every removal is allowed.
 func (b *Binding) Settle(ctx context.Context, plan []Removal, accept bool) (SettleResult, error) {
 	var res SettleResult
