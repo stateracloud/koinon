@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-26
 - Closes: an open question in [0037](0037-tooling.md) (run migrations at API start, or as a Job?)
+- Amends: [0037](0037-tooling.md) (the decision "run on startup or by a migrate subcommand": migrations run as a Job)
 - Relates to: [0003](0003-postgres-source-of-truth.md), [0027](0027-repo-and-versioning.md)
 
 ## Context

@@ -18,10 +18,12 @@ org it acts in; IDs from another org are not found.
 | CreateAgentFromTemplate | `koinon.agent.v1alpha1.CreateAgentFromTemplateRequest` | `koinon.agent.v1alpha1.CreateAgentFromTemplateResponse` | - | CreateAgentFromTemplate creates a draft agent from a template. Members and above. |
 | GetAgent | `koinon.agent.v1alpha1.GetAgentRequest` | `koinon.agent.v1alpha1.GetAgentResponse` | - | GetAgent returns one agent. Viewers and above. |
 | GetAgentModel | `koinon.agent.v1alpha1.GetAgentModelRequest` | `koinon.agent.v1alpha1.GetAgentModelResponse` | - | GetAgentModel says which model the agent's next run uses and where that choice comes from, and lists the models an admin may pick. Admins and owners only. |
+| GetAgentSandboxResources | `koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse` | - | GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override, the template's values, what the next sandbox gets, and the platform bounds an override must stay inside (ADR 0083). Admins and owners only. |
 | ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns the org's agents, oldest first. Viewers and above. |
 | ResumeAgent | `koinon.agent.v1alpha1.ResumeAgentRequest` | `koinon.agent.v1alpha1.ResumeAgentResponse` | - | ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners only. |
 | RunAgentTrigger | `koinon.agent.v1alpha1.RunAgentTriggerRequest` | `koinon.agent.v1alpha1.RunAgentTriggerResponse` | - | RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited. Admins and owners only. |
 | SetAgentModel | `koinon.agent.v1alpha1.SetAgentModelRequest` | `koinon.agent.v1alpha1.SetAgentModelResponse` | - | SetAgentModel sets the agent's model, or clears it with "default". It is a setting of the agent, not a new version: it applies to the agent's next run. The model must be one the org serves and has a price for. Audited, with the old and the new value. Admins and owners only. |
+| SetAgentSandboxResources | `koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse` | - | SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left empty so the template's value and then the platform default apply. A value outside the platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the model it is a setting of the agent, not a new version; a change recreates the sandbox at the next run (the size is part of the sandbox spec hash). Audited, with the old and the new override. Admins and owners only. |
 | SetAgentThinking | `koinon.agent.v1alpha1.SetAgentThinkingRequest` | `koinon.agent.v1alpha1.SetAgentThinkingResponse` | - | SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting with an empty value so the version's value (a template's spec.model.thinking) and then the default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old and the new value. Admins and owners only. |
 | SetAgentTriggers | `koinon.agent.v1alpha1.SetAgentTriggersRequest` | `koinon.agent.v1alpha1.SetAgentTriggersResponse` | - | SetAgentTriggers proposes a new version with the given triggers (everything else carried over from the latest version). The triggers fire nothing until ActivateAgent activates that version; an active agent keeps running its active version meanwhile. Audited. Admins and owners only. |
 
@@ -75,7 +77,8 @@ Agent is an agent and the definition it runs.
 | ephemeral | 22 | `bool` | singular |  | The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when the task ends (ADR 0065 decision 13c). |
 | sandbox_archived_at | 23 | `google.protobuf.Timestamp` | singular |  | Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in its last checkpoint and the next run restores it into a fresh sandbox. |
 | model_setting | 24 | `string` | singular |  | The agent's own model setting (SetAgentModel); empty when it follows the version and the org default. When set it wins over `model`, which is the latest version's. |
-| harness | 25 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
+| sandbox_resources | 25 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when it follows the template and the platform default. |
+| harness | 26 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 
 ### Message ArchiveAgentRequest
 
@@ -156,6 +159,23 @@ GetAgentResponse holds the agent.
 | --- | --- | --- | --- | --- | --- |
 | agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
 
+### Message GetAgentSandboxResourcesRequest
+
+GetAgentSandboxResourcesRequest names the agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+
+### Message GetAgentSandboxResourcesResponse
+
+GetAgentSandboxResourcesResponse holds the state.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| state | 1 | `koinon.agent.v1alpha1.SandboxResourcesState` | singular |  |  |
+
 ### Message GrantBinding
 
 GrantBinding binds a template grant to one of the org's connections and
@@ -218,6 +238,50 @@ RunAgentTriggerResponse names the task the fire created.
 | --- | --- | --- | --- | --- | --- |
 | task_id | 1 | `string` | singular |  |  |
 
+### Message SandboxBounds
+
+SandboxBounds are the platform's range for each of the four values (chart sandbox.resources.bounds).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| cpu_request | 1 | `koinon.agent.v1alpha1.SandboxRange` | singular |  |  |
+| cpu_limit | 2 | `koinon.agent.v1alpha1.SandboxRange` | singular |  |  |
+| memory_request | 3 | `koinon.agent.v1alpha1.SandboxRange` | singular |  |  |
+| memory_limit | 4 | `koinon.agent.v1alpha1.SandboxRange` | singular |  |  |
+
+### Message SandboxRange
+
+SandboxRange bounds one value. An empty min or max is unbounded on that side.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| min | 1 | `string` | singular |  |  |
+| max | 2 | `string` | singular |  |  |
+
+### Message SandboxResources
+
+SandboxResources are the four sandbox sizing values, as Kubernetes quantities such as "250m" or
+"2Gi". An empty value is unset.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| cpu_request | 1 | `string` | singular |  |  |
+| cpu_limit | 2 | `string` | singular |  |  |
+| memory_request | 3 | `string` | singular |  |  |
+| memory_limit | 4 | `string` | singular |  |  |
+
+### Message SandboxResourcesState
+
+SandboxResourcesState is the agent's sandbox sizing and where it comes from.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| override | 1 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | The agent's own override; empty values follow the template. |
+| template | 2 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | The active version's (or, before activation, the latest version's) template values; empty values take the platform default. |
+| effective | 3 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | What the next sandbox gets: override, else template, else platform default, clamped to the bounds. |
+| bounds | 4 | `koinon.agent.v1alpha1.SandboxBounds` | singular |  | The platform bounds an override must stay inside. |
+| memory_request_equals_limit | 5 | `bool` | singular |  | Whether the platform raises the memory request to the memory limit (Kata, ADR 0083); a memory request in an override then has no effect. |
+
 ### Message ServedModel
 
 ServedModel is a model the org serves and has a price for.
@@ -244,6 +308,24 @@ SetAgentModelResponse holds the result, as GetAgentModel would return it.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | model | 1 | `koinon.agent.v1alpha1.GetAgentModelResponse` | singular |  |  |
+
+### Message SetAgentSandboxResourcesRequest
+
+SetAgentSandboxResourcesRequest sets the agent's override.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| resources | 3 | `koinon.agent.v1alpha1.SandboxResources` | singular |  | The whole override: a value left empty is cleared. |
+
+### Message SetAgentSandboxResourcesResponse
+
+SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| state | 1 | `koinon.agent.v1alpha1.SandboxResourcesState` | singular |  |  |
 
 ### Message SetAgentThinkingRequest
 

@@ -298,13 +298,14 @@ sandboxResources:
       limit: {max: "8"}
     memory:
       request: {min: 256Mi}
+      limit: {min: 256Mi}
   memoryRequestEqualsLimit: false
 `)
 		Expect(err).NotTo(HaveOccurred())
 		p := c.sandboxResources
 		Expect(p.Default.CPU).To(Equal(templates.Quantities{Request: "500m", Limit: "2"}))
 		Expect(p.Default.Memory).To(Equal(templates.Quantities{Request: "1Gi", Limit: "4Gi"}))
-		Expect(p.Bounds.CPULimit).To(Equal(sandboxres.Range{Max: "8"}))
+		Expect(p.Bounds.CPULimit).To(Equal(sandboxres.Range{Min: "100m", Max: "8"}))
 		Expect(p.Bounds.MemoryRequest).To(Equal(sandboxres.Range{Min: "256Mi", Max: "8Gi"}))
 		Expect(p.MemoryRequestEqualsLimit).To(BeFalse())
 	})
@@ -317,6 +318,7 @@ sandboxResources:
 		Entry("a bad quantity", "sandboxResources:\n  default:\n    memory: {limit: 2 gigs}\n", "memory.limit"),
 		Entry("a bad bound", "sandboxResources:\n  bounds:\n    cpu:\n      limit: {max: lots}\n", `bounds.cpuLimit.max "lots"`),
 		Entry("a minimum above the maximum", "sandboxResources:\n  bounds:\n    memory:\n      limit: {min: 16Gi}\n", "bounds.memoryLimit: min 16Gi is greater than max 8Gi"),
+		Entry("a cpu limit range below the request minimum", "sandboxResources:\n  bounds:\n    cpu:\n      limit: {min: 50m}\n", "bounds.cpu: the limit range"),
 		Entry("a default request above its limit", "sandboxResources:\n  default:\n    cpu: {request: 4}\n", "cpu.request 4 is greater than cpu.limit 2"),
 	)
 })

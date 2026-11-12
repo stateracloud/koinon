@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/agentmodel"
+	"github.com/stateracloud/koinon/internal/agentresources"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
@@ -24,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runoutcome"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -36,20 +38,21 @@ var agentStatusToProto = map[store.AgentStatus]agentv1alpha1.AgentStatus{
 // agentView renders an agent with its latest and active versions.
 func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent, slugs map[pgtype.UUID]string, archived map[pgtype.UUID]pgtype.Timestamptz) (*agentv1alpha1.Agent, error) {
 	out := &agentv1alpha1.Agent{
-		Id:              idString(a.ID),
-		OrgId:           idString(a.OrgID),
-		DisplayName:     a.DisplayName,
-		Status:          agentStatusToProto[a.Status],
-		Flavor:          flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
-		Harness:         a.Harness,
-		TemplateId:      idString(a.TemplateID),
-		LatestVersion:   a.LatestVersion,
-		CreatedAt:       tsProto(a.CreatedAt),
-		ActivatedAt:     tsProto(a.ActivatedAt),
-		ArchivedAt:      tsProto(a.ArchivedAt),
-		UnhealthyAt:     tsProto(a.UnhealthyAt),
-		UnhealthyReason: a.UnhealthyReason.String,
-		ModelSetting:    a.Model.String,
+		Id:               idString(a.ID),
+		OrgId:            idString(a.OrgID),
+		DisplayName:      a.DisplayName,
+		Status:           agentStatusToProto[a.Status],
+		Flavor:           flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
+		Harness:          a.Harness,
+		TemplateId:       idString(a.TemplateID),
+		LatestVersion:    a.LatestVersion,
+		CreatedAt:        tsProto(a.CreatedAt),
+		ActivatedAt:      tsProto(a.ActivatedAt),
+		ArchivedAt:       tsProto(a.ArchivedAt),
+		UnhealthyAt:      tsProto(a.UnhealthyAt),
+		UnhealthyReason:  a.UnhealthyReason.String,
+		ModelSetting:     a.Model.String,
+		SandboxResources: sandboxResourcesProto(agentresources.OverrideOf(a)),
 	}
 	if archived != nil {
 		out.SandboxArchivedAt = tsProto(archived[a.ID])
@@ -639,4 +642,76 @@ func (s *Server) SetAgentThinking(ctx context.Context, req *agentv1alpha1.SetAge
 		return nil, s.agentModelError(err)
 	}
 	return &agentv1alpha1.SetAgentThinkingResponse{Model: agentModelProto(v)}, nil
+}
+
+func sandboxResourcesProto(r templates.Resources) *agentv1alpha1.SandboxResources {
+	return &agentv1alpha1.SandboxResources{
+		CpuRequest: r.CPU.Request, CpuLimit: r.CPU.Limit,
+		MemoryRequest: r.Memory.Request, MemoryLimit: r.Memory.Limit,
+	}
+}
+
+func sandboxRangeProto(r sandboxres.Range) *agentv1alpha1.SandboxRange {
+	return &agentv1alpha1.SandboxRange{Min: r.Min, Max: r.Max}
+}
+
+func sandboxResourcesStateProto(v agentresources.View) *agentv1alpha1.SandboxResourcesState {
+	return &agentv1alpha1.SandboxResourcesState{
+		Override: sandboxResourcesProto(v.Override), Template: sandboxResourcesProto(v.Template), Effective: sandboxResourcesProto(v.Effective),
+		Bounds: &agentv1alpha1.SandboxBounds{
+			CpuRequest: sandboxRangeProto(v.Bounds.CPURequest), CpuLimit: sandboxRangeProto(v.Bounds.CPULimit),
+			MemoryRequest: sandboxRangeProto(v.Bounds.MemoryRequest), MemoryLimit: sandboxRangeProto(v.Bounds.MemoryLimit),
+		},
+		MemoryRequestEqualsLimit: v.MemoryRequestEqualsLimit,
+	}
+}
+
+func (s *Server) agentResourcesError(err error) error {
+	var inv *agentresources.InvalidError
+	switch {
+	case errors.As(err, &inv):
+		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+	case errors.Is(err, agentresources.ErrNotFound):
+		return connect.NewError(connect.CodeNotFound, "agent not found")
+	}
+	return s.dbError(err, "agent")
+}
+
+// GetAgentSandboxResources implements AgentService. Admins and owners.
+func (s *Server) GetAgentSandboxResources(ctx context.Context, req *agentv1alpha1.GetAgentSandboxResourcesRequest) (*agentv1alpha1.GetAgentSandboxResourcesResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	v, err := s.agentResources.Load(ctx, c.org, id)
+	if err != nil {
+		return nil, s.agentResourcesError(err)
+	}
+	return &agentv1alpha1.GetAgentSandboxResourcesResponse{State: sandboxResourcesStateProto(v)}, nil
+}
+
+// SetAgentSandboxResources implements AgentService. Admins and owners.
+func (s *Server) SetAgentSandboxResources(ctx context.Context, req *agentv1alpha1.SetAgentSandboxResourcesRequest) (*agentv1alpha1.SetAgentSandboxResourcesResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	r := req.GetResources()
+	want := templates.Resources{
+		CPU:    templates.Quantities{Request: strings.TrimSpace(r.GetCpuRequest()), Limit: strings.TrimSpace(r.GetCpuLimit())},
+		Memory: templates.Quantities{Request: strings.TrimSpace(r.GetMemoryRequest()), Limit: strings.TrimSpace(r.GetMemoryLimit())},
+	}
+	v, err := s.agentResources.Set(requestCtx(ctx), c.org, id, c.auditActor(), want)
+	if err != nil {
+		return nil, s.agentResourcesError(err)
+	}
+	return &agentv1alpha1.SetAgentSandboxResourcesResponse{State: sandboxResourcesStateProto(v)}, nil
 }

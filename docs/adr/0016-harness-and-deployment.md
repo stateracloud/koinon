@@ -1,10 +1,10 @@
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted
-- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md)
+- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement)
 - Date: 2026-10-21
 - Decision: [design.md#16](../design.md)
-- Verification: Pending: OpenShell spike (old issue 3)
+- Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 
 > Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
 
@@ -21,7 +21,8 @@ pi through an adapter.
 
 - The control plane talks to the OpenShell gateway (gRPC) through an **`ExecutionBackend`**
   interface. OpenSandbox is the alternative implementation.
-- A thin **`agentd`** inside the sandbox drives the harness over ACP:
+- A thin **`agentd`** inside the sandbox drives the harness over ACP
+  _(Changed by [0049](0049-v01-scope-decisions.md), see the amendment below: `agentd` runs in the control plane and nothing of Koinon's runs inside the sandbox)_:
   - it starts sessions;
   - it sends prompts;
   - it streams updates;

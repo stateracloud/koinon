@@ -60,6 +60,21 @@ service AgentService {
   // and the new value. Admins and owners only.
   rpc SetAgentThinking(SetAgentThinkingRequest) returns (SetAgentThinkingResponse);
 
+  // GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override,
+  // the template's values, what the next sandbox gets, and the platform bounds an override must
+  // stay inside (ADR 0083). Admins and owners only.
+  rpc GetAgentSandboxResources(GetAgentSandboxResourcesRequest) returns (GetAgentSandboxResourcesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left
+  // empty so the template's value and then the platform default apply. A value outside the
+  // platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the
+  // model it is a setting of the agent, not a new version; a change recreates the sandbox at the
+  // next run (the size is part of the sandbox spec hash). Audited, with the old and the new
+  // override. Admins and owners only.
+  rpc SetAgentSandboxResources(SetAgentSandboxResourcesRequest) returns (SetAgentSandboxResourcesResponse);
+
   // RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
   // at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
   // Admins and owners only.
@@ -120,9 +135,12 @@ message Agent {
   // The agent's own model setting (SetAgentModel); empty when it follows the version and the org
   // default. When set it wins over `model`, which is the latest version's.
   string model_setting = 24;
+  // The agent's own sandbox resource override (SetAgentSandboxResources); every value empty when
+  // it follows the template and the platform default.
+  SandboxResources sandbox_resources = 25;
   // The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
   // agent is created.
-  string harness = 25;
+  string harness = 26;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -335,6 +353,69 @@ message SetAgentThinkingRequest {
 // SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
 message SetAgentThinkingResponse {
   GetAgentModelResponse model = 1;
+}
+
+// SandboxResources are the four sandbox sizing values, as Kubernetes quantities such as "250m" or
+// "2Gi". An empty value is unset.
+message SandboxResources {
+  string cpu_request = 1;
+  string cpu_limit = 2;
+  string memory_request = 3;
+  string memory_limit = 4;
+}
+
+// SandboxRange bounds one value. An empty min or max is unbounded on that side.
+message SandboxRange {
+  string min = 1;
+  string max = 2;
+}
+
+// SandboxBounds are the platform's range for each of the four values (chart sandbox.resources.bounds).
+message SandboxBounds {
+  SandboxRange cpu_request = 1;
+  SandboxRange cpu_limit = 2;
+  SandboxRange memory_request = 3;
+  SandboxRange memory_limit = 4;
+}
+
+// GetAgentSandboxResourcesRequest names the agent.
+message GetAgentSandboxResourcesRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+// SandboxResourcesState is the agent's sandbox sizing and where it comes from.
+message SandboxResourcesState {
+  // The agent's own override; empty values follow the template.
+  SandboxResources override = 1;
+  // The active version's (or, before activation, the latest version's) template values; empty
+  // values take the platform default.
+  SandboxResources template = 2;
+  // What the next sandbox gets: override, else template, else platform default, clamped to the bounds.
+  SandboxResources effective = 3;
+  // The platform bounds an override must stay inside.
+  SandboxBounds bounds = 4;
+  // Whether the platform raises the memory request to the memory limit (Kata, ADR 0083); a memory
+  // request in an override then has no effect.
+  bool memory_request_equals_limit = 5;
+}
+
+// GetAgentSandboxResourcesResponse holds the state.
+message GetAgentSandboxResourcesResponse {
+  SandboxResourcesState state = 1;
+}
+
+// SetAgentSandboxResourcesRequest sets the agent's override.
+message SetAgentSandboxResourcesRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // The whole override: a value left empty is cleared.
+  SandboxResources resources = 3;
+}
+
+// SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.
+message SetAgentSandboxResourcesResponse {
+  SandboxResourcesState state = 1;
 }
 
 // RunAgentTriggerRequest names the trigger to fire.

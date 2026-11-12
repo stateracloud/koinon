@@ -10,6 +10,7 @@ import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentModel } from '@/components/agent-model'
 import { AgentRunLimits } from '@/components/agent-run-limits'
+import { AgentSandboxResources } from '@/components/agent-sandbox-resources'
 import { AgentTriggers } from '@/components/agent-triggers'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -126,6 +127,7 @@ export function AgentPage() {
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
       {isApprover(org.role) && <AgentModel agent={a} />}
+      {isApprover(org.role) && <AgentSandboxResources agent={a} />}
       {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}

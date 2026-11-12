@@ -2,7 +2,7 @@
 
 - Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285)
 - Date: 2026-11-01
-- Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md)
+- Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md), [0109](0109-automated-restore-drill.md) (decisions 15 and 18, by reference)
 - Relates to: [0027](0027-repo-and-versioning.md) (forward-only migrations, upgrade test), [0030](0030-run-state-machine.md) (leases, epoch, takeover), [0032](0032-agent-home-checkpoints.md) (home checkpoints), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (KEK and envelopes), [0060](0060-migrations-as-a-job.md) (migration Job), [0066](0066-triggers-and-scheduling.md) (DBOS), [0076](0076-database-modes.md) (database modes, backups), [0077](0077-pinned-openshell-and-installer.md) (OpenShell pins), [0045](0045-openshell-hardening-defaults.md) (pinned supervisor image)
 - Issue: old issue 336; covers old issue 331 and #64
 
