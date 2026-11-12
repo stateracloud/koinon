@@ -63,6 +63,7 @@ import (
 	"github.com/stateracloud/koinon/internal/askuser"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/auth/ratelimit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
@@ -144,6 +145,10 @@ type config struct {
 	executorID     string
 	wait           time.Duration
 	trustedOrigins string
+	// trustedProxies lists the proxy networks whose X-Forwarded-For / Forwarded the login and admin API limiters believe.
+	trustedProxies string
+	// trustedProxyHeader is the header those proxies write: x-forwarded-for or forwarded.
+	trustedProxyHeader string
 
 	publicURL string
 
@@ -237,6 +242,14 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"most automatic price changes in 24 hours; it can only be lowered")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
+
+	fs.StringVar(&c.trustedProxies, "trusted-proxies", "",
+		"comma-separated CIDRs of the proxies and load balancers in front of koinon-api; from a peer in one of them the "+
+			"login and admin API limiters read the client address from X-Forwarded-For / Forwarded (rightmost untrusted hop); "+
+			"empty never trusts those headers")
+
+	fs.StringVar(&c.trustedProxyHeader, "trusted-proxy-header", ratelimit.HeaderXForwardedFor,
+		"the header the --trusted-proxies write the client address to: x-forwarded-for or forwarded; the other is ignored")
 
 	fs.StringVar(&c.publicURL, "public-url", "",
 		"URL browsers reach Koinon at, e.g. https://koinon.example.com; an http:// URL drops the "+
@@ -957,7 +970,14 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: cfg.addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	proxies, err := ratelimit.ParseTrustedProxies(splitList(cfg.trustedProxies))
+	if err != nil {
+		return fmt.Errorf("--trusted-proxies: %w", err)
+	}
+	if err := proxies.UseHeader(cfg.trustedProxyHeader); err != nil {
+		return fmt.Errorf("--trusted-proxy-header: %w", err)
+	}
+	srv := &http.Server{Addr: cfg.addr, Handler: proxies.Middleware(handler), ReadHeaderTimeout: 10 * time.Second}
 	servers := []*http.Server{srv}
 	toolsErr := make(chan error, 1)
 	if cfg.toolsAddr != "" {
