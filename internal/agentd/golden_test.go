@@ -103,8 +103,13 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(agentd.QuoteOutside(huge)).To(HavePrefix(`"xxx`))
 		Expect(agentd.QuoteOutside(huge)).To(HaveSuffix(fmt.Sprintf(`" [truncated: %d of %d bytes shown]`, agentd.OutsideMaxBytes-2, len(huge))))
 		Expect(agentd.QuoteOutside("short")).To(Equal(`"short"`))
-		for _, raw := range []string{huge, strings.Repeat("\x00", 2*agentd.OutsideMaxBytes), strings.Repeat("\xff", agentd.OutsideMaxBytes),
-			strings.Repeat("​", agentd.OutsideMaxBytes), strings.Repeat("\x00", agentd.OutsideMaxBytes-10)} {
+		for _, raw := range []string{
+			huge,
+			strings.Repeat("\x00", 2*agentd.OutsideMaxBytes),
+			strings.Repeat("\xff", agentd.OutsideMaxBytes),
+			strings.Repeat("\u200b", agentd.OutsideMaxBytes),
+			strings.Repeat("\x00", agentd.OutsideMaxBytes-10),
+		} {
 			q := agentd.QuoteOutside(raw)
 			if i := strings.LastIndex(q, ` [truncated:`); i >= 0 {
 				q = q[:i]
