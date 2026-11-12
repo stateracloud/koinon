@@ -32,8 +32,13 @@ You may use AI tools. The rules are the same as for any contribution:
 
 - The human author signs off the commits (DCO above) and is responsible for the change: you must
   understand it, have run it, and be able to answer review questions about it.
-- Disclose the tool with a `Co-Authored-By:` trailer on the commit. Never add an AI as
-  `Signed-off-by`: only a person can certify the DCO.
+- Disclose the tool in the pull request: fill in the "AI use" field of the template (which tool,
+  and what it did). That field is the disclosure; no trailer is required. A pull request body you
+  write yourself (for example `hack/ship.sh --pr-body`) skips the template, so copy the section in.
+- You may also add an `Assisted-by:` trailer to a commit, naming the tool (for example
+  `Assisted-by: <tool> <version>`). It is optional, and it is the preferred form: `Co-Authored-By:`
+  is for people. Never add an AI as `Signed-off-by`: only a
+  person can certify the DCO, so only a human signs off.
 - Maintainers may close a pull request that shows no understanding of the change, however
   well-formed it looks.
 
