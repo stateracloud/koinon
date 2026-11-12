@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): enqueueing, --admin and --break-glass need the upstream project's merge rights.
+# From a fork it reads a pull request's checks like pr-wait.sh; the merge itself is a maintainer's.
+#
 # Merge a pull request only after its head has been read, not assumed (old issue 647). It replaces the
 # hand-written wait-then-merge loops: a draft's green rollup, a ready run that has not started yet and a
 # required context that never reported have each been merged over by hand before.

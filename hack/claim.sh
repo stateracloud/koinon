@@ -3,6 +3,9 @@
 #
 # Work claims (ADR 0082, reduced to the lock by ADR 0104): two lanes must never take the same issue.
 #
+# Maintainer script (hack/README.md): writing claim refs and assigning issues needs write access to the
+# repository it acts on. From a fork it claims on the fork; `next` needs a board (KOINON_BOARD).
+#
 # The lock is the ref claim/<N>, written through the GitHub API as a compare-and-set (creating a ref
 # fails when it exists; a non-forced update must fast-forward). It is the only truth: an empty-tree
 # commit whose message records holder, human, pr, note and state. A release appends a commit; refs are
@@ -42,9 +45,10 @@
 # human holds, or none).
 #
 # Environment (all optional):
-#   KOINON_CLAIM_REPO           owner/name (default: the current repository)
-#   KOINON_CLAIM_PROJECT        project number for `next` (default 1)
-#   KOINON_CLAIM_PROJECT_OWNER  project owner (default: the repository owner)
+#   KOINON_CLAIM_REPO           owner/name (default: KOINON_REPO, else the origin remote, hack/repo-lib.sh)
+#   KOINON_CLAIM_PROJECT        project number for `next`, or none (default: KOINON_BOARD, which is 1 on
+#                               the upstream repository and none on a fork, hack/repo-lib.sh)
+#   KOINON_CLAIM_PROJECT_OWNER  project owner (default: KOINON_BOARD_OWNER, else the repository owner)
 #   KOINON_CLAIM_HUMAN          your GitHub login (default: the authenticated user)
 #   KOINON_CLAIM_HUMAN_CAP      held claims allowed per human (default: empty or 0, no cap)
 #   KOINON_CLAIM_MILESTONE      milestone title for `next` (default: the open one due first)
@@ -54,6 +58,8 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# shellcheck source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 
 DEFAULT_LANE=main
 EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
@@ -184,14 +190,21 @@ ADR_PR_JQ='[.[].data.repository.pullRequests.nodes[] | .files.nodes[]
 # ---------------------------------------------------------------------------------------------
 
 REPO=${KOINON_CLAIM_REPO:-}
-PROJECT=${KOINON_CLAIM_PROJECT:-1}
+PROJECT=${KOINON_CLAIM_PROJECT:-}
 PROJECT_OWNER=${KOINON_CLAIM_PROJECT_OWNER:-}
 OWNER='' NAME='' LANE=$DEFAULT_LANE
 init_repo() {
-  [[ -n $REPO ]] || REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+  local board
+  [[ -n $REPO ]] || REPO=$(koinon_repo) || die "cannot work out the repository (set KOINON_CLAIM_REPO)"
   OWNER=${REPO%%/*}
   NAME=${REPO#*/}
-  PROJECT_OWNER=${PROJECT_OWNER:-$OWNER}
+  if [[ -z $PROJECT ]]; then
+    board=$(KOINON_REPO=$REPO koinon_board) || die "cannot work out the project board (KOINON_BOARD)"
+    PROJECT=${board#* }
+    PROJECT=${PROJECT:-none}
+    [[ -z $board ]] || PROJECT_OWNER=${PROJECT_OWNER:-${board%% *}}
+  fi
+  PROJECT_OWNER=${PROJECT_OWNER:-${KOINON_BOARD_OWNER:-$OWNER}}
 }
 
 # gh_try ARGS...: run `gh api`, keep the output in TRY_OUT and the exit status in TRY_RC.
@@ -338,7 +351,7 @@ unassign() { gh api -X DELETE "repos/$REPO/issues/$1/assignees" -f "assignees[]=
 cmd_next() {
   local label="" ms human claims held closers prs json n p c t blockers
   if [[ ${1:-} == --label ]]; then label=${2:-}; [[ -n $label ]] || die "usage: next [--label L]"; fi
-  [[ $PROJECT != none ]] || die "next needs the project board (KOINON_CLAIM_PROJECT)"
+  [[ $PROJECT != none ]] || die "next needs the project board (KOINON_BOARD or KOINON_CLAIM_PROJECT; a fork has none by default)"
   ms=${KOINON_CLAIM_MILESTONE:-}
   [[ -n $ms ]] || ms=$(gh api "repos/$REPO/milestones?state=open" --jq 'sort_by(.due_on // "9999", .number) | .[0].title // empty')
   human=$(human_login)

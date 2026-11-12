@@ -282,6 +282,18 @@ check "gh pr create called with --draft" has 'gh pr create .*--draft' "$FAKE_LOG
 check "PR line printed" has '^PR #123 https://example.invalid/o/r/pull/123$' "$tmp/o10"
 check "board add called" has 'gh project item-add 1 --owner stateracloud --url https://example.invalid/o/r/pull/123' "$FAKE_LOG"
 check "board ok line" has '^board ok$' "$tmp/o10"
+# (#846) The board comes from hack/repo-lib.sh: a fork has none, and the owner and number are overridable.
+reset_state
+echo pf >pf.txt
+rc=$(KOINON_REPO=someone/koinon run "$tmp/o10f" -m "feat: pf" --pr-title "feat: pf" --pr-body "$tmp/body.md")
+check "fork: exit 0" eq "$rc" 0
+check "fork: no board call" hasnt 'gh project item-add' "$FAKE_LOG"
+check "fork: board none line" has '^board none$' "$tmp/o10f"
+reset_state
+echo pb >pb.txt
+rc=$(KOINON_REPO=someone/koinon KOINON_BOARD=7 run "$tmp/o10g" -m "feat: pb" --pr-title "feat: pb" --pr-body "$tmp/body.md")
+check "fork board: exit 0" eq "$rc" 0
+check "fork board: the fork's own board" has 'gh project item-add 7 --owner someone --url ' "$FAKE_LOG"
 reset_state
 export FAKE_PR_URL=https://example.invalid/o/r/pull/77
 echo q >q.txt

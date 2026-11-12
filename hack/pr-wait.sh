@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork on
+# any pull request gh can see.
+#
 # Wait on a pull request without a hand-written loop. Polls `gh pr view` and prints one line per
 # state change, so it is cheap to run in the background and read later. It only reports: it never
 # merges, never marks ready and never enables auto-merge.

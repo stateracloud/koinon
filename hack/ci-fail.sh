@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork.
+#
 # Show why CI failed, in a few lines. For a PR it finds the failing checks; for a run id it takes the
 # run's failed jobs. Per failing GitHub Actions job it prints at most 30 lines: the job name, the
 # link, then the useful lines of `gh run view --log-failed` (ANSI codes and timestamps stripped;

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): the lab target is maintainer infrastructure; --local works from a fork.
+#
 # Run the kind e2e (`make test-e2e-kind`, the go suite) of the committed HEAD somewhere other than
 # your shell's toolchain, two ways:
 #

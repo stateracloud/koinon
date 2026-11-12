@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): measures the maintainers' merge latency. It only reads, so it works from a fork.
+#
 # Measure the target of issue 572: the time from the LAST PUSH of a pull request to MERGED, over the last N
 # merged code pull requests, and where that time goes (queue time, time per CI job, runner minutes). Read-only
 # against GitHub (gh api GET calls only), no pager, nothing posted.
@@ -50,7 +52,7 @@ DOCS_RE='(\.md$|^docs/|^\.claude/)'
 PAR=6
 
 usage() {
-  sed -n "4,41p" "$0" | sed "s/^# \{0,1\}//" >&2
+  sed -n "4,43p" "$0" | sed "s/^# \{0,1\}//" >&2
   exit "${1:-64}"
 }
 

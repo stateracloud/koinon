@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): posting a commit status needs write access to the repository; from a fork it
+# posts on the fork.
+#
 # Post the commit status `e2e-lab` on a commit: the record that an external run of the kind e2e passed (or
 # failed) on exactly that commit (old issue 547). The run's own driver calls it after the run; run it by
 # hand to post a result again, for example when the commit was not pushed yet at the time.

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): posting a commit status needs write access to the repository and a lab host.
+#
 # Helpers for the commit status `go-test-lab` (old issue 610): the record that an external run of go-test
 # (posted through hack/e2e-status.sh) passed on exactly one commit. The ci.yml job go-test is satisfied
 # without running when the pull request head has a green one.

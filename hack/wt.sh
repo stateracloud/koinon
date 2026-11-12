@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): the worktrees of parallel agent lanes. It needs no GitHub rights and works from a
+# fork; the root is KOINON_WT_ROOT (default /tmp/kw).
+#
 # Short-lived git worktrees under one root, so agents do not carry long paths or worktree plumbing.
 # The root is ${KOINON_WT_ROOT:-/tmp/kw}, independent of TMPDIR. Run it from any checkout; it
 # never changes the checkout you run it from.

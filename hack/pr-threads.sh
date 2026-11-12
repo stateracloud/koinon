@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork.
+#
 # List the unresolved review threads of a pull request (#187). The main ruleset requires every review
 # thread resolved (required_review_thread_resolution), and advisory bots (DeepSource, CodeRabbit) leave
 # inline comments, so a PR can sit BLOCKED with every required check green. hack/pr-wait.sh --checks and
