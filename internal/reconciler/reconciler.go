@@ -94,6 +94,10 @@ type Endpoint struct {
 
 // Config configures a Reconciler.
 type Config struct {
+	// StateRevisionDB, when set, replaces the pool for storing State stream revisions. For tests of
+	// a slow or failing store.
+	StateRevisionDB staterev.DB
+
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
@@ -337,7 +341,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: pool},
+		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
@@ -347,12 +351,27 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}, nil
 }
 
+// stateDB is the database the State stream's revisions go to: the pool, unless the config names one.
+func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
+	if cfg.StateRevisionDB != nil {
+		return cfg.StateRevisionDB
+	}
+	return pool
+}
+
+// statePublishTimeout bounds publishState.
+const statePublishTimeout = 5 * time.Second
+
 // publishState stores the state of this pass as a revision of the State stream when it differs from
-// the latest one (ADR 0097 decision 2.1). Nothing reads the stream yet, so a failure is logged and
+// the latest one (ADR 0097 decision 2.1), after the Apply, so the stored revision records what was
+// applied. Nothing reads the stream yet, so a failure is logged and
 // counted and never holds the pass back: the Apply below is what serves the state. The state is the
 // one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
 // gateway that follows the stream serves what the agentgateway drivers serve.
 func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
+	// Its own short deadline: a slow database must not hold the pass.
+	ctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
+	defer cancel()
 	served, _ := s.WithoutInvalidLimits()
 	p, err := r.states.Publish(ctx, served)
 	if err != nil {
@@ -695,13 +714,17 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	sem := make(chan struct{}, r.cfg.SandboxJobs)
 	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
 
-	r.publishState(ctx, plan.State)
-
 	var res gatewayplan.ApplyResult
 	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, plan.State)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
+	// Record what was applied. A gateway that took nothing (unreachable, whole config refused) has
+	// nothing to record; a partial rejection still left the rest live.
+	var applyRej *gateway.RejectedError
+	if applyErr == nil || errors.As(applyErr, &applyRej) {
+		r.publishState(ctx, plan.State)
+	}
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
 		// but the objects named, which are reported on their org and do not hold back the others.

@@ -98,6 +98,24 @@ var _ = Describe("Snapshot", func() {
 		Expect(proto.Equal(staterev.Snapshot(a), staterev.Snapshot(b))).To(BeTrue())
 	})
 
+	It("gives identical bytes for the same State with every input slice permuted", func() {
+		a := richState()
+		b := richState()
+		b.Tools[agentA] = append(b.Tools[agentA], gateway.ToolGrant{Target: "wiki", Tools: []string{"zz", "aa"}})
+		a.Tools[agentA] = append(a.Tools[agentA], gateway.ToolGrant{Target: "wiki", Tools: []string{"aa", "zz"}})
+		a.Tools[agentA] = append([]gateway.ToolGrant{a.Tools[agentA][2]}, a.Tools[agentA][:2]...)
+		a.Providers[1].Models[0].Price.Tiers = append(a.Providers[1].Models[0].Price.Tiers, gateway.PriceTier{ContextOver: 100000, Input: "4"})
+		b.Providers[1].Models[0].Price.Tiers = []gateway.PriceTier{{ContextOver: 100000, Input: "4"}, b.Providers[1].Models[0].Price.Tiers[0]}
+		slices.Reverse(b.Keys)
+		slices.Reverse(b.Providers)
+		b.Providers[0].Models[0], b.Providers[0].Models[1] = b.Providers[0].Models[1], b.Providers[0].Models[0]
+		ba, err := proto.MarshalOptions{Deterministic: true}.Marshal(staterev.Snapshot(a))
+		Expect(err).NotTo(HaveOccurred())
+		bb, err := proto.MarshalOptions{Deterministic: true}.Marshal(staterev.Snapshot(b))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(bb).To(Equal(ba))
+	})
+
 	It("differs when a limit or a grant changes", func() {
 		a := richState()
 		b := richState()

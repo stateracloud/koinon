@@ -75,7 +75,9 @@ func (Half) EnumDescriptor() ([]byte, []int) {
 
 type StreamStateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// copy_id names the gateway copy (one replica of koinon-gateway); acks are recorded under it.
+	// copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),
+	// 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
+	// an ack under a reused id would count for a process that has not loaded the revision.
 	CopyId        string `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

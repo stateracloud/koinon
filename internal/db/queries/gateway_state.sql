@@ -8,23 +8,24 @@
 SELECT pg_advisory_xact_lock(hashtextextended('koinon.gateway_state_revisions', 0));
 
 -- name: GetLatestGatewayStateRevision :one
-SELECT revision, snapshot, created_at FROM gateway_state_revisions
+SELECT revision, snapshot, digest, created_at FROM gateway_state_revisions
 ORDER BY revision DESC
 LIMIT 1;
 
 -- name: InsertGatewayStateRevision :one
-INSERT INTO gateway_state_revisions (snapshot) VALUES (@snapshot)
+INSERT INTO gateway_state_revisions (snapshot, digest) VALUES (@snapshot, @digest)
 RETURNING revision;
 
 -- name: NotifyGatewayStateRevision :exec
 SELECT pg_notify('koinon_gateway_state', @payload::text);
 
 -- name: PruneGatewayStateRevisions :execrows
--- Keeps the newest @keep revisions; their acks go with the rest.
+-- Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
+-- Their acks go with them.
 DELETE FROM gateway_state_revisions
-WHERE revision NOT IN (
-    SELECT revision FROM gateway_state_revisions ORDER BY revision DESC LIMIT @keep::int
-);
+WHERE revision < (SELECT max(revision) FROM gateway_state_revisions)
+  AND (revision NOT IN (SELECT revision FROM gateway_state_revisions ORDER BY revision DESC LIMIT @keep::int)
+       OR created_at < now() - make_interval(secs => @max_age_seconds::int));
 
 -- name: AckGatewayStateRevision :exec
 INSERT INTO gateway_state_acks (copy_id, revision, half)

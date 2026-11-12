@@ -7827,7 +7827,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "copy_id names the gateway copy (one replica of koinon-gateway); acks are recorded under it."
+              "description": "copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),\n1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and\nan ack under a reused id would count for a process that has not loaded the revision."
             }
           ]
         },

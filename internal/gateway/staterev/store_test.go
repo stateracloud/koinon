@@ -5,6 +5,7 @@ package staterev_test
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -73,6 +74,53 @@ var _ = Describe("Publisher and acks", Ordered, func() {
 		r3, err := pub.Publish(ctx, richState())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r3.Changed).To(BeTrue())
+	})
+
+	It("stores one row when two goroutines publish the same state at once", func(ctx SpecContext) {
+		var wg sync.WaitGroup
+		changed := make(chan bool, 2)
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer GinkgoRecover()
+				r, err := pub.Publish(ctx, richState())
+				Expect(err).NotTo(HaveOccurred())
+				changed <- r.Changed
+			}()
+		}
+		wg.Wait()
+		close(changed)
+		n := 0
+		for c := range changed {
+			if c {
+				n++
+			}
+		}
+		Expect(n).To(Equal(1))
+		Expect(rows(ctx)).To(Equal(1))
+	})
+
+	It("drops revisions older than the maximum age but never the newest", func(ctx SpecContext) {
+		r1, _ := pub.Publish(ctx, richState())
+		s := richState()
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("3")})
+		r2, _ := pub.Publish(ctx, s)
+		_, err := pool.Exec(ctx, "UPDATE gateway_state_revisions SET created_at = now() - interval '40 days'")
+		Expect(err).NotTo(HaveOccurred())
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4")})
+		r3, err := pub.Publish(ctx, s)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows(ctx)).To(Equal(1), "r1 and r2 are old; r3 is the newest")
+		Expect(r3.Revision).To(BeNumerically(">", r2.Revision))
+		Expect(r2.Revision).To(BeNumerically(">", r1.Revision))
+		// Even when the newest is itself old, it stays.
+		_, err = pool.Exec(ctx, "UPDATE gateway_state_revisions SET created_at = now() - interval '40 days'")
+		Expect(err).NotTo(HaveOccurred())
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("5")})
+		_, err = pub.Publish(ctx, s)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows(ctx)).To(Equal(1))
 	})
 
 	It("has no latest revision before the first publish", func(ctx SpecContext) {

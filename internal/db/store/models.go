@@ -1744,6 +1744,7 @@ type GatewayStateAck struct {
 type GatewayStateRevision struct {
 	Revision  int64
 	Snapshot  []byte
+	Digest    string
 	CreatedAt pgtype.Timestamptz
 }
 

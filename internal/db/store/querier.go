@@ -614,7 +614,7 @@ type Querier interface {
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
-	InsertGatewayStateRevision(ctx context.Context, snapshot []byte) (int64, error)
+	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
@@ -1207,8 +1207,9 @@ type Querier interface {
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
-	// Keeps the newest @keep revisions; their acks go with the rest.
-	PruneGatewayStateRevisions(ctx context.Context, keep int32) (int64, error)
+	// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
+	// Their acks go with them.
+	PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error)
 	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
 	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON

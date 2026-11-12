@@ -47,7 +47,7 @@ func (q *Queries) CountGatewayCopiesAcked(ctx context.Context, arg CountGatewayC
 }
 
 const getLatestGatewayStateRevision = `-- name: GetLatestGatewayStateRevision :one
-SELECT revision, snapshot, created_at FROM gateway_state_revisions
+SELECT revision, snapshot, digest, created_at FROM gateway_state_revisions
 ORDER BY revision DESC
 LIMIT 1
 `
@@ -55,17 +55,27 @@ LIMIT 1
 func (q *Queries) GetLatestGatewayStateRevision(ctx context.Context) (GatewayStateRevision, error) {
 	row := q.db.QueryRow(ctx, getLatestGatewayStateRevision)
 	var i GatewayStateRevision
-	err := row.Scan(&i.Revision, &i.Snapshot, &i.CreatedAt)
+	err := row.Scan(
+		&i.Revision,
+		&i.Snapshot,
+		&i.Digest,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const insertGatewayStateRevision = `-- name: InsertGatewayStateRevision :one
-INSERT INTO gateway_state_revisions (snapshot) VALUES ($1)
+INSERT INTO gateway_state_revisions (snapshot, digest) VALUES ($1, $2)
 RETURNING revision
 `
 
-func (q *Queries) InsertGatewayStateRevision(ctx context.Context, snapshot []byte) (int64, error) {
-	row := q.db.QueryRow(ctx, insertGatewayStateRevision, snapshot)
+type InsertGatewayStateRevisionParams struct {
+	Snapshot []byte
+	Digest   string
+}
+
+func (q *Queries) InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertGatewayStateRevision, arg.Snapshot, arg.Digest)
 	var revision int64
 	err := row.Scan(&revision)
 	return revision, err
@@ -97,14 +107,20 @@ func (q *Queries) NotifyGatewayStateRevision(ctx context.Context, payload string
 
 const pruneGatewayStateRevisions = `-- name: PruneGatewayStateRevisions :execrows
 DELETE FROM gateway_state_revisions
-WHERE revision NOT IN (
-    SELECT revision FROM gateway_state_revisions ORDER BY revision DESC LIMIT $1::int
-)
+WHERE revision < (SELECT max(revision) FROM gateway_state_revisions)
+  AND (revision NOT IN (SELECT revision FROM gateway_state_revisions ORDER BY revision DESC LIMIT $1::int)
+       OR created_at < now() - make_interval(secs => $2::int))
 `
 
-// Keeps the newest @keep revisions; their acks go with the rest.
-func (q *Queries) PruneGatewayStateRevisions(ctx context.Context, keep int32) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneGatewayStateRevisions, keep)
+type PruneGatewayStateRevisionsParams struct {
+	Keep          int32
+	MaxAgeSeconds int32
+}
+
+// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
+// Their acks go with them.
+func (q *Queries) PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneGatewayStateRevisions, arg.Keep, arg.MaxAgeSeconds)
 	if err != nil {
 		return 0, err
 	}

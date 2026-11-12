@@ -4,9 +4,12 @@ package staterev
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -25,6 +28,10 @@ const NotifyChannel = "koinon_gateway_state"
 // DefaultKeep is how many revisions the table keeps. A gateway copy needs only the latest; the rest
 // is history for an operator and for the ack check of a copy that is a few revisions behind.
 const DefaultKeep = 100
+
+// MaxAge is how long a revision stays (the newest one always does). A snapshot holds org names and
+// URLs, so this also bounds how long a deleted org's data stays in the table.
+const MaxAge = 30 * 24 * time.Hour
 
 // DB is what Publisher needs of the pool: a transaction. *pgxpool.Pool satisfies it.
 type DB interface {
@@ -56,6 +63,14 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 	if err != nil {
 		return Published{}, fmt.Errorf("staterev: encode the snapshot: %w", err)
 	}
+	// The deterministic encoding is stable within one build of the protobuf library; a library upgrade
+	// can cost one extra revision, never a missed one.
+	enc, err := proto.MarshalOptions{Deterministic: true}.Marshal(snap)
+	if err != nil {
+		return Published{}, fmt.Errorf("staterev: encode the snapshot: %w", err)
+	}
+	sum := sha256.Sum256(enc)
+	digest := hex.EncodeToString(sum[:])
 	tx, err := p.DB.Begin(ctx)
 	if err != nil {
 		return Published{}, fmt.Errorf("staterev: begin: %w", err)
@@ -71,14 +86,11 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 	case err != nil:
 		return Published{}, fmt.Errorf("staterev: read the latest revision: %w", err)
 	default:
-		var prev gwv1.StateUpdate
-		// A stored snapshot that does not decode is replaced by a new revision, not an error:
-		// the state is the truth and the publisher must not stall on an old row.
-		if protojson.Unmarshal(latest.Snapshot, &prev) == nil && proto.Equal(&prev, snap) {
+		if latest.Digest == digest {
 			return Published{Revision: latest.Revision}, nil
 		}
 	}
-	rev, err := q.InsertGatewayStateRevision(ctx, body)
+	rev, err := q.InsertGatewayStateRevision(ctx, store.InsertGatewayStateRevisionParams{Snapshot: body, Digest: digest})
 	if err != nil {
 		return Published{}, fmt.Errorf("staterev: insert: %w", err)
 	}
@@ -89,7 +101,7 @@ func (p Publisher) Publish(ctx context.Context, s gateway.State) (Published, err
 	if keep <= 0 {
 		keep = DefaultKeep
 	}
-	if _, err := q.PruneGatewayStateRevisions(ctx, int32(keep)); err != nil {
+	if _, err := q.PruneGatewayStateRevisions(ctx, store.PruneGatewayStateRevisionsParams{Keep: int32(keep), MaxAgeSeconds: int32(MaxAge / time.Second)}); err != nil {
 		return Published{}, fmt.Errorf("staterev: retention: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -109,7 +121,8 @@ func Latest(ctx context.Context, db store.DBTX) (*gwv1.StateUpdate, error) {
 		return nil, fmt.Errorf("staterev: read the latest revision: %w", err)
 	}
 	var u gwv1.StateUpdate
-	if err := protojson.Unmarshal(row.Snapshot, &u); err != nil {
+	dec := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := dec.Unmarshal(row.Snapshot, &u); err != nil {
 		return nil, fmt.Errorf("staterev: decode revision %d: %w", row.Revision, err)
 	}
 	u.Revision = row.Revision
@@ -145,7 +158,9 @@ func Ack(ctx context.Context, db store.DBTX, copyID string, revision int64, half
 
 // AllAcked reports whether every one of the live gateway copies confirmed half at revision or a
 // later one. The caller names the live copies (it knows who is running); the table only knows who
-// confirmed. No copies gives false: "nobody is live" must never read as "everybody has it".
+// confirmed. Copy ids are unique per process incarnation (see the proto comment). No copies gives
+// false: "nobody is live" must never read as "everybody has it", so S4 must handle "no live copy"
+// explicitly (for example serve and proceed, or fail) and must not wait on a false that cannot change.
 func AllAcked(ctx context.Context, db store.DBTX, revision int64, half gwv1.Half, liveCopies []string) (bool, error) {
 	h, err := halfName(half)
 	if err != nil {

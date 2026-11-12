@@ -97,6 +97,13 @@ func sortedAgents[V any](m map[gateway.AgentRef]V) []gateway.AgentRef {
 	return out
 }
 
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func sortedCopy(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -162,6 +169,7 @@ func providerToProto(p gateway.Provider) *gwv1.Provider {
 					CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Reasoning: t.Reasoning,
 				})
 			}
+			slices.SortStableFunc(pm.Price.Tiers, func(a, b *gwv1.PriceTier) int { return cmp.Compare(a.GetContextOver(), b.GetContextOver()) })
 		}
 		out.Models = append(out.Models, pm)
 	}
@@ -218,7 +226,9 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 		for _, g := range m.Tools[a] {
 			at.Grants = append(at.Grants, &gwv1.ToolGrant{Target: g.Target, Tools: sortedCopy(g.Tools), All: g.All})
 		}
-		slices.SortFunc(at.Grants, func(x, y *gwv1.ToolGrant) int { return cmp.Compare(x.GetTarget(), y.GetTarget()) })
+		slices.SortStableFunc(at.Grants, func(x, y *gwv1.ToolGrant) int {
+			return cmp.Or(cmp.Compare(x.GetTarget(), y.GetTarget()), slices.Compare(x.GetTools(), y.GetTools()), cmp.Compare(boolInt(x.GetAll()), boolInt(y.GetAll())))
+		})
 		out.Tools = append(out.Tools, at)
 	}
 	return out

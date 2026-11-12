@@ -20,7 +20,9 @@ export const file_koinon_gateway_v1alpha1_state: GenFile = /*@__PURE__*/
  */
 export type StreamStateRequest = Message<"koinon.gateway.v1alpha1.StreamStateRequest"> & {
   /**
-   * copy_id names the gateway copy (one replica of koinon-gateway); acks are recorded under it.
+   * copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),
+   * 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
+   * an ack under a reused id would count for a process that has not loaded the revision.
    *
    * @generated from field: string copy_id = 1;
    */

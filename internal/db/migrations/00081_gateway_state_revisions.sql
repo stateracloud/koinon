@@ -19,8 +19,13 @@
 -- copy confirms each half of it apart (gateway_state_acks.half). Each revision is a full snapshot, so
 -- a copy that was away needs only the latest row.
 --
--- Bounded: the publisher deletes all but the newest rows after every insert (staterev.Retain), and an
--- ack goes with its revision (ON DELETE CASCADE). The newest revision is never deleted.
+-- Bounded: after every insert the publisher keeps the newest 100 revisions AND deletes the ones older
+-- than 30 days, never the newest one; an ack goes with its revision (ON DELETE CASCADE). A snapshot
+-- holds org names, agent names and upstream URLs, so the age bound also limits how long the data of a
+-- deleted org stays in this table.
+--
+-- copy_id is unique per process incarnation (pod UID plus a boot nonce) and never reused after a
+-- restart: an ack under a reused id would count for a process that has not loaded the revision.
 
 -- +goose Up
 
@@ -30,20 +35,20 @@ CREATE TABLE gateway_state_revisions (
     revision   bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- A StateUpdate as protojson, without the revision field (the column is the revision).
     snapshot   jsonb       NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
+    -- sha256 (hex) of the snapshot's deterministic proto encoding: "did the state change" compares
+    -- digests and decodes nothing.
+    digest     text        NOT NULL CHECK (digest ~ '^[0-9a-f]{64}$'),
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE gateway_state_acks (
     -- The gateway copy (one replica of koinon-gateway) that confirmed. Free text: a copy names itself.
-    copy_id  text        NOT NULL CHECK (copy_id <> ''),
+    copy_id  text        NOT NULL CHECK (char_length(copy_id) BETWEEN 1 AND 253),
     revision bigint      NOT NULL REFERENCES gateway_state_revisions (revision) ON DELETE CASCADE,
     half     text        NOT NULL CHECK (half IN ('model', 'mcp')),
     acked_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (copy_id, revision, half)
 );
-
--- "Has every copy confirmed revision R for half H" reads by (half, revision).
-CREATE INDEX gateway_state_acks_half_revision_idx ON gateway_state_acks (half, revision);
 
 -- +goose Down
 
