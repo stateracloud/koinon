@@ -48,6 +48,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
@@ -124,6 +125,10 @@ type Options struct {
 	// GitHub is the client of the shipped GitHub provider when Hosts is nil; it defaults to a
 	// client for api.github.com.
 	GitHub *github.Client
+	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext). The push
+	// writer's fetch, ref listing and push dial through it and refuse redirects. Nil dials
+	// unchecked, for tests.
+	DialContext gitpush.DialFunc
 	// ExecutionLease is how long one executor holds a request. Default
 	// DefaultExecutionLease.
 	ExecutionLease time.Duration
@@ -150,6 +155,7 @@ type Service struct {
 	execKey   ExecKeys
 	savedKeys *secretstore.Keyring
 	hosts     *codehost.Registry
+	dial      gitpush.DialFunc
 	lease     time.Duration
 	maxExec   int
 	now       func() time.Time
@@ -177,7 +183,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 	}
 	return &Service{
 		now:  opts.Now,
-		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts,
+		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts, dial: opts.DialContext,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, hold: opts.RestoreHold, onMCP: opts.OnMCPResult,
 	}
 }

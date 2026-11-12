@@ -724,7 +724,7 @@ func serve(ctx context.Context, cfg config) error {
 	})
 	// One guard for every service that reaches outward (issue #462, ADR 0107).
 	hold := restorehold.NewGuard(cfg.restoreHold)
-	approvalOpts := approvals.Options{RestoreHold: hold, Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved}
+	approvalOpts := approvals.Options{RestoreHold: hold, Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
