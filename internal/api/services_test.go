@@ -213,18 +213,22 @@ var _ = Describe("AgentService", func() {
 	})
 
 	It("still reads the deprecated flavor field when the request names no harness", func(ctx SpecContext) {
-		a, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+		res, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), DisplayName: "By flavor",
+			Grants: e.repoGrant(ctx, org, "acme/widgets"),
 			Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE, //nolint:staticcheck // deprecated field
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(a.GetAgent().GetHarness()).To(Equal("opencode"))
+		Expect(res.GetAgent().GetHarness()).To(Equal("opencode"))
 
+		// A deprecated value with no harness behind it is refused for the harness, not for anything else.
 		_, err = owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(),
+			Grants: e.repoGrant(ctx, org, "acme/widgets"),
 			Flavor: templatev1alpha1.Flavor_FLAVOR_HERMES, //nolint:staticcheck // deprecated field and value
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("harness is not allowed by the template")))
 	})
 
 	It("lets only admins and owners activate, which approves the proposed grants", func(ctx SpecContext) {
