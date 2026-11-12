@@ -357,6 +357,13 @@ its native format (ADR 0069), so the gateway forwards bodies and does no format 
 confirms each revision it serves. The kubelet tick, the 90 s key settle and agentd's reload waits do
 not apply to Koinon's gateway.
 
+Record (2026-11-12, #279 slice 2): the stream is backed by two install-wide tables (migration 00080),
+`gateway_state_revisions` (one revision sequence for the whole State, a full secret-free snapshot per
+revision, the newest 100 kept, a `pg_notify` on `koinon_gateway_state` per new revision) and
+`gateway_state_acks` (gateway copy, revision, half). The reconciler stores a revision only when the
+snapshot differs from the latest one. A gateway copy's ack of a revision covers every earlier one for
+that half.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_

@@ -552,7 +552,9 @@ type MCPState struct {
 // WithoutInvalidLimits returns s without the keys and limits of agents whose Limit fails
 // Limit.Validate, and one Rejection per dropped key. A driver that serves the rest of the state
 // uses it so that one agent's bad limit fails that agent's key (it is not served: fail closed)
-// and not the whole config.
+// and not the whole config. A key is shared by both halves, so the dropped key also takes the agent
+// off the MCP path (its tool grants stay, but name no key); a spec pins this. ADR 0097 does not say
+// otherwise.
 func (s State) WithoutInvalidLimits() (State, []Rejection) {
 	var bad map[AgentRef]error
 	for a, l := range s.Limits {

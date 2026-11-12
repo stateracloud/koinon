@@ -52,6 +52,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -207,6 +208,8 @@ type Reconciler struct {
 	backend      execution.Backend
 	gw           gateway.ModelGateway
 	secrets      SecretStore
+	// states stores the revisions of the gateway State (the State stream, ADR 0097).
+	states staterev.Publisher
 
 	mu sync.Mutex
 	// wsMu guards the per-pass workspace map, which per-sandbox jobs read concurrently.
@@ -334,7 +337,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
+		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: pool},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
@@ -342,6 +345,25 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
 		}),
 	}, nil
+}
+
+// publishState stores the state of this pass as a revision of the State stream when it differs from
+// the latest one (ADR 0097 decision 2.1). Nothing reads the stream yet, so a failure is logged and
+// counted and never holds the pass back: the Apply below is what serves the state. The state is the
+// one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
+// gateway that follows the stream serves what the agentgateway drivers serve.
+func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
+	served, _ := s.WithoutInvalidLimits()
+	p, err := r.states.Publish(ctx, served)
+	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
+		r.log.Warn("storing the gateway state revision failed; the gateway is applied as before", "err", err)
+		return
+	}
+	if p.Changed {
+		r.m.StateRevisions.Inc()
+		r.log.Debug("gateway state revision stored", "revision", p.Revision)
+	}
 }
 
 // notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
@@ -672,6 +694,8 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	// SandboxJobs.
 	sem := make(chan struct{}, r.cfg.SandboxJobs)
 	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
+
+	r.publishState(ctx, plan.State)
 
 	var res gatewayplan.ApplyResult
 	rejectedReason := ""
