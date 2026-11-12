@@ -264,6 +264,12 @@ func (f *fakeModelGateway) LedgerEnforcesBudgets() bool { return f.ledgerBudgets
 
 func (f *fakeModelGateway) Usage() gateway.UsageReader { return gateway.NoUsage{} }
 
+func (f *fakeModelGateway) issuedKeys() []gateway.IssuedKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gateway.IssuedKey(nil), f.issued...)
+}
+
 func (f *fakeModelGateway) issuedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -24,7 +24,7 @@ fresh() { # a copy of the inputs, echoes its path
 	local w
 	w=$(mktemp -d "$tmp/w.XXXXXX") || exit 1
 	mkdir -p "$w/hack/e2e-toolchain" "$w/.github/workflows" "$w/test/e2e"
-	cp "$repo/hack/versions.env" "$w/hack/"
+	cp "$repo/hack/versions.env" "$repo/hack/govulncheck.sh" "$w/hack/"
 	cp "$repo/hack/e2e-toolchain/Dockerfile" "$w/hack/e2e-toolchain/"
 	cp "$repo"/.github/workflows/*.yml "$w/.github/workflows/"
 	cp "$repo/CONTRIBUTING.md" "$w/"
@@ -104,8 +104,8 @@ subst "$w/.github/workflows/ci.yml" '      - name: load tool versions
 expect_fail "a buf-action with no versions-env load in its job" "$w" "no earlier step in the job running hack/versions-env.sh"
 
 w=$(fresh)
-subst "$w/.github/workflows/govulncheck.yml" '"golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"' 'golang.org/x/vuln/cmd/govulncheck@v1.9.0'
-expect_fail "a govulncheck version literal in a workflow" "$w" "literal govulncheck/gofumpt"
+subst "$w/hack/govulncheck.sh" '"golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"' 'golang.org/x/vuln/cmd/govulncheck@v1.9.0'
+expect_fail "a govulncheck version literal in the wrapper script" "$w" "literal govulncheck/gofumpt"
 
 w=$(fresh)
 printf 'go run mvdan.cc/gofumpt@v0.12.0 -l x\n' >"$w/hack/x.sh"

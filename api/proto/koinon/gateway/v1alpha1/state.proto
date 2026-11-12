@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.gateway.v1alpha1;
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1;gatewayv1alpha1";
+
+// GatewayStateService is the State stream of ADR 0097 decision 2.1: koinon-api sends a gateway copy
+// the full desired state of the gateway, one revision at a time, and the copy confirms each half of a
+// revision once it serves it. It is the config delivery of Koinon's own gateway; the agentgateway
+// drivers keep rendering files and CRDs. It is internal: only a gateway copy calls it.
+//
+// Nothing here carries secret material: a StateUpdate holds key ids and key hashes, never a key, and
+// names the file a credential is mounted at, never its content (ADR 0097 decision 5, the secret store).
+service GatewayStateService {
+  // StreamState sends the latest revision at once and every later one when it is published. Each
+  // message is a full snapshot (state of the world), not a delta, so a copy that reconnects needs
+  // nothing but the next message.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // The stream message is StateUpdate, the name ADR 0097 and the State types use for a revision.
+  rpc StreamState(StreamStateRequest) returns (stream StateUpdate);
+  // AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model
+  // half and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An
+  // ack of a revision covers every earlier one for that half. Idempotent.
+  rpc AckRevision(AckRevisionRequest) returns (AckRevisionResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message StreamStateRequest {
+  // copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),
+  // 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
+  // an ack under a reused id would count for a process that has not loaded the revision.
+  string copy_id = 1;
+}
+
+// Half is one of the two paths a gateway copy serves.
+enum Half {
+  HALF_UNSPECIFIED = 0;
+  HALF_MODEL = 1;
+  HALF_MCP = 2;
+}
+
+message AckRevisionRequest {
+  string copy_id = 1;
+  int64 revision = 2;
+  Half half = 3;
+}
+
+message AckRevisionResponse {}
+
+// StateUpdate is one revision of the gateway's desired state: the keys both halves need, then the
+// model half and the MCP half (gateway.State, ADR 0097 decision 2.1). The keys are at the top level
+// so neither half is a copy of them.
+message StateUpdate {
+  // revision grows by one per published change of the state and is the number the copy acks. 0 only
+  // in a snapshot that has not been stored yet.
+  int64 revision = 1;
+  repeated Key keys = 2;
+  ModelState model = 3;
+  MCPState mcp = 4;
+}
+
+// AgentRef names an agent.
+message AgentRef {
+  string org = 1;
+  string name = 2;
+}
+
+// Key is the gateway-side record of an API key: id, owner and hash. The key itself never enters it.
+message Key {
+  string id = 1;
+  AgentRef agent = 2;
+  // hash is "sha256:<hex>" of the key material.
+  string hash = 3;
+}
+
+message ModelState {
+  repeated AgentLimit limits = 1;
+  repeated Provider providers = 2;
+  repeated AgentModels models = 3;
+}
+
+message AgentLimit {
+  AgentRef agent = 1;
+  Limit limit = 2;
+}
+
+// Limit is a per-agent spend limit (gateway.Limit).
+message Limit {
+  // unit is "USD", the only unit.
+  string unit = 1;
+  // amount_pico_usd is the exact amount in pico-USD (money.USD).
+  int64 amount_pico_usd = 2;
+  // window_seconds is 0 for no window.
+  int64 window_seconds = 3;
+  string generation = 4;
+}
+
+// Provider is an org's OpenAI-compatible upstream. api_key_file is where the provider key is mounted
+// in the gateway, not the key.
+message Provider {
+  string org = 1;
+  string name = 2;
+  string type = 3;
+  string base_url = 4;
+  string api_key_file = 5;
+  string anthropic_workspace_id = 6;
+  repeated Model models = 7;
+}
+
+message Model {
+  string name = 1;
+  string format = 2;
+  Thinking thinking = 3;
+  bool guard = 4;
+  // price is unset for a model without one; the gateway does not serve it.
+  Price price = 5;
+}
+
+// Thinking is internal/thinking.Capability as the table records it.
+message Thinking {
+  string thinks = 1;
+  string on = 2;
+  string off = 3;
+  string display = 4;
+  repeated string betas = 5;
+  string usage_split = 6;
+}
+
+// Price is per million tokens in USD, as decimal strings.
+message Price {
+  string input = 1;
+  string output = 2;
+  string cache_read = 3;
+  string cache_write = 4;
+  string reasoning = 5;
+  repeated PriceTier tiers = 6;
+}
+
+message PriceTier {
+  int64 context_over = 1;
+  string input = 2;
+  string output = 3;
+  string cache_read = 4;
+  string cache_write = 5;
+  string reasoning = 6;
+}
+
+message AgentModels {
+  AgentRef agent = 1;
+  repeated string models = 2;
+}
+
+message MCPState {
+  repeated MCPTarget targets = 1;
+  repeated AgentTools tools = 2;
+}
+
+// MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in
+// the gateway, not the credential; credential_header and credential_prefix say how it is sent.
+message MCPTarget {
+  string name = 1;
+  string url = 2;
+  bool sse = 3;
+  string org = 4;
+  string credential_header = 5;
+  string credential_prefix = 6;
+  string credential_file = 7;
+}
+
+message AgentTools {
+  AgentRef agent = 1;
+  repeated ToolGrant grants = 2;
+}
+
+message ToolGrant {
+  string target = 1;
+  repeated string tools = 2;
+  bool all = 3;
+}

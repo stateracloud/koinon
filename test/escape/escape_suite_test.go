@@ -51,6 +51,9 @@
 //	                            (the chart's pods policy), KOINON_ESCAPE_NETPOL (the chart's
 //	                            default-deny NetworkPolicy name) and KOINON_ESCAPE_SERVICES
 //	                            (namespace/name:port list whose ClusterIPs must be unreachable).
+//	                            When KOINON_ESCAPE_SERVICES is set, every listed Service must
+//	                            exist (a missing one fails the spec); the built-in default list
+//	                            is skipped where a Service is absent.
 //	                            The live admission case skips unless the chart's policy is bound
 //	                            to the namespace. The Kata case fails when the variable is set
 //	                            and the sandbox is not under Kata.
