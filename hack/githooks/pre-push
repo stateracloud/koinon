@@ -10,15 +10,20 @@ remote=$1
 refs=$(cat)
 zero=0000000000000000000000000000000000000000
 status=0
-if [ -n "${KOINON_SKIP_GITLEAKS:-}" ]; then
+if [ "${KOINON_SKIP_GITLEAKS:-}" = 1 ]; then
 	:
 elif ! command -v gitleaks >/dev/null 2>&1; then
 	echo "pre-push: gitleaks is not installed; this push is not scanned (CI scans every commit)" >&2
 else
 	while read -r _ local_sha _ remote_sha; do
+		[ -n "$local_sha" ] || continue
 		[ "$local_sha" = "$zero" ] && continue # a delete
-		if [ "$remote_sha" = "$zero" ]; then
-			opts="$local_sha --not --remotes=$remote"
+		# A remote sha this clone does not have (a force push over an unfetched tip) is a bad range, which
+		# gitleaks reports as "0 commits scanned" and exit 0: treat it like a new branch.
+		if [ "$remote_sha" = "$zero" ] || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+			# $remote is a URL when pushing to one: then scan what no remote-tracking ref has.
+			if git remote | grep -qxF -- "$remote"; then not="--remotes=$remote"; else not="--remotes"; fi
+			opts="$local_sha --not $not"
 		else
 			opts="$remote_sha..$local_sha"
 		fi

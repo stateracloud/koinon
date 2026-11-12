@@ -300,6 +300,19 @@ expect "wait bad max" 2 '--max needs a number'
 out=$(cd "$repo" && bash "$script" --start no-such-ref-xyz 2>&1); rc=$?
 expect "start unknown base" 2 'unknown base'
 
+# --start by a relative path from a subdirectory: the run must find the script (the first cut did not).
+mkdir -p "$repo/hack" "$repo/sub"
+cp hack/lane-gates.sh hack/paths-lib.sh hack/paths.rules "$repo/hack/"
+vfile=$(cd "$repo/sub" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash ../hack/lane-gates.sh --start "$nonempty_base" 2>/dev/null)
+waitrun "$vfile" --max 30
+expect "start by a relative path from a subdirectory" 0 '^gate=go .*verdict=pass' '^lane-gates ok'
+# A run that dies with a code that is no verdict (here 127) is a failure with its tail, not that code.
+mkdir "$tmp/odd"
+echo "bash: boom: command not found" >"$tmp/odd/verdict"
+echo 127 >"$tmp/odd/rc"
+waitrun "$tmp/odd/verdict"
+expect "wait maps a non-verdict exit code to 1" 1 'exited 127 before it had a verdict' 'command not found'
+
 # Usage errors.
 out=$(cd "$repo" && bash "$script" --nope 2>&1); rc=$?
 expect "unknown flag" 2 'unknown argument'

@@ -11,7 +11,9 @@
 #   --refresh (before the command)    ignore the cache and fetch again
 #
 # One fetch: the board's items through GraphQL, 100 per page with a cursor (no 1000 cap), joined with
-# the REST list of open issues (pull requests removed). An issue not on the board has status "none".
+# the REST list of open issues (pull requests removed). Only items of $KOINON_BOARD_REPO count (an org
+# board can hold other repositories' issues). An issue not on the board has status "none"; one on the board
+# without a Status value has "no-status".
 # Record: {number,title,status,labels[],url}. Lines: "#<N> <status> [label,label] <title>".
 # Cache: $KOINON_STATE_DIR/board.json (default ${XDG_CONFIG_HOME:-~/.config}/koinon/state, the dir of
 # hack/agent-state.sh), fresh for $KOINON_BOARD_TTL seconds (default 600). A failed fetch keeps the old
@@ -24,7 +26,7 @@
 
 set -uo pipefail
 
-usage() { sed -n '4,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 refresh=0
 [[ ${1:-} == --refresh ]] && { refresh=1; shift; }
@@ -43,6 +45,7 @@ org=${KOINON_BOARD_ORG:-stateracloud}
 number=${KOINON_BOARD_NUMBER:-1}
 repo=${KOINON_BOARD_REPO:-stateracloud/koinon}
 ttl=${KOINON_BOARD_TTL:-600}
+[[ $ttl =~ ^[0-9]+$ ]] || { echo "board: KOINON_BOARD_TTL must be a number of seconds" >&2; exit 2; }
 state_dir=${KOINON_STATE_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/koinon/state}
 cache=$state_dir/board.json
 
@@ -63,7 +66,7 @@ query='query($org: String!, $number: Int!, $endCursor: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-        content { ... on Issue { number state } }
+        content { ... on Issue { number state repository { nameWithOwner } } }
       }
     }
   } }
@@ -77,7 +80,7 @@ fetch() {
 	trap "rm -rf '$tmp'" RETURN
 	"$gh_cmd" api graphql --paginate -f query="$query" -f org="$org" -F number="$number" >"$tmp/items.raw" || { echo "board: the board query failed" >&2; return 1; }
 	"$gh_cmd" api -X GET "repos/$repo/issues" -f state=open -F per_page=100 --paginate >"$tmp/issues.raw" || { echo "board: the issue list failed" >&2; return 1; }
-	jq -s '[.[] | .data.organization.projectV2.items.nodes[]? | select(.content.number != null) | {key: (.content.number | tostring), value: (.status.name // "none")}] | from_entries' "$tmp/items.raw" >"$tmp/items.json" || { echo "board: unreadable board page" >&2; return 1; }
+	jq -s --arg repo "$repo" '[.[] | .data.organization.projectV2.items.nodes[]? | select(.content.number != null and .content.repository.nameWithOwner == $repo) | {key: (.content.number | tostring), value: (.status.name // "no-status")}] | from_entries' "$tmp/items.raw" >"$tmp/items.json" || { echo "board: unreadable board page" >&2; return 1; }
 	jq -s --slurpfile st "$tmp/items.json" '[.[][] | select(has("pull_request") | not) | {number, title, status: ($st[0][(.number | tostring)] // "none"), labels: [.labels[].name], url: .html_url}] | sort_by(.number)' "$tmp/issues.raw" >"$tmp/board.json" || { echo "board: unreadable issue page" >&2; return 1; }
 	mv "$tmp/board.json" "$cache"
 }
@@ -89,7 +92,7 @@ fi
 line='"#\(.number) \(.status) [\(.labels | join(","))] \(.title)"'
 case $cmd in
 snapshot) jq . "$cache" ;;
-backlog) jq -r ".[] | select(.status == \"Backlog\" or .status == \"none\") | $line" "$cache" ;;
+backlog) jq -r ".[] | select(.status == \"Backlog\" or .status == \"none\" or .status == \"no-status\") | $line" "$cache" ;;
 ready) jq -r ".[] | select(.status == \"Ready\") | $line" "$cache" ;;
 issue)
 	jq -e --argjson n "$1" '.[] | select(.number == $n)' "$cache" || { echo "board: #$1 is not an open issue" >&2; exit 1; }

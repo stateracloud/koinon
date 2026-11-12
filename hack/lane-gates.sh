@@ -43,6 +43,8 @@
 
 set -uo pipefail
 
+self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0") # before any cd: --start re-runs this file
+
 case ${1:-} in
 -h | --help) sed -n 4,35p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 --wait)
@@ -75,10 +77,15 @@ case ${1:-} in
 		sleep 2
 		waited=$((waited + 2))
 	done
-	grep -E '^(gate=|lane-gates )' "$wfile"
 	wrc=$(cat "$wdir/rc")
-	[[ $wrc =~ ^[0-9]+$ ]] || wrc=1
-	exit "$wrc"
+	if [[ $wrc == 0 || $wrc == 1 || $wrc == 3 ]]; then
+		grep -E '^(gate=|lane-gates )' "$wfile"
+		exit "$wrc"
+	fi
+	# 2, 126, 127...: the run itself broke (usage error, missing file); never pass that code on as a verdict.
+	echo "lane-gates FAIL: the run exited $wrc before it had a verdict; nothing was verified"
+	tail -n 5 "$wfile" | sed 's/^/  | /'
+	exit 1
 	;;
 --start)
 	shift
@@ -87,15 +94,18 @@ case ${1:-} in
 	cd "$(git rev-parse --show-toplevel)" || exit 2
 	git rev-parse --verify --quiet "$sbase^{commit}" >/dev/null || { echo "lane-gates: unknown base $sbase (git fetch origin?)" >&2; exit 2; }
 	sdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates-run.XXXXXX") || exit 2
-	self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+	[[ -f $self ]] || { echo "lane-gates: cannot find $self" >&2; exit 2; }
 	: >"$sdir/verdict"
 	# shellcheck disable=SC2016 # the script is for the child shell: its $1..$3 must not expand here
 	# The detached shell writes rc last and atomically, so --wait never reads a half-written code.
 	run='echo $$ >"$3/pid"; bash "$1" "$2" >"$3/verdict" 2>&1; echo $? >"$3/rc.tmp"; mv "$3/rc.tmp" "$3/rc"'
+	# A new session, so ending the caller's process group does not end the run (macOS has no setsid).
 	if command -v setsid >/dev/null 2>&1; then
 		setsid bash -c "$run" _ "$self" "$sbase" "$sdir" </dev/null >/dev/null 2>&1 &
+	elif command -v perl >/dev/null 2>&1; then
+		perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash -c "$run" _ "$self" "$sbase" "$sdir" </dev/null >/dev/null 2>&1 &
 	else
-		nohup bash -c "$run" _ "$self" "$sbase" "$sdir" </dev/null >/dev/null 2>&1 &
+		echo "lane-gates: --start needs setsid (util-linux) or perl to detach the run" >&2; exit 2
 	fi
 	disown 2>/dev/null
 	# The pid is the detached shell's own ($$ above; setsid may fork). Wait for it so --wait never races it.
