@@ -395,6 +395,8 @@ var _ = Describe("Reconciler latency defaults", func() {
 			queueRun(ctx, org, user, warm.ID)
 			pass(ctx)
 			Expect(created()).To(Equal(1), "the first run of the prepared agent creates no sandbox and no volume")
+			Expect(osg.Calls("StartSandbox")).To(BeZero(), "nor does it start one")
+			Expect(phase(warm.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 
 			queueRun(ctx, org, user, cold.ID)
 			pass(ctx)

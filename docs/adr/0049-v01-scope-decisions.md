@@ -357,8 +357,8 @@ from templates costs nothing until work arrives.
   to pass; the others start on demand. Keep-warm sandboxes count toward resources (old issue 314).
 - **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
-  and the home volume at activation without starting the pod is not built: tracked in #101 (closed by the 2026-11-12 amendment below). A per-org rate limit on
-  sandbox starts is tracked in #27.
+  and the home volume at activation without starting the pod is not built: tracked in #101 (closed by
+  the 2026-11-12 amendment below). A per-org rate limit on sandbox starts is tracked in #27.
 - **API and UI (#100).** `AgentService.SetAgentKeepWarm` sets or withdraws the request; admins and
   owners only, audited (`agent.keep_warm.set`), refused on an archived agent. `Agent.keep_warm` is the
   request and `Agent.keep_warm_granted` the outcome. Only the reconciler knows the cap, so each pass
@@ -377,11 +377,14 @@ creates it and starts it, so the image is pulled to the node and the home volume
 first run. For that agent there is nothing left to prepare, and its first run already skips the pull
 and the volume creation. The storage cost of that prepared volume is the one keep-warm already
 carries: one home volume per granted keep-warm agent, so at most `reconciler.keepWarmPerOrg` volumes
-per org, which exist whether or not the pod runs. Agents that are not keep-warm gain no volume
+per org (the volume outlives a stop, for example after the request is withdrawn, until the sandbox is
+deleted). Koinon does not size the volume: OpenShell's workspace default does, so an operator reads
+the cost as volumes × that size. Agents that are not keep-warm gain no volume
 before their first run, so bulk-creating agents from templates stays free.
 
 Decision on #101: it is closed with this record. Preparing without starting the pod for every agent
 needs a backend call that creates a sandbox stopped or pulls an image alone; OpenShell offers neither
 (`CreateSandbox` starts the sandbox and the volume lives and dies with it, see `RetentionRetain`), so
-it is not built. The spec "prepares only the keep-warm agent at activation" in
+it is not built. Creating and then stopping a sandbox would start the pod, which #101 rules out, and
+costs a start per agent. The spec "prepares only the keep-warm agent at activation" in
 `internal/reconciler/latency_test.go` shows that a prepared agent's first run creates nothing.
