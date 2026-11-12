@@ -32,6 +32,9 @@ const (
 	pollMaxPages = 3
 	// maxItemPayload bounds the payload kept of one item; a larger one is delivered without it.
 	maxItemPayload = 64 << 10
+	// maxHeaderSeconds caps a seconds header (X-Poll-Interval, Retry-After) before it becomes a
+	// Duration, so a huge value cannot overflow into a short one; the poller caps waits lower.
+	maxHeaderSeconds = 7 * 24 * 3600
 )
 
 // ConditionalResponse is the answer to a conditional GET. A 304 is a result, not an error: it is
@@ -119,7 +122,7 @@ func pollInterval(h http.Header) time.Duration {
 	if err != nil || n <= 0 {
 		return 0
 	}
-	return time.Duration(n) * time.Second
+	return time.Duration(min(n, maxHeaderSeconds)) * time.Second
 }
 
 // rateLimitedUntil reads GitHub's rate-limit answer (F6): a primary limit is a 403 or 429 with
@@ -132,7 +135,7 @@ func rateLimitedUntil(resp *http.Response, now time.Time) (time.Time, bool) {
 	}
 	h := resp.Header
 	if s, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After"))); err == nil && s >= 0 {
-		return now.Add(time.Duration(s) * time.Second), true
+		return now.Add(time.Duration(min(s, maxHeaderSeconds)) * time.Second), true
 	}
 	if h.Get("X-RateLimit-Remaining") == "0" {
 		if reset, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil {

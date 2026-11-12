@@ -539,11 +539,13 @@ Polling is the ingress of decision 7 for a code host that cannot reach Koinon. A
   `If-Modified-Since`) and always with the same query, so the validator stays valid. A `304` ends
   the poll before the body is read and before any trigger work; GitHub does not count it against
   the primary rate limit. Gitea's API lists carry no ETag and no Last-Modified, so the Gitea adapter
-  hashes the first page and compares it with the stored hash (`page_hash`): an identical page ends
-  the poll the same way. Issue comments are read with `since` (cursor time minus 5 minutes) so the
+  hashes the first page and compares it with the stored hash (`page_hash`): an identical first page
+  that is also the last ends the poll the same way. The list runs oldest first, so a full first page
+  is walked further (at most 5 pages); a walk that hits that bound moves `since` to the last comment
+  it read, so a burst of old comments cannot hide new ones. Issue comments are read with `since` (cursor time minus 5 minutes) so the
   page stays small and the hash stable.
 - **The interval.** `next_poll_at = max(now + floor, now + provider interval, backoff_until)`,
-  computed and stored per row. The floor is 1 minute (`Config.Floor`, per provider in
+  computed and stored per row, where `now` is when that row's answer arrived, not when the pass began. The floor is 1 minute (`Config.Floor`, per provider in
   `Config.Floors`); the provider interval is GitHub's `X-Poll-Interval`, kept until a response
   states another. Koinon never polls faster than either. The leader never sleeps on a minimum across
   rows: a row told 120 s does not hold back a row told 60 s.

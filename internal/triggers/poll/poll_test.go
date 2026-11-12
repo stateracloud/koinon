@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,9 @@ func (r *recorder) calls() int {
 type replica struct {
 	rt *durable.Runtime
 	p  *poll.Poller
+	// clock is the poller's Now unless the spec set one: the time of the current pass, so the
+	// provider "answers" at the moment the pass starts.
+	clock atomic.Int64
 }
 
 func startReplica(ctx context.Context, cfg poll.Config, rec *recorder, open poll.Opener) *replica {
@@ -93,11 +97,15 @@ func startReplica(ctx context.Context, cfg poll.Config, rec *recorder, open poll
 		PollingInterval: 100 * time.Millisecond,
 	})
 	Expect(err).NotTo(HaveOccurred())
+	r := &replica{rt: rt}
+	if cfg.Now == nil {
+		cfg.Now = func() time.Time { return time.Unix(0, r.clock.Load()).UTC() }
+	}
 	p := poll.New(cfg, pool, work, rec)
 	Expect(rt.Register(p.Registrar())).To(Succeed())
 	Expect(rt.Launch(ctx)).To(Succeed())
 	p.Bind(open, rec)
-	r := &replica{rt: rt, p: p}
+	r.p = p
 	DeferCleanup(r.stop)
 	return r
 }
@@ -106,6 +114,7 @@ func (r *replica) stop() { _ = r.rt.Shutdown(5 * time.Second) }
 
 func (r *replica) pass(ctx context.Context, at time.Time) {
 	GinkgoHelper()
+	r.clock.Store(at.UnixNano())
 	_, err := r.p.PollDue(ctx, at)
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -245,6 +254,19 @@ var _ = Describe("shared code-host pollers (#25)", func() {
 			Expect([]int{appGets, libGets}).To(Equal([]int{2, 3}))
 		})
 
+		It("counts the interval from the provider's answer, not from the start of a long pass", func(ctx SpecContext) {
+			rec.subscribe(sub(conn, app, "watch"))
+			fake.SetPollInterval("app", 60)
+			// The pass starts at t0; the answer arrives 40 s later, as it would late in a long pass.
+			answered := t0.Add(40 * time.Second)
+			r := startReplica(ctx, poll.Config{Now: func() time.Time { return answered }}, rec, open)
+			r.pass(ctx, t0)
+			Expect(row(ctx, conn, app).NextPollAt.Time).To(BeTemporally("==", answered.Add(60*time.Second)))
+			r.pass(ctx, t0.Add(60*time.Second))
+			gets, _ := fake.PollGets("app")
+			Expect(gets).To(Equal(1), "not due 20 s after the last answer")
+		})
+
 		It("does not let a provider interval below the floor shorten it", func(ctx SpecContext) {
 			rec.subscribe(sub(conn, app, "watch"))
 			fake.SetPollInterval("app", 30)
@@ -346,6 +368,26 @@ var _ = Describe("shared code-host pollers (#25)", func() {
 			Expect(row(ctx, conn, res).LastStatus).To(Equal(poll.OutcomeChanged))
 			Eventually(rec.deliveries).Should(ConsistOf(delivery{Trigger: "watch", Key: "comment:" + itoa(id)}))
 			Expect(pollDedupes(ctx, org)).To(Equal(1))
+		})
+
+		It("finds new comments behind a full first page that has not changed", func(ctx SpecContext) {
+			rec.subscribe(sub(conn, res, "watch"))
+			issue := fake.AddIssue("app", "a busy pull request")
+			r := startReplica(ctx, poll.Config{}, rec, open)
+			r.pass(ctx, t0)
+			for i := range 55 {
+				fake.AddComment("app", issue, "bot "+strconv.Itoa(i))
+			}
+			r.pass(ctx, t0.Add(time.Minute))
+			Eventually(rec.calls).Should(Equal(55))
+
+			// The first page (50 comments, all delivered) is the same as before; the new comment
+			// is on page 2.
+			id := fake.AddComment("app", issue, "the one after the burst")
+			r.pass(ctx, t0.Add(2*time.Minute))
+			Expect(row(ctx, conn, res).LastStatus).To(Equal(poll.OutcomeChanged))
+			Eventually(rec.deliveries).Should(ContainElement(delivery{Trigger: "watch", Key: "comment:" + itoa(id)}))
+			Expect(rec.calls()).To(Equal(56))
 		})
 	})
 })

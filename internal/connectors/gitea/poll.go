@@ -20,7 +20,7 @@ import (
 // Last-Modified (go-gitea/gitea @ 37fa67f, modules/httpcache: API responses are
 // "max-age=0, private, must-revalidate"; the ETag helpers serve downloads only) and no poll-interval
 // or rate-limit header, so a poll reads the first page and compares its hash with the stored one:
-// an identical page is "unchanged" and ends the poll before any trigger work. The issue-comment list
+// an identical page that is not full is "unchanged" and ends the poll before any trigger work. The issue-comment list
 // takes `since` (services/context/utils.go), which keeps the page small and the hash stable while
 // nothing is new.
 
@@ -86,11 +86,17 @@ func (a *access) Poll(ctx context.Context, res codehost.Resource, st codehost.Po
 		h.Write([]byte{'\n'})
 	}
 	hash := codehost.Validator{Kind: codehost.ValidatorPageHash, Value: hex.EncodeToString(h.Sum(nil))}
-	if st.Baselined && st.Validator == hash {
+	// The list runs oldest first, so an identical first page proves nothing new only when it is
+	// also the last page; a full one may hide new comments on the pages after it.
+	if st.Baselined && st.Validator == hash && len(raw) < maxPerPage {
 		return codehost.PollResult{Changed: false, State: st}, nil
 	}
 	next := cur
-	var items []codehost.PollItem
+	var (
+		items  []codehost.PollItem
+		newest time.Time // creation time of the last comment walked
+		capped bool
+	)
 	for p := 1; ; p++ {
 		for _, m := range raw {
 			var c struct {
@@ -99,6 +105,9 @@ func (a *access) Poll(ctx context.Context, res codehost.Resource, st codehost.Po
 			}
 			if err := json.Unmarshal(m, &c); err != nil || c.ID <= 0 {
 				return codehost.PollResult{}, fmt.Errorf("gitea: comment without an id")
+			}
+			if c.Created.After(newest) {
+				newest = c.Created.UTC().Truncate(time.Second)
 			}
 			if c.ID <= cur.id {
 				continue
@@ -115,13 +124,26 @@ func (a *access) Poll(ctx context.Context, res codehost.Resource, st codehost.Po
 			}
 			items = append(items, codehost.PollItem{Key: "comment:" + strconv.FormatInt(c.ID, 10), Kind: "issue_comment", At: c.Created, Payload: body})
 		}
-		if len(raw) < maxPerPage || p >= pollMaxPages {
+		if len(raw) < maxPerPage {
+			break
+		}
+		if p >= pollMaxPages {
+			capped = true
 			break
 		}
 		raw = nil
 		if _, err := a.c.do(ctx, "GET", path, query(p+1), nil, &raw); err != nil {
 			return codehost.PollResult{}, err
 		}
+	}
+	if capped && newest.Add(pollOverlap).After(next.at) {
+		// The walk stopped at its page bound. Move `since` up to the last comment it read, giving
+		// up the clock-skew overlap for this step, so the next poll reads the comments after it
+		// instead of the same pages of ones already delivered.
+		next.at = newest.Add(pollOverlap)
+	}
+	if st.Baselined && len(items) == 0 && next == cur {
+		return codehost.PollResult{Changed: false, State: codehost.PollState{Validator: hash, Cursor: cur.String(), Baselined: true}}, nil
 	}
 	out := codehost.PollResult{Changed: true, State: codehost.PollState{Validator: hash, Cursor: next.String(), Baselined: true}}
 	if st.Baselined {

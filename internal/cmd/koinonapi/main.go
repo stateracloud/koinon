@@ -775,11 +775,11 @@ func serve(ctx context.Context, cfg config) error {
 	if sched != nil {
 		sched.Bind(svc)
 		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
+		slog.Info("schedule triggers started")
 	}
 	if pollers != nil {
 		pollers.Bind(poll.ConnectionOpener{Hosts: hosts, Keys: opener}, poll.LogDeliverer{Logger: slog.Default()})
 		safego.GoOrStop(bgCtx, slog.Default(), "code-host-pollers", stop, func(ctx context.Context) { pollers.Run(ctx) })
-		slog.Info("schedule triggers started")
 	}
 	if kube != nil {
 		var sealer connections.Sealer
@@ -820,6 +820,8 @@ func serve(ctx context.Context, cfg config) error {
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())
+	}
+	if pollers != nil {
 		reg.MustRegister(pollers.Collector())
 	}
 	// The price refresh (ADR 0098, amended 2026-11-07). Off, koinon-api makes no request to any price

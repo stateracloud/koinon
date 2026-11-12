@@ -42,8 +42,10 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/jackc/pgx/v5"
@@ -77,7 +79,9 @@ const (
 	errorBackoffBase = time.Minute
 	minWake          = time.Second
 	maxErrorText     = 500
-	maxDedupeKey     = 512
+	// maxValidator is the longest validator code_host_pollers stores.
+	maxValidator = 512
+	maxDedupeKey = 512
 	// leaderLock is the advisory lock key of the polling replica ("koinonpl").
 	leaderLock int64 = 0x6b6f696e6f6e706c
 )
@@ -428,6 +432,7 @@ func (p *Poller) pollOne(ctx context.Context, row store.CodeHostPoller, now time
 	}
 	provider, outcome, err := p.poll(ctx, row, now, &save)
 	if err != nil {
+		now = p.answeredAt(now)
 		var rl *codehost.RateLimitError
 		if errors.As(err, &rl) {
 			outcome = OutcomeRateLimited
@@ -471,6 +476,13 @@ func (p *Poller) poll(ctx context.Context, row store.CodeHostPoller, now time.Ti
 	got, err := poller.Poll(ctx, res, st)
 	if err != nil {
 		return provider, "", err
+	}
+	// The interval counts from the answer, not from the start of the pass: a row polled late in a
+	// long pass would otherwise be due again before its interval has passed.
+	now = p.answeredAt(now)
+	if len(got.State.Validator.Value) > maxValidator {
+		// An oversized ETag (a proxy's) cannot be stored; poll without one rather than fail the save.
+		got.State.Validator = codehost.Validator{Kind: codehost.ValidatorNone}
 	}
 	if got.Interval > 0 {
 		save.ProviderIntervalS = int32(min(got.Interval, MaxBackoff) / time.Second)
@@ -628,11 +640,25 @@ func (d LogDeliverer) Deliver(_ context.Context, _ *store.Queries, ev Event, sub
 	return "", pgtype.UUID{}, nil
 }
 
+// answeredAt is the clock after a provider answered, never before the pass's start.
+func (p *Poller) answeredAt(passStart time.Time) time.Time {
+	if t := p.cfg.Now(); t.After(passStart) {
+		return t
+	}
+	return passStart
+}
+
 func ts(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
+// truncate cuts s to at most n bytes on a rune boundary and drops invalid UTF-8, which Postgres
+// would refuse in a text column.
 func truncate(s string, n int) string {
+	s = strings.ToValidUTF8(s, "")
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }
