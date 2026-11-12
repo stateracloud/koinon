@@ -218,48 +218,65 @@ else
 fi
 
 # --- T1 -------------------------------------------------------------------------------------------
-# Scan the files that run tests; docs are excluded (they explain the rule), and so are this script and its test.
-# t1_files GLOB...: the matching files under the tree, without .git, node_modules, docs, testdata and the two rule files.
-t1_files() {
-	local args=() g
-	for g in "$@"; do args+=(-o -name "$g"); done
-	find "$root" \( -name .git -o -name node_modules -o -name docs -o -name testdata \) -prune -o \
-		-type f \( "${args[@]:1}" \) ! -name ci-rules-check.sh ! -name ci-rules-check-test.sh -print 2>/dev/null
-}
-# t1_grep PATTERN FILE...: "file:line: text" for each line that matches PATTERN once a whole-line comment
-# (//, *, #) and a trailing `//` comment are dropped. A trailing `//` comment is cut so `retries: 0 // none` is clean.
-t1_grep() {
-	local pat=$1
-	shift
-	[[ $# -gt 0 ]] || return 0
-	awk -v pat="$pat" -v root="$root/" '
-		/^[[:space:]]*(\/\/|\*|\/\*|#)/ { next }
-		{ l = $0; sub(/[[:space:]]\/\/.*/, "", l); if (l ~ pat) { f = FILENAME; sub("^" root, "", f); print f ":" FNR ": " $0 } }
-	' "$@"
-}
-scan() { # PATTERN [grep options...]: matching lines of the scanned files
-	local pat=$1
-	shift
-	grep -r -I -n -E "$@" --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=docs --exclude-dir=testdata \
-		--exclude=ci-rules-check.sh --exclude=ci-rules-check-test.sh "$pat" "$root" 2>/dev/null || true
-}
-mapfile -t f_flake < <(t1_files '*.go' '*.sh' '*.yml' '*.yaml' 'Makefile' '*.mk' 'package.json')
-mapfile -t f_action < <(t1_files '*.yml' '*.yaml')
-mapfile -t f_cli < <(t1_files '*.sh' '*.yml' '*.yaml' 'Makefile' '*.mk' 'package.json')
-mapfile -t f_web < <(t1_files '*.ts' '*.tsx' '*.mts' '*.js' '*.mjs' | grep -E "^$root/web/|/playwright[^/]*\.config\.[a-z]+$" || true)
-mapfile -t f_vitest < <(t1_files 'vite.config.*' 'vitest.config.*' 'vitest.workspace.*' 'vite.*.config.*' 'vitest.*.config.*')
-hits=$(
-	t1_grep 'flake-attempts|[Ff]lakeAttempts|--rerun-fails' "${f_flake[@]}"
-	t1_grep 'nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action' "${f_action[@]}"
-	t1_grep '--retries[= ][[:space:]]*[1-9]' "${f_cli[@]}"
-	t1_grep 'retries:[[:space:]]*[^0[:space:]]' "${f_web[@]}"
-	t1_grep '(^|[^a-zA-Z])retry:[[:space:]]*[^0[:space:]]' "${f_vitest[@]}"
-)
-if [[ -n ${hits//[[:space:]]/} ]]; then
+# One file list (tracked files in a git tree, else find), one grep over it, then a classification of the matched
+# lines only. Docs are excluded (they explain the rule), and so are this script and its test.
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ $(git -C "$root" rev-parse --show-toplevel) == "$(cd "$root" && pwd -P)" ]]; then
+	mapfile -t all_files < <(git -C "$root" ls-files -z | tr '\0' '\n' | grep -vE '(^|/)(node_modules|docs|testdata)/' || true)
+else
+	mapfile -t all_files < <(cd "$root" && find . \( -name .git -o -name node_modules -o -name docs -o -name testdata \) -prune -o -type f -print | sed 's|^\./||')
+fi
+cand=()
+for f in "${all_files[@]}"; do
+	case ${f##*/} in
+	ci-rules-check.sh | ci-rules-check-test.sh) ;;
+	*.go | *.sh | *.yml | *.yaml | *.mk | Makefile | package.json | *.ts | *.tsx | *.mts | *.js | *.mjs) cand+=("$f") ;;
+	esac
+done
+raw=''
+if [[ ${#cand[@]} -gt 0 ]]; then
+	raw=$(cd "$root" && command grep -n -I -H -F -e flake-attempts -e lakeAttempts -e rerun-fails -e retry-action -e wretry \
+		-e /retry -e -retries -e retries: -e retry: -e flaky-waiver: -- "${cand[@]}" 2>/dev/null || true)
+fi
+hits=''
+while IFS= read -r line; do
+	[[ -n $line ]] || continue
+	file=${line%%:*}
+	rest=${line#*:}
+	ln=${rest%%:*}
+	text=${rest#*:}
+	trimmed=${text#"${text%%[![:space:]]*}"}
+	[[ $trimmed == //* || $trimmed == \** || $trimmed == '#'* ]] && continue
+	code=${text%%[[:space:]]//*}
+	base=${file##*/}
+	bad=0
+	case $base in
+	*.go | *.sh | *.yml | *.yaml | *.mk | Makefile | package.json)
+		[[ $code =~ flake-attempts|[Ff]lakeAttempts|--rerun-fails ]] && bad=1
+		[[ $code =~ --retries[=\ ][[:space:]]*[1-9] ]] && [[ $base != *.go ]] && bad=1
+		if [[ $base == *.yml || $base == *.yaml ]]; then
+			[[ $code =~ nick-fields/retry|nick-invision/retry|Wandalen/wretry|wretry\.action|retry-action ]] && bad=1
+		fi
+		;;
+	esac
+	if [[ $file == web/* || $base == playwright*.config.* ]]; then
+		case $base in *.ts | *.tsx | *.mts | *.js | *.mjs) [[ $code =~ retries:[[:space:]]*[^0[:space:]] ]] && bad=1 ;; esac
+	fi
+	case $base in
+	vite.config.* | vitest.config.* | vitest.workspace.* | vite.*.config.* | vitest.*.config.*)
+		[[ $code =~ (^|[^a-zA-Z])retry:[[:space:]]*[^0[:space:]] ]] && bad=1
+		;;
+	esac
+	[[ $bad == 1 ]] && hits+="$file:$ln: $text"$'\n'
+done <<<"$raw"
+if [[ -n $hits ]]; then
 	verdict T1 fail "automatic test retry (rule T1; file:line): $(tr '\n' ' ' <<<"$hits" | cut -c1-400)"
 else
 	verdict T1 pass "no automatic test retry"
 fi
+
+scan() { # PATTERN: lines of the T1 grep output for the files T2 reads, as "root/file:line:text"
+	grep -E -- "$1" <<<"$raw" | grep -E '^[^:]+\.(go|ts|tsx|sh|yml|yaml):' | sed "s|^|$root/|" || true
+}
 
 # --- T2 -------------------------------------------------------------------------------------------
 bad=()
@@ -274,7 +291,7 @@ while IFS= read -r line; do
 	else
 		bad+=("$where: malformed waiver (want: flaky-waiver: #<issue> until <YYYY-MM-DD>)")
 	fi
-done < <(scan 'flaky-waiver:' --include='*.go' --include='*.ts' --include='*.tsx' --include='*.sh' --include='*.yml' --include='*.yaml')
+done < <(scan 'flaky-waiver:')
 if [[ ${#bad[@]} -eq 0 ]]; then
 	verdict T2 pass "$n flaky-test waivers, none past its date"
 else
