@@ -151,7 +151,13 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       xz-utils=5.6.1+really5.4.5-1ubuntu0.4 \
       python3=3.12.3-0ubuntu2.1 \
       python-is-python3=3.11.4-1 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+      /var/log/apt/* /var/log/dpkg.log /var/log/alternatives.log \
+      /var/cache/ldconfig/aux-cache /var/cache/debconf/*-old
+# The commit time (#176): useradd writes it into /etc/shadow instead of the current day. It is
+# declared here, after the apt layer: a declared ARG is part of the cache key of every later RUN, so
+# declaring it earlier would make a build with another epoch miss the cached apt install.
+ARG SOURCE_DATE_EPOCH
 # OpenShell runs the sandbox as UID/GID 10001 with the home volume at /sandbox (spike 1, 8).
 RUN groupadd --gid 10001 sandbox \
  && useradd --uid 10001 --gid 10001 --home-dir /sandbox --no-create-home --shell /bin/bash sandbox \
