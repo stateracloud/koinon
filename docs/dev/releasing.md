@@ -19,7 +19,8 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 
 1. Merge everything to `main` and wait for the `ci` and `secrets` checks on the merge commit. `ci`
    cancels a run when a newer commit lands on `main`, so a superseded merge commit can be left with
-   cancelled checks: tag the newest commit whose checks are green.
+   cancelled checks: tag the newest commit whose checks are green. Write down its SHA: step 3 tags this SHA, not
+   whatever `main` is by then.
 2. Re-check the gateway fallback, for every release, rc and final (ADR 0040, amendment 2026-11-12).
    Do it before you push the tag. Koinon stays on agentgateway behind `ModelGateway`; Agent Router
    (formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback
@@ -33,8 +34,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
      open, merged or closed, and the version of Agent Router you looked at.
    - Check the three gaps that ADR 0040 gives as reasons not to choose it: budgets are token windows
      of at most one day with no USD or never-reset budget; quota fails open by default; it needs
-     Envoy Gateway. That pull request matters because it makes metrics survive a stream that ends in the middle
-     of a response, which our spend ledger needs.
+     Envoy Gateway. That pull request would emit partial metrics when the stream is torn down mid-response.
    - Reconsider the fallback only if one of these holds: agentgateway fails a requirement of ADR
      0040 or ADR 0041 that we cannot fix (USD budgets per key, unpriced models, spend after a
      streamed response, MCP authorization), or Agent Router closes all three gaps. Weigh also the
@@ -43,11 +43,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
      issue and write an ADR that amends or supersedes ADR 0040. Otherwise write "no change" and go
      on.
 
-3. Tag the merge commit and push the tag (signed tags are fine; the workflow only needs the commit):
+3. Tag the commit you wrote down in step 1 and push the tag (signed tags are fine; the workflow only
+   needs the commit). A commit may have landed on `main` during step 2; do not tag it, because the
+   `release` gate checks the tagged commit and tags are immutable:
 
    ```sh
-   git switch main && git pull
-   git tag -s v0.1.0-rc.1 -m "v0.1.0-rc.1"
+   git fetch origin
+   git tag -s v0.1.0-rc.1 -m "v0.1.0-rc.1" <sha-from-step-1>
    git push origin v0.1.0-rc.1
    ```
 
