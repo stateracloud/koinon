@@ -424,6 +424,13 @@ jobs:
       - name: adr-lint
         if: ${{ !cancelled() }}
         run: hack/adr-lint.sh
+      # Area and tags on every ADR, research note and spike (hack/doc-meta-lint.sh, ADR 0115).
+      - name: doc metadata (tests)
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint-test.sh
+      - name: doc metadata
+        if: ${{ !cancelled() }}
+        run: hack/doc-meta-lint.sh
       # Scans every tracked file, Markdown included, so it cannot sit in the path-gated `scripts` job (#572).
       - name: old-issue references
         if: ${{ !cancelled() }}

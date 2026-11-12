@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended: 2026-10-26 (releases from old issue 146)
 - Date: 2026-10-21
+- Area: product-scope
+- Tags: roadmap, release
 - Decision: [design.md#24](../design.md)
 
 ## Context

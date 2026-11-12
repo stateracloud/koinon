@@ -2,6 +2,8 @@
 
 - Status: Accepted (2026-11-06)
 - Date: 2026-11-06
+- Area: models-spend
+- Tags: agentgateway, mcp, models, spend-ledger, leak-guard
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md) (supersedes in part decisions 1, 2 and 6 and
   the "Our own Go proxy" rejection: agentgateway becomes the first driver, not the destination),
   [0013](0013-model-access.md) (the "Our own Go proxy" alternative), [0041](0041-koinon-spend-ledger-and-budget-stops.md)

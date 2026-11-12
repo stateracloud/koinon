@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0042](0042-ask-tier-park-and-execute.md)
 - Date: 2026-10-21
+- Area: work-model
+- Tags: approvals, mcp, openshell
 - Amended by: [0048](0048-openshell-spike-results.md) (resolves the spike verification)
 - Decision: [design.md#8](../design.md)
 - Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)

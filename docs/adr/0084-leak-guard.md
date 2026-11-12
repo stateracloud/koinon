@@ -2,6 +2,8 @@
 
 - Status: Accepted (decisions by procoduck, 2026-10-31; delivery before v0.1.0); amended by [0091](0091-leak-guard-by-destination.md) (2026-11-03: the main protection is where a call sends data; the text check is a frozen secondary alarm)
 - Date: 2026-10-31
+- Area: security-audit
+- Tags: leak-guard, egress, mcp, security
 - Amended by: [0097](0097-koinon-owned-gateway.md) (decision 1, in step 2: the guard is called from Koinon's MCP path, not through ExtMcp)
 - Amends: [0042](0042-ask-tier-park-and-execute.md) (a leak becomes an approval), [0057](0057-mcp-servers.md) (servers declare a data class and kind; every org route carries the guard)
 - Relates to: [0051](0051-session-home-generations.md) (home generations), [0040](0040-agentgateway-model-and-mcp-gateway.md), [0023](0023-observability-and-audit.md), [0020](0020-agent-builder-and-templates.md)

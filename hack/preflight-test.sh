@@ -56,7 +56,7 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test doc-meta-lint doc-meta-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
@@ -340,6 +340,8 @@ check "multi-area change passes: exit 0" eq "$rc" 0
 check "migrate-lint gets the base" has '^migrate-lint.sh origin/main' "$FAKE_LOG"
 check "adr-lint ran" has '^adr-lint.sh' "$FAKE_LOG"
 check "adr-lint-test ran" has '^adr-lint-test.sh' "$FAKE_LOG"
+check "doc-meta-lint ran" has '^doc-meta-lint.sh' "$FAKE_LOG"
+check "doc-meta-lint-test ran" has '^doc-meta-lint-test.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"

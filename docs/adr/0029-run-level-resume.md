@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0051](0051-session-home-generations.md)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: harness, runs, flavors, agent-home
 - Decision: [design.md#29](../design.md)
 
 > Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
