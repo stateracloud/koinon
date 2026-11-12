@@ -4,12 +4,14 @@ package keyscli_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/keyscli"
@@ -83,5 +85,20 @@ var _ = Describe("DrawID", func() {
 
 		_, err = keyscli.DrawID(ctx, time.Now(), nil, func(context.Context, string) (bool, error) { return true, nil })
 		Expect(err).To(MatchError(ContainSubstring("could not draw an unused KEK ID")))
+
+		_, err = keyscli.DrawID(ctx, time.Now(), nil, func(context.Context, string) (bool, error) { return false, errors.New("database down") })
+		Expect(err).To(MatchError(ContainSubstring("database down")))
+	})
+
+	It("creates no Secret when the probe fails", func(ctx SpecContext) {
+		kube := fake.NewClientset()
+		store := keyscli.KubeStore{Client: kube, Namespace: "koinon", Name: "koinon-kek",
+			UsedID: func(context.Context, string) (bool, error) { return false, errors.New("database down") }}
+		created, err := store.Ensure(ctx, time.Now(), nil)
+		Expect(err).To(MatchError(ContainSubstring("database down")))
+		Expect(created).To(BeFalse())
+		list, err := kube.CoreV1().Secrets("koinon").List(ctx, metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.Items).To(BeEmpty())
 	})
 })

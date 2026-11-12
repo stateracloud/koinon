@@ -360,7 +360,8 @@ func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 // after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
 //
 // Not covered: an add whose event was lost (the audit is optional, [AuditOptional]) and whose KEK was
-// removed by hand before the next start-up observation records a key-set state is never recorded. The
+// removed by hand before the next start-up observation records a key-set state is never recorded (interim
+// gap, tracked in #862; exit: Add records the ID durably before it saves the Secret). The
 // query scans the keys.% events; that is fine while the chain is small (add a partial index on action if
 // it grows).
 func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
