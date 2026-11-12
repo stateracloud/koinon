@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below)
 - Date: 2026-10-21
+- Area: models-spend
+- Tags: agentgateway, models, mcp
 - Amended by: [0097](0097-koinon-owned-gateway.md) (supersedes in part decisions 1, 2 and 6; agentgateway becomes the first driver, not the destination)
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
 - Verification: the OpenShell spike is done, see [0048](0048-openshell-spike-results.md); the agentgateway spike (deployment mode, ExtMCP routing) was Pending (old issue 3)

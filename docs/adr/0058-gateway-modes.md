@@ -2,6 +2,8 @@
 
 - Status: Accepted; amended 2026-10-25 and 2026-10-26 (below)
 - Date: 2026-10-23
+- Area: models-spend
+- Tags: agentgateway, models, budgets, kubernetes
 - Amended by: [0097](0097-koinon-owned-gateway.md) (shared mode is not built; Kubernetes mode is frozen and deleted in step 3)
 - Amends: [0049](0049-v01-scope-decisions.md) (the two gateway modes become three)
 - Note (2026-11-06, [0097](0097-koinon-owned-gateway.md) decision 4, #274): **kubernetes mode is

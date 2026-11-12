@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: frontend-ux
+- Tags: ui, api, auth, eventing
 - Decision: [design.md#22](../design.md)
 
 ## Context

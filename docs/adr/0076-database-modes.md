@@ -2,6 +2,8 @@
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)
 - Date: 2026-10-28
+- Area: install-operations
+- Tags: database, install, backup-restore, helm-chart
 - Amends: [0049](0049-v01-scope-decisions.md) ("Postgres: … No bundled StatefulSet")
 - Relates to: [0003](0003-postgres-source-of-truth.md), [0047](0047-repository-scaffold.md), [0060](0060-migrations-as-a-job.md), [0066](0066-triggers-and-scheduling.md), [0075](0075-isolation-tiers.md), [0077](0077-pinned-openshell-and-installer.md)
 

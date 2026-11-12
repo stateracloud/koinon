@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Area: install-operations
+- Tags: backup-restore, helm-chart, upgrade
 - Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (the patch-line rule; recovery policy),
   [0100](0100-install-audit-chain.md) (`restore-hold` is a recorded setting), [0023](0023-observability-and-audit.md) (fixed metric label sets)

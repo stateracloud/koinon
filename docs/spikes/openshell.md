@@ -1,7 +1,10 @@
 # Spike: OpenShell, Agent Sandbox and agentgateway on the maintainer cluster
 
-- Status: Run complete (steps 1–8, re-runs and gap checks on 2026-10-21); ADR 0048 proposed; teardown pending;
+- Status: Complete (run complete, steps 1–8, re-runs and gap checks on 2026-10-21); ADR 0048 proposed; teardown pending;
   results in `hack/spike/results/`)
+- Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: openshell, sandbox, credentials, isolation, agentgateway
 - Tracking: old issue 3
 - Results: [ADR 0048](../adr/0048-openshell-spike-results.md)
 - Decisions it verifies: ADR 0002, 0006, 0008, 0009, 0013, 0016, 0029, 0035, 0040–0045

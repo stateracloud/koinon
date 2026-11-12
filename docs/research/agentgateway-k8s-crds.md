@@ -1,5 +1,10 @@
 # agentgateway v1.6.0 Kubernetes mode: what the native CRDs can express for Koinon
 
+- Status: Complete
+- Date: 2026-10-25
+- Area: models-spend
+- Tags: agentgateway, budgets, kubernetes
+
 Researched 2026-10-25. Source: `github.com/agentgateway/agentgateway` at tag **v1.6.0**
 (commit `ea5608642b9d5c94c5baf5fd9f2f9849b808e963`), plus the official docs at
 `agentgateway.dev/docs/kubernetes/latest` (1.6.x). The Kubernetes controller lives **in the same

@@ -2,6 +2,8 @@
 
 - Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default)
 - Date: 2026-11-09
+- Area: engineering-process
+- Tags: claims, ci
 - Amends: [0082](0082-work-claims-and-ready-queue.md) decisions 1, 2, 3, 5, 6, 7 and 10 (and its lanes);
   [0094](0094-work-claims-on-the-public-repository.md) decisions 1, 2, 3, 5, 6 and 7
 - Relates to: [0046](0046-adr-conventions.md), [0082](0082-work-claims-and-ready-queue.md), [0094](0094-work-claims-on-the-public-repository.md)

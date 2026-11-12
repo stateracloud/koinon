@@ -2,6 +2,8 @@
 
 - Status: Superseded by [0055](0055-chat-as-its-own-object.md) and [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
+- Area: work-model
+- Tags: chat, tasks, ui
 - Decision: [design.md#17](../design.md)
 
 ## Context

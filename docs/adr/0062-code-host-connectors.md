@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: connectors-tools
+- Tags: connectors, github, gitea, egress
 - Relates to: old issue 144 (decided there and in
   conversation on 2026-10-26)
 - Amends: [0007](0007-connector-model.md) (hosts per connection, provider data in the type),

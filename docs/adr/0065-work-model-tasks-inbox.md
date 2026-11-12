@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: work-model
+- Tags: tasks, approvals, runs, agent-home, chat
 - Relates to: old issue 146 (rounds 1 and 2, and the
   releases)
 - Amends: [0010](0010-eventing.md) (tasks, not the board, are the queue),

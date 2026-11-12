@@ -2,6 +2,8 @@
 
 - Status: Accepted (delivery in rc.7)
 - Date: 2026-10-29
+- Area: runtime-sandbox
+- Tags: sandbox, openshell, kubernetes, metrics
 - Amends: [0048](0048-openshell-spike-results.md) (decision 3 and the 2026-10-26 amendment: the reconciler
   holds no access to Agent Sandbox objects), [0066](0066-triggers-and-scheduling.md) (the wait cause set and
   where its input comes from; amendment 2026-10-28, rc.6). It leaves ADRs ([0045](0045-openshell-hardening-defaults.md)

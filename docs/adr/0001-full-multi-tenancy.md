@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Area: tenancy-identity
+- Tags: multi-tenancy
 - Decision: [design.md#1](../design.md)
 
 ## Context
