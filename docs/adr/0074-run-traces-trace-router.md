@@ -223,10 +223,12 @@ procoduck decided the open points on 2026-10-28.
        redacted at `full`. Updating is a reviewed bump with that test, like the GenAI conventions pin. What stays ours: exact matching of known
        secrets in every encoding, JSON-aware cleaning, header and credential key names, PEM and JWT,
        `kgw_` and the OpenShell placeholder, the false-positive exemptions, and a short list of
-       shapes gitleaks has no rule for (OpenRouter, truncated Anthropic keys, Google OAuth), each with
-       a test that fails when gitleaks starts to cover it. That list is interim: it deviates from the
-       rule that nothing is hand-written, and issue #212 tracks its exit condition (an upstream rule
-       for each shape).
+       shapes in one table (`ownedShapes`), each with a written reason and a test. OpenRouter, `ya29.`
+       and `GOCSPX-` have no gitleaks rule; the test fails when one gains it, and the entry is then
+       deleted. The truncated Anthropic key and the legacy OpenAI `sk-` key (20 or more
+       alphanumerics, entropy above 3) are Koinon-owned by decision (issue #212, 2026-11-11):
+       gitleaks only knows the whole shapes, and a cut-off key is as sensitive as a whole one.
+       The table is not a place to add the next vendor: send that rule to gitleaks.
      - **At `redacted`, also:** email addresses, phone numbers, IBANs and payment-card numbers, and
        high-entropy tokens.
 
